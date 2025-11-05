@@ -1,0 +1,6 @@
+.env
+.venv/
+/data/
+__pycache__/
+reports/
+watchlist.txt
