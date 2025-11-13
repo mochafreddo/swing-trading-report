@@ -9,6 +9,15 @@ from .scan import run_scan
 from .sell import run_sell
 
 
+def _load_dotenv_if_available() -> None:
+    try:
+        from dotenv import load_dotenv  # type: ignore
+
+        load_dotenv(override=False)
+    except Exception:
+        pass
+
+
 def _configure_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -22,7 +31,13 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("scan", help="Collect -> evaluate -> write markdown report")
     s.add_argument("--limit", type=int, default=None, help="Max tickers to evaluate")
     s.add_argument("--watchlist", type=str, default=None, help="Path to watchlist file")
-    s.add_argument("--provider", type=str, default=None, choices=["kis", "pykrx"], help="Data provider override")
+    s.add_argument(
+        "--provider",
+        type=str,
+        default=None,
+        choices=["kis", "pykrx"],
+        help="Data provider override",
+    )
     s.add_argument("--screener-limit", type=int, default=None, help="Override screener top-N size")
     s.add_argument(
         "--universe",
@@ -45,6 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    _load_dotenv_if_available()
     _configure_logging()
     parser = _build_parser()
     ns = parser.parse_args(argv)

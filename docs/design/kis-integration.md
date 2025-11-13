@@ -35,6 +35,15 @@
 - 주의: 엔드포인트 경로/TR_ID는 환경에 따라 다를 수 있음. 실패 예시/문서를 공유해 주면 즉시 정합화
 - 폴백: 실패 시 `screener.us_defaults` 목록 사용
 
+## 유닛 테스트 계획 — 해외 거래대금 랭크(`trade-pbmn`)
+
+- 대상: `KISClient.overseas_trade_value_rank` (`/uapi/overseas-stock/v1/ranking/trade-pbmn`, TR `HHDFS76320010`)
+- 목적: 랭크 요청 시 파라미터/헤더 정합성 보장 및 가격 필터 로직 회귀 방지
+- 케이스
+  1. 정상 호출: `exchange/limit/nday/volume_filter`, 가격 구간 → `_fetch_overseas_rank_items`에 정확히 전달되고 반환값을 그대로 노출해야 함.
+  2. 가격 필터 정규화: `price_min/price_max`가 `None`이나 0 이하일 때 빈 문자열, 양수일 때 `int` 문자열로 전달되어야 함(소수점 절사).
+  3. 제한 수량 전달: `limit` 값이 그대로 `_fetch_overseas_rank_items`에 위임되어 페이징 로직이 동일하게 동작해야 함.
+
 ## 레이트리밋/백오프
 
 - 서버/레이트리밋: `429/418/503` 또는 본문 `EGW00201` → 지수형 백오프 + 요청 간 최소 간격(`KIS_MIN_INTERVAL_MS`)
