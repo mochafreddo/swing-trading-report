@@ -37,6 +37,7 @@ class Config:
     screen_limit: int = 30
     report_dir: str = "reports"
     data_dir: str = "data"
+    watchlist_path: Optional[str] = None
     screener_enabled: bool = False
     screener_limit: int = 20
     screener_only: bool = False
@@ -210,6 +211,7 @@ def load_config(
     rs_benchmark_return = env_float("RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return", 0.0)
 
     holdings_path = env_str("HOLDINGS_FILE", "files.holdings", None)
+    watchlist_path = env_str("WATCHLIST_FILE", "files.watchlist", None)
     holdings_data = load_holdings(holdings_path)
 
     # Universe markets (KR,US)
@@ -286,6 +288,7 @@ def load_config(
         screen_limit=screen_limit,
         report_dir=os.getenv("REPORT_DIR") or from_yaml("data.report_dir", "reports"),
         data_dir=os.getenv("DATA_DIR") or from_yaml("data.data_dir", "data"),
+        watchlist_path=watchlist_path,
         screener_enabled=screener_enabled,
         screener_limit=screener_limit,
         screener_only=screener_only,

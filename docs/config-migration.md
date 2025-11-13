@@ -17,6 +17,8 @@
 | `SCREEN_LIMIT` | `data.screen_limit` |
 | `REPORT_DIR` | `data.report_dir` |
 | `DATA_DIR` | `data.data_dir` |
+| `HOLDINGS_FILE` | `files.holdings` |
+| `WATCHLIST_FILE` | `files.watchlist` |
 | `KIS_APP_KEY` | `kis.app_key` |
 | `KIS_APP_SECRET` | `kis.app_secret` |
 | `KIS_BASE_URL` | `kis.base_url` |

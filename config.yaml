@@ -64,6 +64,7 @@ universe:
 
 files:
   holdings: holdings.yaml
+  watchlist: watchlist.txt
 
 fx:
   mode: kis

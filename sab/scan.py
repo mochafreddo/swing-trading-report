@@ -91,7 +91,8 @@ def run_scan(
     logger = logging.getLogger(__name__)
     cfg: Config = load_config(provider_override=provider, limit_override=limit)
 
-    tickers = load_watchlist(watchlist_path)
+    resolved_watchlist_path = watchlist_path or cfg.watchlist_path or "watchlist.txt"
+    tickers = load_watchlist(resolved_watchlist_path)
     if cfg.screen_limit and tickers:
         tickers = tickers[: cfg.screen_limit]
 

@@ -25,6 +25,7 @@
   - `REPORT_DIR=reports`
   - `DATA_DIR=data`
   - `HOLDINGS_FILE=holdings.yaml`
+  - `WATCHLIST_FILE=watchlist.txt`
   - `SCREENER_ENABLED=true` (옵션, KIS 상위 종목 스크리너 활성화)
   - `SCREENER_LIMIT=30` (옵션, 스크리너 상위 N)
   - `SCREENER_ONLY=false` (옵션, true이면 스크리너 결과만 사용)
