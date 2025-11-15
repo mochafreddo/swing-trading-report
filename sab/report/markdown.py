@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def _ensure_dir(path: str) -> None:
@@ -64,16 +64,16 @@ def write_report(
         lines.append("|--------|------|------:|------:|------:|------:|------:|-----:|------:|")
         for c in cand_list:
             lines.append(
-                f"| {c.get('ticker','-')} | {c.get('name','-')} | {c.get('price','-')} | "
-                f"{c.get('ema20','-')} | {c.get('ema50','-')} | {c.get('rsi14','-')} | "
-                f"{c.get('atr14','-')} | {c.get('gap','-')} | {c.get('score','-')} |"
+                f"| {c.get('ticker', '-')} | {c.get('name', '-')} | {c.get('price', '-')} | "
+                f"{c.get('ema20', '-')} | {c.get('ema50', '-')} | {c.get('rsi14', '-')} | "
+                f"{c.get('atr14', '-')} | {c.get('gap', '-')} | {c.get('score', '-')} |"
             )
         lines.append("")
 
         for c in cand_list:
-            lines.append(f"## [매수 후보] {c.get('ticker','-')} — {c.get('name','-')}")
+            lines.append(f"## [매수 후보] {c.get('ticker', '-')} — {c.get('name', '-')}")
             lines.append(
-                f"- Price: {c.get('price','-')} (d/d {c.get('pct_change','-')}) H: {c.get('high','-')} L: {c.get('low','-')}"
+                f"- Price: {c.get('price', '-')} (d/d {c.get('pct_change', '-')}) H: {c.get('high', '-')} L: {c.get('low', '-')}"
             )
             currency = c.get("currency")
             if currency and currency.upper() != "KRW":
@@ -89,20 +89,16 @@ def write_report(
             status = c.get("market_status")
             if status:
                 lines.append(f"- Market: {status}")
-            trend_line = f"- Trend: EMA20({c.get('ema20','-')}) vs EMA50({c.get('ema50','-')})"
+            trend_line = f"- Trend: EMA20({c.get('ema20', '-')}) vs EMA50({c.get('ema50', '-')})"
             if c.get("sma200") and c.get("sma200") != "-":
-                trend_line += f", SMA200({c.get('sma200','-')})"
+                trend_line += f", SMA200({c.get('sma200', '-')})"
             if c.get("trend_pass"):
                 trend_line += f" (trend pass: {c.get('trend_pass')})"
             lines.append(trend_line)
-            lines.append(f"- Momentum: RSI14={c.get('rsi14','-')}")
-            lines.append(f"- Volatility: ATR14={c.get('atr14','-')}")
-            lines.append(
-                f"- Gap: {c.get('gap','-')} (threshold {c.get('gap_threshold','-')})"
-            )
-            lines.append(
-                f"- Liquidity: Avg $Vol {c.get('avg_dollar_volume','-')}"
-            )
+            lines.append(f"- Momentum: RSI14={c.get('rsi14', '-')}")
+            lines.append(f"- Volatility: ATR14={c.get('atr14', '-')}")
+            lines.append(f"- Gap: {c.get('gap', '-')} (threshold {c.get('gap_threshold', '-')})")
+            lines.append(f"- Liquidity: Avg $Vol {c.get('avg_dollar_volume', '-')}")
             rg = c.get("risk_guide")
             if rg:
                 lines.append(f"- Risk guide: {rg}")

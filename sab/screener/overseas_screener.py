@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.market_time import us_market_status
 
@@ -14,8 +14,8 @@ class ScreenRequest:
 
 @dataclass
 class ScreenResult:
-    tickers: List[str]
-    metadata: Dict[str, Any]
+    tickers: list[str]
+    metadata: dict[str, Any]
 
 
 class USSimpleScreener:
@@ -24,7 +24,7 @@ class USSimpleScreener:
     This avoids extra API calls; evaluation/filters run later.
     """
 
-    def __init__(self, defaults: List[str]) -> None:
+    def __init__(self, defaults: list[str]) -> None:
         self._defaults = [t.strip().upper() for t in defaults if t.strip()]
 
     def screen(self, request: ScreenRequest) -> ScreenResult:
@@ -40,4 +40,3 @@ class USSimpleScreener:
 
 
 __all__ = ["USSimpleScreener", "ScreenRequest", "ScreenResult"]
-

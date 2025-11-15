@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Dict, List, Optional, Tuple
 
 from .config import Config
 from .data.cache import load_json, save_json
@@ -26,14 +25,14 @@ DEFAULT_EXCHANGE = "NAS"
 def resolve_fx_rate(
     *,
     cfg: Config,
-    ticker_currency: Dict[str, str],
-    tickers: List[str],
-    kis_client: Optional[KISClient],
+    ticker_currency: dict[str, str],
+    tickers: list[str],
+    kis_client: KISClient | None,
     logger: logging.Logger,
-) -> Tuple[Optional[float], Optional[str], List[str]]:
+) -> tuple[float | None, str | None, list[str]]:
     """Resolve USD/KRW rate according to fx_mode."""
 
-    failures: List[str] = []
+    failures: list[str] = []
     manual_rate = cfg.usd_krw_rate
     mode = (cfg.fx_mode or "manual").strip().lower()
 
@@ -61,7 +60,9 @@ def resolve_fx_rate(
     if cached_rate:
         rate, cached_symbol, cached_exchange, age_minutes = cached_rate
         if rate is not None:
-            label = _format_cache_label(cached_symbol or symbol, cached_exchange or exchange, age_minutes)
+            label = _format_cache_label(
+                cached_symbol or symbol, cached_exchange or exchange, age_minutes
+            )
             logger.info("FX rate cache hit (%s)", label)
             return rate, label, failures
 
@@ -71,7 +72,9 @@ def resolve_fx_rate(
         msg = f"FX_MODE=kis failed to fetch price-detail ({exc}); using cached/manual rate if available."
         logger.warning(msg)
         failures.append(msg)
-        cached = _load_cached_rate(cfg.data_dir, cfg.fx_cache_ttl_minutes * 12)  # allow stale cache as last resort
+        cached = _load_cached_rate(
+            cfg.data_dir, cfg.fx_cache_ttl_minutes * 12
+        )  # allow stale cache as last resort
         if cached:
             rate, cached_symbol, cached_exchange, age_minutes = cached
             if rate is not None:
@@ -99,7 +102,7 @@ def resolve_fx_rate(
     return rate, note, failures
 
 
-def _manual_fallback(rate: Optional[float]) -> Tuple[Optional[float], Optional[str]]:
+def _manual_fallback(rate: float | None) -> tuple[float | None, str | None]:
     if rate is None:
         return None, None
     return rate, "manual fallback"
@@ -107,9 +110,9 @@ def _manual_fallback(rate: Optional[float]) -> Tuple[Optional[float], Optional[s
 
 def _select_symbol(
     cfg: Config,
-    ticker_currency: Dict[str, str],
-    tickers: List[str],
-) -> Tuple[str, str, str]:
+    ticker_currency: dict[str, str],
+    tickers: list[str],
+) -> tuple[str, str, str]:
     if cfg.fx_kis_symbol:
         base, suffix = _split_symbol(cfg.fx_kis_symbol)
         if base:
@@ -131,7 +134,7 @@ def _select_symbol(
     return base, exchange, _format_symbol_label(base, exchange)
 
 
-def _split_symbol(raw: Optional[str]) -> Tuple[str, Optional[str]]:
+def _split_symbol(raw: str | None) -> tuple[str, str | None]:
     if not raw:
         return "", None
     text = raw.strip().upper()
@@ -141,7 +144,7 @@ def _split_symbol(raw: Optional[str]) -> Tuple[str, Optional[str]]:
     return base.strip(), suffix.strip()
 
 
-def _to_exchange(suffix: Optional[str]) -> Optional[str]:
+def _to_exchange(suffix: str | None) -> str | None:
     if not suffix:
         return None
     return SUFFIX_TO_EXCD.get(suffix.upper())
@@ -153,7 +156,7 @@ def _format_symbol_label(symbol: str, exchange: str) -> str:
     return f"{symbol}.{exchange}"
 
 
-def _format_cache_label(symbol: str, exchange: str, age_minutes: Optional[float]) -> str:
+def _format_cache_label(symbol: str, exchange: str, age_minutes: float | None) -> str:
     label = f"KIS cache {_format_symbol_label(symbol, exchange)}"
     if age_minutes is not None:
         label += f" (~{int(age_minutes)}m)"
@@ -161,9 +164,9 @@ def _format_cache_label(symbol: str, exchange: str, age_minutes: Optional[float]
 
 
 def _load_cached_rate(
-    data_dir: Optional[str],
-    ttl_minutes: Optional[float],
-) -> Optional[Tuple[Optional[float], Optional[str], Optional[str], Optional[float]]]:
+    data_dir: str | None,
+    ttl_minutes: float | None,
+) -> tuple[float | None, str | None, str | None, float | None] | None:
     if not data_dir or ttl_minutes is None or ttl_minutes <= 0:
         return None
     cached = load_json(data_dir, FX_CACHE_KEY)
@@ -185,7 +188,7 @@ def _load_cached_rate(
     return rate, symbol, exchange, age
 
 
-def _save_cached_rate(data_dir: Optional[str], rate: float, symbol: str, exchange: str) -> None:
+def _save_cached_rate(data_dir: str | None, rate: float, symbol: str, exchange: str) -> None:
     if not data_dir:
         return
     payload = {
@@ -197,7 +200,7 @@ def _save_cached_rate(data_dir: Optional[str], rate: float, symbol: str, exchang
     save_json(data_dir, FX_CACHE_KEY, payload)
 
 
-def _to_float(val: Optional[object]) -> Optional[float]:
+def _to_float(val: object | None) -> float | None:
     if val is None or val == "":
         return None
     try:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 try:
     import yaml
@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 @dataclass
 class ConfigData:
-    raw: Dict[str, Any]
+    raw: dict[str, Any]
 
 
 def load_yaml_config(path: str | None = None) -> ConfigData:
@@ -22,7 +22,7 @@ def load_yaml_config(path: str | None = None) -> ConfigData:
     if not p.exists():
         return ConfigData(raw={})
 
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
     if yaml is None:
         return ConfigData(raw={})
 

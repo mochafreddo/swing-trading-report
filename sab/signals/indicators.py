@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from math import isnan
-from typing import Iterable, List
 
 
-def ema(values: Iterable[float], period: int) -> List[float]:
+def ema(values: Iterable[float], period: int) -> list[float]:
     vals = list(values)
     if period <= 0 or not vals:
         return [float("nan")] * len(vals)
     k = 2 / (period + 1)
-    out: List[float] = []
+    out: list[float] = []
     ema_prev = None
-    for i, v in enumerate(vals):
+    for v in vals:
         if v is None:
             v = float("nan")
         if ema_prev is None:
@@ -22,19 +22,19 @@ def ema(values: Iterable[float], period: int) -> List[float]:
     return out
 
 
-def rsi(closes: Iterable[float], period: int = 14) -> List[float]:
+def rsi(closes: Iterable[float], period: int = 14) -> list[float]:
     c = list(closes)
     if period <= 0 or len(c) < 2:
         return [float("nan")] * len(c)
-    gains: List[float] = [0.0]
-    losses: List[float] = [0.0]
+    gains: list[float] = [0.0]
+    losses: list[float] = [0.0]
     for i in range(1, len(c)):
         ch = c[i] - c[i - 1]
         gains.append(max(0.0, ch))
         losses.append(max(0.0, -ch))
     avg_gain = sum(gains[1 : period + 1]) / period if len(gains) > period else 0.0
     avg_loss = sum(losses[1 : period + 1]) / period if len(losses) > period else 0.0
-    rsis: List[float] = [float("nan")] * len(c)
+    rsis: list[float] = [float("nan")] * len(c)
     if period < len(c):
         rsis[period] = 100.0 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss)))
     for i in range(period + 1, len(c)):
@@ -47,21 +47,21 @@ def rsi(closes: Iterable[float], period: int = 14) -> List[float]:
 
 def atr(
     highs: Iterable[float], lows: Iterable[float], closes: Iterable[float], period: int = 14
-) -> List[float]:
+) -> list[float]:
     H, L, C = list(highs), list(lows), list(closes)
     n = min(len(H), len(L), len(C))
     if period <= 0 or n == 0:
         return [float("nan")] * n
-    tr: List[float] = []
+    tr: list[float] = []
     prev_close = C[0]
     for i in range(n):
-        h = H[i]
-        l = L[i]
+        high = H[i]
+        low = L[i]
         c_prev = prev_close
-        tr.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+        tr.append(max(high - low, abs(high - c_prev), abs(low - c_prev)))
         prev_close = C[i]
     # Wilder's smoothing
-    out: List[float] = [float("nan")] * n
+    out: list[float] = [float("nan")] * n
     if n > period:
         first = sum(tr[1 : period + 1]) / period
         out[period] = first
@@ -70,12 +70,12 @@ def atr(
     return out
 
 
-def sma(values: Iterable[float], period: int) -> List[float]:
+def sma(values: Iterable[float], period: int) -> list[float]:
     vals = list(values)
     n = len(vals)
     if period <= 0 or n == 0:
         return [float("nan")] * n
-    out: List[float] = [float("nan")] * n
+    out: list[float] = [float("nan")] * n
     window_sum = 0.0
     for i, v in enumerate(vals):
         if v is None or (isinstance(v, float) and isnan(v)):

@@ -73,7 +73,14 @@
 - [ ] 차트 이미지 생성 후 리포트 삽입(옵션)
 - [ ] 간단 백테스트 스냅샷(최근 n건 신호 성공/실패 요약)
 - [ ] 테스트 추가(지표/평가/리포트 단위 테스트)
-- [ ] 린터/포맷터(예: `uv add ruff`) 도입
+- [x] 린터/포맷터 도입(ruff 기반)
+  - [x] dev 의존성 추가: `uv add --group dev ruff`
+  - [x] `pyproject.toml`에 `tool.ruff`/`tool.ruff.lint`/`tool.ruff.format` 설정 추가
+  - [x] `uv run ruff check --fix` + `uv run ruff format`으로 1회 전체 코드 정리
+  - [x] 커밋 전에 `uv run ruff check`가 항상 실행되도록 설정
+    - IDE/에디터에서 on-save 포맷(`ruff format`) 및 on-type lint 활성화
+    - [x] `.pre-commit-config.yaml`로 `ruff`/`ruff format` 훅 정의
+    - [x] `uv run pre-commit install`로 Git 훅 설치
 - [ ] 성능/리팩터링(로깅/병렬화/구조 개선)
 - [ ] 해외 주식(US) 지원(초판)
   - [x] 해외 일봉 조회 + 누적 수집

@@ -3,27 +3,30 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .config import Config, load_config, load_watchlist
-from .data.holiday_cache import merge_holidays, lookup_holiday, HolidayEntry
+from .data.cache import load_json, save_json
+from .data.holiday_cache import HolidayEntry, lookup_holiday, merge_holidays
 from .data.kis_client import KISAuthError, KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import (
     PykrxClient,
     PykrxClientError,
     PykrxNotInstalledError,
 )
-from .data.cache import load_json, save_json
+from .fx import resolve_fx_rate
 from .report.markdown import write_report
-from .signals.evaluator import EvaluationSettings, evaluate_ticker
 from .screener import KISScreener, ScreenRequest
-from .screener.overseas_screener import USSimpleScreener as USScreener, ScreenRequest as USScreenRequest
 from .screener.kis_overseas_screener import (
     KISOverseasScreener as KUS,
+)
+from .screener.kis_overseas_screener import (
     ScreenRequest as KUSReq,
 )
+from .screener.overseas_screener import ScreenRequest as USScreenRequest
+from .screener.overseas_screener import USSimpleScreener as USScreener
+from .signals.evaluator import EvaluationSettings, evaluate_ticker
 from .utils.market_time import us_market_status
-from .fx import resolve_fx_rate
 
 
 def _infer_env_from_base(base_url: str) -> str:
@@ -42,7 +45,7 @@ def _infer_currency(ticker: str) -> str:
     return "KRW"
 
 
-def _to_float(value: Any) -> Optional[float]:
+def _to_float(value: Any) -> float | None:
     try:
         if value is None:
             return None
@@ -55,9 +58,9 @@ def _to_float(value: Any) -> Optional[float]:
 
 
 def _apply_currency_display(
-    candidate: Dict[str, Any],
-    fx_rate: Optional[float],
-    fx_meta_note: Optional[str],
+    candidate: dict[str, Any],
+    fx_rate: float | None,
+    fx_meta_note: str | None,
 ) -> None:
     currency = candidate.get("currency", "KRW")
     price_value = _to_float(candidate.get("price_value"))
@@ -82,11 +85,11 @@ def _apply_currency_display(
 
 def run_scan(
     *,
-    limit: Optional[int],
-    watchlist_path: Optional[str],
-    provider: Optional[str],
-    screener_limit: Optional[int] = None,
-    universe: Optional[str] = None,
+    limit: int | None,
+    watchlist_path: str | None,
+    provider: str | None,
+    screener_limit: int | None = None,
+    universe: str | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
     cfg: Config = load_config(provider_override=provider, limit_override=limit)
@@ -98,16 +101,16 @@ def run_scan(
 
     failures: list[str] = []
     market_data: dict[str, list[dict]] = {}
-    cache_hint: Optional[str] = None
+    cache_hint: str | None = None
     fatal_failure = False
 
-    kis_client: Optional[KISClient] = None
-    pykrx_client: Optional[PykrxClient] = None
-    pykrx_import_error: Optional[str] = None
+    kis_client: KISClient | None = None
+    pykrx_client: PykrxClient | None = None
+    pykrx_import_error: str | None = None
     pykrx_warning_added = False
-    screener_meta_map: Dict[str, Dict[str, Any]] = {}
+    screener_meta_map: dict[str, dict[str, Any]] = {}
 
-    def ensure_pykrx_client() -> Optional[PykrxClient]:
+    def ensure_pykrx_client() -> PykrxClient | None:
         nonlocal pykrx_client, pykrx_import_error
         if pykrx_client is not None:
             return pykrx_client
@@ -143,9 +146,7 @@ def run_scan(
 
     if cfg.data_provider == "kis":
         if not (cfg.kis_app_key and cfg.kis_app_secret and cfg.kis_base_url):
-            msg = (
-                "KIS credentials missing. Set KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL in .env (see docs/kis-setup.md)."
-            )
+            msg = "KIS credentials missing. Set KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL in .env (see docs/kis-setup.md)."
             failures.append(msg)
             logger.error(msg)
             fatal_failure = True
@@ -159,16 +160,12 @@ def run_scan(
             min_interval = None
             if cfg.kis_min_interval_ms is not None:
                 min_interval = max(0.0, cfg.kis_min_interval_ms / 1000.0)
-            kis_client = KISClient(
-                creds, cache_dir=cfg.data_dir, min_interval=min_interval
-            )
+            kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
             cache_hint = kis_client.cache_status
     elif cfg.data_provider == "pykrx":
         client = ensure_pykrx_client()
         if client is None:
-            msg = (
-                "PyKRX provider selected but pykrx package is unavailable. Install with 'uv add pykrx'."
-            )
+            msg = "PyKRX provider selected but pykrx package is unavailable. Install with 'uv add pykrx'."
             failures.append(msg)
             logger.error(msg)
             fatal_failure = True
@@ -213,12 +210,14 @@ def run_scan(
                 else:
                     tickers = kr_tickers
                 total_added += len(kr_tickers)
-                logger.info("KR screener selected %s tickers (cache: %s)", len(kr_tickers), cache_status)
+                logger.info(
+                    "KR screener selected %s tickers (cache: %s)", len(kr_tickers), cache_status
+                )
 
             # US screener (simple defaults)
             if "US" in cfg.universe_markets:
                 us_tickers: list[str] = []
-                us_source: Optional[str] = None
+                us_source: str | None = None
                 if cfg.us_screener_mode == "kis":
                     try:
                         kscr = KUS(kis_client)
@@ -274,16 +273,18 @@ def run_scan(
                 )
 
             if total_added == 0:
-                logger.warning("Screener enabled but no markets selected or no defaults configured for US")
+                logger.warning(
+                    "Screener enabled but no markets selected or no defaults configured for US"
+                )
 
-    def _split_overseas(t: str) -> tuple[str, Optional[str]]:
+    def _split_overseas(t: str) -> tuple[str, str | None]:
         # Accept formats: SYMBOL.US (default NASD), SYMBOL.NASD/NYSE/AMEX
         if "." not in t:
             return t, None
         base, suff = t.rsplit(".", 1)
         return base.strip().upper(), suff.strip().upper()
 
-    def _excd_from_suffix(suffix: Optional[str]) -> Optional[str]:
+    def _excd_from_suffix(suffix: str | None) -> str | None:
         if not suffix:
             return None
         mapping = {
@@ -299,9 +300,9 @@ def run_scan(
         }
         return mapping.get(suffix, None)
 
-    ticker_currency: Dict[str, str] = {t: _infer_currency(t) for t in tickers}
-    fx_rate: Optional[float] = None
-    fx_meta_note: Optional[str] = None
+    ticker_currency: dict[str, str] = {t: _infer_currency(t) for t in tickers}
+    fx_rate: float | None = None
+    fx_meta_note: str | None = None
     resolved_rate, resolved_note, fx_messages = resolve_fx_rate(
         cfg=cfg,
         ticker_currency=ticker_currency,
@@ -314,10 +315,10 @@ def run_scan(
     if fx_messages:
         failures.extend(fx_messages)
 
-    us_holidays_cache: Dict[str, HolidayEntry] = {}
-    latest_dates: Dict[str, str] = {}
+    us_holidays_cache: dict[str, HolidayEntry] = {}
+    latest_dates: dict[str, str] = {}
 
-    def refresh_us_holidays() -> Dict[str, HolidayEntry]:
+    def refresh_us_holidays() -> dict[str, HolidayEntry]:
         if not kis_client:
             return {}
         try:
@@ -335,9 +336,7 @@ def run_scan(
         except KISClientError as exc:
             msg = str(exc)
             if "HTTP 404" in msg:
-                logger.info(
-                    "US holiday API returned 404 (no entries from %s to %s)", start, end
-                )
+                logger.info("US holiday API returned 404 (no entries from %s to %s)", start, end)
                 return {}
             logger.warning("Failed to refresh US holidays: %s", msg)
             return {}
@@ -353,9 +352,7 @@ def run_scan(
             base_symbol, suffix = _split_overseas(ticker)
             exch = _excd_from_suffix(suffix)
             # Cache key reflects market to avoid collisions
-            cache_key = (
-                f"candles_overseas_{exch}_{base_symbol}" if exch else f"candles_{ticker}"
-            )
+            cache_key = f"candles_overseas_{exch}_{base_symbol}" if exch else f"candles_{ticker}"
             cached = load_json(cfg.data_dir, cache_key)
             if isinstance(cached, list) and cached:
                 market_data[ticker] = cached
@@ -368,7 +365,9 @@ def run_scan(
                         symbol=base_symbol, exchange=exch, count=max(cfg.min_history_bars, 200)
                     )
                 else:
-                    candles = kis_client.daily_candles(base_symbol, count=max(cfg.min_history_bars, 200))
+                    candles = kis_client.daily_candles(
+                        base_symbol, count=max(cfg.min_history_bars, 200)
+                    )
                 if candles:
                     market_data[ticker] = candles
                     save_json(cfg.data_dir, cache_key, candles)
@@ -387,7 +386,7 @@ def run_scan(
                     logger.warning(msg)
                 else:
                     fallback_client = ensure_pykrx_client()
-                    fallback_error: Optional[str] = None
+                    fallback_error: str | None = None
                     if fallback_client is not None and not exch:
                         # PyKRX only supports KR tickers, skip if overseas
                         try:
@@ -409,9 +408,7 @@ def run_scan(
                                     exc,
                                     len(candles),
                                 )
-                                failures.append(
-                                    f"{ticker}: KIS error ({exc}); used PyKRX fallback"
-                                )
+                                failures.append(f"{ticker}: KIS error ({exc}); used PyKRX fallback")
                                 if not pykrx_warning_added:
                                     failures.append(
                                         "Warning: PyKRX fallback data is end-of-day and may differ from KIS."
@@ -421,7 +418,9 @@ def run_scan(
                             fallback_error = "No data from PyKRX"
                             fallback_client = None
                     else:
-                        fallback_error = pykrx_import_error if not exch else "Overseas symbol; no PyKRX fallback"
+                        fallback_error = (
+                            pykrx_import_error if not exch else "Overseas symbol; no PyKRX fallback"
+                        )
 
                     msg = f"{ticker}: {exc}"
                     if fallback_client is None and fallback_error:
@@ -431,9 +430,7 @@ def run_scan(
     elif cfg.data_provider == "pykrx" and pykrx_client:
         for ticker in tickers:
             try:
-                candles = pykrx_client.daily_candles(
-                    ticker, count=max(cfg.min_history_bars, 200)
-                )
+                candles = pykrx_client.daily_candles(ticker, count=max(cfg.min_history_bars, 200))
             except PykrxClientError as exc:
                 msg = f"{ticker}: PyKRX error ({exc})"
                 failures.append(msg)
@@ -501,7 +498,7 @@ def run_scan(
     for candidate in candidates:
         _apply_currency_display(candidate, fx_rate, fx_meta_note)
         if candidate.get("currency", "KRW").upper() == "USD":
-            holiday_entry: Optional[HolidayEntry] = None
+            holiday_entry: HolidayEntry | None = None
             date_key = latest_dates.get(candidate.get("ticker", ""))
             if date_key:
                 holiday_entry = us_holidays_cache.get(date_key)

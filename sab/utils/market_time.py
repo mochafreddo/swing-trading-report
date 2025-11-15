@@ -19,4 +19,3 @@ def us_market_status(now: dt.datetime | None = None) -> str:
 
 
 __all__ = ["is_us_market_open", "us_market_status"]
-

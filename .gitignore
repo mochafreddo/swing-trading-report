@@ -1,4 +1,6 @@
 .env
+.ruff_cache/
+.uv-cache/
 .venv/
 /data/
 __pycache__/

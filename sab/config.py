@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional, overload
+from typing import Any, overload
 from urllib.parse import urlparse
 
 from .config_loader import load_yaml_config
@@ -31,13 +31,13 @@ def _load_dotenv_if_available() -> None:
 @dataclass(frozen=True)
 class Config:
     data_provider: str = "kis"  # or pykrx
-    kis_app_key: Optional[str] = None
-    kis_app_secret: Optional[str] = None
-    kis_base_url: Optional[str] = None
+    kis_app_key: str | None = None
+    kis_app_secret: str | None = None
+    kis_base_url: str | None = None
     screen_limit: int = 30
     report_dir: str = "reports"
     data_dir: str = "data"
-    watchlist_path: Optional[str] = None
+    watchlist_path: str | None = None
     screener_enabled: bool = False
     screener_limit: int = 20
     screener_only: bool = False
@@ -47,12 +47,12 @@ class Config:
     min_history_bars: int = 120
     exclude_etf_etn: bool = False
     require_slope_up: bool = False
-    kis_min_interval_ms: Optional[float] = None
+    kis_min_interval_ms: float | None = None
     screener_cache_ttl_minutes: float = 5.0
     min_price: float = 0.0
     rs_lookback_days: int = 20
     rs_benchmark_return: float = 0.0
-    holdings_path: Optional[str] = None
+    holdings_path: str | None = None
     holdings: HoldingsData = field(default_factory=lambda: load_holdings(None))
     sell_atr_multiplier: float = 1.0
     sell_time_stop_days: int = 10
@@ -68,16 +68,16 @@ class Config:
     us_screener_mode: str = "defaults"  # 'defaults' or 'kis'
     us_screener_metric: str = "volume"  # 'volume' | 'market_cap' | 'value'
     us_screener_limit: int = 20
-    usd_krw_rate: Optional[float] = None
+    usd_krw_rate: float | None = None
     fx_mode: str = "manual"  # 'manual' | 'kis' | 'off'
     fx_cache_ttl_minutes: float = 10.0
-    fx_kis_symbol: Optional[str] = None
+    fx_kis_symbol: str | None = None
     # Per-market thresholds
-    us_min_price: Optional[float] = None
-    us_min_dollar_volume: Optional[float] = None
+    us_min_price: float | None = None
+    us_min_dollar_volume: float | None = None
 
 
-def _normalize_kis_base(url: Optional[str]) -> Optional[str]:
+def _normalize_kis_base(url: str | None) -> str | None:
     if not url:
         return None
 
@@ -107,8 +107,8 @@ def _normalize_kis_base(url: Optional[str]) -> Optional[str]:
 
 def load_config(
     *,
-    provider_override: Optional[str] = None,
-    limit_override: Optional[int] = None,
+    provider_override: str | None = None,
+    limit_override: int | None = None,
 ) -> Config:
     yaml_cfg = load_yaml_config().raw
     _load_dotenv_if_available()
@@ -132,12 +132,10 @@ def load_config(
             return default
 
     @overload
-    def parse_float(val: Any, default: float) -> float:
-        ...
+    def parse_float(val: Any, default: float) -> float: ...
 
     @overload
-    def parse_float(val: Any, default: None) -> float | None:
-        ...
+    def parse_float(val: Any, default: None) -> float | None: ...
 
     def parse_float(val: Any, default: float | None) -> float | None:
         try:
@@ -163,7 +161,7 @@ def load_config(
             return parse_float(env_val, default)
         return parse_float(from_yaml(path, default), default)
 
-    def env_str(key: str, path: str, default: Optional[str]) -> Optional[str]:
+    def env_str(key: str, path: str, default: str | None) -> str | None:
         env_val = os.getenv(key)
         if env_val is not None:
             return env_val
@@ -230,7 +228,7 @@ def load_config(
     us_screener_mode = str(from_yaml("screener.us_mode", "defaults") or "defaults").strip().lower()
     us_screener_metric = str(from_yaml("screener.us_metric", "volume") or "volume").strip().lower()
     us_screener_limit = env_int("US_SCREENER_LIMIT", "screener.us_limit", 20)
-    usd_krw_rate: Optional[float] = None
+    usd_krw_rate: float | None = None
     env_fx = os.getenv("USD_KRW_RATE")
     if env_fx is not None:
         try:
@@ -328,12 +326,12 @@ def load_config(
     )
 
 
-def load_watchlist(path: Optional[str]) -> list[str]:
+def load_watchlist(path: str | None) -> list[str]:
     if not path:
         return []
     if not os.path.exists(path):
         return []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         tickers: list[str] = []
         for line in f:
             t = line.strip()

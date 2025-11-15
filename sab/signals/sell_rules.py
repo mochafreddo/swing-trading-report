@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .indicators import atr, ema, rsi, sma
 
@@ -22,15 +22,15 @@ class SellSettings:
 @dataclass
 class SellEvaluation:
     action: str  # HOLD, REVIEW, SELL
-    reasons: List[str]
-    stop_price: Optional[float] = None
-    target_price: Optional[float] = None
+    reasons: list[str]
+    stop_price: float | None = None
+    target_price: float | None = None
 
 
 def evaluate_sell_signals(
     ticker: str,
-    candles: List[Dict[str, float]],
-    holding: Dict[str, Any],
+    candles: list[dict[str, float]],
+    holding: dict[str, Any],
     settings: SellSettings,
 ) -> SellEvaluation:
     if len(candles) < settings.min_bars:
@@ -41,7 +41,6 @@ def evaluate_sell_signals(
     lows = [c["low"] for c in candles]
 
     atr_values = atr(highs, lows, closes, 14)
-    entry_price = float(holding.get("entry_price", 0))
     stop_override = holding.get("stop_override")
     target_override = holding.get("target_override")
 
@@ -52,10 +51,9 @@ def evaluate_sell_signals(
 
     latest = candles[-1]
     close_today = latest["close"]
-    close_yesterday = candles[-2]["close"]
     atr_today = atr_values[-1]
 
-    reasons: List[str] = []
+    reasons: list[str] = []
     action = "HOLD"
 
     # SMA200 context (optional)
@@ -90,9 +88,7 @@ def evaluate_sell_signals(
         reasons.append("Custom stop override in effect")
     elif atr_today > 0:
         stop_price = close_today - settings.atr_trail_multiplier * atr_today
-        reasons.append(
-            f"ATR trail {settings.atr_trail_multiplier}×ATR → {stop_price:.2f}"
-        )
+        reasons.append(f"ATR trail {settings.atr_trail_multiplier}×ATR → {stop_price:.2f}")
         if close_today <= stop_price:
             reasons.append("Price hit ATR trailing stop")
             action = "SELL"
@@ -115,4 +111,6 @@ def evaluate_sell_signals(
     if not reasons:
         reasons.append("No sell criteria triggered")
 
-    return SellEvaluation(action=action, reasons=reasons, stop_price=stop_price, target_price=target_price)
+    return SellEvaluation(
+        action=action, reasons=reasons, stop_price=stop_price, target_price=target_price
+    )

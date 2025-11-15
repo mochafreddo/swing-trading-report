@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..data.cache import load_json, save_json
 from ..data.kis_client import KISClient
@@ -14,14 +14,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ScreenRequest:
     limit: int
-    min_price: Optional[float] = None
-    min_dollar_volume: Optional[float] = None
+    min_price: float | None = None
+    min_dollar_volume: float | None = None
 
 
 @dataclass
 class ScreenResult:
-    tickers: List[str]
-    metadata: Dict[str, Any]
+    tickers: list[str]
+    metadata: dict[str, Any]
 
 
 class KISScreener:
@@ -42,8 +42,8 @@ class KISScreener:
 
         raw = self._client.volume_rank(limit=max(request.limit * 2, 50))
 
-        tickers: List[str] = []
-        rows: List[Dict[str, Any]] = []
+        tickers: list[str] = []
+        rows: list[dict[str, Any]] = []
 
         for row in raw:
             price = row.get("price", 0.0) or 0.0

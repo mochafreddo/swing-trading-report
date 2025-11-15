@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .config import Config, load_config
 from .data.cache import load_json, save_json
@@ -24,14 +24,14 @@ def _infer_env_from_base(base_url: str) -> str:
 US_SUFFIXES = {s.upper() for s in SUFFIX_TO_EXCD.keys()}
 
 
-def _split_symbol_and_suffix(ticker: str) -> tuple[str, Optional[str]]:
+def _split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
     if "." not in ticker:
         return ticker.strip().upper(), None
     base, suffix = ticker.rsplit(".", 1)
     return base.strip().upper(), suffix.strip().upper()
 
 
-def _exchange_from_suffix(suffix: Optional[str]) -> Optional[str]:
+def _exchange_from_suffix(suffix: str | None) -> str | None:
     if not suffix:
         return None
     return SUFFIX_TO_EXCD.get(suffix.upper())
@@ -44,7 +44,7 @@ def _infer_currency_from_ticker(ticker: str) -> str:
     return "KRW"
 
 
-def run_sell(*, provider: Optional[str]) -> int:
+def run_sell(*, provider: str | None) -> int:
     logger = logging.getLogger(__name__)
     cfg: Config = load_config(provider_override=provider)
 
@@ -55,7 +55,7 @@ def run_sell(*, provider: Optional[str]) -> int:
     tickers = [h.ticker for h in holdings if h.ticker]
     unique_tickers = list(dict.fromkeys(tickers))
 
-    ticker_currency: Dict[str, str] = {}
+    ticker_currency: dict[str, str] = {}
     for holding in holdings:
         if not holding.ticker:
             continue
@@ -64,18 +64,18 @@ def run_sell(*, provider: Optional[str]) -> int:
             currency = _infer_currency_from_ticker(holding.ticker)
         ticker_currency[holding.ticker] = currency
 
-    failures: List[str] = []
-    market_data: Dict[str, List[Dict[str, Any]]] = {}
-    cache_hint: Optional[str] = None
+    failures: list[str] = []
+    market_data: dict[str, list[dict[str, Any]]] = {}
+    cache_hint: str | None = None
     fatal_failure = False
 
-    kis_client: Optional[KISClient] = None
-    pykrx_client: Optional[PykrxClient] = None
-    pykrx_init_error: Optional[str] = None
+    kis_client: KISClient | None = None
+    pykrx_client: PykrxClient | None = None
+    pykrx_init_error: str | None = None
     pykrx_warning_added = False
     missing_logged: set[str] = set()
 
-    def ensure_pykrx_client() -> Optional[PykrxClient]:
+    def ensure_pykrx_client() -> PykrxClient | None:
         nonlocal pykrx_client, pykrx_init_error
         if pykrx_client is not None:
             return pykrx_client
@@ -128,8 +128,8 @@ def run_sell(*, provider: Optional[str]) -> int:
 
     target_bars = max(cfg.min_history_bars, 200)
 
-    fx_rate: Optional[float] = None
-    fx_note: Optional[str] = None
+    fx_rate: float | None = None
+    fx_note: str | None = None
     if unique_tickers:
         resolved_rate, resolved_note, fx_messages = resolve_fx_rate(
             cfg=cfg,
@@ -230,7 +230,7 @@ def run_sell(*, provider: Optional[str]) -> int:
             )
             pykrx_warning_added = True
 
-    results: List[SellReportRow] = []
+    results: list[SellReportRow] = []
     order = {"SELL": 0, "REVIEW": 1, "HOLD": 2}
 
     settings = SellSettings(

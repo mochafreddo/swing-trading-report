@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .indicators import atr, ema, rsi, sma
 
@@ -10,8 +10,8 @@ from .indicators import atr, ema, rsi, sma
 @dataclass
 class EvaluationResult:
     ticker: str
-    candidate: Optional[Dict[str, Any]]
-    reason: Optional[str] = None
+    candidate: dict[str, Any] | None
+    reason: str | None = None
 
 
 @dataclass
@@ -29,15 +29,15 @@ class EvaluationSettings:
     us_min_price: float | None = None
 
 
-def _clean(values: List[float]) -> List[float]:
+def _clean(values: list[float]) -> list[float]:
     return [v for v in values if not math.isnan(v)]
 
 
 def evaluate_ticker(
     ticker: str,
-    candles: List[Dict[str, float]],
+    candles: list[dict[str, float]],
     settings: EvaluationSettings,
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     meta = meta or {}
     currency = meta.get("currency", "KRW")
@@ -125,7 +125,7 @@ def evaluate_ticker(
         return EvaluationResult(
             ticker,
             None,
-            f"Gap {gap_pct*100:.1f}% exceeds threshold",
+            f"Gap {gap_pct * 100:.1f}% exceeds threshold",
         )
 
     # Liquidity: average dollar volume last 20 bars
@@ -184,7 +184,7 @@ def evaluate_ticker(
         risk_guide = f"Stop {fmt(stop, 0)} / Target {fmt(target, 0)} (~1:2)"
 
     score = 0.0
-    breakdown: List[str] = []
+    breakdown: list[str] = []
 
     score += 1
     breakdown.append("ema_cross")
@@ -226,17 +226,17 @@ def evaluate_ticker(
         "ema50": fmt(ema50[-1]),
         "rsi14": fmt(rsi14[-1]),
         "atr14": fmt(atr_value),
-        "gap": f"{gap_pct*100:.1f}%",
-        "gap_threshold": f"{gap_threshold*100:.1f}%",
-        "pct_change": f"{pct_change*100:.1f}%",
+        "gap": f"{gap_pct * 100:.1f}%",
+        "gap_threshold": f"{gap_threshold * 100:.1f}%",
+        "pct_change": f"{pct_change * 100:.1f}%",
         "high": fmt(latest["high"], 0),
         "low": fmt(latest["low"], 0),
         "risk_guide": risk_guide,
         "sma200": fmt(sma200_value if not math.isnan(sma200_value) else float("nan"), 0),
         "avg_dollar_volume": fmt(avg_dollar_volume, 0),
-        "rs_return": f"{rs_return*100:.1f}%" if rs_return is not None else "-",
-        "rs_diff": f"{rs_diff*100:.1f}%" if rs_diff is not None else "-",
-        "rs_benchmark": f"{settings.rs_benchmark_return*100:.1f}%",
+        "rs_return": f"{rs_return * 100:.1f}%" if rs_return is not None else "-",
+        "rs_diff": f"{rs_diff * 100:.1f}%" if rs_diff is not None else "-",
+        "rs_benchmark": f"{settings.rs_benchmark_return * 100:.1f}%",
         "score": score_display,
         "score_value": score,
         "score_notes": score_notes,

@@ -2,22 +2,22 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..data.kis_client import KISClient, KISClientError
+from ..data.kis_client import KISClient
 
 
 @dataclass
 class ScreenRequest:
     limit: int
     metric: str  # 'volume' | 'market_cap' | 'value'
-    exchange: Optional[str] = None  # NAS/NYS/AMS or None for default rotation
+    exchange: str | None = None  # NAS/NYS/AMS or None for default rotation
 
 
 @dataclass
 class ScreenResult:
-    tickers: List[str]
-    metadata: Dict[str, Any]
+    tickers: list[str]
+    metadata: dict[str, Any]
 
 
 class KISOverseasScreener:
@@ -33,8 +33,8 @@ class KISOverseasScreener:
     def screen(self, request: ScreenRequest) -> ScreenResult:
         metric = (request.metric or "volume").lower()
         exchanges = self._resolve_exchanges(request.exchange)
-        tickers: List[str] = []
-        by_ticker: Dict[str, Any] = {}
+        tickers: list[str] = []
+        by_ticker: dict[str, Any] = {}
         for exch in exchanges:
             remaining = request.limit - len(tickers)
             if remaining <= 0:
@@ -65,7 +65,7 @@ class KISOverseasScreener:
             },
         )
 
-    def _resolve_exchanges(self, exchange: Optional[str]) -> List[str]:
+    def _resolve_exchanges(self, exchange: str | None) -> list[str]:
         if exchange:
             return [self._normalize_exchange(exchange)]
         return ["NAS", "NYS", "AMS"]
@@ -85,7 +85,7 @@ class KISOverseasScreener:
         code = (exchange or "NAS").strip().upper()
         return mapping.get(code, code)
 
-    def _fetch_rank(self, metric: str, exchange: str, limit: int) -> List[Dict[str, Any]]:
+    def _fetch_rank(self, metric: str, exchange: str, limit: int) -> list[dict[str, Any]]:
         if metric in {"market_cap", "marketcap"}:
             return self._client.overseas_market_cap_rank(exchange=exchange, limit=limit)
         if metric in {"value", "amount", "trade_value"}:
@@ -94,7 +94,7 @@ class KISOverseasScreener:
         return self._client.overseas_trade_volume_rank(exchange=exchange, limit=limit)
 
     @staticmethod
-    def _symbol_from_row(row: Dict[str, Any]) -> str:
+    def _symbol_from_row(row: dict[str, Any]) -> str:
         sym = (
             row.get("SYMB")
             or row.get("symb")

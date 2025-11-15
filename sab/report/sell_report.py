@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import datetime as _dt
-import os
 import math
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
 
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def _fmt_number(value: Optional[float], digits: int = 0) -> str:
+def _fmt_number(value: float | None, digits: int = 0) -> str:
     if value is None:
         return "-"
     try:
@@ -22,7 +22,7 @@ def _fmt_number(value: Optional[float], digits: int = 0) -> str:
         return "-"
 
 
-def _fmt_percent(value: Optional[float]) -> str:
+def _fmt_percent(value: float | None) -> str:
     if value is None:
         return "-"
     try:
@@ -31,7 +31,7 @@ def _fmt_percent(value: Optional[float]) -> str:
         return "-"
 
 
-def _fmt_currency(value: Optional[float], currency: Optional[str], fx_rate: Optional[float]) -> str:
+def _fmt_currency(value: float | None, currency: str | None, fx_rate: float | None) -> str:
     if value is None:
         return "-"
     try:
@@ -57,17 +57,17 @@ def _fmt_currency(value: Optional[float], currency: Optional[str], fx_rate: Opti
 class SellReportRow:
     ticker: str
     name: str
-    quantity: Optional[float]
-    entry_price: Optional[float]
-    entry_date: Optional[str]
-    last_price: Optional[float]
-    pnl_pct: Optional[float]
+    quantity: float | None
+    entry_price: float | None
+    entry_date: str | None
+    last_price: float | None
+    pnl_pct: float | None
     action: str
-    reasons: List[str]
-    stop_price: Optional[float]
-    target_price: Optional[float]
-    notes: Optional[str] = None
-    currency: Optional[str] = None
+    reasons: list[str]
+    stop_price: float | None
+    target_price: float | None
+    notes: str | None = None
+    currency: str | None = None
 
 
 def write_sell_report(
@@ -102,13 +102,13 @@ def write_sell_report(
     failures_list = list(failures or [])
     has_usd = any((row.currency or "").upper() == "USD" for row in rows)
 
-    rules: List[str] = []
+    rules: list[str] = []
     if atr_trail_multiplier is not None:
         rules.append(f"ATR trail ×{atr_trail_multiplier:g}")
     if time_stop_days is not None and time_stop_days > 0:
         rules.append(f"Time stop {time_stop_days}d")
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(f"# Holdings Sell Review — {today}")
     lines.append(f"- Run at: {now_str} KST")
     cache_note = f" (cache: {cache_hint})" if cache_hint else ""
@@ -136,16 +136,7 @@ def write_sell_report(
         lines.append("|--------|----:|------:|-----:|-----:|-------|------|--------|")
         for row in rows:
             lines.append(
-                "| {ticker} | {qty} | {entry} | {last} | {pnl} | {state} | {stop} | {target} |".format(
-                    ticker=row.ticker,
-                    qty=_fmt_number(row.quantity, 0),
-                    entry=_fmt_currency(row.entry_price, row.currency, fx_rate),
-                    last=_fmt_currency(row.last_price, row.currency, fx_rate),
-                    pnl=_fmt_percent(row.pnl_pct),
-                    state=row.action,
-                    stop=_fmt_currency(row.stop_price, row.currency, fx_rate),
-                    target=_fmt_currency(row.target_price, row.currency, fx_rate),
-                )
+                f"| {row.ticker} | {_fmt_number(row.quantity, 0)} | {_fmt_currency(row.entry_price, row.currency, fx_rate)} | {_fmt_currency(row.last_price, row.currency, fx_rate)} | {_fmt_percent(row.pnl_pct)} | {row.action} | {_fmt_currency(row.stop_price, row.currency, fx_rate)} | {_fmt_currency(row.target_price, row.currency, fx_rate)} |"
             )
         lines.append("")
 

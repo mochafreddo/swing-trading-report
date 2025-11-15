@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import yaml
@@ -15,30 +15,30 @@ class Holding:
     ticker: str
     quantity: float = 0.0
     entry_price: float = 0.0
-    entry_currency: Optional[str] = None
-    entry_date: Optional[str] = None
-    strategy: Optional[str] = None
-    notes: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
-    stop_override: Optional[float] = None
-    target_override: Optional[float] = None
+    entry_currency: str | None = None
+    entry_date: str | None = None
+    strategy: str | None = None
+    notes: str | None = None
+    tags: list[str] = field(default_factory=list)
+    stop_override: float | None = None
+    target_override: float | None = None
 
 
 @dataclass
 class HoldingSettings:
-    default_currency: Optional[str] = None
-    default_strategy: Optional[str] = None
-    default_tags: List[str] = field(default_factory=list)
+    default_currency: str | None = None
+    default_strategy: str | None = None
+    default_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
 class HoldingsData:
-    path: Optional[Path]
+    path: Path | None
     settings: HoldingSettings
-    holdings: List[Holding]
+    holdings: list[Holding]
 
 
-def _ensure_list(value: Any) -> List[str]:
+def _ensure_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value]
     if value is None:
@@ -46,7 +46,7 @@ def _ensure_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def load_holdings(path: Optional[str]) -> HoldingsData:
+def load_holdings(path: str | None) -> HoldingsData:
     if not path:
         return HoldingsData(path=None, settings=HoldingSettings(), holdings=[])
 
@@ -63,14 +63,14 @@ def load_holdings(path: Optional[str]) -> HoldingsData:
     except Exception:
         return HoldingsData(path=p, settings=HoldingSettings(), holdings=[])
 
-    settings_raw: Dict[str, Any] = raw.get("settings", {}) or {}
+    settings_raw: dict[str, Any] = raw.get("settings", {}) or {}
     settings = HoldingSettings(
         default_currency=settings_raw.get("default_currency"),
         default_strategy=settings_raw.get("default_strategy"),
         default_tags=_ensure_list(settings_raw.get("default_tags")),
     )
 
-    holdings_list: List[Holding] = []
+    holdings_list: list[Holding] = []
     for item in raw.get("holdings", []) or []:
         if not isinstance(item, dict):
             continue
@@ -94,7 +94,7 @@ def load_holdings(path: Optional[str]) -> HoldingsData:
         strategy = item.get("strategy") or settings.default_strategy
         tags = _ensure_list(item.get("tags", settings.default_tags))
 
-        def _opt_float(value: Any) -> Optional[float]:
+        def _opt_float(value: Any) -> float | None:
             if value is None:
                 return None
             try:
