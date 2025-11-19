@@ -21,16 +21,17 @@
 
 ## 모듈 맵
 
-- `sab/config.py` … 설정 우선순위, 환경변수, 경로 보정, 보유 로드
+- `sab/config.py` … 설정 우선순위, 환경변수, 경로 보정, 보유 로드, 전략/시장별 임계치
 - `sab/config_loader.py` … YAML 로더(옵션 `pyyaml`)
 - `sab/data/kis_client.py` … KIS HTTP 클라이언트: 토큰 캐시, 스로틀, 백오프, 국내/해외 캔들, KR 랭크
 - `sab/data/pykrx_client.py` … PyKRX를 통한 EOD OHLCV(폴백/프로바이더)
 - `sab/screener/kis_screener.py` … KR 거래량 랭킹(캐시 TTL)
 - `sab/screener/kis_overseas_screener.py` … US 랭크(거래량/시가총액/거래대금) — 환경에 따라 조정 필요
 - `sab/screener/overseas_screener.py` … US 기본 목록(해외 랭크 실패 시 대체)
-- `sab/signals/indicators.py` … EMA/RSI/ATR/SMA
-- `sab/signals/evaluator.py` … Buy 평가/스코어링
-- `sab/signals/sell_rules.py` … Sell/Review 규칙
+- `sab/signals/indicators.py` … EMA/RSI/ATR/SMA 등 지표 계산
+- `sab/signals/evaluator.py` … 기본 Buy 평가/스코어링(EMA20/50 + RSI30 재돌파)
+- `sab/signals/sell_rules.py` … Sell/Review 규칙(EMA20/50 + ATR 트레일)
+- (계획) `sab/signals/hybrid_*` … SMA20 + EMA10/21 기반 하이브리드 전략 모듈
 - `sab/report/markdown.py` … Buy 리포트 작성기
 - `sab/report/sell_report.py` … Sell/Review 리포트 작성기
 - `sab/utils/market_time.py` … 미국 시장 개/폐장(ET) 헬퍼
@@ -44,7 +45,8 @@
 - 티커별 JSON 캐시 읽기 → KIS(국내/해외) 호출 → 다중 기간 윈도우로 누적(≥ `MIN_HISTORY_BARS`) → 캐시 저장
 - KIS 실패 시 KR 티커에 한해 PyKRX 폴백 시도 → 리포트 Appendix에 경고 기록
 3) 평가
-- EMA20/50 크로스, RSI 리바운드, ATR 기반 갭 임계, SMA200/기울기/유동성/ETF 필터 → 후보 스코어링/정렬
+- (현재) EMA20/50 크로스, RSI 리바운드, ATR 기반 갭 임계, SMA200/기울기/유동성/ETF 필터 → 후보 스코어링/정렬
+- (계획) SMA20 + EMA10/21 하이브리드 패턴(추세 지속 눌림, 스윙 하이 돌파, RSI 과매도 반등)을 선택 가능한 전략 모드로 제공
 4) 리포트
 - 헤더 메타데이터(프로바이더, 캐시 힌트, 개수), 후보 테이블/상세, 실패/주의 Appendix, 파일명 `YYYY‑MM‑DD.buy.md`
 

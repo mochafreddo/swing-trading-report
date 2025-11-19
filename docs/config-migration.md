@@ -54,6 +54,36 @@
 | `SELL_RSI_FLOOR` | `sell.rsi_floor` |
 | `SELL_RSI_FLOOR_ALT` | `sell.rsi_floor_alt` |
 | `SELL_MIN_BARS` | `sell.min_bars` |
+| `SELL_MODE` | `sell.mode` |
+| `HYBRID_SELL_PROFIT_TARGET_LOW` | `sell.hybrid.profit_target_low` |
+| `HYBRID_SELL_PROFIT_TARGET_HIGH` | `sell.hybrid.profit_target_high` |
+| `HYBRID_SELL_PARTIAL_PROFIT_FLOOR` | `sell.hybrid.partial_profit_floor` |
+| `HYBRID_SELL_EMA_SHORT_PERIOD` | `sell.hybrid.ema_short_period` |
+| `HYBRID_SELL_EMA_MID_PERIOD` | `sell.hybrid.ema_mid_period` |
+| `HYBRID_SELL_SMA_TREND_PERIOD` | `sell.hybrid.sma_trend_period` |
+| `HYBRID_SELL_RSI_PERIOD` | `sell.hybrid.rsi_period` |
+| `HYBRID_SELL_STOP_LOSS_PCT_MIN` | `sell.hybrid.stop_loss_pct_min` |
+| `HYBRID_SELL_STOP_LOSS_PCT_MAX` | `sell.hybrid.stop_loss_pct_max` |
+| `HYBRID_SELL_FAILED_BREAKOUT_DROP_PCT` | `sell.hybrid.failed_breakout_drop_pct` |
+| `HYBRID_SELL_MIN_BARS` | `sell.hybrid.min_bars` |
+| `HYBRID_SELL_TIME_STOP_DAYS` | `sell.hybrid.time_stop_days` |
+| `STRATEGY_MODE` | `strategy.mode` |
+| `HYBRID_SMA_TREND_PERIOD` | `strategy.hybrid.sma_trend_period` |
+| `HYBRID_EMA_SHORT_PERIOD` | `strategy.hybrid.ema_short_period` |
+| `HYBRID_EMA_MID_PERIOD` | `strategy.hybrid.ema_mid_period` |
+| `HYBRID_RSI_PERIOD` | `strategy.hybrid.rsi_period` |
+| `HYBRID_RSI_ZONE_LOW` | `strategy.hybrid.rsi_zone_low` |
+| `HYBRID_RSI_ZONE_HIGH` | `strategy.hybrid.rsi_zone_high` |
+| `HYBRID_RSI_OVERSOLD_LOW` | `strategy.hybrid.rsi_oversold_low` |
+| `HYBRID_RSI_OVERSOLD_HIGH` | `strategy.hybrid.rsi_oversold_high` |
+| `HYBRID_PULLBACK_MAX_BARS` | `strategy.hybrid.pullback_max_bars` |
+| `HYBRID_BREAKOUT_CONS_MIN_BARS` | `strategy.hybrid.breakout_consolidation_min_bars` |
+| `HYBRID_BREAKOUT_CONS_MAX_BARS` | `strategy.hybrid.breakout_consolidation_max_bars` |
+| `HYBRID_VOLUME_LOOKBACK_DAYS` | `strategy.hybrid.volume_lookback_days` |
+| `HYBRID_MAX_GAP_PCT` | `strategy.hybrid.max_gap_pct` |
+| `HYBRID_USE_SMA60_FILTER` | `strategy.hybrid.use_sma60_filter` |
+| `HYBRID_SMA60_PERIOD` | `strategy.hybrid.sma60_period` |
+| `HYBRID_KR_BREAKOUT_NEEDS_CONFIRM` | `strategy.hybrid.kr_breakout_requires_confirmation` |
 
 필요 시 해외 확장/추가 전략 항목은 동일한 방식으로 `config.yaml`에 정의합니다.
 

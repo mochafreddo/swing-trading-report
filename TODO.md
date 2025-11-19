@@ -68,27 +68,37 @@
     - 예외: 갭다운 과도 시 방어 로직(부분청산/전량청산 기준)
   - [x] `sab sell` 서브커맨드 구현 → `reports/YYYY-MM-DD.sell.md`
 
-## v1.2 — 시각화/분석/품질 강화
+## v1.2 — 전략/리포트/시각화/품질 강화
 
-- [ ] 차트 이미지 생성 후 리포트 삽입(옵션)
-- [ ] 간단 백테스트 스냅샷(최근 n건 신호 성공/실패 요약)
-- [ ] 테스트 추가(지표/평가/리포트 단위 테스트)
-- [x] 린터/포맷터 도입(ruff 기반)
-  - [x] dev 의존성 추가: `uv add --group dev ruff`
-  - [x] `pyproject.toml`에 `tool.ruff`/`tool.ruff.lint`/`tool.ruff.format` 설정 추가
-  - [x] `uv run ruff check --fix` + `uv run ruff format`으로 1회 전체 코드 정리
-  - [x] 커밋 전에 `uv run ruff check`가 항상 실행되도록 설정
-    - IDE/에디터에서 on-save 포맷(`ruff format`) 및 on-type lint 활성화
-    - [x] `.pre-commit-config.yaml`로 `ruff`/`ruff format` 훅 정의
-    - [x] `uv run pre-commit install`로 Git 훅 설치
-- [ ] 성능/리팩터링(로깅/병렬화/구조 개선)
-- [ ] 해외 주식(US) 지원(초판)
+- 전략/리포트 고도화(SMA+EMA 하이브리드)
+  - [x] SMA+EMA 하이브리드 매뉴얼 정리(`docs/swing-trading-manual.md`)
+  - [x] 아키텍처/시그널/리포트 설계 문서 업데이트(`docs/ARCHITECTURE.md`, `docs/design/signals.md`, `docs/design/reports.md`)
+  - [x] 전략 모드 설정 설계(`strategy.mode` + 하이브리드 설정 키 정의)
+  - [x] 하이브리드 Buy 평가 모듈 설계/구현(추세 지속 눌림, 스윙 하이 돌파, RSI 과매도 반등)
+  - [x] 하이브리드 Sell 규칙 설계/구현(이익 실현, 추세 붕괴, 실패한 돌파, 3–5% 스톱)
+  - [x] Buy/Sell 리포트에 하이브리드 전용 필드/체크리스트 반영
+- 시각화/분석
+  - [ ] 차트 이미지 생성 후 리포트 삽입(옵션)
+  - [ ] 간단 백테스트 스냅샷(최근 n건 신호 성공/실패 요약)
+- 테스트/품질
+  - [ ] 테스트 추가(지표/평가/리포트 단위 테스트, 특히 하이브리드 전략)
+  - [x] 린터/포맷터 도입(ruff 기반)
+    - [x] dev 의존성 추가: `uv add --group dev ruff`
+    - [x] `pyproject.toml`에 `tool.ruff`/`tool.ruff.lint`/`tool.ruff.format` 설정 추가
+    - [x] `uv run ruff check --fix` + `uv run ruff format`으로 1회 전체 코드 정리
+    - [x] 커밋 전에 `uv run ruff check`가 항상 실행되도록 설정
+      - IDE/에디터에서 on-save 포맷(`ruff format`) 및 on-type lint 활성화
+      - [x] `.pre-commit-config.yaml`로 `ruff`/`ruff format` 훅 정의
+      - [x] `uv run pre-commit install`로 Git 훅 설치
+- 성능/리팩터링
+  - [ ] 성능/리팩터링(로깅/병렬화/구조 개선, 전략 모듈 분리 포함)
+- 해외 주식(US) 지원(초판)
   - [x] 해외 일봉 조회 + 누적 수집
   - [x] 해외 스크리너(간단) + 시간대/휴장일 처리
   - [x] 환율/통화 표시(선택, KIS price-detail 기반 자동 환율 + 캐시)
   - [x] 시장별 임계치 분리(US: USD 기준 min_price/min_dollar_volume)
   - [x] KIS 휴장일 API 연동 및 메타데이터 반영(휴일/조기폐장 표기)
-- [ ] 장 오픈 진입 체크 기능
+- 장 오픈 진입 체크 기능
   - [ ] `sab entry` 서브커맨드 설계/구현(전일 Buy Report + 시초가/장초 데이터)
   - [ ] 갭-ATR 규칙(OK/Wait/Avoid) 및 5–15분 재확인 로직
   - [ ] Entry 리포트(`YYYY-MM-DD.entry.md`) 생성

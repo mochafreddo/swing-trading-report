@@ -14,6 +14,11 @@ from .data.pykrx_client import (
 )
 from .fx import SUFFIX_TO_EXCD, resolve_fx_rate
 from .report.sell_report import SellReportRow, write_sell_report
+from .signals.hybrid_sell import (
+    HybridSellEvaluation,
+    HybridSellSettings,
+    evaluate_sell_signals_hybrid,
+)
 from .signals.sell_rules import SellEvaluation, SellSettings, evaluate_sell_signals
 
 
@@ -244,6 +249,21 @@ def run_sell(*, provider: str | None) -> int:
         min_bars=max(cfg.sell_min_bars, 2),
     )
 
+    hybrid_settings = HybridSellSettings(
+        profit_target_low=cfg.hybrid_sell.profit_target_low,
+        profit_target_high=cfg.hybrid_sell.profit_target_high,
+        partial_profit_floor=cfg.hybrid_sell.partial_profit_floor,
+        ema_short_period=cfg.hybrid_sell.ema_short_period,
+        ema_mid_period=cfg.hybrid_sell.ema_mid_period,
+        sma_trend_period=cfg.hybrid_sell.sma_trend_period,
+        rsi_period=cfg.hybrid_sell.rsi_period,
+        stop_loss_pct_min=cfg.hybrid_sell.stop_loss_pct_min,
+        stop_loss_pct_max=cfg.hybrid_sell.stop_loss_pct_max,
+        failed_breakout_drop_pct=cfg.hybrid_sell.failed_breakout_drop_pct,
+        min_bars=max(cfg.hybrid_sell.min_bars, 2),
+        time_stop_days=cfg.hybrid_sell.time_stop_days,
+    )
+
     for holding in holdings:
         ticker = holding.ticker
         candles = market_data.get(ticker)
@@ -252,18 +272,27 @@ def run_sell(*, provider: str | None) -> int:
                 failures.append(f"{ticker}: No market data available for sell evaluation")
                 missing_logged.add(ticker)
             continue
-        evaluation: SellEvaluation = evaluate_sell_signals(
-            ticker,
-            candles,
-            {
-                "entry_price": holding.entry_price,
-                "entry_date": holding.entry_date,
-                "stop_override": holding.stop_override,
-                "target_override": holding.target_override,
-                "strategy": holding.strategy,
-            },
-            settings,
-        )
+        holding_dict = {
+            "entry_price": holding.entry_price,
+            "entry_date": holding.entry_date,
+            "stop_override": holding.stop_override,
+            "target_override": holding.target_override,
+            "strategy": holding.strategy,
+        }
+        if cfg.sell_mode == "sma_ema_hybrid":
+            evaluation: HybridSellEvaluation | SellEvaluation = evaluate_sell_signals_hybrid(
+                ticker,
+                candles,
+                holding_dict,
+                hybrid_settings,
+            )
+        else:
+            evaluation = evaluate_sell_signals(
+                ticker,
+                candles,
+                holding_dict,
+                settings,
+            )
         last_close = candles[-1]["close"] if candles else None
         entry_price = holding.entry_price or None
         if entry_price is not None and (isinstance(entry_price, float) and math.isnan(entry_price)):
@@ -303,6 +332,15 @@ def run_sell(*, provider: str | None) -> int:
 
     results.sort(key=lambda r: (order.get(r.action, 99), r.ticker))
 
+    sell_mode_note: str | None = None
+    if cfg.sell_mode == "sma_ema_hybrid":
+        sell_mode_note = (
+            f"profit {cfg.hybrid_sell.profit_target_low * 100:.0f}–"
+            f"{cfg.hybrid_sell.profit_target_high * 100:.0f}%, "
+            f"stop {cfg.hybrid_sell.stop_loss_pct_min * 100:.0f}–"
+            f"{cfg.hybrid_sell.stop_loss_pct_max * 100:.0f}%"
+        )
+
     out_path = write_sell_report(
         report_dir=cfg.report_dir,
         provider=cfg.data_provider,
@@ -313,6 +351,8 @@ def run_sell(*, provider: str | None) -> int:
         time_stop_days=cfg.sell_time_stop_days,
         fx_rate=fx_rate,
         fx_note=fx_note,
+        sell_mode=cfg.sell_mode,
+        sell_mode_note=sell_mode_note,
     )
 
     logger.info("Sell report written to: %s", out_path)

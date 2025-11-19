@@ -26,6 +26,10 @@ from .screener.kis_overseas_screener import (
 from .screener.overseas_screener import ScreenRequest as USScreenRequest
 from .screener.overseas_screener import USSimpleScreener as USScreener
 from .signals.evaluator import EvaluationSettings, evaluate_ticker
+from .signals.hybrid_buy import (
+    HybridEvaluationSettings,
+    evaluate_ticker_hybrid,
+)
 from .utils.market_time import us_market_status
 
 
@@ -478,6 +482,30 @@ def run_scan(
         min_price=cfg.min_price,
         us_min_price=cfg.us_min_price,
     )
+    hybrid_settings = HybridEvaluationSettings(
+        sma_trend_period=cfg.hybrid.sma_trend_period,
+        ema_short_period=cfg.hybrid.ema_short_period,
+        ema_mid_period=cfg.hybrid.ema_mid_period,
+        rsi_period=cfg.hybrid.rsi_period,
+        rsi_zone_low=cfg.hybrid.rsi_zone_low,
+        rsi_zone_high=cfg.hybrid.rsi_zone_high,
+        rsi_oversold_low=cfg.hybrid.rsi_oversold_low,
+        rsi_oversold_high=cfg.hybrid.rsi_oversold_high,
+        pullback_max_bars=cfg.hybrid.pullback_max_bars,
+        breakout_consolidation_min_bars=cfg.hybrid.breakout_consolidation_min_bars,
+        breakout_consolidation_max_bars=cfg.hybrid.breakout_consolidation_max_bars,
+        volume_lookback_days=cfg.hybrid.volume_lookback_days,
+        max_gap_pct=cfg.hybrid.max_gap_pct,
+        use_sma60_filter=cfg.hybrid.use_sma60_filter,
+        sma60_period=cfg.hybrid.sma60_period,
+        kr_breakout_requires_confirmation=cfg.hybrid.kr_breakout_requires_confirmation,
+        min_history_bars=cfg.min_history_bars,
+        min_price=cfg.min_price,
+        us_min_price=cfg.us_min_price,
+        min_dollar_volume=cfg.min_dollar_volume,
+        us_min_dollar_volume=cfg.us_min_dollar_volume,
+        exclude_etf_etn=cfg.exclude_etf_etn,
+    )
     for ticker in tickers:
         candles = market_data.get(ticker)
         if not candles:
@@ -486,6 +514,18 @@ def run_scan(
         meta["currency"] = ticker_currency.get(ticker, "KRW")
         if fx_rate is not None:
             meta["usd_krw_rate"] = fx_rate
+        if cfg.strategy_mode == "sma_ema_hybrid":
+            result_hybrid = evaluate_ticker_hybrid(ticker, candles, hybrid_settings, meta)
+            if result_hybrid.candidate:
+                candidates.append(result_hybrid.candidate)
+            elif (
+                result_hybrid.reason
+                and result_hybrid.reason != "Did not meet hybrid signal criteria"
+            ):
+                failures.append(f"{ticker}: {result_hybrid.reason}")
+                logger.warning("%s: %s", ticker, result_hybrid.reason)
+            continue
+
         result = evaluate_ticker(ticker, candles, eval_settings, meta)
         if result.candidate:
             candidates.append(result.candidate)
@@ -527,6 +567,7 @@ def run_scan(
         failures=failures,
         cache_hint=cache_hint,
         report_type="buy",
+        strategy_mode=cfg.strategy_mode,
     )
 
     logger.info("Buy report written to: %s", out_path)

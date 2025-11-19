@@ -38,6 +38,7 @@ def write_report(
     failures: Iterable[str] | None = None,
     cache_hint: str | None = None,
     report_type: str = "buy",
+    strategy_mode: str | None = None,
 ) -> str:
     _ensure_dir(report_dir)
     today = _dt.datetime.now().strftime("%Y-%m-%d")
@@ -53,6 +54,11 @@ def write_report(
     lines.append(f"- Run at: {now_str} KST")
     cache_note = f" (cache: {cache_hint})" if cache_hint else ""
     lines.append(f"- Provider: {provider}{cache_note}")
+    if strategy_mode and report_type == "buy":
+        mode_label = strategy_mode
+        if strategy_mode == "sma_ema_hybrid":
+            mode_label = "sma_ema_hybrid (SMA20 + EMA10/21)"
+        lines.append(f"- Strategy: {mode_label}")
     lines.append(f"- Universe: {universe_count} tickers, Candidates: {len(cand_list)}")
     if failures:
         lines.append(f"- Notes: {len(failures)} issue(s) logged (see Appendix)")
@@ -60,14 +66,29 @@ def write_report(
 
     if cand_list:
         lines.append("## Candidates")
-        lines.append("| Ticker | Name | Price | EMA20 | EMA50 | RSI14 | ATR14 | Gap | Score |")
-        lines.append("|--------|------|------:|------:|------:|------:|------:|-----:|------:|")
-        for c in cand_list:
+        if strategy_mode == "sma_ema_hybrid" and report_type == "buy":
             lines.append(
-                f"| {c.get('ticker', '-')} | {c.get('name', '-')} | {c.get('price', '-')} | "
-                f"{c.get('ema20', '-')} | {c.get('ema50', '-')} | {c.get('rsi14', '-')} | "
-                f"{c.get('atr14', '-')} | {c.get('gap', '-')} | {c.get('score', '-')} |"
+                "| Ticker | Name | Price | SMA20 | EMA10 | EMA21 | RSI14 | Vol(5d) | Pattern | Score |"
             )
+            lines.append(
+                "|--------|------|------:|------:|------:|------:|------:|--------:|---------|------:|"
+            )
+            for c in cand_list:
+                lines.append(
+                    f"| {c.get('ticker', '-')} | {c.get('name', '-')} | {c.get('price', '-')} | "
+                    f"{c.get('sma20', '-')} | {c.get('ema10', '-')} | {c.get('ema21', '-')} | "
+                    f"{c.get('rsi14', '-')} | {c.get('avg_dollar_volume', '-')} | "
+                    f"{c.get('pattern', '-')} | {c.get('score', '-')} |"
+                )
+        else:
+            lines.append("| Ticker | Name | Price | EMA20 | EMA50 | RSI14 | ATR14 | Gap | Score |")
+            lines.append("|--------|------|------:|------:|------:|------:|------:|-----:|------:|")
+            for c in cand_list:
+                lines.append(
+                    f"| {c.get('ticker', '-')} | {c.get('name', '-')} | {c.get('price', '-')} | "
+                    f"{c.get('ema20', '-')} | {c.get('ema50', '-')} | {c.get('rsi14', '-')} | "
+                    f"{c.get('atr14', '-')} | {c.get('gap', '-')} | {c.get('score', '-')} |"
+                )
         lines.append("")
 
         for c in cand_list:
@@ -89,16 +110,41 @@ def write_report(
             status = c.get("market_status")
             if status:
                 lines.append(f"- Market: {status}")
-            trend_line = f"- Trend: EMA20({c.get('ema20', '-')}) vs EMA50({c.get('ema50', '-')})"
-            if c.get("sma200") and c.get("sma200") != "-":
-                trend_line += f", SMA200({c.get('sma200', '-')})"
-            if c.get("trend_pass"):
-                trend_line += f" (trend pass: {c.get('trend_pass')})"
+            if strategy_mode == "sma_ema_hybrid" and report_type == "buy":
+                trend_line = (
+                    f"- Trend: SMA20({c.get('sma20', '-')}) / "
+                    f"EMA10({c.get('ema10', '-')}) / EMA21({c.get('ema21', '-')})"
+                )
+            else:
+                trend_line = (
+                    f"- Trend: EMA20({c.get('ema20', '-')}) vs EMA50({c.get('ema50', '-')})"
+                )
+                if c.get("sma200") and c.get("sma200") != "-":
+                    trend_line += f", SMA200({c.get('sma200', '-')})"
+                if c.get("trend_pass"):
+                    trend_line += f" (trend pass: {c.get('trend_pass')})"
             lines.append(trend_line)
             lines.append(f"- Momentum: RSI14={c.get('rsi14', '-')}")
-            lines.append(f"- Volatility: ATR14={c.get('atr14', '-')}")
-            lines.append(f"- Gap: {c.get('gap', '-')} (threshold {c.get('gap_threshold', '-')})")
+            if strategy_mode != "sma_ema_hybrid" or report_type != "buy":
+                lines.append(f"- Volatility: ATR14={c.get('atr14', '-')}")
+                lines.append(
+                    f"- Gap: {c.get('gap', '-')} (threshold {c.get('gap_threshold', '-')})"
+                )
             lines.append(f"- Liquidity: Avg $Vol {c.get('avg_dollar_volume', '-')}")
+
+            if strategy_mode == "sma_ema_hybrid" and report_type == "buy":
+                pattern = c.get("pattern")
+                if pattern:
+                    lines.append(f"- Pattern: {pattern}")
+                reasons = c.get("pattern_reasons")
+                if reasons:
+                    lines.append(f"- Pattern notes: {reasons}")
+                checklist: list[str] = []
+                if c.get("sma20") not in (None, "-"):
+                    checklist.append("Close>SMA20?")
+                if c.get("ema10") not in (None, "-") and c.get("ema21") not in (None, "-"):
+                    checklist.append("EMA10≥EMA21?")
+                lines.append(f"- Checklist: {', '.join(checklist)}")
             rg = c.get("risk_guide")
             if rg:
                 lines.append(f"- Risk guide: {rg}")

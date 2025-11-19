@@ -366,24 +366,50 @@ class KISClient:
                 params=params,
             )
 
-            if resp.status_code != 200:
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError(f"Overseas price detail HTTP {resp.status_code}: {resp.text}")
-
+            # Try to parse JSON body even on non-200 to inspect msg_cd
+            data: dict[str, Any] | None = None
             try:
                 data = resp.json()
-            except ValueError as exc:
+            except ValueError:
+                data = None
+
+            if resp.status_code != 200:
+                msg_cd = str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
+                msg1 = (data.get("msg1") or data.get("msg_cd") or "Unknown error") if isinstance(
+                    data, dict
+                ) else "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    # Token expired on server side: clear, refresh, and retry
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
-                raise KISClientError("Overseas price detail response is not JSON") from exc
+                raise KISClientError(
+                    f"Overseas price detail HTTP {resp.status_code}: {resp.text}"
+                )
+
+            if data is None:
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError("Overseas price detail response is not JSON")
 
             if str(data.get("rt_cd")) != "0":
                 msg_cd = data.get("msg_cd") or ""
                 msg1 = data.get("msg1") or "Unknown error"
                 if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
                     time.sleep(max(1.0, self._min_interval))
                     continue
                 raise KISClientError(f"KIS overseas price detail error: {msg1}")
@@ -434,12 +460,6 @@ class KISClient:
                     continue
                 raise KISClientError(f"Daily candle request failed: {exc}") from exc
 
-            if resp.status_code != 200:
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError(f"Daily candle HTTP {resp.status_code}: {resp.text}")
-
             try:
                 parsed = resp.json()
             except ValueError as exc:
@@ -453,10 +473,33 @@ class KISClient:
 
             data = parsed
 
+            if resp.status_code != 200:
+                msg_cd = parsed.get("msg_cd") or ""
+                msg1 = parsed.get("msg1") or "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    # Token expired: refresh and retry
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"Daily candle HTTP {resp.status_code}: {resp.text}")
+
             if str(parsed.get("rt_cd")) != "0":
                 msg_cd = parsed.get("msg_cd") or ""
                 msg1 = parsed.get("msg1") or "Unknown error"
                 if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
                     time.sleep(max(1.0, self._min_interval))
                     continue
                 raise KISClientError(f"KIS error: {msg1}")
@@ -500,24 +543,55 @@ class KISClient:
             "CTX_AREA_FK": "",
         }
 
-        try:
-            resp = self._request(
-                "GET", self.creds.overseas_holiday_url, headers=headers, params=params
-            )
-        except requests.RequestException as exc:  # pragma: no cover
-            raise KISClientError(f"Overseas holiday request failed: {exc}") from exc
+        data: dict[str, Any] | None = None
+        for attempt in range(self._max_attempts):
+            try:
+                resp = self._request(
+                    "GET", self.creds.overseas_holiday_url, headers=headers, params=params
+                )
+            except requests.RequestException as exc:  # pragma: no cover
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"Overseas holiday request failed: {exc}") from exc
 
-        if resp.status_code != 200:
-            raise KISClientError(f"Overseas holiday HTTP {resp.status_code}: {resp.text}")
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError("Overseas holiday response is not JSON") from exc
 
-        try:
-            data = resp.json()
-        except ValueError as exc:
-            raise KISClientError("Overseas holiday response is not JSON") from exc
+            if resp.status_code != 200:
+                msg_cd = data.get("msg_cd") or ""
+                msg1 = data.get("msg1") or msg_cd or "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    # Token expired: refresh and retry
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"Overseas holiday HTTP {resp.status_code}: {resp.text}")
 
-        if str(data.get("rt_cd")) != "0":
-            msg = data.get("msg1") or data.get("msg_cd") or "Unknown error"
-            raise KISClientError(f"KIS overseas holiday error: {msg}")
+            if str(data.get("rt_cd")) != "0":
+                msg_cd = data.get("msg_cd") or ""
+                msg1 = data.get("msg1") or msg_cd or "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                msg = msg1
+                raise KISClientError(f"KIS overseas holiday error: {msg}")
+            break
 
         items = data.get("output") or []
         if not isinstance(items, list):
@@ -628,12 +702,6 @@ class KISClient:
                     continue
                 raise KISClientError(f"Overseas daily request failed: {exc}")
 
-            if resp.status_code != 200:
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError(f"Overseas daily HTTP {resp.status_code}: {resp.text}")
-
             try:
                 parsed = resp.json()
             except ValueError as exc:
@@ -647,10 +715,33 @@ class KISClient:
 
             data = parsed
 
+            if resp.status_code != 200:
+                msg_cd = parsed.get("msg_cd") or ""
+                msg1 = parsed.get("msg1") or "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    # Token expired: refresh and retry
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"Overseas daily HTTP {resp.status_code}: {resp.text}")
+
             if str(parsed.get("rt_cd")) != "0":
                 msg_cd = parsed.get("msg_cd") or ""
                 msg1 = parsed.get("msg1") or "Unknown error"
                 if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
                     time.sleep(max(1.0, self._min_interval))
                     continue
                 raise KISClientError(f"KIS overseas error: {msg1}")

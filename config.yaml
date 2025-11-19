@@ -4,25 +4,25 @@ version: 1
 
 data:
   provider: kis
-  screen_limit: 60
+  screen_limit: 40
   report_dir: reports
   data_dir: data
 
 kis:
   base_url: https://openapi.koreainvestment.com:9443
-  min_interval_ms: 500
+  min_interval_ms: 100
 
 screener:
   enabled: true
-  limit: 60
+  limit: 40
   only: false
   cache_ttl_minutes: 5
-  min_price: 1000
-  min_dollar_volume: 3000000000
+  min_price: 10000
+  min_dollar_volume: 5_000_000_000
   # US-specific screener settings and thresholds
   us_mode: kis # 'kis' to use KIS screener; 'defaults' to use us_defaults list
   us_metric: value # 'volume' | 'market_cap' | 'value' (used when us_mode=kis)
-  us_limit: 60
+  us_limit: 40
   us_defaults: # used when us_mode='defaults' or KIS falls back
     - AAPL.US
     - MSFT.US
@@ -31,20 +31,39 @@ screener:
     - META.US
     - GOOGL.US
   us:
-    min_price: 5
-    min_dollar_volume: 3000000
+    min_price: 20
+    min_dollar_volume: 10_000_000
 
 strategy:
-  use_sma200_filter: true
-  require_slope_up: false
-  gap_atr_multiplier: 1.5
+  mode: sma_ema_hybrid # ema_cross | sma_ema_hybrid
+  use_sma200_filter: false
+  require_slope_up: true
+  gap_atr_multiplier: 1.0
   min_history_bars: 200
   exclude_etf_etn: true
-  rs_lookback_days: 60
+  rs_lookback_days: 40
   rs_benchmark_return: 0.0
+  hybrid:
+    sma_trend_period: 20
+    ema_short_period: 10
+    ema_mid_period: 21
+    rsi_period: 14
+    rsi_zone_low: 45.0
+    rsi_zone_high: 60.0
+    rsi_oversold_low: 30.0
+    rsi_oversold_high: 40.0
+    pullback_max_bars: 10
+    breakout_consolidation_min_bars: 5
+    breakout_consolidation_max_bars: 15
+    volume_lookback_days: 5
+    max_gap_pct: 0.05
+    use_sma60_filter: false
+    sma60_period: 60
+    kr_breakout_requires_confirmation: true
 
 sell:
-  atr_trail_multiplier: 1.5
+  mode: sma_ema_hybrid # generic | sma_ema_hybrid
+  atr_trail_multiplier: 2.0
   time_stop_days: 30
   require_sma200: true
   ema_short: 20
@@ -53,6 +72,19 @@ sell:
   rsi_floor: 50
   rsi_floor_alt: 30
   min_bars: 20
+  hybrid:
+    profit_target_low: 0.05
+    profit_target_high: 0.10
+    partial_profit_floor: 0.03
+    ema_short_period: 10
+    ema_mid_period: 21
+    sma_trend_period: 20
+    rsi_period: 14
+    stop_loss_pct_min: 0.03
+    stop_loss_pct_max: 0.05
+    failed_breakout_drop_pct: 0.03
+    min_bars: 20
+    time_stop_days: 0
 
 entry_check:
   enabled: false

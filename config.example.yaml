@@ -39,6 +39,8 @@ screener:
   us_limit: 20
 
 strategy:
+  # Buy strategy mode: 'ema_cross' (current EMA20/50) or 'sma_ema_hybrid' (SMA20 + EMA10/21 hybrid, planned)
+  mode: ema_cross
   use_sma200_filter: true
   require_slope_up: true
   gap_atr_multiplier: 1.0
@@ -46,8 +48,28 @@ strategy:
   exclude_etf_etn: true
   rs_lookback_days: 60
   rs_benchmark_return: 0.0
+  # Hybrid strategy tuning (used when mode = sma_ema_hybrid)
+  hybrid:
+    sma_trend_period: 20          # SMA20: mid-term trend
+    ema_short_period: 10          # EMA10: pullback/entry
+    ema_mid_period: 21            # EMA21: medium-term momentum/support
+    rsi_period: 14                # RSI(14)
+    rsi_zone_low: 45.0            # swing zone lower bound
+    rsi_zone_high: 60.0           # swing zone upper bound
+    rsi_oversold_low: 30.0        # oversold band low
+    rsi_oversold_high: 40.0       # oversold band high
+    pullback_max_bars: 10         # max bars in pullback phase
+    breakout_consolidation_min_bars: 5   # min bars in pre-breakout base
+    breakout_consolidation_max_bars: 15  # max bars in pre-breakout base
+    volume_lookback_days: 5       # volume lookback for 5-day avg
+    max_gap_pct: 0.05             # hard cap on acceptable gap (5%)
+    use_sma60_filter: false       # optional SMA60 filter for KR mid/small caps
+    sma60_period: 60
+    kr_breakout_requires_confirmation: true  # require confirmation candle for KR breakouts
 
 sell:
+  # Sell mode: 'generic' (ATR/EMA20/50-based) or 'sma_ema_hybrid' (profit band + SMA20/EMA10/21 rules)
+  mode: generic
   atr_trail_multiplier: 1.0
   time_stop_days: 10
   require_sma200: true
@@ -57,6 +79,20 @@ sell:
   rsi_floor: 50
   rsi_floor_alt: 30
   min_bars: 20
+  # Hybrid sell tuning (used when mode = sma_ema_hybrid)
+  hybrid:
+    profit_target_low: 0.05        # 1st profit threshold (5%)
+    profit_target_high: 0.10       # high profit threshold (10%)
+    partial_profit_floor: 0.03     # partial-profit zone floor (3%)
+    ema_short_period: 10           # EMA short for trend breakdown
+    ema_mid_period: 21             # EMA mid for trend breakdown
+    sma_trend_period: 20           # SMA20 trend baseline
+    rsi_period: 14                 # RSI period for sell checks
+    stop_loss_pct_min: 0.03        # lower bound of hard stop band (3%)
+    stop_loss_pct_max: 0.05        # upper bound of hard stop band (5%)
+    failed_breakout_drop_pct: 0.03 # breakout failure threshold (3% below entry)
+    min_bars: 20                   # minimum bars required for evaluation
+    time_stop_days: 0              # optional time stop (0 disables)
 
 entry_check:
   enabled: false

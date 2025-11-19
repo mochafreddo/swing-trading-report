@@ -4,9 +4,21 @@
 
 ## 매수(Buy) 평가
 
-입력: 티커별 최소 `MIN_HISTORY_BARS` 봉(기본 200). 지표: EMA(20/50), RSI(14), ATR(14), SMA(200)
+입력: 티커별 최소 `MIN_HISTORY_BARS` 봉(기본 200).
+
+공통 지표:
+
+- EMA, SMA, RSI(14), ATR(14)
+- 거래대금/거래량(스크리너 및 유동성 필터용)
+
+전략은 **여러 모드**로 확장 가능하며, 현재 설계는 다음 두 가지를 기본으로 합니다.
+
+### 1) 기본 EMA 크로스 전략(현 구현)
+
+- 지표: EMA(20/50), RSI(14), ATR(14), SMA(200)
 
 필터(별도 표기 없으면 모두 통과 필요)
+
 - EMA 크로스: 당일 EMA20 > EMA50 이고, 전일 EMA20 ≤ EMA50
 - RSI 리바운드: RSI14가 30 위로 재돌파하되 70 미만 유지
 - ATR‑갭: |시가−전일종가|/전일종가 ≤ `GAP_ATR_MULTIPLIER × ATR / 전일종가`(폴백: 고정 3%)
@@ -18,10 +30,35 @@
 스코어링: 교차/RSI/SMA200/기울기/갭/유동성/RS 여부를 가산. RS(상대강도)는 N일 수익률을 벤치마크와 비교(지수 시리즈 연동 전까지 설정값 사용)
 
 Config keys (selection):
+
 - `strategy.min_history_bars`, `strategy.gap_atr_multiplier`
 - `strategy.use_sma200_filter`, `strategy.require_slope_up`, `strategy.exclude_etf_etn`
 - `screener.min_dollar_volume`, `screener.min_price`
 - `strategy.rs_lookback_days`, `strategy.rs_benchmark_return`
+
+### 2) SMA+EMA 하이브리드 전략(계획)
+
+전략 개요는 `docs/swing-trading-manual.md`를 따르며, 핵심은 다음과 같습니다.
+
+- 지표: SMA20(중기 추세), EMA10/EMA21(단·중기 모멘텀), RSI(14), 거래량/거래대금
+- 패턴:
+  - 추세 지속 + 눌림 반등(Trend continuation + pullback bounce)
+  - 스윙 하이 돌파(Swing high breakout)
+  - RSI 과매도 반등(RSI oversold reversal)
+- 공통 필터:
+  - 가격 > SMA20 (필수)
+  - EMA10 ≥ EMA21 (모멘텀 유지) — 일부 패턴에서 필수
+  - RSI 45–60(스윙 존) 또는 30–40 → 40 상향(과매도 반등)
+  - 과도한 매도 거래량/갭 필터(ATR 또는 고정 %)
+
+Config 예시(계획):
+
+- `strategy.mode` = `ema_cross` \| `sma_ema_hybrid`
+- `strategy.hybrid.sma_trend_period` (기본 20)
+- `strategy.hybrid.ema_short_period` (기본 10)
+- `strategy.hybrid.ema_mid_period` (기본 21)
+- `strategy.hybrid.rsi_zone_low`, `strategy.hybrid.rsi_zone_high`
+- `strategy.hybrid.pullback_max_bars` 등
 
 ## 매도/보류 규칙
 

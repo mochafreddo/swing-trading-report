@@ -29,6 +29,42 @@ def _load_dotenv_if_available() -> None:
 
 
 @dataclass(frozen=True)
+class HybridStrategyConfig:
+    sma_trend_period: int = 20
+    ema_short_period: int = 10
+    ema_mid_period: int = 21
+    rsi_period: int = 14
+    rsi_zone_low: float = 45.0
+    rsi_zone_high: float = 60.0
+    rsi_oversold_low: float = 30.0
+    rsi_oversold_high: float = 40.0
+    pullback_max_bars: int = 10
+    breakout_consolidation_min_bars: int = 5
+    breakout_consolidation_max_bars: int = 15
+    volume_lookback_days: int = 5
+    max_gap_pct: float = 0.05
+    use_sma60_filter: bool = False
+    sma60_period: int = 60
+    kr_breakout_requires_confirmation: bool = True
+
+
+@dataclass(frozen=True)
+class HybridSellConfig:
+    profit_target_low: float = 0.05
+    profit_target_high: float = 0.10
+    partial_profit_floor: float = 0.03
+    ema_short_period: int = 10
+    ema_mid_period: int = 21
+    sma_trend_period: int = 20
+    rsi_period: int = 14
+    stop_loss_pct_min: float = 0.03
+    stop_loss_pct_max: float = 0.05
+    failed_breakout_drop_pct: float = 0.03
+    min_bars: int = 20
+    time_stop_days: int = 0
+
+
+@dataclass(frozen=True)
 class Config:
     data_provider: str = "kis"  # or pykrx
     kis_app_key: str | None = None
@@ -41,6 +77,7 @@ class Config:
     screener_enabled: bool = False
     screener_limit: int = 20
     screener_only: bool = False
+    strategy_mode: str = "ema_cross"
     use_sma200_filter: bool = False
     gap_atr_multiplier: float = 1.0
     min_dollar_volume: float = 0.0
@@ -54,6 +91,7 @@ class Config:
     rs_benchmark_return: float = 0.0
     holdings_path: str | None = None
     holdings: HoldingsData = field(default_factory=lambda: load_holdings(None))
+    sell_mode: str = "generic"
     sell_atr_multiplier: float = 1.0
     sell_time_stop_days: int = 10
     sell_require_sma200: bool = True
@@ -75,6 +113,9 @@ class Config:
     # Per-market thresholds
     us_min_price: float | None = None
     us_min_dollar_volume: float | None = None
+    hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
+    hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
+    hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
 
 
 def _normalize_kis_base(url: str | None) -> str | None:
@@ -208,6 +249,128 @@ def load_config(
     rs_lookback_days = env_int("RS_LOOKBACK_DAYS", "strategy.rs_lookback_days", 20)
     rs_benchmark_return = env_float("RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return", 0.0)
 
+    # Strategy mode and hybrid strategy tuning
+    strategy_mode_raw = (
+        os.getenv("STRATEGY_MODE") or from_yaml("strategy.mode", "ema_cross") or "ema_cross"
+    )
+    strategy_mode = str(strategy_mode_raw).strip().lower()
+    if strategy_mode not in {"ema_cross", "sma_ema_hybrid"}:
+        strategy_mode = "ema_cross"
+
+    hybrid_sma_trend_period = env_int(
+        "HYBRID_SMA_TREND_PERIOD", "strategy.hybrid.sma_trend_period", 20
+    )
+    hybrid_ema_short_period = env_int(
+        "HYBRID_EMA_SHORT_PERIOD", "strategy.hybrid.ema_short_period", 10
+    )
+    hybrid_ema_mid_period = env_int("HYBRID_EMA_MID_PERIOD", "strategy.hybrid.ema_mid_period", 21)
+    hybrid_rsi_period = env_int("HYBRID_RSI_PERIOD", "strategy.hybrid.rsi_period", 14)
+    hybrid_rsi_zone_low = env_float("HYBRID_RSI_ZONE_LOW", "strategy.hybrid.rsi_zone_low", 45.0)
+    hybrid_rsi_zone_high = env_float("HYBRID_RSI_ZONE_HIGH", "strategy.hybrid.rsi_zone_high", 60.0)
+    hybrid_rsi_oversold_low = env_float(
+        "HYBRID_RSI_OVERSOLD_LOW", "strategy.hybrid.rsi_oversold_low", 30.0
+    )
+    hybrid_rsi_oversold_high = env_float(
+        "HYBRID_RSI_OVERSOLD_HIGH", "strategy.hybrid.rsi_oversold_high", 40.0
+    )
+    hybrid_pullback_max_bars = env_int(
+        "HYBRID_PULLBACK_MAX_BARS", "strategy.hybrid.pullback_max_bars", 10
+    )
+    hybrid_breakout_cons_min_bars = env_int(
+        "HYBRID_BREAKOUT_CONS_MIN_BARS",
+        "strategy.hybrid.breakout_consolidation_min_bars",
+        5,
+    )
+    hybrid_breakout_cons_max_bars = env_int(
+        "HYBRID_BREAKOUT_CONS_MAX_BARS",
+        "strategy.hybrid.breakout_consolidation_max_bars",
+        15,
+    )
+    hybrid_volume_lookback_days = env_int(
+        "HYBRID_VOLUME_LOOKBACK_DAYS", "strategy.hybrid.volume_lookback_days", 5
+    )
+    hybrid_max_gap_pct = env_float("HYBRID_MAX_GAP_PCT", "strategy.hybrid.max_gap_pct", 0.05)
+    hybrid_use_sma60_filter = env_bool(
+        "HYBRID_USE_SMA60_FILTER", "strategy.hybrid.use_sma60_filter", False
+    )
+    hybrid_sma60_period = env_int("HYBRID_SMA60_PERIOD", "strategy.hybrid.sma60_period", 60)
+    hybrid_kr_breakout_needs_confirm = env_bool(
+        "HYBRID_KR_BREAKOUT_NEEDS_CONFIRM",
+        "strategy.hybrid.kr_breakout_requires_confirmation",
+        True,
+    )
+
+    hybrid_cfg = HybridStrategyConfig(
+        sma_trend_period=hybrid_sma_trend_period,
+        ema_short_period=hybrid_ema_short_period,
+        ema_mid_period=hybrid_ema_mid_period,
+        rsi_period=hybrid_rsi_period,
+        rsi_zone_low=hybrid_rsi_zone_low,
+        rsi_zone_high=hybrid_rsi_zone_high,
+        rsi_oversold_low=hybrid_rsi_oversold_low,
+        rsi_oversold_high=hybrid_rsi_oversold_high,
+        pullback_max_bars=hybrid_pullback_max_bars,
+        breakout_consolidation_min_bars=hybrid_breakout_cons_min_bars,
+        breakout_consolidation_max_bars=hybrid_breakout_cons_max_bars,
+        volume_lookback_days=hybrid_volume_lookback_days,
+        max_gap_pct=hybrid_max_gap_pct,
+        use_sma60_filter=hybrid_use_sma60_filter,
+        sma60_period=hybrid_sma60_period,
+        kr_breakout_requires_confirmation=hybrid_kr_breakout_needs_confirm,
+    )
+
+    # Sell mode and hybrid sell tuning
+    sell_mode_raw = os.getenv("SELL_MODE") or from_yaml("sell.mode", "generic") or "generic"
+    sell_mode = str(sell_mode_raw).strip().lower()
+    if sell_mode not in {"generic", "sma_ema_hybrid"}:
+        sell_mode = "generic"
+
+    hybrid_sell_profit_low = env_float(
+        "HYBRID_SELL_PROFIT_TARGET_LOW", "sell.hybrid.profit_target_low", 0.05
+    )
+    hybrid_sell_profit_high = env_float(
+        "HYBRID_SELL_PROFIT_TARGET_HIGH", "sell.hybrid.profit_target_high", 0.10
+    )
+    hybrid_sell_partial_floor = env_float(
+        "HYBRID_SELL_PARTIAL_PROFIT_FLOOR", "sell.hybrid.partial_profit_floor", 0.03
+    )
+    hybrid_sell_ema_short = env_int(
+        "HYBRID_SELL_EMA_SHORT_PERIOD", "sell.hybrid.ema_short_period", 10
+    )
+    hybrid_sell_ema_mid = env_int("HYBRID_SELL_EMA_MID_PERIOD", "sell.hybrid.ema_mid_period", 21)
+    hybrid_sell_sma_trend = env_int(
+        "HYBRID_SELL_SMA_TREND_PERIOD", "sell.hybrid.sma_trend_period", 20
+    )
+    hybrid_sell_rsi_period = env_int("HYBRID_SELL_RSI_PERIOD", "sell.hybrid.rsi_period", 14)
+    hybrid_sell_stop_loss_min = env_float(
+        "HYBRID_SELL_STOP_LOSS_PCT_MIN", "sell.hybrid.stop_loss_pct_min", 0.03
+    )
+    hybrid_sell_stop_loss_max = env_float(
+        "HYBRID_SELL_STOP_LOSS_PCT_MAX", "sell.hybrid.stop_loss_pct_max", 0.05
+    )
+    hybrid_sell_failed_bo_drop = env_float(
+        "HYBRID_SELL_FAILED_BREAKOUT_DROP_PCT",
+        "sell.hybrid.failed_breakout_drop_pct",
+        0.03,
+    )
+    hybrid_sell_min_bars = env_int("HYBRID_SELL_MIN_BARS", "sell.hybrid.min_bars", 20)
+    hybrid_sell_time_stop = env_int("HYBRID_SELL_TIME_STOP_DAYS", "sell.hybrid.time_stop_days", 0)
+
+    hybrid_sell_cfg = HybridSellConfig(
+        profit_target_low=hybrid_sell_profit_low,
+        profit_target_high=hybrid_sell_profit_high,
+        partial_profit_floor=hybrid_sell_partial_floor,
+        ema_short_period=hybrid_sell_ema_short,
+        ema_mid_period=hybrid_sell_ema_mid,
+        sma_trend_period=hybrid_sell_sma_trend,
+        rsi_period=hybrid_sell_rsi_period,
+        stop_loss_pct_min=hybrid_sell_stop_loss_min,
+        stop_loss_pct_max=hybrid_sell_stop_loss_max,
+        failed_breakout_drop_pct=hybrid_sell_failed_bo_drop,
+        min_bars=hybrid_sell_min_bars,
+        time_stop_days=hybrid_sell_time_stop,
+    )
+
     holdings_path = env_str("HOLDINGS_FILE", "files.holdings", None)
     watchlist_path = env_str("WATCHLIST_FILE", "files.watchlist", None)
     holdings_data = load_holdings(holdings_path)
@@ -290,6 +453,7 @@ def load_config(
         screener_enabled=screener_enabled,
         screener_limit=screener_limit,
         screener_only=screener_only,
+        strategy_mode=strategy_mode,
         use_sma200_filter=use_sma200_filter,
         gap_atr_multiplier=gap_atr_multiplier,
         min_dollar_volume=min_dollar_volume,
@@ -303,6 +467,7 @@ def load_config(
         rs_benchmark_return=rs_benchmark_return,
         holdings_path=holdings_path,
         holdings=holdings_data,
+        sell_mode=sell_mode,
         sell_atr_multiplier=sell_atr_multiplier,
         sell_time_stop_days=sell_time_stop_days,
         sell_require_sma200=sell_require_sma200,
@@ -323,6 +488,8 @@ def load_config(
         fx_kis_symbol=fx_kis_symbol,
         us_min_price=us_min_price,
         us_min_dollar_volume=us_min_dollar_volume,
+        hybrid=hybrid_cfg,
+        hybrid_sell=hybrid_sell_cfg,
     )
 
 

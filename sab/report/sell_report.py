@@ -81,6 +81,8 @@ def write_sell_report(
     time_stop_days: int | None = None,
     fx_rate: float | None = None,
     fx_note: str | None = None,
+    sell_mode: str | None = None,
+    sell_mode_note: str | None = None,
 ) -> str:
     _ensure_dir(report_dir)
 
@@ -126,6 +128,14 @@ def write_sell_report(
         lines.append(fx_line)
     if rules:
         lines.append(f"- Rules: {', '.join(rules)}")
+    if sell_mode:
+        mode_label = sell_mode
+        if sell_mode == "sma_ema_hybrid":
+            mode_label = "sma_ema_hybrid (SMA20 + EMA10/21)"
+        line = f"- Sell mode: {mode_label}"
+        if sell_mode_note:
+            line += f" — {sell_mode_note}"
+        lines.append(line)
     if failures_list:
         lines.append(f"- Notes: {len(failures_list)} issue(s) logged (see Appendix)")
     lines.append("")
