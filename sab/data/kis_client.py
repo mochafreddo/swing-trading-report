@@ -861,24 +861,51 @@ class KISClient:
             for attempt in range(self._max_attempts):
                 resp = self._request("GET", self.creds.volume_rank_url, headers=hdrs, params=params)
 
-                if resp.status_code != 200:
-                    if attempt < self._max_attempts - 1:
-                        time.sleep(1.0)
-                        continue
-                    raise KISClientError(f"Volume rank HTTP {resp.status_code}: {resp.text}")
-
+                # Try to parse JSON body even on non-200 to inspect msg_cd
+                data: dict[str, Any] | None = None
                 try:
                     data = resp.json()
-                except ValueError as exc:
+                except ValueError:
+                    data = None
+
+                if resp.status_code != 200:
+                    msg_cd = str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
+                    msg1 = (data.get("msg1") or data.get("msg_cd") or "Unknown error") if isinstance(
+                        data, dict
+                    ) else "Unknown error"
+                    if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                        # Token expired on server side: clear, refresh, and retry
+                        self._access_token = None
+                        self._token_expiry = None
+                        self.ensure_token()
+                        headers["authorization"] = self._access_token or ""
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
                     if attempt < self._max_attempts - 1:
                         time.sleep(1.0)
                         continue
-                    raise KISClientError("Volume rank response is not JSON") from exc
+                    raise KISClientError(
+                        f"Volume rank HTTP {resp.status_code}: {msg1} ({resp.text})"
+                    )
+
+                if data is None:
+                    if attempt < self._max_attempts - 1:
+                        time.sleep(1.0)
+                        continue
+                    raise KISClientError("Volume rank response is not JSON")
 
                 if str(data.get("rt_cd")) != "0":
                     msg_cd = data.get("msg_cd") or ""
                     msg1 = data.get("msg1") or "Unknown error"
                     if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
+                    if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                        # Token expired according to body: refresh and retry
+                        self._access_token = None
+                        self._token_expiry = None
+                        self.ensure_token()
+                        headers["authorization"] = self._access_token or ""
                         time.sleep(max(1.0, self._min_interval))
                         continue
                     raise KISClientError(f"KIS volume rank error: {msg1}")
