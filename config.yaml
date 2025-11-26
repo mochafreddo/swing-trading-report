@@ -17,8 +17,8 @@ screener:
   limit: 80
   only: false
   cache_ttl_minutes: 5
-  min_price: 10000
-  min_dollar_volume: 5_000_000_000
+  min_price: 3000
+  min_dollar_volume: 1_000_000_000
   # US-specific screener settings and thresholds
   us_mode: kis # 'kis' to use KIS screener; 'defaults' to use us_defaults list
   us_metric: value # 'volume' | 'market_cap' | 'value' (used when us_mode=kis)
