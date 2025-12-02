@@ -442,11 +442,15 @@ def evaluate_ticker_hybrid(
             return f"{value:,.0f}"
         return f"{value:,.{digits}f}"
 
+    price_digits = 2 if currency == "USD" else 0
+    # Gap guard prices should carry decimals for precise order reference, regardless of currency.
+    gap_price_digits = 2
+
     risk_guide = "-"
     if not math.isnan(atr_value):
         stop = max(last_close - atr_value, 0)
         target = last_close + atr_value * 2
-        risk_guide = f"Stop {fmt(stop, 0)} / Target {fmt(target, 0)} (~1:2)"
+        risk_guide = f"Stop {fmt(stop, price_digits)} / Target {fmt(target, price_digits)} (~1:2)"
 
     gap_guard_pct = None
     gap_guard_up_price = None
@@ -481,8 +485,12 @@ def evaluate_ticker_hybrid(
         "entry_state_reason": entry_state_reason,
         "atr14": fmt(atr_value),
         "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%" if gap_guard_pct is not None else "-",
-        "gap_guard_up_price": fmt(gap_guard_up_price, 0) if gap_guard_up_price else "-",
-        "gap_guard_down_price": fmt(gap_guard_down_price, 0) if gap_guard_down_price else "-",
+        "gap_guard_up_price": fmt(gap_guard_up_price, gap_price_digits)
+        if gap_guard_up_price
+        else "-",
+        "gap_guard_down_price": fmt(gap_guard_down_price, gap_price_digits)
+        if gap_guard_down_price
+        else "-",
         "risk_guide": risk_guide,
         # Score is kept for sorting compatibility but fixed for hybrid
         "score_value": 1.0,

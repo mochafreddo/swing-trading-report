@@ -105,12 +105,12 @@ def evaluate_sell_signals_hybrid(
 
     if pnl_pct is not None and pnl_pct >= settings.profit_target_high:
         reasons.append(
-            f"Reached high profit target ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.0f}%)"
+            f"Reached high profit target ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.1f}%)"
         )
         action = "SELL"
     elif pnl_pct is not None and pnl_pct >= settings.partial_profit_floor:
         reasons.append(
-            f"Reached partial profit zone ({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.0f}%)"
+            f"Reached partial profit zone ({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.1f}%)"
         )
         if action != "SELL":
             action = "REVIEW"
@@ -164,7 +164,7 @@ def evaluate_sell_signals_hybrid(
         if pnl_pct <= -settings.failed_breakout_drop_pct:
             reasons.append(
                 f"Failed breakout: price moved {pnl_pct * 100:.1f}% below entry "
-                f"(threshold {settings.failed_breakout_drop_pct * 100:.0f}%)"
+                f"(threshold {settings.failed_breakout_drop_pct * 100:.1f}%)"
             )
             action = "SELL"
 
@@ -176,7 +176,7 @@ def evaluate_sell_signals_hybrid(
             if loss_abs >= settings.stop_loss_pct_min:
                 reasons.append(
                     f"Hit hard stop band (loss {loss_abs * 100:.1f}% ≥ "
-                    f"{settings.stop_loss_pct_min * 100:.0f}% min)"
+                    f"{settings.stop_loss_pct_min * 100:.1f}% min)"
                 )
                 action = "SELL"
                 # Set stop at the midpoint of the band for reporting

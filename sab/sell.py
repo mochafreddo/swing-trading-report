@@ -367,10 +367,10 @@ def run_sell(*, provider: str | None) -> int:
     sell_mode_note: str | None = None
     if cfg.sell_mode == "sma_ema_hybrid":
         sell_mode_note = (
-            f"profit {cfg.hybrid_sell.profit_target_low * 100:.0f}–"
-            f"{cfg.hybrid_sell.profit_target_high * 100:.0f}%, "
-            f"stop {cfg.hybrid_sell.stop_loss_pct_min * 100:.0f}–"
-            f"{cfg.hybrid_sell.stop_loss_pct_max * 100:.0f}%"
+            f"profit {cfg.hybrid_sell.profit_target_low * 100:.1f}–"
+            f"{cfg.hybrid_sell.profit_target_high * 100:.1f}%, "
+            f"stop {cfg.hybrid_sell.stop_loss_pct_min * 100:.1f}–"
+            f"{cfg.hybrid_sell.stop_loss_pct_max * 100:.1f}%"
         )
 
     out_path = write_sell_report(
