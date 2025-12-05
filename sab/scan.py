@@ -233,6 +233,9 @@ def run_scan(
                             )
                         )
                         us_tickers = kres.tickers
+                        # Propagate metadata (including names) so filters can
+                        # apply ETF/ETN and other heuristics consistently.
+                        screener_meta_map.update(kres.metadata.get("by_ticker", {}))
                         if us_tickers:
                             us_source = "kis_overseas_rank"
                         else:

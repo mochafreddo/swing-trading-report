@@ -32,7 +32,7 @@ screener:
     - GOOGL.US
   us:
     min_price: 20
-    min_dollar_volume: 10_000_000
+    min_dollar_volume: 5_000_000
 
 strategy:
   mode: sma_ema_hybrid # ema_cross | sma_ema_hybrid

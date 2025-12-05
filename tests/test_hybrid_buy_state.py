@@ -229,3 +229,21 @@ def test_rsi_oversold_watch(monkeypatch):
         "need rsi" in result.candidate["entry_state_reason"].lower()
         or "need rsi" in result.candidate["entry_state_reason"]
     )
+
+
+def test_hybrid_evaluator_excludes_etf_when_flag_true(monkeypatch):
+    candles = _simple_candles(10)
+
+    # Evaluate on the last candle.
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+    )
+
+    settings = _settings()
+    settings.exclude_etf_etn = True
+
+    meta = {"currency": "USD", "name": "Vanguard Total Stock Market ETF"}
+
+    result = evaluate_ticker_hybrid("VTI.AMS", candles, settings, meta)
+    assert result.candidate is None
+    assert result.reason == "ETF/ETN excluded"

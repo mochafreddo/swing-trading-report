@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from .etf_filters import is_etf_or_leveraged
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
 
@@ -160,11 +161,9 @@ def evaluate_ticker(
             f"Avg dollar volume {avg_dollar_volume:,.0f} < {eff_min_dv:,.0f}",
         )
 
-    # ETF/ETN exclusion heuristic
-    if settings.exclude_etf_etn:
-        name = str(meta.get("name", "")).upper()
-        if any(keyword in name for keyword in ["ETF", "ETN", "레버리지", "인버스"]):
-            return EvaluationResult(ticker, None, "ETF/ETN excluded")
+    # ETF/ETN exclusion heuristic (including leveraged/inverse products)
+    if settings.exclude_etf_etn and is_etf_or_leveraged(ticker, meta):
+        return EvaluationResult(ticker, None, "ETF/ETN excluded")
 
     rs_return = None
     rs_diff = None

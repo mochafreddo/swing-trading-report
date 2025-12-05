@@ -281,6 +281,105 @@ def test_evaluate_ticker_uses_eval_index(monkeypatch):
     )
 
 
+def test_evaluate_ticker_excludes_etf_when_flag_true(monkeypatch):
+    import sab.signals.evaluator as ev
+
+    # Build minimal candles where basic data/length checks pass.
+    candles = [
+        {
+            "date": "20250101",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.5,
+            "close": 10.0,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250102",
+            "open": 10.0,
+            "high": 11.5,
+            "low": 9.7,
+            "close": 11.0,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250103",
+            "open": 11.0,
+            "high": 12.5,
+            "low": 10.7,
+            "close": 12.0,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250104",
+            "open": 12.0,
+            "high": 13.5,
+            "low": 11.7,
+            "close": 13.0,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250105",
+            "open": 13.0,
+            "high": 14.5,
+            "low": 12.7,
+            "close": 14.0,
+            "volume": 1_000_000,
+        },
+    ]
+
+    # Force evaluation on the last candle.
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, True),
+    )
+
+    # Stub indicators so EMA/RSI/ATR/gap checks all pass and evaluation
+    # reaches the ETF exclusion branch.
+    def fake_ema(values, period):
+        n = len(values)
+        base = [1.0] * n
+        if period == 20:
+            # Ensure EMA20 crosses above EMA50 on the last bar.
+            base[-2] = 1.0
+            base[-1] = 2.0
+        elif period == 50:
+            base[-2] = 1.0
+            base[-1] = 1.0
+        return base
+
+    def fake_rsi(values, period):
+        n = len(values)
+        out = [0.0] * n
+        # RSI rebounds from <=30 to >30 and stays below 70.
+        if n >= 2:
+            out[-2] = 30.0
+            out[-1] = 40.0
+        return out
+
+    def fake_atr(highs, lows, closes, period):
+        return [1.0] * len(closes)
+
+    monkeypatch.setattr(ev, "ema", fake_ema)
+    monkeypatch.setattr(ev, "rsi", fake_rsi)
+    monkeypatch.setattr(ev, "atr", fake_atr)
+
+    settings = EvaluationSettings(
+        min_history_bars=5,
+        min_price=0.0,
+        min_dollar_volume=0.0,
+        us_min_dollar_volume=None,
+        exclude_etf_etn=True,
+        gap_atr_multiplier=0.0,
+    )
+    meta = {"currency": "USD", "name": "Test ETF"}
+
+    result = evaluate_ticker("TESTETF.US", candles, settings, meta)
+    assert result.candidate is None
+    assert result.reason == "ETF/ETN excluded"
+
+
 def test_evaluate_sell_signals_use_eval_index(monkeypatch):
     import sab.signals.sell_rules as sr
 

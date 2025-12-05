@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from .etf_filters import is_etf_or_leveraged
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
 
@@ -97,10 +98,8 @@ def _basic_filters(
             avg_dv,
         )
 
-    if settings.exclude_etf_etn:
-        name = str(meta.get("name", "")).upper()
-        if any(k in name for k in ["ETF", "ETN", "레버리지", "인버스"]):
-            return False, "ETF/ETN excluded", close, avg_dv
+    if settings.exclude_etf_etn and is_etf_or_leveraged(ticker, meta):
+        return False, "ETF/ETN excluded", close, avg_dv
 
     return True, None, close, avg_dv
 
