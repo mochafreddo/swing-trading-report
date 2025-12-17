@@ -1,3 +1,4 @@
+import datetime as dt
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -69,6 +70,56 @@ class KISClientOverseasTradeValueRankTests(unittest.TestCase):
                 "PRC2": "",
             },
         )
+
+
+class KISClientOverseasRankPaginationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        creds = KISCredentials(
+            app_key="test-key",
+            app_secret="test-secret",
+            base_url="https://example.com",
+            env="demo",
+        )
+        self.client = KISClient(creds, session=MagicMock(), cache_dir=None)
+        self.client._access_token = "Bearer test"
+        self.client._token_expiry = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+
+    def test_fetch_overseas_rank_items_paginates_with_tr_cont_and_keyb(self) -> None:
+        resp1 = MagicMock()
+        resp1.status_code = 200
+        resp1.headers = {"tr_cont": "M"}
+        resp1.json.return_value = {
+            "rt_cd": "0",
+            "output2": [{"SYMB": "AAA"}],
+            "output1": {"keyb": "CUR1"},
+        }
+
+        resp2 = MagicMock()
+        resp2.status_code = 200
+        resp2.headers = {"tr_cont": ""}
+        resp2.json.return_value = {
+            "rt_cd": "0",
+            "output2": [{"SYMB": "BBB"}],
+        }
+
+        self.client._request = MagicMock(side_effect=[resp1, resp2])
+
+        result = self.client._fetch_overseas_rank_items(
+            url="https://example.com/rank",
+            tr_id="TESTTR",
+            params={"EXCD": "NAS", "NDAY": "1", "VOL_RANG": "0"},
+            limit=2,
+        )
+
+        self.assertEqual([r.get("SYMB") for r in result], ["AAA", "BBB"])
+        self.assertEqual(self.client._request.call_count, 2)
+
+        first_call = self.client._request.call_args_list[0].kwargs
+        self.assertNotIn("tr_cont", first_call["headers"])
+
+        second_call = self.client._request.call_args_list[1].kwargs
+        self.assertEqual(second_call["headers"].get("tr_cont"), "N")
+        self.assertEqual(second_call["params"].get("KEYB"), "CUR1")
 
 
 if __name__ == "__main__":

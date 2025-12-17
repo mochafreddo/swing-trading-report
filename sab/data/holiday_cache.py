@@ -57,51 +57,89 @@ def merge_holidays(
     country_code: str,
     fetched: list[dict[str, Any]],
 ) -> Dict[str, HolidayEntry]:
-    cached = load_cached_holidays(cache_dir, country_code)
+    cached_raw = load_cached_holidays(cache_dir, country_code)
     country = country_code.strip().upper()
 
+    builtin: dict[str, str] = {}
     if country == "US":
-        for date, note in load_us_trading_calendar(cache_dir).items():
+        builtin = load_us_trading_calendar(cache_dir)
+    if country == "KR":
+        builtin = load_kr_trading_calendar(cache_dir)
+    trusted_dates = set(builtin)
+
+    # Filter cached entries to avoid stale/suspicious closures (e.g., empty notes).
+    def _keep_cached(date: str, entry: HolidayEntry, trusted: set[str]) -> bool:
+        note = (entry.note or "").strip()
+        if date in trusted:
+            return True
+        # Drop empty-note closures for unknown dates.
+        if not note and not entry.is_open:
+            return False
+        # Drop obvious noise strings.
+        lowered = note.lower()
+        if lowered in {"amex", "아멕스"}:
+            return False
+        return True
+
+    cached = {
+        date: entry for date, entry in cached_raw.items() if _keep_cached(date, entry, trusted_dates)
+    }
+
+    if country == "US":
+        for date, note in builtin.items():
             cached[date] = HolidayEntry(date=date, note=note, is_open=False)
     if country == "KR":
-        for date, note in load_kr_trading_calendar(cache_dir).items():
+        for date, note in builtin.items():
             cached[date] = HolidayEntry(date=date, note=note, is_open=False)
 
     for item in fetched:
         natn = str(item.get("natn_eng_abrv_cd") or item.get("tr_natn_cd") or "").upper()
-        if natn and natn not in {country, "US", "USA", "840"}:
-            # Skip non-US entries even if caller passes a broader set.
+        allowed_natn = {country}
+        if country == "US":
+            allowed_natn.update({"US", "USA", "840"})
+        if country == "KR":
+            allowed_natn.update({"KR", "KOR", "410"})
+        if natn and natn not in allowed_natn:
             continue
 
-        # Prefer explicit trading date fields over settlement dates.
+        # Prefer explicit trading date fields. Ignore settlement-only rows to
+        # avoid polluting the holiday cache with settlement schedules.
         date = str(
             item.get("trd_dt")
             or item.get("TRD_DT")
             or item.get("base_date")
             or item.get("base_dt")
             or item.get("trd_date")
-            or item.get("dmst_sttl_dt")
-            or item.get("acpl_sttl_dt")
             or ""
         ).replace("-", "")
         if not date:
             continue
+        # Do not allow fetched data to override known calendar dates.
+        if date in trusted_dates:
+            continue
 
-        desc = (
-            item.get("base_event")
-            or item.get("evnt_nm")
-            or item.get("tr_mket_name")
-            or item.get("natn_eng_abrv_cd")
-            or item.get("note")
-        )
+        event = item.get("base_event") or item.get("evnt_nm") or item.get("note")
+        desc = event.strip() if isinstance(event, str) else None
         flag_val = (
             item.get("open_yn")
             or item.get("mket_opn_yn")
             or item.get("cntr_div_cd")
             or item.get("opng_yn")
         )
-        is_open = str(flag_val or "N").upper() in {"Y", "OPEN", "1", "T", "TRUE"}
-        cached[date] = HolidayEntry(date=date, note=desc, is_open=is_open)
+        if flag_val is None:
+            # Without a market-open indicator, only accept rows that clearly
+            # describe an event (treat as a closure).
+            if not desc:
+                continue
+            is_open = False
+        else:
+            is_open = str(flag_val or "N").upper() in {"Y", "OPEN", "1", "T", "TRUE"}
+
+        note = desc or None
+        lowered = note.lower() if note else ""
+        if lowered in {"amex", "아멕스"}:
+            continue
+        cached[date] = HolidayEntry(date=date, note=note, is_open=is_open)
     save_holidays(cache_dir, country_code, cached)
     return cached
 

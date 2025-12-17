@@ -12,6 +12,8 @@ class ScreenRequest:
     limit: int
     metric: str  # 'volume' | 'market_cap' | 'value'
     exchange: str | None = None  # NAS/NYS/AMS or None for default rotation
+    nday: int = 0  # 0 = today, 1 = previous session, etc.
+    fallback_ndays: list[int] | None = None  # optional retry list
 
 
 @dataclass
@@ -35,24 +37,54 @@ class KISOverseasScreener:
         exchanges = self._resolve_exchanges(request.exchange)
         tickers: list[str] = []
         by_ticker: dict[str, Any] = {}
-        for exch in exchanges:
-            remaining = request.limit - len(tickers)
-            if remaining <= 0:
-                break
-            rows = self._fetch_rank(metric, exch, remaining)
-            for row in rows:
-                sym = self._symbol_from_row(row)
-                if not sym:
-                    continue
-                ticker = sym if "." in sym else f"{sym}.{exch}"
-                if ticker in tickers:
-                    continue
-                tickers.append(ticker)
-                enriched = dict(row)
-                enriched.setdefault("exchange", exch)
-                by_ticker[ticker] = enriched
-                if len(tickers) >= request.limit:
+        ndays: list[int] = []
+        if request.nday is not None:
+            try:
+                ndays.append(max(0, int(request.nday)))
+            except (TypeError, ValueError):
+                ndays.append(0)
+        for nd in request.fallback_ndays or []:
+            try:
+                candidate = max(0, int(nd))
+            except (TypeError, ValueError):
+                continue
+            if candidate not in ndays:
+                ndays.append(candidate)
+        if not ndays:
+            ndays = [0]
+
+        nday_used: int | None = None
+        tried_ndays: list[int] = []
+
+        for nd in ndays:
+            tried_ndays.append(nd)
+            for exch in exchanges:
+                remaining = request.limit - len(tickers)
+                if remaining <= 0:
                     break
+                rows = self._fetch_rank(metric, exch, remaining, nday=nd)
+                if not rows:
+                    continue
+                for row in rows:
+                    sym = self._symbol_from_row(row)
+                    if not sym:
+                        continue
+                    ticker = sym if "." in sym else f"{sym}.{exch}"
+                    if ticker in tickers:
+                        continue
+                    tickers.append(ticker)
+                    enriched = dict(row)
+                    enriched.setdefault("exchange", exch)
+                    by_ticker[ticker] = enriched
+                    if nday_used is None:
+                        nday_used = nd
+                    if len(tickers) >= request.limit:
+                        break
+                if tickers:
+                    # Prefer a single session's ranks; stop once we have results.
+                    break
+            if tickers:
+                break
 
         return ScreenResult(
             tickers=tickers,
@@ -61,6 +93,9 @@ class KISOverseasScreener:
                 "metric": metric,
                 "exchanges": exchanges,
                 "generated_at": dt.datetime.now().isoformat(),
+                "nday_requested": request.nday,
+                "nday_used": nday_used,
+                "nday_tried": tried_ndays,
                 "by_ticker": by_ticker,
             },
         )
@@ -85,13 +120,22 @@ class KISOverseasScreener:
         code = (exchange or "NAS").strip().upper()
         return mapping.get(code, code)
 
-    def _fetch_rank(self, metric: str, exchange: str, limit: int) -> list[dict[str, Any]]:
+    def _fetch_rank(
+        self, metric: str, exchange: str, limit: int, *, nday: int = 0
+    ) -> list[dict[str, Any]]:
+        nday_str = str(max(0, int(nday)))
         if metric in {"market_cap", "marketcap"}:
-            return self._client.overseas_market_cap_rank(exchange=exchange, limit=limit)
+            return self._client.overseas_market_cap_rank(
+                exchange=exchange, limit=limit, nday=nday_str
+            )
         if metric in {"value", "amount", "trade_value"}:
-            return self._client.overseas_trade_value_rank(exchange=exchange, limit=limit)
+            return self._client.overseas_trade_value_rank(
+                exchange=exchange, limit=limit, nday=nday_str
+            )
         # default to volume
-        return self._client.overseas_trade_volume_rank(exchange=exchange, limit=limit)
+        return self._client.overseas_trade_volume_rank(
+            exchange=exchange, limit=limit, nday=nday_str
+        )
 
     @staticmethod
     def _symbol_from_row(row: dict[str, Any]) -> str:

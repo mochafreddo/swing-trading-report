@@ -30,7 +30,7 @@ from .signals.hybrid_buy import (
     HybridEvaluationSettings,
     evaluate_ticker_hybrid,
 )
-from .utils.market_time import us_market_status
+from .utils.market_time import us_market_status, us_session_info
 
 
 def _infer_env_from_base(base_url: str) -> str:
@@ -223,6 +223,21 @@ def run_scan(
             if "US" in cfg.universe_markets:
                 us_tickers: list[str] = []
                 us_source: str | None = None
+                us_nday_used: int | None = None
+                session_info = us_session_info(data_dir=cfg.data_dir)
+                preferred_nday = int(session_info.get("preferred_nday", 1) or 1)
+                # Avoid nday=0 when we already prefer a prior session; keep a bounded search window.
+                fallback_ndays = (
+                    [n for n in range(1, 6) if n != preferred_nday]
+                    if preferred_nday != 0
+                    else [n for n in range(1, 6)]
+                )
+                logger.info(
+                    "US session state=%s holiday=%s preferred_nday=%s",
+                    session_info.get("state"),
+                    session_info.get("is_holiday"),
+                    preferred_nday,
+                )
                 if cfg.us_screener_mode == "kis":
                     try:
                         kscr = KUS(kis_client)
@@ -230,9 +245,12 @@ def run_scan(
                             KUSReq(
                                 limit=cfg.us_screener_limit or screener_limit,
                                 metric=cfg.us_screener_metric,
+                                nday=preferred_nday,
+                                fallback_ndays=fallback_ndays,
                             )
                         )
                         us_tickers = kres.tickers
+                        us_nday_used = kres.metadata.get("nday_used")
                         # Propagate metadata (including names) so filters can
                         # apply ETF/ETN and other heuristics consistently.
                         screener_meta_map.update(kres.metadata.get("by_ticker", {}))
@@ -241,6 +259,13 @@ def run_scan(
                         else:
                             logger.warning(
                                 "US KIS screener returned 0 tickers; falling back to defaults if configured"
+                            )
+                        if us_tickers:
+                            logger.info(
+                                "US KIS screener used nday=%s (tried=%s, state=%s)",
+                                kres.metadata.get("nday_used"),
+                                kres.metadata.get("nday_tried"),
+                                session_info.get("state"),
                             )
                     except Exception as exc:
                         logger.warning("US KIS screener failed (%s); falling back to defaults", exc)
@@ -274,10 +299,12 @@ def run_scan(
                     tickers = list(dict.fromkeys(us_tickers + (tickers or [])))
                 total_added += len(us_tickers)
                 logger.info(
-                    "US screener selected %s tickers (mode=%s, source=%s)",
+                    "US screener selected %s tickers (mode=%s, source=%s, nday=%s, state=%s)",
                     len(us_tickers),
                     cfg.us_screener_mode,
                     us_source or "none",
+                    us_nday_used,
+                    session_info.get("state"),
                 )
 
             if total_added == 0:

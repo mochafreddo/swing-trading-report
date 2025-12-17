@@ -994,27 +994,42 @@ class KISClient:
             if isinstance(items, dict):
                 items = [items]
 
+            added = 0
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 results.append(item)
+                added += 1
                 if len(results) >= limit:
                     break
 
             if len(results) >= limit:
                 break
 
-            tr_cont = (resp.headers.get("tr_cont") or "").strip()
+            resp_tr_cont = (resp.headers.get("tr_cont") or "").strip().upper()
+            output1 = data.get("output1") or {}
+            if isinstance(output1, list) and output1:
+                output1 = output1[0]
+            if not isinstance(output1, dict):
+                output1 = {}
             keyb = (
                 data.get("keyb")
                 or data.get("KEYB")
-                or (data.get("output1") or {}).get("keyb")
+                or output1.get("keyb")
+                or output1.get("KEYB")
                 or ""
             )
             request_params["KEYB"] = keyb
 
-            if tr_cont not in {"M", "F"}:
+            # Stop if we cannot make progress.
+            if added == 0:
                 break
+
+            # KIS pagination: response tr_cont == "M" means more data; request
+            # should send tr_cont="N" to continue (see domestic rank usage).
+            if resp_tr_cont != "M":
+                break
+            tr_cont = "N"
 
         return results[:limit]
 
@@ -1072,10 +1087,12 @@ class KISClient:
         *,
         exchange: str,
         limit: int,
+        nday: str = "0",
         volume_filter: str = "0",
     ) -> list[dict[str, Any]]:
         params = {
             "EXCD": exchange,
+            "NDAY": nday,
             "VOL_RANG": volume_filter,
         }
         return self._fetch_overseas_rank_items(
