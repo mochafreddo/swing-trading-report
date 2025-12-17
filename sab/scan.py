@@ -37,6 +37,15 @@ def _infer_env_from_base(base_url: str) -> str:
     return "demo" if "vts" in base_url.lower() else "real"
 
 
+def _format_ny_now_for_log(session_info: dict[str, object]) -> str:
+    ny_now = session_info.get("ny_now")
+    if isinstance(ny_now, dt.datetime):
+        return ny_now.isoformat(timespec="seconds")
+    if ny_now is None:
+        return "-"
+    return str(ny_now)
+
+
 US_SUFFIXES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
 
 
@@ -232,11 +241,13 @@ def run_scan(
                     if preferred_nday != 0
                     else [n for n in range(1, 6)]
                 )
+                ny_now_str = _format_ny_now_for_log(session_info)
                 logger.info(
-                    "US session state=%s holiday=%s preferred_nday=%s",
+                    "US session state=%s holiday=%s preferred_nday=%s ny_now=%s",
                     session_info.get("state"),
                     session_info.get("is_holiday"),
                     preferred_nday,
+                    ny_now_str,
                 )
                 if cfg.us_screener_mode == "kis":
                     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import logging
 import os
 import sys
@@ -21,7 +22,35 @@ def _load_dotenv_if_available() -> None:
 def _configure_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(level=level, format="%(levelname)s - %(message)s")
+
+    log_format = os.getenv(
+        "LOG_FORMAT",
+        "%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
+    log_datefmt = os.getenv("LOG_DATEFMT") or None
+    log_tz = (os.getenv("LOG_TZ") or "local").strip().lower()
+    if log_tz not in {"local", "utc"}:
+        log_tz = "local"
+
+    class _TZFormatter(logging.Formatter):
+        def __init__(self, fmt: str, *, datefmt: str | None, tz: str) -> None:
+            super().__init__(fmt=fmt, datefmt=datefmt)
+            self._tz = tz
+
+        def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+            if self._tz == "utc":
+                ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
+            else:
+                ts = dt.datetime.fromtimestamp(record.created).astimezone()
+
+            datefmt = datefmt or self.datefmt
+            if datefmt:
+                return ts.strftime(datefmt)
+            return ts.isoformat(timespec="milliseconds")
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(_TZFormatter(log_format, datefmt=log_datefmt, tz=log_tz))
+    logging.basicConfig(level=level, handlers=[handler], force=True)
 
 
 def _build_parser() -> argparse.ArgumentParser:

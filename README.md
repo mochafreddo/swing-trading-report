@@ -21,6 +21,11 @@
   - `KIS_APP_KEY=...`
   - `KIS_APP_SECRET=...`
   - `KIS_BASE_URL=...`  # 모의/실전 (포트 생략 가능: 자동으로 9443/29443 보정)
+  - (선택) 로깅
+    - `LOG_LEVEL=INFO` (또는 `DEBUG`)
+    - `LOG_TZ=local` (기본) 또는 `utc`
+    - `LOG_FORMAT=...` (기본: `%(asctime)s %(levelname)s %(name)s - %(message)s`)
+    - `LOG_DATEFMT=...` (strftime 포맷, 미지정 시 ISO 8601 + ms + TZ)
   - `SCREEN_LIMIT=30`
   - `REPORT_DIR=reports`
   - `DATA_DIR=data`
