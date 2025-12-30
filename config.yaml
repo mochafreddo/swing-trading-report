@@ -4,7 +4,7 @@ version: 1
 
 data:
   provider: kis
-  screen_limit: 310
+  screen_limit: 300
   report_dir: reports
   data_dir: data
 
@@ -22,7 +22,7 @@ screener:
   # US-specific screener settings and thresholds
   us_mode: kis # 'kis' to use KIS screener; 'defaults' to use us_defaults list
   us_metric: value # 'volume' | 'market_cap' | 'value' (used when us_mode=kis)
-  us_limit: 310
+  us_limit: 300
   us_defaults: # used when us_mode='defaults' or KIS falls back
     - AAPL.US
     - MSFT.US

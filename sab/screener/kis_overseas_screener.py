@@ -80,10 +80,8 @@ class KISOverseasScreener:
                         nday_used = nd
                     if len(tickers) >= request.limit:
                         break
-                if tickers:
-                    # Prefer a single session's ranks; stop once we have results.
-                    break
             if tickers:
+                # Prefer a single session's ranks; stop once we have results.
                 break
 
         return ScreenResult(
