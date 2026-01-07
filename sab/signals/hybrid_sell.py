@@ -110,6 +110,12 @@ def evaluate_sell_signals_hybrid(
             f"Reached high profit target ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.1f}%)"
         )
         action = "SELL"
+    elif pnl_pct is not None and pnl_pct >= settings.profit_target_low:
+        reasons.append(
+            f"Reached profit target zone ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_low * 100:.1f}%)"
+        )
+        if action != "SELL":
+            action = "REVIEW"
     elif pnl_pct is not None and pnl_pct >= settings.partial_profit_floor:
         reasons.append(
             f"Reached partial profit zone ({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.1f}%)"
