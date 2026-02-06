@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## commands
+## 명령어
 
 - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 - `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
@@ -11,18 +11,21 @@
 - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
 - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
-## pre-commit (sandbox)
+## pre-commit (샌드박스)
 
-- Full run: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
-- Single hook: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run mypy --all-files`
-- Hook updates: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit autoupdate`
-- Config check: `UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config`
-- First run may require network access to fetch hook repositories.
+- 전체 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
+- 단일 훅 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run mypy --all-files`
+- 훅 업데이트: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit autoupdate`
+- 설정 검사: `UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config`
+- 첫 실행 시 훅 저장소를 내려받기 위해 네트워크 접근이 필요할 수 있습니다.
 
-## commits
+## 커밋
 
-- Use Conventional Commits.
-- Commit by meaningful units of change.
-- One intention per commit.
-- Split commits when concerns are mixed.
-- Avoid vague commit messages.
+- Conventional Commits 형식을 사용합니다.
+- 의미 단위로 커밋합니다.
+- 하나의 커밋에는 하나의 의도만 담습니다.
+- 서로 다른 관심사가 섞여 있으면 커밋을 분리합니다.
+- 모호한 커밋 메시지는 피합니다.
+- 커밋 메시지의 제목과 본문은 한글로 작성합니다.
+- `git status`, `git add`, `git commit` 같은 git 명령은 `/bin/zsh -lc` 같은 셸 래퍼 없이 직접 실행합니다.
+- `git push`는 권한 상승(`sandbox_permissions=\"require_escalated\"`)으로 실행합니다.
