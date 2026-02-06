@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, overload
 from urllib.parse import urlparse
 
-from .config_loader import load_yaml_config
+from .config_loader import ConfigLoadError, load_yaml_config
 from .holdings_loader import HoldingsData, load_holdings
 
 
@@ -26,6 +26,14 @@ def _load_dotenv_if_available() -> None:
     except Exception:
         # dotenv is optional; ignore if missing
         pass
+
+
+def _has_secret_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
 
 
 @dataclass(frozen=True)
@@ -156,6 +164,15 @@ def load_config(
 
     def from_yaml(path: str, default: Any = None) -> Any:
         return _from_nested(yaml_cfg, path, default)
+
+    if _has_secret_value(from_yaml("kis.app_key")) or _has_secret_value(
+        from_yaml("kis.app_secret")
+    ):
+        raise ConfigLoadError(
+            "Security policy violation: do not store KIS credentials in YAML config. "
+            "Remove 'kis.app_key'/'kis.app_secret' and set "
+            "KIS_APP_KEY/KIS_APP_SECRET via environment variables."
+        )
 
     def parse_bool(val: Any, default: bool = False) -> bool:
         if isinstance(val, bool):
@@ -491,8 +508,8 @@ def load_config(
 
     return Config(
         data_provider=provider,
-        kis_app_key=os.getenv("KIS_APP_KEY") or from_yaml("kis.app_key"),
-        kis_app_secret=os.getenv("KIS_APP_SECRET") or from_yaml("kis.app_secret"),
+        kis_app_key=os.getenv("KIS_APP_KEY"),
+        kis_app_secret=os.getenv("KIS_APP_SECRET"),
         kis_base_url=_normalize_kis_base(
             os.getenv("KIS_BASE_URL") or from_yaml("kis.base_url")
         ),

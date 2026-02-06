@@ -25,6 +25,7 @@
   - `KIS_APP_KEY=...`
   - `KIS_APP_SECRET=...`
   - `KIS_BASE_URL=...`  # 모의/실전 (포트 생략 가능: 자동으로 9443/29443 보정)
+  - 보안 정책: `kis.app_key`/`kis.app_secret`의 YAML 저장은 금지되며, 감지 시 실행이 실패합니다.
   - (선택) 로깅
     - `LOG_LEVEL=INFO` (또는 `DEBUG`)
     - `LOG_TZ=local` (기본) 또는 `utc`
@@ -174,6 +175,8 @@ Per‑market 임계치(권장)
 - 레이트리밋(EGW00201) 대응을 위해 요청 간 최소 간격(`KIS_MIN_INTERVAL_MS`)과 백오프 재시도를 적용합니다.
 - config.yaml 활용(선택)
   - 기본값/임계치를 한 곳에서 관리하려면 `config.yaml` 생성 후 `.env`보다 먼저 적용됩니다.
+  - 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)은 `.env`/환경변수로만 관리합니다.
   - 예시는 repo 루트의 `config.example.yaml`을 참고하세요. 환경변수는 여전히 우선순위가 더 높습니다.
+  - 로컬 전용 설정 파일은 `config.local.yaml` 패턴을 권장하며, 기본 `.gitignore`에 포함되어 있습니다.
   - `SAB_CONFIG=/path/to/config.yaml` 환경변수로 다른 경로의 설정 파일을 지정할 수 있습니다. 사용 시 `pyyaml` 패키지가 필요합니다.
   - `.env`에서 `config.yaml`로 옮기는 방법은 `docs/config-migration.md`를 참고하세요.

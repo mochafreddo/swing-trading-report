@@ -9,8 +9,8 @@ data:
   data_dir: data
 
 kis:
-  app_key: your_app_key
-  app_secret: your_app_secret
+  # Security policy: keep credentials in .env only.
+  # Set KIS_APP_KEY / KIS_APP_SECRET via environment variables.
   base_url: https://openapivts.koreainvestment.com
   min_interval_ms: 500
 

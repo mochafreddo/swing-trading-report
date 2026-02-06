@@ -6,6 +6,7 @@
 
 - `config.yaml` → `.env` → CLI 순으로 우선순위가 적용됩니다. (CLI > .env > config)
 - `.env`에만 존재하던 값은 아래 매핑에 맞춰 `config.yaml`에 추가합니다.
+- 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)은 YAML에 저장하지 않고 `.env`/환경변수로만 관리합니다.
 - 환경변수는 즉시 적용/실험용으로 유지하되, 장기 기본값은 `config.yaml`에 기록합니다.
 - 다른 경로의 설정 파일을 쓰고 싶다면 `SAB_CONFIG=/path/to/file.yaml` 을 지정하세요.
 
@@ -19,8 +20,6 @@
 | `DATA_DIR` | `data.data_dir` |
 | `HOLDINGS_FILE` | `files.holdings` |
 | `WATCHLIST_FILE` | `files.watchlist` |
-| `KIS_APP_KEY` | `kis.app_key` |
-| `KIS_APP_SECRET` | `kis.app_secret` |
 | `KIS_BASE_URL` | `kis.base_url` |
 | `KIS_MIN_INTERVAL_MS` | `kis.min_interval_ms` |
 | `SCREENER_ENABLED` | `screener.enabled` |
@@ -92,13 +91,14 @@
 ## 3. 마이그레이션 절차
 
 1. `config.example.yaml`을 복사하여 `config.yaml` 생성.
-2. 위 표를 참고해 `.env`에 있던 값을 `config.yaml`에 옮김.
-3. `.env`에서는 비밀정보(KIS 키 등)만 유지하거나 실험용 값만 남김.
+2. 위 표를 참고해 비시크릿 설정만 `config.yaml`에 옮김.
+3. `.env`에서는 비밀정보(KIS 키 등)와 실험용 값을 관리.
 4. `SAB_CONFIG` 환경변수로 다른 경로(예: `~/.config/sab.yaml`)를 지정할 수 있습니다.
 5. 실행: `uv run -m sab scan` (변경 사항이 즉시 반영되는지 확인).
 
 ## 4. 주의사항
 
 - `pyyaml` 패키지가 필요합니다(`uv add pyyaml`). 설치 권한이 없으면 `.env` 방식만 사용하세요.
+- `kis.app_key`, `kis.app_secret` 키가 YAML에 있으면 보안 정책 위반으로 실행이 실패합니다.
 - 숫자/불리언 값은 YAML에서 타입으로 인식되므로 인용부호 없이 작성하세요.
 - CLI 인자(`--limit`, `--screener-limit`, `--universe` 등)는 항상 최종 우선순위를 가집니다.

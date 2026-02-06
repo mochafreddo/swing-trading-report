@@ -10,3 +10,4 @@ __pycache__/
 holdings.yaml
 reports/
 watchlist.txt
+config.local.yaml
