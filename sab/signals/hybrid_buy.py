@@ -150,11 +150,11 @@ def _detect_trend_pullback_bounce(
 
     # Very rough check for heavy selling: big red bar with volume >> avg
     heavy_selling = False
-    for c in candles[-pullback_bars:]:
-        o = float(c.get("open") or 0.0)
-        cl = float(c.get("close") or 0.0)
-        v = float(c.get("volume") or 0.0)
-        if cl < o and avg_vol > 0 and v > avg_vol * 1.5:
+    for bar in candles[-pullback_bars:]:
+        bar_open = float(bar.get("open") or 0.0)
+        bar_close = float(bar.get("close") or 0.0)
+        bar_volume = float(bar.get("volume") or 0.0)
+        if bar_close < bar_open and avg_vol > 0 and bar_volume > avg_vol * 1.5:
             heavy_selling = True
             break
     if heavy_selling:
@@ -177,10 +177,10 @@ def _detect_trend_pullback_bounce(
     yest = candles[-2] if len(candles) >= 2 else None
     if yest is not None:
         o = float(today.get("open") or 0.0)
-        c = float(today.get("close") or 0.0)
+        close_today = float(today.get("close") or 0.0)
         v = float(today.get("volume") or 0.0)
         prev_v = float(yest.get("volume") or 0.0)
-        if c > o and v > max(prev_v, avg_vol):
+        if close_today > o and v > max(prev_v, avg_vol):
             reasons.append("Bullish candle with rising volume")
             triggered = True
             flags["trigger_bullish_vol"] = True

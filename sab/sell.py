@@ -75,10 +75,10 @@ def run_sell(*, provider: str | None) -> int:
     for holding in holdings:
         if not holding.ticker:
             continue
-        currency = (holding.entry_currency or "").strip().upper()
-        if not currency:
-            currency = _infer_currency_from_ticker(holding.ticker)
-        ticker_currency[holding.ticker] = currency
+        entry_currency = (holding.entry_currency or "").strip().upper()
+        if not entry_currency:
+            entry_currency = _infer_currency_from_ticker(holding.ticker)
+        ticker_currency[holding.ticker] = entry_currency
 
     failures: list[str] = []
     market_data: dict[str, list[dict[str, Any]]] = {}
@@ -284,12 +284,13 @@ def run_sell(*, provider: str | None) -> int:
 
     for holding in holdings:
         ticker = holding.ticker
-        candles = market_data.get(ticker)
-        if not candles:
+        ticker_candles = market_data.get(ticker)
+        if not ticker_candles:
             if ticker not in missing_logged:
                 failures.append(f"{ticker}: No market data available for sell evaluation")
                 missing_logged.add(ticker)
             continue
+        _, suffix = _split_symbol_and_suffix(ticker)
         holding_dict = {
             "entry_price": holding.entry_price,
             "entry_date": holding.entry_date,
@@ -304,14 +305,14 @@ def run_sell(*, provider: str | None) -> int:
         if cfg.sell_mode == "sma_ema_hybrid":
             evaluation: HybridSellEvaluation | SellEvaluation = evaluate_sell_signals_hybrid(
                 ticker,
-                candles,
+                ticker_candles,
                 holding_dict,
                 hybrid_settings,
             )
         else:
             evaluation = evaluate_sell_signals(
                 ticker,
-                candles,
+                ticker_candles,
                 holding_dict,
                 settings,
             )
@@ -320,8 +321,8 @@ def run_sell(*, provider: str | None) -> int:
             entry_price = None
 
         eval_price = getattr(evaluation, "eval_price", None)
-        if eval_price is None and candles:
-            eval_price = candles[-1].get("close")
+        if eval_price is None and ticker_candles:
+            eval_price = ticker_candles[-1].get("close")
         try:
             last_price = float(eval_price) if eval_price is not None else None
         except (TypeError, ValueError):
@@ -330,19 +331,19 @@ def run_sell(*, provider: str | None) -> int:
             last_price = None
 
         pnl_pct = None
-        if entry_price and entry_price != 0 and last_price not in (None, 0):
+        if entry_price and entry_price != 0 and last_price is not None and last_price != 0:
             try:
                 pnl_pct = (last_price - entry_price) / entry_price
             except TypeError:
                 pnl_pct = None
 
-        currency = holding.entry_currency or ticker_currency.get(ticker)
+        currency: str | None = holding.entry_currency or ticker_currency.get(ticker)
         if currency:
             currency = currency.upper()
 
         eval_date = getattr(evaluation, "eval_date", None)
-        if eval_date is None and candles:
-            raw_date = candles[-1].get("date")
+        if eval_date is None and ticker_candles:
+            raw_date = ticker_candles[-1].get("date")
             if raw_date:
                 eval_date = str(raw_date)
 

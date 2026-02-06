@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 import logging
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from .cache import load_json, save_json
 
@@ -324,10 +324,11 @@ class KISClient:
 
             parsed_dates: list[str] = []
             for item in items:
-                parsed = self._parse_candle(item)
-                if parsed and parsed.get("date"):
-                    collected[parsed["date"]] = parsed
-                    parsed_dates.append(parsed["date"])
+                parsed_item = self._parse_candle(item)
+                if parsed_item and parsed_item.get("date"):
+                    date_key = str(parsed_item["date"])
+                    collected[date_key] = parsed_item
+                    parsed_dates.append(date_key)
 
             if not parsed_dates:
                 empty_streak += 1
@@ -340,11 +341,11 @@ class KISClient:
             oldest_dt = min(dt.datetime.strptime(d, "%Y%m%d") for d in parsed_dates)
             chunk_end = oldest_dt - dt.timedelta(days=1)
 
-        parsed = sorted(collected.values(), key=lambda x: x["date"])
-        if len(parsed) > target:
-            parsed = parsed[-target:]
+        rows = sorted(collected.values(), key=lambda x: x["date"])
+        if len(rows) > target:
+            rows = rows[-target:]
 
-        return parsed
+        return rows
 
     def overseas_price_detail(self, *, symbol: str, exchange: str) -> dict[str, Any]:
         symbol = (symbol or "").strip().upper()
@@ -553,7 +554,7 @@ class KISClient:
             "CTX_AREA_FK": "",
         }
 
-        data: dict[str, Any] | None = None
+        payload: dict[str, Any] | None = None
         for attempt in range(self._max_attempts):
             try:
                 resp = self._request(
@@ -566,16 +567,24 @@ class KISClient:
                 raise KISClientError(f"Overseas holiday request failed: {exc}") from exc
 
             try:
-                data = resp.json()
+                parsed = resp.json()
             except ValueError as exc:
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
                 raise KISClientError("Overseas holiday response is not JSON") from exc
 
+            if not isinstance(parsed, dict):
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError("Overseas holiday response payload is not an object")
+
+            payload = parsed
+
             if resp.status_code != 200:
-                msg_cd = data.get("msg_cd") or ""
-                msg1 = data.get("msg1") or msg_cd or "Unknown error"
+                msg_cd = payload.get("msg_cd") or ""
+                msg1 = payload.get("msg1") or msg_cd or "Unknown error"
                 if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                     # Token expired: refresh and retry
                     self._access_token = None
@@ -589,9 +598,9 @@ class KISClient:
                     continue
                 raise KISClientError(f"Overseas holiday HTTP {resp.status_code}: {resp.text}")
 
-            if str(data.get("rt_cd")) != "0":
-                msg_cd = data.get("msg_cd") or ""
-                msg1 = data.get("msg1") or msg_cd or "Unknown error"
+            if str(payload.get("rt_cd")) != "0":
+                msg_cd = payload.get("msg_cd") or ""
+                msg1 = payload.get("msg1") or msg_cd or "Unknown error"
                 if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                     self._access_token = None
                     self._token_expiry = None
@@ -603,14 +612,17 @@ class KISClient:
                 raise KISClientError(f"KIS overseas holiday error: {msg}")
             break
 
-        items = data.get("output") or []
+        if payload is None:
+            return []
+
+        items = payload.get("output") or []
         if not isinstance(items, list):
             items = [items]
         logger.debug(
             "overseas_holidays rt_cd=%s msg_cd=%s msg1=%s items=%d",
-            data.get("rt_cd"),
-            data.get("msg_cd"),
-            data.get("msg1"),
+            payload.get("rt_cd"),
+            payload.get("msg_cd"),
+            payload.get("msg1"),
             len(items),
         )
         return items
@@ -659,10 +671,11 @@ class KISClient:
 
             parsed_dates: list[str] = []
             for it in items:
-                parsed = self._parse_overseas_candle(it)
-                if parsed and parsed.get("date"):
-                    collected[parsed["date"]] = parsed
-                    parsed_dates.append(parsed["date"])
+                parsed_item = self._parse_overseas_candle(it)
+                if parsed_item and parsed_item.get("date"):
+                    date_key = str(parsed_item["date"])
+                    collected[date_key] = parsed_item
+                    parsed_dates.append(date_key)
 
             if not parsed_dates:
                 empty_streak += 1
@@ -675,10 +688,10 @@ class KISClient:
             oldest_dt = min(dt.datetime.strptime(d, "%Y%m%d") for d in parsed_dates)
             chunk_end = oldest_dt - dt.timedelta(days=1)
 
-        parsed = sorted(collected.values(), key=lambda x: x["date"])
-        if len(parsed) > target:
-            parsed = parsed[-target:]
-        return parsed
+        rows = sorted(collected.values(), key=lambda x: x["date"])
+        if len(rows) > target:
+            rows = rows[-target:]
+        return rows
 
     def _fetch_overseas_candle_chunk(
         self,
@@ -875,11 +888,12 @@ class KISClient:
                 hdrs["tr_cont"] = tr_cont
 
             # Request with body-level rate limit handling
+            data: dict[str, Any] | None = None
+            resp: requests.Response | None = None
             for attempt in range(self._max_attempts):
                 resp = self._request("GET", self.creds.volume_rank_url, headers=hdrs, params=params)
 
                 # Try to parse JSON body even on non-200 to inspect msg_cd
-                data: dict[str, Any] | None = None
                 try:
                     data = resp.json()
                 except ValueError:
@@ -928,10 +942,23 @@ class KISClient:
                     raise KISClientError(f"KIS volume rank error: {msg1}")
                 break
 
+            if data is None or resp is None:
+                break
+
             items = data.get("output") or []
-            parsed = [self._parse_rank_item(it) for it in items]
-            parsed = [p for p in parsed if p]
-            results.extend(parsed)
+            if isinstance(items, dict):
+                items = [items]
+            if not isinstance(items, list):
+                items = []
+
+            parsed_items: list[dict[str, Any]] = []
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                parsed_item = self._parse_rank_item(it)
+                if parsed_item is not None:
+                    parsed_items.append(parsed_item)
+            results.extend(parsed_items)
 
             tr_cont = (resp.headers.get("tr_cont") or "").strip()
             if tr_cont != "M":

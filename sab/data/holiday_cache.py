@@ -86,11 +86,11 @@ def merge_holidays(
     }
 
     if country == "US":
-        for date, note in builtin.items():
-            cached[date] = HolidayEntry(date=date, note=note, is_open=False)
+        for date, builtin_note in builtin.items():
+            cached[date] = HolidayEntry(date=date, note=builtin_note, is_open=False)
     if country == "KR":
-        for date, note in builtin.items():
-            cached[date] = HolidayEntry(date=date, note=note, is_open=False)
+        for date, builtin_note in builtin.items():
+            cached[date] = HolidayEntry(date=date, note=builtin_note, is_open=False)
 
     for item in fetched:
         natn = str(item.get("natn_eng_abrv_cd") or item.get("tr_natn_cd") or "").upper()

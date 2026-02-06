@@ -75,7 +75,7 @@ class PykrxClient:
         closes = _col("종가", "Close", "close")
         volumes = _col("거래량", "Volume", "volume")
 
-        prev_close = None
+        prev_close: float | None = None
         for idx, date_idx in enumerate(df.index):
             row_open = _to_float(opens.iloc[idx])
             row_high = _to_float(highs.iloc[idx])
@@ -86,8 +86,13 @@ class PykrxClient:
             date_str = _format_date(date_idx)
 
             diff = float("nan")
-            if prev_close not in (None, 0) and not _is_nan(row_close):
-                diff = row_close - float(prev_close)
+            if (
+                prev_close is not None
+                and prev_close != 0
+                and not _is_nan(prev_close)
+                and not _is_nan(row_close)
+            ):
+                diff = row_close - prev_close
 
             records.append(
                 {

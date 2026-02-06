@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
@@ -17,8 +17,8 @@ class ConfigData:
 
 
 def load_yaml_config(path: str | None = None) -> ConfigData:
-    path = path or os.getenv("SAB_CONFIG", "config.yaml")
-    p = Path(path)
+    resolved_path = path if path is not None else (os.getenv("SAB_CONFIG") or "config.yaml")
+    p = Path(resolved_path)
     if not p.exists():
         return ConfigData(raw={})
 

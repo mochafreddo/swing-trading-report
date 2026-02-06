@@ -117,7 +117,6 @@ class Config:
     us_min_dollar_volume: float | None = None
     hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
     hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
-    hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
 
 
 def _normalize_kis_base(url: str | None) -> str | None:

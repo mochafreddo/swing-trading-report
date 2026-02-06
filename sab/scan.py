@@ -113,7 +113,7 @@ def run_scan(
         tickers = tickers[: cfg.screen_limit]
 
     failures: list[str] = []
-    market_data: dict[str, list[dict]] = {}
+    market_data: dict[str, list[dict[str, Any]]] = {}
     ticker_data_source: dict[str, str] = {}
     cache_hint: str | None = None
     fatal_failure = False
@@ -234,7 +234,19 @@ def run_scan(
                 us_source: str | None = None
                 us_nday_used: int | None = None
                 session_info = us_session_info(data_dir=cfg.data_dir)
-                preferred_nday = int(session_info.get("preferred_nday", 1) or 1)
+                preferred_nday_raw = session_info.get("preferred_nday", 1)
+                preferred_nday = 1
+                if isinstance(preferred_nday_raw, bool):
+                    preferred_nday = int(preferred_nday_raw)
+                elif isinstance(preferred_nday_raw, int):
+                    preferred_nday = preferred_nday_raw
+                elif isinstance(preferred_nday_raw, float):
+                    preferred_nday = int(preferred_nday_raw)
+                elif isinstance(preferred_nday_raw, str):
+                    try:
+                        preferred_nday = int(preferred_nday_raw)
+                    except ValueError:
+                        preferred_nday = 1
                 # Avoid nday=0 when we already prefer a prior session; keep a bounded search window.
                 fallback_ndays = (
                     [n for n in range(1, 6) if n != preferred_nday]
@@ -560,8 +572,8 @@ def run_scan(
         exclude_etf_etn=cfg.exclude_etf_etn,
     )
     for ticker in tickers:
-        candles = market_data.get(ticker)
-        if not candles:
+        ticker_candles = market_data.get(ticker)
+        if not ticker_candles:
             continue
         meta = dict(screener_meta_map.get(ticker, {}))
         meta["currency"] = ticker_currency.get(ticker, "KRW")
@@ -574,7 +586,7 @@ def run_scan(
         if fx_rate is not None:
             meta["usd_krw_rate"] = fx_rate
         if cfg.strategy_mode == "sma_ema_hybrid":
-            result_hybrid = evaluate_ticker_hybrid(ticker, candles, hybrid_settings, meta)
+            result_hybrid = evaluate_ticker_hybrid(ticker, ticker_candles, hybrid_settings, meta)
             if result_hybrid.candidate:
                 candidates.append(result_hybrid.candidate)
             elif (
@@ -585,7 +597,7 @@ def run_scan(
                 logger.warning("%s: %s", ticker, result_hybrid.reason)
             continue
 
-        result = evaluate_ticker(ticker, candles, eval_settings, meta)
+        result = evaluate_ticker(ticker, ticker_candles, eval_settings, meta)
         if result.candidate:
             candidates.append(result.candidate)
         elif result.reason and result.reason != "Did not meet signal criteria":
