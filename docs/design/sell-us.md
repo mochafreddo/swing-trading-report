@@ -18,7 +18,8 @@ Rules (reused from generic sell)
 
 - Indicators: EMA(20/50), RSI(14), ATR(14), SMA(200) computed from daily candles.
 - SELL
-  - ATR trailing stop: `close <= close − k × ATR` (`k = sell.atr_trail_multiplier`).
+  - ATR trailing stop: `trail = highest_close_since_entry − k × ATR`, and SELL when `close <= trail` (`k = sell.atr_trail_multiplier`).
+    - `highest_close_since_entry` is anchored by `holdings.yaml` `entry_date`; when missing/invalid, a recent window fallback is used.
   - RSI breakdown: `RSI < sell.rsi_floor_alt` (default 30).
   - EMA death cross: EMA20 crosses below EMA50.
 - REVIEW

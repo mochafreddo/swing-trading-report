@@ -66,7 +66,8 @@ Config 예시(계획):
 
 규칙(강한 신호 우선)
 - SELL
-  - ATR 트레일 스톱 충족: `close ≤ close − k×ATR` (k=`SELL_ATR_MULTIPLIER`)
+  - ATR 트레일 스톱 충족: `trail = highest_close_since_entry − k×ATR`, 그리고 `close ≤ trail`일 때 SELL (k=`SELL_ATR_MULTIPLIER`)
+    - `highest_close_since_entry` 기준은 `holdings.yaml`의 `entry_date`; 누락/파싱 실패 시 최근 윈도우 fallback 사용
   - RSI 급락: RSI < `SELL_RSI_FLOOR_ALT`(예: 30)
   - EMA 데드크로스: EMA20이 EMA50 하향 돌파
 - REVIEW

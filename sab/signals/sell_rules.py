@@ -8,6 +8,11 @@ from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
 
 
+def _normalize_candle_date(value: Any) -> str:
+    date_text = str(value or "").strip().replace("-", "")
+    return date_text[:8]
+
+
 @dataclass
 class SellSettings:
     atr_trail_multiplier: float = 1.0
@@ -98,12 +103,36 @@ def evaluate_sell_signals(
 
     # ATR trailing stop
     stop_price = None
+    entry_date_str = holding.get("entry_date")
     if stop_override is not None:
         stop_price = float(stop_override)
         reasons.append("Custom stop override in effect")
     elif atr_today > 0:
-        stop_price = close_today - settings.atr_trail_multiplier * atr_today
-        reasons.append(f"ATR trail {settings.atr_trail_multiplier}×ATR → {stop_price:.2f}")
+        start_idx = max(0, len(closes) - settings.min_bars)
+        if entry_date_str:
+            try:
+                entry_date = dt.date.fromisoformat(str(entry_date_str))
+                entry_yyyymmdd = entry_date.strftime("%Y%m%d")
+                for idx, candle in enumerate(candles_eval):
+                    candle_date = _normalize_candle_date(candle.get("date"))
+                    if candle_date and candle_date >= entry_yyyymmdd:
+                        start_idx = idx
+                        break
+                else:
+                    start_idx = len(closes) - 1
+                    reasons.append("Entry date is after latest candle; ATR trail uses latest close")
+            except ValueError:
+                reasons.append("Entry date missing/invalid; ATR trail uses recent window")
+        else:
+            reasons.append("Entry date missing/invalid; ATR trail uses recent window")
+
+        trail_closes = closes[start_idx:]
+        peak_close = max(trail_closes) if trail_closes else close_today
+        stop_price = peak_close - settings.atr_trail_multiplier * atr_today
+        reasons.append(
+            f"ATR trail (peak close {peak_close:.2f}) "
+            f"{settings.atr_trail_multiplier:g}×ATR → {stop_price:.2f}"
+        )
         if close_today <= stop_price:
             reasons.append("Price hit ATR trailing stop")
             action = "SELL"
@@ -112,7 +141,6 @@ def evaluate_sell_signals(
 
     # Time stop: days since entry
     time_stop_days = settings.time_stop_days
-    entry_date_str = holding.get("entry_date")
     if entry_date_str and time_stop_days > 0:
         try:
             entry_date = dt.date.fromisoformat(str(entry_date_str))
