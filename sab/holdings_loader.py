@@ -10,6 +10,10 @@ except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
 
+class HoldingsLoadError(RuntimeError):
+    """Raised when holdings file exists but cannot be loaded safely."""
+
+
 @dataclass
 class Holding:
     ticker: str
@@ -55,13 +59,27 @@ def load_holdings(path: str | None) -> HoldingsData:
         return HoldingsData(path=p, settings=HoldingSettings(), holdings=[])
 
     if yaml is None:
-        return HoldingsData(path=p, settings=HoldingSettings(), holdings=[])
+        raise HoldingsLoadError(
+            f"Holdings file '{p}' exists but PyYAML is unavailable. "
+            "Install dependency 'pyyaml' to parse holdings YAML."
+        )
 
     try:
         with p.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-    except Exception:
-        return HoldingsData(path=p, settings=HoldingSettings(), holdings=[])
+            raw: Any = yaml.safe_load(f)
+    except OSError as exc:
+        raise HoldingsLoadError(f"Failed to read holdings file '{p}': {exc}") from exc
+    except Exception as exc:
+        raise HoldingsLoadError(f"Failed to parse holdings file '{p}': {exc}") from exc
+
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise HoldingsLoadError(
+            "Holdings file "
+            f"'{p}' must have a mapping (object) at YAML root, got "
+            f"{type(raw).__name__}."
+        )
 
     settings_raw: dict[str, Any] = raw.get("settings", {}) or {}
     settings = HoldingSettings(

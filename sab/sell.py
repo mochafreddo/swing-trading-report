@@ -5,6 +5,7 @@ import math
 from typing import Any
 
 from .config import Config, load_config
+from .config_loader import ConfigLoadError
 from .data.cache import load_json, save_json
 from .data.kis_client import KISAuthError, KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import (
@@ -13,6 +14,7 @@ from .data.pykrx_client import (
     PykrxNotInstalledError,
 )
 from .fx import SUFFIX_TO_EXCD, resolve_fx_rate
+from .holdings_loader import HoldingsLoadError
 from .report.sell_report import SellReportRow, write_sell_report
 from .signals.hybrid_sell import (
     HybridSellEvaluation,
@@ -62,7 +64,11 @@ def _infer_currency_from_ticker(ticker: str) -> str:
 
 def run_sell(*, provider: str | None) -> int:
     logger = logging.getLogger(__name__)
-    cfg: Config = load_config(provider_override=provider)
+    try:
+        cfg: Config = load_config(provider_override=provider)
+    except (ConfigLoadError, HoldingsLoadError) as exc:
+        logger.error("Configuration loading failed: %s", exc)
+        return 1
 
     holdings = cfg.holdings.holdings
     if not holdings:

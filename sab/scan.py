@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from .config import Config, load_config, load_watchlist
+from .config_loader import ConfigLoadError
 from .data.cache import load_json, save_json
 from .data.holiday_cache import HolidayEntry, lookup_holiday, merge_holidays
 from .data.kis_client import KISAuthError, KISClient, KISClientError, KISCredentials
@@ -15,6 +16,7 @@ from .data.pykrx_client import (
     PykrxNotInstalledError,
 )
 from .fx import resolve_fx_rate
+from .holdings_loader import HoldingsLoadError
 from .report.markdown import write_report
 from .screener import KISScreener, ScreenRequest
 from .screener.kis_overseas_screener import (
@@ -105,7 +107,11 @@ def run_scan(
     universe: str | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
-    cfg: Config = load_config(provider_override=provider, limit_override=limit)
+    try:
+        cfg: Config = load_config(provider_override=provider, limit_override=limit)
+    except (ConfigLoadError, HoldingsLoadError) as exc:
+        logger.error("Configuration loading failed: %s", exc)
+        return 1
 
     resolved_watchlist_path = watchlist_path or cfg.watchlist_path or "watchlist.txt"
     tickers = load_watchlist(resolved_watchlist_path)

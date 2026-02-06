@@ -11,6 +11,10 @@ except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
 
+class ConfigLoadError(RuntimeError):
+    """Raised when config.yaml exists but cannot be loaded safely."""
+
+
 @dataclass
 class ConfigData:
     raw: dict[str, Any]
@@ -24,14 +28,27 @@ def load_yaml_config(path: str | None = None) -> ConfigData:
     if not p.exists():
         return ConfigData(raw={})
 
-    data: dict[str, Any] = {}
     if yaml is None:
-        return ConfigData(raw={})
+        raise ConfigLoadError(
+            f"Config file '{p}' exists but PyYAML is unavailable. "
+            "Install dependency 'pyyaml' to parse YAML config."
+        )
 
     try:
         with p.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except Exception:
-        data = {}
+            loaded: Any = yaml.safe_load(f)
+    except OSError as exc:
+        raise ConfigLoadError(f"Failed to read config file '{p}': {exc}") from exc
+    except Exception as exc:
+        raise ConfigLoadError(f"Failed to parse config file '{p}': {exc}") from exc
 
-    return ConfigData(raw=data)
+    if loaded is None:
+        return ConfigData(raw={})
+    if not isinstance(loaded, dict):
+        raise ConfigLoadError(
+            "Config file "
+            f"'{p}' must have a mapping (object) at YAML root, got "
+            f"{type(loaded).__name__}."
+        )
+
+    return ConfigData(raw=loaded)
