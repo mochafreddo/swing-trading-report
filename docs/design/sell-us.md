@@ -1,60 +1,60 @@
-# Design — U.S. Holdings Sell Logic
+# 설계 — 미국 보유 종목 매도 로직
 
-Goal
+목표
 
-- Determine when to SELL, REVIEW, or HOLD existing U.S. equity positions listed in `holdings.yaml` (format `SYMBOL.EXCH`, e.g., `AAPL.NASD`, `JNJ.NYSE`).
+- `holdings.yaml`에 있는 기존 미국 주식 포지션(`SYMBOL.EXCH` 형식, 예: `AAPL.NASD`, `JNJ.NYSE`)에 대해 `SELL`, `REVIEW`, `HOLD`를 판정합니다.
 
-Data Source
+데이터 소스
 
-- KIS Developers Overseas Daily Price API: `/uapi/overseas-price/v1/quotations/dailyprice` (TR `HHDFS76240000`).
-- Ticker parsing: `SYMBOL.SUFFIX` → map suffix to KIS `EXCD` code
+- KIS Developers 해외 일봉 API: `/uapi/overseas-price/v1/quotations/dailyprice` (TR `HHDFS76240000`)
+- 티커 파싱: `SYMBOL.SUFFIX` → 접미사를 KIS `EXCD` 코드로 매핑
   - `US|NASDAQ|NASD|NAS` → `NAS`
   - `NYSE|NYS` → `NYS`
   - `AMEX|AMS` → `AMS`
-- Cache key: `candles_overseas_{EXCD}_{SYMBOL}` to avoid collisions with KR tickers.
-- Fallback: PyKRX is KR‑only; do not fallback for overseas symbols.
+- 캐시 키: 국내 티커와 충돌을 피하기 위해 `candles_overseas_{EXCD}_{SYMBOL}` 사용
+- 폴백: PyKRX는 국내 전용이므로 해외 심볼에는 폴백하지 않습니다.
 
-Rules (reused from generic sell)
+규칙(기존 공통 매도 로직 재사용)
 
-- Indicators: EMA(20/50), RSI(14), ATR(14), SMA(200) computed from daily candles.
+- 지표: 일봉 기준 EMA(20/50), RSI(14), ATR(14), SMA(200)
 - SELL
-  - ATR trailing stop: `trail = highest_close_since_entry − k × ATR`, and SELL when `close <= trail` (`k = sell.atr_trail_multiplier`).
-    - `highest_close_since_entry` is anchored by `holdings.yaml` `entry_date`; when missing/invalid, a recent window fallback is used.
-  - RSI breakdown: `RSI < sell.rsi_floor_alt` (default 30).
-  - EMA death cross: EMA20 crosses below EMA50.
+  - ATR 트레일링 스탑: `trail = 진입 이후 최고 종가 − k × ATR`, `close <= trail`이면 SELL (`k = sell.atr_trail_multiplier`)
+    - `진입 이후 최고 종가`는 `holdings.yaml`의 `entry_date`를 기준으로 계산하며, 누락/오류 시 최근 구간 기반 폴백 사용
+  - RSI 붕괴: `RSI < sell.rsi_floor_alt` (기본 30)
+  - EMA 데드크로스: EMA20이 EMA50 아래로 하향 교차
 - REVIEW
-  - Price below both EMAs (when not already SELL).
-  - `RSI < sell.rsi_floor` (default 50).
-  - SMA200 context breach when `sell.require_sma200 = true`.
-  - Time stop: `days_since_entry >= sell.time_stop_days`.
-- Overrides per holding are respected: `stop_override`, `target_override`.
+  - (이미 SELL이 아닌 경우) 가격이 두 EMA 아래
+  - `RSI < sell.rsi_floor` (기본 50)
+  - `sell.require_sma200 = true`일 때 SMA200 컨텍스트 이탈
+  - 시간 스탑: `days_since_entry >= sell.time_stop_days`
+- 종목별 오버라이드는 존중됩니다: `stop_override`, `target_override`
 
-Config
+설정
 
-- Shared keys (apply to US as well):
+- 공통 키(US에도 동일 적용)
   - `sell.atr_trail_multiplier`, `sell.time_stop_days`, `sell.require_sma200`
   - `sell.ema_short`, `sell.ema_long`, `sell.rsi_period`
   - `sell.rsi_floor`, `sell.rsi_floor_alt`, `sell.min_bars`
-- Per-market thresholds (US) already exist for screening in `config.yaml` (`screener.us.*`). No separate sell overrides are required initially.
+- 시장별(US) 스크리닝 임계치는 이미 `config.yaml`의 `screener.us.*`에 존재하며, 초기에는 별도 매도 전용 오버라이드가 필요하지 않습니다.
 
-FX Handling
+환율 처리
 
-- `sab sell` reuses `fx.resolve_fx_rate`, honoring `FX_MODE`/`USD_KRW_RATE` just like `sab scan`.
-- When `FX_MODE=kis` and a `KISClient` is available, the command automatically fetches USD/KRW via `overseas-price/v1/quotations/price-detail` and caches it.
-- Sell report header prints the current FX source, and USD-denominated prices display as `$X (₩Y)` in both the summary table and detail sections.
+- `sab sell`은 `sab scan`과 동일하게 `fx.resolve_fx_rate`를 재사용하며 `FX_MODE`/`USD_KRW_RATE`를 따릅니다.
+- `FX_MODE=kis`이고 `KISClient`를 사용할 수 있으면, `overseas-price/v1/quotations/price-detail`에서 USD/KRW를 자동 조회하고 캐시합니다.
+- Sell 리포트 헤더에는 현재 환율 소스를 출력하며, USD 표시 가격은 요약 표와 상세 섹션 모두에서 `$X (₩Y)` 형태로 표기됩니다.
 
-Report Output
+리포트 출력
 
-- Same Markdown structure as KR: summary table and per-holding details.
-- Currency is read from `holdings.yaml` (`entry_currency`). USD-denominated entries display both USD and converted KRW prices when an FX rate is available.
+- 국내와 동일한 마크다운 구조: 요약 표 + 보유 종목별 상세
+- 통화는 `holdings.yaml`의 `entry_currency`를 사용합니다. USD 보유 종목은 환율이 있을 때 USD와 환산 KRW를 함께 표시합니다.
 
-Edge Cases / Resilience
+엣지 케이스 / 복원력
 
-- Insufficient data: mark as `REVIEW` with reason.
-- API errors: use cached candles when available; log issue in Appendix.
-- No overseas fallback: for symbols with `EXCD`, PyKRX fallback is skipped.
+- 데이터 부족: 사유를 남기고 `REVIEW`로 표시
+- API 오류: 가능하면 캐시 일봉을 사용하고, 이슈를 Appendix에 기록
+- 해외 폴백 없음: `EXCD`가 있는 심볼은 PyKRX 폴백을 건너뜀
 
-Future Enhancements
+향후 개선
 
-- Intraday awareness for U.S. sessions (open/closed) in report header.
-- Per-market sell overrides if needed (e.g., different ATR multiplier for US).
+- 리포트 헤더에 미국장 장중/장마감 상태(오픈/클로즈) 인식 추가
+- 필요 시 시장별 매도 오버라이드 추가(예: US 전용 ATR 배수)

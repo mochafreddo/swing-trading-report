@@ -1,112 +1,108 @@
-# Daily Candle Evaluation Design (KIS + Hybrid Strategy)
+# 일봉 평가 설계 (KIS + 하이브리드 전략)
 
-## 1. Background and Problem
+## 1. 배경과 문제
 
-The project consumes daily OHLCV candles from KIS (and PyKRX) and runs swing‑trading logic on them (buy/sell, hybrid strategy, reports).
+프로젝트는 KIS(및 PyKRX)에서 일봉 OHLCV를 받아 스윙 트레이딩 로직(매수/매도, 하이브리드 전략, 리포트)을 실행합니다.
 
-Two practical issues arise:
+실무에서 다음 두 가지 문제가 발생합니다.
 
-- KIS daily price APIs can return a **last candle that represents “today” while the session is still in progress** (intraday snapshot).
-- The current implementation implicitly assumes **“last element in `candles` == fully completed daily bar”** and always evaluates on `candles[-1]`.
+- KIS 일봉 API는 **장이 진행 중이어도 “오늘”을 나타내는 마지막 캔들**(장중 스냅샷)을 반환할 수 있습니다.
+- 현재 구현은 암묵적으로 **`candles`의 마지막 원소 = 완전히 종료된 일봉**이라고 가정하고 `candles[-1]`을 기준으로 평가합니다.
 
-For swing trading based on end‑of‑day signals, we want:
+EOD(종가) 기반 스윙 전략에서는 다음이 필요합니다.
 
-- To **only evaluate on completed daily candles**, i.e., *yesterday’s* close while the market is open.
-- To avoid mixing incomplete intraday candles into EMA/RSI/ATR conditions and hybrid pattern detection.
+- 시장이 열려 있을 때는 *어제 종가*처럼 **완료된 일봉만 기준으로 평가**해야 합니다.
+- 미완성 장중 캔들이 EMA/RSI/ATR 조건이나 하이브리드 패턴 탐지에 섞이지 않도록 해야 합니다.
 
-This document specifies how we improve that behavior.
+이 문서는 해당 동작을 개선하는 방법을 정의합니다.
 
+## 2. KIS 일봉 동작(요약)
 
-## 2. KIS Daily Candle Behavior (Summary)
+KIS 예제(MCP 경유)와 실제 관측 데이터를 기준으로 정리하면 다음과 같습니다.
 
-From KIS examples (via MCP) and observed data:
+- **국내 주식**
+  - API:
+    - `inquire_daily_price` (`/uapi/domestic-stock/v1/quotations/inquire-daily-price`)
+    - `inquire_daily_itemchartprice` (`/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`, `FID_PERIOD_DIV_CODE = D`)
+  - 문서는 일/주/월 OHLC 시계열을 설명하지만, **“오늘 봉은 장 종료 후에만 포함된다”**는 보장을 명시하지 않습니다.
+  - 실무상 국내 일봉 API가 EOD처럼 동작하는 경우가 많지만, 이를 절대 보장으로 의존할 수는 없습니다.
 
-- **Domestic stocks**
-  - APIs:  
-    - `inquire_daily_price` (`/uapi/domestic-stock/v1/quotations/inquire-daily-price`)  
-    - `inquire_daily_itemchartprice` (`/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`, `FID_PERIOD_DIV_CODE = D`).
-  - Documentation describes *daily / weekly / monthly OHLC series*, but does **not** guarantee that “today’s bar is only present after the close”.
-  - In practice, domestic daily APIs often behave like EOD feeds, but we cannot rely on that as a hard guarantee.
-
-- **Overseas stocks**
-  - API: `dailyprice` (`/uapi/overseas-price/v1/quotations/dailyprice`).
-  - Empirically (e.g., TMO NAS/NYSE data), KIS returns a **today bar during the ongoing US regular session**:
-    - date == today
-    - very small volume compared to recent days
-    - high/low/close changing intraday
-  - That bar is **not a completed daily candle** in the EOD sense.
+- **해외 주식**
+  - API: `dailyprice` (`/uapi/overseas-price/v1/quotations/dailyprice`)
+  - 관측상(예: TMO NAS/NYSE 데이터), 미국 정규장 진행 중 KIS는 **당일 봉**을 반환합니다.
+    - 날짜 == 오늘
+    - 최근 대비 매우 작은 거래량
+    - 고가/저가/종가가 장중에 계속 변동
+  - 이 봉은 EOD 관점에서 **완료된 일봉이 아닙니다.**
 
 - **PyKRX**
-  - PyKRX is an EOD source for KR; returned candles are **completed daily bars**.
+  - 국내 EOD 소스이며, 반환되는 캔들은 **완료된 일봉**입니다.
 
-Conclusion:
+결론:
 
-- We **cannot** assume “`candles[-1]` is always a fully closed bar”.
-- We **must** decide in our own logic whether we use `candles[-1]` or `candles[-2]` (or earlier), depending on:
-  - Exchange session state (intraday vs after close)
-  - Volume profile of the last bar
-  - Data source (KIS vs PyKRX).
+- **`candles[-1]`이 항상 완전 종료 봉이라고 가정할 수 없습니다.**
+- 다음 조건을 바탕으로 `candles[-1]` 또는 `candles[-2]`(필요 시 그 이전)를 선택해야 합니다.
+  - 거래소 장 상태(장중 vs 장마감 후)
+  - 마지막 봉 거래량 특성
+  - 데이터 소스(KIS vs PyKRX)
 
+## 3. 설계 목표
 
-## 3. Design Goals
+1. **완료된 일봉만 사용**
+   - 정규장 중에는 전략 평가를 **전일 종가** 기준으로 수행
+   - 장마감 이후(다음 장 시작 전)에는 가장 최신 완료봉(마지막 원소) 사용
 
-1. **Use completed daily candles only**
-   - During regular trading hours, evaluate strategies using the **previous day’s** close.
-   - After the market close (and before the next open), use the **latest completed bar** (the last element).
+2. **장중 아티팩트 격리**
+   - 얇은 거래량의 부분 당일 봉을 EMA/RSI/ATR 및 하이브리드 패턴의 완전 EOD 봉으로 취급하지 않음
 
-2. **Isolate intraday artifacts**
-   - Avoid treating thin, partial “today” bars as full EOD candles in EMA/RSI/ATR and hybrid pattern detection.
+3. **소스 인지형 동작**
+   - PyKRX(EOD)는 항상 마지막 봉 사용 가능
+   - KIS 일봉 API는 장중 가능성을 전제로 추가 검증 적용
 
-3. **Source‑aware behavior**
-   - Treat PyKRX (EOD) as always “safe to use last bar”.
-   - Treat KIS daily APIs as potentially intraday and apply additional checks.
+4. **작고 국소적인 변경**
+   - `indicators.py` 재설계는 하지 않음
+   - 재사용 가능한 작은 헬퍼로 동작을 구현하고 의사결정 레벨 함수만 조정
 
-4. **Minimal, local changes**
-   - Do not redesign indicators (`indicators.py`).
-   - Implement the behavior in a small reusable helper and adjust only the decision‑level functions.
+5. **명시적이며 테스트 가능**
+   - KR/US, KIS/PyKRX, 장중/장마감 후 시나리오를 검증할 수 있는 단위/통합 테스트 케이스 제공
 
-5. **Testable and explicit**
-   - Provide clear unit and integration test cases to validate behavior across KR/US, KIS/PyKRX, intraday/after‑close scenarios.
+## 4. 핵심 개념: Evaluation Index + Option B 슬라이싱
 
+### 4.1 평가 인덱스(`idx_eval`)
 
-## 4. Core Concept: Evaluation Index + Option B Slicing
+**평가 인덱스** 개념을 도입합니다.
 
-### 4.1 Evaluation Index (`idx_eval`)
+- `idx_eval`은 전략 평가 시점에서 **유효한 최신 완료봉**의 인덱스입니다.
+- 예시:
+  - 2025-11-19 미국 장중:
+    - `candles[-1]`은 당일(2025-11-19)로 아직 변동 중
+    - `idx_eval`은 `len(candles) - 2`(2025-11-18)여야 함
+  - 미국 장마감 후:
+    - `candles[-1]`이 2025-11-19 완료봉
+    - `idx_eval`은 `len(candles) - 1`
 
-We introduce the concept of an **evaluation index**:
+### 4.2 Option B: `idx_eval`까지 데이터 슬라이싱
 
-- `idx_eval` is the index of the candle that represents the **effective “latest completed bar”** for strategy evaluation.
-- Example:
-  - During US intraday on 2025‑11‑19:
-    - `candles[-1]` is today (2025‑11‑19) and still changing.
-    - `idx_eval` should be `len(candles) - 2` (2025‑11‑18).
-  - After US close:
-    - `candles[-1]` is the completed bar for 2025‑11‑19.
-    - `idx_eval` should be `len(candles) - 1`.
+“Option B” 패턴을 따릅니다.
 
-### 4.2 Option B: Slice Data to `idx_eval`
-
-We follow the “Option B” pattern:
-
-- Instead of modifying internal pattern functions to accept an explicit index, we:
-  - Compute `idx_eval` once.
-  - Slice all sequences to **include only data up to `idx_eval`**:
+- 패턴 함수 내부를 인덱스 인자로 변경하는 대신:
+  - `idx_eval`을 한 번 계산
+  - 모든 시퀀스를 **`idx_eval`까지만 포함**하도록 슬라이싱
     - `candles_eval = candles[: idx_eval + 1]`
     - `closes_eval = closes[: idx_eval + 1]`
-    - `sma_eval = sma_trend[: idx_eval + 1]`, etc.
-  - Pass only `*_eval` sequences into pattern/sell functions.
-- Inside pattern/sell functions, existing logic remains valid:
+    - `sma_eval = sma_trend[: idx_eval + 1]` 등
+  - 패턴/매도 함수에는 `*_eval` 시퀀스만 전달
+- 패턴/매도 함수 내부의 기존 로직은 그대로 유효
   - `idx = len(closes) - 1`
   - `today = candles[-1]`
   - `yest = candles[-2]`
-  - All of these now refer to the **chosen evaluation bar**, not necessarily the raw last array element.
+  - 이제 이 값들은 원본의 마지막이 아니라 **선택된 평가 봉**을 의미
 
-This minimizes code churn and reduces the risk of off‑by‑one bugs.
+이 방식은 코드 변경 범위를 최소화하고 off-by-one 오류 위험을 줄입니다.
 
+## 5. 헬퍼: `choose_eval_index`
 
-## 5. Helper: `choose_eval_index`
-
-We centralize the intraday vs EOD decision in a helper:
+장중/종가 결정 로직을 헬퍼로 중앙화합니다.
 
 ```python
 def choose_eval_index(
@@ -120,91 +116,89 @@ def choose_eval_index(
     ...
 ```
 
-### 5.1 Inputs
+### 5.1 입력
 
-- `candles`: list of OHLCV dicts, ascending by date.
+- `candles`: 날짜 오름차순 OHLCV dict 리스트
 - `meta`:
-  - Optional per‑ticker metadata:
-    - `currency`: `"KRW" | "USD" | ..."`
-    - `exchange`: `"KRX" | "NAS" | "NYS" | ..."`
-    - `data_source` / `provider`: `"kis" | "pykrx" | ..."` (used to skip intraday logic for EOD-only feeds)
-    - potential future fields: `country`, `market`.
+  - 종목별 메타데이터(선택)
+    - `currency`: `"KRW" | "USD" | ...`
+    - `exchange`: `"KRX" | "NAS" | "NYS" | ...`
+    - `data_source` / `provider`: `"kis" | "pykrx" | ...` (EOD 전용 피드면 장중 로직 생략)
+    - 향후 필드: `country`, `market`
 - `provider`:
-  - `"kis"` | `"pykrx"` | other.
+  - `"kis"` | `"pykrx"` | 기타
 - `now`:
-  - Optional timezone‑aware current time, for unit testing and controlled evaluation.
+  - 단위 테스트/통제 평가를 위한 타임존 인지 현재 시각(선택)
 - `lookback_for_volume`:
-  - Number of prior days to use for volume average when applying the thin‑volume heuristic.
+  - 거래량 휴리스틱 평균 계산에 사용하는 과거 일수
 
-### 5.2 Basic Rules
+### 5.2 기본 규칙
 
-1. **Trivial sizes**
+1. **자명한 길이 처리**
    - `n = len(candles)`
-   - `n == 0` → return `-1` (caller must handle).
-   - `n == 1` → return `0` (only one bar; use it).
+   - `n == 0` → `-1` 반환(호출자가 처리)
+   - `n == 1` → `0` 반환(하나뿐이므로 사용)
 
-2. **Source‑aware shortcut**
-   - If `provider == "pykrx"`:
-     - PyKRX is EOD; always use the last bar:
-       - `return n - 1`.
+2. **소스 인지형 지름길**
+   - `provider == "pykrx"`이면:
+     - PyKRX는 EOD이므로 항상 마지막 봉 사용
+       - `return n - 1`
 
-3. **Default (KIS)**
-   - Start with `idx_eval = n - 1`.
-   - Then adjust based on exchange session state + volume heuristics.
+3. **기본(KIS)**
+   - 시작값 `idx_eval = n - 1`
+   - 이후 거래소 장 상태 + 거래량 휴리스틱으로 조정
 
+## 6. 거래소 세션 모델
 
-## 6. Exchange Session Model
+KRX와 미국 주요 거래소의 정규장을 모델링합니다.
 
-We model the regular sessions for KRX and major US exchanges.
+### 6.1 타임존
 
-### 6.1 Timezones
+- 한국 주식:
+  - `Asia/Seoul`
+- 미국 주식(NYSE/NASDAQ 등):
+  - `America/New_York`
+  - **DST(서머타임) 인지 필수**
 
-- Korean stocks:
-  - Timezone: `Asia/Seoul`
-- US stocks (NYSE/NASDAQ, etc.):
-  - Timezone: `America/New_York`
-  - Must be **DST‑aware**.
+### 6.2 세션 상태
 
-### 6.2 Session States
+거래소별 현재 시각을 거친 상태로 분류합니다.
 
-Per exchange, we classify the current time into a coarse state:
+- **KRX(국내 주식)**
+  - 정규장: 09:00–15:30(서울)
+  - 상태:
+    - `INTRADAY`: 09:00 <= now < 15:30
+    - `AFTER_CLOSE`: 15:30 <= now < 다음날 09:00
 
-- **KRX (Korean stocks)**
-  - Regular session: 09:00–15:30 (Seoul time)
-  - States:
-    - `INTRADAY`: 09:00 ≤ now < 15:30
-    - `AFTER_CLOSE`: 15:30 ≤ now < next day 09:00
+- **미국(NYSE/NASDAQ)**
+  - 정규장: 09:30–16:00(뉴욕)
+  - 상태:
+    - `PRE_OPEN`: 00:00 <= now < 09:30
+    - `INTRADAY`: 09:30 <= now < 16:00
+    - `AFTER_CLOSE`: 16:00 <= now < 24:00
+  - `data/holidays_us.json`(`SAB_DATA_DIR` 경로) 사용 가능 시, 일반 장중 시간대라도 미국 휴일이면 `STATE_CLOSED`로 취급
 
-- **US (NYSE/NASDAQ)**
-  - Regular session: 09:30–16:00 (New York time)
-  - States:
-    - `PRE_OPEN`: 00:00 ≤ now < 09:30
-    - `INTRADAY`: 09:30 ≤ now < 16:00
-    - `AFTER_CLOSE`: 16:00 ≤ now < 24:00
-  - We also consult `data/holidays_us.json` (loaded via `SAB_DATA_DIR` when available) to treat known holidays as `STATE_CLOSED`, even if the local clock falls inside the usual intraday window.
+미국 시장의 경우 `sab/scan.py`의 `refresh_us_holidays`와 연계해, 당일이 휴일이면 시계상 장중 구간이어도 시장 종료로 처리합니다.
 
-For US, we also have a holiday calendar (`refresh_us_holidays` in `sab/scan.py`); if today is a US holiday, we treat the session as closed even if clock time falls into “intraday” range.
+## 7. 거래량 기반 휴리스틱
 
+시간 정보만으로는 다음을 완전히 구분하기 어렵습니다.
 
-## 7. Volume‑Based Heuristic
+- “원래 거래가 얇은 정상 일자”
+- “오늘 장중의 미완성 부분 봉”
 
-Time alone doesn’t always distinguish between:
+마지막 봉에 대해 보수적인 거래량 휴리스틱을 추가합니다.
 
-- “legitimate thin day” vs
-- “intraday partial candle for today”.
+### 7.1 계산
 
-We add a conservative volume heuristic for the last bar.
-
-### 7.1 Computation
-
-Given `candles` and `lookback_for_volume`:
+`candles`, `lookback_for_volume`이 주어졌을 때:
 
 - `last = candles[-1]`
 - `prev_window = candles[-(lookback_for_volume + 1):-1]`
 - `v_last = float(last.get("volume") or 0.0)`
-- `avg_vol = mean(volume(c) for c in prev_window)`, if `prev_window` is non‑empty.
+- `avg_vol = mean(volume(c) for c in prev_window)` (`prev_window`가 비어 있지 않은 경우)
 
-Define:
+정의:
 
 ```python
 very_thin_today = (
@@ -213,250 +207,242 @@ very_thin_today = (
 )
 ```
 
-Where:
+설정값:
 
 - `VOL_FLOOR`:
-  - a small absolute threshold (e.g., 1,000 shares) to avoid triggering on inherently illiquid names.
+  - 절대 최소 임계(예: 1,000주). 본래 비유동 종목에서 과민 반응을 줄이기 위함
 - `THIN_RATIO`:
-  - a fractional threshold, e.g., `0.2` (20% of recent average), configurable via settings/env if needed.
+  - 비율 임계값(예: `0.2`, 최근 평균의 20%). 필요 시 설정/환경변수로 노출
 
-### 7.2 Usage
+### 7.2 사용 방식
 
-- For **US + KIS**:
-  - If session state is `INTRADAY`, we will *generally* drop today and use yesterday (`idx_eval = n - 2`).
-  - We also may apply `very_thin_today` in `PRE_OPEN` / `AFTER_CLOSE` to avoid early‑generated partial candles.
+- **미국 + KIS**:
+  - `INTRADAY`이면 일반적으로 당일을 제외하고 전일 사용(`idx_eval = n - 2`)
+  - `PRE_OPEN`/`AFTER_CLOSE`에서도 조기 생성된 부분 봉을 피하기 위해 `very_thin_today`를 추가 판단에 사용 가능
 
-- For **KR + KIS**:
-  - KRX dailies tend to be EOD, but to be robust:
-    - We can drop the last bar only if:
-      - session state is `INTRADAY` and
-      - `very_thin_today` is true.
+- **국내 + KIS**:
+  - 국내 일봉이 EOD 성향이 강하더라도 견고성을 위해,
+    - 다음 조건을 모두 만족할 때만 마지막 봉 제외
+      - 세션 상태가 `INTRADAY`
+      - `very_thin_today == true`
 
+## 8. 최종 의사결정 로직
 
-## 8. Final Decision Logic
-
-Putting it together:
+종합 로직:
 
 1. `n = len(candles)`
-2. Handle trivial sizes and `provider == "pykrx"` (always `n - 1`).
-3. Determine exchange/market:
-   - From `meta["currency"]`, `meta["exchange"]` or a small mapping (e.g., suffix `.US` → US).
-4. Compute `state = get_exchange_state(market, now)`:
-   - `INTRADAY`, `PRE_OPEN`, `AFTER_CLOSE`.
-   - For US: skip `INTRADAY` if `today` is a holiday.
-5. Compute `very_thin_today` as described above.
-6. Decide `idx_eval`:
+2. 자명한 길이 처리 및 `provider == "pykrx"` 처리(항상 `n - 1`)
+3. 거래소/시장 판별
+   - `meta["currency"]`, `meta["exchange"]` 또는 간단 매핑(예: `.US` 접미사 → US)
+4. `state = get_exchange_state(market, now)` 계산
+   - `INTRADAY`, `PRE_OPEN`, `AFTER_CLOSE`
+   - US는 당일 휴일이면 `INTRADAY`를 무시
+5. 위 정의대로 `very_thin_today` 계산
+6. `idx_eval` 결정
 
    - **US + KIS**
-     - If `state == INTRADAY`:  
-       → `idx_eval = n - 2`
-     - Else if `state in {PRE_OPEN, AFTER_CLOSE}` and `very_thin_today`:  
-       → `idx_eval = n - 2`
-     - Else:  
-       → `idx_eval = n - 1`
+     - `state == INTRADAY`:
+       - `idx_eval = n - 2`
+     - `state in {PRE_OPEN, AFTER_CLOSE}` 이고 `very_thin_today`:
+       - `idx_eval = n - 2`
+     - 그 외:
+       - `idx_eval = n - 1`
 
    - **KR + KIS**
-     - If `state == INTRADAY` and `very_thin_today`:  
-       → `idx_eval = n - 2`
-     - Else:  
-       → `idx_eval = n - 1`
+     - `state == INTRADAY` 이고 `very_thin_today`:
+       - `idx_eval = n - 2`
+     - 그 외:
+       - `idx_eval = n - 1`
 
-7. Guard for underflow:
+7. 언더플로 보호
 
-   - If `idx_eval < 0`: set `idx_eval = 0`.
+   - `idx_eval < 0`이면 `idx_eval = 0`
 
-8. Return `idx_eval`.
+8. `idx_eval` 반환
 
-This logic aims to:
+의도:
 
-- Use yesterday’s bar while the market is open (or when today’s bar is clearly partial).
-- Use the latest bar once the session is closed and the volume looks normal.
-- Always use the last bar for PyKRX/EOD feeds.
+- 시장이 열려 있거나 당일 봉이 부분봉으로 명확할 때는 전일 봉 사용
+- 장이 닫히고 거래량이 정상 범위이면 최신 봉 사용
+- PyKRX/EOD 피드는 항상 마지막 봉 사용
 
+## 9. 코드베이스 통합 지점
 
-## 9. Integration Points in the Codebase
+현재 “마지막 캔들 = 평가 캔들”을 가정하는 **의사결정 레벨 함수**에 헬퍼와 Option B 슬라이싱을 적용합니다.
 
-We will apply this helper and Option B slicing at all **decision‑level** functions that currently assume “last candle == evaluation candle”.
-
-### 9.1 Buy Side
+### 9.1 매수(Buy)
 
 - `sab/signals/hybrid_buy.py`
   - `evaluate_ticker_hybrid`:
-    - Currently:
-      - uses `candles[-1]`, `candles[-2]`, `sma_trend[-1]`, `ema_short[-1]`, `rsi_vals[-1]`, etc.
-    - New behavior:
-      - Compute `idx_eval = choose_eval_index(...)` using KIS/PyKRX + meta.
-      - Slice:
+    - 현재:
+      - `candles[-1]`, `candles[-2]`, `sma_trend[-1]`, `ema_short[-1]`, `rsi_vals[-1]` 등 사용
+    - 변경:
+      - KIS/PyKRX + meta 기반 `idx_eval = choose_eval_index(...)` 계산
+      - 슬라이싱:
         - `candles_eval = candles[: idx_eval + 1]`
-        - `closes_eval`, `sma_eval`, `ema_short_eval`, `ema_mid_eval`, `rsi_eval`.
-      - Call pattern functions with `*_eval`:
+        - `closes_eval`, `sma_eval`, `ema_short_eval`, `ema_mid_eval`, `rsi_eval`
+      - 패턴 함수에 `*_eval` 전달:
         - `_detect_trend_pullback_bounce(closes_eval, sma_eval, ema_short_eval, ema_mid_eval, rsi_eval, candles_eval, settings)`
         - `_detect_swing_high_breakout(...)`
         - `_detect_rsi_oversold_reversal(...)`
-      - Use `latest = candles[idx_eval]`, `prev = candles[idx_eval - 1]` when constructing the final candidate (price, pct_change, high/low, indicators).
+      - 최종 후보 생성 시 `latest = candles[idx_eval]`, `prev = candles[idx_eval - 1]` 사용(가격, 등락률, 고저, 지표)
 
 - `sab/signals/evaluator.py`
-  - `evaluate_ticker` (EMA20/50 strategy):
-    - Same pattern:
-      - Determine `idx_eval`.
-      - Use `latest = candles[idx_eval]`, `previous = candles[idx_eval - 1]`.
-      - Reference indicators by index:
-        - `ema20[idx_eval]`, `ema20[idx_eval - 1]`, `rsi14[idx_eval]`, `atr14[idx_eval]`, `sma200[idx_eval]`.
-      - Liquidity window: use candles up to `idx_eval` only (`candles_eval[-20:]`).
+  - `evaluate_ticker`(EMA20/50 전략):
+    - 동일 패턴 적용
+      - `idx_eval` 계산
+      - `latest = candles[idx_eval]`, `previous = candles[idx_eval - 1]`
+      - 지표 인덱스 참조:
+        - `ema20[idx_eval]`, `ema20[idx_eval - 1]`, `rsi14[idx_eval]`, `atr14[idx_eval]`, `sma200[idx_eval]`
+      - 유동성 윈도우는 `idx_eval`까지의 데이터만 사용(`candles_eval[-20:]`)
 
-### 9.2 Sell Side
+### 9.2 매도(Sell)
 
 - `sab/signals/hybrid_sell.py`
   - `evaluate_sell_signals_hybrid`:
-    - Use `idx_eval` and:
-      - `latest = candles[idx_eval]`, `last_close = latest["close"]`.
-      - EMA/SMA/RSI from index `idx_eval`.
-      - Last 3 candles for “three consecutive bearish candles”:
+    - `idx_eval` 기반으로
+      - `latest = candles[idx_eval]`, `last_close = latest["close"]`
+      - EMA/SMA/RSI는 `idx_eval` 인덱스 사용
+      - “3연속 음봉” 계산:
         - `start = max(0, idx_eval - 2)`
-        - `last_three = candles[start: idx_eval + 1]`.
+        - `last_three = candles[start: idx_eval + 1]`
 
 - `sab/signals/sell_rules.py`
   - `evaluate_sell_signals`:
-    - Use `idx_eval` and:
-      - `latest = candles[idx_eval]`, `close_today = latest["close"]`.
-      - `atr_today = atr_values[idx_eval]`.
-      - EMA/SMA and RSI from `idx_eval` and `idx_eval - 1`.
+    - `idx_eval` 기반으로
+      - `latest = candles[idx_eval]`, `close_today = latest["close"]`
+      - `atr_today = atr_values[idx_eval]`
+      - EMA/SMA/RSI는 `idx_eval`과 `idx_eval - 1` 사용
 
-These changes keep indicators intact and confine the “which day are we evaluating?” logic to a single, testable helper.
+이 변경으로 지표 계산 로직은 유지하면서 “어느 날짜를 평가할지”를 단일 테스트 가능한 헬퍼로 고립할 수 있습니다.
 
-### 9.3 Reporting Alignment
+### 9.3 리포팅 정합성
 
-- `SellEvaluation` / `HybridSellEvaluation` now carry `eval_price`, `eval_index`, and `eval_date`.
-- `sab/sell.py` uses those values when building `SellReportRow`, so the “Last / P&L” numbers in the Markdown report match the bar used for the SELL/REVIEW decision.
-- `reports/*.sell.md` annotate “Last close” with the evaluation date when available, making it clear whether the run happened during intraday hours or after the session close.
+- `SellEvaluation` / `HybridSellEvaluation`에 `eval_price`, `eval_index`, `eval_date`를 포함
+- `sab/sell.py`는 해당 값을 `SellReportRow` 생성에 사용하여, 마크다운 리포트의 “Last / P&L”가 실제 의사결정에 사용된 봉과 일치하도록 함
+- `reports/*.sell.md`는 가능하면 “Last close”에 평가 날짜를 함께 표시해, 장중 실행인지 장마감 후 실행인지 명확하게 함
 
+## 10. 엣지 케이스 및 특수 고려사항
 
-## 10. Edge Cases and Special Considerations
+- **조기 폐장/부분 세션(예: 미국 휴일)**
+  - 가능하면 세션 상태 함수가 휴일 캘린더와 조기 폐장 일정을 고려해야 함
+  - 우선은 사용 가능한 미국 휴일 데이터로 휴일을 장중으로 오판하지 않도록 처리
 
-- **Early close / partial session days (e.g., US holidays)**
-  - The exchange state function should consider holiday calendars and early‑close schedules where practical.
-  - For now, we at least avoid treating holidays as intraday, using available US holiday data.
+- **저유동 종목**
+  - 본래 거래량이 매우 작은 종목은 평균 거래량 자체가 낮음
+  - `VOL_FLOOR`로 극소 거래량에 대한 과민 반응을 방지
+  - 필요 시 “휴리스틱 적용 전 최소 60~90일 히스토리 필요” 같은 보호 장치를 추가 가능
 
-- **Illiquid symbols**
-  - For genuinely illiquid tickers, average volume can be extremely low.
-  - `VOL_FLOOR` ensures we do not overreact to tiny absolute volumes.
-  - Additional safeguards (e.g., require ≥ 60–90 days of history before applying the volume heuristic) can be added later.
+- **데이터 결측**
+  - 날짜 간 큰 공백은 데이터 품질 이슈일 수 있음
+  - 선택적으로 날짜 갭을 탐지해 마지막 봉을 신뢰하지 않고 `REVIEW` 처리 가능
 
-- **Data gaps**
-  - Large gaps in dates (missing days) may indicate data issues.
-  - We can optionally detect date gaps and mark those tickers as `REVIEW` instead of blindly trusting the last bar.
+- **EOD/장중 혼합(KIS vs PyKRX 폴백)**
+  - KIS 실패 후 PyKRX 폴백 시 마지막 봉의 의미가 달라짐
+  - meta에 `source = "pykrx"`를 표기해 `choose_eval_index`가 EOD로 처리하도록 함
 
-- **EOD vs intraday mixing (KIS vs PyKRX fallback)**
-  - When KIS fails and we fall back to PyKRX, the last bar meaning changes.
-  - We should tag meta with `source = "pykrx"` and let `choose_eval_index` treat it as pure EOD.
+- **타임존 & DST**
+  - 미국 시장은 `America/New_York` DST 규칙을 반영한 timezone-aware `datetime` 사용 필수
+  - DST 경계에서 1시간 오차(off-by-one-hour)가 나지 않도록 모든 세션 계산을 해당 거래소 타임존에서 수행
 
-- **Timezones & DST**
-  - For US markets, we must use timezone‑aware `datetime` with DST rules for America/New_York.
-  - All session calculations should be done in the relevant exchange timezone to avoid off‑by‑one‑hour errors at DST boundaries.
+## 11. 테스트 전략
 
+헬퍼와 평가 함수 두 레이어에서 검증합니다.
 
-## 11. Testing Strategy
+### 11.1 단위 테스트: `choose_eval_index`
 
-We validate the design at two levels: the helper and the evaluation functions.
+대상: API 호출 없이 검증 가능한 작고 순수한 함수(또는 모듈)
 
-### 11.1 Unit Tests: `choose_eval_index`
+핵심 케이스:
 
-Target: a small, pure function (or module) that can be tested without hitting APIs.
+1. **US, 장중, KIS 일봉**
+   - 구성:
+     - `provider = "kis"`, `meta.exchange = "NAS"`, `currency = "USD"`
+     - `candles` 길이 >= 7, 마지막 봉 날짜 = 오늘
+     - 마지막 봉 거래량 << 최근 5일 평균
+     - `now` = 11:00 America/New_York(`INTRADAY`)
+   - 기대:
+     - `idx_eval == len(candles) - 2`
 
-Key cases:
+2. **US, 장마감 후, 정상 거래량**
+   - `now` = 17:00 America/New_York(`AFTER_CLOSE`)
+   - 마지막 봉 거래량이 최근 평균과 유사
+   - 기대:
+     - `idx_eval == len(candles) - 1`
 
-1. **US, intraday, KIS daily**
-   - Setup:
-     - `provider = "kis"`, `meta.exchange = "NAS"`, `currency = "USD"`.
-     - `candles` length ≥ 7, last bar date = today.
-     - Last bar volume ≪ average of previous 5 bars.
-     - `now` = 11:00 America/New_York (`INTRADAY`).
-   - Expect:
-     - `idx_eval == len(candles) - 2`.
+3. **US, 장전/장후 + 극단적 저거래량 마지막 봉**
+   - `now` = 08:00 또는 19:00 America/New_York
+   - 마지막 봉 거래량 << 평균, `very_thin_today = true`
+   - 기대:
+     - `idx_eval == len(candles) - 2`
 
-2. **US, after close, normal volume**
-   - `now` = 17:00 America/New_York (`AFTER_CLOSE`).
-   - Last bar volume ≈ recent average.
-   - Expect:
-     - `idx_eval == len(candles) - 1`.
+4. **KR, 장중, 거래량 얇음 vs 정상**
+   - `provider = "kis"`, `meta.currency = "KRW"`
+   - `now` = 10:00 Asia/Seoul(`INTRADAY`)
+   - Case A: 마지막 봉 거래량 정상 → `idx_eval == len(candles) - 1`
+   - Case B: 마지막 봉 거래량 매우 낮음 → `idx_eval == len(candles) - 2`
 
-3. **US, pre‑open/after‑close with ultra‑thin last bar**
-   - `now` = 08:00 or 19:00 America/New_York.
-   - Last bar volume ≪ average; `very_thin_today` true.
-   - Expect:
-     - `idx_eval == len(candles) - 2`.
+5. **PyKRX 데이터**
+   - `provider = "pykrx"`
+   - `now` 무관
+   - 기대:
+     - `idx_eval == len(candles) - 1`
 
-4. **KR, intraday, thin vs normal**
-   - `provider = "kis"`, `meta.currency = "KRW"`.
-   - `now` = 10:00 Asia/Seoul (`INTRADAY`).
-   - Case A: normal last‑bar volume ⇒ `idx_eval == len(candles) - 1`.
-   - Case B: very thin last‑bar volume ⇒ `idx_eval == len(candles) - 2`.
+6. **자명한 길이**
+   - `len(candles) == 0` → `idx_eval == -1`
+   - `len(candles) == 1` → `idx_eval == 0`
 
-5. **PyKRX data**
-   - `provider = "pykrx"`.
-   - Any `now`.
-   - Expect:
-     - `idx_eval == len(candles) - 1`.
+7. **미국 휴일**
+   - 시계상으론 `INTRADAY` 시간대지만 당일이 미국 휴일
+   - 시장 종료로 간주하여 마지막 완료봉 사용
+     - `idx_eval == len(candles) - 1`
 
-6. **Trivial lengths**
-   - `len(candles) == 0` ⇒ `idx_eval == -1`.
-   - `len(candles) == 1` ⇒ `idx_eval == 0`.
+### 11.2 통합 테스트: 평가 함수
 
-7. **US holiday**
-   - `now` during what would normally be `INTRADAY`, but `today` is marked as US holiday.
-   - We treat the market as closed; last completed bar should be used:
-     - `idx_eval == len(candles) - 1`.
+매수/매도 평가가 올바른 봉과 지표를 사용하는지 검증합니다.
 
+1. **하이브리드 매수, US, 장중**
+   - 합성 캔들 시퀀스:
+     - N-1일이 하이브리드 패턴 조건 충족
+     - N일은 거래량이 얇은 부분 봉
+   - `now` = 미국 장중
+   - 기대:
+     - `evaluate_ticker_hybrid`가 가격/RSI/EMA/패턴 탐지에 N-1 데이터를 사용
+     - 후보의 `price`, `rsi14`, `sma20`이 N이 아닌 N-1과 일치
 
-### 11.2 Integration Tests: Evaluation Functions
+2. **하이브리드 매수, US, 장마감 후**
+   - 동일 시퀀스, `now` = 장마감 후, 마지막 봉 거래량 정상
+   - 기대:
+     - 평가가 N 봉을 최신 봉으로 사용
 
-We test that buy/sell evaluations use the correct bar and indicators.
+3. **EMA20/50 매수(국내), 장중 vs 장마감 후**
+   - KR 티커에서 EMA 크로스 + RSI 반등이 특정 일자에 발생하도록 구성
+   - 테스트:
+     - 장중(서울 10:00), 마지막 봉 거래량 얇음:
+       - N-1 봉으로 신호 평가
+     - 장마감 후:
+       - N(최신) 봉으로 평가
 
-1. **Hybrid buy, US, intraday**
-   - Use a synthetic candle series where:
-     - Day N‑1 meets the hybrid pattern criteria.
-     - Day N is a partial bar with thin volume.
-   - `now` = intraday US time.
-   - Expect:
-     - `evaluate_ticker_hybrid` uses day N‑1 values for price, RSI, EMA, pattern detection.
-     - Candidate’s `price`, `rsi14`, `sma20` match N‑1, not N.
+4. **매도 규칙(일반 + 하이브리드), 장중 vs 장마감 후**
+   - 보유 종목/캔들 이력에서 특정 봉에 매도 트리거(RSI < 50, EMA 크로스, 3연속 음봉 등)가 발생하도록 구성
+   - 기대:
+     - 장중에는 부분 당일 봉에 **조기 반응하지 않음**
+     - 장마감 후에는 해당 봉 완성 시 트리거를 정상 인식
 
-2. **Hybrid buy, US, after close**
-   - Same series, but `now` = after US close, with last bar volume normal.
-   - Expect:
-     - Evaluation uses day N as the latest bar.
+5. **실데이터 픽스처 회귀(예: TMO)**
+   - `data/candles_overseas_NYS_TMO.json`을 픽스처로 사용
+   - `now`를 다음 두 시점으로 고정:
+     - 파일 마지막 날짜의 미국 장중 시각
+     - 같은 날짜의 장마감 후 시각
+   - 검증:
+     - 장중: 평가는 전일 봉 사용
+     - 장마감 후: 평가는 마지막 봉 사용
 
-3. **EMA20/50 buy (domestic), intraday vs after close**
-   - KR ticker, with candles such that:
-     - EMA cross + RSI rebound occur on a specific day.
-   - Test:
-     - During intraday (10:00 Seoul), with thin last bar:
-       - Use N‑1 bar for signals.
-     - After close:
-       - Use N (latest) bar.
+## 12. 향후 작업 / 로드맵(요약)
 
-4. **Sell rules (generic + hybrid), intraday vs after close**
-   - Build a holding and candle history such that:
-     - A sell trigger (e.g., RSI < 50, EMA cross, three bearish candles) appears on a certain bar.
-   - Ensure:
-     - During intraday, the logic **does not prematurely react** to a partial today bar.
-     - After close, the same trigger is recognized when the bar is complete.
-
-5. **Real fixture regression (e.g., TMO)**
-   - Use `data/candles_overseas_NYS_TMO.json` as a fixture.
-   - Set `now` to:
-     - A US intraday time for the last date in the file.
-     - A US after‑close time for that date.
-   - Verify:
-     - Intraday: evaluation uses the previous day’s candle.
-     - After close: evaluation uses the last candle.
-
-
-## 12. Future Work / Roadmap (High‑Level)
-
-- Add a small `sab/signals/session.py` (or similar) module to:
-  - Encapsulate exchange timezone and session state logic.
-  - Provide reusable helpers: `get_exchange_state(meta, now)`, `is_us_holiday(date)`, etc.
-- Make `VOL_FLOOR` and `THIN_RATIO` configurable via config/env.
-- Optionally record the **evaluation date** explicitly in candidates (e.g., `eval_date`), so reports clearly show whether signals are based on yesterday or today.
-- Extend to other asset classes (ETFs, futures) if/when daily candles are used similarly.
+- `sab/signals/session.py`(가칭) 모듈 추가
+  - 거래소 타임존/세션 상태 로직 캡슐화
+  - 재사용 헬퍼 제공: `get_exchange_state(meta, now)`, `is_us_holiday(date)` 등
+- `VOL_FLOOR`, `THIN_RATIO`를 config/env로 노출
+- 후보 결과에 **평가 기준일**(`eval_date`)을 명시 기록해, 리포트에서 어제 기준인지 오늘 기준인지 명확히 표시
+- 일봉 기반 확장 자산(ETF, 선물 등)에도 동일 프레임 적용
