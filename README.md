@@ -12,9 +12,13 @@
 
 - 의존성/프로젝트 준비
   - 기존 저장소라면 `pyproject.toml` 추가 후 의존성 동기화
-  - 예시: `uv add requests pandas numpy python-dotenv pyyaml`
-  - (선택) PyKRX 폴백/데이터 제공자를 쓰려면 `uv add pykrx`
-  - 잠금/동기화: `uv lock && uv sync`
+  - 기본(슬림) 프로파일: `uv sync`
+  - 개발 의존성 포함: `uv sync --all-groups`
+  - (선택) `.env` 자동 로딩: `uv sync --extra dotenv`
+  - (선택) 거래소 휴장일 자동 캘린더: `uv sync --extra calendar`
+  - (선택) PyKRX 데이터 제공자/폴백: `uv sync --extra pykrx`
+  - (선택) 전체 기능: `uv sync --all-extras --all-groups`
+  - 잠금 갱신이 필요하면: `uv lock`
 
 - .env 설정(예시)
   - `DATA_PROVIDER=kis`
@@ -64,7 +68,7 @@
   - 스크리너 상위 N 조정: `uv run -m sab scan --screener-limit 15`
   - 유니버스 선택: `uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
   - 워치리스트 지정: `uv run -m sab scan --watchlist watchlist.txt`
-  - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `pykrx` 패키지를 설치해 두세요 (`uv add pykrx`)
+  - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
   - 보유 평가: `uv run -m sab sell`
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 
@@ -82,7 +86,7 @@
 - 로컬 품질 점검 권장 명령:
   - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
   - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
-  - `UV_CACHE_DIR=.uv-cache uv run --with "mypy==1.15.0" mypy sab`
+  - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
   - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
 참고(US 시장)

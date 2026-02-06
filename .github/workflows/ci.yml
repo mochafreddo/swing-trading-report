@@ -20,7 +20,7 @@ env:
 
 jobs:
   quality:
-    name: Ruff + Pytest (Python ${{ matrix.python-version }})
+    name: Ruff + Mypy + Pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -60,7 +60,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Mypy
-        run: uv run --with "mypy==1.15.0" mypy sab
+        run: uv run mypy sab
 
       - name: Pytest
         run: uv run python -m pytest -q

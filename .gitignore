@@ -4,6 +4,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .uv-cache/
+.pre-commit-cache/
 .venv/
 /data/
 holdings.yaml

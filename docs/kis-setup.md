@@ -90,7 +90,7 @@ SELL_REQUIRE_SMA200=true
 
 ## 5) 개발 팁
 
-- uv 사용: `uv add requests python-dotenv`
+- uv 사용: 기본은 `uv sync`, `.env` 자동 로딩은 `uv sync --extra dotenv`
 - 커넥터 구조 제안
   - `sab/data/kis_client.py`: 토큰 발급/캐시(파일 저장), 일봉 조회 API 래퍼
   - 예외/재시도, 속도 제한, 간단 캐시(`./data/`) 포함

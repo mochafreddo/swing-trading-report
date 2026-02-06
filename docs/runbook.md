@@ -9,7 +9,7 @@
 - 설정:
   - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
   - `.env`에 KIS 키/토글 작성
-  - 선택: `uv add pykrx`로 KR 폴백/프로바이더 활성화
+  - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 
 ## 자주 쓰는 실행
 
