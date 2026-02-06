@@ -74,6 +74,17 @@
   - Entry: `reports/YYYY-MM-DD.entry.md` (익일 시초 체크) — 예정
   - 상세 포맷은 `docs/report-spec.md` 참고
 
+## 개발 운영(1인 사이드 프로젝트)
+
+- 이 저장소는 1인 개발 기준으로 운영합니다.
+- 기본 흐름은 `main`에 직접 push + CI 자동 검증입니다.
+- 필요할 때만 feature 브랜치/PR을 사용하고, PR을 쓸 때도 동일한 CI 검증을 적용합니다.
+- 로컬 품질 점검 권장 명령:
+  - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
+  - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
+  - `UV_CACHE_DIR=.uv-cache uv run --with "mypy==1.15.0" mypy sab`
+  - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
+
 참고(US 시장)
 
 - 해외 스크리너 모드

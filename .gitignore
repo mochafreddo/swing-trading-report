@@ -1,9 +1,11 @@
+__pycache__/
 .env
+.pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .uv-cache/
 .venv/
 /data/
-__pycache__/
 holdings.yaml
 reports/
 watchlist.txt
