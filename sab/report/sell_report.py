@@ -24,6 +24,32 @@ def _fmt_number(value: float | None, digits: int = 0) -> str:
         return "-"
 
 
+def _fmt_quantity(value: float | None, max_digits: int = 6) -> str:
+    if value is None:
+        return "-"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if math.isnan(numeric):
+        return "-"
+
+    try:
+        digits = int(max_digits)
+    except (TypeError, ValueError):
+        digits = 6
+    digits = max(0, min(digits, 8))
+    if digits == 0:
+        return f"{numeric:,.0f}"
+
+    rounded = round(numeric, digits)
+    if rounded == 0:
+        rounded = 0.0
+    if math.isclose(rounded, round(rounded), abs_tol=10 ** (-digits)):
+        return f"{rounded:,.0f}"
+    return f"{rounded:,.{digits}f}".rstrip("0").rstrip(".")
+
+
 def _fmt_percent(value: float | None) -> str:
     if value is None:
         return "-"
@@ -88,6 +114,7 @@ def write_sell_report(
     fx_note: str | None = None,
     sell_mode: str | None = None,
     sell_mode_note: str | None = None,
+    quantity_digits: int = 6,
 ) -> str:
     _ensure_dir(report_dir)
 
@@ -140,7 +167,7 @@ def write_sell_report(
         lines.append("|--------|----:|------:|-----:|-----:|-------|------|--------|")
         for row in rows:
             lines.append(
-                f"| {row.ticker} | {_fmt_number(row.quantity, 0)} | {_fmt_currency(row.entry_price, row.currency, fx_rate)} | {_fmt_currency(row.last_price, row.currency, fx_rate)} | {_fmt_percent(row.pnl_pct)} | {row.action} | {_fmt_currency(row.stop_price, row.currency, fx_rate)} | {_fmt_currency(row.target_price, row.currency, fx_rate)} |"
+                f"| {row.ticker} | {_fmt_quantity(row.quantity, quantity_digits)} | {_fmt_currency(row.entry_price, row.currency, fx_rate)} | {_fmt_currency(row.last_price, row.currency, fx_rate)} | {_fmt_percent(row.pnl_pct)} | {row.action} | {_fmt_currency(row.stop_price, row.currency, fx_rate)} | {_fmt_currency(row.target_price, row.currency, fx_rate)} |"
             )
         lines.append("")
 

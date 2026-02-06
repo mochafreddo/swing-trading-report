@@ -76,3 +76,71 @@ def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -
         assert report_path.read_text(encoding="utf-8").startswith(
             "# Holdings Sell Review"
         )
+
+
+def test_write_sell_report_formats_fractional_quantity_in_summary(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        SellReportRow(
+            ticker="CMG.NYS",
+            name="Chipotle",
+            quantity=0.268187,
+            entry_price=37.25,
+            entry_date="2026-01-02",
+            last_price=38.45,
+            pnl_pct=0.032,
+            action="REVIEW",
+            reasons=["test"],
+            stop_price=None,
+            target_price=40.98,
+            currency="USD",
+        ),
+        SellReportRow(
+            ticker="005930",
+            name="Samsung",
+            quantity=12.0,
+            entry_price=71200.0,
+            entry_date="2025-01-01",
+            last_price=75000.0,
+            pnl_pct=0.053,
+            action="HOLD",
+            reasons=["test"],
+            stop_price=None,
+            target_price=79000.0,
+            currency="KRW",
+        ),
+    ]
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=rows,
+    )
+    content = Path(out_path).read_text(encoding="utf-8")
+    assert "| CMG.NYS | 0.268187 |" in content
+    assert "| 005930 | 12 |" in content
+
+
+def test_write_sell_report_quantity_digits_is_configurable(tmp_path: Path) -> None:
+    row = SellReportRow(
+        ticker="CMG.NYS",
+        name="Chipotle",
+        quantity=0.268187,
+        entry_price=37.25,
+        entry_date="2026-01-02",
+        last_price=38.45,
+        pnl_pct=0.032,
+        action="REVIEW",
+        reasons=["test"],
+        stop_price=None,
+        target_price=40.98,
+        currency="USD",
+    )
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=[row],
+        quantity_digits=4,
+    )
+    content = Path(out_path).read_text(encoding="utf-8")
+    assert "| CMG.NYS | 0.2682 |" in content
