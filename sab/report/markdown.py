@@ -4,6 +4,8 @@ import datetime as _dt
 import os
 from collections.abc import Iterable
 
+from ..utils.atomic_io import advisory_path_lock, atomic_write_text
+
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -43,7 +45,6 @@ def write_report(
     _ensure_dir(report_dir)
     today = _dt.datetime.now().strftime("%Y-%m-%d")
     now_str = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    out_path = _next_report_path(report_dir, today, report_type)
 
     cand_list = list(candidates)
     failures = list(failures or [])
@@ -188,7 +189,11 @@ def write_report(
             lines.append(f"- {f}")
         lines.append("")
 
-    with open(out_path, "w", encoding="utf-8") as fp:
-        fp.write("\n".join(lines))
+    lock_name = f".{report_type}.report.lock" if report_type else ".report.lock"
+    lock_path = os.path.join(report_dir, lock_name)
+    content = "\n".join(lines)
+    with advisory_path_lock(lock_path):
+        out_path = _next_report_path(report_dir, today, report_type)
+        atomic_write_text(out_path, content)
 
     return out_path

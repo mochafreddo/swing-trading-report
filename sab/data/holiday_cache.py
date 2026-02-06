@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from ..utils.atomic_io import atomic_write_json
 from .kr_calendar import load_kr_trading_calendar
 from .us_calendar import load_us_trading_calendar
 
@@ -48,8 +49,7 @@ def save_holidays(cache_dir: str, country_code: str, entries: Dict[str, HolidayE
         date: {"note": entry.note, "is_open": entry.is_open}
         for date, entry in entries.items()
     }
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp, indent=2, ensure_ascii=False)
+    atomic_write_json(path, payload, indent=2, ensure_ascii=False)
 
 
 def merge_holidays(

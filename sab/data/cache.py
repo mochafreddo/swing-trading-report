@@ -4,6 +4,8 @@ import json
 import os
 from typing import Any
 
+from ..utils.atomic_io import atomic_write_json
+
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -17,8 +19,7 @@ def json_path(base_dir: str, key: str) -> str:
 def save_json(base_dir: str, key: str, obj: Any) -> str:
     ensure_dir(base_dir)
     p = json_path(base_dir, key)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False)
+    atomic_write_json(p, obj, ensure_ascii=False)
     return p
 
 
@@ -31,4 +32,3 @@ def load_json(base_dir: str, key: str) -> Any | None:
             return json.load(f)
     except Exception:
         return None
-

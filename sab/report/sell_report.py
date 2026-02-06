@@ -6,6 +6,8 @@ import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from ..utils.atomic_io import advisory_path_lock, atomic_write_text
+
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -91,17 +93,6 @@ def write_sell_report(
 
     today = _dt.datetime.now().strftime("%Y-%m-%d")
     now_str = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    suffix = ".sell.md"
-    base = os.path.join(report_dir, f"{today}{suffix}")
-    out_path = base
-    if os.path.exists(out_path):
-        i = 1
-        while True:
-            candidate = os.path.join(report_dir, f"{today}-{i}{suffix}")
-            if not os.path.exists(candidate):
-                out_path = candidate
-                break
-            i += 1
 
     rows = list(evaluated)
     failures_list = list(failures or [])
@@ -196,8 +187,21 @@ def write_sell_report(
             lines.append(f"- {item}")
         lines.append("")
 
-    with open(out_path, "w", encoding="utf-8") as fp:
-        fp.write("\n".join(lines))
+    suffix = ".sell.md"
+    lock_path = os.path.join(report_dir, ".sell.report.lock")
+    content = "\n".join(lines)
+    with advisory_path_lock(lock_path):
+        base = os.path.join(report_dir, f"{today}{suffix}")
+        out_path = base
+        if os.path.exists(out_path):
+            i = 1
+            while True:
+                candidate = os.path.join(report_dir, f"{today}-{i}{suffix}")
+                if not os.path.exists(candidate):
+                    out_path = candidate
+                    break
+                i += 1
+        atomic_write_text(out_path, content)
 
     return out_path
 
