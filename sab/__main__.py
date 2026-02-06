@@ -6,17 +6,9 @@ import logging
 import os
 import sys
 
+from .env_loader import load_dotenv_if_available
 from .scan import run_scan
 from .sell import run_sell
-
-
-def _load_dotenv_if_available() -> None:
-    try:
-        from dotenv import load_dotenv  # type: ignore
-
-        load_dotenv(override=False)
-    except Exception:
-        pass
 
 
 def _configure_logging() -> None:
@@ -95,7 +87,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    _load_dotenv_if_available()
+    load_dotenv_if_available(override=False)
     _configure_logging()
     parser = _build_parser()
     ns = parser.parse_args(argv)

@@ -14,7 +14,8 @@
   - 기존 저장소라면 `pyproject.toml` 추가 후 의존성 동기화
   - 기본(슬림) 프로파일: `uv sync`
   - 개발 의존성 포함: `uv sync --all-groups`
-  - (선택) `.env` 자동 로딩: `uv sync --extra dotenv`
+  - `.env` 자동 로딩은 기본 내장 파서로 동작(추가 의존성 불필요)
+  - (선택) `python-dotenv` 고급 파싱 사용: `uv sync --extra dotenv`
   - (선택) 거래소 휴장일 자동 캘린더: `uv sync --extra calendar`
   - (선택) PyKRX 데이터 제공자/폴백: `uv sync --extra pykrx`
   - (선택) 전체 기능: `uv sync --all-extras --all-groups`

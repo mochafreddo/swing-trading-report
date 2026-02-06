@@ -6,6 +6,7 @@ from typing import Any, overload
 from urllib.parse import urlparse
 
 from .config_loader import ConfigLoadError, load_yaml_config
+from .env_loader import load_dotenv_if_available
 from .holdings_loader import HoldingsData, load_holdings
 
 
@@ -16,16 +17,6 @@ def _from_nested(d: dict[str, Any], path: str, default: Any = None) -> Any:
             return default
         current = current[part]
     return current
-
-
-def _load_dotenv_if_available() -> None:
-    try:
-        from dotenv import load_dotenv  # type: ignore
-
-        load_dotenv(override=False)
-    except Exception:
-        # dotenv is optional; ignore if missing
-        pass
 
 
 def _has_secret_value(value: Any) -> bool:
@@ -160,7 +151,7 @@ def load_config(
     limit_override: int | None = None,
 ) -> Config:
     yaml_cfg = load_yaml_config().raw
-    _load_dotenv_if_available()
+    load_dotenv_if_available(override=False)
 
     def from_yaml(path: str, default: Any = None) -> Any:
         return _from_nested(yaml_cfg, path, default)
