@@ -190,7 +190,9 @@ def _load_cached_rate(
     return rate, symbol, exchange, age
 
 
-def _save_cached_rate(data_dir: str | None, rate: float, symbol: str, exchange: str) -> None:
+def _save_cached_rate(
+    data_dir: str | None, rate: float, symbol: str, exchange: str
+) -> None:
     if not data_dir:
         return
     payload = {

@@ -32,7 +32,7 @@ def _normalize_suffix(suffix: str | None) -> str:
     return "".join(ch for ch in suffix.upper() if ch.isalnum())
 
 
-US_SUFFIXES = {_normalize_suffix(s) for s in SUFFIX_TO_EXCD.keys()}
+US_SUFFIXES = {_normalize_suffix(s) for s in SUFFIX_TO_EXCD}
 
 
 def _split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
@@ -126,12 +126,17 @@ def run_sell(*, provider: str | None) -> int:
             min_interval = None
             if cfg.kis_min_interval_ms is not None:
                 min_interval = max(0.0, cfg.kis_min_interval_ms / 1000.0)
-            kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
+            kis_client = KISClient(
+                creds, cache_dir=cfg.data_dir, min_interval=min_interval
+            )
             cache_hint = kis_client.cache_status
     elif cfg.data_provider == "pykrx":
         client = ensure_pykrx_client()
         if client is None:
-            msg = "PyKRX provider selected but pykrx package is unavailable. Install with 'uv add pykrx'."
+            msg = (
+                "PyKRX provider selected but pykrx package is unavailable. "
+                "Install with 'uv sync --extra pykrx'."
+            )
             failures.append(msg)
             logger.error(msg)
             fatal_failure = True
@@ -139,7 +144,9 @@ def run_sell(*, provider: str | None) -> int:
             pykrx_client = client
             cache_hint = "pykrx"
     else:
-        failures.append(f"Provider '{cfg.data_provider}' not supported for sell command")
+        failures.append(
+            f"Provider '{cfg.data_provider}' not supported for sell command"
+        )
         logger.error("Unsupported provider '%s'", cfg.data_provider)
         fatal_failure = True
 
@@ -165,7 +172,9 @@ def run_sell(*, provider: str | None) -> int:
             base_symbol, suffix = _split_symbol_and_suffix(ticker)
             exch = _exchange_from_suffix(suffix)
             cache_key = (
-                f"candles_overseas_{exch}_{base_symbol}" if exch else f"candles_{base_symbol}"
+                f"candles_overseas_{exch}_{base_symbol}"
+                if exch
+                else f"candles_{base_symbol}"
             )
             cached = load_json(cfg.data_dir, cache_key)
             if isinstance(cached, list) and cached:
@@ -198,7 +207,9 @@ def run_sell(*, provider: str | None) -> int:
                     if fallback_client is not None and not exch:
                         # PyKRX supports KR tickers only
                         try:
-                            candles = fallback_client.daily_candles(base_symbol, count=target_bars)
+                            candles = fallback_client.daily_candles(
+                                base_symbol, count=target_bars
+                            )
                         except PykrxClientError as py_exc:
                             fallback_client = None
                             fallback_error = str(py_exc)
@@ -212,7 +223,9 @@ def run_sell(*, provider: str | None) -> int:
                                     exc,
                                     len(candles),
                                 )
-                                failures.append(f"{ticker}: KIS error ({exc}); used PyKRX fallback")
+                                failures.append(
+                                    f"{ticker}: KIS error ({exc}); used PyKRX fallback"
+                                )
                                 if not pykrx_warning_added:
                                     failures.append(
                                         "Warning: PyKRX fallback data is end-of-day and may differ from KIS."
@@ -287,7 +300,9 @@ def run_sell(*, provider: str | None) -> int:
         ticker_candles = market_data.get(ticker)
         if not ticker_candles:
             if ticker not in missing_logged:
-                failures.append(f"{ticker}: No market data available for sell evaluation")
+                failures.append(
+                    f"{ticker}: No market data available for sell evaluation"
+                )
                 missing_logged.add(ticker)
             continue
         _, suffix = _split_symbol_and_suffix(ticker)
@@ -303,11 +318,13 @@ def run_sell(*, provider: str | None) -> int:
             "data_source": ticker_data_source.get(ticker, cfg.data_provider),
         }
         if cfg.sell_mode == "sma_ema_hybrid":
-            evaluation: HybridSellEvaluation | SellEvaluation = evaluate_sell_signals_hybrid(
-                ticker,
-                ticker_candles,
-                holding_dict,
-                hybrid_settings,
+            evaluation: HybridSellEvaluation | SellEvaluation = (
+                evaluate_sell_signals_hybrid(
+                    ticker,
+                    ticker_candles,
+                    holding_dict,
+                    hybrid_settings,
+                )
             )
         else:
             evaluation = evaluate_sell_signals(
@@ -317,7 +334,9 @@ def run_sell(*, provider: str | None) -> int:
                 settings,
             )
         entry_price = holding.entry_price or None
-        if entry_price is not None and (isinstance(entry_price, float) and math.isnan(entry_price)):
+        if entry_price is not None and (
+            isinstance(entry_price, float) and math.isnan(entry_price)
+        ):
             entry_price = None
 
         eval_price = getattr(evaluation, "eval_price", None)
@@ -327,11 +346,20 @@ def run_sell(*, provider: str | None) -> int:
             last_price = float(eval_price) if eval_price is not None else None
         except (TypeError, ValueError):
             last_price = None
-        if last_price is not None and isinstance(last_price, float) and math.isnan(last_price):
+        if (
+            last_price is not None
+            and isinstance(last_price, float)
+            and math.isnan(last_price)
+        ):
             last_price = None
 
         pnl_pct = None
-        if entry_price and entry_price != 0 and last_price is not None and last_price != 0:
+        if (
+            entry_price
+            and entry_price != 0
+            and last_price is not None
+            and last_price != 0
+        ):
             try:
                 pnl_pct = (last_price - entry_price) / entry_price
             except TypeError:
@@ -394,11 +422,15 @@ def run_sell(*, provider: str | None) -> int:
     logger.info("Sell report written to: %s", out_path)
 
     if fatal_failure:
-        logger.error("Sell evaluation completed with fatal errors. See report for details.")
+        logger.error(
+            "Sell evaluation completed with fatal errors. See report for details."
+        )
         return 1
 
     if failures:
-        logger.warning("Sell evaluation completed with warnings. See report for details.")
+        logger.warning(
+            "Sell evaluation completed with warnings. See report for details."
+        )
 
     return 0
 

@@ -50,7 +50,9 @@ class KISClientOverseasTradeValueRankTests(unittest.TestCase):
         )
 
     def test_trade_value_rank_omits_invalid_price_filters(self) -> None:
-        with patch.object(KISClient, "_fetch_overseas_rank_items", return_value=[]) as mock_fetch:
+        with patch.object(
+            KISClient, "_fetch_overseas_rank_items", return_value=[]
+        ) as mock_fetch:
             self.client.overseas_trade_value_rank(
                 exchange="NYSE",
                 limit=3,

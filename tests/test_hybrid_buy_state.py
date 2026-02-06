@@ -60,7 +60,8 @@ def test_pullback_bounce_watch(monkeypatch):
 
     # Eval index to last candle
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
 
     # Make ATR deterministic
@@ -75,18 +76,25 @@ def test_pullback_bounce_watch(monkeypatch):
             True,
             ["Reversal candle near EMA short"],
             HybridPattern.TREND_PULLBACK_BOUNCE,
-            {"trigger_hammer_near_ema": True, "rsi_val": 49.0, "close_above_ema_short": False},
+            {
+                "trigger_hammer_near_ema": True,
+                "rsi_val": 49.0,
+                "close_above_ema_short": False,
+            },
         ),
     )
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy._detect_swing_high_breakout", lambda *a, **k: (False, [], None, {})
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
         lambda *a, **k: (False, [], None, {}),
     )
 
-    result = evaluate_ticker_hybrid("FAKE.US", candles, _settings(), {"currency": "USD"})
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
     assert result.candidate is not None
     assert result.candidate["pattern"] == HybridPattern.TREND_PULLBACK_BOUNCE
     assert result.candidate["entry_state"] == "WATCH"
@@ -99,7 +107,8 @@ def test_pullback_bounce_watch(monkeypatch):
 def test_pullback_bounce_ready(monkeypatch):
     candles = _simple_candles(10)
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [1.0] * len(closes)
@@ -118,14 +127,17 @@ def test_pullback_bounce_ready(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy._detect_swing_high_breakout", lambda *a, **k: (False, [], None, {})
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
         lambda *a, **k: (False, [], None, {}),
     )
 
-    result = evaluate_ticker_hybrid("FAKE.US", candles, _settings(), {"currency": "USD"})
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
     assert result.candidate is not None
     assert result.candidate["entry_state"] == "READY"
     assert "bounce confirmed" in result.candidate["entry_state_reason"].lower()
@@ -134,7 +146,8 @@ def test_pullback_bounce_ready(monkeypatch):
 def test_breakout_extended_sets_watch(monkeypatch):
     candles = _simple_candles(10, base=100.0)
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
     # ATR=2 ensures last_close (approx 104.3) > swing_high(100)+ATR => extended
     monkeypatch.setattr(
@@ -158,7 +171,9 @@ def test_breakout_extended_sets_watch(monkeypatch):
         lambda *a, **k: (False, [], None, {}),
     )
 
-    result = evaluate_ticker_hybrid("FAKE.US", candles, _settings(), {"currency": "USD"})
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
     assert result.candidate is not None
     assert result.candidate["pattern"] == HybridPattern.SWING_HIGH_BREAKOUT
     assert result.candidate["entry_state"] == "WATCH"
@@ -168,7 +183,8 @@ def test_breakout_extended_sets_watch(monkeypatch):
 def test_rsi_oversold_ready(monkeypatch):
     candles = _simple_candles(10)
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [1.5] * len(closes)
@@ -178,7 +194,8 @@ def test_rsi_oversold_ready(monkeypatch):
         lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy._detect_swing_high_breakout", lambda *a, **k: (False, [], None, {})
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
@@ -190,7 +207,9 @@ def test_rsi_oversold_ready(monkeypatch):
         ),
     )
 
-    result = evaluate_ticker_hybrid("FAKE.US", candles, _settings(), {"currency": "USD"})
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
     assert result.candidate is not None
     assert result.candidate["pattern"] == HybridPattern.RSI_OVERSOLD_REVERSAL
     assert result.candidate["entry_state"] == "READY"
@@ -199,7 +218,8 @@ def test_rsi_oversold_ready(monkeypatch):
 def test_rsi_oversold_watch(monkeypatch):
     candles = _simple_candles(10)
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [1.5] * len(closes)
@@ -209,7 +229,8 @@ def test_rsi_oversold_watch(monkeypatch):
         lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy._detect_swing_high_breakout", lambda *a, **k: (False, [], None, {})
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
@@ -221,7 +242,9 @@ def test_rsi_oversold_watch(monkeypatch):
         ),
     )
 
-    result = evaluate_ticker_hybrid("FAKE.US", candles, _settings(), {"currency": "USD"})
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
     assert result.candidate is not None
     assert result.candidate["pattern"] == HybridPattern.RSI_OVERSOLD_REVERSAL
     assert result.candidate["entry_state"] == "WATCH"
@@ -236,7 +259,8 @@ def test_hybrid_evaluator_excludes_etf_when_flag_true(monkeypatch):
 
     # Evaluate on the last candle.
     monkeypatch.setattr(
-        "sab.signals.hybrid_buy.choose_eval_index", lambda data, **_: (len(data) - 1, True)
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
     )
 
     settings = _settings()

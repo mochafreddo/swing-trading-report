@@ -134,7 +134,9 @@ def choose_eval_index(
 
     meta = meta or {}
     provider_hint = (
-        str(meta.get("data_source") or meta.get("provider") or provider or "kis").strip().lower()
+        str(meta.get("data_source") or meta.get("provider") or provider or "kis")
+        .strip()
+        .lower()
     )
     if provider_hint == "pykrx":
         return len(candles) - 1, False
@@ -160,7 +162,9 @@ def choose_eval_index(
     prev_slice = candles[prev_slice_start:idx_latest]
     avg_vol = 0.0
     if prev_slice:
-        avg_vol = sum(float(c.get("volume") or 0.0) for c in prev_slice) / len(prev_slice)
+        avg_vol = sum(float(c.get("volume") or 0.0) for c in prev_slice) / len(
+            prev_slice
+        )
     last_vol = float(last.get("volume") or 0.0)
     very_thin_today = avg_vol > volume_floor and last_vol < avg_vol * thin_ratio
 
@@ -171,9 +175,7 @@ def choose_eval_index(
         if is_us_holiday:
             state = STATE_CLOSED
 
-        if state == STATE_INTRADAY and last_date == session_date:
-            idx_eval = idx_latest - 1
-        elif (
+        if (state == STATE_INTRADAY and last_date == session_date) or (
             state in {STATE_PRE_OPEN, STATE_AFTER_CLOSE}
             and very_thin_today
             and last_date == session_date

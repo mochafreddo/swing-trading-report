@@ -16,7 +16,9 @@ def test_kis_overseas_screener_uses_fallback_nday_when_empty() -> None:
     client.overseas_trade_volume_rank.side_effect = volume_rank
     screener = KISOverseasScreener(client)
 
-    result = screener.screen(ScreenRequest(limit=5, metric="volume", nday=0, fallback_ndays=[1, 2]))
+    result = screener.screen(
+        ScreenRequest(limit=5, metric="volume", nday=0, fallback_ndays=[1, 2])
+    )
 
     assert result.tickers == ["AAPL.NAS"]
     assert result.metadata["nday_used"] == 1
@@ -34,7 +36,9 @@ def test_kis_overseas_screener_stops_on_first_successful_nday() -> None:
     client.overseas_trade_value_rank.side_effect = value_rank
     screener = KISOverseasScreener(client)
 
-    result = screener.screen(ScreenRequest(limit=3, metric="value", nday=1, fallback_ndays=[2, 3]))
+    result = screener.screen(
+        ScreenRequest(limit=3, metric="value", nday=1, fallback_ndays=[2, 3])
+    )
 
     assert result.tickers == ["MSFT.NAS"]
     assert result.metadata["nday_used"] == 1
@@ -46,7 +50,9 @@ def test_kis_overseas_screener_all_ndays_empty_returns_empty() -> None:
     client.overseas_trade_volume_rank.return_value = []
     screener = KISOverseasScreener(client)
 
-    result = screener.screen(ScreenRequest(limit=2, metric="volume", nday=1, fallback_ndays=[2, 3]))
+    result = screener.screen(
+        ScreenRequest(limit=2, metric="volume", nday=1, fallback_ndays=[2, 3])
+    )
 
     assert result.tickers == []
     assert result.metadata["nday_used"] is None

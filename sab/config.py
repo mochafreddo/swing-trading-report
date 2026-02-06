@@ -103,7 +103,9 @@ class Config:
     sell_rsi_floor: float = 50.0
     sell_rsi_floor_alt: float = 30.0
     sell_min_bars: int = 20
-    universe_markets: list[str] = field(default_factory=lambda: ["KR"])  # e.g., ["KR", "US"]
+    universe_markets: list[str] = field(
+        default_factory=lambda: ["KR"]
+    )  # e.g., ["KR", "US"]
     us_screener_defaults: list[str] = field(default_factory=list)
     us_screener_mode: str = "defaults"  # 'defaults' or 'kis'
     us_screener_metric: str = "volume"  # 'volume' | 'market_cap' | 'value'
@@ -137,10 +139,7 @@ def _normalize_kis_base(url: str | None) -> str | None:
     host = parsed.hostname.lower()
     port = parsed.port
     if port is None:
-        if "openapivts" in host:
-            port = 29443
-        else:
-            port = 9443
+        port = 29443 if "openapivts" in host else 9443
 
     netloc = parsed.hostname if port in (80, 443) else f"{parsed.hostname}:{port}"
     normalized = f"{parsed.scheme}://{netloc}"
@@ -227,12 +226,18 @@ def load_config(
     screener_limit = env_int("SCREENER_LIMIT", "screener.limit", 20)
     screener_only = env_bool("SCREENER_ONLY", "screener.only", False)
 
-    use_sma200_filter = env_bool("USE_SMA200_FILTER", "strategy.use_sma200_filter", False)
+    use_sma200_filter = env_bool(
+        "USE_SMA200_FILTER", "strategy.use_sma200_filter", False
+    )
     require_slope_up = env_bool("REQUIRE_SLOPE_UP", "strategy.require_slope_up", False)
     exclude_etf_etn = env_bool("EXCLUDE_ETF_ETN", "strategy.exclude_etf_etn", False)
 
-    gap_atr_multiplier = env_float("GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier", 1.0)
-    min_dollar_volume = env_float("MIN_DOLLAR_VOLUME", "screener.min_dollar_volume", 0.0)
+    gap_atr_multiplier = env_float(
+        "GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier", 1.0
+    )
+    min_dollar_volume = env_float(
+        "MIN_DOLLAR_VOLUME", "screener.min_dollar_volume", 0.0
+    )
     min_history_bars = env_int("MIN_HISTORY_BARS", "strategy.min_history_bars", 120)
 
     kis_min_interval_ms = None
@@ -245,14 +250,20 @@ def load_config(
     else:
         kis_min_interval_ms = parse_float(from_yaml("kis.min_interval_ms"), None)  # type: ignore[arg-type]
 
-    screener_cache_ttl_minutes = env_float("SCREENER_CACHE_TTL", "screener.cache_ttl_minutes", 5.0)
+    screener_cache_ttl_minutes = env_float(
+        "SCREENER_CACHE_TTL", "screener.cache_ttl_minutes", 5.0
+    )
     min_price = env_float("MIN_PRICE", "screener.min_price", 0.0)
     rs_lookback_days = env_int("RS_LOOKBACK_DAYS", "strategy.rs_lookback_days", 20)
-    rs_benchmark_return = env_float("RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return", 0.0)
+    rs_benchmark_return = env_float(
+        "RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return", 0.0
+    )
 
     # Strategy mode and hybrid strategy tuning
     strategy_mode_raw = (
-        os.getenv("STRATEGY_MODE") or from_yaml("strategy.mode", "ema_cross") or "ema_cross"
+        os.getenv("STRATEGY_MODE")
+        or from_yaml("strategy.mode", "ema_cross")
+        or "ema_cross"
     )
     strategy_mode = str(strategy_mode_raw).strip().lower()
     if strategy_mode not in {"ema_cross", "sma_ema_hybrid"}:
@@ -264,10 +275,16 @@ def load_config(
     hybrid_ema_short_period = env_int(
         "HYBRID_EMA_SHORT_PERIOD", "strategy.hybrid.ema_short_period", 10
     )
-    hybrid_ema_mid_period = env_int("HYBRID_EMA_MID_PERIOD", "strategy.hybrid.ema_mid_period", 21)
+    hybrid_ema_mid_period = env_int(
+        "HYBRID_EMA_MID_PERIOD", "strategy.hybrid.ema_mid_period", 21
+    )
     hybrid_rsi_period = env_int("HYBRID_RSI_PERIOD", "strategy.hybrid.rsi_period", 14)
-    hybrid_rsi_zone_low = env_float("HYBRID_RSI_ZONE_LOW", "strategy.hybrid.rsi_zone_low", 45.0)
-    hybrid_rsi_zone_high = env_float("HYBRID_RSI_ZONE_HIGH", "strategy.hybrid.rsi_zone_high", 60.0)
+    hybrid_rsi_zone_low = env_float(
+        "HYBRID_RSI_ZONE_LOW", "strategy.hybrid.rsi_zone_low", 45.0
+    )
+    hybrid_rsi_zone_high = env_float(
+        "HYBRID_RSI_ZONE_HIGH", "strategy.hybrid.rsi_zone_high", 60.0
+    )
     hybrid_rsi_oversold_low = env_float(
         "HYBRID_RSI_OVERSOLD_LOW", "strategy.hybrid.rsi_oversold_low", 30.0
     )
@@ -290,11 +307,15 @@ def load_config(
     hybrid_volume_lookback_days = env_int(
         "HYBRID_VOLUME_LOOKBACK_DAYS", "strategy.hybrid.volume_lookback_days", 5
     )
-    hybrid_max_gap_pct = env_float("HYBRID_MAX_GAP_PCT", "strategy.hybrid.max_gap_pct", 0.05)
+    hybrid_max_gap_pct = env_float(
+        "HYBRID_MAX_GAP_PCT", "strategy.hybrid.max_gap_pct", 0.05
+    )
     hybrid_use_sma60_filter = env_bool(
         "HYBRID_USE_SMA60_FILTER", "strategy.hybrid.use_sma60_filter", False
     )
-    hybrid_sma60_period = env_int("HYBRID_SMA60_PERIOD", "strategy.hybrid.sma60_period", 60)
+    hybrid_sma60_period = env_int(
+        "HYBRID_SMA60_PERIOD", "strategy.hybrid.sma60_period", 60
+    )
     hybrid_kr_breakout_needs_confirm = env_bool(
         "HYBRID_KR_BREAKOUT_NEEDS_CONFIRM",
         "strategy.hybrid.kr_breakout_requires_confirmation",
@@ -321,7 +342,9 @@ def load_config(
     )
 
     # Sell mode and hybrid sell tuning
-    sell_mode_raw = os.getenv("SELL_MODE") or from_yaml("sell.mode", "generic") or "generic"
+    sell_mode_raw = (
+        os.getenv("SELL_MODE") or from_yaml("sell.mode", "generic") or "generic"
+    )
     sell_mode = str(sell_mode_raw).strip().lower()
     if sell_mode not in {"generic", "sma_ema_hybrid"}:
         sell_mode = "generic"
@@ -338,11 +361,15 @@ def load_config(
     hybrid_sell_ema_short = env_int(
         "HYBRID_SELL_EMA_SHORT_PERIOD", "sell.hybrid.ema_short_period", 10
     )
-    hybrid_sell_ema_mid = env_int("HYBRID_SELL_EMA_MID_PERIOD", "sell.hybrid.ema_mid_period", 21)
+    hybrid_sell_ema_mid = env_int(
+        "HYBRID_SELL_EMA_MID_PERIOD", "sell.hybrid.ema_mid_period", 21
+    )
     hybrid_sell_sma_trend = env_int(
         "HYBRID_SELL_SMA_TREND_PERIOD", "sell.hybrid.sma_trend_period", 20
     )
-    hybrid_sell_rsi_period = env_int("HYBRID_SELL_RSI_PERIOD", "sell.hybrid.rsi_period", 14)
+    hybrid_sell_rsi_period = env_int(
+        "HYBRID_SELL_RSI_PERIOD", "sell.hybrid.rsi_period", 14
+    )
     hybrid_sell_stop_loss_min = env_float(
         "HYBRID_SELL_STOP_LOSS_PCT_MIN", "sell.hybrid.stop_loss_pct_min", 0.03
     )
@@ -355,7 +382,9 @@ def load_config(
         0.03,
     )
     hybrid_sell_min_bars = env_int("HYBRID_SELL_MIN_BARS", "sell.hybrid.min_bars", 20)
-    hybrid_sell_time_stop = env_int("HYBRID_SELL_TIME_STOP_DAYS", "sell.hybrid.time_stop_days", 0)
+    hybrid_sell_time_stop = env_int(
+        "HYBRID_SELL_TIME_STOP_DAYS", "sell.hybrid.time_stop_days", 0
+    )
     hybrid_sell_time_stop_grace = env_int(
         "HYBRID_SELL_TIME_STOP_GRACE_DAYS", "sell.hybrid.time_stop_grace_days", 0
     )
@@ -387,18 +416,26 @@ def load_config(
     # Universe markets (KR,US)
     markets_env = os.getenv("UNIVERSE_MARKETS")
     if markets_env is not None:
-        universe_markets = [m.strip().upper() for m in markets_env.split(",") if m.strip()]
+        universe_markets = [
+            m.strip().upper() for m in markets_env.split(",") if m.strip()
+        ]
     else:
         raw_markets = from_yaml("universe.markets", ["KR"]) or ["KR"]
-        universe_markets = [str(m).strip().upper() for m in raw_markets if str(m).strip()]
+        universe_markets = [
+            str(m).strip().upper() for m in raw_markets if str(m).strip()
+        ]
 
     # US screener defaults (yaml-only)
     us_screener_defaults_raw = from_yaml("screener.us_defaults", []) or []
     us_screener_defaults = [
         str(t).strip().upper() for t in us_screener_defaults_raw if str(t).strip()
     ]
-    us_screener_mode = str(from_yaml("screener.us_mode", "defaults") or "defaults").strip().lower()
-    us_screener_metric = str(from_yaml("screener.us_metric", "volume") or "volume").strip().lower()
+    us_screener_mode = (
+        str(from_yaml("screener.us_mode", "defaults") or "defaults").strip().lower()
+    )
+    us_screener_metric = (
+        str(from_yaml("screener.us_metric", "volume") or "volume").strip().lower()
+    )
     us_screener_limit = env_int("US_SCREENER_LIMIT", "screener.us_limit", 20)
     usd_krw_rate: float | None = None
     env_fx = os.getenv("USD_KRW_RATE")
@@ -440,7 +477,9 @@ def load_config(
         except (TypeError, ValueError):
             us_min_dollar_volume = None
 
-    sell_atr_multiplier = env_float("SELL_ATR_MULTIPLIER", "sell.atr_trail_multiplier", 1.0)
+    sell_atr_multiplier = env_float(
+        "SELL_ATR_MULTIPLIER", "sell.atr_trail_multiplier", 1.0
+    )
     sell_time_stop_days = env_int("SELL_TIME_STOP_DAYS", "sell.time_stop_days", 10)
     sell_require_sma200 = env_bool("SELL_REQUIRE_SMA200", "sell.require_sma200", True)
     sell_ema_short = env_int("SELL_EMA_SHORT", "sell.ema_short", 20)
@@ -454,7 +493,9 @@ def load_config(
         data_provider=provider,
         kis_app_key=os.getenv("KIS_APP_KEY") or from_yaml("kis.app_key"),
         kis_app_secret=os.getenv("KIS_APP_SECRET") or from_yaml("kis.app_secret"),
-        kis_base_url=_normalize_kis_base(os.getenv("KIS_BASE_URL") or from_yaml("kis.base_url")),
+        kis_base_url=_normalize_kis_base(
+            os.getenv("KIS_BASE_URL") or from_yaml("kis.base_url")
+        ),
         screen_limit=screen_limit,
         report_dir=os.getenv("REPORT_DIR") or from_yaml("data.report_dir", "reports"),
         data_dir=os.getenv("DATA_DIR") or from_yaml("data.data_dir", "data"),

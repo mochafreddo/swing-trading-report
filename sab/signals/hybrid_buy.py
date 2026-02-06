@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .etf_filters import is_etf_or_leveraged
@@ -10,7 +10,7 @@ from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
 
 
-class HybridPattern(str, Enum):
+class HybridPattern(StrEnum):
     TREND_PULLBACK_BOUNCE = "trend_pullback_bounce"
     SWING_HIGH_BREAKOUT = "swing_high_breakout"
     RSI_OVERSOLD_REVERSAL = "rsi_oversold_reversal"
@@ -73,7 +73,12 @@ def _basic_filters(
     eval_index: int,
 ) -> tuple[bool, str | None, float, float]:
     if len(candles) < settings.min_history_bars:
-        return False, f"Not enough history (<{settings.min_history_bars} bars)", 0.0, 0.0
+        return (
+            False,
+            f"Not enough history (<{settings.min_history_bars} bars)",
+            0.0,
+            0.0,
+        )
 
     idx = max(0, min(eval_index, len(candles) - 1))
     latest = candles[idx]
@@ -104,7 +109,9 @@ def _basic_filters(
     return True, None, close, avg_dv
 
 
-def _volume_stats(candles: list[dict[str, Any]], lookback_days: int) -> tuple[float, float]:
+def _volume_stats(
+    candles: list[dict[str, Any]], lookback_days: int
+) -> tuple[float, float]:
     if not candles:
         return 0.0, 0.0
     vols = [float(c.get("volume") or 0.0) for c in candles]
@@ -240,7 +247,12 @@ def _detect_swing_high_breakout(
     today = candles[-1]
     prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
     if not (close > swing_high and float(today.get("volume") or 0.0) > avg_vol):
-        return False, ["No confirmed breakout over swing high"], None, {"swing_high": swing_high}
+        return (
+            False,
+            ["No confirmed breakout over swing high"],
+            None,
+            {"swing_high": swing_high},
+        )
 
     # KR-specific confirmation can be applied later in entry logic; for now we only mark pattern.
     reasons.append("Close broke above recent swing high with volume > 5d avg")
@@ -294,7 +306,10 @@ def _detect_rsi_oversold_reversal(
     if lower_shadow <= body:
         return False, ["No clear reversal candle off lows"], None, {}
 
-    if abs(low - ema_short[idx]) / close < 0.03 or abs(low - ema_mid[idx]) / close < 0.03:
+    if (
+        abs(low - ema_short[idx]) / close < 0.03
+        or abs(low - ema_mid[idx]) / close < 0.03
+    ):
         reasons.append("Reversal off EMA short/mid with volume")
         return (
             True,
@@ -327,7 +342,9 @@ def evaluate_ticker_hybrid(
 
     candles_eval = candles[: idx_eval + 1]
 
-    ok, reason, last_close, avg_dv = _basic_filters(ticker, candles, settings, meta, idx_eval)
+    ok, reason, last_close, avg_dv = _basic_filters(
+        ticker, candles, settings, meta, idx_eval
+    )
     if not ok:
         return HybridEvaluationResult(ticker, None, reason)
 
@@ -380,7 +397,9 @@ def evaluate_ticker_hybrid(
                 pattern_context = ctx_rsi
 
     if not pattern:
-        return HybridEvaluationResult(ticker, None, "Did not meet hybrid signal criteria")
+        return HybridEvaluationResult(
+            ticker, None, "Did not meet hybrid signal criteria"
+        )
 
     latest = candles[idx_eval]
     prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
@@ -420,7 +439,9 @@ def evaluate_ticker_hybrid(
             extended = last_close > swing_high + atr_value
         if extended:
             entry_state = "WATCH"
-            entry_state_reason = "Breakout extended (>1 ATR above swing high); consider waiting"
+            entry_state_reason = (
+                "Breakout extended (>1 ATR above swing high); consider waiting"
+            )
         else:
             entry_state = "READY"
             entry_state_reason = "Breakout close above swing high with volume"
@@ -434,7 +455,9 @@ def evaluate_ticker_hybrid(
             entry_state = "READY"
             entry_state_reason = "RSI rebound and close above EMA short"
         else:
-            entry_state_reason = "Early reversal; need RSI>=45 and close above EMA short"
+            entry_state_reason = (
+                "Early reversal; need RSI>=45 and close above EMA short"
+            )
 
     def fmt(value: float, digits: int = 2) -> str:
         if digits == 0:
@@ -483,7 +506,9 @@ def evaluate_ticker_hybrid(
         "entry_state": entry_state,
         "entry_state_reason": entry_state_reason,
         "atr14": fmt(atr_value),
-        "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%" if gap_guard_pct is not None else "-",
+        "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%"
+        if gap_guard_pct is not None
+        else "-",
         "gap_guard_up_price": fmt(gap_guard_up_price, gap_price_digits)
         if gap_guard_up_price
         else "-",

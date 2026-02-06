@@ -239,7 +239,9 @@ def evaluate_ticker(
         "high": fmt(latest["high"], 0),
         "low": fmt(latest["low"], 0),
         "risk_guide": risk_guide,
-        "sma200": fmt(sma200_value if not math.isnan(sma200_value) else float("nan"), 0),
+        "sma200": fmt(
+            sma200_value if not math.isnan(sma200_value) else float("nan"), 0
+        ),
         "avg_dollar_volume": fmt(avg_dollar_volume, 0),
         "rs_return": f"{rs_return * 100:.1f}%" if rs_return is not None else "-",
         "rs_diff": f"{rs_diff * 100:.1f}%" if rs_diff is not None else "-",

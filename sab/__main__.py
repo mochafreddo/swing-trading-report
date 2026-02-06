@@ -37,7 +37,9 @@ def _configure_logging() -> None:
             super().__init__(fmt=fmt, datefmt=datefmt)
             self._tz = tz
 
-        def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        def formatTime(
+            self, record: logging.LogRecord, datefmt: str | None = None
+        ) -> str:
             if self._tz == "utc":
                 ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
             else:
@@ -54,7 +56,9 @@ def _configure_logging() -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="sab", description="Swing Alert Bot — on-demand report")
+    p = argparse.ArgumentParser(
+        prog="sab", description="Swing Alert Bot — on-demand report"
+    )
     sub = p.add_subparsers(dest="cmd")
 
     s = sub.add_parser("scan", help="Collect -> evaluate -> write markdown report")
@@ -67,7 +71,9 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["kis", "pykrx"],
         help="Data provider override",
     )
-    s.add_argument("--screener-limit", type=int, default=None, help="Override screener top-N size")
+    s.add_argument(
+        "--screener-limit", type=int, default=None, help="Override screener top-N size"
+    )
     s.add_argument(
         "--universe",
         type=str,

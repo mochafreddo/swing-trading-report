@@ -46,7 +46,9 @@ class HybridSellEvaluation:
     eval_date: str | None = None
 
 
-def _compute_pnl_pct(entry_price: float | None, last_close: float | None) -> float | None:
+def _compute_pnl_pct(
+    entry_price: float | None, last_close: float | None
+) -> float | None:
     if entry_price is None or last_close is None:
         return None
     if entry_price == 0:
@@ -94,10 +96,7 @@ def evaluate_sell_signals_hybrid(
     action = "HOLD"
 
     entry_price = holding.get("entry_price")
-    if isinstance(entry_price, (int | float)):
-        entry_price = float(entry_price)
-    else:
-        entry_price = None
+    entry_price = float(entry_price) if isinstance(entry_price, (int | float)) else None
 
     pnl_pct = _compute_pnl_pct(entry_price, last_close)
 
@@ -143,10 +142,14 @@ def evaluate_sell_signals_hybrid(
             action = "REVIEW"
 
     # Momentum shift: EMA short falling below EMA mid
-    if len(ema_short) >= 2 and len(ema_mid) >= 2:
-        if ema_short[-1] < ema_mid[-1] and ema_short[-2] >= ema_mid[-2]:
-            reasons.append("EMA short crossed below EMA mid (momentum down)")
-            action = "SELL"
+    if (
+        len(ema_short) >= 2
+        and len(ema_mid) >= 2
+        and ema_short[-1] < ema_mid[-1]
+        and ema_short[-2] >= ema_mid[-2]
+    ):
+        reasons.append("EMA short crossed below EMA mid (momentum down)")
+        action = "SELL"
 
     # Consecutive bearish candles
     if len(candles_eval) >= 3:
@@ -168,13 +171,17 @@ def evaluate_sell_signals_hybrid(
     # --- 3) Failed breakout ---
     # If holding strategy is breakout-like, consider a sharp drop > failed_breakout_drop_pct
     strategy_tag = str(holding.get("strategy") or "").lower()
-    if entry_price is not None and pnl_pct is not None and "breakout" in strategy_tag:
-        if pnl_pct <= -settings.failed_breakout_drop_pct:
-            reasons.append(
-                f"Failed breakout: price moved {pnl_pct * 100:.1f}% below entry "
-                f"(threshold {settings.failed_breakout_drop_pct * 100:.1f}%)"
-            )
-            action = "SELL"
+    if (
+        entry_price is not None
+        and pnl_pct is not None
+        and "breakout" in strategy_tag
+        and pnl_pct <= -settings.failed_breakout_drop_pct
+    ):
+        reasons.append(
+            f"Failed breakout: price moved {pnl_pct * 100:.1f}% below entry "
+            f"(threshold {settings.failed_breakout_drop_pct * 100:.1f}%)"
+        )
+        action = "SELL"
 
     # --- 4) Hard stop loss band (3–5%) ---
     if entry_price is not None:
@@ -188,7 +195,9 @@ def evaluate_sell_signals_hybrid(
                 )
                 action = "SELL"
                 # Set stop at the midpoint of the band for reporting
-                mid_band = (settings.stop_loss_pct_min + settings.stop_loss_pct_max) / 2.0
+                mid_band = (
+                    settings.stop_loss_pct_min + settings.stop_loss_pct_max
+                ) / 2.0
                 stop_price = entry_price * (1.0 - mid_band)
 
     # --- 5) Optional time stop ---
@@ -202,7 +211,9 @@ def evaluate_sell_signals_hybrid(
             entry_date = dt.date.fromisoformat(str(entry_date_str))
             days_in_trade = (dt.date.today() - entry_date).days
             if days_in_trade >= time_stop_days:
-                reasons.append(f"Time stop: {days_in_trade} days ≥ {time_stop_days} days")
+                reasons.append(
+                    f"Time stop: {days_in_trade} days ≥ {time_stop_days} days"
+                )
                 if action != "SELL":
                     action = "REVIEW"
         except ValueError:

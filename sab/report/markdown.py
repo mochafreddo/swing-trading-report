@@ -81,8 +81,12 @@ def write_report(
                     f"{c.get('pattern', '-')} | {c.get('entry_state', '-')} |"
                 )
         else:
-            lines.append("| Ticker | Name | Price | EMA20 | EMA50 | RSI14 | ATR14 | Gap | Score |")
-            lines.append("|--------|------|------:|------:|------:|------:|------:|-----:|------:|")
+            lines.append(
+                "| Ticker | Name | Price | EMA20 | EMA50 | RSI14 | ATR14 | Gap | Score |"
+            )
+            lines.append(
+                "|--------|------|------:|------:|------:|------:|------:|-----:|------:|"
+            )
             for c in cand_list:
                 lines.append(
                     f"| {c.get('ticker', '-')} | {c.get('name', '-')} | {c.get('price', '-')} | "
@@ -92,7 +96,9 @@ def write_report(
         lines.append("")
 
         for c in cand_list:
-            lines.append(f"## [매수 후보] {c.get('ticker', '-')} — {c.get('name', '-')}")
+            lines.append(
+                f"## [매수 후보] {c.get('ticker', '-')} — {c.get('name', '-')}"
+            )
             lines.append(
                 f"- Price: {c.get('price', '-')} (d/d {c.get('pct_change', '-')}) H: {c.get('high', '-')} L: {c.get('low', '-')}"
             )
@@ -102,7 +108,9 @@ def write_report(
                 converted = c.get("price_converted")
                 extra = fx_note or ""
                 if converted:
-                    extra = (extra + ", " if extra else "") + f"가격 ≈ ₩{converted:,.0f}"
+                    extra = (
+                        extra + ", " if extra else ""
+                    ) + f"가격 ≈ ₩{converted:,.0f}"
                 label = f"- Currency: {currency}"
                 if extra:
                     label += f" ({extra})"
@@ -116,9 +124,7 @@ def write_report(
                     f"EMA10({c.get('ema10', '-')}) / EMA21({c.get('ema21', '-')})"
                 )
             else:
-                trend_line = (
-                    f"- Trend: EMA20({c.get('ema20', '-')}) vs EMA50({c.get('ema50', '-')})"
-                )
+                trend_line = f"- Trend: EMA20({c.get('ema20', '-')}) vs EMA50({c.get('ema50', '-')})"
                 if c.get("sma200") and c.get("sma200") != "-":
                     trend_line += f", SMA200({c.get('sma200', '-')})"
                 if c.get("trend_pass"):
@@ -147,7 +153,10 @@ def write_report(
                 checklist: list[str] = []
                 if c.get("sma20") not in (None, "-"):
                     checklist.append("Close>SMA20?")
-                if c.get("ema10") not in (None, "-") and c.get("ema21") not in (None, "-"):
+                if c.get("ema10") not in (None, "-") and c.get("ema21") not in (
+                    None,
+                    "-",
+                ):
                     checklist.append("EMA10≥EMA21?")
                 lines.append(f"- Checklist: {', '.join(checklist)}")
                 if c.get("atr14"):

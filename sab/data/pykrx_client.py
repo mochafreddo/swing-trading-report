@@ -118,7 +118,7 @@ def _import_pykrx_stock() -> ModuleType:
         return importlib.import_module("pykrx.stock")
     except ImportError as exc:  # pragma: no cover - runtime dependency
         raise PykrxNotInstalledError(
-            "pykrx is required for PyKRX data provider. Install with 'uv add pykrx'."
+            "pykrx is required for PyKRX data provider. Install with 'uv sync --extra pykrx'."
         ) from exc
 
 

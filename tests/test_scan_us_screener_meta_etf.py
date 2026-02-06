@@ -70,12 +70,17 @@ class RunScanUSScreenerMetaETFTests(unittest.TestCase):
                 captured_meta.update(meta)
                 from sab.signals.hybrid_buy import HybridEvaluationResult
 
-                return HybridEvaluationResult(ticker, None, "Did not meet hybrid signal criteria")
+                return HybridEvaluationResult(
+                    ticker, None, "Did not meet hybrid signal criteria"
+                )
 
             with (
                 patch("sab.scan.load_config", return_value=cfg),
                 patch("sab.scan.load_watchlist", return_value=[]),
-                patch("sab.scan.write_report", return_value=os.path.join(tmpdir, "report.md")),
+                patch(
+                    "sab.scan.write_report",
+                    return_value=os.path.join(tmpdir, "report.md"),
+                ),
                 patch("sab.scan.KUS.screen", return_value=kres),
                 patch("sab.scan.KISClient.overseas_holidays", return_value=[]),
                 patch(

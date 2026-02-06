@@ -27,7 +27,10 @@ class RunScanUSHolidayCallTests(unittest.TestCase):
             with (
                 patch("sab.scan.load_config", return_value=cfg),
                 patch("sab.scan.load_watchlist", return_value=[]),
-                patch("sab.scan.write_report", return_value=os.path.join(tmpdir, "report.md")),
+                patch(
+                    "sab.scan.write_report",
+                    return_value=os.path.join(tmpdir, "report.md"),
+                ),
                 patch(
                     "sab.scan.KISClient.overseas_holidays",
                     autospec=True,

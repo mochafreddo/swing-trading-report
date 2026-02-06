@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,7 +29,10 @@ class KISScreener:
     """Fetches ranked tickers from KIS Developers volume-rank API."""
 
     def __init__(
-        self, client: KISClient, cache_dir: str | None = None, cache_ttl_minutes: float = 5.0
+        self,
+        client: KISClient,
+        cache_dir: str | None = None,
+        cache_ttl_minutes: float = 5.0,
     ) -> None:
         self._client = client
         self._cache_dir = cache_dir
@@ -62,7 +66,10 @@ class KISScreener:
 
             enriched = dict(row)
             name = (
-                row.get("hts_kor_isnm") or row.get("stck_hnm") or row.get("kor_sec_name") or ticker
+                row.get("hts_kor_isnm")
+                or row.get("stck_hnm")
+                or row.get("kor_sec_name")
+                or ticker
             )
             enriched["ticker"] = ticker
             enriched["name"] = name
@@ -137,7 +144,5 @@ class KISScreener:
             "tickers": result.tickers,
             "metadata": metadata,
         }
-        try:
+        with suppress(Exception):
             save_json(self._cache_dir, key, payload)
-        except Exception:
-            pass

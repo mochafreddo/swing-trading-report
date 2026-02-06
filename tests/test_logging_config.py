@@ -58,7 +58,9 @@ def test_configure_logging_local_tz_offset(
     line = _format_root(make_log_record(created=FIXED_CREATED))
 
     expected_ts = (
-        dt.datetime.fromtimestamp(FIXED_CREATED).astimezone().isoformat(timespec="milliseconds")
+        dt.datetime.fromtimestamp(FIXED_CREATED)
+        .astimezone()
+        .isoformat(timespec="milliseconds")
     )
     assert line == f"{expected_ts} INFO sab.test - hello"
 
@@ -75,7 +77,9 @@ def test_configure_logging_invalid_tz_defaults_to_local(
     line = _format_root(make_log_record(created=FIXED_CREATED))
 
     expected_ts = (
-        dt.datetime.fromtimestamp(FIXED_CREATED).astimezone().isoformat(timespec="milliseconds")
+        dt.datetime.fromtimestamp(FIXED_CREATED)
+        .astimezone()
+        .isoformat(timespec="milliseconds")
     )
     assert line == f"{expected_ts} INFO sab.test - hello"
 
@@ -112,7 +116,9 @@ def test_configure_logging_respects_log_format(
     assert line == "CUSTOM:sab.test:hello"
 
 
-def test_configure_logging_respects_log_level(isolated_root_logger, monkeypatch, capsys) -> None:
+def test_configure_logging_respects_log_level(
+    isolated_root_logger, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
     monkeypatch.setenv("LOG_TZ", "utc")
     monkeypatch.setenv("LOG_FORMAT", "%(levelname)s %(name)s - %(message)s")
@@ -218,6 +224,8 @@ def test_configure_logging_log_tz_defaults_to_local_when_unset(
     line = _format_root(make_log_record(created=FIXED_CREATED))
 
     expected_ts = (
-        dt.datetime.fromtimestamp(FIXED_CREATED).astimezone().isoformat(timespec="milliseconds")
+        dt.datetime.fromtimestamp(FIXED_CREATED)
+        .astimezone()
+        .isoformat(timespec="milliseconds")
     )
     assert line == f"{expected_ts} INFO sab.test - hello"

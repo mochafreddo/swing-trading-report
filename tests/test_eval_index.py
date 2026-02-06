@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 
 from sab.signals.eval_index import choose_eval_index
 from sab.signals.evaluator import EvaluationSettings, evaluate_ticker
-from sab.signals.hybrid_buy import HybridEvaluationSettings, HybridPattern, evaluate_ticker_hybrid
+from sab.signals.hybrid_buy import (
+    HybridEvaluationSettings,
+    HybridPattern,
+    evaluate_ticker_hybrid,
+)
 from sab.signals.hybrid_sell import (
     HybridSellEvaluation,
     HybridSellSettings,
@@ -25,7 +29,9 @@ def _make_candle(date: dt.date, close: float, volume: float) -> dict[str, float 
     }
 
 
-def _build_candles(dates: list[dt.date], close_start: float = 100.0, volume: float = 1_000_000.0):
+def _build_candles(
+    dates: list[dt.date], close_start: float = 100.0, volume: float = 1_000_000.0
+):
     candles: list[dict[str, float | str]] = []
     for idx, date in enumerate(dates):
         candles.append(_make_candle(date, close_start + idx, volume))
@@ -257,9 +263,30 @@ def test_evaluate_ticker_uses_eval_index(monkeypatch):
     import sab.signals.evaluator as ev
 
     candles = [
-        {"date": "20250108", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 1_000_000},
-        {"date": "20250109", "open": 10, "high": 12, "low": 9.5, "close": 11, "volume": 1_100_000},
-        {"date": "20250110", "open": 11, "high": 13, "low": 10, "close": 12, "volume": 100},
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
     ]
 
     def fake_eval_index(data, meta=None, provider=None):
@@ -384,9 +411,30 @@ def test_evaluate_sell_signals_use_eval_index(monkeypatch):
     import sab.signals.sell_rules as sr
 
     candles = [
-        {"date": "20250108", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 1_000_000},
-        {"date": "20250109", "open": 10, "high": 12, "low": 9.5, "close": 11, "volume": 1_100_000},
-        {"date": "20250110", "open": 11, "high": 13, "low": 10, "close": 12, "volume": 100},
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
     ]
 
     def fake_eval_index(data, meta=None, provider=None):
@@ -406,9 +454,30 @@ def test_evaluate_sell_signals_hybrid_use_eval_index(monkeypatch):
     import sab.signals.hybrid_sell as hs
 
     candles = [
-        {"date": "20250108", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 1_000_000},
-        {"date": "20250109", "open": 10, "high": 12, "low": 9.5, "close": 11, "volume": 1_100_000},
-        {"date": "20250110", "open": 11, "high": 13, "low": 10, "close": 12, "volume": 100},
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
     ]
 
     def fake_eval_index(data, meta=None, provider=None):

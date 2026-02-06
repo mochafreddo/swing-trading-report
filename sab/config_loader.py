@@ -17,7 +17,9 @@ class ConfigData:
 
 
 def load_yaml_config(path: str | None = None) -> ConfigData:
-    resolved_path = path if path is not None else (os.getenv("SAB_CONFIG") or "config.yaml")
+    resolved_path = (
+        path if path is not None else (os.getenv("SAB_CONFIG") or "config.yaml")
+    )
     p = Path(resolved_path)
     if not p.exists():
         return ConfigData(raw={})

@@ -174,12 +174,17 @@ def run_scan(
             min_interval = None
             if cfg.kis_min_interval_ms is not None:
                 min_interval = max(0.0, cfg.kis_min_interval_ms / 1000.0)
-            kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
+            kis_client = KISClient(
+                creds, cache_dir=cfg.data_dir, min_interval=min_interval
+            )
             cache_hint = kis_client.cache_status
     elif cfg.data_provider == "pykrx":
         client = ensure_pykrx_client()
         if client is None:
-            msg = "PyKRX provider selected but pykrx package is unavailable. Install with 'uv add pykrx'."
+            msg = (
+                "PyKRX provider selected but pykrx package is unavailable. "
+                "Install with 'uv sync --extra pykrx'."
+            )
             failures.append(msg)
             logger.error(msg)
             fatal_failure = True
@@ -219,13 +224,18 @@ def run_scan(
                 cache_status = screen_result.metadata.get("cache_status", "refresh")
                 if not screener_only:
                     if tickers:
-                        logger.info("Screener combined with watchlist (%s tickers)", len(tickers))
+                        logger.info(
+                            "Screener combined with watchlist (%s tickers)",
+                            len(tickers),
+                        )
                     tickers = list(dict.fromkeys(tickers + kr_tickers))
                 else:
                     tickers = kr_tickers
                 total_added += len(kr_tickers)
                 logger.info(
-                    "KR screener selected %s tickers (cache: %s)", len(kr_tickers), cache_status
+                    "KR screener selected %s tickers (cache: %s)",
+                    len(kr_tickers),
+                    cache_status,
                 )
 
             # US screener (simple defaults)
@@ -291,7 +301,9 @@ def run_scan(
                                 session_info.get("state"),
                             )
                     except Exception as exc:
-                        logger.warning("US KIS screener failed (%s); falling back to defaults", exc)
+                        logger.warning(
+                            "US KIS screener failed (%s); falling back to defaults", exc
+                        )
                 if not us_tickers and cfg.us_screener_defaults:
                     us_scr = USScreener(cfg.us_screener_defaults)
                     us_res = us_scr.screen(USScreenRequest(limit=screener_limit))
@@ -305,7 +317,8 @@ def run_scan(
                         us_source = fallback_label
                         if cfg.us_screener_mode == "kis":
                             logger.info(
-                                "US defaults list used as fallback (%s tickers)", len(us_tickers)
+                                "US defaults list used as fallback (%s tickers)",
+                                len(us_tickers),
                             )
                     else:
                         logger.warning(
@@ -356,7 +369,7 @@ def run_scan(
             "AMEX": "AMS",
             "AMS": "AMS",
         }
-        return mapping.get(suffix, None)
+        return mapping.get(suffix)
 
     ticker_currency: dict[str, str] = {t: _infer_currency(t) for t in tickers}
     fx_rate: float | None = None
@@ -396,12 +409,16 @@ def run_scan(
         except KISClientError as exc:
             msg = str(exc)
             if "HTTP 404" in msg:
-                logger.info("US holiday API returned 404 (no entries from %s to %s)", start, end)
+                logger.info(
+                    "US holiday API returned 404 (no entries from %s to %s)", start, end
+                )
                 return {}
             logger.warning("Failed to refresh US holidays: %s", msg)
             return {}
 
-        logger.info("US holiday API succeeded: %s rows for %s -> %s", len(items), start, end)
+        logger.info(
+            "US holiday API succeeded: %s rows for %s -> %s", len(items), start, end
+        )
         if items:
             logger.debug("US holiday sample row: %s", items[0])
         return merge_holidays(cfg.data_dir, "US", items)
@@ -416,7 +433,11 @@ def run_scan(
             base_symbol, suffix = _split_overseas(ticker)
             exch = _excd_from_suffix(suffix)
             # Cache key reflects market to avoid collisions
-            cache_key = f"candles_overseas_{exch}_{base_symbol}" if exch else f"candles_{ticker}"
+            cache_key = (
+                f"candles_overseas_{exch}_{base_symbol}"
+                if exch
+                else f"candles_{ticker}"
+            )
             cached = load_json(cfg.data_dir, cache_key)
             if isinstance(cached, list) and cached:
                 market_data[ticker] = cached
@@ -427,7 +448,9 @@ def run_scan(
             try:
                 if exch:
                     candles = kis_client.overseas_daily_candles(
-                        symbol=base_symbol, exchange=exch, count=max(cfg.min_history_bars, 200)
+                        symbol=base_symbol,
+                        exchange=exch,
+                        count=max(cfg.min_history_bars, 200),
                     )
                 else:
                     candles = kis_client.daily_candles(
@@ -475,7 +498,9 @@ def run_scan(
                                     exc,
                                     len(candles),
                                 )
-                                failures.append(f"{ticker}: KIS error ({exc}); used PyKRX fallback")
+                                failures.append(
+                                    f"{ticker}: KIS error ({exc}); used PyKRX fallback"
+                                )
                                 if not pykrx_warning_added:
                                     failures.append(
                                         "Warning: PyKRX fallback data is end-of-day and may differ from KIS."
@@ -486,7 +511,9 @@ def run_scan(
                             fallback_client = None
                     else:
                         fallback_error = (
-                            pykrx_import_error if not exch else "Overseas symbol; no PyKRX fallback"
+                            pykrx_import_error
+                            if not exch
+                            else "Overseas symbol; no PyKRX fallback"
                         )
 
                     msg = f"{ticker}: {exc}"
@@ -497,7 +524,9 @@ def run_scan(
     elif cfg.data_provider == "pykrx" and pykrx_client:
         for ticker in tickers:
             try:
-                candles = pykrx_client.daily_candles(ticker, count=max(cfg.min_history_bars, 200))
+                candles = pykrx_client.daily_candles(
+                    ticker, count=max(cfg.min_history_bars, 200)
+                )
             except PykrxClientError as exc:
                 msg = f"{ticker}: PyKRX error ({exc})"
                 failures.append(msg)
@@ -586,7 +615,9 @@ def run_scan(
         if fx_rate is not None:
             meta["usd_krw_rate"] = fx_rate
         if cfg.strategy_mode == "sma_ema_hybrid":
-            result_hybrid = evaluate_ticker_hybrid(ticker, ticker_candles, hybrid_settings, meta)
+            result_hybrid = evaluate_ticker_hybrid(
+                ticker, ticker_candles, hybrid_settings, meta
+            )
             if result_hybrid.candidate:
                 candidates.append(result_hybrid.candidate)
             elif (
@@ -622,7 +653,9 @@ def run_scan(
             if holiday_entry:
                 status = "Open" if holiday_entry.is_open else "Holiday"
                 note = holiday_entry.note or ""
-                candidate["market_status"] = f"US {status}{(' - ' + note) if note else ''}"
+                candidate["market_status"] = (
+                    f"US {status}{(' - ' + note) if note else ''}"
+                )
             else:
                 candidate["market_status"] = f"US market {us_market_status()}"
 
@@ -644,7 +677,9 @@ def run_scan(
     logger.info("Buy report written to: %s", out_path)
 
     if fatal_failure:
-        logger.error("Scan completed with fatal errors. See failures section in report.")
+        logger.error(
+            "Scan completed with fatal errors. See failures section in report."
+        )
         return 1
 
     if failures:

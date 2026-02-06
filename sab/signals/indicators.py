@@ -14,10 +14,7 @@ def ema(values: Iterable[float], period: int) -> list[float]:
     for v in vals:
         if v is None:
             v = float("nan")
-        if ema_prev is None:
-            ema_prev = v
-        else:
-            ema_prev = (v * k) + (ema_prev * (1 - k))
+        ema_prev = v if ema_prev is None else (v * k) + (ema_prev * (1 - k))
         out.append(ema_prev)
     return out
 
@@ -36,7 +33,9 @@ def rsi(closes: Iterable[float], period: int = 14) -> list[float]:
     avg_loss = sum(losses[1 : period + 1]) / period if len(losses) > period else 0.0
     rsis: list[float] = [float("nan")] * len(c)
     if period < len(c):
-        rsis[period] = 100.0 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss)))
+        rsis[period] = (
+            100.0 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss)))
+        )
     for i in range(period + 1, len(c)):
         avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
         avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
@@ -46,7 +45,10 @@ def rsi(closes: Iterable[float], period: int = 14) -> list[float]:
 
 
 def atr(
-    highs: Iterable[float], lows: Iterable[float], closes: Iterable[float], period: int = 14
+    highs: Iterable[float],
+    lows: Iterable[float],
+    closes: Iterable[float],
+    period: int = 14,
 ) -> list[float]:
     H, L, C = list(highs), list(lows), list(closes)
     n = min(len(H), len(L), len(C))

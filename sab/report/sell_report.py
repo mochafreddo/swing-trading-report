@@ -31,7 +31,9 @@ def _fmt_percent(value: float | None) -> str:
         return "-"
 
 
-def _fmt_currency(value: float | None, currency: str | None, fx_rate: float | None) -> str:
+def _fmt_currency(
+    value: float | None, currency: str | None, fx_rate: float | None
+) -> str:
     if value is None:
         return "-"
     try:

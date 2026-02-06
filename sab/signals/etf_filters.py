@@ -33,10 +33,7 @@ def is_etf_or_leveraged(ticker: str, meta: Mapping[str, Any]) -> bool:
 
     # Very coarse ticker-based hints as a fallback only.
     ticker_hints = ["2X", "3X"]
-    if any(h in t for h in ticker_hints):
-        return True
-
-    return False
+    return bool(any(h in t for h in ticker_hints))
 
 
 __all__ = ["is_etf_or_leveraged"]

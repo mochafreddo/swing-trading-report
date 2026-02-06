@@ -43,7 +43,9 @@ def evaluate_sell_signals(
     settings: SellSettings,
 ) -> SellEvaluation:
     if len(candles) < settings.min_bars:
-        return SellEvaluation(action="REVIEW", reasons=["Insufficient data for sell evaluation"])
+        return SellEvaluation(
+            action="REVIEW", reasons=["Insufficient data for sell evaluation"]
+        )
 
     meta_currency = holding.get("entry_currency") or holding.get("currency")
     meta = {"currency": meta_currency} if meta_currency else {}
@@ -80,7 +82,9 @@ def evaluate_sell_signals(
     if settings.require_sma200:
         sma200 = sma(closes, 200)
         sma_val = sma200[-1]
-        if not (close_today > sma_val and ema_short[-1] > sma_val and ema_long[-1] > sma_val):
+        if not (
+            close_today > sma_val and ema_short[-1] > sma_val and ema_long[-1] > sma_val
+        ):
             reasons.append("Below SMA200 context")
             action = "REVIEW"
 
@@ -120,9 +124,13 @@ def evaluate_sell_signals(
                         break
                 else:
                     start_idx = len(closes) - 1
-                    reasons.append("Entry date is after latest candle; ATR trail uses latest close")
+                    reasons.append(
+                        "Entry date is after latest candle; ATR trail uses latest close"
+                    )
             except ValueError:
-                reasons.append("Entry date missing/invalid; ATR trail uses recent window")
+                reasons.append(
+                    "Entry date missing/invalid; ATR trail uses recent window"
+                )
         else:
             reasons.append("Entry date missing/invalid; ATR trail uses recent window")
 
@@ -146,7 +154,9 @@ def evaluate_sell_signals(
             entry_date = dt.date.fromisoformat(str(entry_date_str))
             days_in_trade = (dt.date.today() - entry_date).days
             if days_in_trade >= time_stop_days:
-                reasons.append(f"Time stop: {days_in_trade} days >= {time_stop_days} days")
+                reasons.append(
+                    f"Time stop: {days_in_trade} days >= {time_stop_days} days"
+                )
                 action = "REVIEW" if action != "SELL" else action
         except ValueError:
             pass

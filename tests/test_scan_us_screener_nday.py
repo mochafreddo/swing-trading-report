@@ -41,7 +41,10 @@ class RunScanUSScreenerNdayTests(unittest.TestCase):
             with (
                 patch("sab.scan.load_config", return_value=cfg),
                 patch("sab.scan.load_watchlist", return_value=[]),
-                patch("sab.scan.write_report", return_value=os.path.join(tmpdir, "report.md")),
+                patch(
+                    "sab.scan.write_report",
+                    return_value=os.path.join(tmpdir, "report.md"),
+                ),
                 patch("sab.scan.us_session_info", return_value=fake_session),
                 patch("sab.scan.KISClient.overseas_holidays", return_value=[]),
                 patch("sab.scan.KISClient.overseas_daily_candles", return_value=[]),
@@ -51,7 +54,10 @@ class RunScanUSScreenerNdayTests(unittest.TestCase):
                     return_value=type(
                         "KRes",
                         (),
-                        {"tickers": ["AAPL.NAS"], "metadata": {"nday_used": 1, "nday_tried": [1]}},
+                        {
+                            "tickers": ["AAPL.NAS"],
+                            "metadata": {"nday_used": 1, "nday_tried": [1]},
+                        },
                     )(),
                 ) as mock_screen,
             ):
