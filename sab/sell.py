@@ -322,6 +322,7 @@ def run_sell(*, provider: str | None) -> int:
             "currency": ticker_currency.get(ticker),
             "exchange": _exchange_from_suffix(suffix),
             "data_source": ticker_data_source.get(ticker, cfg.data_provider),
+            "data_dir": cfg.data_dir,
         }
         if cfg.sell_mode == "sma_ema_hybrid":
             evaluation: HybridSellEvaluation | SellEvaluation = (

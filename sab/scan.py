@@ -618,6 +618,7 @@ def run_scan(
         data_source = ticker_data_source.get(ticker, cfg.data_provider)
         meta["data_source"] = data_source
         meta["provider"] = data_source
+        meta["data_dir"] = cfg.data_dir
         if fx_rate is not None:
             meta["usd_krw_rate"] = fx_rate
         if cfg.strategy_mode == "sma_ema_hybrid":

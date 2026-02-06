@@ -29,20 +29,30 @@ class EvalContext:
     state: str
 
 
-_US_HOLIDAYS_CACHE: dict[str, bool] | None = None
+_US_HOLIDAYS_CACHE: dict[str, dict[str, bool]] | None = None
 
 
-def _load_us_holidays() -> dict[str, bool]:
+def _resolve_data_dir(data_dir: str | None) -> str:
+    if data_dir:
+        return str(data_dir)
+    return os.getenv("SAB_DATA_DIR") or "data"
+
+
+def _load_us_holidays(data_dir: str | None = None) -> dict[str, bool]:
     global _US_HOLIDAYS_CACHE
-    if _US_HOLIDAYS_CACHE is not None:
-        return _US_HOLIDAYS_CACHE
+    if _US_HOLIDAYS_CACHE is None:
+        _US_HOLIDAYS_CACHE = {}
 
-    data_dir = os.getenv("SAB_DATA_DIR") or "data"
-    path = os.path.join(data_dir, "holidays_us.json")
+    resolved_data_dir = os.path.abspath(_resolve_data_dir(data_dir))
+    cached = _US_HOLIDAYS_CACHE.get(resolved_data_dir)
+    if cached is not None:
+        return cached
+
+    path = os.path.join(resolved_data_dir, "holidays_us.json")
     holidays: dict[str, bool] = {}
 
     # Seed with built-in US calendar.
-    for date in load_us_trading_calendar(data_dir):
+    for date in load_us_trading_calendar(resolved_data_dir):
         holidays[date] = True
 
     try:
@@ -56,12 +66,12 @@ def _load_us_holidays() -> dict[str, bool]:
     except (OSError, json.JSONDecodeError):
         pass
 
-    _US_HOLIDAYS_CACHE = holidays
+    _US_HOLIDAYS_CACHE[resolved_data_dir] = holidays
     return holidays
 
 
-def _is_us_holiday(date: dt.date) -> bool:
-    holidays = _load_us_holidays()
+def _is_us_holiday(date: dt.date, data_dir: str | None = None) -> bool:
+    holidays = _load_us_holidays() if data_dir is None else _load_us_holidays(data_dir)
     entry = holidays.get(date.strftime("%Y%m%d"))
     return bool(entry)
 
@@ -125,6 +135,7 @@ def choose_eval_index(
     lookback_for_volume: int = 5,
     thin_ratio: float = 0.2,
     volume_floor: float = 1_000.0,
+    data_dir: str | None = None,
 ) -> tuple[int, bool]:
     """Decide which candle index should be used for evaluation."""
     if not candles:
@@ -133,6 +144,10 @@ def choose_eval_index(
         return 0, False
 
     meta = meta or {}
+    if data_dir is None:
+        meta_data_dir = meta.get("data_dir")
+        if isinstance(meta_data_dir, str) and meta_data_dir.strip():
+            data_dir = meta_data_dir.strip()
     provider_hint = (
         str(meta.get("data_source") or meta.get("provider") or provider or "kis")
         .strip()
@@ -171,7 +186,7 @@ def choose_eval_index(
     idx_eval = idx_latest
     is_us_holiday = False
     if market == "US":
-        is_us_holiday = _is_us_holiday(session_date)
+        is_us_holiday = _is_us_holiday(session_date, data_dir=data_dir)
         if is_us_holiday:
             state = STATE_CLOSED
 

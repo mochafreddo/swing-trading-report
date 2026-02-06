@@ -74,6 +74,7 @@ def evaluate_sell_signals_hybrid(
     meta = {"currency": meta_currency} if meta_currency else {}
     meta["exchange"] = holding.get("exchange")
     meta["data_source"] = holding.get("data_source")
+    meta["data_dir"] = holding.get("data_dir")
     provider = str(meta.get("data_source") or holding.get("provider") or "kis").lower()
     idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
     if idx_eval < 1:

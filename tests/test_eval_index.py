@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from zoneinfo import ZoneInfo
 
 from sab.signals.eval_index import choose_eval_index
@@ -90,6 +91,52 @@ def test_choose_eval_index_us_holiday_keeps_last(monkeypatch):
     idx, dropped = choose_eval_index(candles, meta={"currency": "USD"}, now=now)
     assert idx == len(candles) - 1
     assert dropped is False
+
+
+def test_choose_eval_index_uses_explicit_data_dir_over_env(monkeypatch, tmp_path):
+    import sab.signals.eval_index as ei
+
+    monkeypatch.setattr(ei, "_US_HOLIDAYS_CACHE", {}, raising=False)
+
+    env_dir = tmp_path / "env-data"
+    explicit_dir = tmp_path / "explicit-data"
+    env_dir.mkdir()
+    explicit_dir.mkdir()
+
+    env_holidays_path = env_dir / "holidays_us.json"
+    explicit_holidays_path = explicit_dir / "holidays_us.json"
+
+    env_holidays_path.write_text(
+        json.dumps({"20251212": {"note": "Regular Session", "is_open": True}}),
+        encoding="utf-8",
+    )
+    explicit_holidays_path.write_text(
+        json.dumps({"20251212": {"note": "Custom Closure", "is_open": False}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SAB_DATA_DIR", str(env_dir))
+
+    dates = [
+        dt.date(2025, 12, 10),
+        dt.date(2025, 12, 11),
+        dt.date(2025, 12, 12),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 12, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    idx_env, dropped_env = choose_eval_index(candles, meta={"currency": "USD"}, now=now)
+    assert idx_env == len(candles) - 2
+    assert dropped_env is True
+
+    idx_explicit, dropped_explicit = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=str(explicit_dir),
+    )
+    assert idx_explicit == len(candles) - 1
+    assert dropped_explicit is False
 
 
 def test_choose_eval_index_us_intraday_without_today_keeps_last():
