@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import datetime as _dt
 import os
 from collections.abc import Iterable
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_text
+from .time_label import resolve_report_timestamp
 
 
 def _ensure_dir(path: str) -> None:
@@ -43,8 +43,7 @@ def write_report(
     strategy_mode: str | None = None,
 ) -> str:
     _ensure_dir(report_dir)
-    today = _dt.datetime.now().strftime("%Y-%m-%d")
-    now_str = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    today, now_str, tz_label = resolve_report_timestamp()
 
     cand_list = list(candidates)
     failures = list(failures or [])
@@ -52,7 +51,7 @@ def write_report(
     title = REPORT_TITLES.get(report_type, "Swing Report")
     lines: list[str] = []
     lines.append(f"# {title} — {today}")
-    lines.append(f"- Run at: {now_str} KST")
+    lines.append(f"- Run at: {now_str} {tz_label}")
     cache_note = f" (cache: {cache_hint})" if cache_hint else ""
     lines.append(f"- Provider: {provider}{cache_note}")
     if strategy_mode and report_type == "buy":

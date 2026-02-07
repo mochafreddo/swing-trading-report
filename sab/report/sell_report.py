@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import datetime as _dt
 import math
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_text
+from .time_label import resolve_report_timestamp
 
 
 def _ensure_dir(path: str) -> None:
@@ -118,8 +118,7 @@ def write_sell_report(
 ) -> str:
     _ensure_dir(report_dir)
 
-    today = _dt.datetime.now().strftime("%Y-%m-%d")
-    now_str = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    today, now_str, tz_label = resolve_report_timestamp()
 
     rows = list(evaluated)
     failures_list = list(failures or [])
@@ -133,7 +132,7 @@ def write_sell_report(
 
     lines: list[str] = []
     lines.append(f"# Holdings Sell Review — {today}")
-    lines.append(f"- Run at: {now_str} KST")
+    lines.append(f"- Run at: {now_str} {tz_label}")
     cache_note = f" (cache: {cache_hint})" if cache_hint else ""
     lines.append(f"- Provider: {provider}{cache_note}")
     lines.append(f"- Evaluated holdings: {len(rows)}")

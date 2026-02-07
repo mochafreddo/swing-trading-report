@@ -10,7 +10,7 @@
 
 ```
 # <Title> — YYYY-MM-DD
-- Run at: YYYY-MM-DD HH:MM KST
+- Run at: YYYY-MM-DD HH:MM <TZ>
 - Provider: kis (cache: hit|refresh|expired|pykrx)
 - Universe/Evaluated: counts
 - Notes: N issue(s) logged (see Appendix)  # only when present
@@ -41,5 +41,5 @@
 ## 서식
 
 - 숫자: 가격은 천단위 구분, 지표는 소수 1자리, 변화율은 % 표기
-- 시간: 헤더는 KST, US 스크리너 메타는 ET 상태
+- 시간: 헤더는 실행 환경의 로컬 타임존 라벨, US 스크리너 메타는 ET 상태
 - 5분 내 훑어볼 수 있도록 간결한 리스트 중심 구성

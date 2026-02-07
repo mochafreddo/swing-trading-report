@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import sab.report.markdown as buy_markdown
+import sab.report.sell_report as sell_markdown
 from sab.report.markdown import write_report
 from sab.report.sell_report import SellReportRow, write_sell_report
 
@@ -144,3 +146,53 @@ def test_write_sell_report_quantity_digits_is_configurable(tmp_path: Path) -> No
     )
     content = Path(out_path).read_text(encoding="utf-8")
     assert "| CMG.NYS | 0.2682 |" in content
+
+
+def test_write_report_uses_runtime_timezone_label(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        buy_markdown,
+        "resolve_report_timestamp",
+        lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
+    )
+    out_path = write_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        universe_count=1,
+        candidates=[{"ticker": "AAPL", "name": "Apple", "price": "190"}],
+        report_type="buy",
+    )
+    content = Path(out_path).read_text(encoding="utf-8")
+    assert "- Run at: 2026-02-06 09:30 EST" in content
+    assert "KST" not in content
+
+
+def test_write_sell_report_uses_runtime_timezone_label(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        sell_markdown,
+        "resolve_report_timestamp",
+        lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
+    )
+    row = SellReportRow(
+        ticker="AAPL.NAS",
+        name="Apple",
+        quantity=1.0,
+        entry_price=150.0,
+        entry_date="2026-01-02",
+        last_price=190.0,
+        pnl_pct=0.2,
+        action="HOLD",
+        reasons=["test"],
+        stop_price=170.0,
+        target_price=210.0,
+        currency="USD",
+    )
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=[row],
+    )
+    content = Path(out_path).read_text(encoding="utf-8")
+    assert "- Run at: 2026-02-06 09:30 EST" in content
+    assert "KST" not in content
