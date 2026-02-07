@@ -2,7 +2,7 @@
 
 간단한 스윙 스크리닝을 원할 때만 실행하고, 결과를 마크다운 리포트로 저장하는 개인용 로컬 프로젝트입니다. 데이터 소스는 기본적으로 한국투자증권 KIS Developers(Open API)를 사용하며, 국내(KR) 기본 + (선택) 해외(US)까지 확장 가능합니다. 프로젝트/의존성 관리는 uv를 사용합니다.
 
-상세 배경과 요구사항은 PRD.md 참고.
+상세 배경과 요구사항은 `docs/PRD.md` 참고.
 
 ## Quickstart (uv 기반)
 
@@ -123,7 +123,8 @@ Per‑market 임계치(권장)
 - `data/` … 캐시/상태(JSON 또는 SQLite)
 - `docs/kis-setup.md` … KIS 설정 가이드
 - `docs/report-spec.md` … 리포트 스펙
-- `PRD.md` … 제품 요구사항 문서
+- `docs/ARCHITECTURE.md` … 아키텍처 문서
+- `docs/PRD.md` … 제품 요구사항 문서
 - `holdings.yaml` … 보유 목록(매도/보류 평가용)
 
 ## 스크립트화 권장
