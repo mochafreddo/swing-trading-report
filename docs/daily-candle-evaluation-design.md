@@ -7,14 +7,14 @@
 실무에서 다음 두 가지 문제가 발생합니다.
 
 - KIS 일봉 API는 **장이 진행 중이어도 “오늘”을 나타내는 마지막 캔들**(장중 스냅샷)을 반환할 수 있습니다.
-- 현재 구현은 암묵적으로 **`candles`의 마지막 원소 = 완전히 종료된 일봉**이라고 가정하고 `candles[-1]`을 기준으로 평가합니다.
+- (과거) “`candles[-1]` = 완전히 종료된 일봉”이라고 가정하면, 미국 장중 실행 시 **미완성 당일 봉**이 평가에 섞일 수 있습니다.
 
 EOD(종가) 기반 스윙 전략에서는 다음이 필요합니다.
 
 - 시장이 열려 있을 때는 *어제 종가*처럼 **완료된 일봉만 기준으로 평가**해야 합니다.
 - 미완성 장중 캔들이 EMA/RSI/ATR 조건이나 하이브리드 패턴 탐지에 섞이지 않도록 해야 합니다.
 
-이 문서는 해당 동작을 개선하는 방법을 정의합니다.
+이 문서는 해당 동작을 개선하는 방법을 정의하며, 제안된 핵심(평가 인덱스 선택 + 슬라이싱)은 현재 코드에 반영되어 있습니다.
 
 ## 2. KIS 일봉 동작(요약)
 
@@ -268,24 +268,21 @@ very_thin_today = (
 
 ## 9. 코드베이스 통합 지점
 
-현재 “마지막 캔들 = 평가 캔들”을 가정하는 **의사결정 레벨 함수**에 헬퍼와 Option B 슬라이싱을 적용합니다.
+“어느 날짜를 평가할지”를 중앙화하기 위해 `sab/signals/eval_index.py`의 `choose_eval_index`를 사용하고, 평가에 쓰이는 시퀀스는 `idx_eval`까지 슬라이싱(Option B)하여 전달합니다.
 
 ### 9.1 매수(Buy)
 
 - `sab/signals/hybrid_buy.py`
   - `evaluate_ticker_hybrid`:
-    - 현재:
-      - `candles[-1]`, `candles[-2]`, `sma_trend[-1]`, `ema_short[-1]`, `rsi_vals[-1]` 등 사용
-    - 변경:
-      - KIS/PyKRX + meta 기반 `idx_eval = choose_eval_index(...)` 계산
-      - 슬라이싱:
-        - `candles_eval = candles[: idx_eval + 1]`
-        - `closes_eval`, `sma_eval`, `ema_short_eval`, `ema_mid_eval`, `rsi_eval`
-      - 패턴 함수에 `*_eval` 전달:
-        - `_detect_trend_pullback_bounce(closes_eval, sma_eval, ema_short_eval, ema_mid_eval, rsi_eval, candles_eval, settings)`
-        - `_detect_swing_high_breakout(...)`
-        - `_detect_rsi_oversold_reversal(...)`
-      - 최종 후보 생성 시 `latest = candles[idx_eval]`, `prev = candles[idx_eval - 1]` 사용(가격, 등락률, 고저, 지표)
+    - KIS/PyKRX + meta 기반 `idx_eval = choose_eval_index(...)` 계산
+    - 슬라이싱:
+      - `candles_eval = candles[: idx_eval + 1]`
+      - `closes_eval`, `sma_eval`, `ema_short_eval`, `ema_mid_eval`, `rsi_eval`
+    - 패턴 함수에 `*_eval` 전달:
+      - `_detect_trend_pullback_bounce(closes_eval, sma_eval, ema_short_eval, ema_mid_eval, rsi_eval, candles_eval, settings)`
+      - `_detect_swing_high_breakout(...)`
+      - `_detect_rsi_oversold_reversal(...)`
+    - 최종 후보 생성 시 `latest = candles[idx_eval]`, `prev = candles[idx_eval - 1]` 사용(가격, 등락률, 고저, 지표)
 
 - `sab/signals/evaluator.py`
   - `evaluate_ticker`(EMA20/50 전략):

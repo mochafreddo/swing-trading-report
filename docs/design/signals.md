@@ -4,7 +4,7 @@
 
 ## 매수(Buy) 평가
 
-입력: 티커별 최소 `MIN_HISTORY_BARS` 봉(기본 200).
+입력: 티커별 최소 `MIN_HISTORY_BARS` 봉(권장 200).
 
 공통 지표:
 

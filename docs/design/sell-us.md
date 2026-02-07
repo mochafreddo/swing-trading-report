@@ -39,7 +39,7 @@
 
 환율 처리
 
-- `sab sell`은 `sab scan`과 동일하게 `fx.resolve_fx_rate`를 재사용하며 `FX_MODE`/`USD_KRW_RATE`를 따릅니다.
+- `uv run -m sab sell`은 `uv run -m sab scan`과 동일하게 `sab.fx.resolve_fx_rate`를 재사용하며 `FX_MODE`/`USD_KRW_RATE`를 따릅니다.
 - `FX_MODE=kis`이고 `KISClient`를 사용할 수 있으면, `overseas-price/v1/quotations/price-detail`에서 USD/KRW를 자동 조회하고 캐시합니다.
 - Sell 리포트 헤더에는 현재 환율 소스를 출력하며, USD 표시 가격은 요약 표와 상세 섹션 모두에서 `$X (₩Y)` 형태로 표기됩니다.
 

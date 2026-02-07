@@ -33,7 +33,7 @@
 - 히스토리 부족: `MIN_HISTORY_BARS=200+` 권장, 누적 수집으로 보완. 신규상장 등은 기준 미달 가능
 - US 심볼: `SYMBOL.US` 또는 `SYMBOL.NASD/NYSE/AMEX` 사용. US에는 PyKRX 폴백이 적용되지 않음
 - US 스크리너: `screener.us_mode=kis`로 KIS 랭크 사용. 실패 시 `screener.us_defaults`로 자동 폴백
-- 환율/통화: `FX_MODE=kis`(기본)로 설정하면 KIS 해외 현재가상세에서 `t_rate`를 받아 자동 환율을 적용하고, `FX_CACHE_TTL`분 동안 캐시합니다. 실패 시 `USD_KRW_RATE` 값으로 폴백하거나, 값이 없으면 리포트 Appendix에 경고를 남깁니다.
+- 환율/통화: 기본은 `FX_MODE=manual`이며, `FX_MODE=kis`로 설정하면 KIS 해외 현재가상세에서 `t_rate`를 받아 자동 환율을 적용하고 `FX_CACHE_TTL`분 동안 캐시합니다. 실패 시 `USD_KRW_RATE` 값으로 폴백하거나, 값이 없으면 리포트 Appendix에 경고를 남깁니다.
 - 휴장일: 미국 휴일 정보는 KIS `countries-holiday` API를 조회해 `data/holidays_us.json`에 캐시합니다. 파일을 삭제하면 다음 실행 시 자동 갱신됩니다.
 
 ## 확장

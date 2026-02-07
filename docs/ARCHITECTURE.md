@@ -10,13 +10,13 @@
 
 ## 명령과 흐름
 
-- `sab scan` → Buy 리포트
+- `uv run -m sab scan` → Buy 리포트
   1) 설정 로드(config.yaml → .env → CLI) 2) 유니버스 구성(워치리스트 ± 스크리너) 3) 캐시/백오프를 고려해 캔들 수집 4) Buy 규칙 평가 5) `reports/YYYY-MM-DD.buy.md` 저장
 
-- `sab sell` → Sell/Review 리포트
+- `uv run -m sab sell` → Sell/Review 리포트
   1) 보유 목록(`holdings.yaml`) 로드 2) 캔들 수집 3) Sell/Review 규칙(ATR 트레일, RSI, EMA 컨텍스트) 평가 4) `reports/YYYY-MM-DD.sell.md` 저장
 
-- `sab entry`(계획) → Entry 리포트
+- `uv run -m sab entry`(계획) → Entry 리포트
   - 전일 Buy 리포트를 파싱해 당일 시초/장초를 확인하고 OK/Wait/Avoid 가이드를 생성
 
 ## 모듈 맵

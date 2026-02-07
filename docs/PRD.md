@@ -56,7 +56,7 @@
 
 2-1) 매도/보유 평가(보유 종목)
 
-- 입력: `holdings.yaml`(또는 `.json`), 필드 예: `ticker, quantity, entry_price, notes`
+- 입력: `holdings.yaml`, 필드 예: `ticker, quantity, entry_price, notes`
 - 무효화 기준(예): EMA20/50 되크로스, 종가 EMA20/EMA50 하향 이탈, RSI50/30 재하락
 - 리스크 기준(예): ATR(14) 트레일링 스탑(예: 1×ATR), 시간 스탑(N거래일 경과)
 - 결과: 리포트에 Sell/Review 섹션으로 표기(사유/근거/가이드)
@@ -76,25 +76,23 @@
 
 4) 구성/입력
 
-- 원칙: 설정은 단일 소스(Single Source of Truth)로 관리하며, `.env`와 `config.yaml`에 **동일 키를 중복 정의하지 않는다**.
-  - `.env`: 시크릿/환경별 값만 저장(버전관리 제외)
-  - `config.yaml`: 전략/필터/시장/입력/출력/알림 등 비(非)시크릿 설정(버전관리 포함)
-  - 충돌 정책: 동일 키가 양쪽에 존재하면 실행을 실패로 처리하고 충돌 키를 명확히 출력한다.
+- 원칙: 기본값/임계치는 `config.yaml`에 두고, 로컬 오버라이드/시크릿은 `.env`(환경변수)에 둔다. 실행 시에는 CLI 플래그가 최우선이다.
+  - 우선순위: `config.yaml` → `.env`/환경변수 → CLI
+  - 권장: 혼란을 줄이기 위해 장기 기본값은 `config.yaml`로 수렴하고, `.env`는 시크릿/실험용 override에만 사용한다.
+  - 보안 정책: KIS 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)은 YAML 저장을 금지하며(감지 시 실행 실패), `.env`/환경변수로만 허용한다.
 - `.env` 권장 키(예시, 시크릿)
   - `KIS_APP_KEY=...`
   - `KIS_APP_SECRET=...`
   - (선택) `SLACK_WEBHOOK_URL=...` 또는 `SLACK_BOT_TOKEN=...`
   - (선택) `TELEGRAM_BOT_TOKEN=...`
 - `config.yaml` 권장 항목(예시, 비시크릿)
-  - 시장/유니버스: `markets: [KR, US]`
-  - 데이터 제공자: `data_provider: kis` (또는 `pykrx` — KR 한정 폴백)
-  - 저장소: `report_dir: reports`, `data_dir: data`
-  - 수집/호출: `min_history_bars: 200`, `kis_min_interval_ms: 500`
-  - 스크리너: `screener: { enabled: true, limit: 30, only: false }`
-  - 전략/필터: `strategy: { use_sma200_filter: true, gap_atr_multiplier: 1.0, min_dollar_volume: 5000000000, exclude_etf_etn: true, require_slope_up: true, min_price: 1000 }`
-  - 리포트 옵션: `entry_check_enabled: false`
-  - 알림(선택): `notifications: { enabled: false, telegram: { enabled: false, chat_id: "..." }, slack: { enabled: false } }`
-- 워치리스트: `watchlist.txt`(줄당 1티커) 또는 `watchlist.yaml`(메모 포함) 지원.
+  - 데이터/출력: `data.provider`, `data.screen_limit`, `data.report_dir`, `data.data_dir`
+  - KIS: `kis.base_url`, `kis.min_interval_ms`
+  - 유니버스: `universe.markets: ["KR", "US"]`
+  - 스크리너: `screener.enabled`, `screener.limit`, `screener.only`, `screener.cache_ttl_minutes`, `screener.us_mode`, `screener.us_metric`, `screener.us_limit`, `screener.us_defaults`
+  - 전략/필터: `strategy.*`, `screener.min_price`, `screener.min_dollar_volume`, `screener.us.*`
+  - 보유: `files.holdings`, 워치리스트: `files.watchlist`
+- 워치리스트: `watchlist.txt`(줄당 1티커) 지원.
 
 5) 자동 실행/알림(요약 전송)
 
@@ -162,7 +160,7 @@
 
 - v1.1
   - 리포트 서식 개선(요약 표, 섹션 앵커, 간단 점수화).
-  - 설정 파일 `config.yaml` 지원(비시크릿). `.env`는 시크릿만 사용하며, `.env`/`config.yaml` 간 키 중복을 금지.
+  - 설정 파일 `config.yaml` 지원(비시크릿). `.env`는 시크릿/로컬 override 용도로 사용(우선순위는 `config.yaml` → `.env` → CLI).
   - 리더 보완(최소 가격, (선택) RS 점수) 및 보유/매도 평가(초판)
   - 해외주식(미국) 일봉/스크리너(간단) 지원(시간대/심볼 규칙 반영)
 
@@ -177,14 +175,11 @@
 - 의존성: uv(패키지/프로젝트 매니저). Python은 uv가 자동 관리 가능.
   - 설치(macOS): `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - 버전 확인: `uv --version`
-- 초기화(최초 1회)
-  - 프로젝트 생성/전환: 리포지토리 루트에서 실행
-  - 프로젝트 설정 생성: `uv init` (기존 repo면 `pyproject.toml`만 수동 추가 예정)
-  - 필요한 라이브러리 추가 예: `uv add pandas numpy requests python-dotenv`
-  - 잠금파일/동기화: `uv lock && uv sync`
+- 최초 1회 동기화
+  - `uv sync` (옵션은 README 참고)
 - 환경설정:
   - `.env`에 시크릿 입력(예: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `SLACK_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`)
-  - `config.yaml`에 비시크릿 설정 입력(예: `markets: [KR, US]`, `data_provider: kis`, 스크리너/전략/출력 경로, 알림 토글 등)
+  - `config.yaml`에 비시크릿 설정 입력(예: `universe.markets`, 스크리너/전략/출력 경로 등). 매핑/예시는 `docs/config-migration.md` 참고
 - 실행 예시(uv run)
   - 기본 실행: `uv run -m sab scan`
   - 스크리너 크기: `uv run -m sab scan --limit 30`
