@@ -10,6 +10,11 @@
   - 모의투자/실전 투자 환경 구분
   - 필요 시 콜백/허용 IP 등 설정
 
+참고:
+
+- 자동 실행을 GitHub Actions에서 돌릴 경우, KIS 설정이 “특정 IP만 허용” 형태라면 실행이 막힐 수 있습니다.
+  - 이 경우 고정 IP 환경(VPS 등) 또는 로컬 런너로 전환이 필요할 수 있습니다.
+
 ## 2) 엔드포인트와 환경
 
 - Base URL은 환경(모의/실전)에 따라 상이하며, KIS는 포트를 사용합니다.
@@ -43,52 +48,31 @@
   - 레이트 리밋 준수(호출 간 지연/재시도 정책)
   - 인증 헤더 예시: `authorization: Bearer <token>`, `appkey: <...>`, `appsecret: <...>`, `tr_id: FHKST03010100`
 
-## 4) .env 설정 (예시)
+## 4) 설정(권장)
 
-```
-DATA_PROVIDER=kis
+### 4-1) `.env` (시크릿만)
+
+`.env`는 커밋하지 않으며, 시크릿만 둡니다.
+
+```bash
 KIS_APP_KEY=your_app_key
 KIS_APP_SECRET=your_app_secret
-KIS_BASE_URL=https://openapivts.koreainvestment.com  # 예: 모의 환경(포트는 자동 보정됨)
-SCREEN_LIMIT=30
-REPORT_DIR=reports
-DATA_DIR=data  # 토큰/캐시 저장 디렉터리
-# 전략/스크리너 옵션 예시
-USE_SMA200_FILTER=true
-GAP_ATR_MULTIPLIER=1.0
-MIN_DOLLAR_VOLUME=5000000000
-MIN_HISTORY_BARS=120
-EXCLUDE_ETF_ETN=true
-REQUIRE_SLOPE_UP=true
-SCREENER_ENABLED=true
-SCREENER_LIMIT=30
-SCREENER_ONLY=false
-SCREENER_CACHE_TTL=5
-UNIVERSE_MARKETS=KR,US
-ENTRY_CHECK_ENABLED=false
-MIN_PRICE=1000
-RS_LOOKBACK_DAYS=60
-RS_BENCHMARK_RETURN=0.0
-SELL_ATR_MULTIPLIER=1.0
-SELL_TIME_STOP_DAYS=10
-SELL_REQUIRE_SMA200=true
-
-## 7) 일봉 히스토리 누적 수집
-
-- API 특성: 일봉 기간별 시세는 호출당 최대 100봉이 반환됩니다.
-- 요구사항: 전략 안정성을 위해 `MIN_HISTORY_BARS`(권장 200) 이상 확보가 필요합니다.
-- 접근법:
-  - 날짜 창을 이동하며 여러 번 호출해 과거로 누적 수집(첫 호출: 최신 구간, 다음 호출: 가장 오래된 일자 이전으로 확장)
-  - 응답 헤더의 `tr_cont`가 제공되는 API는 이를 활용해 페이지네이션을 진행할 수 있습니다.
-  - 이후 실행에서는 최근 구간만 증분 갱신하여 호출 수를 최소화합니다.
-- 레이트리밋: 초당 거래건수 초과(EGW00201) 발생 시, 요청 간 최소 간격(`KIS_MIN_INTERVAL_MS`)과 백오프 재시도를 통해 안정화합니다.
-
-## 8) 매도/보유 평가 & 장 오픈 진입 체크
-- holdings.yaml 스키마를 정의해 보유 종목을 관리하고, 무효화/리스크/시간 스탑 규칙으로 Sell/Review 섹션을 생성합니다.
-- 전일 리포트 후보를 기준으로, 다음 날 시초가 갭과 장초 5–15분 흐름을 확인해 진입 가이드를 표기합니다.
 ```
 
-## 5) 개발 팁
+### 4-2) `config.yaml` (비시크릿)
+
+- 샘플은 repo 루트의 `config.example.yaml`을 참고하세요.
+- Base URL(모의/실전), 요청 간 최소 간격(`kis.min_interval_ms`), 스크리너/전략 임계치 등은 `config.yaml`에서 관리합니다.
+- 주의: `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패). 예를 들어 `KIS_BASE_URL`(env)과 `kis.base_url`(yaml)을 동시에 두면 안 됩니다.
+
+## 5) 운영 팁
+
+- 토큰은 24시간 유효(정책 변경 가능). 본 프로젝트는 토큰을 `data/`에 캐시해 같은 날 재발급을 피합니다.
+- 레이트리밋 `EGW00201` 대응:
+  - `kis.min_interval_ms`(또는 `KIS_MIN_INTERVAL_MS`)를 늘리고
+  - 백오프 재시도로 안정화합니다.
+
+## 6) 개발 팁
 
 - uv 사용: 기본은 `uv sync` (기본 내장 파서로 `.env` 자동 로딩 지원)
 - (선택) `python-dotenv` 기반 고급 파싱: `uv sync --extra dotenv`
@@ -97,9 +81,9 @@ SELL_REQUIRE_SMA200=true
   - 예외/재시도, 속도 제한, 간단 캐시(`./data/`) 포함
 - 폴백 전략(옵션)
   - KIS 장애/인증 실패 시 PyKRX로 한시적 대체(리포트에 경고 표기)
-- 구성 관리: `config.yaml`(예: `config.example.yaml`)에 기본값/임계치 기록 후 `.env`에서 필요한 값만 override
+- 구성 관리: 비시크릿은 `config.yaml`, 시크릿은 `.env`(중복 키 금지)
 
-## 6) 주의사항
+## 7) 주의사항
 
 - KIS 정책/요금/허용 범위는 변경될 수 있음 → 정기적으로 공식 문서 확인
 - 민감정보(AppSecret 등)는 절대 버전관리 금지

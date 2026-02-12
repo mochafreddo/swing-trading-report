@@ -8,7 +8,8 @@
 - 의존성 동기화: `uv lock && uv sync`
 - 설정:
   - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
-  - `.env`에 KIS 키/토글 작성
+  - `.env`에는 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)만 작성(권장)
+  - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
   - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 
 ## 자주 쓰는 실행
