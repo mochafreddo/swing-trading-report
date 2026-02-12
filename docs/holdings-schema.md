@@ -1,6 +1,16 @@
 # holdings.yaml Schema (Draft)
 
-이 문서는 `holdings.yaml` 파일 구조를 정의합니다. 보유 종목을 기록하여 Sell/Review 평가에 활용할 수 있습니다.
+이 문서는 `holdings.yaml` 파일 구조를 정의합니다.
+
+- 권장: 보유 목록은 Supabase(Postgres)에서 관리하고, `holdings.yaml`은 import/export 용도로 사용합니다.
+- 단, 초기에는 `holdings.yaml`만으로도 Sell/Review 평가가 가능합니다(자동 실행은 DB가 더 안전).
+
+## 관리 방식(권장)
+
+- 보유 목록은 **웹 UI(Next.js)에서 CRUD**로 관리합니다.
+- `holdings.yaml`은 다음 용도로 사용합니다.
+  - 초기 이관(import)
+  - 백업(export)
 
 ## 파일 구조
 

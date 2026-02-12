@@ -1,8 +1,21 @@
 # Swing Trading Report (KR, On‑Demand)
 
-간단한 스윙 스크리닝을 원할 때만 실행하고, 결과를 마크다운 리포트로 저장하는 개인용 로컬 프로젝트입니다. 데이터 소스는 기본적으로 한국투자증권 KIS Developers(Open API)를 사용하며, 국내(KR) 기본 + (선택) 해외(US)까지 확장 가능합니다. 프로젝트/의존성 관리는 uv를 사용합니다.
+간단한 스윙 스크리닝을 원할 때만 실행하고, 결과를 **JSON 리포트**로 저장한 뒤 **로컬 웹(Next.js)** 에서 열람하는 개인용 프로젝트입니다. 데이터 소스는 기본적으로 한국투자증권 KIS Developers(Open API)를 사용하며, 국내(KR) 기본 + (선택) 해외(US)까지 확장 가능합니다. 프로젝트/의존성 관리는 uv를 사용합니다.
 
-상세 배경과 요구사항은 PRD.md 참고.
+권장 구성(개인용):
+
+- 로컬 UI: Next.js(로컬 Docker)
+- 데이터: Supabase(Postgres/Storage) — 보유 목록/리포트/실행 이력
+- 자동 실행: GitHub Actions `schedule` (자동 실행일 때만 알림 전송)
+
+상세 배경과 요구사항은 `docs/PRD.md` 참고.
+
+## Requirements
+
+- Python 3.13+
+- uv
+- (웹 UI 개발/구동) Node.js LTS (Next.js)
+- (로컬 배포) Docker Desktop
 
 ## Quickstart (uv 기반)
 
@@ -22,47 +35,15 @@
   - 잠금 갱신이 필요하면: `uv lock`
 
 - .env 설정(예시)
-  - `DATA_PROVIDER=kis`
-  - `KIS_APP_KEY=...`
-  - `KIS_APP_SECRET=...`
-  - `KIS_BASE_URL=...`  # 모의/실전 (포트 생략 가능: 자동으로 9443/29443 보정)
-  - 보안 정책: `kis.app_key`/`kis.app_secret`의 YAML 저장은 금지되며, 감지 시 실행이 실패합니다.
-  - (선택) 로깅
-    - `LOG_LEVEL=INFO` (또는 `DEBUG`)
-    - `LOG_TZ=local` (기본) 또는 `utc`
-    - `LOG_FORMAT=...` (기본: `%(asctime)s %(levelname)s %(name)s - %(message)s`)
-    - `LOG_DATEFMT=...` (strftime 포맷, 미지정 시 ISO 8601 + ms + TZ)
-  - `SCREEN_LIMIT=30`
-  - `REPORT_DIR=reports`
-  - `DATA_DIR=data`
-  - `HOLDINGS_FILE=holdings.yaml`
-  - `WATCHLIST_FILE=watchlist.txt`
-  - `SCREENER_ENABLED=true` (옵션, KIS 상위 종목 스크리너 활성화)
-  - `SCREENER_LIMIT=30` (옵션, 스크리너 상위 N)
-  - `SCREENER_ONLY=false` (옵션, true이면 스크리너 결과만 사용)
-  - `SCREENER_CACHE_TTL=5` (스크리너 캐시 유지 시간, 분)
-  - `MIN_HISTORY_BARS=200` (다중 구간 호출로 목표 히스토리 길이 확보)
-  - `KIS_MIN_INTERVAL_MS=500` (요청 간 최소 간격, 데모 500ms 권장)
-  - `UNIVERSE_MARKETS=KR,US` (선택: 해외(US) 포함)
-  - (선택) 해외 스크리너(KIS 연동 또는 기본목록)
-    - `US_SCREENER_LIMIT=20`
-    - `config.yaml`의 `screener.us_mode` = `kis` 또는 `defaults`
-    - `screener.us_metric` = `volume|market_cap|value`
-  - `ENTRY_CHECK_ENABLED=false` (선택: 장 오픈 진입 체크 기능)
-  - `MIN_PRICE=1000` (스크리너 최소 가격 필터)
-  - `RS_LOOKBACK_DAYS=60` (상대강도 계산 기간)
-  - `RS_BENCHMARK_RETURN=0.0` (비교 기준 수익률, 소수로 입력 ex 0.05)
-  - `FX_MODE=kis` (선택: 환율 소스 `kis|manual|off`, 기본 manual)
-  - `FX_CACHE_TTL=10` (선택: KIS 환율 캐시 TTL 분 단위)
-  - `FX_KIS_SYMBOL=AAPL.NAS` (선택: 환율 조회용 대표 USD 종목)
-  - `USD_KRW_RATE=1320` (선택: manual 모드나 폴백용 고정 환율)
-  - (선택) Sell 규칙 커스터마이즈:
-    - `SELL_ATR_MULTIPLIER=1.0`
-    - `SELL_TIME_STOP_DAYS=10`
-    - `SELL_REQUIRE_SMA200=true`
-    - `SELL_EMA_SHORT=20`, `SELL_EMA_LONG=50`
-    - `SELL_RSI_PERIOD=14`, `SELL_RSI_FLOOR=50`, `SELL_RSI_FLOOR_ALT=30`
-    - `SELL_MIN_BARS=20`
+  - 원칙:
+    - `.env`는 **시크릿/환경별 값만** 둡니다(커밋 금지).
+    - 비시크릿 설정은 `config.yaml`로 관리합니다(샘플: `config.example.yaml`).
+    - `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패).
+  - 최소 예시(필수):
+    - `KIS_APP_KEY=...`
+    - `KIS_APP_SECRET=...`
+  - 선택(로컬 운영 편의):
+    - `LOG_LEVEL=INFO`
 
 - 실행 예시
   - 기본 실행: `uv run -m sab scan`
@@ -72,13 +53,14 @@
   - 워치리스트 지정: `uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
   - 보유 평가: `uv run -m sab sell`
+  - 웹 UI(Next.js): Docker로 구동(문서/구현은 PRD 기준으로 정리)
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 
 - 결과(리포트 분리 설계)
-  - Buy: `reports/YYYY-MM-DD.buy.md` (장 마감 후 후보·근거)
-  - Sell/Review: `reports/YYYY-MM-DD.sell.md` (보유 종목 평가)
-  - Entry: `reports/YYYY-MM-DD.entry.md` (익일 시초 체크) — 예정
-  - 상세 포맷은 `docs/report-spec.md` 참고
+  - Buy: `reports/YYYY-MM-DD.buy.json`
+  - Sell/Review: `reports/YYYY-MM-DD.sell.json`
+  - Entry: `reports/YYYY-MM-DD.entry.json` — 예정
+  - 웹 대시보드는 `reports/`의 JSON을 렌더링합니다.
 
 ## 개발 운영(1인 사이드 프로젝트)
 
@@ -118,12 +100,12 @@ Per‑market 임계치(권장)
   - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell` / `sab entry`)
   - `data/` … KIS/PyKRX 커넥터, 캐시
   - `signals/` … EMA/RSI/ATR 계산
-  - `report/` … 마크다운 템플릿 렌더링(각 리포트별)
-- `reports/` … 생성된 마크다운 리포트 출력 폴더
+  - `report/` … 리포트 아티팩트(JSON) 생성
+  - `web/` … 로컬 대시보드(리포트 열람)
+- `reports/` … 생성된 JSON 리포트 아티팩트 출력 폴더
 - `data/` … 캐시/상태(JSON 또는 SQLite)
 - `docs/kis-setup.md` … KIS 설정 가이드
-- `docs/report-spec.md` … 리포트 스펙
-- `PRD.md` … 제품 요구사항 문서
+- `docs/PRD.md` … 제품 요구사항 문서
 - `holdings.yaml` … 보유 목록(매도/보류 평가용)
 
 ## 스크립트화 권장
@@ -175,9 +157,7 @@ Per‑market 임계치(권장)
 - 첫 실행은 2~3회 호출로 충분한 길이를 확보하고, 이후 실행은 최근 구간만 증분 갱신합니다.
 - 레이트리밋(EGW00201) 대응을 위해 요청 간 최소 간격(`KIS_MIN_INTERVAL_MS`)과 백오프 재시도를 적용합니다.
 - config.yaml 활용(선택)
-  - 기본값/임계치를 한 곳에서 관리하려면 `config.yaml` 생성 후 `.env`보다 먼저 적용됩니다.
+  - 비시크릿 기본값/임계치는 `config.yaml`에서 관리합니다(샘플: `config.example.yaml`).
   - 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)은 `.env`/환경변수로만 관리합니다.
-  - 예시는 repo 루트의 `config.example.yaml`을 참고하세요. 환경변수는 여전히 우선순위가 더 높습니다.
-  - 로컬 전용 설정 파일은 `config.local.yaml` 패턴을 권장하며, 기본 `.gitignore`에 포함되어 있습니다.
-  - `SAB_CONFIG=/path/to/config.yaml` 환경변수로 다른 경로의 설정 파일을 지정할 수 있습니다. 사용 시 `pyyaml` 패키지가 필요합니다.
-  - `.env`에서 `config.yaml`로 옮기는 방법은 `docs/config-migration.md`를 참고하세요.
+  - `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패).
+  - 로컬 전용 설정이 필요하면 `config.local.yaml`을 만들고 `SAB_CONFIG=config.local.yaml`로 지정하세요(파일은 커밋하지 않기).

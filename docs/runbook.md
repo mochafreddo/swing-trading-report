@@ -11,6 +11,16 @@
   - `.env`에는 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)만 작성(권장)
   - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
   - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
+- 런타임:
+  - Python 3.13+
+- Supabase(권장):
+  - 보유 목록/리포트/실행 이력은 Supabase(Postgres/Storage)를 단일 소스로 사용합니다.
+  - GitHub Actions 런너가 자동 실행할 때도 동일한 Supabase를 사용합니다.
+
+## 보유 목록(holdings)
+
+- 보유 목록은 **웹 UI(Next.js)에서 CRUD**로 관리합니다(단일 사용자 기준).
+- (선택) `holdings.yaml` import/export로 초기 이관/백업을 지원합니다.
 
 ## 자주 쓰는 실행
 
@@ -20,10 +30,16 @@
   - `uv run -m sab scan --universe screener --screener-limit 20`
 - 보유 매도/보류 평가
   - `uv run -m sab sell`
+- 웹 UI(Next.js)
+  - 로컬 Docker로 구동(세부는 PRD 기준)
+
+- 자동 실행(GitHub Actions)
+  - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
+  - 알림은 자동 실행일 때만 전송합니다.
 
 ## 파일/경로
 
-- 리포트: `reports/YYYY-MM-DD.buy.md`, `...sell.md`(중복 시 `-1`)
+- 리포트(정식 아티팩트): `reports/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`)
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
 - 보유 목록: `holdings.yaml`(경로는 `files.holdings` 또는 `HOLDINGS_FILE`)
 
