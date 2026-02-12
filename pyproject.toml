@@ -24,6 +24,10 @@ full = [
     "pandas-market-calendars>=5.1.3",
     "pykrx>=1.0.0",
 ]
+ui = [
+    "fastapi>=0.128.4",
+    "uvicorn>=0.40.0",
+]
 
 [dependency-groups]
 dev = [
