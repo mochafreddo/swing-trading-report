@@ -1,13 +1,14 @@
 __pycache__/
+.cursor/
 .env
+.mypy_cache/
+.pre-commit-cache/
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
 .uv-cache/
-.pre-commit-cache/
 .venv/
 /data/
+config.local.yaml
 holdings.yaml
 reports/
 watchlist.txt
-config.local.yaml
