@@ -199,7 +199,7 @@ jobs:
           PY
 
       - name: Send Telegram notification (schedule only)
-        if: github.event_name == 'schedule' && success() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
+        if: github.event_name == 'schedule' && success()
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -207,19 +207,27 @@ jobs:
           MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
         run: |
           set -euo pipefail
+          if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
+            echo "Telegram secrets not set; skipping."
+            exit 0
+          fi
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${MESSAGE_TEXT}" \
             -d disable_web_page_preview=true
 
       - name: Send Slack notification (schedule only)
-        if: github.event_name == 'schedule' && success() && secrets.SLACK_WEBHOOK_URL != ''
+        if: github.event_name == 'schedule' && success()
         continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
         run: |
           set -euo pipefail
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "Slack webhook not set; skipping."
+            exit 0
+          fi
           python - <<'PY'
           import json
           import os
