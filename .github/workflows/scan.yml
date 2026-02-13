@@ -1,0 +1,237 @@
+name: Scan pipeline
+
+on:
+  schedule:
+    # Weekdays at 22:00 UTC (adjust to your market/strategy cadence)
+    - cron: "0 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Market universe (KR|US|both)"
+        required: false
+        default: both
+        type: choice
+        options:
+          - KR
+          - US
+          - both
+      provider:
+        description: "Data provider"
+        required: false
+        default: kis
+        type: choice
+        options:
+          - kis
+          - pykrx
+
+concurrency:
+  group: scan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: .uv-cache
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+      KIS_BASE_URL: ${{ secrets.KIS_BASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-${{ runner.os }}-3.13-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-3.13-
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Resolve workflow inputs
+        id: params
+        run: |
+          set -euo pipefail
+
+          provider="${{ github.event.inputs.provider }}"
+          if [[ -z "${provider}" ]]; then
+            provider="kis"
+          fi
+
+          universe="${{ github.event.inputs.universe }}"
+          if [[ -z "${universe}" ]]; then
+            universe="both"
+          fi
+
+          case "${universe}" in
+            KR) markets="KR" ;;
+            US) markets="US" ;;
+            both) markets="KR,US" ;;
+            *)
+              echo "Unsupported universe: ${universe}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "${provider}" == "pykrx" && "${universe}" != "KR" ]]; then
+            echo "::warning::provider=pykrx with universe=${universe} may fail for US market symbols."
+          fi
+
+          echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_universe=${universe}" >> "${GITHUB_OUTPUT}"
+          echo "markets=${markets}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run scan
+        id: run_scan
+        env:
+          DATA_PROVIDER: ${{ steps.params.outputs.provider }}
+          UNIVERSE_MARKETS: ${{ steps.params.outputs.markets }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+
+          uv run -m sab scan \
+            --provider "${{ steps.params.outputs.provider }}" \
+            --universe both 2>&1 | tee scan.log
+
+          report_path="$(sed -n 's/.*Buy report written to: //p' scan.log | tail -n 1 | tr -d '\r')"
+          if [[ -z "${report_path}" ]]; then
+            report_path="$(python - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(
+              Path("reports").glob("*.buy.json"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(paths[0] if paths else "")
+          PY
+          )"
+          fi
+
+          if [[ -z "${report_path}" || ! -f "${report_path}" ]]; then
+            echo "Scan report (*.buy.json) not found under reports/" >&2
+            exit 1
+          fi
+
+          uploaded_key="$(sed -n 's/.*Buy report uploaded to Supabase: //p' scan.log | tail -n 1 | tr -d '\r')"
+
+          echo "report_path=${report_path}" >> "${GITHUB_OUTPUT}"
+          echo "uploaded_key=${uploaded_key}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload generated report artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-report-${{ github.run_id }}
+          path: ${{ steps.run_scan.outputs.report_path }}
+          if-no-files-found: error
+
+      - name: Build notification summary
+        id: summary
+        if: github.event_name == 'schedule' && success()
+        env:
+          REPORT_PATH: ${{ steps.run_scan.outputs.report_path }}
+          STORAGE_KEY: ${{ steps.run_scan.outputs.uploaded_key }}
+          PROVIDER: ${{ steps.params.outputs.provider }}
+          UNIVERSE_INPUT: ${{ steps.params.outputs.dispatch_universe }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(os.environ["REPORT_PATH"])
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+
+          summary = report.get("summary") or {}
+          candidate_count = int(summary.get("candidate_count") or 0)
+          issue_count = int(summary.get("issue_count") or 0)
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+
+          lines = [
+              "[SAB][scan][schedule]",
+              f"repo={repo}",
+              f"provider={os.environ.get('PROVIDER', '').strip() or 'kis'}",
+              f"universe={os.environ.get('UNIVERSE_INPUT', '').strip() or 'both'}",
+              f"generated_at={report.get('generated_at', '')}",
+              f"candidate_count={candidate_count}",
+              f"issue_count={issue_count}",
+          ]
+          storage_key = os.environ.get("STORAGE_KEY", "").strip()
+          if storage_key:
+              lines.append(f"storage_key={storage_key}")
+          lines.append(f"run_url={run_url}")
+          text = "\n".join(lines)
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+              fh.write("text<<EOF\n")
+              fh.write(text)
+              fh.write("\nEOF\n")
+          PY
+
+      - name: Send Telegram notification (schedule only)
+        if: github.event_name == 'schedule' && success() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE_TEXT}" \
+            -d disable_web_page_preview=true
+
+      - name: Send Slack notification (schedule only)
+        if: github.event_name == 'schedule' && success() && secrets.SLACK_WEBHOOK_URL != ''
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          payload = json.dumps({"text": os.environ["MESSAGE_TEXT"]}).encode("utf-8")
+          req = urllib.request.Request(
+              os.environ["SLACK_WEBHOOK_URL"],
+              data=payload,
+              headers={"Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(req, timeout=10) as resp:
+              if resp.status >= 300:
+                  raise RuntimeError(f"Slack webhook returned HTTP {resp.status}")
+          PY
