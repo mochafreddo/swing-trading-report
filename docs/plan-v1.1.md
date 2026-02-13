@@ -22,6 +22,7 @@
 - **키/시크릿 노출 금지**: `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_PAT`는 브라우저로 절대 노출하지 않는다(Next.js 서버 측에서만 사용).
 - **점진적 완성**: (1) 데이터·파이프라인 연결 → (2) 최소 UI → (3) 운영(리텐션/알림) → (4) UX·성능 개선.
 - **품질 게이트**: PR에 ruff/mypy/pytest가 최소 한 번은 통과하도록 유지한다.
+- **체크 기준**: `- [x]`는 “코드 작성”만이 아니라, 외부 시스템(Supabase/GitHub Actions 등) 적용이 필요한 항목은 **클라우드 적용 + 검증 완료**까지 끝난 상태를 의미한다.
 
 ---
 
@@ -71,8 +72,8 @@
 - [x] 인덱스: `updated_at` 추가
 
 #### M1-2. Storage `reports`
-- [ ] 버킷 `reports` 생성(private)
-- [ ] 오브젝트 키 규칙을 문서화 및 테스트 가능한 함수로 고정
+- [x] 버킷 `reports` 생성(private)
+- [x] 오브젝트 키 규칙을 문서화 및 테스트 가능한 함수로 고정
   - 기본: `YYYY/MM/YYYY-MM-DD.buy.json`, `YYYY/MM/YYYY-MM-DD.sell.json`
   - 중복 실행: `YYYY/MM/YYYY-MM-DD-1.buy.json` …
 
@@ -91,6 +92,7 @@
 
 #### M2-2. Storage 업로드
 - [ ] Supabase Storage 업로더 구현(서비스 롤 키 사용)
+- [ ] 업로드 `contentType`을 `application/json`으로 고정(`reports` 버킷 MIME 정책 준수)
 - [ ] 키 충돌 시 suffix 증가 규칙 구현(존재 여부 확인 + 다음 번호 선택)
 - [ ] 로컬 `reports/`는 “개발/디버그 보관”으로 유지(스펙 2.5)
 

@@ -43,7 +43,10 @@
 
 ## 파일/경로
 
-- 리포트(정식 아티팩트): `reports/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`)
+- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`)
+- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`, `-2`, ...)
+- Storage 업로드 MIME: `contentType=application/json`으로 고정(`reports` 버킷 정책)
+- 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
 - 보유 목록: `holdings.yaml`(경로는 `files.holdings` 또는 `HOLDINGS_FILE`)
 

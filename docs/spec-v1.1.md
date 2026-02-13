@@ -106,6 +106,8 @@
 
 - **버킷명(권장)**: `reports`
 - **권한(권장)**: private
+- **MIME 정책(권장)**: `allowed_mime_types = ["application/json"]`
+  - 업로더는 반드시 `contentType=application/json`으로 업로드한다.
 - **오브젝트 키 규칙(권장)**
   - `YYYY/MM/YYYY-MM-DD.buy.json`
   - `YYYY/MM/YYYY-MM-DD.sell.json`
@@ -234,4 +236,3 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 - 리포트 목록을 Storage listing만으로 충분히 제공할지, `run_history`/인덱스 테이블을 둘지
 - 캔들 캐시 테이블 도입 방식(A: row-per-bar vs B: JSONB-per-ticker)
 - Vercel/모바일 접근을 위한 인증/권한(로그인, RLS) 설계
-
