@@ -2,10 +2,10 @@
 
 ## 명령어
 
-- `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
-- `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
-- `UV_CACHE_DIR=.uv-cache uv lock -U`
-- `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
+- `UV_CACHE_DIR=.uv-cache uv lock --upgrade`
+- `UV_CACHE_DIR=.uv-cache uv sync --all-extras --dev`
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
 - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
