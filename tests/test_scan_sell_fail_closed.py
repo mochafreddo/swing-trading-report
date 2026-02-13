@@ -143,6 +143,7 @@ def test_run_sell_maps_exchange_per_ticker_without_suffix_scope_leak(
             "sab.sell.write_sell_report",
             return_value=str(tmp_path / "2026-02-06.sell.md"),
         ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
         patch("sab.sell.evaluate_sell_signals", side_effect=fake_evaluate_sell_signals),
     ):
         code = run_sell(provider=None)
