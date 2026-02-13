@@ -5,10 +5,14 @@
 ## 설치/준비
 
 - uv 설치: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- 의존성 동기화: `uv lock && uv sync`
+- 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv lock -U && UV_CACHE_DIR=.uv-cache uv sync --all-groups`
 - 설정:
   - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
-  - `.env`에는 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)만 작성(권장)
+  - `.env`에는 v1.1 필수 키를 작성:
+    - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
+    - Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+    - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
+    - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
   - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
@@ -25,11 +29,11 @@
 ## 자주 쓰는 실행
 
 - Buy 스캔(KR+US 스크리너 + 워치리스트)
-  - `uv run -m sab scan --universe both`
+  - `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe both`
 - Buy 스캔(스크리너만, 상위 20)
-  - `uv run -m sab scan --universe screener --screener-limit 20`
+  - `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe screener --screener-limit 20`
 - 보유 매도/보류 평가
-  - `uv run -m sab sell`
+  - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 - 웹 UI(Next.js)
   - 로컬 Docker로 구동(세부는 PRD 기준)
 

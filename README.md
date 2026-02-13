@@ -46,13 +46,13 @@
     - `LOG_LEVEL=INFO`
 
 - 실행 예시
-  - 기본 실행: `uv run -m sab scan`
-  - 평가 상한 지정: `uv run -m sab scan --limit 30`
-  - 스크리너 상위 N 조정: `uv run -m sab scan --screener-limit 15`
-  - 유니버스 선택: `uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
-  - 워치리스트 지정: `uv run -m sab scan --watchlist watchlist.txt`
+  - 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
+  - 평가 상한 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
+  - 스크리너 상위 N 조정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
+  - 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
+  - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
-  - 보유 평가: `uv run -m sab sell`
+  - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 웹 UI(Next.js): Docker로 구동(문서/구현은 PRD 기준으로 정리)
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 

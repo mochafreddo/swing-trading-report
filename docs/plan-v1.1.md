@@ -49,12 +49,12 @@
 
 ### M0. 기준선 정리(개발 환경/시크릿)
 
-- [ ] `.env.example`에 v1.1 필수 환경변수 목록을 최신화
+- [x] `.env.example`에 v1.1 필수 환경변수 목록을 최신화
   - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택)`KIS_BASE_URL`
   - Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
   - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용)`REPORT_RETENTION_DAYS`
   - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`(슬랙은 선택)
-- [ ] 로컬 실행 커맨드 확정(AGENTS.md 기준)
+- [x] 로컬 실행 커맨드 확정(AGENTS.md 기준)
   - `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
   - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 
@@ -218,4 +218,3 @@
 - **ticker 검색**: Storage listing만으로는 ticker 인덱스가 없으므로, v1.1에서는 “최근 N개 JSON을 읽어 서버에서 검색”으로 단순 구현한다. 리포트 수가 늘면 인덱스 테이블 도입을 검토한다.
 - **키 충돌 처리**: suffix 규칙은 “동일 날짜 다회 실행”에서 반드시 재현 가능해야 하므로, 업로드 직전 존재 여부 확인이 필요하다(레이스 가능성은 v1.1에서는 허용 범위로 둔다).
 - **서비스 롤 키**: Next.js 서버 전용. GHA에서도 서비스 롤 키 사용은 허용하되, 로그에 출력되지 않도록 주의한다.
-
