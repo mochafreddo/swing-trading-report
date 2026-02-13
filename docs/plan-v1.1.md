@@ -109,19 +109,19 @@
 ### M3. GitHub Actions 워크플로우(자동/수동) + 알림 조건
 
 #### M3-1. scan/sell 워크플로우
-- [ ] `.github/workflows/scan.yml` 생성
+- [x] `.github/workflows/scan.yml` 생성
   - 트리거: `schedule`, `workflow_dispatch`
   - 입력: `universe`(`KR|US|both`), `provider`(`kis|pykrx`) (스펙 6.2)
   - 실행: `uv run -m sab scan ...`
   - 업로드: 생성된 아티팩트 → Supabase Storage
-- [ ] `.github/workflows/sell.yml` 생성
+- [x] `.github/workflows/sell.yml` 생성
   - 트리거/입력: scan과 유사(단, `universe`는 필요 시만)
   - 입력 holdings: Supabase Postgres에서 읽기(단일 소스)
   - 업로드: sell 아티팩트 → Storage
 
 #### M3-2. 알림(자동 실행만)
-- [ ] `github.event_name == 'schedule'`일 때만 텔레그램/슬랙 요약 전송
-- [ ] 수동 실행(`workflow_dispatch`) 및 로컬 CLI에서는 기본 비전송
+- [x] `github.event_name == 'schedule'`일 때만 텔레그램/슬랙 요약 전송
+- [x] 수동 실행(`workflow_dispatch`) 및 로컬 CLI에서는 기본 비전송
 
 **완료 정의**
 - Actions에서 수동 실행 시 업로드까지 성공하며, 자동 실행에서만 알림이 발송된다.
