@@ -66,9 +66,9 @@
 ### M1. Supabase 스키마/스토리지 준비
 
 #### M1-1. Postgres `holdings`
-- [ ] `docs/spec-v1.1.md` 4.1의 컬럼으로 `holdings` 테이블 생성 SQL 작성/적용
-- [ ] `updated_at` 자동 갱신(트리거 또는 앱 레벨) 방식 결정 및 적용
-- [ ] 인덱스: `updated_at` 추가
+- [x] `docs/spec-v1.1.md` 4.1의 컬럼으로 `holdings` 테이블 생성 SQL 작성/적용
+- [x] `updated_at` 자동 갱신(트리거 또는 앱 레벨) 방식 결정 및 적용
+- [x] 인덱스: `updated_at` 추가
 
 #### M1-2. Storage `reports`
 - [ ] 버킷 `reports` 생성(private)
