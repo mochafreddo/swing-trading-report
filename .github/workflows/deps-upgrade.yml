@@ -1,0 +1,61 @@
+name: Dependency upgrade (uv)
+
+on:
+  schedule:
+    # Weekly on Mondays at 09:00 UTC (adjust as needed)
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: deps-upgrade-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UV_CACHE_DIR: .uv-cache
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-${{ runner.os }}-3.13-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-3.13-
+            uv-${{ runner.os }}-
+
+      - name: Upgrade lockfile + sync env
+        run: bash scripts/upgrade_deps.sh
+
+      - name: Create PR if lockfile changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(deps): uv.lock 업그레이드"
+          title: "chore(deps): uv.lock 업그레이드"
+          body: |
+            - `uv lock --upgrade`로 `uv.lock`를 갱신했습니다.
+            - `uv sync --all-extras --dev`로 설치 가능 여부를 확인했습니다.
+          branch: "codex/uv-deps-upgrade"
+          delete-branch: true
+          labels: dependencies
+
