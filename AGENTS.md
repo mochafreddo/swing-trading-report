@@ -35,5 +35,9 @@
   - 문장마다 줄을 띄우지 않고 문단 단위로 작성합니다.
   - CLI에서 `-m`를 문장별로 여러 번 쓰지 않습니다.
   - 권장: `-m "제목"` + `-m "본문 전체"` 형태로 작성합니다.
+  - 본문에 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 않습니다(문자 그대로 `\n`이 커밋 메시지에 저장될 수 있음).
+    - 권장: zsh의 `$'...'` 인용을 사용합니다. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
+    - 대안: `git commit`로 편집기를 열어 작성합니다.
+  - 이미 푸시한 커밋 메시지를 고칠 때는 `git rebase -i`로 `reword` 후 `git push --force-with-lease`를 사용합니다(브랜치 정책/협업 상황 확인).
 - `git status`, `git add`, `git commit` 같은 git 명령은 `/bin/zsh -lc` 같은 셸 래퍼 없이 직접 실행합니다.
 - `git push`는 권한 상승(`sandbox_permissions=\"require_escalated\"`)으로 실행합니다.
