@@ -21,10 +21,10 @@ def _load_with_python_dotenv(
         return False
 
     try:
-        kwargs: dict[str, object] = {"override": override}
         if dotenv_path is not None:
-            kwargs["dotenv_path"] = str(dotenv_path)
-        load_dotenv(**kwargs)
+            load_dotenv(dotenv_path=str(dotenv_path), override=override)
+        else:
+            load_dotenv(override=override)
     except Exception:
         return False
     return True
