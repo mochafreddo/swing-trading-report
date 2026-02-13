@@ -85,20 +85,20 @@
 ### M2. JSON 아티팩트 생성(스키마 고정) + 업로드 경로 연결
 
 #### M2-1. 아티팩트 스키마
-- [ ] ADR-0002(JSON 아티팩트) 기준으로 `schema: "sab.report.v1"`를 포함한 최소 스키마 고정
-- [ ] 아티팩트에 “UI 리스트/요약”에 필요한 최소 메타 포함(권장)
+- [x] ADR-0002(JSON 아티팩트) 기준으로 `schema: "sab.report.v1"`를 포함한 최소 스키마 고정
+- [x] 아티팩트에 “UI 리스트/요약”에 필요한 최소 메타 포함(권장)
   - 생성 시각, run_type(buy/sell), universe/provider, 주요 카운트(예: candidates/decisions 수)
   - (선택) 티커 집합(리스트 필터/검색 성능을 위해)
 
 #### M2-2. Storage 업로드
-- [ ] Supabase Storage 업로더 구현(서비스 롤 키 사용)
-- [ ] 업로드 `contentType`을 `application/json`으로 고정(`reports` 버킷 MIME 정책 준수)
-- [ ] 키 충돌 시 suffix 증가 규칙 구현(존재 여부 확인 + 다음 번호 선택)
-- [ ] 로컬 `reports/`는 “개발/디버그 보관”으로 유지(스펙 2.5)
+- [x] Supabase Storage 업로더 구현(서비스 롤 키 사용)
+- [x] 업로드 `contentType`을 `application/json`으로 고정(`reports` 버킷 MIME 정책 준수)
+- [x] 키 충돌 시 suffix 증가 규칙 구현(존재 여부 확인 + 다음 번호 선택)
+- [x] 로컬 `reports/`는 “개발/디버그 보관”으로 유지(스펙 2.5)
 
 #### M2-3. `scan`/`sell` 후처리
-- [ ] `uv run -m sab scan|sell` 실행 결과에서 아티팩트 파일 생성 보장
-- [ ] (GHA 환경에서) 실행 후 자동으로 Storage 업로드 수행
+- [x] `uv run -m sab scan|sell` 실행 결과에서 아티팩트 파일 생성 보장
+- [x] (GHA 환경에서) 실행 후 자동으로 Storage 업로드 수행
 
 **완료 정의**
 - 로컬에서 한 번 실행 시 `reports/*.buy.json` 또는 `reports/*.sell.json`이 생성된다.
@@ -187,8 +187,8 @@
 
 ### Python
 
-- [ ] 아티팩트 스키마 유효성 테스트(필수 필드/버전)
-- [ ] Storage 오브젝트 키 생성/충돌(suffix) 테스트
+- [x] 아티팩트 스키마 유효성 테스트(필수 필드/버전)
+- [x] Storage 오브젝트 키 생성/충돌(suffix) 테스트
 - [ ] retention 판정 로직 테스트(날짜 파싱/경계: 오늘-30일)
 - [ ] (가능하면) Supabase 연동은 “클라이언트 호출”을 얇게 감싸고, 핵심 로직은 순수 함수로 분리해 단위 테스트로 커버
 

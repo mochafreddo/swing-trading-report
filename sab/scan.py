@@ -19,6 +19,7 @@ from .data.pykrx_client import (
 from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
 from .report.markdown import write_report
+from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .screener import KISScreener, ScreenRequest
 from .screener.kis_overseas_screener import (
     KISOverseasScreener as KUS,
@@ -791,6 +792,19 @@ def run_scan(
 
     out_path = _write_scan_report(runtime)
     runtime.logger.info("Buy report written to: %s", out_path)
+    try:
+        uploaded_key = maybe_upload_report_artifact(
+            artifact_path=out_path,
+            run_type="buy",
+            logger=runtime.logger,
+        )
+    except SupabaseStorageError as exc:
+        runtime.failures.append(f"Supabase upload failed: {exc}")
+        runtime.fatal_failure = True
+        runtime.logger.error("Supabase report upload failed: %s", exc)
+    else:
+        if uploaded_key:
+            runtime.logger.info("Buy report uploaded to Supabase: %s", uploaded_key)
 
     if runtime.fatal_failure:
         runtime.logger.error(

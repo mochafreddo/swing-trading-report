@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import sab.report.markdown as buy_markdown
-import sab.report.sell_report as sell_markdown
+import sab.report.markdown as buy_reports
+import sab.report.sell_report as sell_reports
 from sab.report.markdown import write_report
 from sab.report.sell_report import SellReportRow, write_sell_report
 
@@ -56,7 +57,10 @@ def test_write_report_uses_unique_paths_under_concurrency(tmp_path: Path) -> Non
         report_path = Path(out_path)
         assert report_path.parent == tmp_path
         assert report_path.exists()
-        assert report_path.read_text(encoding="utf-8").startswith("# Swing Screening")
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["schema"] == "sab.report.v1"
+        assert payload["type"] == "buy"
+        assert payload["summary"]["candidate_count"] == 1
 
 
 def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -> None:
@@ -75,12 +79,13 @@ def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -
         report_path = Path(out_path)
         assert report_path.parent == tmp_path
         assert report_path.exists()
-        assert report_path.read_text(encoding="utf-8").startswith(
-            "# Holdings Sell Review"
-        )
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["schema"] == "sab.report.v1"
+        assert payload["type"] == "sell"
+        assert payload["summary"]["evaluated_count"] == 1
 
 
-def test_write_sell_report_formats_fractional_quantity_in_summary(
+def test_write_sell_report_preserves_fractional_quantity_in_payload(
     tmp_path: Path,
 ) -> None:
     rows = [
@@ -118,39 +123,49 @@ def test_write_sell_report_formats_fractional_quantity_in_summary(
         provider="test",
         evaluated=rows,
     )
-    content = Path(out_path).read_text(encoding="utf-8")
-    assert "| CMG.NYS | 0.268187 |" in content
-    assert "| 005930 | 12 |" in content
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    evaluated = {row["ticker"]: row for row in payload["evaluated"]}
+    assert evaluated["CMG.NYS"]["quantity"] == 0.268187
+    assert evaluated["005930"]["quantity"] == 12.0
 
 
-def test_write_sell_report_quantity_digits_is_configurable(tmp_path: Path) -> None:
+def test_write_sell_report_emits_rules_and_fx_metadata(tmp_path: Path) -> None:
     row = SellReportRow(
-        ticker="CMG.NYS",
-        name="Chipotle",
-        quantity=0.268187,
-        entry_price=37.25,
+        ticker="AAPL.NAS",
+        name="Apple",
+        quantity=1.0,
+        entry_price=150.0,
         entry_date="2026-01-02",
-        last_price=38.45,
-        pnl_pct=0.032,
-        action="REVIEW",
+        last_price=190.0,
+        pnl_pct=0.2,
+        action="HOLD",
         reasons=["test"],
-        stop_price=None,
-        target_price=40.98,
+        stop_price=170.0,
+        target_price=210.0,
         currency="USD",
     )
     out_path = write_sell_report(
         report_dir=tmp_path.as_posix(),
         provider="test",
         evaluated=[row],
-        quantity_digits=4,
+        atr_trail_multiplier=1.5,
+        time_stop_days=7,
+        fx_rate=1380.0,
+        fx_note="manual",
+        sell_mode="sma_ema_hybrid",
+        sell_mode_note="hybrid tuned",
     )
-    content = Path(out_path).read_text(encoding="utf-8")
-    assert "| CMG.NYS | 0.2682 |" in content
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["rules"]["atr_trail_multiplier"] == 1.5
+    assert payload["rules"]["time_stop_days"] == 7
+    assert payload["rules"]["sell_mode"] == "sma_ema_hybrid"
+    assert payload["fx"]["usd_krw_rate"] == 1380.0
+    assert payload["fx"]["note"] == "manual"
 
 
 def test_write_report_uses_runtime_timezone_label(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
-        buy_markdown,
+        buy_reports,
         "resolve_report_timestamp",
         lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
     )
@@ -161,16 +176,15 @@ def test_write_report_uses_runtime_timezone_label(tmp_path: Path, monkeypatch) -
         candidates=[{"ticker": "AAPL", "name": "Apple", "price": "190"}],
         report_type="buy",
     )
-    content = Path(out_path).read_text(encoding="utf-8")
-    assert "- Run at: 2026-02-06 09:30 EST" in content
-    assert "KST" not in content
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["generated_at"] == "2026-02-06 09:30 EST"
 
 
 def test_write_sell_report_uses_runtime_timezone_label(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        sell_markdown,
+        sell_reports,
         "resolve_report_timestamp",
         lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
     )
@@ -193,6 +207,5 @@ def test_write_sell_report_uses_runtime_timezone_label(
         provider="test",
         evaluated=[row],
     )
-    content = Path(out_path).read_text(encoding="utf-8")
-    assert "- Run at: 2026-02-06 09:30 EST" in content
-    assert "KST" not in content
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["generated_at"] == "2026-02-06 09:30 EST"

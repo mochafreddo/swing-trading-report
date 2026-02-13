@@ -17,6 +17,7 @@ from .data.pykrx_client import (
 from .fx import SUFFIX_TO_EXCD, resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
 from .report.sell_report import SellReportRow, write_sell_report
+from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .signals.hybrid_sell import (
     HybridSellEvaluation,
     HybridSellSettings,
@@ -501,6 +502,19 @@ def run_sell(*, provider: str | None) -> int:
 
     out_path = _write_sell_report(runtime, results)
     logger.info("Sell report written to: %s", out_path)
+    try:
+        uploaded_key = maybe_upload_report_artifact(
+            artifact_path=out_path,
+            run_type="sell",
+            logger=logger,
+        )
+    except SupabaseStorageError as exc:
+        runtime.failures.append(f"Supabase upload failed: {exc}")
+        runtime.fatal_failure = True
+        logger.error("Supabase report upload failed: %s", exc)
+    else:
+        if uploaded_key:
+            logger.info("Sell report uploaded to Supabase: %s", uploaded_key)
 
     if runtime.fatal_failure:
         logger.error(

@@ -1,86 +1,32 @@
 from __future__ import annotations
 
-import math
 import os
+from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 
-from ..utils.atomic_io import advisory_path_lock, atomic_write_text
+from ..utils.atomic_io import advisory_path_lock, atomic_write_json
 from .time_label import resolve_report_timestamp
+
+_ARTIFACT_SCHEMA = "sab.report.v1"
 
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def _fmt_number(value: float | None, digits: int = 0) -> str:
-    if value is None:
-        return "-"
-    try:
-        if digits == 0:
-            return f"{value:,.0f}"
-        return f"{value:,.{digits}f}"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def _fmt_quantity(value: float | None, max_digits: int = 6) -> str:
-    if value is None:
-        return "-"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    if math.isnan(numeric):
-        return "-"
-
-    try:
-        digits = int(max_digits)
-    except (TypeError, ValueError):
-        digits = 6
-    digits = max(0, min(digits, 8))
-    if digits == 0:
-        return f"{numeric:,.0f}"
-
-    rounded = round(numeric, digits)
-    if rounded == 0:
-        rounded = 0.0
-    if math.isclose(rounded, round(rounded), abs_tol=10 ** (-digits)):
-        return f"{rounded:,.0f}"
-    return f"{rounded:,.{digits}f}".rstrip("0").rstrip(".")
-
-
-def _fmt_percent(value: float | None) -> str:
-    if value is None:
-        return "-"
-    try:
-        return f"{value * 100:+.1f}%"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def _fmt_currency(
-    value: float | None, currency: str | None, fx_rate: float | None
-) -> str:
-    if value is None:
-        return "-"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    if math.isnan(numeric):
-        return "-"
-
-    curr = (currency or "KRW").upper()
-    if curr == "USD":
-        display = f"${numeric:,.2f}"
-        if fx_rate:
-            converted = numeric * fx_rate
-            display += f" (₩{converted:,.0f})"
-        return display
-    if curr == "KRW":
-        return f"₩{numeric:,.0f}"
-    return f"{curr} {numeric:,.2f}"
+def _next_report_path(report_dir: str, date: str) -> str:
+    suffix = ".sell.json"
+    base = os.path.join(report_dir, f"{date}{suffix}")
+    if not os.path.exists(base):
+        return base
+    i = 1
+    while True:
+        path = os.path.join(report_dir, f"{date}-{i}{suffix}")
+        if not os.path.exists(path):
+            return path
+        i += 1
 
 
 @dataclass
@@ -101,6 +47,40 @@ class SellReportRow:
     eval_date: str | None = None
 
 
+def _collect_tickers(rows: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    tickers: list[str] = []
+    for row in rows:
+        ticker_raw = row.get("ticker")
+        if ticker_raw is None:
+            continue
+        ticker = str(ticker_raw).strip()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        tickers.append(ticker)
+    return tickers
+
+
+def _build_rules_payload(
+    *,
+    atr_trail_multiplier: float | None,
+    time_stop_days: int | None,
+    sell_mode: str | None,
+    sell_mode_note: str | None,
+) -> dict[str, Any] | None:
+    payload: dict[str, Any] = {}
+    if atr_trail_multiplier is not None:
+        payload["atr_trail_multiplier"] = atr_trail_multiplier
+    if time_stop_days is not None:
+        payload["time_stop_days"] = time_stop_days
+    if sell_mode:
+        payload["sell_mode"] = sell_mode
+    if sell_mode_note:
+        payload["sell_mode_note"] = sell_mode_note
+    return payload or None
+
+
 def write_sell_report(
     *,
     report_dir: str,
@@ -116,118 +96,58 @@ def write_sell_report(
     sell_mode_note: str | None = None,
     quantity_digits: int = 6,
 ) -> str:
-    _ensure_dir(report_dir)
+    del quantity_digits  # Legacy formatting option kept for API compatibility.
 
+    _ensure_dir(report_dir)
     today, now_str, tz_label = resolve_report_timestamp()
 
-    rows = list(evaluated)
+    rows = [asdict(row) for row in evaluated]
     failures_list = list(failures or [])
-    has_usd = any((row.currency or "").upper() == "USD" for row in rows)
+    action_counts = Counter(
+        str(row.get("action") or "").strip().upper()
+        for row in rows
+        if str(row.get("action") or "").strip()
+    )
+    summary: dict[str, Any] = {
+        "evaluated_count": len(rows),
+        "issue_count": len(failures_list),
+        "action_counts": dict(sorted(action_counts.items())),
+    }
 
-    rules: list[str] = []
-    if atr_trail_multiplier is not None:
-        rules.append(f"ATR trail ×{atr_trail_multiplier:g}")
-    if time_stop_days is not None and time_stop_days > 0:
-        rules.append(f"Time stop {time_stop_days}d")
-
-    lines: list[str] = []
-    lines.append(f"# Holdings Sell Review — {today}")
-    lines.append(f"- Run at: {now_str} {tz_label}")
-    cache_note = f" (cache: {cache_hint})" if cache_hint else ""
-    lines.append(f"- Provider: {provider}{cache_note}")
-    lines.append(f"- Evaluated holdings: {len(rows)}")
-    if has_usd:
-        if fx_rate:
-            fx_line = f"- FX: 1 USD ≈ ₩{fx_rate:,.0f}"
-            if fx_note:
-                fx_line += f" ({fx_note})"
-        elif fx_note:
-            fx_line = f"- FX: {fx_note}"
-        else:
-            fx_line = "- FX: unavailable"
-        lines.append(fx_line)
+    artifact: dict[str, Any] = {
+        "schema": _ARTIFACT_SCHEMA,
+        "type": "sell",
+        "generated_at": f"{now_str} {tz_label}",
+        "report_date": today,
+        "provider": provider,
+        "summary": summary,
+        "tickers": _collect_tickers(rows),
+        "evaluated": rows,
+        "issues": failures_list,
+    }
+    if cache_hint:
+        artifact["cache_hint"] = cache_hint
+    rules = _build_rules_payload(
+        atr_trail_multiplier=atr_trail_multiplier,
+        time_stop_days=time_stop_days,
+        sell_mode=sell_mode,
+        sell_mode_note=sell_mode_note,
+    )
     if rules:
-        lines.append(f"- Rules: {', '.join(rules)}")
-    if sell_mode:
-        mode_label = sell_mode
-        if sell_mode == "sma_ema_hybrid":
-            mode_label = "sma_ema_hybrid (SMA20 + EMA10/21)"
-        line = f"- Sell mode: {mode_label}"
-        if sell_mode_note:
-            line += f" — {sell_mode_note}"
-        lines.append(line)
-    if failures_list:
-        lines.append(f"- Notes: {len(failures_list)} issue(s) logged (see Appendix)")
-    lines.append("")
+        artifact["rules"] = rules
 
-    if rows:
-        lines.append("## Holdings Summary")
-        lines.append("| Ticker | Qty | Entry | Last | P/L% | State | Stop | Target |")
-        lines.append("|--------|----:|------:|-----:|-----:|-------|------|--------|")
-        for row in rows:
-            lines.append(
-                f"| {row.ticker} | {_fmt_quantity(row.quantity, quantity_digits)} | {_fmt_currency(row.entry_price, row.currency, fx_rate)} | {_fmt_currency(row.last_price, row.currency, fx_rate)} | {_fmt_percent(row.pnl_pct)} | {row.action} | {_fmt_currency(row.stop_price, row.currency, fx_rate)} | {_fmt_currency(row.target_price, row.currency, fx_rate)} |"
-            )
-        lines.append("")
+    fx_payload: dict[str, Any] = {}
+    if fx_rate is not None:
+        fx_payload["usd_krw_rate"] = fx_rate
+    if fx_note:
+        fx_payload["note"] = fx_note
+    if fx_payload:
+        artifact["fx"] = fx_payload
 
-        for row in rows:
-            title = f"## [{row.action}] {row.ticker}"
-            if row.name and row.name != row.ticker:
-                title += f" — {row.name}"
-            lines.append(title)
-            entry_details = []
-            if row.quantity is not None:
-                entry_details.append(f"Qty {row.quantity:g}")
-            if row.entry_price is not None:
-                entry_details.append(
-                    f"Entry {_fmt_currency(row.entry_price, row.currency, fx_rate)}"
-                )
-            if row.entry_date:
-                entry_details.append(f"since {row.entry_date}")
-            if entry_details:
-                lines.append(f"- Position: {' / '.join(entry_details)}")
-            if row.last_price is not None:
-                last_line = f"- Last close: {_fmt_currency(row.last_price, row.currency, fx_rate)}"
-                if row.eval_date:
-                    last_line += f" (as of {row.eval_date})"
-                lines.append(last_line)
-            lines.append(f"- P/L: {_fmt_percent(row.pnl_pct)}")
-            if row.stop_price is not None or row.target_price is not None:
-                stop_txt = _fmt_currency(row.stop_price, row.currency, fx_rate)
-                target_txt = _fmt_currency(row.target_price, row.currency, fx_rate)
-                lines.append(f"- Risk guide: Stop {stop_txt} / Target {target_txt}")
-            if row.notes:
-                lines.append(f"- Notes: {row.notes}")
-            if row.reasons:
-                lines.append("- Reasons:")
-                for reason in row.reasons:
-                    lines.append(f"  - {reason}")
-            lines.append("")
-    else:
-        lines.append("_No holdings evaluated._")
-        lines.append("")
-
-    if failures_list:
-        lines.append("### Appendix — Issues")
-        for item in failures_list:
-            lines.append(f"- {item}")
-        lines.append("")
-
-    suffix = ".sell.md"
     lock_path = os.path.join(report_dir, ".sell.report.lock")
-    content = "\n".join(lines)
     with advisory_path_lock(lock_path):
-        base = os.path.join(report_dir, f"{today}{suffix}")
-        out_path = base
-        if os.path.exists(out_path):
-            i = 1
-            while True:
-                candidate = os.path.join(report_dir, f"{today}-{i}{suffix}")
-                if not os.path.exists(candidate):
-                    out_path = candidate
-                    break
-                i += 1
-        atomic_write_text(out_path, content)
+        out_path = _next_report_path(report_dir, today)
+        atomic_write_json(out_path, artifact, ensure_ascii=False, indent=2)
 
     return out_path
 

@@ -40,6 +40,9 @@
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
   - 알림은 자동 실행일 때만 전송합니다.
+- 로컬 CLI 업로드(선택)
+  - 기본은 로컬 파일 생성만 수행합니다.
+  - 로컬 실행에서도 Supabase 업로드가 필요하면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
 
 ## 파일/경로
 

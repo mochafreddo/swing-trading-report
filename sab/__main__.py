@@ -53,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="cmd")
 
-    s = sub.add_parser("scan", help="Collect -> evaluate -> write markdown report")
+    s = sub.add_parser("scan", help="Collect -> evaluate -> write JSON report")
     s.add_argument("--limit", type=int, default=None, help="Max tickers to evaluate")
     s.add_argument("--watchlist", type=str, default=None, help="Path to watchlist file")
     s.add_argument(
