@@ -52,6 +52,22 @@
   gap: 0.6rem;
 }
 
+.filterRow {
+  margin-top: 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.toggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
 .tableWrap {
   margin-top: 0.7rem;
   overflow-x: auto;
@@ -87,6 +103,20 @@
 .inlineActions {
   display: flex;
   gap: 0.4rem;
+}
+
+.inactiveRow {
+  opacity: 0.74;
+}
+
+.inactiveBadge {
+  margin-left: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  border-radius: 999px;
+  padding: 0.04rem 0.42rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
 }
 
 .dangerButton {

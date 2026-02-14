@@ -4,6 +4,10 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import styles from "./holdings-client.module.css";
 
+import {
+  isActiveHoldingQuantity,
+  partitionHoldingsByActivity
+} from "@/lib/holding-activity";
 import type { HoldingRecord } from "@/lib/types";
 
 interface HoldingsResponse {
@@ -115,6 +119,7 @@ function readApiError(payload: unknown): string | undefined {
 
 export function HoldingsClient() {
   const [items, setItems] = useState<HoldingRecord[]>([]);
+  const [showInactive, setShowInactive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +130,11 @@ export function HoldingsClient() {
     () => (editingTicker ? `Edit ${editingTicker}` : "Create Holding"),
     [editingTicker]
   );
+  const partitioned = useMemo(
+    () => partitionHoldingsByActivity(items),
+    [items]
+  );
+  const visibleItems = showInactive ? items : partitioned.active;
 
   const refresh = async () => {
     setLoading(true);
@@ -361,22 +371,42 @@ export function HoldingsClient() {
 
       <section className="panel">
         <div className={styles.headerRow}>
-          <div>
-            <h2 className="panelTitle">Holdings</h2>
-            <p className="subtle">정렬: updated_at desc</p>
-          </div>
-          <button type="button" onClick={() => void refresh()} disabled={loading}>
-            Refresh
-          </button>
-        </div>
+              <div>
+                <h2 className="panelTitle">Holdings</h2>
+                <p className="subtle">
+                  정렬: updated_at desc · 활성 {partitioned.activeCount} / 비활성{" "}
+                  {partitioned.inactiveCount}
+                </p>
+              </div>
+              <button type="button" onClick={() => void refresh()} disabled={loading}>
+                Refresh
+              </button>
+            </div>
+            <div className={styles.filterRow}>
+              <label className={styles.toggleLabel}>
+                <input
+                  type="checkbox"
+                  checked={showInactive}
+                  onChange={(event) => setShowInactive(event.target.checked)}
+                />
+                비활성 포함 표시 (quantity&lt;=0)
+              </label>
+              {!showInactive && partitioned.inactiveCount > 0 && (
+                <p className="subtle">비활성 {partitioned.inactiveCount}개 숨김</p>
+              )}
+            </div>
 
         {error && <p className={styles.error}>{error}</p>}
         {loading && <p className="subtle">로딩 중...</p>}
-        {!loading && items.length === 0 && (
-          <p className="subtle">등록된 보유 종목이 없습니다.</p>
+        {!loading && visibleItems.length === 0 && (
+          <p className="subtle">
+            {items.length === 0
+              ? "등록된 보유 종목이 없습니다."
+              : "활성 보유 종목이 없습니다."}
+          </p>
         )}
 
-        {!loading && items.length > 0 && (
+        {!loading && visibleItems.length > 0 && (
           <div className={styles.tableWrap}>
             <table>
               <thead>
@@ -392,10 +422,20 @@ export function HoldingsClient() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((row) => (
-                  <tr key={row.ticker}>
+                {visibleItems.map((row) => {
+                  const inactive = !isActiveHoldingQuantity(row.quantity);
+                  return (
+                  <tr
+                    key={row.ticker}
+                    className={showInactive && inactive ? styles.inactiveRow : undefined}
+                  >
                     <td>{row.ticker}</td>
-                    <td>{row.quantity}</td>
+                    <td>
+                      {row.quantity}
+                      {showInactive && inactive && (
+                        <span className={styles.inactiveBadge}>비활성</span>
+                      )}
+                    </td>
                     <td>{row.entry_price}</td>
                     <td>{row.entry_date ?? "-"}</td>
                     <td className={styles.notesCell}>{row.notes ?? "-"}</td>
@@ -416,7 +456,7 @@ export function HoldingsClient() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
