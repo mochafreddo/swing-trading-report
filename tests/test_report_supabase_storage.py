@@ -5,9 +5,11 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import sab.report.supabase_storage as supabase_storage
 from sab.report.supabase_storage import (
     SupabaseStorageConfig,
     SupabaseStorageConfigError,
+    SupabaseStorageError,
     maybe_upload_report_artifact,
     upload_report_artifact,
 )
@@ -58,6 +60,175 @@ class _FakeSession:
         if not self._post_responses:
             raise AssertionError("unexpected POST request")
         return self._post_responses.pop(0)
+
+
+def test_is_not_found_response_classifies_expected_statuses() -> None:
+    assert supabase_storage._is_not_found_response(status_code=404, text="")
+    assert supabase_storage._is_not_found_response(
+        status_code=400,
+        text='{"code":"not_found","message":"The resource was not found"}',
+    )
+    assert supabase_storage._is_not_found_response(
+        status_code=400,
+        text="Resource not found",
+    )
+    assert not supabase_storage._is_not_found_response(
+        status_code=400,
+        text='{"code":"invalid_request","message":"bad request"}',
+    )
+    assert not supabase_storage._is_not_found_response(
+        status_code=500,
+        text="internal error",
+    )
+
+
+def test_is_conflict_response_classifies_expected_statuses() -> None:
+    assert supabase_storage._is_conflict_response(status_code=409, text="")
+    assert supabase_storage._is_conflict_response(
+        status_code=400,
+        text="duplicate key",
+    )
+    assert supabase_storage._is_conflict_response(
+        status_code=400,
+        text="already exists",
+    )
+    assert not supabase_storage._is_conflict_response(
+        status_code=400,
+        text="invalid payload",
+    )
+    assert not supabase_storage._is_conflict_response(
+        status_code=500,
+        text="internal error",
+    )
+
+
+def test_resolve_storage_config_prefers_secret_key() -> None:
+    config = supabase_storage._resolve_storage_config(
+        url_raw="https://example.supabase.co/",
+        secret_key_raw="sb_secret_server_key",
+        legacy_service_role_raw="legacy-key",
+        bucket_raw="reports",
+        required=True,
+    )
+
+    assert config is not None
+    assert config.service_role_key == "sb_secret_server_key"
+    assert config.url == "https://example.supabase.co"
+
+
+def test_resolve_storage_config_uses_legacy_key_when_secret_is_missing() -> None:
+    config = supabase_storage._resolve_storage_config(
+        url_raw="https://example.supabase.co",
+        secret_key_raw=None,
+        legacy_service_role_raw="legacy-key",
+        bucket_raw="reports",
+        required=True,
+    )
+
+    assert config is not None
+    assert config.service_role_key == "legacy-key"
+
+
+def test_resolve_storage_config_requires_env_when_required() -> None:
+    with pytest.raises(SupabaseStorageConfigError):
+        supabase_storage._resolve_storage_config(
+            url_raw=None,
+            secret_key_raw=None,
+            legacy_service_role_raw=None,
+            bucket_raw="reports",
+            required=True,
+        )
+
+
+def test_resolve_storage_config_returns_none_when_not_required() -> None:
+    config = supabase_storage._resolve_storage_config(
+        url_raw=None,
+        secret_key_raw=None,
+        legacy_service_role_raw=None,
+        bucket_raw="reports",
+        required=False,
+    )
+    assert config is None
+
+
+def test_extract_report_date_from_filename_falls_back_to_today() -> None:
+    today = date(2026, 2, 14)
+
+    assert (
+        supabase_storage._extract_report_date_from_filename(
+            filename="buy-report.json",
+            today=today,
+        )
+        == today
+    )
+    assert (
+        supabase_storage._extract_report_date_from_filename(
+            filename="2026-99-99.buy.json",
+            today=today,
+        )
+        == today
+    )
+
+
+def test_extract_report_date_from_filename_reads_valid_date() -> None:
+    parsed = supabase_storage._extract_report_date_from_filename(
+        filename="prefix-2026-02-13.buy.json",
+        today=date(2026, 2, 14),
+    )
+    assert parsed == date(2026, 2, 13)
+
+
+def test_resolve_storage_key_and_upload_retries_on_conflict() -> None:
+    report_date = date(2026, 2, 13)
+    candidate_keys = list(
+        supabase_storage._iter_candidate_storage_keys(
+            report_date=report_date,
+            run_type="buy",
+            max_duplicate_index=2,
+        )
+    )
+
+    exists_calls: list[str] = []
+    upload_calls: list[str] = []
+
+    def _fake_exists(key: str) -> bool:
+        exists_calls.append(key)
+        return False
+
+    def _fake_upload(key: str) -> None:
+        upload_calls.append(key)
+        if len(upload_calls) == 1:
+            raise supabase_storage.SupabaseStorageConflictError("race")
+
+    resolved = supabase_storage._resolve_storage_key_and_upload(
+        candidate_keys=candidate_keys,
+        object_exists=_fake_exists,
+        upload_payload=_fake_upload,
+    )
+
+    assert resolved == "2026/02/2026-02-13-1.buy.json"
+    assert exists_calls == candidate_keys[:2]
+    assert upload_calls == candidate_keys[:2]
+
+
+def test_resolve_storage_key_and_upload_raises_when_candidates_exhausted() -> None:
+    with pytest.raises(SupabaseStorageError, match="duplicate index exhausted"):
+        supabase_storage._resolve_storage_key_and_upload(
+            candidate_keys=["k0", "k1"],
+            object_exists=lambda _key: True,
+            upload_payload=lambda _key: None,
+        )
+
+
+def test_iter_candidate_storage_keys_rejects_negative_max_duplicate_index() -> None:
+    with pytest.raises(ValueError, match="max_duplicate_index"):
+        list(
+            supabase_storage._iter_candidate_storage_keys(
+                report_date=date(2026, 2, 13),
+                run_type="buy",
+                max_duplicate_index=-1,
+            )
+        )
 
 
 def test_upload_report_artifact_adds_suffix_when_key_exists(tmp_path: Path) -> None:
@@ -157,6 +328,40 @@ def test_maybe_upload_report_artifact_skips_when_disabled(
         run_type="buy",
         logger=logging.getLogger("test"),
     )
+    assert uploaded is None
+
+
+def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("SAB_UPLOAD_REPORTS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+
+    def _fake_upload(
+        *,
+        local_path: str,
+        run_type: str,
+        report_date: date,
+        config: SupabaseStorageConfig,
+    ) -> str:
+        del local_path, run_type, report_date, config
+        raise SupabaseStorageError("upload failed")
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact", _fake_upload
+    )
+
+    uploaded = maybe_upload_report_artifact(
+        artifact_path=report_path.as_posix(),
+        run_type="buy",
+        logger=logging.getLogger("test"),
+    )
+
     assert uploaded is None
 
 
