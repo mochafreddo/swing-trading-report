@@ -130,9 +130,9 @@
 
 ### M4. 리포트 retention cleanup 워크플로우
 
-- [ ] `.github/workflows/cleanup.yml` 생성(`schedule`)
-- [ ] Storage listing → 날짜 파싱(`YYYY-MM-DD`) → 보관기간(기본 30일) 초과 삭제
-- [ ] 삭제 기준/로그(몇 개 삭제했는지) 출력
+- [x] `.github/workflows/cleanup.yml` 생성(`schedule`)
+- [x] Storage listing → 날짜 파싱(`YYYY-MM-DD`) → 보관기간(기본 30일) 초과 삭제
+- [x] 삭제 기준/로그(몇 개 삭제했는지) 출력
 
 **완료 정의**
 - 과거 날짜 테스트 오브젝트를 넣었을 때, 기준일 이후 자동 삭제가 동작한다.
@@ -189,7 +189,7 @@
 
 - [x] 아티팩트 스키마 유효성 테스트(필수 필드/버전)
 - [x] Storage 오브젝트 키 생성/충돌(suffix) 테스트
-- [ ] retention 판정 로직 테스트(날짜 파싱/경계: 오늘-30일)
+- [x] retention 판정 로직 테스트(날짜 파싱/경계: 오늘-30일)
 - [ ] (가능하면) Supabase 연동은 “클라이언트 호출”을 얇게 감싸고, 핵심 로직은 순수 함수로 분리해 단위 테스트로 커버
 
 권장 커맨드:

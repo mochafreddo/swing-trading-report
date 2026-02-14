@@ -1,0 +1,239 @@
+name: Report cleanup
+
+on:
+  schedule:
+    - cron: "40 23 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run only (no delete)"
+        required: false
+        default: true
+        type: boolean
+      retention_days:
+        description: "Retention days (>0)"
+        required: false
+        default: "30"
+        type: string
+      bucket:
+        description: "Supabase Storage bucket"
+        required: false
+        default: "reports"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Resolve cleanup inputs
+        id: params
+        run: |
+          set -euo pipefail
+
+          dry_run="${{ github.event.inputs.dry_run }}"
+          retention_days="${{ github.event.inputs.retention_days }}"
+          bucket="${{ github.event.inputs.bucket }}"
+
+          if [[ -z "${dry_run}" ]]; then
+            dry_run="true"
+          fi
+          if [[ -z "${retention_days}" ]]; then
+            retention_days="30"
+          fi
+          if [[ -z "${bucket}" ]]; then
+            bucket="reports"
+          fi
+
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            dry_run="false"
+          fi
+
+          dry_run="${dry_run,,}"
+          if [[ "${dry_run}" != "true" && "${dry_run}" != "false" ]]; then
+            echo "dry_run must be true/false, got '${dry_run}'" >&2
+            exit 1
+          fi
+
+          if ! [[ "${retention_days}" =~ ^[0-9]+$ ]] || [[ "${retention_days}" -le 0 ]]; then
+            echo "retention_days must be a positive integer, got '${retention_days}'" >&2
+            exit 1
+          fi
+
+          echo "dry_run=${dry_run}" >> "${GITHUB_OUTPUT}"
+          echo "retention_days=${retention_days}" >> "${GITHUB_OUTPUT}"
+          echo "bucket=${bucket}" >> "${GITHUB_OUTPUT}"
+
+      - name: Cleanup expired report objects
+        id: cleanup
+        env:
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
+          RETENTION_DAYS: ${{ steps.params.outputs.retention_days }}
+          BUCKET: ${{ steps.params.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          from sab.report.retention import (
+              extract_report_date_from_key,
+              select_expired_report_keys,
+          )
+
+          supabase_url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
+          if not supabase_url:
+              raise SystemExit("SUPABASE_URL must be set")
+
+          supabase_key = (
+              (os.environ.get("SUPABASE_SECRET_KEY") or "").strip()
+              or (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+          )
+          if not supabase_key:
+              raise SystemExit(
+                  "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY must be set"
+              )
+          if supabase_key.startswith("sb_publishable_"):
+              raise SystemExit(
+                  "Publishable key is not allowed for server-side cleanup workflow"
+              )
+
+          bucket = (os.environ.get("BUCKET") or "reports").strip()
+          retention_days = int(os.environ["RETENTION_DAYS"])
+          dry_run = (os.environ.get("DRY_RUN") or "true").strip().lower() == "true"
+
+          headers = {
+              "apikey": supabase_key,
+              "Authorization": f"Bearer {supabase_key}",
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+          }
+
+          def request_json(*, method: str, url: str, payload: object | None) -> object:
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode("utf-8")
+              request = Request(url, data=data, method=method, headers=headers)
+              try:
+                  with urlopen(request, timeout=15) as response:
+                      body = response.read().decode("utf-8")
+              except HTTPError as exc:
+                  message = exc.read().decode("utf-8", errors="replace")
+                  raise SystemExit(f"{method} {url} failed ({exc.code}): {message}") from exc
+              except URLError as exc:
+                  raise SystemExit(f"{method} {url} failed: {exc}") from exc
+
+              if not body.strip():
+                  return None
+              try:
+                  return json.loads(body)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(
+                      f"{method} {url} returned non-JSON response: {body[:200]}"
+                  ) from exc
+
+          encoded_bucket = quote(bucket, safe="")
+          list_url = f"{supabase_url}/storage/v1/object/list/{encoded_bucket}"
+          all_keys: list[str] = []
+          offset = 0
+          limit = 1000
+
+          while True:
+              payload = {
+                  "prefix": "",
+                  "limit": limit,
+                  "offset": offset,
+                  "sortBy": {"column": "name", "order": "asc"},
+              }
+              response_data = request_json(method="POST", url=list_url, payload=payload)
+              if not isinstance(response_data, list):
+                  raise SystemExit("Supabase list API response must be a JSON array")
+
+              for row in response_data:
+                  if not isinstance(row, dict):
+                      continue
+                  name = row.get("name")
+                  if not isinstance(name, str):
+                      continue
+                  key = name.strip()
+                  if key:
+                      all_keys.append(key)
+
+              if len(response_data) < limit:
+                  break
+              offset += limit
+
+          pattern_matched_count = sum(
+              1 for key in all_keys if extract_report_date_from_key(key) is not None
+          )
+          today_utc = dt.datetime.now(dt.UTC).date()
+          expired_keys = select_expired_report_keys(
+              all_keys,
+              retention_days=retention_days,
+              today=today_utc,
+          )
+
+          deleted_count = 0
+          if not dry_run and expired_keys:
+              delete_url = f"{supabase_url}/storage/v1/object/{encoded_bucket}"
+              chunk_size = 100
+              for start in range(0, len(expired_keys), chunk_size):
+                  chunk = expired_keys[start : start + chunk_size]
+                  result = request_json(
+                      method="DELETE",
+                      url=delete_url,
+                      payload={"prefixes": chunk},
+                  )
+                  if isinstance(result, list):
+                      deleted_count += len(result)
+                  else:
+                      deleted_count += len(chunk)
+
+          print("[cleanup] bucket=", bucket, sep="")
+          print("[cleanup] dry_run=", str(dry_run).lower(), sep="")
+          print("[cleanup] retention_days=", retention_days, sep="")
+          print("[cleanup] listed_count=", len(all_keys), sep="")
+          print("[cleanup] pattern_matched_count=", pattern_matched_count, sep="")
+          print("[cleanup] expired_count=", len(expired_keys), sep="")
+          print("[cleanup] deleted_count=", deleted_count, sep="")
+
+          preview_limit = 20
+          for key in expired_keys[:preview_limit]:
+              print(f"[cleanup][expired] {key}")
+          if len(expired_keys) > preview_limit:
+              print(
+                  "[cleanup][expired] ... "
+                  f"{len(expired_keys) - preview_limit} more key(s) omitted"
+              )
+
+          output_path = os.environ.get("GITHUB_OUTPUT")
+          if output_path:
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write(f"bucket={bucket}\n")
+                  output.write(f"dry_run={str(dry_run).lower()}\n")
+                  output.write(f"retention_days={retention_days}\n")
+                  output.write(f"listed_count={len(all_keys)}\n")
+                  output.write(f"pattern_matched_count={pattern_matched_count}\n")
+                  output.write(f"expired_count={len(expired_keys)}\n")
+                  output.write(f"deleted_count={deleted_count}\n")
+          PY
