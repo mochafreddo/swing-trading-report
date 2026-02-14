@@ -155,7 +155,8 @@
 #### M5-3. Holdings
 - [x] 목록: ticker, quantity, entry_price, entry_date, notes, tags
 - [x] 생성/수정/삭제(삭제는 hard delete 또는 quantity=0 정책 중 선택)
-- [ ] (선택) import/export(초기 이관/백업용) — v1.1에서는 후순위
+- [x] (선택) import/export(초기 이관/백업용) — v1.1 범위 밖으로 확정(의도된 미구현)
+- [x] v1.2 백로그 스펙으로 이관: `docs/spec-v1.2-holdings-import-export.md`
 
 #### M5-4. Run
 - [x] scan/sell 버튼 → Next.js 서버에서 GitHub API `workflow_dispatch` 호출

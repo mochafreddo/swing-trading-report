@@ -50,7 +50,7 @@
 ## 보유 목록(holdings)
 
 - 보유 목록은 **웹 UI(Next.js)에서 CRUD**로 관리합니다(단일 사용자 기준).
-- (선택) `holdings.yaml` import/export로 초기 이관/백업을 지원합니다.
+- (선택) `holdings.yaml` import/export는 **v1.1 미구현**이며, v1.2에서 초기 이관/백업 용도로 도입 예정입니다.
 
 ## 자주 쓰는 실행
 
@@ -80,7 +80,7 @@
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
 - 보유 목록(공식 소스): Supabase Postgres `holdings` 테이블
-- 선택 백업 파일: `holdings.yaml`(import/export 용도)
+- 선택 백업 파일: `holdings.yaml`(import/export 용도, v1.2 예정)
 
 ## 문제 해결
 

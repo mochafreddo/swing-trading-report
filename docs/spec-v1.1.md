@@ -202,7 +202,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 - **Holdings**
   - 목록: ticker, quantity, entry_price, entry_date, notes, tags
   - 생성/수정/삭제
-  - (선택) import/export 버튼(초기 이관/백업용)
+  - (선택) import/export 버튼(초기 이관/백업용, **v1.1 미도입/범위 밖**, v1.2 백로그)
 - **Run**
   - scan/sell 트리거 버튼
   - 트리거 후: “Actions에서 실행 중” 안내 + 워크플로우 페이지 링크
