@@ -214,6 +214,11 @@ export function ReportsClient() {
               </>
             )}
           </p>
+          {query.trim() && truncated && (
+            <p className="subtle">
+              검색 범위 제한: 최신 {searchWindow}개 리포트만 검색됨
+            </p>
+          )}
         </header>
 
         <ul className={styles.list}>

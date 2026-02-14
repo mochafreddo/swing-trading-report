@@ -11,7 +11,7 @@ __pycache__/
 /data/
 config.local.yaml
 holdings.yaml
-reports/
+/reports/
 watchlist.txt
 web/node_modules/
 web/.next/

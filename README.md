@@ -68,6 +68,8 @@
   - 웹 패키지 매니저: `pnpm` (고정)
   - 기능:
     - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
+      - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
+      - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
     - `Holdings`: Supabase `holdings` CRUD
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
 
