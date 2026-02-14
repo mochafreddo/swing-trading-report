@@ -10,7 +10,7 @@
   - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
   - `.env`에는 v1.1 필수 키를 작성:
     - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
-    - Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+    - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
     - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
     - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)

@@ -183,7 +183,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
   - (선택) `KIS_BASE_URL`
 - Supabase
   - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `SUPABASE_SECRET_KEY`(권장) 또는 `SUPABASE_SERVICE_ROLE_KEY`(레거시)
 - 알림(기본, 자동 실행에만 사용)
   - Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 
@@ -209,7 +209,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 
 ### 7.3 보안/키 관리(원칙)
 
-- **서비스 롤 키는 브라우저로 노출하지 않는다.**
+- **서버 전용 Supabase 키(`SUPABASE_SECRET_KEY` 또는 `SUPABASE_SERVICE_ROLE_KEY`)는 브라우저로 노출하지 않는다.**
   - Supabase 접근은 Next.js **서버 측(Route Handler/Server Action)** 에서만 수행한다.
 - v1.1은 로컬 전용이므로 인증은 생략 가능하지만,
   - 추후 Vercel 등 공개 배포 시 인증/권한(RLS 포함)을 별도 SPEC/ADR로 추가한다.
@@ -217,7 +217,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 ### 7.4 웹 UI 환경변수(예시)
 
 - `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_SECRET_KEY`(권장) 또는 `SUPABASE_SERVICE_ROLE_KEY`(레거시)
 - `GITHUB_OWNER`
 - `GITHUB_REPO`
 - `GITHUB_PAT` (workflow_dispatch 호출용, 로컬에만 저장)

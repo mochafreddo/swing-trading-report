@@ -27,6 +27,7 @@ def test_env_example_contains_v11_required_keys() -> None:
         "KIS_APP_SECRET",
         "KIS_BASE_URL",
         "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
         "GITHUB_OWNER",
         "GITHUB_REPO",

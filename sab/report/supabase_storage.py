@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import logging
@@ -48,17 +49,71 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_value(name: str) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    return value
+
+
+def _decode_jwt_payload(token: str) -> dict[str, object] | None:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+
+    payload_part = parts[1]
+    padding = "=" * (-len(payload_part) % 4)
+    try:
+        payload_bytes = base64.urlsafe_b64decode(payload_part + padding)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _validate_supabase_api_key(*, key: str, source_name: str) -> None:
+    if key.startswith("sb_publishable_"):
+        raise SupabaseStorageConfigError(
+            f"{source_name} is a publishable key. "
+            "Use SUPABASE_SECRET_KEY (recommended) or legacy SUPABASE_SERVICE_ROLE_KEY."
+        )
+
+    payload = _decode_jwt_payload(key)
+    if payload is None:
+        return
+
+    role = payload.get("role")
+    if isinstance(role, str) and role.strip().lower() == "anon":
+        raise SupabaseStorageConfigError(
+            f"{source_name} has role=anon. "
+            "Use SUPABASE_SECRET_KEY (recommended) or legacy SUPABASE_SERVICE_ROLE_KEY."
+        )
+
+
 def _load_storage_config(*, required: bool) -> SupabaseStorageConfig | None:
-    url_raw = os.getenv("SUPABASE_URL")
-    key_raw = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    url_raw = _env_value("SUPABASE_URL")
+    secret_key_raw = _env_value("SUPABASE_SECRET_KEY")
+    legacy_service_role_raw = _env_value("SUPABASE_SERVICE_ROLE_KEY")
+    key_raw = secret_key_raw or legacy_service_role_raw
     bucket_raw = os.getenv("SUPABASE_REPORTS_BUCKET") or _DEFAULT_BUCKET
 
     if not url_raw or not key_raw:
         if required:
             raise SupabaseStorageConfigError(
-                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set for report upload"
+                "SUPABASE_URL and one of SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY "
+                "must be set for report upload"
             )
         return None
+
+    source_name = (
+        "SUPABASE_SECRET_KEY"
+        if secret_key_raw is not None
+        else "SUPABASE_SERVICE_ROLE_KEY"
+    )
+    _validate_supabase_api_key(key=key_raw, source_name=source_name)
 
     return SupabaseStorageConfig(
         url=url_raw.rstrip("/"),
@@ -231,7 +286,8 @@ def maybe_upload_report_artifact(
     config = _load_storage_config(required=required)
     if config is None:
         logger.info(
-            "Supabase report upload skipped: SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set"
+            "Supabase report upload skipped: "
+            "SUPABASE_URL and SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY not set"
         )
         return None
 

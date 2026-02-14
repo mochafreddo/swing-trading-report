@@ -19,7 +19,7 @@
 ## 구현 원칙
 
 - **단일 소스**: holdings는 Supabase Postgres만을 “정답”으로 본다.
-- **키/시크릿 노출 금지**: `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_PAT`는 브라우저로 절대 노출하지 않는다(Next.js 서버 측에서만 사용).
+- **키/시크릿 노출 금지**: `SUPABASE_SECRET_KEY`/`SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_PAT`는 브라우저로 절대 노출하지 않는다(Next.js 서버 측에서만 사용).
 - **점진적 완성**: (1) 데이터·파이프라인 연결 → (2) 최소 UI → (3) 운영(리텐션/알림) → (4) UX·성능 개선.
 - **품질 게이트**: PR에 ruff/mypy/pytest가 최소 한 번은 통과하도록 유지한다.
 - **체크 기준**: `- [x]`는 “코드 작성”만이 아니라, 외부 시스템(Supabase/GitHub Actions 등) 적용이 필요한 항목은 **클라우드 적용 + 검증 완료**까지 끝난 상태를 의미한다.
@@ -52,7 +52,7 @@
 
 - [x] `.env.example`에 v1.1 필수 환경변수 목록을 최신화
   - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택)`KIS_BASE_URL`
-  - Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+  - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
   - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용)`REPORT_RETENTION_DAYS`
   - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`(슬랙은 선택)
 - [x] 로컬 실행 커맨드 확정(AGENTS.md 기준)

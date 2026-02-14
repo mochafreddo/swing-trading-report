@@ -168,9 +168,67 @@ def test_maybe_upload_report_artifact_requires_supabase_env_on_github_actions(
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
 
     with pytest.raises(SupabaseStorageConfigError):
+        maybe_upload_report_artifact(
+            artifact_path=report_path.as_posix(),
+            run_type="buy",
+            logger=logging.getLogger("test"),
+        )
+
+
+def test_maybe_upload_report_artifact_prefers_supabase_secret_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "legacy-service-role-key")
+
+    captured: dict[str, str] = {}
+
+    def _fake_upload(
+        *,
+        local_path: str,
+        run_type: str,
+        report_date: date,
+        config: SupabaseStorageConfig,
+    ) -> str:
+        del local_path, run_type, report_date
+        captured["key"] = config.service_role_key
+        return "2026/02/2026-02-13.buy.json"
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact", _fake_upload
+    )
+
+    uploaded = maybe_upload_report_artifact(
+        artifact_path=report_path.as_posix(),
+        run_type="buy",
+        logger=logging.getLogger("test"),
+    )
+
+    assert uploaded == "2026/02/2026-02-13.buy.json"
+    assert captured["key"] == "sb_secret_server_key"
+
+
+def test_maybe_upload_report_artifact_rejects_publishable_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_publishable_test_key")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+
+    with pytest.raises(SupabaseStorageConfigError, match="publishable"):
         maybe_upload_report_artifact(
             artifact_path=report_path.as_posix(),
             run_type="buy",
