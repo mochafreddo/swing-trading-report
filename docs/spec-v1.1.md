@@ -118,13 +118,13 @@
 
 ### 4.3 (선택) Postgres: `run_history`
 
-v1.1에서는 “GitHub Actions 링크”로 충분하면 생략한다. 필요해지면 다음 테이블을 추가한다.
+v1.1에서는 “GitHub Actions 링크”로 충분하므로 **생략**한다(ADR-0006). 필요해지면 다음 테이블을 추가한다.
 
 - `run_history(id, run_type, trigger, started_at, finished_at, status, github_run_url, report_keys[])`
 
 ### 4.4 (선택) 캔들 캐시(리텐션은 `max()` 기반)
 
-v1.1 필수는 아니지만, API 호출 수/속도를 위해 도입 가능하다.
+v1.1에서는 **미도입**한다(ADR-0006). API 호출 수/속도가 문제가 되면 v1.2에서 재검토한다.
 
 - **정책**: 티커별 **최근 `max(min_history_bars, retention_bars)` 봉**만 유지
   - `min_history_bars`: 지표 계산에 필요한 최소 봉수(예: 200)
@@ -213,6 +213,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
   - Supabase 접근은 Next.js **서버 측(Route Handler/Server Action)** 에서만 수행한다.
 - v1.1은 로컬 전용이므로 인증은 생략 가능하지만,
   - 추후 Vercel 등 공개 배포 시 인증/권한(RLS 포함)을 별도 SPEC/ADR로 추가한다.
+  - (현재) `holdings`는 RLS 강제 + `anon`/`authenticated` 권한 제거로 서비스 키 기반(server-only) 접근만 허용한다.
 
 ### 7.4 웹 UI 환경변수(예시)
 
@@ -231,8 +232,10 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 - AC4: 자동 실행(`schedule`) 결과만 텔레그램/슬랙 요약 알림이 전송된다.
 - AC5: cleanup 워크플로우가 30일을 초과한 리포트를 정리한다(기본값).
 
-## 9. 오픈 결정(추후)
+## 9. 오픈 결정(정리)
 
-- 리포트 목록을 Storage listing만으로 충분히 제공할지, `run_history`/인덱스 테이블을 둘지
-- 캔들 캐시 테이블 도입 방식(A: row-per-bar vs B: JSONB-per-ticker)
-- Vercel/모바일 접근을 위한 인증/권한(로그인, RLS) 설계
+v1.1에서 아래 항목은 “미도입(보류)”로 정리한다(ADR-0006).
+
+- 리포트 목록: Storage listing 기반 유지, `run_history`/인덱스 테이블 미도입
+- 캔들 캐시: 미도입(필요 시 v1.2에서 JSONB-per-ticker 우선 검토)
+- 인증/권한: v1.1 로컬 전용(공개 배포 전 별도 ADR/SPEC으로 결정)

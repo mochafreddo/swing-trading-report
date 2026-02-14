@@ -173,10 +173,10 @@
   - GitHub Secrets 설정 목록
   - 로컬 웹 실행(Docker) + 로컬 CLI 실행(uv)
   - 장애 시 점검 포인트(권한/키/버킷/워크플로우 입력)
-- [ ] “오픈 결정” 항목 결정(필요 시 ADR/SPEC 업데이트)
-  - Storage listing만으로 충분한지 vs index 테이블(run_history 등) 도입
-  - 캔들 캐시 도입 여부 및 방식(A row-per-bar vs B JSONB)
-  - 인증/권한(RLS) 설계(공개 배포 전)
+- [x] “오픈 결정” 항목 결정(필요 시 ADR/SPEC 업데이트) — ADR-0006
+  - v1.1: Storage listing 기반 유지, index 테이블(run_history 등) 미도입
+  - v1.1: 캔들 캐시(Supabase) 미도입(필요 시 v1.2에서 재검토)
+  - v1.1: 로컬 전용(공개 배포 전 인증/권한(RLS) 별도 ADR/SPEC으로 결정)
 
 **완료 정의**
 - 운영자가 runbook만 보고 로컬/Actions/Supabase를 재설정할 수 있다.
