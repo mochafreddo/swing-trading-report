@@ -62,6 +62,24 @@ def _infer_currency(ticker: str) -> str:
     return "KRW"
 
 
+def _infer_market(ticker: str) -> str:
+    suffix = None
+    if "." in ticker:
+        suffix = ticker.rsplit(".", 1)[1].strip().upper()
+    if suffix in US_SUFFIXES:
+        return "US"
+    return "KR"
+
+
+def _filter_tickers_by_markets(
+    tickers: list[str], universe_markets: list[str]
+) -> list[str]:
+    allowed_markets = {market.strip().upper() for market in universe_markets if market}
+    if not allowed_markets:
+        return []
+    return [ticker for ticker in tickers if _infer_market(ticker) in allowed_markets]
+
+
 def _to_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -757,10 +775,20 @@ def run_scan(
         logger.error("Configuration loading failed: %s", exc)
         return 1
 
+    loaded_tickers = _load_scan_tickers(cfg, watchlist_path)
+    filtered_tickers = _filter_tickers_by_markets(loaded_tickers, cfg.universe_markets)
+    if len(filtered_tickers) != len(loaded_tickers):
+        logger.info(
+            "Watchlist filtered by universe markets=%s (%s -> %s tickers)",
+            ",".join(cfg.universe_markets),
+            len(loaded_tickers),
+            len(filtered_tickers),
+        )
+
     runtime = _ScanRuntime(
         cfg=cfg,
         logger=logger,
-        tickers=_load_scan_tickers(cfg, watchlist_path),
+        tickers=filtered_tickers,
     )
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit

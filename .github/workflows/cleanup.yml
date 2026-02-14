@@ -154,34 +154,62 @@ jobs:
 
           encoded_bucket = quote(bucket, safe="")
           list_url = f"{supabase_url}/storage/v1/object/list/{encoded_bucket}"
-          all_keys: list[str] = []
-          offset = 0
+          collected_keys: set[str] = set()
+          prefixes_to_visit: list[str] = [""]
+          visited_prefixes: set[str] = set()
           limit = 1000
 
-          while True:
-              payload = {
-                  "prefix": "",
-                  "limit": limit,
-                  "offset": offset,
-                  "sortBy": {"column": "name", "order": "asc"},
-              }
-              response_data = request_json(method="POST", url=list_url, payload=payload)
-              if not isinstance(response_data, list):
-                  raise SystemExit("Supabase list API response must be a JSON array")
+          while prefixes_to_visit:
+              prefix = prefixes_to_visit.pop()
+              if prefix in visited_prefixes:
+                  continue
+              visited_prefixes.add(prefix)
 
-              for row in response_data:
-                  if not isinstance(row, dict):
-                      continue
-                  name = row.get("name")
-                  if not isinstance(name, str):
-                      continue
-                  key = name.strip()
-                  if key:
-                      all_keys.append(key)
+              offset = 0
+              while True:
+                  payload = {
+                      "prefix": prefix,
+                      "limit": limit,
+                      "offset": offset,
+                      "sortBy": {"column": "name", "order": "asc"},
+                  }
+                  response_data = request_json(
+                      method="POST",
+                      url=list_url,
+                      payload=payload,
+                  )
+                  if not isinstance(response_data, list):
+                      raise SystemExit("Supabase list API response must be a JSON array")
 
-              if len(response_data) < limit:
-                  break
-              offset += limit
+                  for row in response_data:
+                      if not isinstance(row, dict):
+                          continue
+                      name = row.get("name")
+                      if not isinstance(name, str):
+                          continue
+
+                      stripped_name = name.strip()
+                      if not stripped_name:
+                          continue
+
+                      full_name = (
+                          stripped_name
+                          if prefix and stripped_name.startswith(prefix)
+                          else f"{prefix}{stripped_name}"
+                      )
+
+                      if stripped_name.endswith(".json"):
+                          collected_keys.add(full_name)
+                          continue
+
+                      if "." not in stripped_name:
+                          prefixes_to_visit.append(f"{full_name}/")
+
+                  if len(response_data) < limit:
+                      break
+                  offset += limit
+
+          all_keys = sorted(collected_keys)
 
           pattern_matched_count = sum(
               1 for key in all_keys if extract_report_date_from_key(key) is not None

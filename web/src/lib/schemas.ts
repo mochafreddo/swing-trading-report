@@ -68,12 +68,23 @@ const toTags = z.preprocess((value) => {
   return value;
 }, z.array(z.string().min(1).max(40)).max(20));
 
+const KR_TICKER_PATTERN = /^\d{6}$/;
+const US_TICKER_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
+
 const tickerSchema = z
   .string()
   .trim()
   .min(1)
   .max(32)
-  .transform((ticker) => ticker.toUpperCase());
+  .transform((ticker) => ticker.toUpperCase())
+  .refine(
+    (ticker) =>
+      KR_TICKER_PATTERN.test(ticker) || US_TICKER_PATTERN.test(ticker),
+    {
+      message:
+        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, AAPL.NASD)"
+    }
+  );
 
 const entryDateSchema = z.preprocess((value) => {
   if (value === "" || value == null) {

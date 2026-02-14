@@ -43,6 +43,26 @@ describe("holding schemas", () => {
     expect(parsed.tags).toEqual(["core", "swing"]);
   });
 
+  it("accepts KR ticker format", () => {
+    const parsed = holdingCreateSchema.parse({
+      ticker: "005930",
+      quantity: 1,
+      entry_price: 70000
+    });
+
+    expect(parsed.ticker).toBe("005930");
+  });
+
+  it("rejects unsupported ticker format", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL",
+      quantity: 1,
+      entry_price: 172.5
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("requires at least one patch field", () => {
     const parsed = holdingPatchSchema.safeParse({});
     expect(parsed.success).toBe(false);
