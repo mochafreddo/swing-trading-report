@@ -1,0 +1,18 @@
+services:
+  web:
+    build:
+      context: ./web
+    container_name: sab-web
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+    ports:
+      - "${WEB_HOST_PORT:-55300}:3000"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    command: pnpm run dev
+
+volumes:
+  web_node_modules:
