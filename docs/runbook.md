@@ -1,6 +1,6 @@
-# 런북 — CLI 운영 가이드
+# 런북 — CLI + Web 운영 가이드
 
-로컬에서 CLI를 실행/디버그/운영하기 위한 실무 지침입니다.
+로컬에서 CLI와 웹 UI를 실행/디버그/운영하기 위한 실무 지침입니다.
 
 ## 설치/준비
 
@@ -12,14 +12,40 @@
     - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
     - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
     - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
+    - Web 로컬 실행(선택): `WEB_HOST_PORT` (기본값 `55300`)
     - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
   - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
   - Python 3.13+
+  - Node.js 20+
+  - Docker Desktop + Docker Compose
 - Supabase(권장):
   - 보유 목록/리포트/실행 이력은 Supabase(Postgres/Storage)를 단일 소스로 사용합니다.
   - GitHub Actions 런너가 자동 실행할 때도 동일한 Supabase를 사용합니다.
+
+## 웹 UI 로컬 실행(Next.js + Docker)
+
+- 전환 직후 1회 정리:
+  - `docker compose down --remove-orphans && docker compose up -d --build web`
+- 일반 재기동:
+  - `docker compose up -d --build web`
+- 강제 재생성(문제 시):
+  - `docker compose stop web`
+  - `docker compose rm -f web`
+  - `docker compose up -d --build web`
+- 로그 확인:
+  - `docker compose logs -f web`
+- 중지:
+  - `docker compose stop web`
+- 접속:
+  - `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+- 포트 변경:
+  - `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
+- 기본 화면:
+  - `Reports`: Storage 리포트 목록/상세/검색
+  - `Holdings`: Supabase `holdings` CRUD
+  - `Run`: scan/sell `workflow_dispatch` 실행 트리거
 
 ## 보유 목록(holdings)
 
@@ -35,7 +61,9 @@
 - 보유 매도/보류 평가
   - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 - 웹 UI(Next.js)
-  - 로컬 Docker로 구동(세부는 PRD 기준)
+  - `docker compose up -d --build web`
+  - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 또는 웹 디렉터리에서 직접 실행: `pnpm install && pnpm run dev`
 
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
@@ -51,7 +79,8 @@
 - Storage 업로드 MIME: `contentType=application/json`으로 고정(`reports` 버킷 정책)
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
-- 보유 목록: `holdings.yaml`(경로는 `files.holdings` 또는 `HOLDINGS_FILE`)
+- 보유 목록(공식 소스): Supabase Postgres `holdings` 테이블
+- 선택 백업 파일: `holdings.yaml`(import/export 용도)
 
 ## 문제 해결
 

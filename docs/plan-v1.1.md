@@ -144,22 +144,22 @@
 > 위치는 스펙 권장에 따라 `web/`로 고정한다. (현재 다른 위치에 웹 코드가 있으면 `web/`로 이동/정리한다.)
 
 #### M5-1. 프로젝트/로컬 실행
-- [ ] `web/`에 Next.js 앱 생성 및 Docker Compose로 로컬 실행 가능하게 구성
-- [ ] 환경변수는 서버 측만 접근(서비스 롤/깃헙 PAT 포함)
+- [x] `web/`에 Next.js 앱 생성 및 Docker Compose로 로컬 실행 가능하게 구성
+- [x] 환경변수는 서버 측만 접근(서비스 롤/깃헙 PAT 포함)
 
 #### M5-2. Reports
-- [ ] 목록: 최신순, 타입(buy/sell) 필터
-- [ ] ticker substring 검색(초기에는 “서버에서 소량(최근 N개) JSON을 읽어 contains 매칭”으로 단순 구현)
-- [ ] 상세: 구조화 렌더링 + Raw JSON 토글
+- [x] 목록: 최신순, 타입(buy/sell) 필터
+- [x] ticker substring 검색(초기에는 “서버에서 소량(최근 N개) JSON을 읽어 contains 매칭”으로 단순 구현)
+- [x] 상세: 구조화 렌더링 + Raw JSON 토글
 
 #### M5-3. Holdings
-- [ ] 목록: ticker, quantity, entry_price, entry_date, notes, tags
-- [ ] 생성/수정/삭제(삭제는 hard delete 또는 quantity=0 정책 중 선택)
+- [x] 목록: ticker, quantity, entry_price, entry_date, notes, tags
+- [x] 생성/수정/삭제(삭제는 hard delete 또는 quantity=0 정책 중 선택)
 - [ ] (선택) import/export(초기 이관/백업용) — v1.1에서는 후순위
 
 #### M5-4. Run
-- [ ] scan/sell 버튼 → Next.js 서버에서 GitHub API `workflow_dispatch` 호출
-- [ ] 트리거 후: “Actions에서 실행 중” 안내 + 워크플로우/런 링크 제공
+- [x] scan/sell 버튼 → Next.js 서버에서 GitHub API `workflow_dispatch` 호출
+- [x] 트리거 후: “Actions에서 실행 중” 안내 + 워크플로우/런 링크 제공
 
 **완료 정의**
 - AC1~AC3이 웹 UI 상호작용으로 재현된다(holdings 반영, scan/sell 트리거, 업로드된 리포트 조회).
@@ -168,7 +168,7 @@
 
 ### M6. 안정화(문서/운영/리팩터링)
 
-- [ ] `docs/runbook.md`에 다음을 한 페이지로 정리
+- [x] `docs/runbook.md`에 다음을 한 페이지로 정리
   - Supabase 준비(테이블/버킷)
   - GitHub Secrets 설정 목록
   - 로컬 웹 실행(Docker) + 로컬 CLI 실행(uv)
@@ -200,8 +200,8 @@
 
 ### Web
 
-- [ ] 서버 라우트(Reports listing/download, Holdings CRUD, Workflow dispatch) 최소 스모크 테스트
-- [ ] 시크릿 노출 점검(브라우저 번들에 서비스 롤/깃헙 PAT 포함 금지)
+- [x] 서버 라우트(Reports listing/download, Holdings CRUD, Workflow dispatch) 최소 스모크 테스트
+- [x] 시크릿 노출 점검(브라우저 번들에 서비스 롤/깃헙 PAT 포함 금지)
 
 ---
 

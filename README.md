@@ -53,8 +53,23 @@
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
-  - 웹 UI(Next.js): Docker로 구동(문서/구현은 PRD 기준으로 정리)
+  - 웹 UI(Next.js): `docker compose up -d web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
   - (예정) 익일 시초 체크: `uv run -m sab entry`
+
+- 웹 UI 로컬 실행(Next.js + Docker)
+  - 전환 직후 1회 정리: `docker compose down --remove-orphans && docker compose up -d --build web`
+  - 일반 재기동: `docker compose up -d --build web`
+  - 강제 재생성(문제 시): `docker compose stop web && docker compose rm -f web && docker compose up -d --build web`
+  - 로그: `docker compose logs -f web`
+  - 중지: `docker compose stop web`
+  - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 포트 변경: `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
+  - 직접 실행: `cd web && pnpm install && pnpm run dev`
+  - 웹 패키지 매니저: `pnpm` (고정)
+  - 기능:
+    - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
+    - `Holdings`: Supabase `holdings` CRUD
+    - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
 
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD.buy.json`
@@ -94,19 +109,20 @@ Per‑market 임계치(권장)
 
 참고: KIS 토큰은 1일 1회 발급 원칙입니다. 본 프로젝트는 토큰을 `data/`에 캐시해 같은 날 재발급을 피합니다.
 
-## 파일/폴더 구조(예정)
+## 파일/폴더 구조
 
-- `sab/` … 애플리케이션 코드
+- `sab/` … Python 애플리케이션 코드
   - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell` / `sab entry`)
   - `data/` … KIS/PyKRX 커넥터, 캐시
   - `signals/` … EMA/RSI/ATR 계산
   - `report/` … 리포트 아티팩트(JSON) 생성
-  - `web/` … 로컬 대시보드(리포트 열람)
+- `web/` … Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` … 생성된 JSON 리포트 아티팩트 출력 폴더
 - `data/` … 캐시/상태(JSON 또는 SQLite)
 - `docs/kis-setup.md` … KIS 설정 가이드
 - `docs/PRD.md` … 제품 요구사항 문서
-- `holdings.yaml` … 보유 목록(매도/보류 평가용)
+- `supabase/` … Supabase 마이그레이션/설정
+- `holdings.yaml` … 선택 백업 파일(import/export 용도)
 
 ## 스크립트화 권장
 
