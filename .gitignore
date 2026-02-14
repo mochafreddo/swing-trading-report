@@ -7,8 +7,13 @@ __pycache__/
 .ruff_cache/
 .uv-cache/
 .venv/
+.pnpm-store/
 /data/
 config.local.yaml
 holdings.yaml
 reports/
 watchlist.txt
+web/node_modules/
+web/.next/
+web/.turbo/
+web/tsconfig.tsbuildinfo

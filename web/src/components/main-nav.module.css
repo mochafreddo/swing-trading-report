@@ -1,0 +1,29 @@
+.nav {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.link {
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  color: var(--ink-muted);
+  text-decoration: none;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+}
+
+.link:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+
+.active {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}

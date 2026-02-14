@@ -1,0 +1,221 @@
+.wrapper {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+}
+
+.left,
+.right {
+  min-width: 0;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+}
+
+.controls label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.controls input,
+.controls select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  color: var(--ink);
+  padding: 0.55rem 0.65rem;
+  font-family: var(--font-mono), monospace;
+}
+
+.list {
+  margin: 0.8rem 0 0;
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.itemButton {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-radius: 12px;
+  color: var(--ink);
+  padding: 0.7rem;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.itemButton:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+}
+
+.itemPrimary {
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  width: fit-content;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-soft);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.14rem 0.45rem;
+}
+
+.itemKey {
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  word-break: break-all;
+  font-family: var(--font-mono), monospace;
+}
+
+.active {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.detailHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.toggleButton {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  color: var(--ink);
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+}
+
+.toggleButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.metaGrid {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.metaGrid div {
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 10px;
+  padding: 0.5rem;
+}
+
+.metaGrid dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.metaGrid dd {
+  margin: 0.25rem 0 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.82rem;
+}
+
+.summaryBoxes {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.55rem;
+}
+
+.summaryBox {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 10px;
+  padding: 0.55rem;
+}
+
+.summaryBox h3 {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+}
+
+.summaryBox p {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  font-family: var(--font-mono), monospace;
+}
+
+.tableWrap {
+  margin-top: 0.9rem;
+}
+
+.sectionTitle {
+  margin: 0 0 0.45rem;
+  color: var(--accent-soft);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tableWrap th,
+.tableWrap td {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  text-align: left;
+  padding: 0.42rem 0.28rem;
+  font-size: 0.82rem;
+}
+
+.tableWrap th {
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.69rem;
+}
+
+.raw {
+  margin-top: 0.8rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  background: #0b101d;
+  padding: 0.7rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow: auto;
+  max-height: 420px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+@media (max-width: 960px) {
+  .wrapper {
+    grid-template-columns: 1fr;
+  }
+
+  .metaGrid {
+    grid-template-columns: 1fr;
+  }
+}

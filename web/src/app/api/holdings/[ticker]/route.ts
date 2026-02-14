@@ -1,0 +1,90 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { holdingPatchSchema } from "@/lib/schemas";
+import {
+  deleteHolding,
+  SupabaseApiError,
+  updateHolding
+} from "@/lib/supabase-admin";
+
+export const runtime = "nodejs";
+
+type RouteContext = {
+  params: { ticker: string } | Promise<{ ticker: string }>;
+};
+
+function parseTicker(raw: string): string | null {
+  const decoded = decodeURIComponent(raw).trim();
+  if (!decoded) {
+    return null;
+  }
+  return decoded.toUpperCase();
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: RouteContext
+) {
+  const params = await context.params;
+  const ticker = parseTicker(params.ticker);
+  if (!ticker) {
+    return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
+  }
+
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+  }
+
+  const parsed = holdingPatchSchema.safeParse(payload);
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        error: "Invalid holding patch payload",
+        details: parsed.error.flatten()
+      },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const updated = await updateHolding(ticker, parsed.data);
+    if (!updated) {
+      return NextResponse.json({ error: "Holding not found" }, { status: 404 });
+    }
+    return NextResponse.json(updated);
+  } catch (error) {
+    if (error instanceof SupabaseApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  context: RouteContext
+) {
+  const params = await context.params;
+  const ticker = parseTicker(params.ticker);
+  if (!ticker) {
+    return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
+  }
+
+  try {
+    const deleted = await deleteHolding(ticker);
+    if (!deleted) {
+      return NextResponse.json({ error: "Holding not found" }, { status: 404 });
+    }
+    return NextResponse.json({ deleted: true, ticker });
+  } catch (error) {
+    if (error instanceof SupabaseApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
