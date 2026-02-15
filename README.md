@@ -94,6 +94,24 @@
   - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
   - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
+## 의존성 업데이트 자동화 (Renovate)
+
+- 의존성 업데이트는 GitHub Actions 커스텀 워크플로 대신 Renovate GitHub App으로 운영합니다.
+- 스케줄: 매주 월요일 09:00 UTC
+- 자동 머지 정책:
+  - `patch`: CI 통과 시 자동 머지
+  - `minor`/`major`: 수동 검토 후 머지
+- 관리 범위:
+  - Python: `pyproject.toml`, `uv.lock`
+  - Web: `web/package.json`, `web/pnpm-lock.yaml`
+  - CI/런타임: `.github/workflows/*.yml`, `docker-compose.yml`, `web/Dockerfile`
+- 안정성 우선 정책:
+  - `.pre-commit-config.yaml`은 Renovate 업데이트 대상에서 제외
+  - 잠금 파일 유지보수 PR(lock file maintenance)은 자동 머지를 비활성화
+  - 메이저 업데이트 PR에는 `major` 라벨을 추가
+
+설정 파일은 `renovate.json`을 참고하세요.
+
 참고(US 시장)
 
 - 해외 스크리너 모드

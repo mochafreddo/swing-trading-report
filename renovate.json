@@ -1,0 +1,94 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": [
+    "after 9am and before 10am on monday"
+  ],
+  "updateNotScheduled": false,
+  "labels": [
+    "dependencies"
+  ],
+  "dependencyDashboard": true,
+  "commitMessagePrefix": "chore(deps): ",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "separateMinorPatch": true,
+  "enabledManagers": [
+    "pep621",
+    "npm",
+    "dockerfile",
+    "docker-compose",
+    "github-actions"
+  ],
+  "ignorePaths": [
+    "data/**",
+    "reports/**",
+    "output/**",
+    "dist/**",
+    ".pre-commit-config.yaml"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "after 9am and before 10am on monday"
+    ],
+    "automerge": false
+  },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "pep621"
+      ],
+      "groupName": "python dependencies"
+    },
+    {
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "web/package.json",
+        "web/pnpm-lock.yaml"
+      ],
+      "groupName": "web dependencies"
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github actions"
+    },
+    {
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ],
+      "groupName": "docker dependencies"
+    },
+    {
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "automerge": false
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "major"
+      ]
+    }
+  ]
+}
