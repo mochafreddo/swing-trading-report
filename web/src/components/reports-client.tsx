@@ -64,6 +64,9 @@ export function ReportsClient() {
     parseReportType(searchParams.get("type"))
   );
   const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
+  const [appliedQuery, setAppliedQuery] = useState(
+    () => (searchParams.get("q") ?? "").trim()
+  );
   const [items, setItems] = useState<ReportListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [searched, setSearched] = useState(0);
@@ -77,15 +80,14 @@ export function ReportsClient() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(() => searchParams.get("raw") === "1");
-  const normalizedQuery = query.trim();
 
   const desiredQueryString = useMemo(() => {
     const params = new URLSearchParams();
     if (reportType !== "all") {
       params.set("type", reportType);
     }
-    if (normalizedQuery) {
-      params.set("q", normalizedQuery);
+    if (appliedQuery) {
+      params.set("q", appliedQuery);
     }
     if (selectedKey) {
       params.set("key", selectedKey);
@@ -94,7 +96,7 @@ export function ReportsClient() {
       params.set("raw", "1");
     }
     return params.toString();
-  }, [normalizedQuery, reportType, selectedKey, showRaw]);
+  }, [appliedQuery, reportType, selectedKey, showRaw]);
 
   const currentQueryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -120,14 +122,29 @@ export function ReportsClient() {
   useEffect(() => {
     const nextType = parseReportType(searchParams.get("type"));
     const nextQuery = searchParams.get("q") ?? "";
+    const nextAppliedQuery = nextQuery.trim();
     const nextKey = searchParams.get("key");
     const nextShowRaw = searchParams.get("raw") === "1";
 
     setReportType((prev) => (prev === nextType ? prev : nextType));
     setQuery((prev) => (prev === nextQuery ? prev : nextQuery));
+    setAppliedQuery((prev) => (prev === nextAppliedQuery ? prev : nextAppliedQuery));
     setSelectedKey((prev) => (prev === nextKey ? prev : nextKey));
     setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
   }, [searchParams]);
+
+  useEffect(() => {
+    const nextAppliedQuery = query.trim();
+    if (nextAppliedQuery === appliedQuery) {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      setAppliedQuery(nextAppliedQuery);
+    }, 300);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [appliedQuery, query]);
 
   useEffect(() => {
     if (desiredQueryString === currentQueryString) {
@@ -151,8 +168,8 @@ export function ReportsClient() {
           type: reportType,
           limit: String(PAGE_LIMIT)
         });
-        if (normalizedQuery) {
-          params.set("q", normalizedQuery);
+        if (appliedQuery) {
+          params.set("q", appliedQuery);
         }
 
         const response = await fetch(`/api/reports?${params.toString()}`, {
@@ -197,7 +214,7 @@ export function ReportsClient() {
     void load();
 
     return () => controller.abort();
-  }, [normalizedQuery, reportType]);
+  }, [appliedQuery, reportType]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -248,6 +265,10 @@ export function ReportsClient() {
   const summary = useMemo(() => asRecord(detail?.summary), [detail]);
   const buyRows = useMemo(() => asRecordArray(detail?.candidates), [detail]);
   const sellRows = useMemo(() => asRecordArray(detail?.evaluated), [detail]);
+  const rawDetailJson = useMemo(
+    () => (detail ? JSON.stringify(detail, null, 2) : ""),
+    [detail]
+  );
 
   return (
     <section className={styles.wrapper}>
@@ -288,14 +309,14 @@ export function ReportsClient() {
 
           <p className="subtle">
             total={total}
-            {normalizedQuery && (
+            {appliedQuery && (
               <>
                 {" · "}searched={searched}
                 {truncated ? `/${searchWindow} window` : ""}
               </>
             )}
           </p>
-          {normalizedQuery && truncated && (
+          {appliedQuery && truncated && (
             <p className="subtle">
               검색 범위 제한: 최신 {searchWindow}개 리포트만 검색됨
             </p>
@@ -457,7 +478,7 @@ export function ReportsClient() {
 
               {showRaw && (
                 <pre id="report-raw-json" className={styles.raw}>
-                  {JSON.stringify(detail, null, 2)}
+                  {rawDetailJson}
                 </pre>
               )}
             </>

@@ -11,13 +11,17 @@ const NAV_ITEMS = [
   { href: "/run", label: "Run" }
 ] as const;
 
+function isActivePath(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function MainNav() {
   const pathname = usePathname();
 
   return (
     <nav className={styles.nav} aria-label="Main navigation">
       {NAV_ITEMS.map((item) => {
-        const active = pathname.startsWith(item.href);
+        const active = isActivePath(pathname, item.href);
         return (
           <Link
             key={item.href}
