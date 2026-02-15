@@ -19,6 +19,12 @@
 - 설정 검사: `UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config`
 - 첫 실행 시 훅 저장소를 내려받기 위해 네트워크 접근이 필요할 수 있습니다.
 
+## 웹 스모크 체크
+
+- 우선순위: 샌드박스에서 `next dev` 포트 바인딩이 `EPERM`으로 막힐 수 있으므로, `sab-web` 컨테이너가 실행 중이면 `http://127.0.0.1:${WEB_HOST_PORT}`로 먼저 검증합니다.
+- `/run` 성공 조건: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`가 비어 있으면 `/api/run`이 500(Zod validation)으로 실패합니다.
+- 브라우저 자동화 폴백: Playwright Chrome 런치가 세션 충돌로 실패할 수 있으므로, 이런 경우 `chrome-devtools` 기반 체크로 전환합니다.
+
 ## 커밋
 
 - Conventional Commits 형식을 사용합니다.
