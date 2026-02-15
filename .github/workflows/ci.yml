@@ -80,6 +80,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve Node.js version from Dockerfile
+        id: resolve-node-version
+        run: |
+          set -euo pipefail
+
+          from_line="$(grep -m1 -E '^[[:space:]]*FROM[[:space:]]+node:' Dockerfile || true)"
+          if [[ -z "${from_line}" ]]; then
+            echo "::error title=Node version resolve failed::Cannot find 'FROM node:' in web/Dockerfile"
+            exit 1
+          fi
+
+          node_tag="${from_line#*node:}"
+          node_tag="${node_tag%%[[:space:]]*}"
+
+          if [[ "${node_tag}" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            node_version="${BASH_REMATCH[1]}"
+          else
+            echo "::error title=Node version resolve failed::Expected semver prefix in Docker image tag, got '${node_tag}'"
+            exit 1
+          fi
+
+          if [[ -z "${node_version}" ]]; then
+            echo "::error title=Node version resolve failed::Resolved Node version is empty"
+            exit 1
+          fi
+
+          echo "version=${node_version}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -88,9 +116,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ steps.resolve-node-version.outputs.version }}
           cache: "pnpm"
           cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Log Node.js version
+        run: |
+          echo "Resolved Node.js version: ${{ steps.resolve-node-version.outputs.version }}"
+          node --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

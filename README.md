@@ -14,7 +14,7 @@
 
 - Python 3.13+
 - uv
-- (웹 UI 개발/구동) Node.js LTS (Next.js)
+- (선택: 웹 UI를 호스트에서 직접 실행할 때) Node.js (버전 기준: `web/Dockerfile`)
 - (로컬 배포) Docker Desktop
 
 ## Quickstart (uv 기반)
@@ -57,6 +57,7 @@
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 
 - 웹 UI 로컬 실행(Next.js + Docker)
+  - 기본 운영 기준: 컨테이너 실행을 권장하며 Node 버전 단일소스는 `web/Dockerfile`입니다.
   - 전환 직후 1회 정리: `docker compose down --remove-orphans && docker compose up -d --build web`
   - 일반 재기동: `docker compose up -d --build web`
   - 강제 재생성(문제 시): `docker compose stop web && docker compose rm -f web && docker compose up -d --build web`
@@ -64,7 +65,8 @@
   - 중지: `docker compose stop web`
   - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
   - 포트 변경: `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
-  - 직접 실행: `cd web && pnpm install && pnpm run dev`
+  - 직접 실행(선택): `cd web && pnpm install && pnpm run dev`
+  - 직접 실행 시 Node 버전은 `web/Dockerfile`의 `FROM node:<version>`과 동일하게 맞춥니다.
   - 웹 패키지 매니저: `pnpm` (고정)
   - 기능:
     - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
