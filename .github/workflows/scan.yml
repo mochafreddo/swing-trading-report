@@ -133,6 +133,27 @@ jobs:
             uv sync --locked --all-groups
           fi
 
+      - name: Validate pykrx watchlist
+        if: steps.params.outputs.provider == 'pykrx'
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          from sab.config import load_config, load_watchlist
+
+          cfg = load_config(provider_override="pykrx")
+          watchlist_path = cfg.watchlist_path or "watchlist.txt"
+          tickers = load_watchlist(watchlist_path)
+          if not tickers:
+              raise SystemExit(
+                  "provider=pykrx requires a non-empty watchlist. "
+                  f"Add at least one ticker to '{watchlist_path}' "
+                  "or set WATCHLIST_FILE/files.watchlist."
+              )
+          print(
+              f"pykrx watchlist preflight passed: {len(tickers)} ticker(s) from {watchlist_path}"
+          )
+          PY
+
       - name: Run scan
         id: run_scan
         env:
