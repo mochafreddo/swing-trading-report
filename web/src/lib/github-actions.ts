@@ -31,7 +31,7 @@ export function buildWorkflowDispatchRequest(
 ): DispatchRequest {
   const gitHubEnv = getGitHubEnv();
   const workflowFile = input.workflow === "scan" ? "scan.yml" : "sell.yml";
-  const ref = input.ref?.trim() || "main";
+  const ref = "main";
 
   const inputs: Record<string, string> = {
     provider: input.provider

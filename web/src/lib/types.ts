@@ -65,7 +65,6 @@ export interface WorkflowDispatchInput {
   workflow: RunWorkflow;
   provider: Provider;
   universe?: "KR" | "US" | "both";
-  ref?: string;
 }
 
 export interface WorkflowDispatchResult {

@@ -1,17 +1,5 @@
 import { z } from "zod";
 
-const toOptionalTrimmedString = (maxLength: number) =>
-  z.preprocess((value) => {
-    if (value == null) {
-      return undefined;
-    }
-    if (typeof value !== "string") {
-      return value;
-    }
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }, z.string().max(maxLength).optional());
-
 const toNullableTrimmedString = (maxLength: number) =>
   z.preprocess((value) => {
     if (value == null) {
@@ -143,22 +131,18 @@ export const holdingPatchSchema = z
     message: "At least one field must be provided"
   });
 
-const refSchema = toOptionalTrimmedString(120);
-
 export const runDispatchSchema = z.union([
   z
     .object({
       workflow: z.literal("scan"),
       provider: z.enum(["kis", "pykrx"]),
-      universe: z.enum(["KR", "US", "both"]),
-      ref: refSchema
+      universe: z.enum(["KR", "US", "both"])
     })
     .strict(),
   z
     .object({
       workflow: z.literal("sell"),
-      provider: z.enum(["kis", "pykrx"]),
-      ref: refSchema
+      provider: z.enum(["kis", "pykrx"])
     })
     .strict()
 ]);

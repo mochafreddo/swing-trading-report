@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSupabaseEnv } from "@/lib/env.server";
 import {
+  assertLocalRequest,
+  LocalRequestGuardError
+} from "@/lib/local-request-guard";
+import {
   filterAndSortReportKeys,
   toReportListItem
 } from "@/lib/report-key";
@@ -34,6 +38,16 @@ function matchesTickerQuery(tickers: string[], query: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  try {
+    assertLocalRequest(request);
+  } catch (error) {
+    if (error instanceof LocalRequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const parsedQuery = reportListQuerySchema.safeParse({
     type: request.nextUrl.searchParams.get("type") ?? undefined,
     q: request.nextUrl.searchParams.get("q") ?? "",

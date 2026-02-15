@@ -3,12 +3,19 @@ services:
     build:
       context: ./web
     container_name: sab-web
-    env_file:
-      - .env
     environment:
       NODE_ENV: development
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_REPORTS_BUCKET: ${SUPABASE_REPORTS_BUCKET:-reports}
+      GITHUB_OWNER: ${GITHUB_OWNER:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      REPORT_RETENTION_DAYS: ${REPORT_RETENTION_DAYS:-30}
+      REPORT_SEARCH_WINDOW: ${REPORT_SEARCH_WINDOW:-100}
     ports:
-      - "${WEB_HOST_PORT:-55300}:3000"
+      - "127.0.0.1:${WEB_HOST_PORT:-55300}:3000"
     volumes:
       - ./web:/app
       - web_node_modules:/app/node_modules

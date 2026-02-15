@@ -39,13 +39,12 @@ describe("buildWorkflowDispatchRequest", () => {
   it("builds sell dispatch request", () => {
     const request = buildWorkflowDispatchRequest({
       workflow: "sell",
-      provider: "pykrx",
-      ref: "feature/x"
+      provider: "pykrx"
     });
 
     expect(request.workflowFile).toBe("sell.yml");
     expect(request.body).toEqual({
-      ref: "feature/x",
+      ref: "main",
       inputs: {
         provider: "pykrx"
       }

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSupabaseEnv } from "@/lib/env.server";
+import {
+  assertLocalRequest,
+  LocalRequestGuardError
+} from "@/lib/local-request-guard";
 import { parseReportStorageKey } from "@/lib/report-key";
 import { reportDetailQuerySchema } from "@/lib/schemas";
 import {
@@ -11,6 +15,16 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  try {
+    assertLocalRequest(request);
+  } catch (error) {
+    if (error instanceof LocalRequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const query = reportDetailQuerySchema.safeParse({
     key: request.nextUrl.searchParams.get("key") ?? undefined
   });

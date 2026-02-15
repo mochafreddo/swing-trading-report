@@ -12,8 +12,7 @@ describe("runDispatchSchema", () => {
     const parsed = runDispatchSchema.safeParse({
       workflow: "scan",
       provider: "kis",
-      universe: "both",
-      ref: "main"
+      universe: "both"
     });
 
     expect(parsed.success).toBe(true);

@@ -4,11 +4,25 @@ import {
   dispatchWorkflow,
   GitHubDispatchError
 } from "@/lib/github-actions";
+import {
+  assertLocalRequest,
+  LocalRequestGuardError
+} from "@/lib/local-request-guard";
 import { runDispatchSchema } from "@/lib/schemas";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  try {
+    assertLocalRequest(request);
+  } catch (error) {
+    if (error instanceof LocalRequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();
