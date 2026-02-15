@@ -52,6 +52,23 @@ a {
   color: inherit;
 }
 
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, white);
+  outline-offset: 2px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .app-shell {
   position: relative;
   z-index: 1;
@@ -73,7 +90,7 @@ a {
   letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.875rem;
 }
 
 .title {

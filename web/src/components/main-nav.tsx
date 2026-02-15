@@ -23,6 +23,7 @@ export function MainNav() {
             key={item.href}
             href={item.href}
             className={`${styles.link} ${active ? styles.active : ""}`.trim()}
+            aria-current={active ? "page" : undefined}
           >
             {item.label}
           </Link>

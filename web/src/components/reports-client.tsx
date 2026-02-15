@@ -183,6 +183,8 @@ export function ReportsClient() {
             <label>
               Type
               <select
+                name="reportType"
+                autoComplete="off"
                 value={reportType}
                 onChange={(event) => {
                   setReportType(event.target.value as "all" | "buy" | "sell");
@@ -197,6 +199,8 @@ export function ReportsClient() {
             <label>
               Ticker 검색
               <input
+                name="reportQuery"
+                autoComplete="off"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="예: AAPL"
@@ -221,10 +225,16 @@ export function ReportsClient() {
           )}
         </header>
 
-        <ul className={styles.list}>
-          {loadingList && <li className="panel subtle">목록 로딩 중...</li>}
+        <ul className={styles.list} aria-busy={loadingList}>
+          {loadingList && (
+            <li className="panel subtle" role="status" aria-live="polite">
+              목록 로딩 중...
+            </li>
+          )}
           {!loadingList && items.length === 0 && (
-            <li className="panel subtle">조건에 맞는 리포트가 없습니다.</li>
+            <li className="panel subtle" role="status" aria-live="polite">
+              조건에 맞는 리포트가 없습니다.
+            </li>
           )}
           {!loadingList &&
             items.map((item) => (
@@ -235,6 +245,7 @@ export function ReportsClient() {
                     selectedKey === item.key ? styles.active : ""
                   }`.trim()}
                   onClick={() => setSelectedKey(item.key)}
+                  aria-pressed={selectedKey === item.key}
                 >
                   <span className={styles.itemPrimary}>{formatDateLabel(item)}</span>
                   <span className={styles.badge}>{item.type.toUpperCase()}</span>
@@ -246,7 +257,7 @@ export function ReportsClient() {
       </div>
 
       <div className={styles.right}>
-        <section className="panel">
+        <section className="panel" aria-busy={loadingDetail}>
           <div className={styles.detailHeaderRow}>
             <div>
               <h2 className="panelTitle">Report Detail</h2>
@@ -257,13 +268,30 @@ export function ReportsClient() {
               className={styles.toggleButton}
               onClick={() => setShowRaw((prev) => !prev)}
               disabled={!detail}
+              aria-pressed={showRaw}
+              aria-controls="report-raw-json"
             >
               {showRaw ? "Raw 숨기기" : "Raw 보기"}
             </button>
           </div>
 
-          {error && <p className={styles.error}>{error}</p>}
-          {loadingDetail && <p className="subtle">상세 로딩 중...</p>}
+          <p className="visuallyHidden" role="status" aria-live="polite">
+            {loadingDetail
+              ? "리포트 상세 로딩 중"
+              : detail
+                ? "리포트 상세 로딩 완료"
+                : "리포트를 선택하세요"}
+          </p>
+          {error && (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          )}
+          {loadingDetail && (
+            <p className="subtle" role="status" aria-live="polite">
+              상세 로딩 중...
+            </p>
+          )}
           {!loadingDetail && !detail && <p className="subtle">리포트를 선택하세요.</p>}
 
           {detail && (
@@ -351,7 +379,9 @@ export function ReportsClient() {
               )}
 
               {showRaw && (
-                <pre className={styles.raw}>{JSON.stringify(detail, null, 2)}</pre>
+                <pre id="report-raw-json" className={styles.raw}>
+                  {JSON.stringify(detail, null, 2)}
+                </pre>
               )}
             </>
           )}

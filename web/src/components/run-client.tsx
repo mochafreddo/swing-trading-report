@@ -66,6 +66,8 @@ export function RunClient() {
         <label>
           Provider
           <select
+            name="provider"
+            autoComplete="off"
             value={provider}
             onChange={(event) => setProvider(event.target.value as Provider)}
           >
@@ -77,6 +79,8 @@ export function RunClient() {
         <label>
           Universe (scan only)
           <select
+            name="universe"
+            autoComplete="off"
             value={universe}
             onChange={(event) =>
               setUniverse(event.target.value as "KR" | "US" | "both")
@@ -109,8 +113,19 @@ export function RunClient() {
       <article className="panel">
         <h2 className="panelTitle">Dispatch Result</h2>
         <p className="subtle">GitHub Actions 링크를 통해 실행 상태를 확인합니다.</p>
+        <p className="visuallyHidden" role="status" aria-live="polite">
+          {loading
+            ? `${loading} 워크플로 실행 요청 중`
+            : result
+              ? "워크플로 실행 요청 완료"
+              : "워크플로 대기 중"}
+        </p>
 
-        {error && <p className={styles.error}>{error}</p>}
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
         {!error && !result && (
           <p className="subtle">scan 또는 sell 실행 버튼을 눌러 시작하세요.</p>
         )}

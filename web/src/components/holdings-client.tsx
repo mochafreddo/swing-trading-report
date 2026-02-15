@@ -235,11 +235,16 @@ export function HoldingsClient() {
       <aside className="panel">
         <h2 className="panelTitle">{modeLabel}</h2>
         <p className="subtle">Supabase holdings 테이블 반영</p>
+        <p className="visuallyHidden" role="status" aria-live="polite">
+          {submitting ? "보유 종목 저장 중" : editingTicker ? "보유 종목 편집 모드" : "보유 종목 생성 모드"}
+        </p>
 
-        <form onSubmit={onSubmit} className={styles.form}>
+        <form onSubmit={onSubmit} className={styles.form} aria-busy={submitting}>
           <label>
             Ticker
             <input
+              name="ticker"
+              autoComplete="off"
               value={form.ticker}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, ticker: event.target.value.toUpperCase() }))
@@ -254,6 +259,8 @@ export function HoldingsClient() {
             <label>
               Quantity
               <input
+                name="quantity"
+                autoComplete="off"
                 value={form.quantity}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, quantity: event.target.value }))
@@ -265,6 +272,8 @@ export function HoldingsClient() {
             <label>
               Entry Price
               <input
+                name="entryPrice"
+                autoComplete="off"
                 value={form.entry_price}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, entry_price: event.target.value }))
@@ -279,6 +288,8 @@ export function HoldingsClient() {
             <label>
               Currency
               <input
+                name="entryCurrency"
+                autoComplete="off"
                 value={form.entry_currency}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, entry_currency: event.target.value }))
@@ -289,6 +300,8 @@ export function HoldingsClient() {
             <label>
               Entry Date
               <input
+                name="entryDate"
+                autoComplete="off"
                 value={form.entry_date}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, entry_date: event.target.value }))
@@ -301,6 +314,8 @@ export function HoldingsClient() {
           <label>
             Strategy
             <input
+              name="strategy"
+              autoComplete="off"
               value={form.strategy}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, strategy: event.target.value }))
@@ -312,6 +327,8 @@ export function HoldingsClient() {
           <label>
             Tags (comma separated)
             <input
+              name="tags"
+              autoComplete="off"
               value={form.tags}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, tags: event.target.value }))
@@ -324,6 +341,8 @@ export function HoldingsClient() {
             <label>
               Stop Override
               <input
+                name="stopOverride"
+                autoComplete="off"
                 value={form.stop_override}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, stop_override: event.target.value }))
@@ -335,6 +354,8 @@ export function HoldingsClient() {
             <label>
               Target Override
               <input
+                name="targetOverride"
+                autoComplete="off"
                 value={form.target_override}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, target_override: event.target.value }))
@@ -348,6 +369,8 @@ export function HoldingsClient() {
           <label>
             Notes
             <textarea
+              name="notes"
+              autoComplete="off"
               value={form.notes}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, notes: event.target.value }))
@@ -369,35 +392,43 @@ export function HoldingsClient() {
         </form>
       </aside>
 
-      <section className="panel">
+      <section className="panel" aria-busy={loading}>
         <div className={styles.headerRow}>
-              <div>
-                <h2 className="panelTitle">Holdings</h2>
-                <p className="subtle">
-                  정렬: updated_at desc · 활성 {partitioned.activeCount} / 비활성{" "}
-                  {partitioned.inactiveCount}
-                </p>
-              </div>
-              <button type="button" onClick={() => void refresh()} disabled={loading}>
-                Refresh
-              </button>
-            </div>
-            <div className={styles.filterRow}>
-              <label className={styles.toggleLabel}>
-                <input
-                  type="checkbox"
-                  checked={showInactive}
-                  onChange={(event) => setShowInactive(event.target.checked)}
-                />
-                비활성 포함 표시 (quantity&lt;=0)
-              </label>
-              {!showInactive && partitioned.inactiveCount > 0 && (
-                <p className="subtle">비활성 {partitioned.inactiveCount}개 숨김</p>
-              )}
-            </div>
-
-        {error && <p className={styles.error}>{error}</p>}
-        {loading && <p className="subtle">로딩 중...</p>}
+          <div>
+            <h2 className="panelTitle">Holdings</h2>
+            <p className="subtle">
+              정렬: updated_at desc · 활성 {partitioned.activeCount} / 비활성{" "}
+              {partitioned.inactiveCount}
+            </p>
+          </div>
+          <button type="button" onClick={() => void refresh()} disabled={loading}>
+            Refresh
+          </button>
+        </div>
+        <div className={styles.filterRow}>
+          <label className={styles.toggleLabel}>
+            <input
+              name="showInactive"
+              type="checkbox"
+              checked={showInactive}
+              onChange={(event) => setShowInactive(event.target.checked)}
+            />
+            비활성 포함 표시 (quantity&lt;=0)
+          </label>
+          {!showInactive && partitioned.inactiveCount > 0 && (
+            <p className="subtle">비활성 {partitioned.inactiveCount}개 숨김</p>
+          )}
+        </div>
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
+        {loading && (
+          <p className="subtle" role="status" aria-live="polite">
+            로딩 중...
+          </p>
+        )}
         {!loading && visibleItems.length === 0 && (
           <p className="subtle">
             {items.length === 0
