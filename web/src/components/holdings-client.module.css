@@ -1,18 +1,24 @@
 .wrapper {
   display: grid;
   grid-template-columns: 360px 1fr;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .form {
-  margin-top: 0.7rem;
+  margin-top: var(--space-3);
   display: grid;
-  gap: 0.55rem;
+  gap: var(--space-2);
+}
+
+.unsavedNotice {
+  margin: var(--space-2) 0 0;
+  color: var(--warn);
+  font-size: 0.875rem;
 }
 
 .form label {
   display: grid;
-  gap: 0.3rem;
+  gap: var(--space-1);
   font-size: 0.875rem;
   color: var(--ink-muted);
 }
@@ -25,20 +31,25 @@
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel) 74%, transparent);
   color: var(--ink);
-  padding: 0.5rem 0.65rem;
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
   font-family: var(--font-body), sans-serif;
+}
+
+.form textarea {
+  min-height: calc(44px * 2);
 }
 
 .rowTwo {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .formActions {
   display: flex;
-  gap: 0.55rem;
-  margin-top: 0.25rem;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .ghostButton {
@@ -49,27 +60,27 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
 }
 
 .filterRow {
-  margin-top: 0.6rem;
+  margin-top: var(--space-3);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
 }
 
 .toggleLabel {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-1);
   font-size: 0.875rem;
   color: var(--ink-muted);
 }
 
 .tableWrap {
-  margin-top: 0.7rem;
+  margin-top: var(--space-3);
   overflow-x: auto;
 }
 
@@ -81,7 +92,7 @@
 .tableWrap th,
 .tableWrap td {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  padding: 0.45rem 0.36rem;
+  padding: var(--space-2) var(--space-1);
   text-align: left;
   font-size: 0.875rem;
   white-space: nowrap;
@@ -95,14 +106,14 @@
 }
 
 .notesCell {
-  max-width: 280px;
-  text-overflow: ellipsis;
-  overflow: hidden;
+  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .inlineActions {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--space-1);
 }
 
 .inactiveRow {
@@ -110,10 +121,10 @@
 }
 
 .inactiveBadge {
-  margin-left: 0.35rem;
+  margin-left: var(--space-1);
   border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
   border-radius: 999px;
-  padding: 0.04rem 0.42rem;
+  padding: 0.04rem var(--space-2);
   font-size: 0.875rem;
   letter-spacing: 0.03em;
   color: var(--ink-muted);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import styles from "./reports-client.module.css";
 
@@ -8,7 +9,15 @@ import type { ReportListItem, ReportsListResponse } from "@/lib/types";
 
 const PAGE_LIMIT = 30;
 
+type ReportType = "all" | "buy" | "sell";
 type ReportJson = Record<string, unknown>;
+
+function parseReportType(value: string | null): ReportType {
+  if (value === "buy" || value === "sell") {
+    return value;
+  }
+  return "all";
+}
 
 function asRecord(value: unknown): ReportJson | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -48,19 +57,87 @@ function formatDateLabel(item: ReportListItem): string {
 }
 
 export function ReportsClient() {
-  const [reportType, setReportType] = useState<"all" | "buy" | "sell">("all");
-  const [query, setQuery] = useState("");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [reportType, setReportType] = useState<ReportType>(() =>
+    parseReportType(searchParams.get("type"))
+  );
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [items, setItems] = useState<ReportListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [searched, setSearched] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [searchWindow, setSearchWindow] = useState(100);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(() =>
+    searchParams.get("key")
+  );
   const [detail, setDetail] = useState<ReportJson | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showRaw, setShowRaw] = useState(false);
+  const [showRaw, setShowRaw] = useState(() => searchParams.get("raw") === "1");
+  const normalizedQuery = query.trim();
+
+  const desiredQueryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (reportType !== "all") {
+      params.set("type", reportType);
+    }
+    if (normalizedQuery) {
+      params.set("q", normalizedQuery);
+    }
+    if (selectedKey) {
+      params.set("key", selectedKey);
+    }
+    if (showRaw) {
+      params.set("raw", "1");
+    }
+    return params.toString();
+  }, [normalizedQuery, reportType, selectedKey, showRaw]);
+
+  const currentQueryString = useMemo(() => {
+    const params = new URLSearchParams();
+    const currentType = parseReportType(searchParams.get("type"));
+    const currentQuery = (searchParams.get("q") ?? "").trim();
+    const currentKey = searchParams.get("key");
+    const currentRaw = searchParams.get("raw") === "1";
+    if (currentType !== "all") {
+      params.set("type", currentType);
+    }
+    if (currentQuery) {
+      params.set("q", currentQuery);
+    }
+    if (currentKey) {
+      params.set("key", currentKey);
+    }
+    if (currentRaw) {
+      params.set("raw", "1");
+    }
+    return params.toString();
+  }, [searchParams]);
+
+  useEffect(() => {
+    const nextType = parseReportType(searchParams.get("type"));
+    const nextQuery = searchParams.get("q") ?? "";
+    const nextKey = searchParams.get("key");
+    const nextShowRaw = searchParams.get("raw") === "1";
+
+    setReportType((prev) => (prev === nextType ? prev : nextType));
+    setQuery((prev) => (prev === nextQuery ? prev : nextQuery));
+    setSelectedKey((prev) => (prev === nextKey ? prev : nextKey));
+    setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (desiredQueryString === currentQueryString) {
+      return;
+    }
+    const targetUrl = desiredQueryString
+      ? `${pathname}?${desiredQueryString}`
+      : pathname;
+    router.replace(targetUrl, { scroll: false });
+  }, [currentQueryString, desiredQueryString, pathname, router]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -74,8 +151,8 @@ export function ReportsClient() {
           type: reportType,
           limit: String(PAGE_LIMIT)
         });
-        if (query.trim()) {
-          params.set("q", query.trim());
+        if (normalizedQuery) {
+          params.set("q", normalizedQuery);
         }
 
         const response = await fetch(`/api/reports?${params.toString()}`, {
@@ -120,7 +197,7 @@ export function ReportsClient() {
     void load();
 
     return () => controller.abort();
-  }, [reportType, query]);
+  }, [normalizedQuery, reportType]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -211,14 +288,14 @@ export function ReportsClient() {
 
           <p className="subtle">
             total={total}
-            {query.trim() && (
+            {normalizedQuery && (
               <>
                 {" · "}searched={searched}
                 {truncated ? `/${searchWindow} window` : ""}
               </>
             )}
           </p>
-          {query.trim() && truncated && (
+          {normalizedQuery && truncated && (
             <p className="subtle">
               검색 범위 제한: 최신 {searchWindow}개 리포트만 검색됨
             </p>
@@ -228,7 +305,7 @@ export function ReportsClient() {
         <ul className={styles.list} aria-busy={loadingList}>
           {loadingList && (
             <li className="panel subtle" role="status" aria-live="polite">
-              목록 로딩 중...
+              목록 로딩 중…
             </li>
           )}
           {!loadingList && items.length === 0 && (
@@ -289,7 +366,7 @@ export function ReportsClient() {
           )}
           {loadingDetail && (
             <p className="subtle" role="status" aria-live="polite">
-              상세 로딩 중...
+              상세 로딩 중…
             </p>
           )}
           {!loadingDetail && !detail && <p className="subtle">리포트를 선택하세요.</p>}

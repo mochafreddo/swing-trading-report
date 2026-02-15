@@ -98,14 +98,14 @@ export function RunClient() {
             onClick={() => void trigger("scan")}
             disabled={loading !== null}
           >
-            {loading === "scan" ? "Dispatching scan..." : "Run Scan"}
+            {loading === "scan" ? "Dispatching scan…" : "Run Scan"}
           </button>
           <button
             type="button"
             onClick={() => void trigger("sell")}
             disabled={loading !== null}
           >
-            {loading === "sell" ? "Dispatching sell..." : "Run Sell"}
+            {loading === "sell" ? "Dispatching sell…" : "Run Sell"}
           </button>
         </div>
       </article>

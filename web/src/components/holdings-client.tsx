@@ -49,6 +49,14 @@ function numberOrUndefined(value: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function requiredNumber(value: string, label: string): number {
+  const parsed = numberOrUndefined(value);
+  if (parsed == null) {
+    throw new Error(`${label} 값이 올바르지 않습니다.`);
+  }
+  return parsed;
+}
+
 function numberOrNull(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -83,8 +91,8 @@ function recordToForm(record: HoldingRecord): HoldingFormState {
 function buildCreatePayload(form: HoldingFormState) {
   return {
     ticker: form.ticker,
-    quantity: numberOrUndefined(form.quantity) ?? 0,
-    entry_price: numberOrUndefined(form.entry_price) ?? 0,
+    quantity: requiredNumber(form.quantity, "Quantity"),
+    entry_price: requiredNumber(form.entry_price, "Entry Price"),
     entry_currency: stringOrNull(form.entry_currency),
     entry_date: stringOrNull(form.entry_date),
     strategy: stringOrNull(form.strategy),
@@ -97,8 +105,8 @@ function buildCreatePayload(form: HoldingFormState) {
 
 function buildPatchPayload(form: HoldingFormState) {
   return {
-    quantity: numberOrUndefined(form.quantity) ?? 0,
-    entry_price: numberOrUndefined(form.entry_price) ?? 0,
+    quantity: requiredNumber(form.quantity, "Quantity"),
+    entry_price: requiredNumber(form.entry_price, "Entry Price"),
     entry_currency: stringOrNull(form.entry_currency),
     entry_date: stringOrNull(form.entry_date),
     strategy: stringOrNull(form.strategy),
@@ -125,6 +133,7 @@ export function HoldingsClient() {
   const [error, setError] = useState<string | null>(null);
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
   const [form, setForm] = useState<HoldingFormState>(EMPTY_FORM);
+  const [baselineForm, setBaselineForm] = useState<HoldingFormState>(EMPTY_FORM);
 
   const modeLabel = useMemo(
     () => (editingTicker ? `Edit ${editingTicker}` : "Create Holding"),
@@ -135,6 +144,11 @@ export function HoldingsClient() {
     [items]
   );
   const visibleItems = showInactive ? items : partitioned.active;
+  const hasUnsavedChanges = useMemo(
+    () =>
+      !submitting && JSON.stringify(form) !== JSON.stringify(baselineForm),
+    [baselineForm, form, submitting]
+  );
 
   const refresh = async () => {
     setLoading(true);
@@ -157,6 +171,56 @@ export function HoldingsClient() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    const message = "저장되지 않은 변경사항이 있습니다. 이 페이지를 떠나시겠습니까?";
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = message;
+      return message;
+    };
+    const onDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const element =
+        event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(element instanceof HTMLAnchorElement)) {
+        return;
+      }
+      if (element.target && element.target !== "_self") {
+        return;
+      }
+
+      const nextUrl = new URL(element.href, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      const changingPage =
+        nextUrl.pathname !== currentUrl.pathname ||
+        nextUrl.search !== currentUrl.search ||
+        nextUrl.hash !== currentUrl.hash;
+      if (!changingPage) {
+        return;
+      }
+
+      if (!window.confirm(message)) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onDocumentClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onDocumentClick, true);
+    };
+  }, [hasUnsavedChanges]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -188,6 +252,7 @@ export function HoldingsClient() {
 
       setEditingTicker(null);
       setForm(EMPTY_FORM);
+      setBaselineForm(EMPTY_FORM);
       await refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Save failed");
@@ -197,13 +262,16 @@ export function HoldingsClient() {
   };
 
   const beginEdit = (row: HoldingRecord) => {
+    const nextForm = recordToForm(row);
     setEditingTicker(row.ticker);
-    setForm(recordToForm(row));
+    setForm(nextForm);
+    setBaselineForm(nextForm);
   };
 
   const cancelEdit = () => {
     setEditingTicker(null);
     setForm(EMPTY_FORM);
+    setBaselineForm(EMPTY_FORM);
   };
 
   const removeHolding = async (ticker: string) => {
@@ -235,6 +303,11 @@ export function HoldingsClient() {
       <aside className="panel">
         <h2 className="panelTitle">{modeLabel}</h2>
         <p className="subtle">Supabase holdings 테이블 반영</p>
+        {hasUnsavedChanges && (
+          <p className={styles.unsavedNotice} role="status" aria-live="polite">
+            저장되지 않은 변경사항이 있습니다.
+          </p>
+        )}
         <p className="visuallyHidden" role="status" aria-live="polite">
           {submitting ? "보유 종목 저장 중" : editingTicker ? "보유 종목 편집 모드" : "보유 종목 생성 모드"}
         </p>
@@ -265,8 +338,11 @@ export function HoldingsClient() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, quantity: event.target.value }))
                 }
+                type="number"
                 inputMode="decimal"
+                step="any"
                 placeholder="0"
+                required
               />
             </label>
             <label>
@@ -278,8 +354,11 @@ export function HoldingsClient() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, entry_price: event.target.value }))
                 }
+                type="number"
                 inputMode="decimal"
+                step="any"
                 placeholder="0"
+                required
               />
             </label>
           </div>
@@ -347,7 +426,9 @@ export function HoldingsClient() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, stop_override: event.target.value }))
                 }
+                type="number"
                 inputMode="decimal"
+                step="any"
                 placeholder="optional"
               />
             </label>
@@ -360,7 +441,9 @@ export function HoldingsClient() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, target_override: event.target.value }))
                 }
+                type="number"
                 inputMode="decimal"
+                step="any"
                 placeholder="optional"
               />
             </label>
@@ -426,7 +509,7 @@ export function HoldingsClient() {
         )}
         {loading && (
           <p className="subtle" role="status" aria-live="polite">
-            로딩 중...
+            로딩 중…
           </p>
         )}
         {!loading && visibleItems.length === 0 && (

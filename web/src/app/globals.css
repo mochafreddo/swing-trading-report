@@ -1,7 +1,14 @@
 :root {
+  color-scheme: dark;
   --font-display: "Avenir Next Condensed", "Gill Sans Nova Condensed", "Impact", sans-serif;
   --font-body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   --font-mono: "SF Mono", "Menlo", "Consolas", monospace;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
   --bg: #0c111f;
   --bg-grid: #1a2137;
   --panel: #11192b;
@@ -29,6 +36,7 @@ body {
 
 body {
   font-family: var(--font-body), sans-serif;
+  line-height: 1.5;
   color: var(--ink);
   background:
     radial-gradient(circle at 10% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 42%),
@@ -74,15 +82,15 @@ a {
   z-index: 1;
   max-width: 1180px;
   margin: 0 auto;
-  padding: 1.4rem 1rem 2.5rem;
+  padding: var(--space-5) var(--space-4) calc(var(--space-6) + var(--space-4));
 }
 
 .top-bar {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .eyebrow {
@@ -105,7 +113,7 @@ a {
   background: color-mix(in srgb, var(--panel) 84%, transparent);
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: var(--radius);
-  padding: 1rem;
+  padding: var(--space-4);
   box-shadow: 0 22px 42px rgba(5, 8, 16, 0.55);
 }
 
@@ -140,6 +148,6 @@ a {
   }
 
   .main-content {
-    padding: 0.8rem;
+    padding: var(--space-3);
   }
 }
