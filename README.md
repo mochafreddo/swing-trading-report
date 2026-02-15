@@ -71,6 +71,8 @@
       - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
       - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
     - `Holdings`: Supabase `holdings` CRUD
+      - 로컬 전용 API: `/api/holdings` 및 `/api/holdings/[ticker]`는 `localhost`/`127.0.0.1`/`::1` 요청만 허용
+      - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
 
 - 결과(리포트 분리 설계)

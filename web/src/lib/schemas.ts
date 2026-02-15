@@ -106,6 +106,11 @@ export const reportDetailQuerySchema = z.object({
   key: z.string().trim().min(1)
 });
 
+export const holdingListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  cursor: z.string().trim().min(1).optional()
+});
+
 export const holdingCreateSchema = z
   .object({
     ticker: tickerSchema,

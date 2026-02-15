@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  assertLocalRequest,
+  LocalRequestGuardError
+} from "@/lib/local-request-guard";
 import { holdingPatchSchema } from "@/lib/schemas";
 import {
   deleteHolding,
@@ -25,6 +29,16 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext
 ) {
+  try {
+    assertLocalRequest(request);
+  } catch (error) {
+    if (error instanceof LocalRequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const params = await context.params;
   const ticker = parseTicker(params.ticker);
   if (!ticker) {
@@ -65,9 +79,19 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   context: RouteContext
 ) {
+  try {
+    assertLocalRequest(request);
+  } catch (error) {
+    if (error instanceof LocalRequestGuardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const params = await context.params;
   const ticker = parseTicker(params.ticker);
   if (!ticker) {

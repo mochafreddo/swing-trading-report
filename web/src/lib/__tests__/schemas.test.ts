@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  holdingListQuerySchema,
   holdingCreateSchema,
   holdingPatchSchema,
   runDispatchSchema
@@ -30,6 +31,27 @@ describe("runDispatchSchema", () => {
 });
 
 describe("holding schemas", () => {
+  it("uses holding list defaults", () => {
+    const parsed = holdingListQuerySchema.parse({});
+    expect(parsed.limit).toBe(100);
+    expect(parsed.cursor).toBeUndefined();
+  });
+
+  it("accepts explicit list query values", () => {
+    const parsed = holdingListQuerySchema.parse({
+      limit: "200",
+      cursor: "abc"
+    });
+
+    expect(parsed.limit).toBe(200);
+    expect(parsed.cursor).toBe("abc");
+  });
+
+  it("rejects invalid list query limits", () => {
+    expect(holdingListQuerySchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(holdingListQuerySchema.safeParse({ limit: 201 }).success).toBe(false);
+  });
+
   it("normalizes create payload", () => {
     const parsed = holdingCreateSchema.parse({
       ticker: "aapl.us",

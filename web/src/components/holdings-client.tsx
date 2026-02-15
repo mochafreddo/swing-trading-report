@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import styles from "./holdings-client.module.css";
 
@@ -8,11 +8,7 @@ import {
   isActiveHoldingQuantity,
   partitionHoldingsByActivity
 } from "@/lib/holding-activity";
-import type { HoldingRecord } from "@/lib/types";
-
-interface HoldingsResponse {
-  items: HoldingRecord[];
-}
+import type { HoldingRecord, HoldingsListResponse } from "@/lib/types";
 
 interface HoldingFormState {
   ticker: string;
@@ -39,6 +35,8 @@ const EMPTY_FORM: HoldingFormState = {
   stop_override: "",
   target_override: ""
 };
+
+const HOLDINGS_PAGE_SIZE = 100;
 
 function numberOrUndefined(value: string): number | undefined {
   const trimmed = value.trim();
@@ -125,10 +123,28 @@ function readApiError(payload: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function mergeHoldingsByTicker(
+  current: HoldingRecord[],
+  incoming: HoldingRecord[]
+): HoldingRecord[] {
+  const merged = [...current, ...incoming];
+  const seen = new Set<string>();
+  return merged.filter((item) => {
+    if (seen.has(item.ticker)) {
+      return false;
+    }
+    seen.add(item.ticker);
+    return true;
+  });
+}
+
 export function HoldingsClient() {
   const [items, setItems] = useState<HoldingRecord[]>([]);
   const [showInactive, setShowInactive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
@@ -150,27 +166,67 @@ export function HoldingsClient() {
     [baselineForm, form, submitting]
   );
 
-  const refresh = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchPage = useCallback(
+    async (cursor?: string | null): Promise<HoldingsListResponse> => {
+      const params = new URLSearchParams({
+        limit: String(HOLDINGS_PAGE_SIZE)
+      });
+      if (cursor) {
+        params.set("cursor", cursor);
+      }
 
-    try {
-      const response = await fetch("/api/holdings", { cache: "no-store" });
+      const response = await fetch(`/api/holdings?${params.toString()}`, {
+        cache: "no-store"
+      });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
         throw new Error(readApiError(payload) || "Failed to load holdings");
       }
-      setItems((payload as HoldingsResponse).items);
+
+      return payload as HoldingsListResponse;
+    },
+    []
+  );
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadingMore(false);
+    setError(null);
+
+    try {
+      const page = await fetchPage();
+      setItems(page.items);
+      setHasMore(page.hasMore);
+      setNextCursor(page.nextCursor);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load holdings");
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    if (!hasMore || !nextCursor || loadingMore) {
+      return;
+    }
+
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const page = await fetchPage(nextCursor);
+      setItems((prev) => mergeHoldingsByTicker(prev, page.items));
+      setHasMore(page.hasMore);
+      setNextCursor(page.nextCursor);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load holdings");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [fetchPage, hasMore, loadingMore, nextCursor]);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) {
@@ -481,10 +537,14 @@ export function HoldingsClient() {
             <h2 className="panelTitle">Holdings</h2>
             <p className="subtle">
               정렬: updated_at desc · 활성 {partitioned.activeCount} / 비활성{" "}
-              {partitioned.inactiveCount}
+              {partitioned.inactiveCount} · 로드 {items.length}
             </p>
           </div>
-          <button type="button" onClick={() => void refresh()} disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading || loadingMore}
+          >
             Refresh
           </button>
         </div>
@@ -573,6 +633,17 @@ export function HoldingsClient() {
                 )})}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && hasMore && (
+          <div className={styles.loadMoreRow}>
+            <button
+              type="button"
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
           </div>
         )}
       </section>

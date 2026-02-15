@@ -1,7 +1,15 @@
 import "server-only";
 
 import { getSupabaseEnv } from "@/lib/env.server";
-import type { HoldingMutationInput, HoldingRecord } from "@/lib/types";
+import {
+  buildHoldingsKeysetFilter,
+  encodeHoldingCursor
+} from "@/lib/holdings-pagination";
+import type {
+  HoldingCursor,
+  HoldingMutationInput,
+  HoldingRecord
+} from "@/lib/types";
 
 const HOLDINGS_SELECT =
   "ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override,created_at,updated_at";
@@ -181,12 +189,30 @@ export async function downloadStorageJson(
   throw new SupabaseApiError(`Report '${key}' is not a valid JSON object`, 500);
 }
 
-export async function fetchHoldings(): Promise<HoldingRecord[]> {
+export interface FetchHoldingsPageOptions {
+  limit?: number;
+  cursor?: HoldingCursor;
+}
+
+export interface FetchHoldingsPageResult {
+  items: HoldingRecord[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export async function fetchHoldingsPage(
+  options: FetchHoldingsPageOptions = {}
+): Promise<FetchHoldingsPageResult> {
   const env = getSupabaseEnv();
+  const pageSize = Math.min(Math.max(options.limit ?? 100, 1), 200);
   const query = new URLSearchParams({
     select: HOLDINGS_SELECT,
-    order: "updated_at.desc"
+    order: "updated_at.desc,ticker.asc",
+    limit: String(pageSize + 1)
   });
+  if (options.cursor) {
+    query.set("or", buildHoldingsKeysetFilter(options.cursor));
+  }
 
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
   const response = await fetch(url, {
@@ -204,7 +230,24 @@ export async function fetchHoldings(): Promise<HoldingRecord[]> {
   }
 
   const payload = (await response.json()) as unknown;
-  return Array.isArray(payload) ? (payload as HoldingRecord[]) : [];
+  const rows = Array.isArray(payload) ? (payload as HoldingRecord[]) : [];
+  const hasMore = rows.length > pageSize;
+  const items = hasMore ? rows.slice(0, pageSize) : rows;
+
+  const tail = items.at(-1);
+  const nextCursor =
+    hasMore && tail && typeof tail.updated_at === "string"
+      ? encodeHoldingCursor({
+          updated_at: tail.updated_at,
+          ticker: tail.ticker
+        })
+      : null;
+
+  return {
+    items,
+    nextCursor,
+    hasMore
+  };
 }
 
 export async function createHolding(

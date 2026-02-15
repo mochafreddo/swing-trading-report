@@ -84,6 +84,12 @@
   overflow-x: auto;
 }
 
+.loadMoreRow {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: center;
+}
+
 .tableWrap table {
   width: 100%;
   border-collapse: collapse;

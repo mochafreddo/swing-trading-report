@@ -35,6 +35,17 @@ export interface HoldingRecord {
   updated_at: string;
 }
 
+export interface HoldingCursor {
+  updated_at: string;
+  ticker: string;
+}
+
+export interface HoldingsListResponse {
+  items: HoldingRecord[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export interface HoldingMutationInput {
   ticker?: string;
   quantity?: number;
