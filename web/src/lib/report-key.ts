@@ -13,7 +13,7 @@ export interface ParsedReportStorageKey {
 }
 
 export function parseReportStorageKey(
-  key: string
+  key: string,
 ): ParsedReportStorageKey | null {
   const normalized = key.trim();
   const match = REPORT_KEY_PATTERN.exec(normalized);
@@ -40,13 +40,13 @@ export function parseReportStorageKey(
     reportDate: date,
     duplicateIndex,
     year: Number.parseInt(match.groups.year, 10),
-    month: Number.parseInt(match.groups.month, 10)
+    month: Number.parseInt(match.groups.month, 10),
   };
 }
 
 export function compareParsedReportKeys(
   a: ParsedReportStorageKey,
-  b: ParsedReportStorageKey
+  b: ParsedReportStorageKey,
 ): number {
   const dateCompare = b.reportDate.localeCompare(a.reportDate);
   if (dateCompare !== 0) {
@@ -57,7 +57,7 @@ export function compareParsedReportKeys(
 
 export function filterAndSortReportKeys(
   keys: string[],
-  type: ReportType | "all" = "all"
+  type: ReportType | "all" = "all",
 ): ParsedReportStorageKey[] {
   const parsed = keys
     .map((key) => parseReportStorageKey(key))
@@ -70,13 +70,13 @@ export function filterAndSortReportKeys(
 
 export function toReportListItem(
   parsed: ParsedReportStorageKey,
-  extras?: Pick<ReportListItem, "generatedAt" | "summary" | "tickers">
+  extras?: Pick<ReportListItem, "generatedAt" | "summary" | "tickers">,
 ): ReportListItem {
   return {
     key: parsed.key,
     type: parsed.type,
     reportDate: parsed.reportDate,
     duplicateIndex: parsed.duplicateIndex,
-    ...extras
+    ...extras,
   };
 }

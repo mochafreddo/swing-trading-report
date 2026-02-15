@@ -13,7 +13,7 @@ export function isActiveHoldingQuantity(quantity: number): boolean {
 }
 
 export function partitionHoldingsByActivity(
-  items: HoldingRecord[]
+  items: HoldingRecord[],
 ): HoldingActivityPartition {
   const active: HoldingRecord[] = [];
   const inactive: HoldingRecord[] = [];
@@ -31,6 +31,6 @@ export function partitionHoldingsByActivity(
     inactive,
     activeCount: active.length,
     inactiveCount: inactive.length,
-    totalCount: items.length
+    totalCount: items.length,
   };
 }

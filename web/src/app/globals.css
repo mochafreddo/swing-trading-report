@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
-  --font-display: "Avenir Next Condensed", "Gill Sans Nova Condensed", "Impact", sans-serif;
+  --font-display:
+    "Avenir Next Condensed", "Gill Sans Nova Condensed", "Impact", sans-serif;
   --font-body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   --font-mono: "SF Mono", "Menlo", "Consolas", monospace;
   --space-1: 0.25rem;
@@ -39,8 +40,16 @@ body {
   line-height: 1.5;
   color: var(--ink);
   background:
-    radial-gradient(circle at 10% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 42%),
-    radial-gradient(circle at 92% 8%, color-mix(in srgb, #4a8cff 18%, transparent), transparent 34%),
+    radial-gradient(
+      circle at 10% 12%,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 92% 8%,
+      color-mix(in srgb, #4a8cff 18%, transparent),
+      transparent 34%
+    ),
     linear-gradient(145deg, var(--bg), #060a12 68%);
 }
 
@@ -50,8 +59,16 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--bg-grid) 68%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--bg-grid) 68%, transparent) 1px, transparent 1px);
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--bg-grid) 68%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-grid) 68%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 48px 48px;
   opacity: 0.25;
 }

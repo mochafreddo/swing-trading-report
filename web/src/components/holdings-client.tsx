@@ -6,7 +6,7 @@ import styles from "./holdings-client.module.css";
 
 import {
   isActiveHoldingQuantity,
-  partitionHoldingsByActivity
+  partitionHoldingsByActivity,
 } from "@/lib/holding-activity";
 import type { HoldingRecord, HoldingsListResponse } from "@/lib/types";
 
@@ -33,7 +33,7 @@ const EMPTY_FORM: HoldingFormState = {
   notes: "",
   tags: "",
   stop_override: "",
-  target_override: ""
+  target_override: "",
 };
 
 const HOLDINGS_PAGE_SIZE = 100;
@@ -82,7 +82,7 @@ function recordToForm(record: HoldingRecord): HoldingFormState {
     stop_override:
       record.stop_override == null ? "" : String(record.stop_override),
     target_override:
-      record.target_override == null ? "" : String(record.target_override)
+      record.target_override == null ? "" : String(record.target_override),
   };
 }
 
@@ -97,7 +97,7 @@ function buildCreatePayload(form: HoldingFormState) {
     notes: stringOrNull(form.notes),
     tags: form.tags,
     stop_override: numberOrNull(form.stop_override),
-    target_override: numberOrNull(form.target_override)
+    target_override: numberOrNull(form.target_override),
   };
 }
 
@@ -111,7 +111,7 @@ function buildPatchPayload(form: HoldingFormState) {
     notes: stringOrNull(form.notes),
     tags: form.tags,
     stop_override: numberOrNull(form.stop_override),
-    target_override: numberOrNull(form.target_override)
+    target_override: numberOrNull(form.target_override),
   };
 }
 
@@ -125,7 +125,7 @@ function readApiError(payload: unknown): string | undefined {
 
 function mergeHoldingsByTicker(
   current: HoldingRecord[],
-  incoming: HoldingRecord[]
+  incoming: HoldingRecord[],
 ): HoldingRecord[] {
   const merged = [...current, ...incoming];
   const seen = new Set<string>();
@@ -149,34 +149,34 @@ export function HoldingsClient() {
   const [error, setError] = useState<string | null>(null);
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
   const [form, setForm] = useState<HoldingFormState>(EMPTY_FORM);
-  const [baselineForm, setBaselineForm] = useState<HoldingFormState>(EMPTY_FORM);
+  const [baselineForm, setBaselineForm] =
+    useState<HoldingFormState>(EMPTY_FORM);
 
   const modeLabel = useMemo(
     () => (editingTicker ? `Edit ${editingTicker}` : "Create Holding"),
-    [editingTicker]
+    [editingTicker],
   );
   const partitioned = useMemo(
     () => partitionHoldingsByActivity(items),
-    [items]
+    [items],
   );
   const visibleItems = showInactive ? items : partitioned.active;
   const hasUnsavedChanges = useMemo(
-    () =>
-      !submitting && JSON.stringify(form) !== JSON.stringify(baselineForm),
-    [baselineForm, form, submitting]
+    () => !submitting && JSON.stringify(form) !== JSON.stringify(baselineForm),
+    [baselineForm, form, submitting],
   );
 
   const fetchPage = useCallback(
     async (cursor?: string | null): Promise<HoldingsListResponse> => {
       const params = new URLSearchParams({
-        limit: String(HOLDINGS_PAGE_SIZE)
+        limit: String(HOLDINGS_PAGE_SIZE),
       });
       if (cursor) {
         params.set("cursor", cursor);
       }
 
       const response = await fetch(`/api/holdings?${params.toString()}`, {
-        cache: "no-store"
+        cache: "no-store",
       });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
@@ -185,7 +185,7 @@ export function HoldingsClient() {
 
       return payload as HoldingsListResponse;
     },
-    []
+    [],
   );
 
   const refresh = useCallback(async () => {
@@ -199,7 +199,11 @@ export function HoldingsClient() {
       setHasMore(page.hasMore);
       setNextCursor(page.nextCursor);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load holdings");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load holdings",
+      );
     } finally {
       setLoading(false);
     }
@@ -218,7 +222,11 @@ export function HoldingsClient() {
       setHasMore(page.hasMore);
       setNextCursor(page.nextCursor);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load holdings");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load holdings",
+      );
     } finally {
       setLoadingMore(false);
     }
@@ -233,7 +241,8 @@ export function HoldingsClient() {
       return;
     }
 
-    const message = "저장되지 않은 변경사항이 있습니다. 이 페이지를 떠나시겠습니까?";
+    const message =
+      "저장되지 않은 변경사항이 있습니다. 이 페이지를 떠나시겠습니까?";
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = message;
@@ -247,7 +256,9 @@ export function HoldingsClient() {
         return;
       }
       const element =
-        event.target instanceof Element ? event.target.closest("a[href]") : null;
+        event.target instanceof Element
+          ? event.target.closest("a[href]")
+          : null;
       if (!(element instanceof HTMLAnchorElement)) {
         return;
       }
@@ -295,9 +306,9 @@ export function HoldingsClient() {
       const response = await fetch(endpoint, {
         method,
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       const responseJson = (await response.json()) as unknown;
@@ -311,7 +322,9 @@ export function HoldingsClient() {
       setBaselineForm(EMPTY_FORM);
       await refresh();
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Save failed");
+      setError(
+        submitError instanceof Error ? submitError.message : "Save failed",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -338,9 +351,12 @@ export function HoldingsClient() {
 
     setError(null);
     try {
-      const response = await fetch(`/api/holdings/${encodeURIComponent(ticker)}`, {
-        method: "DELETE"
-      });
+      const response = await fetch(
+        `/api/holdings/${encodeURIComponent(ticker)}`,
+        {
+          method: "DELETE",
+        },
+      );
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
         throw new Error(readApiError(payload) || "Delete failed");
@@ -350,7 +366,9 @@ export function HoldingsClient() {
       }
       await refresh();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Delete failed");
+      setError(
+        deleteError instanceof Error ? deleteError.message : "Delete failed",
+      );
     }
   };
 
@@ -365,10 +383,18 @@ export function HoldingsClient() {
           </p>
         )}
         <p className="visuallyHidden" role="status" aria-live="polite">
-          {submitting ? "보유 종목 저장 중" : editingTicker ? "보유 종목 편집 모드" : "보유 종목 생성 모드"}
+          {submitting
+            ? "보유 종목 저장 중"
+            : editingTicker
+              ? "보유 종목 편집 모드"
+              : "보유 종목 생성 모드"}
         </p>
 
-        <form onSubmit={onSubmit} className={styles.form} aria-busy={submitting}>
+        <form
+          onSubmit={onSubmit}
+          className={styles.form}
+          aria-busy={submitting}
+        >
           <label>
             Ticker
             <input
@@ -376,7 +402,10 @@ export function HoldingsClient() {
               autoComplete="off"
               value={form.ticker}
               onChange={(event) =>
-                setForm((prev) => ({ ...prev, ticker: event.target.value.toUpperCase() }))
+                setForm((prev) => ({
+                  ...prev,
+                  ticker: event.target.value.toUpperCase(),
+                }))
               }
               disabled={Boolean(editingTicker)}
               placeholder="AAPL.US"
@@ -408,7 +437,10 @@ export function HoldingsClient() {
                 autoComplete="off"
                 value={form.entry_price}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, entry_price: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    entry_price: event.target.value,
+                  }))
                 }
                 type="number"
                 inputMode="decimal"
@@ -427,7 +459,10 @@ export function HoldingsClient() {
                 autoComplete="off"
                 value={form.entry_currency}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, entry_currency: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    entry_currency: event.target.value,
+                  }))
                 }
                 placeholder="KRW or USD"
               />
@@ -439,7 +474,10 @@ export function HoldingsClient() {
                 autoComplete="off"
                 value={form.entry_date}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, entry_date: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    entry_date: event.target.value,
+                  }))
                 }
                 type="date"
               />
@@ -480,7 +518,10 @@ export function HoldingsClient() {
                 autoComplete="off"
                 value={form.stop_override}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, stop_override: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    stop_override: event.target.value,
+                  }))
                 }
                 type="number"
                 inputMode="decimal"
@@ -495,7 +536,10 @@ export function HoldingsClient() {
                 autoComplete="off"
                 value={form.target_override}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, target_override: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    target_override: event.target.value,
+                  }))
                 }
                 type="number"
                 inputMode="decimal"
@@ -523,7 +567,11 @@ export function HoldingsClient() {
               {editingTicker ? "Update" : "Create"}
             </button>
             {editingTicker && (
-              <button type="button" onClick={cancelEdit} className={styles.ghostButton}>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className={styles.ghostButton}
+              >
                 Cancel
               </button>
             )}
@@ -599,38 +647,43 @@ export function HoldingsClient() {
                 {visibleItems.map((row) => {
                   const inactive = !isActiveHoldingQuantity(row.quantity);
                   return (
-                  <tr
-                    key={row.ticker}
-                    className={showInactive && inactive ? styles.inactiveRow : undefined}
-                  >
-                    <td>{row.ticker}</td>
-                    <td>
-                      {row.quantity}
-                      {showInactive && inactive && (
-                        <span className={styles.inactiveBadge}>비활성</span>
-                      )}
-                    </td>
-                    <td>{row.entry_price}</td>
-                    <td>{row.entry_date ?? "-"}</td>
-                    <td className={styles.notesCell}>{row.notes ?? "-"}</td>
-                    <td>{row.tags.join(", ") || "-"}</td>
-                    <td>{row.updated_at}</td>
-                    <td>
-                      <div className={styles.inlineActions}>
-                        <button type="button" onClick={() => beginEdit(row)}>
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void removeHolding(row.ticker)}
-                          className={styles.dangerButton}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )})}
+                    <tr
+                      key={row.ticker}
+                      className={
+                        showInactive && inactive
+                          ? styles.inactiveRow
+                          : undefined
+                      }
+                    >
+                      <td>{row.ticker}</td>
+                      <td>
+                        {row.quantity}
+                        {showInactive && inactive && (
+                          <span className={styles.inactiveBadge}>비활성</span>
+                        )}
+                      </td>
+                      <td>{row.entry_price}</td>
+                      <td>{row.entry_date ?? "-"}</td>
+                      <td className={styles.notesCell}>{row.notes ?? "-"}</td>
+                      <td>{row.tags.join(", ") || "-"}</td>
+                      <td>{row.updated_at}</td>
+                      <td>
+                        <div className={styles.inlineActions}>
+                          <button type="button" onClick={() => beginEdit(row)}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void removeHolding(row.ticker)}
+                            className={styles.dangerButton}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

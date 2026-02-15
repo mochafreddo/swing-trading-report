@@ -8,7 +8,7 @@ import styles from "./main-nav.module.css";
 const NAV_ITEMS = [
   { href: "/reports", label: "Reports" },
   { href: "/holdings", label: "Holdings" },
-  { href: "/run", label: "Run" }
+  { href: "/run", label: "Run" },
 ] as const;
 
 function isActivePath(pathname: string, href: string): boolean {

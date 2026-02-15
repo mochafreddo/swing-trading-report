@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertLocalRequest,
-  LocalRequestGuardError
+  LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 
 function makeRequest(headers: Record<string, string>): { headers: Headers } {
@@ -18,13 +18,13 @@ describe("local-request-guard", () => {
     vi.stubEnv("NODE_ENV", "development");
 
     expect(() =>
-      assertLocalRequest(makeRequest({ host: "localhost:3000" }))
+      assertLocalRequest(makeRequest({ host: "localhost:3000" })),
     ).not.toThrow();
     expect(() =>
-      assertLocalRequest(makeRequest({ host: "127.0.0.1:55300" }))
+      assertLocalRequest(makeRequest({ host: "127.0.0.1:55300" })),
     ).not.toThrow();
     expect(() =>
-      assertLocalRequest(makeRequest({ host: "[::1]:3000" }))
+      assertLocalRequest(makeRequest({ host: "[::1]:3000" })),
     ).not.toThrow();
   });
 
@@ -35,9 +35,9 @@ describe("local-request-guard", () => {
       assertLocalRequest(
         makeRequest({
           host: "localhost:3000",
-          "x-forwarded-host": "example.com"
-        })
-      )
+          "x-forwarded-host": "example.com",
+        }),
+      ),
     ).toThrow(LocalRequestGuardError);
   });
 
@@ -45,7 +45,7 @@ describe("local-request-guard", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     expect(() =>
-      assertLocalRequest(makeRequest({ host: "example.com" }))
+      assertLocalRequest(makeRequest({ host: "example.com" })),
     ).toThrow(LocalRequestGuardError);
   });
 
@@ -53,7 +53,7 @@ describe("local-request-guard", () => {
     vi.stubEnv("NODE_ENV", "test");
 
     expect(() =>
-      assertLocalRequest(makeRequest({ host: "example.com" }))
+      assertLocalRequest(makeRequest({ host: "example.com" })),
     ).not.toThrow();
   });
 });

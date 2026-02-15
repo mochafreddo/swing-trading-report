@@ -3,19 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseEnv } from "@/lib/env.server";
 import {
   assertLocalRequest,
-  LocalRequestGuardError
+  LocalRequestGuardError,
 } from "@/lib/local-request-guard";
-import {
-  filterAndSortReportKeys,
-  toReportListItem
-} from "@/lib/report-key";
+import { filterAndSortReportKeys, toReportListItem } from "@/lib/report-key";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
 import { extractReportTickers } from "@/lib/report-tickers";
 import { reportListQuerySchema } from "@/lib/schemas";
 import {
   downloadStorageJson,
   listAllStorageKeys,
-  SupabaseApiError
+  SupabaseApiError,
 } from "@/lib/supabase-admin";
 import type { ReportListItem } from "@/lib/types";
 
@@ -23,7 +20,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function extractSummary(
-  report: Record<string, unknown>
+  report: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const payload = report.summary;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -42,7 +39,10 @@ export async function GET(request: NextRequest) {
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -51,21 +51,23 @@ export async function GET(request: NextRequest) {
   const parsedQuery = reportListQuerySchema.safeParse({
     type: request.nextUrl.searchParams.get("type") ?? undefined,
     q: request.nextUrl.searchParams.get("q") ?? "",
-    limit: request.nextUrl.searchParams.get("limit") ?? undefined
+    limit: request.nextUrl.searchParams.get("limit") ?? undefined,
   });
 
   if (!parsedQuery.success) {
     return NextResponse.json(
       {
         error: "Invalid query parameters",
-        details: parsedQuery.error.flatten()
+        details: parsedQuery.error.flatten(),
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   const { type, q, limit } = parsedQuery.data;
-  const searchWindow = resolveReportSearchWindow(process.env.REPORT_SEARCH_WINDOW);
+  const searchWindow = resolveReportSearchWindow(
+    process.env.REPORT_SEARCH_WINDOW,
+  );
 
   try {
     const env = getSupabaseEnv();
@@ -78,7 +80,7 @@ export async function GET(request: NextRequest) {
         total: sorted.length,
         searched: 0,
         searchWindow,
-        truncated: false
+        truncated: false,
       });
     }
 
@@ -88,7 +90,10 @@ export async function GET(request: NextRequest) {
     for (const candidate of searchedCandidates) {
       let report: Record<string, unknown>;
       try {
-        report = await downloadStorageJson(env.SUPABASE_REPORTS_BUCKET, candidate.key);
+        report = await downloadStorageJson(
+          env.SUPABASE_REPORTS_BUCKET,
+          candidate.key,
+        );
       } catch (error) {
         if (error instanceof SupabaseApiError && error.status === 404) {
           continue;
@@ -102,14 +107,16 @@ export async function GET(request: NextRequest) {
       }
 
       const generatedAt =
-        typeof report.generated_at === "string" ? report.generated_at : undefined;
+        typeof report.generated_at === "string"
+          ? report.generated_at
+          : undefined;
 
       matchedItems.push(
         toReportListItem(candidate, {
           generatedAt,
           summary: extractSummary(report),
-          tickers
-        })
+          tickers,
+        }),
       );
     }
 
@@ -118,7 +125,7 @@ export async function GET(request: NextRequest) {
       total: matchedItems.length,
       searched: searchedCandidates.length,
       searchWindow,
-      truncated: sorted.length > searchedCandidates.length
+      truncated: sorted.length > searchedCandidates.length,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

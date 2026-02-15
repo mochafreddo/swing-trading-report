@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   assertLocalRequest,
-  LocalRequestGuardError
+  LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { holdingPatchSchema } from "@/lib/schemas";
 import {
   deleteHolding,
   SupabaseApiError,
-  updateHolding
+  updateHolding,
 } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -25,15 +25,15 @@ function parseTicker(raw: string): string | null {
   return decoded.toUpperCase();
 }
 
-export async function PATCH(
-  request: NextRequest,
-  context: RouteContext
-) {
+export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -49,7 +49,10 @@ export async function PATCH(
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Request body must be valid JSON" },
+      { status: 400 },
+    );
   }
 
   const parsed = holdingPatchSchema.safeParse(payload);
@@ -57,9 +60,9 @@ export async function PATCH(
     return NextResponse.json(
       {
         error: "Invalid holding patch payload",
-        details: parsed.error.flatten()
+        details: parsed.error.flatten(),
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -71,22 +74,25 @@ export async function PATCH(
     return NextResponse.json(updated);
   } catch (error) {
     if (error instanceof SupabaseApiError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  context: RouteContext
-) {
+export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -106,7 +112,10 @@ export async function DELETE(
     return NextResponse.json({ deleted: true, ticker });
   } catch (error) {
     if (error instanceof SupabaseApiError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

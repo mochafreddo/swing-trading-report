@@ -3,13 +3,13 @@ import "server-only";
 import { getGitHubEnv } from "@/lib/env.server";
 import type {
   WorkflowDispatchInput,
-  WorkflowDispatchResult
+  WorkflowDispatchResult,
 } from "@/lib/types";
 
 export class GitHubDispatchError extends Error {
   constructor(
     message: string,
-    public readonly status: number
+    public readonly status: number,
   ) {
     super(message);
   }
@@ -27,14 +27,14 @@ interface DispatchRequest {
 }
 
 export function buildWorkflowDispatchRequest(
-  input: WorkflowDispatchInput
+  input: WorkflowDispatchInput,
 ): DispatchRequest {
   const gitHubEnv = getGitHubEnv();
   const workflowFile = input.workflow === "scan" ? "scan.yml" : "sell.yml";
   const ref = "main";
 
   const inputs: Record<string, string> = {
-    provider: input.provider
+    provider: input.provider,
   };
 
   if (input.workflow === "scan") {
@@ -50,13 +50,13 @@ export function buildWorkflowDispatchRequest(
     dispatchUrl: `https://api.github.com/repos/${gitHubEnv.GITHUB_OWNER}/${gitHubEnv.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
     body: {
       ref,
-      inputs
-    }
+      inputs,
+    },
   };
 }
 
 export async function dispatchWorkflow(
-  input: WorkflowDispatchInput
+  input: WorkflowDispatchInput,
 ): Promise<WorkflowDispatchResult> {
   const env = getGitHubEnv();
   const request = buildWorkflowDispatchRequest(input);
@@ -67,10 +67,10 @@ export async function dispatchWorkflow(
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${env.GITHUB_PAT}`,
       "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(request.body),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (response.status !== 204) {
@@ -97,6 +97,6 @@ export async function dispatchWorkflow(
     workflowFile: request.workflowFile,
     workflowUrl: request.workflowUrl,
     actionsUrl: request.actionsUrl,
-    ref: request.body.ref
+    ref: request.body.ref,
   };
 }

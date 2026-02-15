@@ -13,10 +13,7 @@ function extractHostname(rawHost: string | null): string | null {
     return null;
   }
 
-  const first = rawHost
-    .split(",")[0]
-    ?.trim()
-    .toLowerCase();
+  const first = rawHost.split(",")[0]?.trim().toLowerCase();
   if (!first) {
     return null;
   }
@@ -48,7 +45,9 @@ function extractHostname(rawHost: string | null): string | null {
   return first;
 }
 
-export function assertLocalRequest(request: { headers: Pick<Headers, "get"> }): void {
+export function assertLocalRequest(request: {
+  headers: Pick<Headers, "get">;
+}): void {
   if (process.env.NODE_ENV === "test") {
     return;
   }

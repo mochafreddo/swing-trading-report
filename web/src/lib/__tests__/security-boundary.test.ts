@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 
 const CLIENT_ROOTS = [
   path.resolve(process.cwd(), "src/components"),
-  path.resolve(process.cwd(), "src/app")
+  path.resolve(process.cwd(), "src/app"),
 ];
 
 const DISALLOWED_TOKENS = [
   "SUPABASE_SECRET_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "GITHUB_PAT",
-  "@/lib/env.server"
+  "@/lib/env.server",
 ];
 
 function collectFiles(root: string, acc: string[] = []): string[] {

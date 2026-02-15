@@ -3,12 +3,12 @@ import "server-only";
 import { getSupabaseEnv } from "@/lib/env.server";
 import {
   buildHoldingsKeysetFilter,
-  encodeHoldingCursor
+  encodeHoldingCursor,
 } from "@/lib/holdings-pagination";
 import type {
   HoldingCursor,
   HoldingMutationInput,
-  HoldingRecord
+  HoldingRecord,
 } from "@/lib/types";
 
 const HOLDINGS_SELECT =
@@ -17,7 +17,7 @@ const HOLDINGS_SELECT =
 export class SupabaseApiError extends Error {
   constructor(
     message: string,
-    public readonly status: number
+    public readonly status: number,
   ) {
     super(message);
   }
@@ -28,7 +28,7 @@ function buildAuthHeaders(extra?: Record<string, string>): HeadersInit {
   return {
     apikey: env.SUPABASE_API_KEY,
     Authorization: `Bearer ${env.SUPABASE_API_KEY}`,
-    ...extra
+    ...extra,
   };
 }
 
@@ -65,7 +65,7 @@ interface StorageListOptions {
 
 export async function listStorageObjectsPage(
   bucket: string,
-  options: StorageListOptions = {}
+  options: StorageListOptions = {},
 ): Promise<StorageListRow[]> {
   const { prefix = "", limit = 1000, offset = 0 } = options;
   const env = getSupabaseEnv();
@@ -75,7 +75,7 @@ export async function listStorageObjectsPage(
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
-      Accept: "application/json"
+      Accept: "application/json",
     }),
     body: JSON.stringify({
       prefix,
@@ -83,16 +83,16 @@ export async function listStorageObjectsPage(
       offset,
       sortBy: {
         column: "name",
-        order: "asc"
-      }
+        order: "asc",
+      },
     }),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to list storage objects: ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 
@@ -119,7 +119,11 @@ export async function listAllStorageKeys(bucket: string): Promise<string[]> {
 
     let offset = 0;
     while (true) {
-      const page = await listStorageObjectsPage(bucket, { prefix, limit, offset });
+      const page = await listStorageObjectsPage(bucket, {
+        prefix,
+        limit,
+        offset,
+      });
 
       for (const item of page) {
         if (typeof item.name !== "string") {
@@ -156,7 +160,7 @@ export async function listAllStorageKeys(bucket: string): Promise<string[]> {
 
 export async function downloadStorageJson(
   bucket: string,
-  key: string
+  key: string,
 ): Promise<Record<string, unknown>> {
   const env = getSupabaseEnv();
   const encodedKey = encodeStorageKey(key);
@@ -164,15 +168,15 @@ export async function downloadStorageJson(
 
   const response = await fetch(url, {
     headers: buildAuthHeaders({
-      Accept: "application/json"
+      Accept: "application/json",
     }),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to download '${key}': ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 
@@ -201,14 +205,14 @@ export interface FetchHoldingsPageResult {
 }
 
 export async function fetchHoldingsPage(
-  options: FetchHoldingsPageOptions = {}
+  options: FetchHoldingsPageOptions = {},
 ): Promise<FetchHoldingsPageResult> {
   const env = getSupabaseEnv();
   const pageSize = Math.min(Math.max(options.limit ?? 100, 1), 200);
   const query = new URLSearchParams({
     select: HOLDINGS_SELECT,
     order: "updated_at.desc,ticker.asc",
-    limit: String(pageSize + 1)
+    limit: String(pageSize + 1),
   });
   if (options.cursor) {
     query.set("or", buildHoldingsKeysetFilter(options.cursor));
@@ -217,15 +221,15 @@ export async function fetchHoldingsPage(
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
   const response = await fetch(url, {
     headers: buildAuthHeaders({
-      Accept: "application/json"
+      Accept: "application/json",
     }),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to fetch holdings: ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 
@@ -239,19 +243,19 @@ export async function fetchHoldingsPage(
     hasMore && tail && typeof tail.updated_at === "string"
       ? encodeHoldingCursor({
           updated_at: tail.updated_at,
-          ticker: tail.ticker
+          ticker: tail.ticker,
         })
       : null;
 
   return {
     items,
     nextCursor,
-    hasMore
+    hasMore,
   };
 }
 
 export async function createHolding(
-  input: HoldingMutationInput
+  input: HoldingMutationInput,
 ): Promise<HoldingRecord> {
   const env = getSupabaseEnv();
   const query = new URLSearchParams({ select: HOLDINGS_SELECT });
@@ -262,16 +266,16 @@ export async function createHolding(
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
       Accept: "application/json",
-      Prefer: "return=representation"
+      Prefer: "return=representation",
     }),
     body: JSON.stringify(input),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to create holding: ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 
@@ -285,12 +289,12 @@ export async function createHolding(
 
 export async function updateHolding(
   ticker: string,
-  patch: HoldingMutationInput
+  patch: HoldingMutationInput,
 ): Promise<HoldingRecord | null> {
   const env = getSupabaseEnv();
   const query = new URLSearchParams({
     select: HOLDINGS_SELECT,
-    ticker: `eq.${ticker}`
+    ticker: `eq.${ticker}`,
   });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
 
@@ -299,16 +303,16 @@ export async function updateHolding(
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
       Accept: "application/json",
-      Prefer: "return=representation"
+      Prefer: "return=representation",
     }),
     body: JSON.stringify(patch),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to update holding '${ticker}': ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 
@@ -324,7 +328,7 @@ export async function deleteHolding(ticker: string): Promise<boolean> {
   const env = getSupabaseEnv();
   const query = new URLSearchParams({
     select: "ticker",
-    ticker: `eq.${ticker}`
+    ticker: `eq.${ticker}`,
   });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
 
@@ -332,15 +336,15 @@ export async function deleteHolding(ticker: string): Promise<boolean> {
     method: "DELETE",
     headers: buildAuthHeaders({
       Accept: "application/json",
-      Prefer: "return=representation"
+      Prefer: "return=representation",
     }),
-    cache: "no-store"
+    cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
       `Failed to delete holding '${ticker}': ${await parseError(response)}`,
-      response.status
+      response.status,
     );
   }
 

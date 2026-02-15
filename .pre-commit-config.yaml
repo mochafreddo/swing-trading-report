@@ -16,3 +16,15 @@ repos:
         language: system
         entry: uv run mypy --config-file pyproject.toml sab
         pass_filenames: false
+      - id: web-lint
+        name: web lint (pnpm)
+        language: system
+        entry: pnpm --dir web run lint
+        files: ^web/
+        pass_filenames: false
+      - id: web-format-check
+        name: web format check (prettier)
+        language: system
+        entry: pnpm --dir web run format:check
+        files: ^web/
+        pass_filenames: false

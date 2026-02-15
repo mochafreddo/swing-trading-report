@@ -40,24 +40,28 @@ const toNullableNonNegativeNumber = z.preprocess((value) => {
   return value;
 }, z.number().finite().min(0).nullable());
 
-const toTags = z.preprocess((value) => {
-  if (value == null || value === "") {
-    return [];
-  }
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => String(entry).trim()).filter(Boolean);
-  }
-  return value;
-}, z.array(z.string().min(1).max(40)).max(20));
+const toTags = z.preprocess(
+  (value) => {
+    if (value == null || value === "") {
+      return [];
+    }
+    if (typeof value === "string") {
+      return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => String(entry).trim()).filter(Boolean);
+    }
+    return value;
+  },
+  z.array(z.string().min(1).max(40)).max(20),
+);
 
 const KR_TICKER_PATTERN = /^\d{6}$/;
-const US_TICKER_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
+const US_TICKER_PATTERN =
+  /^[A-Z0-9][A-Z0-9._-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
 
 const tickerSchema = z
   .string()
@@ -70,33 +74,39 @@ const tickerSchema = z
       KR_TICKER_PATTERN.test(ticker) || US_TICKER_PATTERN.test(ticker),
     {
       message:
-        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, AAPL.NASD)"
-    }
+        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, AAPL.NASD)",
+    },
   );
 
-const entryDateSchema = z.preprocess((value) => {
-  if (value === "" || value == null) {
-    return null;
-  }
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  return value;
-}, z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable());
+const entryDateSchema = z.preprocess(
+  (value) => {
+    if (value === "" || value == null) {
+      return null;
+    }
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    return value;
+  },
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+);
 
 export const reportListQuerySchema = z.object({
   type: z.enum(["all", "buy", "sell"]).default("all"),
   q: z.string().trim().default(""),
-  limit: z.coerce.number().int().min(1).max(200).default(30)
+  limit: z.coerce.number().int().min(1).max(200).default(30),
 });
 
 export const reportDetailQuerySchema = z.object({
-  key: z.string().trim().min(1)
+  key: z.string().trim().min(1),
 });
 
 export const holdingListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
-  cursor: z.string().trim().min(1).optional()
+  cursor: z.string().trim().min(1).optional(),
 });
 
 export const holdingCreateSchema = z
@@ -110,7 +120,7 @@ export const holdingCreateSchema = z
     notes: toNullableTrimmedString(2000).optional(),
     tags: toTags.default([]),
     stop_override: toNullableNonNegativeNumber.optional(),
-    target_override: toNullableNonNegativeNumber.optional()
+    target_override: toNullableNonNegativeNumber.optional(),
   })
   .strict();
 
@@ -124,11 +134,11 @@ export const holdingPatchSchema = z
     notes: toNullableTrimmedString(2000).optional(),
     tags: toTags.optional(),
     stop_override: toNullableNonNegativeNumber.optional(),
-    target_override: toNullableNonNegativeNumber.optional()
+    target_override: toNullableNonNegativeNumber.optional(),
   })
   .strict()
   .refine((payload) => Object.keys(payload).length > 0, {
-    message: "At least one field must be provided"
+    message: "At least one field must be provided",
   });
 
 export const runDispatchSchema = z.union([
@@ -136,13 +146,13 @@ export const runDispatchSchema = z.union([
     .object({
       workflow: z.literal("scan"),
       provider: z.enum(["kis", "pykrx"]),
-      universe: z.enum(["KR", "US", "both"])
+      universe: z.enum(["KR", "US", "both"]),
     })
     .strict(),
   z
     .object({
       workflow: z.literal("sell"),
-      provider: z.enum(["kis", "pykrx"])
+      provider: z.enum(["kis", "pykrx"]),
     })
-    .strict()
+    .strict(),
 ]);

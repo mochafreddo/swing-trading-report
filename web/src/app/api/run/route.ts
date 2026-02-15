@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  dispatchWorkflow,
-  GitHubDispatchError
-} from "@/lib/github-actions";
+import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
 import {
   assertLocalRequest,
-  LocalRequestGuardError
+  LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { runDispatchSchema } from "@/lib/schemas";
 
@@ -17,7 +14,10 @@ export async function POST(request: NextRequest) {
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -27,7 +27,10 @@ export async function POST(request: NextRequest) {
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Request body must be valid JSON" },
+      { status: 400 },
+    );
   }
 
   const parsed = runDispatchSchema.safeParse(payload);
@@ -35,9 +38,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: "Invalid run payload",
-        details: parsed.error.flatten()
+        details: parsed.error.flatten(),
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -46,7 +49,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(dispatched, { status: 202 });
   } catch (error) {
     if (error instanceof GitHubDispatchError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
     }
 
     const message = error instanceof Error ? error.message : "Unknown error";

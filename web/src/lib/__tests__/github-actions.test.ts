@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildWorkflowDispatchRequest,
   dispatchWorkflow,
-  GitHubDispatchError
+  GitHubDispatchError,
 } from "@/lib/github-actions";
 
 beforeAll(() => {
@@ -23,7 +23,7 @@ describe("buildWorkflowDispatchRequest", () => {
     const request = buildWorkflowDispatchRequest({
       workflow: "scan",
       provider: "kis",
-      universe: "KR"
+      universe: "KR",
     });
 
     expect(request.workflowFile).toBe("scan.yml");
@@ -31,37 +31,37 @@ describe("buildWorkflowDispatchRequest", () => {
       ref: "main",
       inputs: {
         provider: "kis",
-        universe: "KR"
-      }
+        universe: "KR",
+      },
     });
   });
 
   it("builds sell dispatch request", () => {
     const request = buildWorkflowDispatchRequest({
       workflow: "sell",
-      provider: "pykrx"
+      provider: "pykrx",
     });
 
     expect(request.workflowFile).toBe("sell.yml");
     expect(request.body).toEqual({
       ref: "main",
       inputs: {
-        provider: "pykrx"
-      }
+        provider: "pykrx",
+      },
     });
   });
 });
 
 describe("dispatchWorkflow", () => {
   it("treats 204 as success", async () => {
-    const mockFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 204 })
-    );
+    const mockFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }));
 
     const result = await dispatchWorkflow({
       workflow: "scan",
       provider: "kis",
-      universe: "both"
+      universe: "both",
     });
 
     expect(result.dispatched).toBe(true);
@@ -70,21 +70,23 @@ describe("dispatchWorkflow", () => {
 
     const [url, options] = mockFetch.mock.calls[0];
     expect(String(url)).toContain(
-      "/repos/owner/repo/actions/workflows/scan.yml/dispatches"
+      "/repos/owner/repo/actions/workflows/scan.yml/dispatches",
     );
     expect(options?.method).toBe("POST");
   });
 
   it("throws when github returns non-204", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ message: "unprocessable" }), { status: 422 })
+      new Response(JSON.stringify({ message: "unprocessable" }), {
+        status: 422,
+      }),
     );
 
     await expect(
       dispatchWorkflow({
         workflow: "sell",
-        provider: "kis"
-      })
+        provider: "kis",
+      }),
     ).rejects.toBeInstanceOf(GitHubDispatchError);
   });
 });

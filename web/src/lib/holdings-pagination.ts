@@ -46,7 +46,7 @@ export function decodeHoldingCursor(encoded: string): HoldingCursor {
 
     return {
       updated_at: parsed.updated_at,
-      ticker: parsed.ticker
+      ticker: parsed.ticker,
     };
   } catch (error) {
     if (error instanceof HoldingCursorError) {

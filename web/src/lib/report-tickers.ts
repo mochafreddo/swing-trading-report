@@ -64,4 +64,3 @@ export function extractReportTickers(report: ReportJson): string[] {
   const fromEvaluated = extractTickersFromRows(report.evaluated);
   return dedupePreserveOrder(fromCandidates.concat(fromEvaluated));
 }
-

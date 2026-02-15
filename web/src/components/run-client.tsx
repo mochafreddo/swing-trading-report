@@ -34,9 +34,9 @@ export function RunClient() {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       const body = (await response.json()) as unknown;
@@ -50,7 +50,7 @@ export function RunClient() {
       setError(
         dispatchError instanceof Error
           ? dispatchError.message
-          : `${workflow} dispatch failed`
+          : `${workflow} dispatch failed`,
       );
     } finally {
       setLoading(null);
@@ -112,7 +112,9 @@ export function RunClient() {
 
       <article className="panel">
         <h2 className="panelTitle">Dispatch Result</h2>
-        <p className="subtle">GitHub Actions 링크를 통해 실행 상태를 확인합니다.</p>
+        <p className="subtle">
+          GitHub Actions 링크를 통해 실행 상태를 확인합니다.
+        </p>
         <p className="visuallyHidden" role="status" aria-live="polite">
           {loading
             ? `${loading} 워크플로 실행 요청 중`

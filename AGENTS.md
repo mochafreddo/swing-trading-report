@@ -18,6 +18,8 @@
 - 훅 업데이트: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit autoupdate`
 - 설정 검사: `UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config`
 - 첫 실행 시 훅 저장소를 내려받기 위해 네트워크 접근이 필요할 수 있습니다.
+- 커밋 시 staged 파일에 `web/` 변경이 있으면 `pnpm --dir web run lint`와 `pnpm --dir web run format:check`를 검사합니다.
+- `web` 타입체크는 pre-commit에서 제외하고 CI(`.github/workflows/ci.yml`의 web job)에서 `pnpm run typecheck`로 강제합니다.
 
 ## 웹 스모크 체크
 

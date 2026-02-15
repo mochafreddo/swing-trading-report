@@ -4,7 +4,7 @@ import {
   holdingListQuerySchema,
   holdingCreateSchema,
   holdingPatchSchema,
-  runDispatchSchema
+  runDispatchSchema,
 } from "@/lib/schemas";
 
 describe("runDispatchSchema", () => {
@@ -12,7 +12,7 @@ describe("runDispatchSchema", () => {
     const parsed = runDispatchSchema.safeParse({
       workflow: "scan",
       provider: "kis",
-      universe: "both"
+      universe: "both",
     });
 
     expect(parsed.success).toBe(true);
@@ -22,7 +22,7 @@ describe("runDispatchSchema", () => {
     const parsed = runDispatchSchema.safeParse({
       workflow: "sell",
       provider: "kis",
-      hack: "x"
+      hack: "x",
     });
 
     expect(parsed.success).toBe(false);
@@ -39,7 +39,7 @@ describe("holding schemas", () => {
   it("accepts explicit list query values", () => {
     const parsed = holdingListQuerySchema.parse({
       limit: "200",
-      cursor: "abc"
+      cursor: "abc",
     });
 
     expect(parsed.limit).toBe(200);
@@ -48,7 +48,9 @@ describe("holding schemas", () => {
 
   it("rejects invalid list query limits", () => {
     expect(holdingListQuerySchema.safeParse({ limit: 0 }).success).toBe(false);
-    expect(holdingListQuerySchema.safeParse({ limit: 201 }).success).toBe(false);
+    expect(holdingListQuerySchema.safeParse({ limit: 201 }).success).toBe(
+      false,
+    );
   });
 
   it("normalizes create payload", () => {
@@ -56,7 +58,7 @@ describe("holding schemas", () => {
       ticker: "aapl.us",
       quantity: "3",
       entry_price: "172.5",
-      tags: "core, swing"
+      tags: "core, swing",
     });
 
     expect(parsed.ticker).toBe("AAPL.US");
@@ -68,7 +70,7 @@ describe("holding schemas", () => {
     const parsed = holdingCreateSchema.parse({
       ticker: "005930",
       quantity: 1,
-      entry_price: 70000
+      entry_price: 70000,
     });
 
     expect(parsed.ticker).toBe("005930");
@@ -78,7 +80,7 @@ describe("holding schemas", () => {
     const parsed = holdingCreateSchema.safeParse({
       ticker: "AAPL",
       quantity: 1,
-      entry_price: 172.5
+      entry_price: 172.5,
     });
 
     expect(parsed.success).toBe(false);

@@ -61,11 +61,11 @@ export function ReportsClient() {
   const router = useRouter();
   const pathname = usePathname();
   const [reportType, setReportType] = useState<ReportType>(() =>
-    parseReportType(searchParams.get("type"))
+    parseReportType(searchParams.get("type")),
   );
   const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
-  const [appliedQuery, setAppliedQuery] = useState(
-    () => (searchParams.get("q") ?? "").trim()
+  const [appliedQuery, setAppliedQuery] = useState(() =>
+    (searchParams.get("q") ?? "").trim(),
   );
   const [items, setItems] = useState<ReportListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -73,7 +73,7 @@ export function ReportsClient() {
   const [truncated, setTruncated] = useState(false);
   const [searchWindow, setSearchWindow] = useState(100);
   const [selectedKey, setSelectedKey] = useState<string | null>(() =>
-    searchParams.get("key")
+    searchParams.get("key"),
   );
   const [detail, setDetail] = useState<ReportJson | null>(null);
   const [loadingList, setLoadingList] = useState(false);
@@ -128,7 +128,9 @@ export function ReportsClient() {
 
     setReportType((prev) => (prev === nextType ? prev : nextType));
     setQuery((prev) => (prev === nextQuery ? prev : nextQuery));
-    setAppliedQuery((prev) => (prev === nextAppliedQuery ? prev : nextAppliedQuery));
+    setAppliedQuery((prev) =>
+      prev === nextAppliedQuery ? prev : nextAppliedQuery,
+    );
     setSelectedKey((prev) => (prev === nextKey ? prev : nextKey));
     setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
   }, [searchParams]);
@@ -166,7 +168,7 @@ export function ReportsClient() {
       try {
         const params = new URLSearchParams({
           type: reportType,
-          limit: String(PAGE_LIMIT)
+          limit: String(PAGE_LIMIT),
         });
         if (appliedQuery) {
           params.set("q", appliedQuery);
@@ -174,7 +176,7 @@ export function ReportsClient() {
 
         const response = await fetch(`/api/reports?${params.toString()}`, {
           signal: controller.signal,
-          cache: "no-store"
+          cache: "no-store",
         });
 
         const payload = (await response.json()) as unknown;
@@ -202,7 +204,9 @@ export function ReportsClient() {
           return;
         }
         const message =
-          loadError instanceof Error ? loadError.message : "Failed to load reports";
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load reports";
         setError(message);
       } finally {
         if (!controller.signal.aborted) {
@@ -229,14 +233,19 @@ export function ReportsClient() {
 
       try {
         const params = new URLSearchParams({ key: selectedKey });
-        const response = await fetch(`/api/reports/detail?${params.toString()}`, {
-          signal: controller.signal,
-          cache: "no-store"
-        });
+        const response = await fetch(
+          `/api/reports/detail?${params.toString()}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+          },
+        );
         const payload = (await response.json()) as unknown;
 
         if (!response.ok) {
-          throw new Error(readApiError(payload) || "Failed to load report detail");
+          throw new Error(
+            readApiError(payload) || "Failed to load report detail",
+          );
         }
 
         setDetail((payload as { report: ReportJson }).report);
@@ -267,7 +276,7 @@ export function ReportsClient() {
   const sellRows = useMemo(() => asRecordArray(detail?.evaluated), [detail]);
   const rawDetailJson = useMemo(
     () => (detail ? JSON.stringify(detail, null, 2) : ""),
-    [detail]
+    [detail],
   );
 
   return (
@@ -345,8 +354,12 @@ export function ReportsClient() {
                   onClick={() => setSelectedKey(item.key)}
                   aria-pressed={selectedKey === item.key}
                 >
-                  <span className={styles.itemPrimary}>{formatDateLabel(item)}</span>
-                  <span className={styles.badge}>{item.type.toUpperCase()}</span>
+                  <span className={styles.itemPrimary}>
+                    {formatDateLabel(item)}
+                  </span>
+                  <span className={styles.badge}>
+                    {item.type.toUpperCase()}
+                  </span>
                   <span className={styles.itemKey}>{item.key}</span>
                 </button>
               </li>
@@ -390,7 +403,9 @@ export function ReportsClient() {
               상세 로딩 중…
             </p>
           )}
-          {!loadingDetail && !detail && <p className="subtle">리포트를 선택하세요.</p>}
+          {!loadingDetail && !detail && (
+            <p className="subtle">리포트를 선택하세요.</p>
+          )}
 
           {detail && (
             <>
@@ -418,7 +433,11 @@ export function ReportsClient() {
                   {Object.entries(summary).map(([key, value]) => (
                     <article key={key} className={styles.summaryBox}>
                       <h3>{key}</h3>
-                      <p>{typeof value === "object" ? JSON.stringify(value) : String(value)}</p>
+                      <p>
+                        {typeof value === "object"
+                          ? JSON.stringify(value)
+                          : String(value)}
+                      </p>
                     </article>
                   ))}
                 </div>
@@ -426,7 +445,9 @@ export function ReportsClient() {
 
               {buyRows.length > 0 && (
                 <div className={styles.tableWrap}>
-                  <h3 className={styles.sectionTitle}>Candidates ({buyRows.length})</h3>
+                  <h3 className={styles.sectionTitle}>
+                    Candidates ({buyRows.length})
+                  </h3>
                   <table>
                     <thead>
                       <tr>
@@ -452,7 +473,9 @@ export function ReportsClient() {
 
               {sellRows.length > 0 && (
                 <div className={styles.tableWrap}>
-                  <h3 className={styles.sectionTitle}>Evaluated ({sellRows.length})</h3>
+                  <h3 className={styles.sectionTitle}>
+                    Evaluated ({sellRows.length})
+                  </h3>
                   <table>
                     <thead>
                       <tr>

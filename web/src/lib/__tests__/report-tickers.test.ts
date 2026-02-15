@@ -5,7 +5,7 @@ import { extractReportTickers } from "@/lib/report-tickers";
 describe("extractReportTickers", () => {
   it("prefers top-level tickers when present", () => {
     const tickers = extractReportTickers({
-      tickers: [" AAPL.NAS ", "005930", "AAPL.NAS", ""]
+      tickers: [" AAPL.NAS ", "005930", "AAPL.NAS", ""],
     });
 
     expect(tickers).toEqual(["AAPL.NAS", "005930"]);
@@ -17,8 +17,8 @@ describe("extractReportTickers", () => {
         { ticker: "GS.NYS" },
         { ticker: "  " },
         { ticker: "SYK.NYS" },
-        { ticker: "GS.NYS" }
-      ]
+        { ticker: "GS.NYS" },
+      ],
     });
 
     expect(tickers).toEqual(["GS.NYS", "SYK.NYS"]);
@@ -26,7 +26,7 @@ describe("extractReportTickers", () => {
 
   it("falls back to evaluated[] tickers when tickers missing", () => {
     const tickers = extractReportTickers({
-      evaluated: [{ ticker: "CMG.NYS" }, { ticker: "005930" }]
+      evaluated: [{ ticker: "CMG.NYS" }, { ticker: "005930" }],
     });
 
     expect(tickers).toEqual(["CMG.NYS", "005930"]);
@@ -35,10 +35,9 @@ describe("extractReportTickers", () => {
   it("combines candidates and evaluated when needed", () => {
     const tickers = extractReportTickers({
       candidates: [{ ticker: "AAPL.NAS" }, { ticker: "MSFT.NAS" }],
-      evaluated: [{ ticker: "AAPL.NAS" }, { ticker: "005930" }]
+      evaluated: [{ ticker: "AAPL.NAS" }, { ticker: "005930" }],
     });
 
     expect(tickers).toEqual(["AAPL.NAS", "MSFT.NAS", "005930"]);
   });
 });
-

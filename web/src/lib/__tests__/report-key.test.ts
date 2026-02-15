@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   filterAndSortReportKeys,
-  parseReportStorageKey
+  parseReportStorageKey,
 } from "@/lib/report-key";
 
 describe("parseReportStorageKey", () => {
@@ -27,15 +27,15 @@ describe("filterAndSortReportKeys", () => {
         "2026/02/2026-02-14.buy.json",
         "2026/02/2026-02-14-1.buy.json",
         "2026/02/2026-02-10.sell.json",
-        "2026/02/2026-02-14-2.buy.json"
+        "2026/02/2026-02-14-2.buy.json",
       ],
-      "buy"
+      "buy",
     );
 
     expect(result.map((entry) => entry.key)).toEqual([
       "2026/02/2026-02-14-2.buy.json",
       "2026/02/2026-02-14-1.buy.json",
-      "2026/02/2026-02-14.buy.json"
+      "2026/02/2026-02-14.buy.json",
     ]);
   });
 });

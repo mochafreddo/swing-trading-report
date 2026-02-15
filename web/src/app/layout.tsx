@@ -6,11 +6,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SAB Control Panel",
-  description: "Reports, holdings, and workflow dispatch console."
+  description: "Reports, holdings, and workflow dispatch console.",
 };
 
 export default function RootLayout({
-  children
+  children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {

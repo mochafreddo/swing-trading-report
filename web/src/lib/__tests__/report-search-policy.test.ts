@@ -29,4 +29,3 @@ describe("resolveReportSearchWindow", () => {
     expect(resolveReportSearchWindow("1001")).toBe(1000);
   });
 });
-

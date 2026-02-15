@@ -16,7 +16,7 @@ const supabaseSchema = z
     SUPABASE_SECRET_KEY: optionalString,
     SUPABASE_SERVICE_ROLE_KEY: optionalString,
     SUPABASE_REPORTS_BUCKET: optionalString,
-    REPORT_RETENTION_DAYS: optionalString
+    REPORT_RETENTION_DAYS: optionalString,
   })
   .superRefine((value, ctx) => {
     if (!value.SUPABASE_SECRET_KEY && !value.SUPABASE_SERVICE_ROLE_KEY) {
@@ -24,7 +24,7 @@ const supabaseSchema = z
         code: z.ZodIssueCode.custom,
         path: ["SUPABASE_SECRET_KEY"],
         message:
-          "Either SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is required"
+          "Either SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is required",
       });
     }
   });
@@ -32,7 +32,7 @@ const supabaseSchema = z
 const githubSchema = z.object({
   GITHUB_OWNER: z.string().trim().min(1),
   GITHUB_REPO: z.string().trim().min(1),
-  GITHUB_PAT: z.string().trim().min(1)
+  GITHUB_PAT: z.string().trim().min(1),
 });
 
 export interface SupabaseEnv {
@@ -57,11 +57,12 @@ export function getSupabaseEnv(): SupabaseEnv {
   }
 
   const parsed = supabaseSchema.parse(process.env);
-  const apiKey = parsed.SUPABASE_SECRET_KEY ?? parsed.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const apiKey =
+    parsed.SUPABASE_SECRET_KEY ?? parsed.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
   if (apiKey.startsWith("sb_publishable_")) {
     throw new Error(
-      "SUPABASE publishable key is not allowed for server-side API routes"
+      "SUPABASE publishable key is not allowed for server-side API routes",
     );
   }
 
@@ -71,7 +72,7 @@ export function getSupabaseEnv(): SupabaseEnv {
     SUPABASE_API_KEY: apiKey,
     SUPABASE_REPORTS_BUCKET: parsed.SUPABASE_REPORTS_BUCKET ?? "reports",
     REPORT_RETENTION_DAYS:
-      Number.isFinite(retention) && retention > 0 ? retention : 30
+      Number.isFinite(retention) && retention > 0 ? retention : 30,
   };
 
   return cachedSupabaseEnv;
@@ -86,7 +87,7 @@ export function getGitHubEnv(): GitHubEnv {
   cachedGitHubEnv = {
     GITHUB_OWNER: parsed.GITHUB_OWNER,
     GITHUB_REPO: parsed.GITHUB_REPO,
-    GITHUB_PAT: parsed.GITHUB_PAT
+    GITHUB_PAT: parsed.GITHUB_PAT,
   };
   return cachedGitHubEnv;
 }
