@@ -1,7 +1,7 @@
 .wrapper {
   display: grid;
   grid-template-columns: 320px 1fr;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .left,
@@ -12,13 +12,13 @@
 .controls {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.7rem;
-  margin-top: 0.7rem;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .controls label {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-1);
   font-size: 0.875rem;
   color: var(--ink-muted);
 }
@@ -30,16 +30,17 @@
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   background: color-mix(in srgb, var(--panel) 85%, transparent);
   color: var(--ink);
-  padding: 0.55rem 0.65rem;
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
   font-family: var(--font-mono), monospace;
 }
 
 .list {
-  margin: 0.8rem 0 0;
+  margin: var(--space-3) 0 0;
   list-style: none;
   padding: 0;
   display: grid;
-  gap: 0.55rem;
+  gap: var(--space-2);
 }
 
 .itemButton {
@@ -48,11 +49,12 @@
   background: color-mix(in srgb, var(--panel) 72%, transparent);
   border-radius: 12px;
   color: var(--ink);
-  padding: 0.7rem;
+  padding: var(--space-3);
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
+  min-height: 44px;
 }
 
 .itemButton:hover {
@@ -91,7 +93,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.7rem;
+  gap: var(--space-3);
 }
 
 .toggleButton {
@@ -99,7 +101,8 @@
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   background: color-mix(in srgb, var(--panel) 72%, transparent);
   color: var(--ink);
-  padding: 0.45rem 0.65rem;
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
   cursor: pointer;
 }
 
@@ -109,16 +112,16 @@
 }
 
 .metaGrid {
-  margin-top: 0.8rem;
+  margin-top: var(--space-3);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
+  gap: var(--space-2);
 }
 
 .metaGrid div {
   border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   border-radius: 10px;
-  padding: 0.5rem;
+  padding: var(--space-2);
 }
 
 .metaGrid dt {
@@ -129,23 +132,23 @@
 }
 
 .metaGrid dd {
-  margin: 0.25rem 0 0;
+  margin: var(--space-1) 0 0;
   font-family: var(--font-mono), monospace;
   font-size: 0.875rem;
 }
 
 .summaryBoxes {
-  margin-top: 0.8rem;
+  margin-top: var(--space-3);
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.55rem;
+  gap: var(--space-2);
 }
 
 .summaryBox {
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   border-radius: 10px;
-  padding: 0.55rem;
+  padding: var(--space-2);
 }
 
 .summaryBox h3 {
@@ -157,17 +160,17 @@
 }
 
 .summaryBox p {
-  margin: 0.35rem 0 0;
+  margin: var(--space-2) 0 0;
   font-size: 0.88rem;
   font-family: var(--font-mono), monospace;
 }
 
 .tableWrap {
-  margin-top: 0.9rem;
+  margin-top: var(--space-4);
 }
 
 .sectionTitle {
-  margin: 0 0 0.45rem;
+  margin: 0 0 var(--space-2);
   color: var(--accent-soft);
   font-size: 0.875rem;
   letter-spacing: 0.08em;
@@ -183,7 +186,7 @@
 .tableWrap td {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   text-align: left;
-  padding: 0.42rem 0.28rem;
+  padding: var(--space-2) var(--space-1);
   font-size: 0.875rem;
 }
 
@@ -195,11 +198,11 @@
 }
 
 .raw {
-  margin-top: 0.8rem;
+  margin-top: var(--space-3);
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
   background: #0b101d;
-  padding: 0.7rem;
+  padding: var(--space-3);
   font-size: 0.875rem;
   line-height: 1.45;
   overflow: auto;

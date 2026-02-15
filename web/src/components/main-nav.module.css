@@ -1,15 +1,19 @@
 .nav {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
   background: color-mix(in srgb, var(--panel) 86%, transparent);
   color: var(--ink-muted);
   text-decoration: none;
-  padding: 0.55rem 0.95rem;
+  padding: var(--space-2) var(--space-4);
+  min-height: 44px;
   border-radius: 999px;
   font-size: 0.875rem;
   letter-spacing: 0.08em;
