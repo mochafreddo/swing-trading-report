@@ -49,27 +49,24 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
       - name: Restore uv cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.UV_CACHE_DIR }}
           key: uv-${{ runner.os }}-3.13-${{ hashFiles('uv.lock') }}
           restore-keys: |
             uv-${{ runner.os }}-3.13-
             uv-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: uv sync --locked --all-groups
 
       - name: Resolve workflow inputs
         id: params
@@ -80,6 +77,14 @@ jobs:
           if [[ -z "${provider}" ]]; then
             provider="kis"
           fi
+          provider="${provider,,}"
+          case "${provider}" in
+            kis|pykrx) ;;
+            *)
+              echo "Unsupported provider: ${provider}" >&2
+              exit 1
+              ;;
+          esac
 
           universe="${{ github.event.inputs.universe }}"
           if [[ -z "${universe}" ]]; then
@@ -87,22 +92,46 @@ jobs:
           fi
 
           case "${universe}" in
-            KR) markets="KR" ;;
-            US) markets="US" ;;
-            both) markets="KR,US" ;;
+            KR|kr)
+              dispatch_universe="KR"
+              markets="KR"
+              ;;
+            US|us)
+              dispatch_universe="US"
+              markets="US"
+              ;;
+            both|BOTH)
+              dispatch_universe="both"
+              markets="KR,US"
+              ;;
             *)
               echo "Unsupported universe: ${universe}" >&2
               exit 1
               ;;
           esac
 
-          if [[ "${provider}" == "pykrx" && "${universe}" != "KR" ]]; then
-            echo "::warning::provider=pykrx with universe=${universe} may fail for US market symbols."
+          scan_universe_flag="both"
+          if [[ "${provider}" == "pykrx" ]]; then
+            if [[ "${dispatch_universe}" != "KR" ]]; then
+              echo "provider=pykrx supports only universe=KR; got universe=${dispatch_universe}" >&2
+              exit 1
+            fi
+            scan_universe_flag="watchlist"
           fi
 
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
-          echo "dispatch_universe=${universe}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_universe=${dispatch_universe}" >> "${GITHUB_OUTPUT}"
           echo "markets=${markets}" >> "${GITHUB_OUTPUT}"
+          echo "scan_universe_flag=${scan_universe_flag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.params.outputs.provider }}" == "pykrx" ]]; then
+            uv sync --locked --all-groups --extra pykrx
+          else
+            uv sync --locked --all-groups
+          fi
 
       - name: Run scan
         id: run_scan
@@ -115,7 +144,7 @@ jobs:
 
           uv run -m sab scan \
             --provider "${{ steps.params.outputs.provider }}" \
-            --universe both 2>&1 | tee scan.log
+            --universe "${{ steps.params.outputs.scan_universe_flag }}" 2>&1 | tee scan.log
 
           report_path="$(sed -n 's/.*Buy report written to: //p' scan.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${report_path}" ]]; then
@@ -144,7 +173,7 @@ jobs:
 
       - name: Upload generated report artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scan-report-${{ github.run_id }}
           path: ${{ steps.run_scan.outputs.report_path }}

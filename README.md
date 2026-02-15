@@ -78,6 +78,8 @@
       - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
       - 로컬 전용 API: `/api/run`은 `localhost`/`127.0.0.1`/`::1` 요청만 허용, 실행 ref는 `main`으로 고정
+      - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
+      - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
 
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD.buy.json`
