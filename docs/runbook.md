@@ -69,9 +69,36 @@
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
   - 알림은 자동 실행일 때만 전송합니다.
+- Audit 실행(GitHub Actions)
+  - 감사 워크플로: `.github/workflows/audit.yml`
+  - 트리거: `pull_request`, `workflow_dispatch`, 매주 월요일 11:00 UTC(`0 11 * * 1`)
+  - Job:
+    - `workflow_audit`: `rhysd/actionlint`로 워크플로 YAML 정합성 검사
+    - `security_audit`: `aquasecurity/trivy-action`으로 `vuln,secret` 통합 검사
+  - 차단 기준: `HIGH,CRITICAL` 발견 시 실패(`ignore-unfixed=true`)
+  - 산출물: `trivy-results.json` 아티팩트(성공/실패와 무관하게 업로드)
 - 로컬 CLI 업로드(선택)
   - 기본은 로컬 파일 생성만 수행합니다.
   - 로컬 실행에서도 Supabase 업로드가 필요하면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
+
+## Audit 수동 점검
+
+- 빠른 점검:
+  - `trivy fs .`
+- CI 동일 정책 점검:
+  - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --format json --output trivy-results.json .`
+- 취약점 예외:
+  - `.trivyignore`에 임시 예외만 등록
+  - 항목별 만료일/사유 주석 필수
+  - 만료된 예외는 즉시 삭제
+
+## PR 차단 기준(브랜치 보호)
+
+- 아래 체크를 Required status checks로 고정합니다.
+  - `CI / Ruff + Mypy + Pytest (Python 3.13)`
+  - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
+  - `workflow_audit`
+  - `security_audit`
 
 ## 파일/경로
 

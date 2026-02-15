@@ -99,6 +99,32 @@
   - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
   - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
+## Audit 자동화 (GitHub Actions)
+
+- 보안/워크플로 감사 전용 파이프라인은 `.github/workflows/audit.yml`로 운영합니다.
+- 트리거:
+  - `pull_request`
+  - `workflow_dispatch`
+  - `schedule: "0 11 * * 1"` (매주 월요일 11:00 UTC)
+- 감사 정책:
+  - 엔진: Trivy(`vuln,secret`)
+  - 차단 심각도: `HIGH,CRITICAL`
+  - 미패치 취약점: `ignore-unfixed=true`
+  - 결과물: `trivy-results.json` 아티팩트 업로드(성공/실패 모두)
+- 로컬 수동 점검:
+  - 빠른 점검: `trivy fs .`
+  - CI 동일 정책 점검:
+    - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --format json --output trivy-results.json .`
+- 취약점 예외는 `.trivyignore`에서 관리합니다.
+  - 임시 예외만 허용
+  - 각 항목에 만료일/사유 주석 필수
+  - 만료 시 즉시 삭제
+- PR 차단(브랜치 보호) 필수 체크:
+  - `CI / Ruff + Mypy + Pytest (Python 3.13)`
+  - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
+  - `workflow_audit`
+  - `security_audit`
+
 ## 의존성 업데이트 자동화 (Renovate)
 
 - 의존성 업데이트는 GitHub Actions 커스텀 워크플로 대신 Renovate GitHub App으로 운영합니다.

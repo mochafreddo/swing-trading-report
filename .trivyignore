@@ -1,0 +1,10 @@
+# Temporary exceptions for Trivy findings only.
+# Rule:
+# - Every entry MUST include an expiry date and reason in the comment.
+# - Remove the entry when the issue is fixed or the expiry date passes.
+#
+# Format:
+# CVE-YYYY-NNNNN # expires=YYYY-MM-DD reason=<short reason>
+#
+# Example:
+# CVE-2026-12345 # expires=2026-06-30 reason=Upstream fix pending in transitive dependency
