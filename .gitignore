@@ -17,3 +17,4 @@ web/node_modules/
 web/.next/
 web/.turbo/
 web/tsconfig.tsbuildinfo
+output/
