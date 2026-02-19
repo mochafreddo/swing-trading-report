@@ -7,6 +7,8 @@
 - 로컬 UI: Next.js(로컬 Docker)
 - 데이터: Supabase(Postgres/Storage) — 보유 목록/리포트/실행 이력
 - 자동 실행: GitHub Actions `schedule` (자동 실행일 때만 알림 전송)
+  - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보) 전송
+  - 슬랙: 기존 요약 포맷 유지
 
 상세 배경과 요구사항은 `docs/PRD.md` 참고.
 

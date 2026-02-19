@@ -68,6 +68,10 @@
 
 - GitHub Actions `schedule`로 `scan`/`sell` 실행
 - 결과 업로드 후 **자동 실행일 때만** 알림(텔레그램/슬랙) 전송
+- 텔레그램: 리포트 본문 전송
+  - `scan`: 매수 후보 상위 5건 + 잔여 개수
+  - `sell`: `SELL`/`REVIEW` 상위 5건 + 잔여 개수(`HOLD` 제외)
+- 슬랙: 기존 key=value 요약 포맷 유지
 
 ## 4. 데이터/저장소 설계(Supabase)
 
@@ -145,7 +149,8 @@ v1.1에서는 **미도입**한다(ADR-0006). API 호출 수/속도가 문제가 
 
 ### 5.2 알림 전송 조건
 
-- 자동 실행(`schedule`)일 때만 요약을 전송(기본 채널: 텔레그램)
+- 자동 실행(`schedule`)일 때만 알림을 전송(기본 채널: 텔레그램)
+- 텔레그램은 작업 요약이 아닌 리포트 본문(매수/매도·점검 종목)을 전송한다.
 - 수동 실행(`workflow_dispatch`, 로컬 CLI)은 기본 비전송
 - 실패/에러 알림(기본)은 GitHub Actions 기본 알림(Notifications/메일/모바일 푸시)로 수신한다.
 
@@ -157,13 +162,13 @@ v1.1에서는 **미도입**한다(ADR-0006). API 호출 수/속도가 문제가 
   - 트리거: `schedule`, `workflow_dispatch`
   - 실행: `uv run -m sab scan ...`
   - 업로드: 생성된 `reports/*.buy.json` → Supabase Storage `reports` 버킷
-  - 알림: `schedule`일 때만 텔레그램으로 요약 전송(실패/에러는 GitHub 기본 알림)
+  - 알림: `schedule`일 때만 텔레그램으로 매수 후보 본문 전송, 슬랙은 요약 전송(실패/에러는 GitHub 기본 알림)
 - `.github/workflows/sell.yml`
   - 트리거: `schedule`, `workflow_dispatch`
   - 실행: `uv run -m sab sell ...`
   - 입력: holdings는 Supabase(Postgres)에서 읽는다(단일 소스)
   - 업로드: `reports/*.sell.json` → Supabase Storage
-  - 알림: `schedule`일 때만 텔레그램으로 요약 전송(실패/에러는 GitHub 기본 알림)
+  - 알림: `schedule`일 때만 텔레그램으로 `SELL`/`REVIEW` 본문 전송(`HOLD` 제외), 슬랙은 요약 전송(실패/에러는 GitHub 기본 알림)
 - `.github/workflows/cleanup.yml` (권장)
   - 트리거: `schedule`(매일 1회 또는 주 1회)
   - 실행: Supabase Storage에서 30일 초과 리포트 삭제
@@ -229,7 +234,7 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 - AC1: 웹 UI에서 holdings를 CRUD하면 Supabase `holdings`에 반영되고, 이후 `sell` 입력으로 사용된다.
 - AC2: 웹 UI에서 `scan`을 트리거하면 GitHub Actions가 실행되고, Buy 아티팩트가 Supabase Storage에 업로드된다.
 - AC3: 웹 UI에서 `sell`을 트리거하면 GitHub Actions가 실행되고, Sell 아티팩트가 Supabase Storage에 업로드된다.
-- AC4: 자동 실행(`schedule`) 결과만 텔레그램/슬랙 요약 알림이 전송된다.
+- AC4: 자동 실행(`schedule`) 결과만 알림이 전송되며, 텔레그램은 리포트 본문·슬랙은 요약 포맷을 사용한다.
 - AC5: cleanup 워크플로우가 30일을 초과한 리포트를 정리한다(기본값).
 
 ## 9. 오픈 결정(정리)

@@ -210,44 +210,44 @@ jobs:
           import json
           import os
           from pathlib import Path
+          from sab.report.notification_text import (
+              build_sell_slack_summary_text,
+              build_sell_telegram_report_text,
+          )
 
           report_path = Path(os.environ["REPORT_PATH"])
           report = json.loads(report_path.read_text(encoding="utf-8"))
-
-          summary = report.get("summary") or {}
-          evaluated_count = int(summary.get("evaluated_count") or 0)
-          issue_count = int(summary.get("issue_count") or 0)
-          action_counts = summary.get("action_counts") or {}
-          action_parts = []
-          if isinstance(action_counts, dict):
-              for key in sorted(action_counts):
-                  action_parts.append(f"{key}:{action_counts[key]}")
-          action_counts_text = ", ".join(action_parts) if action_parts else "-"
 
           repo = os.environ["GITHUB_REPOSITORY"]
           run_url = (
               f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/"
               f"{os.environ['GITHUB_RUN_ID']}"
           )
+          provider = os.environ.get("PROVIDER", "").strip() or "kis"
+          storage_key = os.environ.get("STORAGE_KEY", "").strip() or None
 
-          lines = [
-              "[SAB][sell][schedule]",
-              f"repo={repo}",
-              f"provider={os.environ.get('PROVIDER', '').strip() or 'kis'}",
-              f"generated_at={report.get('generated_at', '')}",
-              f"evaluated_count={evaluated_count}",
-              f"issue_count={issue_count}",
-              f"action_counts={action_counts_text}",
-          ]
-          storage_key = os.environ.get("STORAGE_KEY", "").strip()
-          if storage_key:
-              lines.append(f"storage_key={storage_key}")
-          lines.append(f"run_url={run_url}")
-          text = "\n".join(lines)
+          slack_text = build_sell_slack_summary_text(
+              report=report,
+              repo=repo,
+              run_url=run_url,
+              provider=provider,
+              storage_key=storage_key,
+          )
+          telegram_text = build_sell_telegram_report_text(
+              report=report,
+              run_url=run_url,
+              provider=provider,
+              include_actions=("SELL", "REVIEW"),
+              storage_key=storage_key,
+              max_items=5,
+          )
 
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
-              fh.write("text<<EOF\n")
-              fh.write(text)
+              fh.write("slack_text<<EOF\n")
+              fh.write(slack_text)
+              fh.write("\nEOF\n")
+              fh.write("telegram_text<<EOF\n")
+              fh.write(telegram_text)
               fh.write("\nEOF\n")
           PY
 
@@ -257,7 +257,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
+          MESSAGE_TEXT: ${{ steps.summary.outputs.telegram_text }}
         run: |
           set -euo pipefail
           if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
@@ -274,7 +274,7 @@ jobs:
         continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          MESSAGE_TEXT: ${{ steps.summary.outputs.text }}
+          MESSAGE_TEXT: ${{ steps.summary.outputs.slack_text }}
         run: |
           set -euo pipefail
           if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
