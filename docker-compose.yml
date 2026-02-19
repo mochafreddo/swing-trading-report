@@ -3,6 +3,7 @@ services:
     build:
       context: ./web
     container_name: sab-web
+    restart: unless-stopped
     environment:
       NODE_ENV: development
       SUPABASE_URL: ${SUPABASE_URL:-}
