@@ -55,6 +55,12 @@ def _initialize_provider(
             creds, cache_dir=cfg.data_dir, min_interval=min_interval
         )
         runtime.cache_hint = runtime.kis_client.cache_status
+        runtime.logger.info(
+            "KIS token cache status=%s (env=%s, cache_dir=%s)",
+            runtime.kis_client.cache_status or "unknown",
+            creds.env,
+            cfg.data_dir,
+        )
         return
 
     if cfg.data_provider == "pykrx":

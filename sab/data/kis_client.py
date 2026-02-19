@@ -11,6 +11,7 @@ import requests  # type: ignore[import-untyped]
 from .cache import load_json, save_json
 
 logger = logging.getLogger(__name__)
+_KST = dt.timezone(dt.timedelta(hours=9), name="KST")
 
 
 class KISClientError(RuntimeError):
@@ -46,7 +47,9 @@ class KISCredentials:
 
     @property
     def volume_rank_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}/uapi/domestic-stock/v1/quotations/volume-rank"
+        return (
+            f"{self.base_url.rstrip('/')}/uapi/domestic-stock/v1/quotations/volume-rank"
+        )
 
     @property
     def volume_rank_tr_id(self) -> str:
@@ -57,7 +60,9 @@ class KISCredentials:
     def overseas_candle_url(self) -> str:
         # KIS Overseas period (daily) price endpoint
         # v1_해외주식-010: /overseas-price/v1/quotations/dailyprice
-        return f"{self.base_url.rstrip('/')}/uapi/overseas-price/v1/quotations/dailyprice"
+        return (
+            f"{self.base_url.rstrip('/')}/uapi/overseas-price/v1/quotations/dailyprice"
+        )
 
     @property
     def overseas_tr_id(self) -> str:
@@ -132,14 +137,10 @@ class KISClient:
             self.cache_status = "miss"
             return
 
-        try:
-            expiry_dt = dt.datetime.fromisoformat(expires_at)
-        except ValueError:
+        expiry_dt = self._parse_expiry_at(expires_at)
+        if expiry_dt is None:
             self.cache_status = "miss"
             return
-
-        if expiry_dt.tzinfo is None:
-            expiry_dt = expiry_dt.replace(tzinfo=dt.timezone.utc)
 
         refresh_dt = expiry_dt - dt.timedelta(minutes=5)
         if refresh_dt <= dt.datetime.now(dt.timezone.utc):
@@ -153,6 +154,42 @@ class KISClient:
     # ------------------------------------------------------------------
     # Auth
     # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_expiry_dt(expiry_dt: dt.datetime) -> dt.datetime:
+        """Normalize token expiry timestamp to UTC.
+
+        KIS may return naive timestamps. Treat them as KST for consistency.
+        """
+        if expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=_KST)
+        return expiry_dt.astimezone(dt.timezone.utc)
+
+    @classmethod
+    def _parse_expiry_at(cls, expires_at: Any) -> Optional[dt.datetime]:
+        if not isinstance(expires_at, str):
+            return None
+        value = expires_at.strip()
+        if not value:
+            return None
+
+        parsed: Optional[dt.datetime] = None
+        try:
+            parsed = dt.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            candidates = [value]
+            if value.endswith("Z"):
+                candidates.append(f"{value[:-1]}+00:00")
+            for candidate in candidates:
+                try:
+                    parsed = dt.datetime.fromisoformat(candidate)
+                except ValueError:
+                    continue
+                break
+
+        if parsed is None:
+            return None
+        return cls._normalize_expiry_dt(parsed)
+
     def _request(
         self,
         method: str,
@@ -170,7 +207,9 @@ class KISClient:
         for attempt in range(self._max_attempts):
             # simple client-side throttle
             if self._min_interval and self._last_request_at is not None:
-                delta = (dt.datetime.now(dt.timezone.utc) - self._last_request_at).total_seconds()
+                delta = (
+                    dt.datetime.now(dt.timezone.utc) - self._last_request_at
+                ).total_seconds()
                 if delta < self._min_interval:
                     time.sleep(self._min_interval - delta)
             try:
@@ -186,7 +225,10 @@ class KISClient:
             except requests.RequestException as exc:
                 last_exc = exc
             else:
-                if resp.status_code in {429, 418, 503} and attempt < self._max_attempts - 1:
+                if (
+                    resp.status_code in {429, 418, 503}
+                    and attempt < self._max_attempts - 1
+                ):
                     time.sleep(backoff)
                     backoff = min(backoff * 2, 8.0)
                     continue
@@ -218,7 +260,9 @@ class KISClient:
         }
 
         try:
-            resp = self._request("POST", self.creds.token_url, headers=headers, json=payload)
+            resp = self._request(
+                "POST", self.creds.token_url, headers=headers, json=payload
+            )
         except requests.RequestException as exc:  # pragma: no cover
             raise KISAuthError(f"Token request failed: {exc}") from exc
 
@@ -249,18 +293,12 @@ class KISClient:
 
         expiry_dt: Optional[dt.datetime] = None
         if expires_at_str:
-            try:
-                expiry_dt = dt.datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                try:
-                    expiry_dt = dt.datetime.fromisoformat(expires_at_str)
-                except ValueError:
-                    expiry_dt = None
+            expiry_dt = self._parse_expiry_at(expires_at_str)
 
         if expiry_dt is None:
-            expiry_dt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=expires_seconds)
-        elif expiry_dt.tzinfo is None:
-            expiry_dt = expiry_dt.replace(tzinfo=dt.timezone.utc)
+            expiry_dt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+                seconds=expires_seconds
+            )
 
         # refresh a little earlier than actual expiry
         refresh_dt = expiry_dt - dt.timedelta(minutes=5)
@@ -285,6 +323,13 @@ class KISClient:
             self.cache_status = "refresh"
         else:
             self.cache_status = "n/a"
+
+        logger.info(
+            "KIS token refreshed (env=%s, cache_status=%s, cache_dir=%s)",
+            self.creds.env,
+            self.cache_status,
+            self._cache_dir or "disabled",
+        )
 
     # ------------------------------------------------------------------
     # Data fetch
@@ -386,9 +431,11 @@ class KISClient:
 
             if resp.status_code != 200:
                 msg_cd = str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
-                msg1 = (data.get("msg1") or data.get("msg_cd") or "Unknown error") if isinstance(
-                    data, dict
-                ) else "Unknown error"
+                msg1 = (
+                    (data.get("msg1") or data.get("msg_cd") or "Unknown error")
+                    if isinstance(data, dict)
+                    else "Unknown error"
+                )
                 if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                     # Token expired on server side: clear, refresh, and retry
                     self._access_token = None
@@ -464,7 +511,9 @@ class KISClient:
         data: dict[str, Any] | None = None
         for attempt in range(self._max_attempts):
             try:
-                resp = self._request("GET", self.creds.candle_url, headers=headers, params=params)
+                resp = self._request(
+                    "GET", self.creds.candle_url, headers=headers, params=params
+                )
             except requests.RequestException as exc:  # pragma: no cover
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
@@ -498,7 +547,9 @@ class KISClient:
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
-                raise KISClientError(f"Daily candle HTTP {resp.status_code}: {resp.text}")
+                raise KISClientError(
+                    f"Daily candle HTTP {resp.status_code}: {resp.text}"
+                )
 
             if str(parsed.get("rt_cd")) != "0":
                 msg_cd = parsed.get("msg_cd") or ""
@@ -558,7 +609,10 @@ class KISClient:
         for attempt in range(self._max_attempts):
             try:
                 resp = self._request(
-                    "GET", self.creds.overseas_holiday_url, headers=headers, params=params
+                    "GET",
+                    self.creds.overseas_holiday_url,
+                    headers=headers,
+                    params=params,
                 )
             except requests.RequestException as exc:  # pragma: no cover
                 if attempt < self._max_attempts - 1:
@@ -578,7 +632,9 @@ class KISClient:
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
-                raise KISClientError("Overseas holiday response payload is not an object")
+                raise KISClientError(
+                    "Overseas holiday response payload is not an object"
+                )
 
             payload = parsed
 
@@ -596,7 +652,9 @@ class KISClient:
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
-                raise KISClientError(f"Overseas holiday HTTP {resp.status_code}: {resp.text}")
+                raise KISClientError(
+                    f"Overseas holiday HTTP {resp.status_code}: {resp.text}"
+                )
 
             if str(payload.get("rt_cd")) != "0":
                 msg_cd = payload.get("msg_cd") or ""
@@ -724,7 +782,10 @@ class KISClient:
         for attempt in range(self._max_attempts):
             try:
                 resp = self._request(
-                    "GET", self.creds.overseas_candle_url, headers=headers, params=params
+                    "GET",
+                    self.creds.overseas_candle_url,
+                    headers=headers,
+                    params=params,
                 )
             except requests.RequestException as exc:  # pragma: no cover
                 if attempt < self._max_attempts - 1:
@@ -759,7 +820,9 @@ class KISClient:
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
-                raise KISClientError(f"Overseas daily HTTP {resp.status_code}: {resp.text}")
+                raise KISClientError(
+                    f"Overseas daily HTTP {resp.status_code}: {resp.text}"
+                )
 
             if str(parsed.get("rt_cd")) != "0":
                 msg_cd = parsed.get("msg_cd") or ""
@@ -798,14 +861,21 @@ class KISClient:
 
         # Overseas fields typically: xymd, open, high, low, close/last, volume/tvol
         return {
-            "date": str(item.get("xymd") or item.get("stck_bsop_date") or "").replace("-", ""),
+            "date": str(item.get("xymd") or item.get("stck_bsop_date") or "").replace(
+                "-", ""
+            ),
             "open": _to_float(item.get("open") or item.get("stck_oprc")),
             "high": _to_float(item.get("high") or item.get("stck_hgpr")),
             "low": _to_float(item.get("low") or item.get("stck_lwpr")),
             "close": _to_float(
-                item.get("close") or item.get("last") or item.get("clos") or item.get("stck_clpr")
+                item.get("close")
+                or item.get("last")
+                or item.get("clos")
+                or item.get("stck_clpr")
             ),
-            "volume": _to_float(item.get("volume") or item.get("tvol") or item.get("acml_vol")),
+            "volume": _to_float(
+                item.get("volume") or item.get("tvol") or item.get("acml_vol")
+            ),
             "prev_close_diff": _to_float(item.get("prdy_vrss") or 0),
         }
 
@@ -891,7 +961,9 @@ class KISClient:
             data: dict[str, Any] | None = None
             resp: requests.Response | None = None
             for attempt in range(self._max_attempts):
-                resp = self._request("GET", self.creds.volume_rank_url, headers=hdrs, params=params)
+                resp = self._request(
+                    "GET", self.creds.volume_rank_url, headers=hdrs, params=params
+                )
 
                 # Try to parse JSON body even on non-200 to inspect msg_cd
                 try:
@@ -900,10 +972,14 @@ class KISClient:
                     data = None
 
                 if resp.status_code != 200:
-                    msg_cd = str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
-                    msg1 = (data.get("msg1") or data.get("msg_cd") or "Unknown error") if isinstance(
-                        data, dict
-                    ) else "Unknown error"
+                    msg_cd = (
+                        str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
+                    )
+                    msg1 = (
+                        (data.get("msg1") or data.get("msg_cd") or "Unknown error")
+                        if isinstance(data, dict)
+                        else "Unknown error"
+                    )
                     if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                         # Token expired on server side: clear, refresh, and retry
                         self._access_token = None
@@ -1006,7 +1082,9 @@ class KISClient:
             resp = self._request("GET", url, headers=headers, params=request_params)
 
             if resp.status_code != 200:
-                raise KISClientError(f"Overseas rank HTTP {resp.status_code}: {resp.text}")
+                raise KISClientError(
+                    f"Overseas rank HTTP {resp.status_code}: {resp.text}"
+                )
 
             try:
                 data = resp.json()

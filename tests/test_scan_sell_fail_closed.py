@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,10 @@ class _FakeKISClient:
         return _build_candles()
 
 
+class _FakeHitKISClient(_FakeKISClient):
+    cache_status = "hit"
+
+
 def _build_holdings(tickers: list[str]) -> HoldingsData:
     return HoldingsData(
         path=None,
@@ -150,3 +155,82 @@ def test_run_sell_maps_exchange_per_ticker_without_suffix_scope_leak(
 
     assert code == 0
     assert captured_exchange == expected_exchange
+
+
+def test_run_scan_logs_kis_token_cache_status_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+    )
+    caplog.set_level(logging.INFO)
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=["005930"]),
+        patch("sab.scan.KISClient", _FakeHitKISClient),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+        patch(
+            "sab.scan.write_report",
+            return_value=str(tmp_path / "2026-02-19.buy.md"),
+        ),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 0
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "KIS token cache status=" in record.getMessage()
+    ]
+    assert lines == [f"KIS token cache status=hit (env=real, cache_dir={tmp_path})"]
+
+
+def test_run_sell_logs_kis_token_cache_status_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["005930"]),
+    )
+    caplog.set_level(logging.INFO)
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.sell.KISClient", _FakeHitKISClient),
+        patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-19.sell.md"),
+        ),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 0
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "KIS token cache status=" in record.getMessage()
+    ]
+    assert lines == [f"KIS token cache status=hit (env=real, cache_dir={tmp_path})"]
