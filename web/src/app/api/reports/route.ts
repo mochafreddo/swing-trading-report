@@ -8,11 +8,15 @@ import {
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { filterAndSortReportKeys, toReportListItem } from "@/lib/report-key";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
+import {
+  resolveReportKeysCacheTtlSeconds,
+  resolveReportSearchConcurrency,
+} from "@/lib/report-performance-policy";
 import { extractReportTickers } from "@/lib/report-tickers";
 import { reportListQuerySchema } from "@/lib/schemas";
 import {
   downloadStorageJson,
-  listAllStorageKeys,
+  listAllStorageKeysCached,
   SupabaseApiError,
 } from "@/lib/supabase-admin";
 import type { ReportListItem } from "@/lib/types";
@@ -76,10 +80,19 @@ export async function GET(request: NextRequest) {
   const searchWindow = resolveReportSearchWindow(
     process.env.REPORT_SEARCH_WINDOW,
   );
+  const keysCacheTtlSeconds = resolveReportKeysCacheTtlSeconds(
+    process.env.REPORT_KEYS_CACHE_TTL_SECONDS,
+  );
+  const searchConcurrency = resolveReportSearchConcurrency(
+    process.env.REPORT_SEARCH_CONCURRENCY,
+  );
 
   try {
     const env = getSupabaseEnv();
-    const keys = await listAllStorageKeys(env.SUPABASE_REPORTS_BUCKET);
+    const keys = await listAllStorageKeysCached(
+      env.SUPABASE_REPORTS_BUCKET,
+      keysCacheTtlSeconds,
+    );
     const sorted = filterAndSortReportKeys(keys, type);
 
     if (!q) {
@@ -93,39 +106,75 @@ export async function GET(request: NextRequest) {
     }
 
     const searchedCandidates = sorted.slice(0, searchWindow);
-    const matchedItems: ReportListItem[] = [];
+    const matchedByIndex = new Map<number, ReportListItem>();
+    let nextIndex = 0;
+    let workerError: unknown;
+    let shouldStop = false;
 
-    for (const candidate of searchedCandidates) {
-      let report: Record<string, unknown>;
-      try {
-        report = await downloadStorageJson(
-          env.SUPABASE_REPORTS_BUCKET,
-          candidate.key,
-        );
-      } catch (error) {
-        if (error instanceof SupabaseApiError && error.status === 404) {
-          continue;
+    const workerCount = Math.min(searchConcurrency, searchedCandidates.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (true) {
+          if (shouldStop) {
+            return;
+          }
+
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= searchedCandidates.length) {
+            return;
+          }
+
+          const candidate = searchedCandidates[index];
+          let report: Record<string, unknown>;
+          try {
+            report = await downloadStorageJson(
+              env.SUPABASE_REPORTS_BUCKET,
+              candidate.key,
+            );
+          } catch (error) {
+            if (error instanceof SupabaseApiError && error.status === 404) {
+              continue;
+            }
+            if (!workerError) {
+              workerError = error;
+            }
+            shouldStop = true;
+            return;
+          }
+
+          const tickers = extractReportTickers(report);
+          if (!matchesTickerQuery(tickers, q)) {
+            continue;
+          }
+
+          const generatedAt =
+            typeof report.generated_at === "string"
+              ? report.generated_at
+              : undefined;
+
+          matchedByIndex.set(
+            index,
+            toReportListItem(candidate, {
+              generatedAt,
+              summary: extractSummary(report),
+              tickers,
+            }),
+          );
         }
-        throw error;
+      }),
+    );
+
+    if (workerError) {
+      throw workerError;
+    }
+
+    const matchedItems: ReportListItem[] = [];
+    for (let index = 0; index < searchedCandidates.length; index += 1) {
+      const item = matchedByIndex.get(index);
+      if (item) {
+        matchedItems.push(item);
       }
-
-      const tickers = extractReportTickers(report);
-      if (!matchesTickerQuery(tickers, q)) {
-        continue;
-      }
-
-      const generatedAt =
-        typeof report.generated_at === "string"
-          ? report.generated_at
-          : undefined;
-
-      matchedItems.push(
-        toReportListItem(candidate, {
-          generatedAt,
-          summary: extractSummary(report),
-          tickers,
-        }),
-      );
     }
 
     return NextResponse.json({

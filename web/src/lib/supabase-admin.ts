@@ -158,6 +158,61 @@ export async function listAllStorageKeys(bucket: string): Promise<string[]> {
   return Array.from(keys);
 }
 
+interface CachedStorageKeysEntry {
+  keys: string[];
+  expiresAt: number;
+}
+
+const storageKeysCache = new Map<string, CachedStorageKeysEntry>();
+const storageKeysInFlight = new Map<string, Promise<string[]>>();
+
+export function __resetStorageKeysCacheForTests(): void {
+  storageKeysCache.clear();
+  storageKeysInFlight.clear();
+}
+
+export async function listAllStorageKeysCached(
+  bucket: string,
+  ttlSeconds: number,
+): Promise<string[]> {
+  const ttlMilliseconds = Math.max(0, ttlSeconds) * 1000;
+  if (ttlMilliseconds === 0) {
+    return listAllStorageKeys(bucket);
+  }
+
+  const now = Date.now();
+  const cached = storageKeysCache.get(bucket);
+  if (cached && cached.expiresAt > now) {
+    return [...cached.keys];
+  }
+
+  const inFlight = storageKeysInFlight.get(bucket);
+  if (inFlight) {
+    const keys = await inFlight;
+    return [...keys];
+  }
+
+  const loading = (async () => {
+    const keys = await listAllStorageKeys(bucket);
+    storageKeysCache.set(bucket, {
+      keys: [...keys],
+      expiresAt: Date.now() + ttlMilliseconds,
+    });
+    return [...keys];
+  })();
+
+  storageKeysInFlight.set(bucket, loading);
+
+  try {
+    const keys = await loading;
+    return [...keys];
+  } finally {
+    if (storageKeysInFlight.get(bucket) === loading) {
+      storageKeysInFlight.delete(bucket);
+    }
+  }
+}
+
 export async function downloadStorageJson(
   bucket: string,
   key: string,
