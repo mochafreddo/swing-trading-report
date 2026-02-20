@@ -56,6 +56,7 @@
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 웹 UI(Next.js): `docker compose up -d web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+    - 로그인: `.env`에 `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET` 설정
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 
 - 웹 UI 로컬 실행(Next.js + Docker)

@@ -6,16 +6,17 @@
 
 - uv 설치: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv lock -U && UV_CACHE_DIR=.uv-cache uv sync --all-groups`
-- 설정:
-  - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
-  - `.env`에는 v1.1 필수 키를 작성:
-    - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
-    - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
-    - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
-    - Web 로컬 실행(선택): `WEB_HOST_PORT` (기본값 `55300`)
-    - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-  - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
-  - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
+  - 설정:
+    - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
+    - `.env`에는 v1.1 필수 키를 작성:
+      - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
+      - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
+      - Web: `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
+      - Web 로그인 제한(선택): `SAB_LOGIN_MAX_ATTEMPTS`, `SAB_LOGIN_WINDOW_SECONDS`, `SAB_LOGIN_BLOCK_SECONDS`
+      - Web 로컬 실행(선택): `WEB_HOST_PORT` (기본값 `55300`)
+      - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+    - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
+    - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
   - Python 3.13+
   - Node.js 20+
@@ -40,6 +41,8 @@
   - `docker compose stop web`
 - 접속:
   - `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+- 인증:
+  - `/login` 페이지에서 관리자 계정(`SAB_BASIC_AUTH_USER/PASS`)으로 로그인하면 HttpOnly 세션 쿠키가 발급됩니다.
 - 포트 변경:
   - `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
 - 기본 화면:
