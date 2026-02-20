@@ -85,10 +85,28 @@
       "matchUpdateTypes": [
         "major"
       ],
+      "dependencyDashboardApproval": true,
       "labels": [
         "dependencies",
         "major"
       ]
+    },
+    {
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "web/package.json",
+        "web/pnpm-lock.yaml"
+      ],
+      "matchPackageNames": [
+        "eslint"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": true,
+      "dependencyDashboardApproval": true
     }
   ]
 }
