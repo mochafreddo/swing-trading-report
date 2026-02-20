@@ -4,7 +4,12 @@ import { useState } from "react";
 
 import styles from "./run-client.module.css";
 
-import type { Provider, WorkflowDispatchResult } from "@/lib/types";
+import { coerceScanUniverseForProvider } from "@/lib/run-dispatch-policy";
+import type {
+  Provider,
+  ScanUniverse,
+  WorkflowDispatchResult,
+} from "@/lib/types";
 
 function readApiError(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -16,7 +21,7 @@ function readApiError(payload: unknown): string | undefined {
 
 export function RunClient() {
   const [provider, setProvider] = useState<Provider>("kis");
-  const [universe, setUniverse] = useState<"KR" | "US" | "both">("both");
+  const [universe, setUniverse] = useState<ScanUniverse>("both");
   const [loading, setLoading] = useState<"scan" | "sell" | null>(null);
   const [result, setResult] = useState<WorkflowDispatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +62,8 @@ export function RunClient() {
     }
   };
 
+  const isPykrx = provider === "pykrx";
+
   return (
     <section className={styles.wrapper}>
       <article className={`panel ${styles.configPanel}`}>
@@ -69,7 +76,13 @@ export function RunClient() {
             name="provider"
             autoComplete="off"
             value={provider}
-            onChange={(event) => setProvider(event.target.value as Provider)}
+            onChange={(event) => {
+              const nextProvider = event.target.value as Provider;
+              setProvider(nextProvider);
+              setUniverse((current) =>
+                coerceScanUniverseForProvider(nextProvider, current),
+              );
+            }}
           >
             <option value="kis">kis</option>
             <option value="pykrx">pykrx</option>
@@ -83,13 +96,20 @@ export function RunClient() {
             autoComplete="off"
             value={universe}
             onChange={(event) =>
-              setUniverse(event.target.value as "KR" | "US" | "both")
+              setUniverse(event.target.value as ScanUniverse)
             }
           >
             <option value="KR">KR</option>
-            <option value="US">US</option>
-            <option value="both">both</option>
+            <option value="US" disabled={isPykrx}>
+              US
+            </option>
+            <option value="both" disabled={isPykrx}>
+              both
+            </option>
           </select>
+          {isPykrx && (
+            <p className="subtle">pykrx provider는 scan에서 KR만 지원합니다.</p>
+          )}
         </label>
 
         <div className={styles.actions}>

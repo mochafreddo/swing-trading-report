@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  isScanUniverseAllowed,
+  PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
+} from "@/lib/run-dispatch-policy";
+
 const toNullableTrimmedString = (maxLength: number) =>
   z.preprocess((value) => {
     if (value == null) {
@@ -148,7 +153,16 @@ export const runDispatchSchema = z.union([
       provider: z.enum(["kis", "pykrx"]),
       universe: z.enum(["KR", "US", "both"]),
     })
-    .strict(),
+    .strict()
+    .superRefine((payload, ctx) => {
+      if (!isScanUniverseAllowed(payload.provider, payload.universe)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["universe"],
+          message: PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
+        });
+      }
+    }),
   z
     .object({
       workflow: z.literal("sell"),

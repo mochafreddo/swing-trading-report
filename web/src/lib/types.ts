@@ -1,4 +1,5 @@
 export type Provider = "kis" | "pykrx";
+export type ScanUniverse = "KR" | "US" | "both";
 
 export type ReportType = "buy" | "sell";
 
@@ -61,11 +62,21 @@ export interface HoldingMutationInput {
 
 export type RunWorkflow = "scan" | "sell";
 
-export interface WorkflowDispatchInput {
-  workflow: RunWorkflow;
-  provider: Provider;
-  universe?: "KR" | "US" | "both";
-}
+export type WorkflowDispatchInput =
+  | {
+      workflow: "scan";
+      provider: "kis";
+      universe: ScanUniverse;
+    }
+  | {
+      workflow: "scan";
+      provider: "pykrx";
+      universe: "KR";
+    }
+  | {
+      workflow: "sell";
+      provider: Provider;
+    };
 
 export interface WorkflowDispatchResult {
   dispatched: boolean;
