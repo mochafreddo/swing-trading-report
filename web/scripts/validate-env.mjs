@@ -28,7 +28,11 @@ function requireMinLength(name, minLength) {
   return value;
 }
 
-if (process.env.NODE_ENV !== "test") {
+const skipValidation =
+  process.env.NODE_ENV === "test" ||
+  process.env.SAB_SKIP_ENV_VALIDATION === "1";
+
+if (!skipValidation) {
   requireNonEmpty("SAB_BASIC_AUTH_USER");
   requireNonEmpty("SAB_BASIC_AUTH_PASS");
   requireMinLength("SAB_SESSION_SECRET", 32);

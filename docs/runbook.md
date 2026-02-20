@@ -13,7 +13,7 @@
       - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
       - Web: `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용) `REPORT_RETENTION_DAYS`
       - Web 로그인 제한(선택): `SAB_LOGIN_MAX_ATTEMPTS`, `SAB_LOGIN_WINDOW_SECONDS`, `SAB_LOGIN_BLOCK_SECONDS`
-      - Web 로컬 실행(선택): `WEB_HOST_PORT` (기본값 `55300`)
+      - Web 로컬 실행(선택): `WEB_HOST_PORT`(prod, 기본 `55300`), `WEB_DEV_HOST_PORT`(dev, 기본 `55301`)
       - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
     - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
@@ -27,24 +27,36 @@
 
 ## 웹 UI 로컬 실행(Next.js + Docker)
 
+- 기본 운영 기준:
+  - `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
 - 전환 직후 1회 정리:
   - `docker compose down --remove-orphans && docker compose up -d --build web`
 - 일반 재기동:
   - `docker compose up -d --build web`
+- 개발 모드(HMR):
+  - `docker compose --profile dev up -d --build web-dev`
+- 개발 모드 중지:
+  - `docker compose stop web-dev`
 - 강제 재생성(문제 시):
   - `docker compose stop web`
   - `docker compose rm -f web`
   - `docker compose up -d --build web`
-- 로그 확인:
+- 로그 확인(prod):
   - `docker compose logs -f web`
+- 로그 확인(dev):
+  - `docker compose --profile dev logs -f web-dev`
 - 중지:
   - `docker compose stop web`
-- 접속:
+- 접속(prod):
   - `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+- 접속(dev):
+  - `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
 - 인증:
   - `/login` 페이지에서 관리자 계정(`SAB_BASIC_AUTH_USER/PASS`)으로 로그인하면 HttpOnly 세션 쿠키가 발급됩니다.
-- 포트 변경:
+- 포트 변경(prod):
   - `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
+- 포트 변경(dev):
+  - `.env`에 `WEB_DEV_HOST_PORT=55445` 설정 후 `docker compose --profile dev up -d --build web-dev`
 - 기본 화면:
   - `Reports`: Storage 리포트 목록/상세/검색
   - `Holdings`: Supabase `holdings` CRUD
@@ -66,7 +78,9 @@
   - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 - 웹 UI(Next.js)
   - `docker compose up -d --build web`
-  - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 접속(prod): `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
+  - 접속(dev): `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
   - 또는 웹 디렉터리에서 직접 실행: `pnpm install && pnpm run dev`
 
 - 자동 실행(GitHub Actions)

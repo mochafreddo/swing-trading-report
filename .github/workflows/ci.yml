@@ -89,29 +89,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Resolve Node.js version from Dockerfile
+      - name: Resolve Node.js version from Dockerfiles
         id: resolve-node-version
         run: |
           set -euo pipefail
 
-          from_line="$(grep -m1 -E '^[[:space:]]*FROM[[:space:]]+node:' Dockerfile || true)"
-          if [[ -z "${from_line}" ]]; then
-            echo "::error title=Node version resolve failed::Cannot find 'FROM node:' in web/Dockerfile"
-            exit 1
-          fi
+          extract_node_version() {
+            local dockerfile="$1"
+            local from_line
+            local node_tag
 
-          node_tag="${from_line#*node:}"
-          node_tag="${node_tag%%[[:space:]]*}"
+            from_line="$(grep -m1 -E '^[[:space:]]*FROM[[:space:]]+node:' "${dockerfile}" || true)"
+            if [[ -z "${from_line}" ]]; then
+              echo "::error title=Node version resolve failed::Cannot find 'FROM node:' in web/${dockerfile}" >&2
+              return 1
+            fi
 
-          if [[ "${node_tag}" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            node_version="${BASH_REMATCH[1]}"
-          else
-            echo "::error title=Node version resolve failed::Expected semver prefix in Docker image tag, got '${node_tag}'"
+            node_tag="${from_line#*node:}"
+            node_tag="${node_tag%%[[:space:]]*}"
+
+            if [[ "${node_tag}" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+              echo "${BASH_REMATCH[1]}"
+              return 0
+            fi
+
+            echo "::error title=Node version resolve failed::Expected semver prefix in web/${dockerfile}, got '${node_tag}'" >&2
+            return 1
+          }
+
+          node_version="$(extract_node_version Dockerfile)"
+          node_version_dev="$(extract_node_version Dockerfile.dev)"
+
+          if [[ "${node_version}" != "${node_version_dev}" ]]; then
+            echo "::error title=Node version mismatch::web/Dockerfile(${node_version}) and web/Dockerfile.dev(${node_version_dev}) must match" >&2
             exit 1
           fi
 
           if [[ -z "${node_version}" ]]; then
-            echo "::error title=Node version resolve failed::Resolved Node version is empty"
+            echo "::error title=Node version resolve failed::Resolved Node version is empty" >&2
             exit 1
           fi
 

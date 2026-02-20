@@ -55,21 +55,26 @@
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
-  - 웹 UI(Next.js): `docker compose up -d web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 웹 UI(Next.js): `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
     - 로그인: `.env`에 `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET` 설정
   - (예정) 익일 시초 체크: `uv run -m sab entry`
 
 - 웹 UI 로컬 실행(Next.js + Docker)
-  - 기본 운영 기준: 컨테이너 실행을 권장하며 Node 버전 단일소스는 `web/Dockerfile`입니다.
+  - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
   - 전환 직후 1회 정리: `docker compose down --remove-orphans && docker compose up -d --build web`
   - 일반 재기동: `docker compose up -d --build web`
+  - 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
+  - 개발 모드 중지: `docker compose stop web-dev`
   - 강제 재생성(문제 시): `docker compose stop web && docker compose rm -f web && docker compose up -d --build web`
-  - 로그: `docker compose logs -f web`
-  - 중지: `docker compose stop web`
-  - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
-  - 포트 변경: `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
+  - 로그(prod): `docker compose logs -f web`
+  - 로그(dev): `docker compose --profile dev logs -f web-dev`
+  - 중지(prod): `docker compose stop web`
+  - 접속(prod): `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 접속(dev): `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
+  - 포트 변경(prod): `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
+  - 포트 변경(dev): `.env`에 `WEB_DEV_HOST_PORT=55445` 설정 후 `docker compose --profile dev up -d --build web-dev`
   - 직접 실행(선택): `cd web && pnpm install && pnpm run dev`
-  - 직접 실행 시 Node 버전은 `web/Dockerfile`의 `FROM node:<version>`과 동일하게 맞춥니다.
+  - 직접 실행 시 Node 버전은 `web/Dockerfile`/`web/Dockerfile.dev`의 `FROM node:<version>`과 동일하게 맞춥니다.
   - 웹 패키지 매니저: `pnpm` (고정)
   - 기능:
     - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
@@ -140,7 +145,7 @@
 - 관리 범위:
   - Python: `pyproject.toml`, `uv.lock`
   - Web: `web/package.json`, `web/pnpm-lock.yaml`
-  - CI/런타임: `.github/workflows/*.yml`, `docker-compose.yml`, `web/Dockerfile`
+  - CI/런타임: `.github/workflows/*.yml`, `docker-compose.yml`, `web/Dockerfile`, `web/Dockerfile.dev`
 - 안정성 우선 정책:
   - `.pre-commit-config.yaml`은 Renovate 업데이트 대상에서 제외
   - 잠금 파일 유지보수 PR(lock file maintenance)은 자동 머지를 비활성화
