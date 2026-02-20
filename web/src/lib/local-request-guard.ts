@@ -52,8 +52,7 @@ export function assertLocalRequest(request: {
     return;
   }
 
-  const rawHost =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const rawHost = request.headers.get("host");
   const hostname = extractHostname(rawHost);
 
   if (!hostname || !LOCAL_HOSTS.has(hostname)) {

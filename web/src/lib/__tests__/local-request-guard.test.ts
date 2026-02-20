@@ -28,7 +28,7 @@ describe("local-request-guard", () => {
     ).not.toThrow();
   });
 
-  it("uses x-forwarded-host first when present", () => {
+  it("ignores x-forwarded-host and trusts host only", () => {
     vi.stubEnv("NODE_ENV", "development");
 
     expect(() =>
@@ -36,6 +36,15 @@ describe("local-request-guard", () => {
         makeRequest({
           host: "localhost:3000",
           "x-forwarded-host": "example.com",
+        }),
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest({
+          host: "example.com",
+          "x-forwarded-host": "localhost:3000",
         }),
       ),
     ).toThrow(LocalRequestGuardError);
