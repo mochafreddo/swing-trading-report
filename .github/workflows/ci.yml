@@ -72,6 +72,15 @@ jobs:
     name: Next.js Web (Lint + Typecheck + Test + Build)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SAB_BASIC_AUTH_USER: ci-user
+      SAB_BASIC_AUTH_PASS: ci-pass
+      SAB_SESSION_SECRET: ci_session_secret_0123456789abcdef
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_SECRET_KEY: sb_secret_ci
+      GITHUB_OWNER: ci-owner
+      GITHUB_REPO: ci-repo
+      GITHUB_PAT: ghp_ci_token
     defaults:
       run:
         working-directory: web
