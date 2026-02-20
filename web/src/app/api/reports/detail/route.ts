@@ -5,6 +5,7 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { parseReportStorageKey } from "@/lib/report-key";
 import { reportDetailQuerySchema } from "@/lib/schemas";
 import { downloadStorageJson, SupabaseApiError } from "@/lib/supabase-admin";
@@ -13,8 +14,15 @@ export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   try {
+    await requireAdminAuth(request);
     assertLocalRequest(request);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
     if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },

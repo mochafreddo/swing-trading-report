@@ -8,6 +8,8 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { holdingCreateSchema, holdingListQuerySchema } from "@/lib/schemas";
 import {
   createHolding,
@@ -20,6 +22,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    await requireAdminAuth(request);
     assertLocalRequest(request);
 
     const parsedQuery = holdingListQuerySchema.safeParse({
@@ -46,6 +49,12 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json(page);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
     if (error instanceof HoldingCursorError) {
       return NextResponse.json(
         { error: error.message },
@@ -71,8 +80,22 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await requireAdminAuth(request);
+    assertSameOrigin(request);
     assertLocalRequest(request);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
+    if (error instanceof SameOriginError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
+    }
     if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },

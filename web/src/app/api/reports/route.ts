@@ -5,6 +5,7 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { filterAndSortReportKeys, toReportListItem } from "@/lib/report-key";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
 import { extractReportTickers } from "@/lib/report-tickers";
@@ -36,8 +37,15 @@ function matchesTickerQuery(tickers: string[], query: string): boolean {
 
 export async function GET(request: NextRequest) {
   try {
+    await requireAdminAuth(request);
     assertLocalRequest(request);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
     if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },

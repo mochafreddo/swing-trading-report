@@ -4,6 +4,8 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { holdingPatchSchema } from "@/lib/schemas";
 import {
   deleteHolding,
@@ -27,8 +29,22 @@ function parseTicker(raw: string): string | null {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    await requireAdminAuth(request);
+    assertSameOrigin(request);
     assertLocalRequest(request);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
+    if (error instanceof SameOriginError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
+    }
     if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },
@@ -86,8 +102,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
+    await requireAdminAuth(request);
+    assertSameOrigin(request);
     assertLocalRequest(request);
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: error.headers },
+      );
+    }
+    if (error instanceof SameOriginError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
+    }
     if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },

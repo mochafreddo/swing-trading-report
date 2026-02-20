@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { MainNav } from "@/components/main-nav";
+import { AppShell } from "@/components/app-shell";
 
 import "./globals.css";
 
@@ -17,16 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="app-shell">
-          <header className="top-bar">
-            <div>
-              <p className="eyebrow">Swing Trading Report</p>
-              <h1 className="title">Operations Console</h1>
-            </div>
-            <MainNav />
-          </header>
-          <main className="main-content">{children}</main>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
