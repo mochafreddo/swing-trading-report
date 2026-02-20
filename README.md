@@ -10,7 +10,7 @@
   - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보) 전송
   - 슬랙: 기존 요약 포맷 유지
 
-상세 배경과 요구사항은 `docs/PRD.md` 참고.
+상세 문서 인덱스는 `docs/README.md`, 배경/요구사항은 `docs/PRD.md`를 참고하세요.
 
 ## Requirements
 
@@ -184,8 +184,9 @@ Per‑market 임계치(권장)
 - `web/` … Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` … 생성된 JSON 리포트 아티팩트 출력 폴더
 - `data/` … 캐시/상태(JSON 또는 SQLite)
-- `docs/kis-setup.md` … KIS 설정 가이드
-- `docs/PRD.md` … 제품 요구사항 문서
+- `docs/README.md` … 문서 인덱스(진입점)
+  - `docs/adr/README.md` … ADR 인덱스
+  - `docs/reviews/README.md` … 리뷰 인덱스
 - `supabase/` … Supabase 마이그레이션/설정
 - `holdings.yaml` … 선택 백업 파일(import/export 용도)
 

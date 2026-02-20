@@ -1,12 +1,15 @@
 # SPEC — v1.1 구현 명세 (Next.js + Supabase + GitHub Actions)
 
-상태: Draft  
+상태: Accepted (v1.1 기준)  
 대상 릴리스: v1.1  
+최종 정합화: 2026-02-20  
 목적: PRD/ADR의 결정을 바탕으로 **v1.1 구현에 필요한 인터페이스/데이터/플로우를 고정**한다.
 
 ## 0. 참고 문서(우선순위)
 
+- `docs/README.md` (문서 인덱스)
 - `docs/PRD.md`
+- `docs/adr/README.md` (ADR 인덱스)
 - `docs/adr/ADR-0002-report-artifacts-dashboard.md` (JSON 아티팩트)
 - `docs/adr/ADR-0004-web-stack-nextjs-local-docker.md` (Next.js + 로컬 Docker)
 - `docs/adr/ADR-0005-automation-github-actions-supabase.md` (GHA schedule + Supabase)
