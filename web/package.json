@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "pnpm@10.29.3",
   "scripts": {
-    "dev": "node scripts/validate-env.mjs && next dev --hostname 0.0.0.0 --port 3000",
-    "build": "node scripts/validate-env.mjs && next build",
-    "start": "node scripts/validate-env.mjs && next start --hostname 0.0.0.0 --port 3000",
+    "dev": "node scripts/validate-env.mjs && node scripts/run-next.mjs dev",
+    "build": "node scripts/validate-env.mjs && node scripts/run-next.mjs build",
+    "start": "node scripts/validate-env.mjs && node scripts/run-next.mjs start",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",

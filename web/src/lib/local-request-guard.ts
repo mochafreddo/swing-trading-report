@@ -3,7 +3,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 export class LocalRequestGuardError extends Error {
   readonly status = 403;
 
-  constructor(message = "Holdings API is only available from local host") {
+  constructor(message = "API is only available from local host") {
     super(message);
   }
 }
@@ -45,6 +45,18 @@ function extractHostname(rawHost: string | null): string | null {
   return first;
 }
 
+function shouldEnforceLocalRequestGuard(): boolean {
+  return process.env.SAB_ENFORCE_LOCAL_REQUEST !== "0";
+}
+
+export function isLocalRequest(request: {
+  headers: Pick<Headers, "get">;
+}): boolean {
+  const rawHost = request.headers.get("host");
+  const hostname = extractHostname(rawHost);
+  return Boolean(hostname && LOCAL_HOSTS.has(hostname));
+}
+
 export function assertLocalRequest(request: {
   headers: Pick<Headers, "get">;
 }): void {
@@ -52,10 +64,11 @@ export function assertLocalRequest(request: {
     return;
   }
 
-  const rawHost = request.headers.get("host");
-  const hostname = extractHostname(rawHost);
+  if (!shouldEnforceLocalRequestGuard()) {
+    return;
+  }
 
-  if (!hostname || !LOCAL_HOSTS.has(hostname)) {
+  if (!isLocalRequest(request)) {
     throw new LocalRequestGuardError();
   }
 }

@@ -74,6 +74,7 @@
   - 포트 변경(prod): `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
   - 포트 변경(dev): `.env`에 `WEB_DEV_HOST_PORT=55445` 설정 후 `docker compose --profile dev up -d --build web-dev`
   - 직접 실행(선택): `cd web && pnpm install && pnpm run dev`
+  - 직접 실행 기본 바인딩: `WEB_BIND_HOST` 미지정 시 `127.0.0.1` (외부 노출 필요 시에만 `WEB_BIND_HOST=0.0.0.0`)
   - 직접 실행 시 Node 버전은 `web/Dockerfile`/`web/Dockerfile.dev`의 `FROM node:<version>`과 동일하게 맞춥니다.
   - 웹 패키지 매니저: `pnpm` (고정)
   - 기능:
@@ -82,15 +83,16 @@
       - Storage key 목록 캐시: `REPORT_KEYS_CACHE_TTL_SECONDS` (기본 30초, `0`이면 캐시 비활성화, 최대 600초)
       - 티커 검색 다운로드 동시성: `REPORT_SEARCH_CONCURRENCY` (기본 8, 최소 1, 최대 16)
       - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
-      - 로컬 전용 API: `/api/reports` 및 `/api/reports/detail`은 `localhost`/`127.0.0.1`/`::1` 요청만 허용
+      - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`)을 필수로 요구
     - `Holdings`: Supabase `holdings` CRUD
-      - 로컬 전용 API: `/api/holdings` 및 `/api/holdings/[ticker]`는 `localhost`/`127.0.0.1`/`::1` 요청만 허용
+      - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증을 필수로 요구
       - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
-      - 로컬 전용 API: `/api/run`은 `localhost`/`127.0.0.1`/`::1` 요청만 허용, 실행 ref는 `main`으로 고정
+      - 보호 경계: `/api/run`은 관리자 세션 인증 + same-origin 검증을 필수로 요구, 실행 ref는 `main`으로 고정
       - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
       - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
       - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
+      - 기본 하드닝: Host 기반 로컬 요청 검사는 기본 활성, `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
 
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD.buy.json`
