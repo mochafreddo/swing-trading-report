@@ -1,7 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from sab.scan import _format_ny_now_for_log
+from sab.scan_types import _format_ny_now_for_log
 
 
 def test_format_ny_now_for_log_datetime() -> None:

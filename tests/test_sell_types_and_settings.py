@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import sab.sell as sell
+from sab.sell_evaluation import _build_hybrid_sell_settings, _build_sell_settings
+from sab.sell_types import (
+    _exchange_from_suffix,
+    _normalize_suffix,
+    _split_symbol_and_suffix,
+)
+from sab.signals.hybrid_sell import HybridSellSettings
+from sab.signals.sell_rules import SellSettings
 
 
 def _make_cfg() -> SimpleNamespace:
@@ -36,25 +43,17 @@ def _make_cfg() -> SimpleNamespace:
     )
 
 
-def test_sell_shim_symbols_are_exposed() -> None:
-    expected = [
-        "_build_hybrid_sell_settings",
-        "_build_sell_settings",
-        "_exchange_from_suffix",
-        "_normalize_suffix",
-        "_split_symbol_and_suffix",
-    ]
-    for name in expected:
-        assert hasattr(sell, name)
-        assert callable(getattr(sell, name))
+def test_sell_type_helpers_basic_behavior() -> None:
+    assert _normalize_suffix("nas-daq") == "NASDAQ"
+    assert _split_symbol_and_suffix("aapl.us") == ("AAPL", "US")
+    assert _exchange_from_suffix("NASDAQ") == "NAS"
 
 
-def test_sell_shim_symbols_basic_behavior() -> None:
+def test_sell_settings_builders_basic_behavior() -> None:
     cfg = _make_cfg()
-    assert sell._normalize_suffix("nas-daq") == "NASDAQ"
-    assert sell._split_symbol_and_suffix("aapl.us") == ("AAPL", "US")
-    assert sell._exchange_from_suffix("NASDAQ") == "NAS"
-    sell_settings = sell._build_sell_settings(cfg)
-    hybrid_settings = sell._build_hybrid_sell_settings(cfg)
+    sell_settings = _build_sell_settings(cfg, SellSettingsCls=SellSettings)
+    hybrid_settings = _build_hybrid_sell_settings(
+        cfg, HybridSellSettingsCls=HybridSellSettings
+    )
     assert sell_settings.atr_trail_multiplier == 2.0
     assert hybrid_settings.profit_target_low == 0.1

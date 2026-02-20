@@ -11,11 +11,6 @@ from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
 from .report.sell_report import SellReportRow, write_sell_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
-from .sell_evaluation import (
-    _build_hybrid_sell_settings as _build_hybrid_sell_settings_impl,
-)
-from .sell_evaluation import _build_sell_mode_note as _build_sell_mode_note_impl
-from .sell_evaluation import _build_sell_settings as _build_sell_settings_impl
 from .sell_evaluation import _evaluate_holdings as _evaluate_holdings_impl
 from .sell_evaluation import _write_sell_report as _write_sell_report_impl
 from .sell_market_data import _collect_market_data as _collect_market_data_impl
@@ -33,12 +28,6 @@ from .sell_types import (
     _exchange_from_suffix as _exchange_from_suffix_impl,
 )
 from .sell_types import (
-    _infer_currency_from_ticker as _infer_currency_from_ticker_impl,
-)
-from .sell_types import (
-    _normalize_suffix as _normalize_suffix_impl,
-)
-from .sell_types import (
     _SellRuntime,
 )
 from .sell_types import (
@@ -50,14 +39,6 @@ from .signals.sell_rules import SellSettings, evaluate_sell_signals
 
 def _infer_env_from_base(base_url: str) -> str:
     return "demo" if "vts" in base_url.lower() else "real"
-
-
-def _infer_currency_from_ticker(ticker: str) -> str:
-    return _infer_currency_from_ticker_impl(ticker)
-
-
-def _normalize_suffix(suffix: str | None) -> str:
-    return _normalize_suffix_impl(suffix)
 
 
 def _split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
@@ -119,17 +100,6 @@ def _collect_market_data(runtime: _SellRuntime, *, target_bars: int) -> None:
     )
 
 
-def _build_sell_settings(cfg: Config) -> SellSettings:
-    return _build_sell_settings_impl(cfg, SellSettingsCls=SellSettings)
-
-
-def _build_hybrid_sell_settings(cfg: Config) -> HybridSellSettings:
-    return _build_hybrid_sell_settings_impl(
-        cfg,
-        HybridSellSettingsCls=HybridSellSettings,
-    )
-
-
 def _evaluate_holdings(runtime: _SellRuntime) -> list[SellReportRow]:
     return _evaluate_holdings_impl(
         runtime,
@@ -141,10 +111,6 @@ def _evaluate_holdings(runtime: _SellRuntime) -> list[SellReportRow]:
         split_symbol_and_suffix_fn=_split_symbol_and_suffix,
         exchange_from_suffix_fn=_exchange_from_suffix,
     )
-
-
-def _build_sell_mode_note(cfg: Config) -> str | None:
-    return _build_sell_mode_note_impl(cfg)
 
 
 def _write_sell_report(runtime: _SellRuntime, results: list[SellReportRow]) -> str:

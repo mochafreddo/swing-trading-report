@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sab.scan import _filter_tickers_by_markets
+from sab.scan_types import _filter_tickers_by_markets
 
 
 def test_filter_tickers_by_markets_keeps_kr_only_when_requested() -> None:
