@@ -6,7 +6,7 @@ import {
 } from "@/lib/local-request-guard";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
-import { holdingPatchSchema } from "@/lib/schemas";
+import { holdingPatchSchema, holdingTickerSchema } from "@/lib/schemas";
 import {
   deleteHolding,
   SupabaseApiError,
@@ -18,14 +18,6 @@ export const runtime = "nodejs";
 type RouteContext = {
   params: { ticker: string } | Promise<{ ticker: string }>;
 };
-
-function parseTicker(raw: string): string | null {
-  const decoded = decodeURIComponent(raw).trim();
-  if (!decoded) {
-    return null;
-  }
-  return decoded.toUpperCase();
-}
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
@@ -56,10 +48,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const ticker = parseTicker(params.ticker);
-  if (!ticker) {
+  const parsedTicker = holdingTickerSchema.safeParse(params.ticker);
+  if (!parsedTicker.success) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
+  const ticker = parsedTicker.data;
 
   let payload: unknown;
   try {
@@ -129,10 +122,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const ticker = parseTicker(params.ticker);
-  if (!ticker) {
+  const parsedTicker = holdingTickerSchema.safeParse(params.ticker);
+  if (!parsedTicker.success) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
+  const ticker = parsedTicker.data;
 
   try {
     const deleted = await deleteHolding(ticker);

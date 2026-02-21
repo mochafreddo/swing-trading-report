@@ -180,6 +180,18 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     expect(vi.mocked(updateHolding)).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when ticker format is unsupported", async () => {
+    const response = await PATCH(
+      makePatchRequest({ quantity: 1 }),
+      makeContext("AAPL"),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid ticker");
+    expect(vi.mocked(updateHolding)).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for invalid JSON", async () => {
     const response = await PATCH(makePatchRequest("{"), makeContext("005930"));
     const payload = (await response.json()) as { error: string };
@@ -285,6 +297,15 @@ describe("DELETE /api/holdings/[ticker] route", () => {
 
   it("returns 400 for invalid ticker", async () => {
     const response = await DELETE(makeDeleteRequest(), makeContext("%20"));
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid ticker");
+    expect(vi.mocked(deleteHolding)).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when ticker format is unsupported", async () => {
+    const response = await DELETE(makeDeleteRequest(), makeContext("AAPL"));
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(400);

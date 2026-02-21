@@ -68,7 +68,7 @@ const KR_TICKER_PATTERN = /^\d{6}$/;
 const US_TICKER_PATTERN =
   /^[A-Z0-9][A-Z0-9._-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
 
-const tickerSchema = z
+export const holdingTickerSchema = z
   .string()
   .trim()
   .min(1)
@@ -116,7 +116,7 @@ export const holdingListQuerySchema = z.object({
 
 export const holdingCreateSchema = z
   .object({
-    ticker: tickerSchema,
+    ticker: holdingTickerSchema,
     quantity: toOptionalNonNegativeNumber.default(0),
     entry_price: toOptionalNonNegativeNumber.default(0),
     entry_currency: toNullableTrimmedString(12).optional(),
