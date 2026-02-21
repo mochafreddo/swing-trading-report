@@ -15,6 +15,10 @@
 - [KIS 설정 가이드](kis-setup.md)
 - [holdings.yaml 스키마](holdings-schema.md)
 
+## 아키텍처
+
+- [시스템 아키텍처 개요](ARCHITECTURE.md)
+
 ## 거버넌스
 
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)
