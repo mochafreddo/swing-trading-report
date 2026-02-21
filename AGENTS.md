@@ -8,7 +8,7 @@
 - `UV_CACHE_DIR=.uv-cache uv sync --all-extras --dev`
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
-- `UV_CACHE_DIR=.uv-cache uv run mypy sab`
+- `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
 ## pre-commit (샌드박스)

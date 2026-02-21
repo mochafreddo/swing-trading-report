@@ -109,7 +109,7 @@
 - 로컬 품질 점검 권장 명령:
   - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
   - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
-  - `UV_CACHE_DIR=.uv-cache uv run mypy sab`
+  - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
   - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
 ## Audit 자동화 (GitHub Actions)
