@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,7 +22,7 @@ STATE_CLOSED = "CLOSED"
 
 @dataclass(frozen=True)
 class EvalContext:
-    candles: list[dict[str, Any]]
+    candles: Sequence[Mapping[str, Any]]
     meta: dict[str, Any]
     now: dt.datetime
     market: str
@@ -127,7 +128,7 @@ def _session_state(market: str, local_now: dt.datetime) -> str:
 
 
 def choose_eval_index(
-    candles: list[dict[str, Any]],
+    candles: Sequence[Mapping[str, Any]],
     *,
     meta: dict[str, Any] | None = None,
     provider: str | None = None,

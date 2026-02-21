@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
+
+
+class Candle(TypedDict):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
 
 
 def _normalize_candle_date(value: Any) -> str:
@@ -38,7 +47,7 @@ class SellEvaluation:
 
 def evaluate_sell_signals(
     ticker: str,
-    candles: list[dict[str, float]],
+    candles: list[Candle],
     holding: dict[str, Any],
     settings: SellSettings,
 ) -> SellEvaluation:
