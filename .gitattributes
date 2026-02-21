@@ -1,0 +1,20 @@
+# Normalize line endings for text files.
+* text=auto eol=lf
+
+# Keep Windows scripts with CRLF for compatibility.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Mark common binary assets as binary.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.gz binary
