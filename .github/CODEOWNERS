@@ -1,0 +1,23 @@
+# Global fallback
+* @mochafreddo
+
+# Backend (Python)
+/sab/ @mochafreddo
+/tests/ @mochafreddo
+/scripts/ @mochafreddo
+
+# Frontend (Next.js)
+/web/ @mochafreddo
+
+# Database / SQL
+/supabase/ @mochafreddo
+
+# CI/CD and repository governance
+/.github/workflows/ @mochafreddo
+/.github/CODEOWNERS @mochafreddo
+
+# Documentation
+/docs/ @mochafreddo
+/README.md @mochafreddo
+/CONTRIBUTING.md @mochafreddo
+/AGENTS.md @mochafreddo
