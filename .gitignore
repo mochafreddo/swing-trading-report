@@ -1,20 +1,40 @@
-__pycache__/
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
 .cursor/
-.env
+
+# Python
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+build/
+*.egg-info/
 .mypy_cache/
 .pre-commit-cache/
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
 .venv/
+
+# Node
 .pnpm-store/
+web/node_modules/
+web/.next/
+web/.turbo/
+web/tsconfig.tsbuildinfo
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Local project data
 /data/
 config.local.yaml
 holdings.yaml
 /reports/
 watchlist.txt
-web/node_modules/
-web/.next/
-web/.turbo/
-web/tsconfig.tsbuildinfo
 output/
