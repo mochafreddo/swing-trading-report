@@ -4,7 +4,7 @@ import datetime as dt
 import json
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sab.data.kis_client import KISClient, KISCredentials
@@ -81,11 +81,10 @@ def test_ensure_token_falls_back_to_expires_in_when_expires_at_is_invalid(
         "expires_in": 3600,
         "access_token_token_expired": "not-a-timestamp",
     }
-    client._request = MagicMock(return_value=fake_resp)
-
-    before = dt.datetime.now(dt.UTC)
-    client.ensure_token()
-    after = dt.datetime.now(dt.UTC)
+    with patch.object(client, "_request", MagicMock(return_value=fake_resp)):
+        before = dt.datetime.now(dt.UTC)
+        client.ensure_token()
+        after = dt.datetime.now(dt.UTC)
 
     assert client.cache_status == "refresh"
     assert client._access_token == "Bearer fresh-token"

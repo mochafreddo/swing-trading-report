@@ -255,10 +255,12 @@ def test_upload_report_artifact_adds_suffix_when_key_exists(tmp_path: Path) -> N
     )
 
     assert key == "2026/02/2026-02-13-1.buy.json"
-    assert session.post_calls[0]["headers"]["content-type"] == "application/json"
-    assert session.post_calls[1]["url"].endswith(
-        "/rest/v1/report_index?on_conflict=report_key"
-    )
+    first_headers = session.post_calls[0]["headers"]
+    assert isinstance(first_headers, dict)
+    assert first_headers["content-type"] == "application/json"
+    second_url = session.post_calls[1]["url"]
+    assert isinstance(second_url, str)
+    assert second_url.endswith("/rest/v1/report_index?on_conflict=report_key")
 
 
 def test_upload_report_artifact_uses_base_key_when_available(tmp_path: Path) -> None:

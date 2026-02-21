@@ -104,24 +104,25 @@ class KISClientOverseasRankPaginationTests(unittest.TestCase):
             "output2": [{"SYMB": "BBB"}],
         }
 
-        self.client._request = MagicMock(side_effect=[resp1, resp2])
+        with patch.object(
+            self.client, "_request", MagicMock(side_effect=[resp1, resp2])
+        ) as request_mock:
+            result = self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS", "NDAY": "1", "VOL_RANG": "0"},
+                limit=2,
+            )
 
-        result = self.client._fetch_overseas_rank_items(
-            url="https://example.com/rank",
-            tr_id="TESTTR",
-            params={"EXCD": "NAS", "NDAY": "1", "VOL_RANG": "0"},
-            limit=2,
-        )
+            self.assertEqual([r.get("SYMB") for r in result], ["AAA", "BBB"])
+            self.assertEqual(request_mock.call_count, 2)
 
-        self.assertEqual([r.get("SYMB") for r in result], ["AAA", "BBB"])
-        self.assertEqual(self.client._request.call_count, 2)
+            first_call = request_mock.call_args_list[0].kwargs
+            self.assertNotIn("tr_cont", first_call["headers"])
 
-        first_call = self.client._request.call_args_list[0].kwargs
-        self.assertNotIn("tr_cont", first_call["headers"])
-
-        second_call = self.client._request.call_args_list[1].kwargs
-        self.assertEqual(second_call["headers"].get("tr_cont"), "N")
-        self.assertEqual(second_call["params"].get("KEYB"), "CUR1")
+            second_call = request_mock.call_args_list[1].kwargs
+            self.assertEqual(second_call["headers"].get("tr_cont"), "N")
+            self.assertEqual(second_call["params"].get("KEYB"), "CUR1")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import sab.signals.sell_rules as sr
-from sab.signals.sell_rules import SellSettings, evaluate_sell_signals
+from sab.signals.sell_rules import Candle, SellSettings, evaluate_sell_signals
 
 
 def _patch_atr_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,7 +26,7 @@ def _patch_atr_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_atr_trail_uses_peak_close_since_entry_date(monkeypatch: pytest.MonkeyPatch):
     _patch_atr_only(monkeypatch)
-    candles = [
+    candles: list[Candle] = [
         {
             "date": "20250101",
             "open": 100,
@@ -82,7 +82,7 @@ def test_atr_trail_falls_back_to_recent_window_when_entry_date_missing(
     monkeypatch: pytest.MonkeyPatch,
 ):
     _patch_atr_only(monkeypatch)
-    candles = [
+    candles: list[Candle] = [
         {
             "date": "20250101",
             "open": 100,

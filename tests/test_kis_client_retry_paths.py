@@ -44,6 +44,20 @@ def _future_expiry() -> dt.datetime:
     return dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
 
 
+def _set_mock_method(target: object, name: str, **kwargs: Any) -> MagicMock:
+    if not hasattr(target, name):
+        raise AttributeError(
+            f"{type(target).__name__!s} has no attribute {name!r} to patch"
+        )
+    if not callable(getattr(target, name)):
+        raise TypeError(
+            f"{type(target).__name__!s}.{name} is not callable and cannot be mocked as a method"
+        )
+    mock = MagicMock(**kwargs)
+    setattr(target, name, mock)
+    return mock
+
+
 def test_ensure_token_refreshes_when_cached_token_is_stale(tmp_path: Path) -> None:
     _cache_file(tmp_path).write_text(
         json.dumps(
@@ -68,7 +82,7 @@ def test_ensure_token_refreshes_when_cached_token_is_stale(tmp_path: Path) -> No
             "expires_in": 3600,
         },
     )
-    client._request = MagicMock(return_value=fresh_resp)
+    _set_mock_method(client, "_request", return_value=fresh_resp)
 
     client.ensure_token()
 
@@ -79,8 +93,10 @@ def test_ensure_token_refreshes_when_cached_token_is_stale(tmp_path: Path) -> No
 
 def test_ensure_token_raises_for_malformed_json() -> None:
     client = KISClient(_build_creds(), session=MagicMock(), cache_dir=None)
-    client._request = MagicMock(
-        return_value=_response(status_code=200, payload=ValueError("bad json"))
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(status_code=200, payload=ValueError("bad json")),
     )
 
     with pytest.raises(KISAuthError, match="Token response is not JSON"):
@@ -125,7 +141,9 @@ def test_fetch_candle_chunk_refreshes_token_on_egw00123() -> None:
         client._access_token = "Bearer refreshed-token"
         client._token_expiry = _future_expiry()
 
-    client.ensure_token = MagicMock(side_effect=_refresh_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_refresh_token
+    )
     token_expired = _response(
         status_code=200,
         payload={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "expired"},
@@ -153,7 +171,9 @@ def test_fetch_candle_chunk_refreshes_token_on_egw00123() -> None:
         seen_authorizations.append(str(headers.get("authorization") or ""))
         return next(responses)
 
-    client._request = MagicMock(side_effect=_request_side_effect)
+    request_mock = _set_mock_method(
+        client, "_request", side_effect=_request_side_effect
+    )
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         rows = client._fetch_candle_chunk(
@@ -164,8 +184,8 @@ def test_fetch_candle_chunk_refreshes_token_on_egw00123() -> None:
         )
 
     assert rows == success_payload["output2"]
-    assert client._request.call_count == 2
-    assert client.ensure_token.call_count == 1
+    assert request_mock.call_count == 2
+    assert ensure_token_mock.call_count == 1
     assert seen_authorizations == ["Bearer old-token", "Bearer refreshed-token"]
     assert mock_sleep.call_args_list == [call(1.0)]
 
@@ -197,7 +217,9 @@ def test_fetch_candle_chunk_retries_when_response_json_is_malformed() -> None:
         ],
     }
     success = _response(status_code=200, payload=success_payload)
-    client._request = MagicMock(side_effect=[malformed, success])
+    request_mock = _set_mock_method(
+        client, "_request", side_effect=[malformed, success]
+    )
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         rows = client._fetch_candle_chunk(
@@ -208,7 +230,7 @@ def test_fetch_candle_chunk_retries_when_response_json_is_malformed() -> None:
         )
 
     assert rows == success_payload["output2"]
-    assert client._request.call_count == 2
+    assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
 
 
@@ -220,8 +242,10 @@ def test_daily_candles_accumulates_and_sorts_rows_from_chunk_fetches() -> None:
         max_attempts=2,
         min_interval=0,
     )
-    client.ensure_token = MagicMock()
-    client._fetch_candle_chunk = MagicMock(
+    ensure_token_mock = _set_mock_method(client, "ensure_token")
+    fetch_candle_chunk_mock = _set_mock_method(
+        client,
+        "_fetch_candle_chunk",
         side_effect=[
             [],
             [
@@ -244,14 +268,14 @@ def test_daily_candles_accumulates_and_sorts_rows_from_chunk_fetches() -> None:
                     "prdy_vrss": "0",
                 },
             ],
-        ]
+        ],
     )
 
     rows = client.daily_candles("005930", count=2, adjusted=True)
 
     assert [row["date"] for row in rows] == ["20240102", "20240103"]
-    assert client.ensure_token.call_count == 1
-    assert client._fetch_candle_chunk.call_count == 2
+    assert ensure_token_mock.call_count == 1
+    assert fetch_candle_chunk_mock.call_count == 2
 
 
 def test_overseas_price_detail_refreshes_token_on_egw00123() -> None:
@@ -271,7 +295,9 @@ def test_overseas_price_detail_refreshes_token_on_egw00123() -> None:
         client._token_expiry = _future_expiry()
         token_call_count["value"] += 1
 
-    client.ensure_token = MagicMock(side_effect=_fake_ensure_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
     token_error = _response(
         status_code=200,
         payload={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "expired"},
@@ -288,13 +314,13 @@ def test_overseas_price_detail_refreshes_token_on_egw00123() -> None:
         seen_authorizations.append(str(headers.get("authorization") or ""))
         return next(responses)
 
-    client._request = MagicMock(side_effect=_request_side_effect)
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
 
     assert result == {"last": "123.45"}
-    assert client.ensure_token.call_count == 2
+    assert ensure_token_mock.call_count == 2
     assert seen_authorizations == ["Bearer initial-token", "Bearer refreshed-token"]
     assert mock_sleep.call_args_list == [call(1.0)]
 
@@ -316,7 +342,9 @@ def test_overseas_price_detail_refreshes_token_on_http_error_egw00123() -> None:
         client._token_expiry = _future_expiry()
         token_call_count["value"] += 1
 
-    client.ensure_token = MagicMock(side_effect=_fake_ensure_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
     token_error = _response(
         status_code=401,
         payload={"msg_cd": "EGW00123", "msg1": "expired token"},
@@ -333,13 +361,13 @@ def test_overseas_price_detail_refreshes_token_on_http_error_egw00123() -> None:
         seen_authorizations.append(str(headers.get("authorization") or ""))
         return next(responses)
 
-    client._request = MagicMock(side_effect=_request_side_effect)
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="amzn", exchange="nasd")
 
     assert result == {"last": "456.78"}
-    assert client.ensure_token.call_count == 2
+    assert ensure_token_mock.call_count == 2
     assert seen_authorizations == ["Bearer initial-token", "Bearer refreshed-token"]
     assert mock_sleep.call_args_list == [call(1.0)]
 
@@ -357,7 +385,9 @@ def test_overseas_price_detail_retries_on_rate_limit_body_error() -> None:
         client._access_token = "Bearer stable-token"
         client._token_expiry = _future_expiry()
 
-    client.ensure_token = MagicMock(side_effect=_fake_ensure_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
     rate_limited = _response(
         status_code=200,
         payload={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "rate limit"},
@@ -366,14 +396,16 @@ def test_overseas_price_detail_retries_on_rate_limit_body_error() -> None:
         status_code=200,
         payload={"rt_cd": "0", "output": [{"last": "999.99"}]},
     )
-    client._request = MagicMock(side_effect=[rate_limited, success])
+    request_mock = _set_mock_method(
+        client, "_request", side_effect=[rate_limited, success]
+    )
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="tsla", exchange="nasd")
 
     assert result == {"last": "999.99"}
-    assert client.ensure_token.call_count == 1
-    assert client._request.call_count == 2
+    assert ensure_token_mock.call_count == 1
+    assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
 
 
@@ -390,20 +422,24 @@ def test_overseas_price_detail_retries_when_response_json_is_malformed() -> None
         client._access_token = "Bearer stable-token"
         client._token_expiry = _future_expiry()
 
-    client.ensure_token = MagicMock(side_effect=_fake_ensure_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
     malformed = _response(status_code=200, payload=ValueError("bad json"))
     success = _response(
         status_code=200,
         payload={"rt_cd": "0", "output": {"last": "77.77"}},
     )
-    client._request = MagicMock(side_effect=[malformed, success])
+    request_mock = _set_mock_method(
+        client, "_request", side_effect=[malformed, success]
+    )
 
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="msft", exchange="nasd")
 
     assert result == {"last": "77.77"}
-    assert client.ensure_token.call_count == 1
-    assert client._request.call_count == 2
+    assert ensure_token_mock.call_count == 1
+    assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
 
 
@@ -420,7 +456,9 @@ def test_overseas_price_detail_raises_after_all_retries_fail() -> None:
         client._access_token = "Bearer stable-token"
         client._token_expiry = _future_expiry()
 
-    client.ensure_token = MagicMock(side_effect=_fake_ensure_token)
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
     fail_1 = _response(
         status_code=500,
         payload={"rt_cd": "1", "msg_cd": "EGW99999", "msg1": "internal"},
@@ -431,7 +469,7 @@ def test_overseas_price_detail_raises_after_all_retries_fail() -> None:
         payload={"rt_cd": "1", "msg_cd": "EGW99999", "msg1": "internal"},
         text="internal-2",
     )
-    client._request = MagicMock(side_effect=[fail_1, fail_2])
+    request_mock = _set_mock_method(client, "_request", side_effect=[fail_1, fail_2])
 
     with (
         patch("sab.data.kis_client.time.sleep") as mock_sleep,
@@ -439,6 +477,6 @@ def test_overseas_price_detail_raises_after_all_retries_fail() -> None:
     ):
         client.overseas_price_detail(symbol="nvda", exchange="nasd")
 
-    assert client.ensure_token.call_count == 1
-    assert client._request.call_count == 2
+    assert ensure_token_mock.call_count == 1
+    assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
