@@ -23,6 +23,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     await requireAdminAuth(request);
+    assertSameOrigin(request);
     assertLocalRequest(request);
 
     const parsedQuery = holdingListQuerySchema.safeParse({
@@ -53,6 +54,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { error: error.message },
         { status: error.status, headers: error.headers },
+      );
+    }
+    if (error instanceof SameOriginError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
       );
     }
     if (error instanceof HoldingCursorError) {

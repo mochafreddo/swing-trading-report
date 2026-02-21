@@ -150,6 +150,18 @@ describe("GET /api/holdings route", () => {
     expect(payload.error).toBe("Local only");
   });
 
+  it("maps same-origin guard failures to 403", async () => {
+    vi.mocked(assertSameOrigin).mockImplementationOnce(() => {
+      throw new SameOriginError("Cross-site blocked");
+    });
+
+    const response = await GET(makeGetRequest());
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toBe("Cross-site blocked");
+  });
+
   it("returns 400 for invalid query params", async () => {
     const response = await GET(makeGetRequest("limit=0"));
     const payload = (await response.json()) as {

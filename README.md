@@ -83,9 +83,9 @@
       - Storage key 목록 캐시: `REPORT_KEYS_CACHE_TTL_SECONDS` (기본 30초, `0`이면 캐시 비활성화, 최대 600초)
       - 티커 검색 다운로드 동시성: `REPORT_SEARCH_CONCURRENCY` (기본 8, 최소 1, 최대 16)
       - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
-      - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`)을 필수로 요구
+      - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`) + same-origin 검증을 필수로 요구
     - `Holdings`: Supabase `holdings` CRUD
-      - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증을 필수로 요구
+      - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증 + same-origin 검증을 필수로 요구
       - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
       - 보호 경계: `/api/run`은 관리자 세션 인증 + same-origin 검증을 필수로 요구, 실행 ref는 `main`으로 고정
