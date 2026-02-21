@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/env.server", () => ({
@@ -72,38 +72,29 @@ vi.mock("@/lib/supabase-admin", () => {
 
   return {
     SupabaseApiError,
-    fetchReportIndexPage: vi.fn(),
     downloadStorageJson: vi.fn(),
-    upsertReportIndexEntry: vi.fn(),
   };
 });
 
-import { GET } from "@/app/api/reports/route";
+import { GET } from "@/app/api/reports/detail/route";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
-import { fetchReportIndexPage, SupabaseApiError } from "@/lib/supabase-admin";
+import { downloadStorageJson, SupabaseApiError } from "@/lib/supabase-admin";
 
 function makeRequest(query = ""): NextRequest {
   const suffix = query ? `?${query}` : "";
-  return new NextRequest(`http://localhost:55300/api/reports${suffix}`);
+  return new NextRequest(`http://localhost:55300/api/reports/detail${suffix}`);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv("REPORT_SEARCH_WINDOW", "100");
-  vi.stubEnv("REPORT_KEYS_CACHE_TTL_SECONDS", "30");
-  vi.stubEnv("REPORT_SEARCH_CONCURRENCY", "8");
 });
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-describe("GET /api/reports route", () => {
+describe("GET /api/reports/detail route", () => {
   it("maps admin auth failures with status and headers", async () => {
     const authError = new AdminAuthError("Unauthorized");
     (authError as { headers: HeadersInit }).headers = {
@@ -117,6 +108,21 @@ describe("GET /api/reports route", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("x-auth-required")).toBe("1");
     expect(payload.error).toBe("Unauthorized");
+    expect(vi.mocked(assertSameOrigin)).not.toHaveBeenCalled();
+    expect(vi.mocked(assertLocalRequest)).not.toHaveBeenCalled();
+  });
+
+  it("maps same-origin guard failures to 403", async () => {
+    vi.mocked(assertSameOrigin).mockImplementationOnce(() => {
+      throw new SameOriginError("Cross-site blocked");
+    });
+
+    const response = await GET(makeRequest());
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toBe("Cross-site blocked");
+    expect(vi.mocked(assertLocalRequest)).not.toHaveBeenCalled();
   });
 
   it("maps local-request guard failures to 403", async () => {
@@ -131,47 +137,69 @@ describe("GET /api/reports route", () => {
     expect(payload.error).toBe("Local only");
   });
 
-  it("maps same-origin guard failures to 403", async () => {
-    vi.mocked(assertSameOrigin).mockImplementationOnce(() => {
-      throw new SameOriginError("Cross-site blocked");
-    });
-
-    const response = await GET(makeRequest());
-    const payload = (await response.json()) as { error: string };
-
-    expect(response.status).toBe(403);
-    expect(payload.error).toBe("Cross-site blocked");
-  });
-
   it("returns 400 for invalid query params", async () => {
-    const response = await GET(makeRequest("limit=0&type=buy"));
+    const response = await GET(makeRequest());
     const payload = (await response.json()) as {
       error: string;
-      details?: { fieldErrors?: { limit?: string[] } };
+      details?: { fieldErrors?: { key?: string[] } };
     };
 
     expect(response.status).toBe(400);
     expect(payload.error).toBe("Invalid query parameters");
-    expect(payload.details?.fieldErrors?.limit).toBeDefined();
-    expect(vi.mocked(fetchReportIndexPage)).not.toHaveBeenCalled();
+    expect(payload.details?.fieldErrors?.key).toBeDefined();
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
   });
 
-  it("returns 500 when supabase call fails", async () => {
-    vi.mocked(fetchReportIndexPage).mockRejectedValueOnce(
-      new SupabaseApiError("storage unavailable", 503),
-    );
-
-    const response = await GET(makeRequest("type=buy&limit=10"));
+  it("returns 400 for invalid report key format", async () => {
+    const response = await GET(makeRequest("key=not-a-report-key"));
     const payload = (await response.json()) as { error: string };
 
-    expect(response.status).toBe(500);
-    expect(payload.error).toContain("storage unavailable");
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid report key format");
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when report object is missing", async () => {
+    vi.mocked(downloadStorageJson).mockRejectedValueOnce(
+      new SupabaseApiError("missing", 404),
+    );
+    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
+
+    const response = await GET(makeRequest(`key=${key}`));
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe("Report not found");
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
+      "reports",
+      "2026/02/2026-02-14.buy.json",
+    );
+  });
+
+  it("returns report detail when key is valid", async () => {
+    const report = {
+      generated_at: "2026-02-14T00:00:00Z",
+      tickers: ["AAPL.US"],
+    };
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce(report);
+    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
+
+    const response = await GET(makeRequest(`key=${key}`));
+    const payload = (await response.json()) as {
+      key: string;
+      report: Record<string, unknown>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.key).toBe("2026/02/2026-02-14.buy.json");
+    expect(payload.report).toEqual(report);
   });
 
   it("returns 500 for unknown errors", async () => {
-    vi.mocked(fetchReportIndexPage).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(downloadStorageJson).mockRejectedValueOnce(new Error("boom"));
+    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
 
-    const response = await GET(makeRequest("type=buy&limit=10"));
+    const response = await GET(makeRequest(`key=${key}`));
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(500);

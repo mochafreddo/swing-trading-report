@@ -28,6 +28,22 @@ vi.mock("@/lib/admin-auth", () => {
   };
 });
 
+vi.mock("@/lib/same-origin", () => {
+  class SameOriginError extends Error {
+    status: number;
+
+    constructor(message = "Cross-site request blocked", status = 403) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  return {
+    SameOriginError,
+    assertSameOrigin: vi.fn(() => undefined),
+  };
+});
+
 vi.mock("@/lib/local-request-guard", () => {
   class LocalRequestGuardError extends Error {
     status: number;
@@ -56,18 +72,21 @@ vi.mock("@/lib/supabase-admin", () => {
 
   return {
     SupabaseApiError,
-    listAllStorageKeysCached: vi.fn(),
+    fetchReportIndexPage: vi.fn(),
     downloadStorageJson: vi.fn(),
+    upsertReportIndexEntry: vi.fn(),
   };
 });
 
 import { GET } from "@/app/api/reports/route";
 import { requireAdminAuth } from "@/lib/admin-auth";
 import { assertLocalRequest } from "@/lib/local-request-guard";
+import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import {
   downloadStorageJson,
-  listAllStorageKeysCached,
+  fetchReportIndexPage,
   SupabaseApiError,
+  upsertReportIndexEntry,
 } from "@/lib/supabase-admin";
 
 function makeRequest(query = ""): NextRequest {
@@ -83,8 +102,6 @@ const BUY_KEY_11 = "2026/02/2026-02-11.buy.json";
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("REPORT_SEARCH_WINDOW", "100");
-  vi.stubEnv("REPORT_KEYS_CACHE_TTL_SECONDS", "30");
-  vi.stubEnv("REPORT_SEARCH_CONCURRENCY", "8");
 });
 
 afterEach(() => {
@@ -92,22 +109,42 @@ afterEach(() => {
 });
 
 describe("GET /api/reports", () => {
-  it("returns report list without downloading report JSON when q is empty", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
+  it("returns report list from index without loading report JSON when q is empty", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
     const downloadMock = vi.mocked(downloadStorageJson);
+    const upsertMock = vi.mocked(upsertReportIndexEntry);
     const authMock = vi.mocked(requireAdminAuth);
     const localGuardMock = vi.mocked(assertLocalRequest);
 
-    listMock.mockResolvedValue([
-      BUY_KEY_12,
-      "2026/02/2026-02-12.sell.json",
-      BUY_KEY_14,
-      BUY_KEY_13,
-    ]);
+    listMock.mockResolvedValue({
+      items: [
+        {
+          report_key: BUY_KEY_14,
+          report_type: "buy",
+          report_date: "2026-02-14",
+          duplicate_index: 0,
+          generated_at: "2026-02-14 09:00 KST",
+          summary: { candidate_count: 2 },
+          tickers: ["AAPL.US", "MSFT.US"],
+          tickers_hydrated: true,
+        },
+        {
+          report_key: BUY_KEY_13,
+          report_type: "buy",
+          report_date: "2026-02-13",
+          duplicate_index: 0,
+          generated_at: null,
+          summary: null,
+          tickers: [],
+          tickers_hydrated: true,
+        },
+      ],
+      total: 3,
+    });
 
     const response = await GET(makeRequest("type=buy&limit=2"));
     const payload = (await response.json()) as {
-      items: Array<{ key: string }>;
+      items: Array<{ key: string; generatedAt?: string }>;
       total: number;
       searched: number;
       searchWindow: number;
@@ -117,51 +154,90 @@ describe("GET /api/reports", () => {
     expect(response.status).toBe(200);
     expect(authMock).toHaveBeenCalledTimes(1);
     expect(localGuardMock).toHaveBeenCalledTimes(1);
-    expect(listMock).toHaveBeenCalledWith("reports", 30);
+    expect(listMock).toHaveBeenCalledWith({
+      type: "buy",
+      limit: 2,
+    });
     expect(downloadMock).not.toHaveBeenCalled();
+    expect(upsertMock).not.toHaveBeenCalled();
     expect(payload.items.map((item) => item.key)).toEqual([
       BUY_KEY_14,
       BUY_KEY_13,
     ]);
+    expect(payload.items[0].generatedAt).toBeUndefined();
     expect(payload.total).toBe(3);
     expect(payload.searched).toBe(0);
     expect(payload.searchWindow).toBe(100);
     expect(payload.truncated).toBe(false);
   });
 
-  it("keeps candidate order even when JSON downloads resolve out of order", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
+  it("returns 403 when same-origin guard rejects request", async () => {
+    vi.mocked(assertSameOrigin).mockImplementationOnce(() => {
+      throw new SameOriginError("Cross-site blocked");
+    });
+
+    const response = await GET(makeRequest("type=buy&limit=2"));
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toBe("Cross-site blocked");
+  });
+
+  it("filters by ticker within searchWindow and keeps index order", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
     const downloadMock = vi.mocked(downloadStorageJson);
+    const upsertMock = vi.mocked(upsertReportIndexEntry);
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
-    vi.stubEnv("REPORT_SEARCH_CONCURRENCY", "2");
-
-    listMock.mockResolvedValue([
-      BUY_KEY_11,
-      BUY_KEY_13,
-      BUY_KEY_14,
-      BUY_KEY_12,
-    ]);
-
-    downloadMock.mockImplementation(async (_bucket, key) => {
-      if (key === BUY_KEY_14) {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        return { generated_at: "2026-02-14T00:00:00Z", tickers: ["MSFT.US"] };
-      }
-      if (key === BUY_KEY_13) {
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        return { generated_at: "2026-02-13T00:00:00Z", tickers: ["AAPL.US"] };
-      }
-      if (key === BUY_KEY_12) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        return { generated_at: "2026-02-12T00:00:00Z", tickers: ["XAA.US"] };
-      }
-      return { generated_at: "2026-02-11T00:00:00Z", tickers: ["META.US"] };
+    listMock.mockResolvedValue({
+      items: [
+        {
+          report_key: BUY_KEY_14,
+          report_type: "buy",
+          report_date: "2026-02-14",
+          duplicate_index: 0,
+          generated_at: "2026-02-14T00:00:00Z",
+          summary: { candidate_count: 1 },
+          tickers: ["MSFT.US"],
+          tickers_hydrated: true,
+        },
+        {
+          report_key: BUY_KEY_13,
+          report_type: "buy",
+          report_date: "2026-02-13",
+          duplicate_index: 0,
+          generated_at: "2026-02-13T00:00:00Z",
+          summary: { candidate_count: 2 },
+          tickers: ["AAPL.US"],
+          tickers_hydrated: true,
+        },
+        {
+          report_key: BUY_KEY_12,
+          report_type: "buy",
+          report_date: "2026-02-12",
+          duplicate_index: 0,
+          generated_at: "2026-02-12T00:00:00Z",
+          summary: null,
+          tickers: ["XAA.US"],
+          tickers_hydrated: true,
+        },
+        {
+          report_key: BUY_KEY_11,
+          report_type: "buy",
+          report_date: "2026-02-11",
+          duplicate_index: 0,
+          generated_at: "2026-02-11T00:00:00Z",
+          summary: null,
+          tickers: ["META.US"],
+          tickers_hydrated: true,
+        },
+      ],
+      total: 4,
     });
 
     const response = await GET(makeRequest("type=buy&limit=10&q=aa"));
     const payload = (await response.json()) as {
-      items: Array<{ key: string }>;
+      items: Array<{ key: string; generatedAt?: string; tickers?: string[] }>;
       total: number;
       searched: number;
       searchWindow: number;
@@ -169,44 +245,165 @@ describe("GET /api/reports", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(listMock).toHaveBeenCalledWith({
+      type: "buy",
+      limit: 10,
+    });
+    expect(downloadMock).not.toHaveBeenCalled();
+    expect(upsertMock).not.toHaveBeenCalled();
     expect(payload.items.map((item) => item.key)).toEqual([
       BUY_KEY_13,
       BUY_KEY_12,
     ]);
+    expect(payload.items[0].generatedAt).toBe("2026-02-13T00:00:00Z");
+    expect(payload.items[0].tickers).toEqual(["AAPL.US"]);
     expect(payload.total).toBe(2);
     expect(payload.searched).toBe(4);
     expect(payload.searchWindow).toBe(10);
     expect(payload.truncated).toBe(false);
+  });
 
-    const downloadedKeys = downloadMock.mock.calls.map((call) => call[1]);
-    expect(downloadedKeys).toHaveLength(4);
-    expect(downloadedKeys).toEqual(
-      expect.arrayContaining([BUY_KEY_14, BUY_KEY_13, BUY_KEY_12, BUY_KEY_11]),
-    );
+  it("falls back to report JSON when index tickers are missing", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
+    const downloadMock = vi.mocked(downloadStorageJson);
+    const upsertMock = vi.mocked(upsertReportIndexEntry);
+
+    vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
+    listMock.mockResolvedValue({
+      items: [
+        {
+          report_key: BUY_KEY_14,
+          report_type: "buy",
+          report_date: "2026-02-14",
+          duplicate_index: 0,
+          generated_at: null,
+          summary: null,
+          tickers: [],
+          tickers_hydrated: false,
+        },
+      ],
+      total: 1,
+    });
+    downloadMock.mockResolvedValue({
+      generated_at: "2026-02-14T00:00:00Z",
+      summary: { candidate_count: 1 },
+      tickers: ["AAPL.US"],
+    });
+
+    const response = await GET(makeRequest("type=buy&limit=5&q=aapl"));
+    const payload = (await response.json()) as {
+      items: Array<{ key: string; generatedAt?: string; tickers?: string[] }>;
+      total: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.total).toBe(1);
+    expect(payload.items[0]?.key).toBe(BUY_KEY_14);
+    expect(payload.items[0]?.generatedAt).toBe("2026-02-14T00:00:00Z");
+    expect(payload.items[0]?.tickers).toEqual(["AAPL.US"]);
+    expect(downloadMock).toHaveBeenCalledWith("reports", BUY_KEY_14);
+    expect(upsertMock).toHaveBeenCalledWith({
+      reportKey: BUY_KEY_14,
+      reportType: "buy",
+      reportDate: "2026-02-14",
+      duplicateIndex: 0,
+      generatedAt: "2026-02-14T00:00:00Z",
+      summary: { candidate_count: 1 },
+      tickers: ["AAPL.US"],
+      tickersHydrated: true,
+    });
+  });
+
+  it("ignores index hydration failures after fallback download", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
+    const downloadMock = vi.mocked(downloadStorageJson);
+    const upsertMock = vi.mocked(upsertReportIndexEntry);
+
+    vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
+    listMock.mockResolvedValue({
+      items: [
+        {
+          report_key: BUY_KEY_13,
+          report_type: "buy",
+          report_date: "2026-02-13",
+          duplicate_index: 0,
+          generated_at: null,
+          summary: null,
+          tickers: [],
+          tickers_hydrated: false,
+        },
+      ],
+      total: 1,
+    });
+    downloadMock.mockResolvedValue({
+      tickers: ["AAPL.US"],
+    });
+    upsertMock.mockRejectedValue(new Error("index down"));
+
+    const response = await GET(makeRequest("type=buy&limit=5&q=aapl"));
+    const payload = (await response.json()) as {
+      items: Array<{ key: string }>;
+      total: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.total).toBe(1);
+    expect(payload.items[0]?.key).toBe(BUY_KEY_13);
+  });
+
+  it("does not re-download when row is already hydrated with empty tickers", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
+    const downloadMock = vi.mocked(downloadStorageJson);
+    const upsertMock = vi.mocked(upsertReportIndexEntry);
+
+    vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
+    listMock.mockResolvedValue({
+      items: [
+        {
+          report_key: BUY_KEY_11,
+          report_type: "buy",
+          report_date: "2026-02-11",
+          duplicate_index: 0,
+          generated_at: "2026-02-11T00:00:00Z",
+          summary: { candidate_count: 0 },
+          tickers: [],
+          tickers_hydrated: true,
+        },
+      ],
+      total: 1,
+    });
+
+    const response = await GET(makeRequest("type=buy&limit=5&q=aapl"));
+    const payload = (await response.json()) as {
+      items: Array<{ key: string }>;
+      total: number;
+      searched: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.total).toBe(0);
+    expect(payload.searched).toBe(1);
+    expect(downloadMock).not.toHaveBeenCalled();
+    expect(upsertMock).not.toHaveBeenCalled();
   });
 
   it("applies searchWindow and marks truncated when candidates exceed window", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
-    const downloadMock = vi.mocked(downloadStorageJson);
-    const allKeys = [
-      "2026/02/2026-02-20.buy.json",
-      "2026/02/2026-02-19.buy.json",
-      "2026/02/2026-02-18.buy.json",
-      "2026/02/2026-02-17.buy.json",
-      "2026/02/2026-02-16.buy.json",
-      "2026/02/2026-02-15.buy.json",
-      "2026/02/2026-02-14.buy.json",
-      "2026/02/2026-02-13.buy.json",
-      "2026/02/2026-02-12.buy.json",
-      "2026/02/2026-02-11.buy.json",
-      "2026/02/2026-02-10.buy.json",
-    ];
+    const listMock = vi.mocked(fetchReportIndexPage);
+    const windowRows = Array.from({ length: 10 }, (_, index) => ({
+      report_key: `2026/02/2026-02-${String(20 - index).padStart(2, "0")}.buy.json`,
+      report_type: "buy" as const,
+      report_date: `2026-02-${String(20 - index).padStart(2, "0")}`,
+      duplicate_index: 0,
+      generated_at: null,
+      summary: null,
+      tickers: ["AAPL.US"],
+      tickers_hydrated: true,
+    }));
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
-    listMock.mockResolvedValue(allKeys);
-    downloadMock.mockResolvedValue({
-      generated_at: "2026-02-20T00:00:00Z",
-      tickers: ["AAPL.US"],
+    listMock.mockResolvedValue({
+      items: windowRows,
+      total: 11,
     });
 
     const response = await GET(makeRequest("type=buy&limit=5&q=aapl"));
@@ -224,84 +421,16 @@ describe("GET /api/reports", () => {
     expect(payload.searched).toBe(10);
     expect(payload.searchWindow).toBe(10);
     expect(payload.truncated).toBe(true);
-    expect(downloadMock).toHaveBeenCalledTimes(10);
   });
 
-  it("skips missing reports (404) during ticker search", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
-    const downloadMock = vi.mocked(downloadStorageJson);
-
-    listMock.mockResolvedValue([BUY_KEY_14, BUY_KEY_13]);
-    downloadMock.mockImplementation(async (_bucket, key) => {
-      if (key === BUY_KEY_14) {
-        throw new SupabaseApiError("missing", 404);
-      }
-      return { generated_at: "2026-02-13T00:00:00Z", tickers: ["AAPL.US"] };
-    });
-
-    const response = await GET(makeRequest("type=buy&limit=10&q=aapl"));
-    const payload = (await response.json()) as {
-      items: Array<{ key: string }>;
-      total: number;
-      searched: number;
-      truncated: boolean;
-    };
-
-    expect(response.status).toBe(200);
-    expect(payload.items.map((item) => item.key)).toEqual([BUY_KEY_13]);
-    expect(payload.total).toBe(1);
-    expect(payload.searched).toBe(2);
-    expect(payload.truncated).toBe(false);
-  });
-
-  it("returns 500 when JSON download fails with non-404 error", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
-    const downloadMock = vi.mocked(downloadStorageJson);
-
-    listMock.mockResolvedValue([BUY_KEY_14]);
-    downloadMock.mockRejectedValue(new SupabaseApiError("boom", 500));
+  it("returns 500 when report index query fails", async () => {
+    const listMock = vi.mocked(fetchReportIndexPage);
+    listMock.mockRejectedValue(new SupabaseApiError("boom", 500));
 
     const response = await GET(makeRequest("type=buy&limit=10&q=aapl"));
     const payload = (await response.json()) as { error?: string };
 
     expect(response.status).toBe(500);
     expect(payload.error).toContain("boom");
-  });
-
-  it("stops scheduling new downloads after non-404 error", async () => {
-    const listMock = vi.mocked(listAllStorageKeysCached);
-    const downloadMock = vi.mocked(downloadStorageJson);
-
-    vi.stubEnv("REPORT_SEARCH_WINDOW", "10");
-    vi.stubEnv("REPORT_SEARCH_CONCURRENCY", "2");
-
-    listMock.mockResolvedValue([
-      BUY_KEY_11,
-      BUY_KEY_12,
-      BUY_KEY_13,
-      BUY_KEY_14,
-    ]);
-    downloadMock.mockImplementation(async (_bucket, key) => {
-      if (key === BUY_KEY_14) {
-        throw new SupabaseApiError("boom", 500);
-      }
-
-      if (key === BUY_KEY_13) {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        return { generated_at: "2026-02-13T00:00:00Z", tickers: ["AAPL.US"] };
-      }
-
-      return { generated_at: "2026-02-12T00:00:00Z", tickers: ["AAPL.US"] };
-    });
-
-    const response = await GET(makeRequest("type=buy&limit=10&q=aapl"));
-    expect(response.status).toBe(500);
-
-    const downloadedKeys = downloadMock.mock.calls.map((call) => call[1]);
-    expect(downloadedKeys).toEqual(
-      expect.arrayContaining([BUY_KEY_14, BUY_KEY_13]),
-    );
-    expect(downloadedKeys).not.toContain(BUY_KEY_12);
-    expect(downloadedKeys).not.toContain(BUY_KEY_11);
   });
 });

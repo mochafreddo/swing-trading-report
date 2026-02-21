@@ -18,6 +18,9 @@ from .storage_key import build_report_storage_key
 _DEFAULT_BUCKET = "reports"
 _MAX_DUPLICATE_INDEX = 999
 _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
+_REPORT_KEY_PATTERN = re.compile(
+    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell)\.json$"
+)
 
 
 class SupabaseStorageError(RuntimeError):
@@ -30,6 +33,14 @@ class SupabaseStorageConfigError(SupabaseStorageError):
 
 class SupabaseStorageConflictError(SupabaseStorageError):
     """Raised when object path already exists in the bucket."""
+
+
+class SupabaseReportIndexError(SupabaseStorageError):
+    """Raised when report-index upsert fails after object upload."""
+
+    def __init__(self, message: str, *, storage_key: str) -> None:
+        super().__init__(message)
+        self.storage_key = storage_key
 
 
 @dataclass(frozen=True)
@@ -258,6 +269,148 @@ def _storage_upload_request(
     return _response_to_data(response)
 
 
+def _report_index_upsert_request(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+) -> _HttpResponseData:
+    url = f"{config.url}/rest/v1/report_index?on_conflict=report_key"
+    headers = {
+        **_auth_headers(config),
+        "content-type": "application/json",
+        "prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    response = session.post(
+        url,
+        headers=headers,
+        data=json.dumps([row], ensure_ascii=False).encode("utf-8"),
+        timeout=config.timeout_seconds,
+    )
+    return _response_to_data(response)
+
+
+def _safe_json_dict(payload: bytes) -> dict[str, object]:
+    try:
+        decoded = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _normalize_ticker(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    ticker = value.strip()
+    return ticker if ticker else None
+
+
+def _extract_tickers_from_rows(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    results: list[str] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        ticker = _normalize_ticker(row.get("ticker"))
+        if ticker:
+            results.append(ticker)
+    return results
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    results: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        results.append(value)
+    return results
+
+
+def _extract_report_tickers(report: dict[str, object]) -> list[str]:
+    tickers_raw = report.get("tickers")
+    tickers: list[str] = []
+    if isinstance(tickers_raw, list):
+        for value in tickers_raw:
+            ticker = _normalize_ticker(value)
+            if ticker:
+                tickers.append(ticker)
+    if tickers:
+        return _dedupe_preserve_order(tickers)
+
+    candidates = _extract_tickers_from_rows(report.get("candidates"))
+    evaluated = _extract_tickers_from_rows(report.get("evaluated"))
+    return _dedupe_preserve_order(candidates + evaluated)
+
+
+def _extract_duplicate_index(storage_key: str) -> int:
+    match = _REPORT_KEY_PATTERN.search(storage_key)
+    if not match:
+        return 0
+    duplicate_index_raw = match.group(1)
+    if duplicate_index_raw is None:
+        return 0
+    try:
+        duplicate_index = int(duplicate_index_raw)
+    except ValueError:
+        return 0
+    return max(duplicate_index, 0)
+
+
+def _build_report_index_row(
+    *,
+    storage_key: str,
+    run_type: str,
+    report_date: dt.date,
+    report_payload: dict[str, object],
+) -> dict[str, object]:
+    generated_at = report_payload.get("generated_at")
+    summary = report_payload.get("summary")
+    tickers = _extract_report_tickers(report_payload)
+
+    return {
+        "report_key": storage_key,
+        "report_type": run_type,
+        "report_date": report_date.isoformat(),
+        "duplicate_index": _extract_duplicate_index(storage_key),
+        "generated_at": generated_at if isinstance(generated_at, str) else None,
+        "summary": summary if isinstance(summary, dict) else None,
+        "tickers": tickers,
+        "tickers_hydrated": True,
+    }
+
+
+def _upsert_report_index(
+    *,
+    config: SupabaseStorageConfig,
+    storage_key: str,
+    run_type: str,
+    report_date: dt.date,
+    report_payload: dict[str, object],
+    session: requests.Session,
+) -> None:
+    row = _build_report_index_row(
+        storage_key=storage_key,
+        run_type=run_type,
+        report_date=report_date,
+        report_payload=report_payload,
+    )
+    response = _report_index_upsert_request(
+        config=config,
+        row=row,
+        session=session,
+    )
+    if response.status_code in {200, 201, 204}:
+        return
+    raise SupabaseReportIndexError(
+        f"failed to upsert report index for '{storage_key}': "
+        f"{_response_message(status_code=response.status_code, text=response.text)}",
+        storage_key=storage_key,
+    )
+
+
 def _iter_candidate_storage_keys(
     *,
     report_date: dt.date,
@@ -345,6 +498,7 @@ def upload_report_artifact(
     session: requests.Session | None = None,
 ) -> str:
     payload = Path(local_path).read_bytes()
+    report_payload = _safe_json_dict(payload)
 
     active_session = session or requests.Session()
     should_close_session = session is None
@@ -365,7 +519,7 @@ def upload_report_artifact(
                 session=active_session,
             )
 
-        return _resolve_storage_key_and_upload(
+        resolved_key = _resolve_storage_key_and_upload(
             candidate_keys=_iter_candidate_storage_keys(
                 report_date=report_date,
                 run_type=run_type,
@@ -373,6 +527,15 @@ def upload_report_artifact(
             object_exists=_exists,
             upload_payload=_upload,
         )
+        _upsert_report_index(
+            config=config,
+            storage_key=resolved_key,
+            run_type=run_type,
+            report_date=report_date,
+            report_payload=report_payload,
+            session=active_session,
+        )
+        return resolved_key
     finally:
         if should_close_session:
             active_session.close()
@@ -407,6 +570,12 @@ def maybe_upload_report_artifact(
             report_date=report_date,
             config=config,
         )
+    except SupabaseReportIndexError as exc:
+        logger.warning(
+            "Supabase report upload completed but index upsert failed: %s",
+            exc,
+        )
+        return exc.storage_key
     except SupabaseStorageError:
         if required:
             raise
@@ -418,6 +587,7 @@ __all__ = [
     "SupabaseStorageConfig",
     "SupabaseStorageConfigError",
     "SupabaseStorageError",
+    "SupabaseReportIndexError",
     "maybe_upload_report_artifact",
     "upload_report_artifact",
 ]

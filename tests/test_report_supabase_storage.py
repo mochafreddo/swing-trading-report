@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import sab.report.supabase_storage as supabase_storage
 from sab.report.supabase_storage import (
+    SupabaseReportIndexError,
     SupabaseStorageConfig,
     SupabaseStorageConfigError,
     SupabaseStorageError,
@@ -237,7 +238,7 @@ def test_upload_report_artifact_adds_suffix_when_key_exists(tmp_path: Path) -> N
 
     session = _FakeSession(
         get_responses=[_FakeResponse(200), _FakeResponse(404)],
-        post_responses=[_FakeResponse(200)],
+        post_responses=[_FakeResponse(200), _FakeResponse(201)],
     )
     config = SupabaseStorageConfig(
         url="https://example.supabase.co",
@@ -255,6 +256,9 @@ def test_upload_report_artifact_adds_suffix_when_key_exists(tmp_path: Path) -> N
 
     assert key == "2026/02/2026-02-13-1.buy.json"
     assert session.post_calls[0]["headers"]["content-type"] == "application/json"
+    assert session.post_calls[1]["url"].endswith(
+        "/rest/v1/report_index?on_conflict=report_key"
+    )
 
 
 def test_upload_report_artifact_uses_base_key_when_available(tmp_path: Path) -> None:
@@ -263,7 +267,7 @@ def test_upload_report_artifact_uses_base_key_when_available(tmp_path: Path) -> 
 
     session = _FakeSession(
         get_responses=[_FakeResponse(404)],
-        post_responses=[_FakeResponse(201)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
     )
     config = SupabaseStorageConfig(
         url="https://example.supabase.co",
@@ -295,7 +299,7 @@ def test_upload_report_artifact_treats_400_not_found_as_missing(
                 '{"httpStatusCode":400,"code":"not_found","message":"The resource was not found"}',
             )
         ],
-        post_responses=[_FakeResponse(201)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
     )
     config = SupabaseStorageConfig(
         url="https://example.supabase.co",
@@ -312,6 +316,68 @@ def test_upload_report_artifact_treats_400_not_found_as_missing(
     )
 
     assert key == "2026/02/2026-02-13.buy.json"
+
+
+def test_upload_report_artifact_indexes_tickers_from_candidates_fallback(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(
+        '{"schema":"sab.report.v1","candidates":[{"ticker":"AAPL.US"},{"ticker":"MSFT.US"}]}',
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="buy",
+        report_date=date(2026, 2, 13),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/02/2026-02-13.buy.json"
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert b'"tickers": ["AAPL.US", "MSFT.US"]' in index_payload
+    assert b'"tickers_hydrated": true' in index_payload
+
+
+def test_upload_report_artifact_raises_index_error_when_upsert_fails(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(500, "index down")],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="index down") as exc_info:
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.storage_key == "2026/02/2026-02-13.buy.json"
 
 
 def test_maybe_upload_report_artifact_skips_when_disabled(
@@ -363,6 +429,43 @@ def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
     )
 
     assert uploaded is None
+
+
+def test_maybe_upload_report_artifact_returns_uploaded_key_on_index_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("SAB_UPLOAD_REPORTS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+
+    def _fake_upload(
+        *,
+        local_path: str,
+        run_type: str,
+        report_date: date,
+        config: SupabaseStorageConfig,
+    ) -> str:
+        del local_path, run_type, report_date, config
+        raise SupabaseReportIndexError(
+            "index down",
+            storage_key="2026/02/2026-02-13.buy.json",
+        )
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact", _fake_upload
+    )
+
+    uploaded = maybe_upload_report_artifact(
+        artifact_path=report_path.as_posix(),
+        run_type="buy",
+        logger=logging.getLogger("test"),
+    )
+
+    assert uploaded == "2026/02/2026-02-13.buy.json"
 
 
 def test_maybe_upload_report_artifact_requires_supabase_env_on_github_actions(
