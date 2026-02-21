@@ -115,14 +115,17 @@
 ## PR 차단 기준(브랜치 보호)
 
 - `main` 브랜치 보호 규칙은 classic branch protection으로 관리합니다.
-- Required status checks는 아래 4개를 고정합니다.
+- 현재 운영 모드는 임시 `solo-dev`로, `main` 직접 push를 허용합니다.
+- `required_status_checks=null`, `required_pull_request_reviews=null` 상태입니다.
+- `enforce_admins=true`로 관리자 우회를 차단합니다.
+- `allow_force_pushes=false`, `allow_deletions=false`는 유지합니다.
+- PR 기반 운영으로 복귀 시 `docs/governance/main-branch-protection.stage1.payload.json`을 적용하고,
+- 아래 4개 Required status checks를 복원합니다:
   - `Ruff + Mypy + Pytest (Python 3.13)`
   - `Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`
-- `enforce_admins=true`로 관리자 우회를 차단합니다.
-- 단독 운영 기준으로 `required_approving_review_count=0`, `require_code_owner_reviews=false`를 유지합니다.
-- 설정 동기화 절차와 2단계 상향 기준은 `docs/governance/main-branch-protection.md`를 따릅니다.
+- 모드 전환/동기화 절차와 2단계 상향 기준은 `docs/governance/main-branch-protection.md`를 따릅니다.
 
 ## 파일/경로
 

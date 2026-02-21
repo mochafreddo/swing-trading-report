@@ -4,21 +4,14 @@
 - 최종 갱신: 2026-02-21
 - 범위: `mochafreddo/swing-trading-report` 저장소의 `main` 브랜치
 
-## 1) 현재 적용 정책(1단계)
+## 1) 현재 활성 정책(임시 solo-dev)
 
 `main`은 classic branch protection으로 관리합니다.
 
-- `required_status_checks.strict=true`
-- Required status checks:
-  - `Ruff + Mypy + Pytest (Python 3.13)`
-  - `Next.js Web (Lint + Typecheck + Test + Build)`
-  - `workflow_audit`
-  - `security_audit`
+- `required_status_checks=null` (required check 미사용)
+- `required_pull_request_reviews=null` (PR 필수 아님)
 - `enforce_admins=true`
-- `required_pull_request_reviews.required_approving_review_count=0`
-- `required_pull_request_reviews.require_code_owner_reviews=false`
-- `required_pull_request_reviews.dismiss_stale_reviews=false`
-- `required_conversation_resolution=true`
+- `required_conversation_resolution=false`
 - `allow_force_pushes=false`
 - `allow_deletions=false`
 - `required_linear_history=false`
@@ -26,13 +19,52 @@
 
 참고 파일:
 
-- 기준 payload: `docs/governance/main-branch-protection.stage1.payload.json`
-- 적용 직후 응답: `docs/governance/main-branch-protection.applied.json`
+- solo-dev payload: `docs/governance/main-branch-protection.solo-dev.payload.json`
 - 현재값 재조회: `docs/governance/main-branch-protection.current.json`
+
+## 2) 강화 기준 정책(stage1, 복귀용)
+
+PR 기반 운영으로 복귀할 때는 아래 stage1 정책을 적용합니다.
+
+- `required_status_checks.strict=true`
+- Required status checks:
+  - `Ruff + Mypy + Pytest (Python 3.13)`
+  - `Next.js Web (Lint + Typecheck + Test + Build)`
+  - `workflow_audit`
+  - `security_audit`
+- `required_pull_request_reviews.required_approving_review_count=0`
+- `required_pull_request_reviews.require_code_owner_reviews=false`
+- `required_pull_request_reviews.dismiss_stale_reviews=false`
+- `required_conversation_resolution=true`
+
+참고 파일:
+
+- stage1 payload: `docs/governance/main-branch-protection.stage1.payload.json`
+- 적용 직후 응답: `docs/governance/main-branch-protection.applied.json`
 - 기준선 스냅샷: `docs/governance/main-branch-protection.snapshot.json`
 - payload는 GitHub Actions `app_id`를 고정하지 않고 `contexts`만 선언해 환경 이관 시 재적용 실패를 줄입니다.
 
-## 2) Required check 이름 동기화 절차
+## 3) 모드 전환 절차
+
+### 3-1) solo-dev 적용(직접 push 허용)
+
+```bash
+gh api --method PUT \
+  -H "Accept: application/vnd.github+json" \
+  repos/mochafreddo/swing-trading-report/branches/main/protection \
+  --input docs/governance/main-branch-protection.solo-dev.payload.json
+```
+
+### 3-2) stage1 적용(PR 기반 운영)
+
+```bash
+gh api --method PUT \
+  -H "Accept: application/vnd.github+json" \
+  repos/mochafreddo/swing-trading-report/branches/main/protection \
+  --input docs/governance/main-branch-protection.stage1.payload.json
+```
+
+## 4) Required check 이름 동기화 절차
 
 워크플로 `job.name`이 변경되면 브랜치 보호의 required check 컨텍스트도 함께 변경해야 합니다.
 
@@ -100,7 +132,7 @@ diff -u \
 `main-branch-protection.payload.normalized.json`과
 `main-branch-protection.current.normalized.json` diff가 비어 있어야 합니다.
 
-## 3) 단독 운영 예외와 상향 트리거
+## 5) 단독 운영 예외와 상향 트리거
 
 현재는 직접 협업자가 1명이라 머지 병목 방지를 위해 승인 수 0 정책을 유지합니다.
 
@@ -112,7 +144,7 @@ diff -u \
   - `require_code_owner_reviews=true`
   - `dismiss_stale_reviews=true`
 
-## 4) 2단계(서명 커밋) 전환 체크리스트
+## 6) 2단계(서명 커밋) 전환 체크리스트
 
 아래 조건을 만족하면 `required_signatures=true`를 적용합니다.
 
@@ -133,15 +165,15 @@ gh api --method POST \
   repos/mochafreddo/swing-trading-report/branches/main/protection/required_signatures
 ```
 
-## 5) 운영 검증 시나리오
+## 7) 운영 검증 시나리오
 
-1. 관리자 계정으로 `main` 직접 push 차단 확인 (`enforce_admins`)
-2. 필수 체크 4개 중 1개 실패 PR 머지 차단 확인
-3. 필수 체크 4개 성공 + 대화 해결 완료 PR 머지 가능 확인
-4. 워크플로 job 이름 변경 후 required check 미동기화 시 머지 차단 확인
+1. solo-dev에서 관리자 계정으로 `main` 직접 push 허용 확인
+2. solo-dev에서 force push 및 브랜치 삭제 차단 확인
+3. stage1 적용 후 필수 체크 4개 중 1개 실패 PR 머지 차단 확인
+4. stage1 적용 후 필수 체크 4개 성공 + 대화 해결 완료 PR 머지 가능 확인
 5. (2단계 적용 후) unsigned 커밋 머지/직접 반영 차단 확인
 
-## 6) 기준 문서
+## 8) 기준 문서
 
 - <https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches>
 - <https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets>
