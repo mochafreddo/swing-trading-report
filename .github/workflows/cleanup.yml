@@ -76,9 +76,11 @@ jobs:
             exit 1
           fi
 
-          echo "dry_run=${dry_run}" >> "${GITHUB_OUTPUT}"
-          echo "retention_days=${retention_days}" >> "${GITHUB_OUTPUT}"
-          echo "bucket=${bucket}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "dry_run=${dry_run}"
+            echo "retention_days=${retention_days}"
+            echo "bucket=${bucket}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Cleanup expired report objects
         id: cleanup

@@ -27,6 +27,14 @@
 - `/run` 성공 조건: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`가 비어 있으면 `/api/run`이 500(Zod validation)으로 실패합니다.
 - 브라우저 자동화 폴백: Playwright Chrome 런치가 세션 충돌로 실패할 수 있으므로, 이런 경우 `chrome-devtools` 기반 체크로 전환합니다.
 
+## GitHub Actions 린트 팁
+
+- `workflow_audit`의 `actionlint`는 `shellcheck` 스타일 경고(`SC2129`)도 실패로 처리될 수 있습니다.
+- GitHub Actions `run: |`에서 heredoc(`cat <<'EOF'`) 사용 시 종료 토큰(`EOF`)은 줄 맨 앞(무들여쓰기)이어야 합니다. 들여쓰기가 들어가면 `SC1039`, `SC1072`, `SC1073`로 실패할 수 있습니다.
+- 단순 문자열 파일 생성은 heredoc 대신 `printf`를 우선 사용합니다.
+- 워크플로 문법/쉘 린트는 로컬에서 다음 명령으로 재현합니다: `docker run --rm -v "$PWD":/work -w /work rhysd/actionlint:latest`
+- 로컬에서 `python` 실행이 불안정할 수 있으므로, 저장소 작업 스크립트는 `uv run python ...`을 우선 사용합니다.
+
 ## 커밋
 
 - Conventional Commits 형식을 사용합니다.

@@ -119,10 +119,12 @@ jobs:
             scan_universe_flag="watchlist"
           fi
 
-          echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
-          echo "dispatch_universe=${dispatch_universe}" >> "${GITHUB_OUTPUT}"
-          echo "markets=${markets}" >> "${GITHUB_OUTPUT}"
-          echo "scan_universe_flag=${scan_universe_flag}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "provider=${provider}"
+            echo "dispatch_universe=${dispatch_universe}"
+            echo "markets=${markets}"
+            echo "scan_universe_flag=${scan_universe_flag}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Install dependencies
         run: |
