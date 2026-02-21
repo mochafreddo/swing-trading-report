@@ -9,6 +9,7 @@ import { __resetLoginThrottleForTests } from "@/lib/login-throttle";
 afterEach(() => {
   __resetLoginThrottleForTests();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("auth routes", () => {
@@ -177,6 +178,71 @@ describe("auth routes", () => {
 
     const stillBlocked = await loginPost(makeRequest("spray-next"));
     expect(stillBlocked.status).toBe(429);
+  });
+
+  it("keeps successful login response when throttle cleanup fails", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_ENFORCE_LOCAL_REQUEST", "0");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+    vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
+    vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
+    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+
+        if (
+          url.pathname.endsWith("/rest/v1/runtime_state") &&
+          method === "GET"
+        ) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        if (
+          url.pathname.endsWith("/rest/v1/runtime_state") &&
+          method === "DELETE"
+        ) {
+          return new Response(
+            JSON.stringify({ message: "delete failed for test" }),
+            {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        throw new Error(`Unexpected request: ${method} ${url.toString()}`);
+      });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const request = new NextRequest("http://localhost:55300/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:55300",
+      },
+      body: JSON.stringify({ username: "sab", password: "pass" }),
+    });
+
+    const response = await loginPost(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(`${ADMIN_SESSION_COOKIE_NAME}=`);
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init?.method ?? "GET") === "DELETE",
+    );
+    expect(deleteCalls).toHaveLength(2);
+    expect(warnSpy).toHaveBeenCalledTimes(2);
   });
 
   it("clears session cookie on logout", async () => {

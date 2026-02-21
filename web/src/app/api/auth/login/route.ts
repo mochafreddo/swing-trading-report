@@ -46,6 +46,21 @@ function parseLoginPayload(payload: unknown): LoginPayload | null {
   return normalized;
 }
 
+async function clearLoginThrottleKeysBestEffort(
+  throttleKeys: string[],
+): Promise<void> {
+  for (const throttleKey of throttleKeys) {
+    try {
+      await clearLoginAttemptFailures(throttleKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.warn(
+        `Failed to clear login throttle state after successful login: ${message}`,
+      );
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
@@ -93,7 +108,7 @@ export async function POST(request: NextRequest) {
   );
   try {
     for (const throttleKey of throttleKeys) {
-      assertLoginAttemptAllowed(throttleKey);
+      await assertLoginAttemptAllowed(throttleKey);
     }
   } catch (error) {
     if (error instanceof LoginThrottleError) {
@@ -110,27 +125,42 @@ export async function POST(request: NextRequest) {
   }
 
   if (!validateAdminCredentials(parsed.username, parsed.password)) {
-    for (const throttleKey of throttleKeys) {
-      recordLoginAttemptFailure(throttleKey);
+    try {
+      for (const throttleKey of throttleKeys) {
+        await recordLoginAttemptFailure(throttleKey);
+      }
+    } catch (error) {
+      if (error instanceof LoginThrottleError) {
+        return NextResponse.json(
+          { error: error.message },
+          {
+            status: error.status,
+            headers: { "Retry-After": String(error.retryAfterSeconds) },
+          },
+        );
+      }
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return NextResponse.json({ error: message }, { status: 500 });
     }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let token: string;
   try {
     const credentialVersion = await getAdminCredentialVersion();
-    const token = await createAdminSessionToken({ credentialVersion });
-    for (const throttleKey of throttleKeys) {
-      clearLoginAttemptFailures(throttleKey);
-    }
-    const response = NextResponse.json({ ok: true });
-    response.cookies.set(
-      ADMIN_SESSION_COOKIE_NAME,
-      token,
-      getAdminSessionCookieOptions(),
-    );
-    return response;
+    token = await createAdminSessionToken({ credentialVersion });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  await clearLoginThrottleKeysBestEffort(throttleKeys);
+
+  const response = NextResponse.json({ ok: true });
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE_NAME,
+    token,
+    getAdminSessionCookieOptions(),
+  );
+  return response;
 }

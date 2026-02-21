@@ -1,3 +1,9 @@
+import {
+  consumeLoginThrottleAttempt,
+  deleteRuntimeStateEntry,
+  fetchRuntimeStateEntry,
+} from "@/lib/supabase-admin";
+
 type LoginThrottleConfig = {
   maxAttempts: number;
   windowMs: number;
@@ -10,18 +16,36 @@ type LoginAttemptState = {
   blockedUntil: number;
 };
 
+type RuntimeStateStore = "memory" | "supabase";
+
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_WINDOW_SECONDS = 15 * 60;
 const DEFAULT_BLOCK_SECONDS = 15 * 60;
 const MAX_TRACKED_LOGIN_KEYS = 512;
 const GLOBAL_LOGIN_THROTTLE_KEY = "__global__";
 const USER_LOGIN_THROTTLE_PREFIX = "user:";
+const LOGIN_THROTTLE_RUNTIME_STATE_PREFIX = "login_throttle:";
 
 let globalAttemptState: LoginAttemptState | null = null;
 const perUserAttempts = new Map<string, LoginAttemptState>();
 
 function isGlobalThrottleKey(key: string): boolean {
   return key === GLOBAL_LOGIN_THROTTLE_KEY;
+}
+
+function resolveRuntimeStateStore(): RuntimeStateStore {
+  const raw = process.env.SAB_RUNTIME_STATE_STORE?.trim().toLowerCase();
+  if (raw === "memory") {
+    return "memory";
+  }
+  if (raw === "supabase") {
+    return "supabase";
+  }
+  return process.env.NODE_ENV === "test" ? "memory" : "supabase";
+}
+
+function buildRuntimeStateKey(key: string): string {
+  return `${LOGIN_THROTTLE_RUNTIME_STATE_PREFIX}${key}`;
 }
 
 function readPositiveIntEnv(name: string, fallback: number): number {
@@ -67,6 +91,47 @@ function isAttemptStateExpired(
   return windowExpired && blockExpired;
 }
 
+function shouldResetAttemptState(
+  state: LoginAttemptState,
+  now: number,
+  config: LoginThrottleConfig,
+): boolean {
+  return (
+    now - state.windowStartedAt > config.windowMs ||
+    (state.blockedUntil > 0 && state.blockedUntil <= now)
+  );
+}
+
+function parseLoginAttemptState(
+  payload: Record<string, unknown>,
+): LoginAttemptState | null {
+  const failures = payload.failures;
+  const windowStartedAt = payload.windowStartedAt;
+  const blockedUntil = payload.blockedUntil;
+  if (
+    typeof failures !== "number" ||
+    !Number.isFinite(failures) ||
+    !Number.isInteger(failures) ||
+    failures < 0 ||
+    typeof windowStartedAt !== "number" ||
+    !Number.isFinite(windowStartedAt) ||
+    !Number.isInteger(windowStartedAt) ||
+    windowStartedAt < 0 ||
+    typeof blockedUntil !== "number" ||
+    !Number.isFinite(blockedUntil) ||
+    !Number.isInteger(blockedUntil) ||
+    blockedUntil < 0
+  ) {
+    return null;
+  }
+
+  return {
+    failures,
+    windowStartedAt,
+    blockedUntil,
+  };
+}
+
 function cleanupGlobalAttempt(now: number, config: LoginThrottleConfig): void {
   if (!globalAttemptState) {
     return;
@@ -99,26 +164,7 @@ function evictOldestKeysIfNeeded(): void {
   }
 }
 
-export class LoginThrottleError extends Error {
-  readonly status = 429;
-  readonly retryAfterSeconds: number;
-
-  constructor(retryAfterSeconds: number) {
-    super("Too many login attempts. Try again later.");
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-export function buildGlobalLoginThrottleKey(): string {
-  return GLOBAL_LOGIN_THROTTLE_KEY;
-}
-
-export function buildLoginThrottleKey(username: string): string {
-  const normalizedUsername = username.trim().toLowerCase();
-  return `${USER_LOGIN_THROTTLE_PREFIX}${normalizedUsername || "unknown"}`;
-}
-
-export function assertLoginAttemptAllowed(key: string, now = Date.now()): void {
+function assertLoginAttemptAllowedInMemory(key: string, now: number): void {
   const config = getLoginThrottleConfig();
   cleanupGlobalAttempt(now, config);
   cleanupPerUserAttempts(now, config);
@@ -138,10 +184,7 @@ export function assertLoginAttemptAllowed(key: string, now = Date.now()): void {
     throw new LoginThrottleError(retryAfterSeconds);
   }
 
-  if (
-    now - state.windowStartedAt > config.windowMs ||
-    (state.blockedUntil > 0 && state.blockedUntil <= now)
-  ) {
+  if (shouldResetAttemptState(state, now, config)) {
     if (isGlobalThrottleKey(key)) {
       globalAttemptState = null;
     } else {
@@ -150,7 +193,7 @@ export function assertLoginAttemptAllowed(key: string, now = Date.now()): void {
   }
 }
 
-export function recordLoginAttemptFailure(key: string, now = Date.now()): void {
+function recordLoginAttemptFailureInMemory(key: string, now: number): void {
   const config = getLoginThrottleConfig();
   cleanupGlobalAttempt(now, config);
   cleanupPerUserAttempts(now, config);
@@ -158,8 +201,15 @@ export function recordLoginAttemptFailure(key: string, now = Date.now()): void {
   const current = isGlobalThrottleKey(key)
     ? globalAttemptState
     : perUserAttempts.get(key);
+  if (current && current.blockedUntil > now) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((current.blockedUntil - now) / 1000),
+    );
+    throw new LoginThrottleError(retryAfterSeconds);
+  }
   const windowExpired =
-    !current || now - current.windowStartedAt > config.windowMs;
+    !current || shouldResetAttemptState(current, now, config);
 
   const state: LoginAttemptState = windowExpired
     ? { failures: 0, windowStartedAt: now, blockedUntil: 0 }
@@ -181,12 +231,136 @@ export function recordLoginAttemptFailure(key: string, now = Date.now()): void {
   perUserAttempts.set(key, state);
 }
 
-export function clearLoginAttemptFailures(key: string): void {
+function clearLoginAttemptFailuresInMemory(key: string): void {
   if (isGlobalThrottleKey(key)) {
     globalAttemptState = null;
   } else {
     perUserAttempts.delete(key);
   }
+}
+
+async function deleteRuntimeStateEntryBestEffort(key: string): Promise<void> {
+  try {
+    await deleteRuntimeStateEntry(key);
+  } catch {
+    // Cleanup failure must not block login request handling.
+  }
+}
+
+async function loadLoginAttemptStateFromSupabase(
+  key: string,
+  now: number,
+  config: LoginThrottleConfig,
+): Promise<LoginAttemptState | null> {
+  const runtimeKey = buildRuntimeStateKey(key);
+  const cached = await fetchRuntimeStateEntry(runtimeKey);
+  if (!cached) {
+    return null;
+  }
+
+  const expiresAt = Date.parse(cached.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    await deleteRuntimeStateEntryBestEffort(runtimeKey);
+    return null;
+  }
+
+  const parsed = parseLoginAttemptState(cached.state_payload);
+  if (!parsed || shouldResetAttemptState(parsed, now, config)) {
+    await deleteRuntimeStateEntryBestEffort(runtimeKey);
+    return null;
+  }
+
+  return parsed;
+}
+
+async function assertLoginAttemptAllowedInSupabase(
+  key: string,
+  now: number,
+): Promise<void> {
+  const config = getLoginThrottleConfig();
+  const state = await loadLoginAttemptStateFromSupabase(key, now, config);
+  if (!state) {
+    return;
+  }
+
+  if (state.blockedUntil > now) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((state.blockedUntil - now) / 1000),
+    );
+    throw new LoginThrottleError(retryAfterSeconds);
+  }
+}
+
+async function recordLoginAttemptFailureInSupabase(
+  key: string,
+  now: number,
+): Promise<void> {
+  const config = getLoginThrottleConfig();
+  const result = await consumeLoginThrottleAttempt({
+    key: buildRuntimeStateKey(key),
+    now,
+    windowMs: config.windowMs,
+    blockMs: config.blockMs,
+    maxAttempts: config.maxAttempts,
+    userKeyCap: MAX_TRACKED_LOGIN_KEYS,
+  });
+  if (result.isBlocked) {
+    throw new LoginThrottleError(result.retryAfterSeconds);
+  }
+}
+
+async function clearLoginAttemptFailuresInSupabase(key: string): Promise<void> {
+  await deleteRuntimeStateEntry(buildRuntimeStateKey(key));
+}
+
+export class LoginThrottleError extends Error {
+  readonly status = 429;
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super("Too many login attempts. Try again later.");
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export function buildGlobalLoginThrottleKey(): string {
+  return GLOBAL_LOGIN_THROTTLE_KEY;
+}
+
+export function buildLoginThrottleKey(username: string): string {
+  const normalizedUsername = username.trim().toLowerCase();
+  return `${USER_LOGIN_THROTTLE_PREFIX}${normalizedUsername || "unknown"}`;
+}
+
+export async function assertLoginAttemptAllowed(
+  key: string,
+  now = Date.now(),
+): Promise<void> {
+  if (resolveRuntimeStateStore() === "memory") {
+    assertLoginAttemptAllowedInMemory(key, now);
+    return;
+  }
+  await assertLoginAttemptAllowedInSupabase(key, now);
+}
+
+export async function recordLoginAttemptFailure(
+  key: string,
+  now = Date.now(),
+): Promise<void> {
+  if (resolveRuntimeStateStore() === "memory") {
+    recordLoginAttemptFailureInMemory(key, now);
+    return;
+  }
+  await recordLoginAttemptFailureInSupabase(key, now);
+}
+
+export async function clearLoginAttemptFailures(key: string): Promise<void> {
+  if (resolveRuntimeStateStore() === "memory") {
+    clearLoginAttemptFailuresInMemory(key);
+    return;
+  }
+  await clearLoginAttemptFailuresInSupabase(key);
 }
 
 export function __resetLoginThrottleForTests(): void {

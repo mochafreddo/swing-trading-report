@@ -15,6 +15,9 @@ import type {
 const HOLDINGS_SELECT =
   "ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override,created_at,updated_at";
 
+const RUNTIME_STATE_SELECT = "state_key,state_payload,expires_at";
+const RUNTIME_STATE_STORAGE_KEYS_PREFIX = "storage_keys:";
+
 export class SupabaseApiError extends Error {
   constructor(
     message: string,
@@ -60,6 +63,29 @@ export interface StorageListRow {
 
 const REPORT_INDEX_SELECT =
   "report_key,report_type,report_date,duplicate_index,generated_at,summary,tickers,tickers_hydrated";
+
+export interface RuntimeStateEntry {
+  state_key: string;
+  state_payload: Record<string, unknown>;
+  expires_at: string;
+}
+
+export interface ConsumeLoginThrottleAttemptInput {
+  key: string;
+  now: number;
+  windowMs: number;
+  blockMs: number;
+  maxAttempts: number;
+  userKeyCap: number;
+}
+
+export interface ConsumeLoginThrottleAttemptResult {
+  failures: number;
+  windowStartedAt: number;
+  blockedUntil: number;
+  isBlocked: boolean;
+  retryAfterSeconds: number;
+}
 
 interface StorageListOptions {
   prefix?: string;
@@ -162,6 +188,212 @@ export async function listAllStorageKeys(bucket: string): Promise<string[]> {
   return Array.from(keys);
 }
 
+function parseRuntimeStateEntry(payload: unknown): RuntimeStateEntry | null {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+
+  const raw = payload[0] as
+    | {
+        state_key?: unknown;
+        state_payload?: unknown;
+        expires_at?: unknown;
+      }
+    | undefined;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  if (
+    typeof raw.state_key !== "string" ||
+    !raw.state_key.trim() ||
+    typeof raw.expires_at !== "string" ||
+    !raw.expires_at.trim() ||
+    !raw.state_payload ||
+    typeof raw.state_payload !== "object" ||
+    Array.isArray(raw.state_payload)
+  ) {
+    return null;
+  }
+
+  return {
+    state_key: raw.state_key,
+    state_payload: raw.state_payload as Record<string, unknown>,
+    expires_at: raw.expires_at,
+  };
+}
+
+export async function fetchRuntimeStateEntry(
+  key: string,
+): Promise<RuntimeStateEntry | null> {
+  const env = getSupabaseEnv();
+  const query = new URLSearchParams({
+    select: RUNTIME_STATE_SELECT,
+    state_key: `eq.${key}`,
+    limit: "1",
+  });
+  const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
+  const response = await fetch(url, {
+    headers: buildAuthHeaders({
+      Accept: "application/json",
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to fetch runtime state '${key}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  return parseRuntimeStateEntry(await response.json());
+}
+
+export async function upsertRuntimeStateEntry(
+  key: string,
+  payload: Record<string, unknown>,
+  expiresAtIso: string,
+): Promise<void> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?on_conflict=state_key`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    }),
+    body: JSON.stringify([
+      {
+        state_key: key,
+        state_payload: payload,
+        expires_at: expiresAtIso,
+      },
+    ]),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to upsert runtime state '${key}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+}
+
+export async function deleteRuntimeStateEntry(key: string): Promise<void> {
+  const env = getSupabaseEnv();
+  const query = new URLSearchParams({
+    state_key: `eq.${key}`,
+  });
+  const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: buildAuthHeaders({
+      Accept: "application/json",
+      Prefer: "return=minimal",
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to delete runtime state '${key}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+}
+
+function parseConsumeLoginThrottleAttemptResult(
+  payload: unknown,
+): ConsumeLoginThrottleAttemptResult | null {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+
+  const raw = payload[0] as
+    | {
+        failures?: unknown;
+        window_started_at?: unknown;
+        blocked_until?: unknown;
+        is_blocked?: unknown;
+        retry_after_seconds?: unknown;
+      }
+    | undefined;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  if (
+    typeof raw.failures !== "number" ||
+    !Number.isFinite(raw.failures) ||
+    !Number.isInteger(raw.failures) ||
+    raw.failures < 0 ||
+    typeof raw.window_started_at !== "number" ||
+    !Number.isFinite(raw.window_started_at) ||
+    !Number.isInteger(raw.window_started_at) ||
+    raw.window_started_at < 0 ||
+    typeof raw.blocked_until !== "number" ||
+    !Number.isFinite(raw.blocked_until) ||
+    !Number.isInteger(raw.blocked_until) ||
+    raw.blocked_until < 0 ||
+    typeof raw.is_blocked !== "boolean" ||
+    typeof raw.retry_after_seconds !== "number" ||
+    !Number.isFinite(raw.retry_after_seconds) ||
+    !Number.isInteger(raw.retry_after_seconds) ||
+    raw.retry_after_seconds < 0
+  ) {
+    return null;
+  }
+
+  return {
+    failures: raw.failures,
+    windowStartedAt: raw.window_started_at,
+    blockedUntil: raw.blocked_until,
+    isBlocked: raw.is_blocked,
+    retryAfterSeconds: raw.retry_after_seconds,
+  };
+}
+
+export async function consumeLoginThrottleAttempt(
+  input: ConsumeLoginThrottleAttemptInput,
+): Promise<ConsumeLoginThrottleAttemptResult> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/consume_login_throttle_attempt`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_state_key: input.key,
+      p_now: new Date(input.now).toISOString(),
+      p_window_seconds: Math.max(1, Math.floor(input.windowMs / 1000)),
+      p_block_seconds: Math.max(1, Math.floor(input.blockMs / 1000)),
+      p_max_attempts: Math.max(1, Math.floor(input.maxAttempts)),
+      p_user_key_cap: Math.max(1, Math.floor(input.userKeyCap)),
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to consume login throttle attempt: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const parsed = parseConsumeLoginThrottleAttemptResult(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      "Supabase did not return a valid consume_login_throttle_attempt result",
+      500,
+    );
+  }
+  return parsed;
+}
+
 interface CachedStorageKeysEntry {
   keys: string[];
   expiresAt: number;
@@ -169,6 +401,84 @@ interface CachedStorageKeysEntry {
 
 const storageKeysCache = new Map<string, CachedStorageKeysEntry>();
 const storageKeysInFlight = new Map<string, Promise<string[]>>();
+
+function shouldUseInMemoryRuntimeStateStore(): boolean {
+  const raw = process.env.SAB_RUNTIME_STATE_STORE?.trim().toLowerCase();
+  if (raw === "memory") {
+    return true;
+  }
+  if (raw === "supabase") {
+    return false;
+  }
+  return process.env.NODE_ENV === "test";
+}
+
+function parseCachedStorageKeysPayload(
+  payload: Record<string, unknown>,
+): string[] | null {
+  const rawKeys = payload.keys;
+  if (!Array.isArray(rawKeys)) {
+    return null;
+  }
+
+  const keys = rawKeys
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return keys;
+}
+
+async function listAllStorageKeysCachedInMemory(
+  bucket: string,
+  ttlMilliseconds: number,
+): Promise<string[]> {
+  const now = Date.now();
+  const cached = storageKeysCache.get(bucket);
+  if (cached && cached.expiresAt > now) {
+    return [...cached.keys];
+  }
+
+  const loading = (async () => {
+    const keys = await listAllStorageKeys(bucket);
+    storageKeysCache.set(bucket, {
+      keys: [...keys],
+      expiresAt: Date.now() + ttlMilliseconds,
+    });
+    return [...keys];
+  })();
+  return loading;
+}
+
+async function listAllStorageKeysCachedInSupabase(
+  bucket: string,
+  ttlMilliseconds: number,
+): Promise<string[]> {
+  const cacheKey = `${RUNTIME_STATE_STORAGE_KEYS_PREFIX}${bucket}`;
+  const now = Date.now();
+  const cached = await fetchRuntimeStateEntry(cacheKey);
+  if (cached) {
+    const expiresAt = Date.parse(cached.expires_at);
+    if (Number.isFinite(expiresAt) && expiresAt > now) {
+      const cachedKeys = parseCachedStorageKeysPayload(cached.state_payload);
+      if (cachedKeys) {
+        return cachedKeys;
+      }
+    }
+    try {
+      await deleteRuntimeStateEntry(cacheKey);
+    } catch {
+      // Cleanup failure should not block storage key loading.
+    }
+  }
+
+  const keys = await listAllStorageKeys(bucket);
+  await upsertRuntimeStateEntry(
+    cacheKey,
+    { keys },
+    new Date(now + ttlMilliseconds).toISOString(),
+  );
+  return [...keys];
+}
 
 export function __resetStorageKeysCacheForTests(): void {
   storageKeysCache.clear();
@@ -184,26 +494,15 @@ export async function listAllStorageKeysCached(
     return listAllStorageKeys(bucket);
   }
 
-  const now = Date.now();
-  const cached = storageKeysCache.get(bucket);
-  if (cached && cached.expiresAt > now) {
-    return [...cached.keys];
-  }
-
   const inFlight = storageKeysInFlight.get(bucket);
   if (inFlight) {
     const keys = await inFlight;
     return [...keys];
   }
 
-  const loading = (async () => {
-    const keys = await listAllStorageKeys(bucket);
-    storageKeysCache.set(bucket, {
-      keys: [...keys],
-      expiresAt: Date.now() + ttlMilliseconds,
-    });
-    return [...keys];
-  })();
+  const loading = shouldUseInMemoryRuntimeStateStore()
+    ? listAllStorageKeysCachedInMemory(bucket, ttlMilliseconds)
+    : listAllStorageKeysCachedInSupabase(bucket, ttlMilliseconds);
 
   storageKeysInFlight.set(bucket, loading);
 

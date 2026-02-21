@@ -51,6 +51,7 @@ afterEach(() => {
   __resetStorageKeysCacheForTests();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("listAllStorageKeysCached", () => {
@@ -125,6 +126,179 @@ describe("listAllStorageKeysCached", () => {
     const second = await listAllStorageKeysCached("reports", 30);
     expect(second).toEqual([REPORT_KEY_A]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses supabase runtime_state cache when configured", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+
+    const runtimeState = new Map<
+      string,
+      { state_payload: Record<string, unknown>; expires_at: string }
+    >();
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+
+        if (url.pathname.endsWith("/rest/v1/runtime_state")) {
+          const stateKeyFilter = url.searchParams.get("state_key") ?? "";
+          const stateKey = stateKeyFilter.startsWith("eq.")
+            ? stateKeyFilter.slice(3)
+            : "";
+
+          if (method === "GET") {
+            const row = runtimeState.get(stateKey);
+            return new Response(
+              JSON.stringify(row ? [{ state_key: stateKey, ...row }] : []),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body)) as Array<{
+              state_key: string;
+              state_payload: Record<string, unknown>;
+              expires_at: string;
+            }>;
+            const row = body[0];
+            runtimeState.set(row.state_key, {
+              state_payload: row.state_payload,
+              expires_at: row.expires_at,
+            });
+            return new Response("", { status: 201 });
+          }
+
+          throw new Error(`Unexpected runtime_state method: ${method}`);
+        }
+
+        if (url.pathname.includes("/storage/v1/object/list/reports")) {
+          return storageListResponse([REPORT_KEY_A]);
+        }
+
+        throw new Error(`Unexpected URL: ${url.toString()}`);
+      });
+
+    const first = await listAllStorageKeysCached("reports", 30);
+    const second = await listAllStorageKeysCached("reports", 30);
+
+    expect(first).toEqual([REPORT_KEY_A]);
+    expect(second).toEqual([REPORT_KEY_A]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("continues when stale runtime_state cleanup fails", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+
+    const staleExpiresAt = new Date("2026-02-20T04:59:00Z").toISOString();
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+
+        if (
+          url.pathname.endsWith("/rest/v1/runtime_state") &&
+          method === "GET"
+        ) {
+          return new Response(
+            JSON.stringify([
+              {
+                state_key: "storage_keys:reports",
+                state_payload: { keys: [REPORT_KEY_B] },
+                expires_at: staleExpiresAt,
+              },
+            ]),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (
+          url.pathname.endsWith("/rest/v1/runtime_state") &&
+          method === "DELETE"
+        ) {
+          return new Response(JSON.stringify({ message: "cleanup failed" }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        if (url.pathname.includes("/storage/v1/object/list/reports")) {
+          return storageListResponse([REPORT_KEY_A]);
+        }
+
+        if (
+          url.pathname.endsWith("/rest/v1/runtime_state") &&
+          method === "POST"
+        ) {
+          return new Response("", { status: 201 });
+        }
+
+        throw new Error(`Unexpected request: ${method} ${url.toString()}`);
+      });
+
+    const result = await listAllStorageKeysCached("reports", 30);
+
+    expect(result).toEqual([REPORT_KEY_A]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("shares in-flight request in supabase runtime_state mode", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+
+    let resolveRuntimeGet: ((response: Response) => void) | undefined;
+    const runtimeGetPromise = new Promise<Response>((resolve) => {
+      resolveRuntimeGet = (response: Response) => resolve(response);
+    });
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+
+        if (
+          method === "GET" &&
+          url.pathname.endsWith("/rest/v1/runtime_state")
+        ) {
+          return runtimeGetPromise;
+        }
+
+        if (url.pathname.includes("/storage/v1/object/list/reports")) {
+          return storageListResponse([REPORT_KEY_A]);
+        }
+
+        if (
+          method === "POST" &&
+          url.pathname.endsWith("/rest/v1/runtime_state")
+        ) {
+          return new Response("", { status: 201 });
+        }
+
+        throw new Error(`Unexpected request: ${method} ${url.toString()}`);
+      });
+
+    const firstPromise = listAllStorageKeysCached("reports", 30);
+    const secondPromise = listAllStorageKeysCached("reports", 30);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (!resolveRuntimeGet) {
+      throw new Error("expected runtime_state resolver to be initialized");
+    }
+    resolveRuntimeGet(new Response("[]", { status: 200 }));
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+    expect(first).toEqual([REPORT_KEY_A]);
+    expect(second).toEqual([REPORT_KEY_A]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 
