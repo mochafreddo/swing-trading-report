@@ -114,11 +114,15 @@
 
 ## PR 차단 기준(브랜치 보호)
 
-- 아래 체크를 Required status checks로 고정합니다.
-  - `CI / Ruff + Mypy + Pytest (Python 3.13)`
-  - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
+- `main` 브랜치 보호 규칙은 classic branch protection으로 관리합니다.
+- Required status checks는 아래 4개를 고정합니다.
+  - `Ruff + Mypy + Pytest (Python 3.13)`
+  - `Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`
+- `enforce_admins=true`로 관리자 우회를 차단합니다.
+- 단독 운영 기준으로 `required_approving_review_count=0`, `require_code_owner_reviews=false`를 유지합니다.
+- 설정 동기화 절차와 2단계 상향 기준은 `docs/governance/main-branch-protection.md`를 따릅니다.
 
 ## 파일/경로
 
