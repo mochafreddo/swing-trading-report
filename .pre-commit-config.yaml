@@ -14,7 +14,7 @@ repos:
       - id: mypy
         name: mypy (uv)
         language: system
-        entry: uv run mypy --config-file pyproject.toml sab
+        entry: uv run mypy --config-file pyproject.toml
         pass_filenames: false
       - id: web-lint
         name: web lint (pnpm)

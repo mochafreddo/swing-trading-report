@@ -71,10 +71,11 @@ line-ending = "auto"
 python_version = "3.13"
 pretty = true
 show_error_codes = true
-ignore_missing_imports = true
+ignore_missing_imports = false
 warn_unused_configs = true
-exclude = [
-    "^tests/",
+files = [
+    "sab",
+    "tests/**/*.py",
 ]
 
 [tool.pytest.ini_options]
