@@ -89,6 +89,7 @@
       - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증 + same-origin 검증을 필수로 요구
       - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
+      - 기능 플래그: `RUN_DISPATCH_ENABLED=1`에서 활성화(하위 호환: 플래그 미설정 + `GITHUB_OWNER/GITHUB_REPO/GITHUB_PAT` 모두 설정 시 자동 활성)
       - 보호 경계: `/api/run`은 관리자 세션 인증 + same-origin 검증을 필수로 요구, 실행 ref는 `main`으로 고정
       - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
       - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함

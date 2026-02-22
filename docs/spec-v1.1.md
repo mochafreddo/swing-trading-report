@@ -227,9 +227,11 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`(권장) 또는 `SUPABASE_SERVICE_ROLE_KEY`(레거시)
-- `GITHUB_OWNER`
-- `GITHUB_REPO`
-- `GITHUB_PAT` (workflow_dispatch 호출용, 로컬에만 저장)
+- `RUN_DISPATCH_ENABLED` (`0`/`1`, 기본 `0`)
+- `GITHUB_OWNER` (`RUN_DISPATCH_ENABLED=1`일 때 필수)
+- `GITHUB_REPO` (`RUN_DISPATCH_ENABLED=1`일 때 필수)
+- `GITHUB_PAT` (`RUN_DISPATCH_ENABLED=1`일 때 필수, workflow_dispatch 호출용, 로컬에만 저장)
+- 하위 호환: `RUN_DISPATCH_ENABLED` 미설정 + `GITHUB_OWNER/GITHUB_REPO/GITHUB_PAT` 3종 모두 설정 시 `/api/run` 자동 활성
 - `REPORT_RETENTION_DAYS=30` (UI 표시/안내용; 실제 삭제는 Actions에서 수행)
 
 ## 8. v1.1 수용 기준(AC)

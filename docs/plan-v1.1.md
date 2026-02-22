@@ -56,7 +56,8 @@
 - [x] `.env.example`에 v1.1 필수 환경변수 목록을 최신화
   - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택)`KIS_BASE_URL`
   - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)
-  - Web: `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT`, (표시용)`REPORT_RETENTION_DAYS`
+  - Web(기본): `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET`, (표시용)`REPORT_RETENTION_DAYS`
+  - Run 트리거(선택): `RUN_DISPATCH_ENABLED`(기본 `0`), `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT` (`RUN_DISPATCH_ENABLED=1`일 때 필수)
   - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`(슬랙은 선택)
 - [x] 로컬 실행 커맨드 확정(AGENTS.md 기준)
   - `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
