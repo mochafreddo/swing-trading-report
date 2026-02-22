@@ -94,7 +94,7 @@
       - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
       - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
       - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
-      - 기본 하드닝: Host 기반 로컬 요청 검사는 기본 활성, `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
+      - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
 
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD.buy.json`

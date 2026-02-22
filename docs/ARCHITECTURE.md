@@ -111,8 +111,8 @@ flowchart LR
   - `SAB_SESSION_SECRET` 기반 HMAC 서명 세션 쿠키(`sab_admin_session`) 발급/검증
 - 요청 무결성
   - 미들웨어에서 API unsafe 메서드에 `same-origin` 선검증
-  - 보호 API 라우트에서 메서드와 무관하게 `same-origin` + 로컬 호스트 검증을 재적용
-  - 로컬 호스트 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
+  - 보호 API 라우트에서 메서드와 무관하게 `same-origin` + 로컬 요청 검증(`host`, `x-forwarded-host`, unsafe의 `origin/referer` 또는 `sec-fetch-site=same-origin`)을 재적용
+  - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
 - 비밀키 보호
   - Supabase/GitHub 키는 서버 코드(`server-only`)에서만 사용
   - publishable key(`sb_publishable_*`)는 서버 경로에서 거부

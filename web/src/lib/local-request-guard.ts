@@ -1,4 +1,5 @@
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
 export class LocalRequestGuardError extends Error {
   readonly status = 403;
@@ -45,20 +46,78 @@ function extractHostname(rawHost: string | null): string | null {
   return first;
 }
 
+function readFirstHeaderValue(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  const first = raw.split(",")[0]?.trim();
+  return first || null;
+}
+
+function extractHostnameFromUrl(rawUrl: string | null): string | null {
+  const first = readFirstHeaderValue(rawUrl);
+  if (!first) {
+    return null;
+  }
+  try {
+    return new URL(first).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isLocalHostname(hostname: string | null): boolean {
+  return Boolean(hostname && LOCAL_HOSTS.has(hostname));
+}
+
+function isSafeMethod(method?: string): boolean {
+  const normalized = (method ?? "GET").trim().toUpperCase();
+  return SAFE_METHODS.has(normalized);
+}
+
 function shouldEnforceLocalRequestGuard(): boolean {
   return process.env.SAB_ENFORCE_LOCAL_REQUEST !== "0";
 }
 
 export function isLocalRequest(request: {
   headers: Pick<Headers, "get">;
+  method?: string;
 }): boolean {
-  const rawHost = request.headers.get("host");
-  const hostname = extractHostname(rawHost);
-  return Boolean(hostname && LOCAL_HOSTS.has(hostname));
+  const host = extractHostname(request.headers.get("host"));
+  if (!isLocalHostname(host)) {
+    return false;
+  }
+
+  const forwardedHost = extractHostname(
+    request.headers.get("x-forwarded-host"),
+  );
+  if (forwardedHost && !isLocalHostname(forwardedHost)) {
+    return false;
+  }
+
+  const originHost = extractHostnameFromUrl(request.headers.get("origin"));
+  if (originHost && !isLocalHostname(originHost)) {
+    return false;
+  }
+
+  const refererHost = extractHostnameFromUrl(request.headers.get("referer"));
+  if (refererHost && !isLocalHostname(refererHost)) {
+    return false;
+  }
+
+  if (!isSafeMethod(request.method) && !originHost && !refererHost) {
+    const secFetchSite = readFirstHeaderValue(
+      request.headers.get("sec-fetch-site"),
+    );
+    return secFetchSite?.toLowerCase() === "same-origin";
+  }
+
+  return true;
 }
 
 export function assertLocalRequest(request: {
   headers: Pick<Headers, "get">;
+  method?: string;
 }): void {
   if (process.env.NODE_ENV === "test") {
     return;

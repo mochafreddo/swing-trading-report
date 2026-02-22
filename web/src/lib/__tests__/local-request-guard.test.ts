@@ -6,8 +6,11 @@ import {
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 
-function makeRequest(headers: Record<string, string>): { headers: Headers } {
-  return { headers: new Headers(headers) };
+function makeRequest(
+  headers: Record<string, string>,
+  method = "GET",
+): { headers: Headers; method: string } {
+  return { headers: new Headers(headers), method };
 }
 
 afterEach(() => {
@@ -36,7 +39,7 @@ describe("local-request-guard", () => {
     ).not.toThrow();
   });
 
-  it("ignores x-forwarded-host and trusts host only", () => {
+  it("rejects forwarded host mismatch", () => {
     vi.stubEnv("NODE_ENV", "development");
 
     expect(() =>
@@ -46,16 +49,68 @@ describe("local-request-guard", () => {
           "x-forwarded-host": "example.com",
         }),
       ),
-    ).not.toThrow();
+    ).toThrow(LocalRequestGuardError);
 
     expect(() =>
       assertLocalRequest(
         makeRequest({
-          host: "example.com",
+          host: "localhost:3000",
           "x-forwarded-host": "localhost:3000",
         }),
       ),
+    ).not.toThrow();
+  });
+
+  it("rejects unsafe requests without origin/referer context", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() =>
+      assertLocalRequest(makeRequest({ host: "localhost:3000" }, "POST")),
     ).toThrow(LocalRequestGuardError);
+  });
+
+  it("allows unsafe requests when sec-fetch-site is same-origin", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest(
+          {
+            host: "localhost:3000",
+            "sec-fetch-site": "same-origin",
+          },
+          "POST",
+        ),
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows unsafe requests when origin/referer is local", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest(
+          {
+            host: "localhost:3000",
+            origin: "http://localhost:3000",
+          },
+          "POST",
+        ),
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest(
+          {
+            host: "localhost:3000",
+            referer: "http://localhost:3000/holdings",
+          },
+          "POST",
+        ),
+      ),
+    ).not.toThrow();
   });
 
   it("rejects non-local hosts by default", () => {
