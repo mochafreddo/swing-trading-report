@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 
 from . import sell_evaluation, sell_market_data, sell_runtime
 from .config import Config, load_config
@@ -21,98 +22,84 @@ def _infer_env_from_base(base_url: str) -> str:
     return "demo" if "vts" in base_url.lower() else "real"
 
 
-class SellService:
-    @staticmethod
-    def build_runtime(cfg: Config, logger: logging.Logger) -> _SellRuntime:
-        return sell_runtime._build_sell_runtime(cfg, logger)
+def _build_sell_runtime(cfg: Config, logger: logging.Logger) -> _SellRuntime:
+    return sell_runtime._build_sell_runtime(cfg, logger)
 
-    @staticmethod
-    def _ensure_pykrx_client(runtime: _SellRuntime) -> PykrxClient | None:
-        return sell_market_data._ensure_pykrx_client(
-            runtime,
-            PykrxClientCls=PykrxClient,
-        )
 
-    def collect(self, runtime: _SellRuntime, *, target_bars: int) -> None:
-        sell_market_data._initialize_provider(
-            runtime,
-            KISCredentialsCls=KISCredentials,
-            KISClientCls=KISClient,
-            ensure_pykrx_client_fn=self._ensure_pykrx_client,
-            infer_env_from_base_fn=_infer_env_from_base,
-        )
-        sell_market_data._resolve_sell_fx(runtime, resolve_fx_rate_fn=resolve_fx_rate)
-        sell_market_data._collect_market_data(
-            runtime,
-            target_bars=target_bars,
-            collect_market_data_from_kis_fn=self._collect_market_data_from_kis,
-            collect_market_data_from_pykrx_fn=self._collect_market_data_from_pykrx,
-        )
+def _collect_sell_runtime(
+    runtime: _SellRuntime,
+    *,
+    target_bars: int,
+) -> None:
+    ensure_pykrx_client = partial(
+        sell_market_data._ensure_pykrx_client,
+        PykrxClientCls=PykrxClient,
+    )
+    collect_market_data_from_kis = partial(
+        sell_market_data._collect_market_data_from_kis,
+        load_json_fn=load_json,
+        save_json_fn=save_json,
+        ensure_pykrx_client_fn=ensure_pykrx_client,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+    )
+    collect_market_data_from_pykrx = partial(
+        sell_market_data._collect_market_data_from_pykrx,
+        PykrxClientErrorCls=PykrxClientError,
+    )
 
-    def _collect_market_data_from_kis(
-        self,
-        runtime: _SellRuntime,
-        *,
-        target_bars: int,
-    ) -> None:
-        sell_market_data._collect_market_data_from_kis(
-            runtime,
-            target_bars=target_bars,
-            load_json_fn=load_json,
-            save_json_fn=save_json,
-            ensure_pykrx_client_fn=self._ensure_pykrx_client,
-            split_symbol_and_suffix_fn=_split_symbol_and_suffix,
-            exchange_from_suffix_fn=_exchange_from_suffix,
-        )
+    sell_market_data._initialize_provider(
+        runtime,
+        KISCredentialsCls=KISCredentials,
+        KISClientCls=KISClient,
+        ensure_pykrx_client_fn=ensure_pykrx_client,
+        infer_env_from_base_fn=_infer_env_from_base,
+    )
 
-    @staticmethod
-    def _collect_market_data_from_pykrx(
-        runtime: _SellRuntime,
-        *,
-        target_bars: int,
-    ) -> None:
-        sell_market_data._collect_market_data_from_pykrx(
-            runtime,
-            target_bars=target_bars,
-            PykrxClientErrorCls=PykrxClientError,
-        )
+    sell_market_data._resolve_sell_fx(runtime, resolve_fx_rate_fn=resolve_fx_rate)
 
-    @staticmethod
-    def evaluate(runtime: _SellRuntime) -> list[SellReportRow]:
-        return sell_evaluation._evaluate_holdings(
-            runtime,
-            SellSettingsCls=SellSettings,
-            HybridSellSettingsCls=HybridSellSettings,
-            evaluate_sell_signals_fn=evaluate_sell_signals,
-            evaluate_sell_signals_hybrid_fn=evaluate_sell_signals_hybrid,
-            SellReportRowCls=SellReportRow,
-            split_symbol_and_suffix_fn=_split_symbol_and_suffix,
-            exchange_from_suffix_fn=_exchange_from_suffix,
-        )
+    sell_market_data._collect_market_data(
+        runtime,
+        target_bars=target_bars,
+        collect_market_data_from_kis_fn=collect_market_data_from_kis,
+        collect_market_data_from_pykrx_fn=collect_market_data_from_pykrx,
+    )
 
-    @staticmethod
-    def render(runtime: _SellRuntime, results: list[SellReportRow]) -> str:
-        return sell_evaluation._write_sell_report(
-            runtime,
-            results,
-            write_sell_report_fn=write_sell_report,
-        )
+
+def _evaluate_sell_runtime(runtime: _SellRuntime) -> list[SellReportRow]:
+    return sell_evaluation._evaluate_holdings(
+        runtime,
+        SellSettingsCls=SellSettings,
+        HybridSellSettingsCls=HybridSellSettings,
+        evaluate_sell_signals_fn=evaluate_sell_signals,
+        evaluate_sell_signals_hybrid_fn=evaluate_sell_signals_hybrid,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+    )
+
+
+def _render_sell_report(runtime: _SellRuntime, results: list[SellReportRow]) -> str:
+    return sell_evaluation._write_sell_report(
+        runtime,
+        results,
+        write_sell_report_fn=write_sell_report,
+    )
 
 
 def run_sell(*, provider: str | None) -> int:
     logger = logging.getLogger(__name__)
-    service = SellService()
     try:
         cfg: Config = load_config(provider_override=provider)
     except (ConfigLoadError, HoldingsLoadError) as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
 
-    runtime = service.build_runtime(cfg, logger)
-    service.collect(runtime, target_bars=max(cfg.min_history_bars, 200))
-    results = service.evaluate(runtime)
+    runtime = _build_sell_runtime(cfg, logger)
+    _collect_sell_runtime(runtime, target_bars=max(cfg.min_history_bars, 200))
+    results = _evaluate_sell_runtime(runtime)
 
-    out_path = service.render(runtime, results)
+    out_path = _render_sell_report(runtime, results)
     logger.info("Sell report written to: %s", out_path)
     try:
         uploaded_key = maybe_upload_report_artifact(

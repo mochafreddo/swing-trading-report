@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from functools import partial
 
 from . import scan_evaluation, scan_market_data, scan_screener
 from .config import Config, load_config, load_watchlist
@@ -37,114 +37,93 @@ def _infer_env_from_base(base_url: str) -> str:
     return "demo" if "vts" in base_url.lower() else "real"
 
 
-class ScanService:
-    def load_tickers(self, cfg: Config, watchlist_path: str | None) -> list[str]:
-        return scan_screener._load_scan_tickers(
-            cfg,
-            watchlist_path,
-            load_watchlist_fn=load_watchlist,
-        )
+def _collect_scan_runtime(
+    runtime: _ScanRuntime,
+    *,
+    screener_enabled: bool,
+    screener_only: bool,
+    screener_limit: int,
+) -> None:
+    ensure_pykrx_client = partial(
+        scan_market_data._ensure_pykrx_client,
+        PykrxClientCls=PykrxClient,
+    )
+    refresh_us_holidays = partial(
+        scan_market_data._refresh_us_holidays,
+        merge_holidays_fn=merge_holidays,
+    )
+    collect_market_data_from_kis = partial(
+        scan_market_data._collect_market_data_from_kis,
+        load_json_fn=load_json,
+        save_json_fn=save_json,
+        refresh_us_holidays_fn=refresh_us_holidays,
+        ensure_pykrx_client_fn=ensure_pykrx_client,
+        split_overseas_fn=_split_overseas,
+        excd_from_suffix_fn=_excd_from_suffix,
+    )
+    collect_market_data_from_pykrx = partial(
+        scan_market_data._collect_market_data_from_pykrx,
+        PykrxClientErrorCls=PykrxClientError,
+    )
 
-    def resolve_screener_flags(
-        self, cfg: Config, universe: str | None
-    ) -> tuple[bool, bool]:
-        return scan_screener._resolve_screener_flags(cfg, universe)
+    scan_market_data._initialize_provider(
+        runtime,
+        screener_enabled=screener_enabled,
+        KISCredentialsCls=KISCredentials,
+        KISClientCls=KISClient,
+        ensure_pykrx_client_fn=ensure_pykrx_client,
+        infer_env_from_base_fn=_infer_env_from_base,
+    )
 
-    @staticmethod
-    def _ensure_pykrx_client(runtime: _ScanRuntime) -> PykrxClient | None:
-        return scan_market_data._ensure_pykrx_client(
-            runtime,
-            PykrxClientCls=PykrxClient,
-        )
+    scan_screener._run_screeners(
+        runtime,
+        screener_enabled=screener_enabled,
+        screener_only=screener_only,
+        screener_limit=screener_limit,
+        ScreenRequestCls=ScreenRequest,
+        KISScreenerCls=KISScreener,
+        KUSCls=KUS,
+        KUSReqCls=KUSReq,
+        USScreenerCls=USScreener,
+        USScreenRequestCls=USScreenRequest,
+        us_session_info_fn=us_session_info,
+        coerce_nday_fn=_coerce_nday,
+        format_ny_now_for_log_fn=_format_ny_now_for_log,
+    )
 
-    @staticmethod
-    def _refresh_us_holidays(runtime: _ScanRuntime) -> dict[str, Any]:
-        return scan_market_data._refresh_us_holidays(
-            runtime,
-            merge_holidays_fn=merge_holidays,
-        )
+    scan_market_data._resolve_scan_fx(
+        runtime,
+        resolve_fx_rate_fn=resolve_fx_rate,
+        infer_currency_fn=_infer_currency,
+    )
 
-    def collect(
-        self,
-        runtime: _ScanRuntime,
-        *,
-        screener_enabled: bool,
-        screener_only: bool,
-        screener_limit: int,
-    ) -> None:
-        scan_market_data._initialize_provider(
-            runtime,
-            screener_enabled=screener_enabled,
-            KISCredentialsCls=KISCredentials,
-            KISClientCls=KISClient,
-            ensure_pykrx_client_fn=self._ensure_pykrx_client,
-            infer_env_from_base_fn=_infer_env_from_base,
-        )
-        scan_screener._run_screeners(
-            runtime,
-            screener_enabled=screener_enabled,
-            screener_only=screener_only,
-            screener_limit=screener_limit,
-            ScreenRequestCls=ScreenRequest,
-            KISScreenerCls=KISScreener,
-            KUSCls=KUS,
-            KUSReqCls=KUSReq,
-            USScreenerCls=USScreener,
-            USScreenRequestCls=USScreenRequest,
-            us_session_info_fn=us_session_info,
-            coerce_nday_fn=_coerce_nday,
-            format_ny_now_for_log_fn=_format_ny_now_for_log,
-        )
-        scan_market_data._resolve_scan_fx(
-            runtime,
-            resolve_fx_rate_fn=resolve_fx_rate,
-            infer_currency_fn=_infer_currency,
-        )
-        scan_market_data._collect_market_data(
-            runtime,
-            collect_market_data_from_kis_fn=self._collect_market_data_from_kis,
-            collect_market_data_from_pykrx_fn=self._collect_market_data_from_pykrx,
-        )
+    scan_market_data._collect_market_data(
+        runtime,
+        collect_market_data_from_kis_fn=collect_market_data_from_kis,
+        collect_market_data_from_pykrx_fn=collect_market_data_from_pykrx,
+    )
 
-    def _collect_market_data_from_kis(self, runtime: _ScanRuntime) -> None:
-        scan_market_data._collect_market_data_from_kis(
-            runtime,
-            load_json_fn=load_json,
-            save_json_fn=save_json,
-            refresh_us_holidays_fn=self._refresh_us_holidays,
-            ensure_pykrx_client_fn=self._ensure_pykrx_client,
-            split_overseas_fn=_split_overseas,
-            excd_from_suffix_fn=_excd_from_suffix,
-        )
 
-    @staticmethod
-    def _collect_market_data_from_pykrx(runtime: _ScanRuntime) -> None:
-        scan_market_data._collect_market_data_from_pykrx(
-            runtime,
-            PykrxClientErrorCls=PykrxClientError,
-        )
+def _evaluate_scan_runtime(runtime: _ScanRuntime) -> None:
+    scan_evaluation._evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=EvaluationSettings,
+        HybridEvaluationSettingsCls=HybridEvaluationSettings,
+        evaluate_ticker_fn=evaluate_ticker,
+        evaluate_ticker_hybrid_fn=evaluate_ticker_hybrid,
+        split_overseas_fn=_split_overseas,
+        excd_from_suffix_fn=_excd_from_suffix,
+    )
+    scan_evaluation._decorate_candidates(
+        runtime,
+        apply_currency_display_fn=scan_evaluation._apply_currency_display,
+        lookup_holiday_fn=lookup_holiday,
+        us_market_status_fn=us_market_status,
+    )
 
-    @staticmethod
-    def evaluate(runtime: _ScanRuntime) -> None:
-        scan_evaluation._evaluate_candidates(
-            runtime,
-            EvaluationSettingsCls=EvaluationSettings,
-            HybridEvaluationSettingsCls=HybridEvaluationSettings,
-            evaluate_ticker_fn=evaluate_ticker,
-            evaluate_ticker_hybrid_fn=evaluate_ticker_hybrid,
-            split_overseas_fn=_split_overseas,
-            excd_from_suffix_fn=_excd_from_suffix,
-        )
-        scan_evaluation._decorate_candidates(
-            runtime,
-            apply_currency_display_fn=scan_evaluation._apply_currency_display,
-            lookup_holiday_fn=lookup_holiday,
-            us_market_status_fn=us_market_status,
-        )
 
-    @staticmethod
-    def render(runtime: _ScanRuntime) -> str:
-        return scan_evaluation._write_scan_report(runtime, write_report_fn=write_report)
+def _render_scan_report(runtime: _ScanRuntime) -> str:
+    return scan_evaluation._write_scan_report(runtime, write_report_fn=write_report)
 
 
 def run_scan(
@@ -156,14 +135,17 @@ def run_scan(
     universe: str | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
-    service = ScanService()
     try:
         cfg: Config = load_config(provider_override=provider, limit_override=limit)
     except (ConfigLoadError, HoldingsLoadError) as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
 
-    loaded_tickers = service.load_tickers(cfg, watchlist_path)
+    loaded_tickers = scan_screener._load_scan_tickers(
+        cfg,
+        watchlist_path,
+        load_watchlist_fn=load_watchlist,
+    )
     filtered_tickers = _filter_tickers_by_markets(loaded_tickers, cfg.universe_markets)
     if len(filtered_tickers) != len(loaded_tickers):
         logger.info(
@@ -181,9 +163,11 @@ def run_scan(
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
     )
-    screener_enabled, screener_only = service.resolve_screener_flags(cfg, universe)
+    screener_enabled, screener_only = scan_screener._resolve_screener_flags(
+        cfg, universe
+    )
 
-    service.collect(
+    _collect_scan_runtime(
         runtime,
         screener_enabled=screener_enabled,
         screener_only=screener_only,
@@ -196,13 +180,13 @@ def run_scan(
         runtime.logger.error(msg)
         runtime.fatal_failure = True
 
-    service.evaluate(runtime)
+    _evaluate_scan_runtime(runtime)
 
     if runtime.tickers and not runtime.market_data:
         runtime.fatal_failure = True
         runtime.logger.error("Failed to retrieve market data for requested tickers")
 
-    out_path = service.render(runtime)
+    out_path = _render_scan_report(runtime)
     runtime.logger.info("Buy report written to: %s", out_path)
     try:
         uploaded_key = maybe_upload_report_artifact(
