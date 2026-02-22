@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
-import logging
+from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
@@ -88,37 +88,96 @@ class KISCredentials:
         return f"{self.base_url.rstrip('/')}/uapi/overseas-stock/v1/ranking/market-cap"
 
 
-class KISClient:
-    """Lightweight HTTP client for KIS Developers REST endpoints."""
+class _KISClientState:
+    """Shared mutable state shape used by KIS mixins."""
 
-    def __init__(
+    creds: KISCredentials
+    session: requests.Session
+    _access_token: str | None
+    _token_expiry: dt.datetime | None
+    _cache_dir: str | None
+    _token_cache_key: str
+    cache_status: str | None
+    _max_attempts: int
+    _min_interval: float
+    _last_request_at: dt.datetime | None
+
+    def _request(
         self,
-        creds: KISCredentials,
+        method: str,
+        url: str,
         *,
-        session: Optional[requests.Session] = None,
-        cache_dir: Optional[str] = None,
-        max_attempts: int = 3,
-        min_interval: Optional[float] = None,
-    ):
-        self.creds = creds
-        self.session = session or requests.Session()
-        self._access_token: Optional[str] = None
-        self._token_expiry: Optional[dt.datetime] = None
-        self._cache_dir = cache_dir
-        self._token_cache_key = f"kis_token_{creds.env}"
-        self.cache_status: Optional[str] = None
-        self._max_attempts = max(1, max_attempts)
-        # throttle between requests (seconds)
-        self._min_interval = (
-            float(min_interval)
-            if min_interval is not None
-            else (0.5 if creds.env == "demo" else 0.1)
-        )
-        self._last_request_at: Optional[dt.datetime] = None
+        headers: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        timeout: float = 10.0,
+    ) -> requests.Response:
+        raise NotImplementedError
 
-        self._try_load_cached_token()
+    def ensure_token(self) -> None:
+        raise NotImplementedError
 
-    # ------------------------------------------------------------------
+
+class _KISTransportMixin(_KISClientState):
+    """Common HTTP transport + retry + client-side throttle."""
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        timeout: float = 10.0,
+    ) -> requests.Response:
+        backoff = 1.0
+        last_exc: requests.RequestException | None = None
+        resp: requests.Response | None = None
+
+        for attempt in range(self._max_attempts):
+            # simple client-side throttle
+            if self._min_interval and self._last_request_at is not None:
+                delta = (
+                    dt.datetime.now(dt.UTC) - self._last_request_at
+                ).total_seconds()
+                if delta < self._min_interval:
+                    time.sleep(self._min_interval - delta)
+            try:
+                resp = self.session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=params,
+                    json=json,
+                    timeout=timeout,
+                )
+                self._last_request_at = dt.datetime.now(dt.UTC)
+            except requests.RequestException as exc:
+                last_exc = exc
+            else:
+                if (
+                    resp.status_code in {429, 418, 503}
+                    and attempt < self._max_attempts - 1
+                ):
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 8.0)
+                    continue
+                return resp
+
+            if attempt < self._max_attempts - 1:
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 8.0)
+
+        if last_exc is not None:
+            raise last_exc
+        assert resp is not None  # final response present if not exception
+        return resp
+
+
+class _KISAuthMixin(_KISClientState):
+    """Authentication/token lifecycle responsibilities."""
+
     def _try_load_cached_token(self) -> None:
         if not self._cache_dir:
             self.cache_status = "disabled"
@@ -143,7 +202,7 @@ class KISClient:
             return
 
         refresh_dt = expiry_dt - dt.timedelta(minutes=5)
-        if refresh_dt <= dt.datetime.now(dt.timezone.utc):
+        if refresh_dt <= dt.datetime.now(dt.UTC):
             self.cache_status = "expired"
             return
 
@@ -151,9 +210,6 @@ class KISClient:
         self._token_expiry = refresh_dt
         self.cache_status = "hit"
 
-    # ------------------------------------------------------------------
-    # Auth
-    # ------------------------------------------------------------------
     @staticmethod
     def _normalize_expiry_dt(expiry_dt: dt.datetime) -> dt.datetime:
         """Normalize token expiry timestamp to UTC.
@@ -162,17 +218,17 @@ class KISClient:
         """
         if expiry_dt.tzinfo is None:
             expiry_dt = expiry_dt.replace(tzinfo=_KST)
-        return expiry_dt.astimezone(dt.timezone.utc)
+        return expiry_dt.astimezone(dt.UTC)
 
     @classmethod
-    def _parse_expiry_at(cls, expires_at: Any) -> Optional[dt.datetime]:
+    def _parse_expiry_at(cls, expires_at: Any) -> dt.datetime | None:
         if not isinstance(expires_at, str):
             return None
         value = expires_at.strip()
         if not value:
             return None
 
-        parsed: Optional[dt.datetime] = None
+        parsed: dt.datetime | None = None
         try:
             parsed = dt.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
         except ValueError:
@@ -190,63 +246,13 @@ class KISClient:
             return None
         return cls._normalize_expiry_dt(parsed)
 
-    def _request(
-        self,
-        method: str,
-        url: str,
-        *,
-        headers: Optional[dict[str, Any]] = None,
-        params: Optional[dict[str, Any]] = None,
-        json: Optional[dict[str, Any]] = None,
-        timeout: float = 10.0,
-    ) -> requests.Response:
-        backoff = 1.0
-        last_exc: Optional[requests.RequestException] = None
-        resp: Optional[requests.Response] = None
-
-        for attempt in range(self._max_attempts):
-            # simple client-side throttle
-            if self._min_interval and self._last_request_at is not None:
-                delta = (
-                    dt.datetime.now(dt.timezone.utc) - self._last_request_at
-                ).total_seconds()
-                if delta < self._min_interval:
-                    time.sleep(self._min_interval - delta)
-            try:
-                resp = self.session.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=params,
-                    json=json,
-                    timeout=timeout,
-                )
-                self._last_request_at = dt.datetime.now(dt.timezone.utc)
-            except requests.RequestException as exc:
-                last_exc = exc
-            else:
-                if (
-                    resp.status_code in {429, 418, 503}
-                    and attempt < self._max_attempts - 1
-                ):
-                    time.sleep(backoff)
-                    backoff = min(backoff * 2, 8.0)
-                    continue
-                return resp
-
-            if attempt < self._max_attempts - 1:
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 8.0)
-
-        if last_exc is not None:
-            raise last_exc
-        assert resp is not None  # final response present if not exception
-        return resp
-
     def ensure_token(self) -> None:
-        if self._access_token and self._token_expiry:
-            if dt.datetime.now(dt.timezone.utc) < self._token_expiry:
-                return
+        if (
+            self._access_token
+            and self._token_expiry
+            and dt.datetime.now(dt.UTC) < self._token_expiry
+        ):
+            return
 
         payload = {
             "grant_type": "client_credentials",
@@ -291,19 +297,17 @@ class KISClient:
         except (TypeError, ValueError):
             expires_seconds = 3600
 
-        expiry_dt: Optional[dt.datetime] = None
+        expiry_dt: dt.datetime | None = None
         if expires_at_str:
             expiry_dt = self._parse_expiry_at(expires_at_str)
 
         if expiry_dt is None:
-            expiry_dt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
-                seconds=expires_seconds
-            )
+            expiry_dt = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=expires_seconds)
 
         # refresh a little earlier than actual expiry
         refresh_dt = expiry_dt - dt.timedelta(minutes=5)
-        if refresh_dt <= dt.datetime.now(dt.timezone.utc):
-            refresh_dt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+        if refresh_dt <= dt.datetime.now(dt.UTC):
+            refresh_dt = dt.datetime.now(dt.UTC) + dt.timedelta(
                 seconds=int(expires_seconds * 0.9)
             )
 
@@ -331,9 +335,10 @@ class KISClient:
             self._cache_dir or "disabled",
         )
 
-    # ------------------------------------------------------------------
-    # Data fetch
-    # ------------------------------------------------------------------
+
+class _KISQuoteMixin(_KISClientState):
+    """Domestic/overseas quote and candle responsibilities."""
+
     def daily_candles(
         self, ticker: str, *, count: int = 120, adjusted: bool = True
     ) -> list[dict[str, Any]]:
@@ -572,9 +577,224 @@ class KISClient:
 
         return data.get("output2") or []
 
-    # ------------------------------------------------------------------
-    # Holidays
-    # ------------------------------------------------------------------
+    def overseas_daily_candles(
+        self,
+        *,
+        symbol: str,
+        exchange: str = "NASD",
+        count: int = 120,
+        adjusted: bool = True,
+    ) -> list[dict[str, Any]]:
+        symbol = symbol.strip().upper()
+        exchange = exchange.strip().upper()
+        if not symbol or not exchange:
+            raise KISClientError("Overseas symbol and exchange are required")
+
+        self.ensure_token()
+
+        target = max(count, 1)
+        chunk_days = 240
+        collected: dict[str, dict[str, Any]] = {}
+
+        now = dt.datetime.now()
+        chunk_end = now
+        earliest_allowed = now - dt.timedelta(days=365 * 10)
+        empty_streak = 0
+
+        while len(collected) < target and chunk_end > earliest_allowed:
+            start_dt = chunk_end - dt.timedelta(days=chunk_days)
+            if start_dt < earliest_allowed:
+                start_dt = earliest_allowed
+            start_str = start_dt.strftime("%Y%m%d")
+            end_str = chunk_end.strftime("%Y%m%d")
+
+            items = self._fetch_overseas_candle_chunk(
+                symbol=symbol,
+                exchange=exchange,
+                start_date=start_str,
+                end_date=end_str,
+                adjusted=adjusted,
+            )
+
+            parsed_dates: list[str] = []
+            for it in items:
+                parsed_item = self._parse_overseas_candle(it)
+                if parsed_item and parsed_item.get("date"):
+                    date_key = str(parsed_item["date"])
+                    collected[date_key] = parsed_item
+                    parsed_dates.append(date_key)
+
+            if not parsed_dates:
+                empty_streak += 1
+                if empty_streak >= self._max_attempts:
+                    break
+                chunk_end = start_dt - dt.timedelta(days=1)
+                continue
+
+            empty_streak = 0
+            oldest_dt = min(dt.datetime.strptime(d, "%Y%m%d") for d in parsed_dates)
+            chunk_end = oldest_dt - dt.timedelta(days=1)
+
+        rows = sorted(collected.values(), key=lambda x: x["date"])
+        if len(rows) > target:
+            rows = rows[-target:]
+        return rows
+
+    def _fetch_overseas_candle_chunk(
+        self,
+        *,
+        symbol: str,
+        exchange: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+    ) -> list[dict[str, Any]]:
+        params = {
+            # KIS overseas params: EXCD(exchange), SYMB(symbol), GUBN(0:period), BYMD(end ymd), MODP(1:adjusted)
+            "EXCD": exchange,
+            "SYMB": symbol,
+            "GUBN": "0",
+            "BYMD": end_date,
+            "MODP": "1" if adjusted else "0",
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": self._access_token,
+            "appkey": self.creds.app_key,
+            "appsecret": self.creds.app_secret,
+            "tr_id": self.creds.overseas_tr_id,
+            "custtype": "P",
+        }
+
+        data: dict[str, Any] | None = None
+        for attempt in range(self._max_attempts):
+            try:
+                resp = self._request(
+                    "GET",
+                    self.creds.overseas_candle_url,
+                    headers=headers,
+                    params=params,
+                )
+            except requests.RequestException as exc:  # pragma: no cover
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"Overseas daily request failed: {exc}") from exc
+
+            try:
+                parsed = resp.json()
+            except ValueError as exc:
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError("Overseas daily response is not JSON") from exc
+
+            if not isinstance(parsed, dict):
+                raise KISClientError("Overseas daily response payload is not an object")
+
+            data = parsed
+
+            if resp.status_code != 200:
+                msg_cd = parsed.get("msg_cd") or ""
+                msg1 = parsed.get("msg1") or "Unknown error"
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    # Token expired: refresh and retry
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(
+                    f"Overseas daily HTTP {resp.status_code}: {resp.text}"
+                )
+
+            if str(parsed.get("rt_cd")) != "0":
+                msg_cd = parsed.get("msg_cd") or ""
+                msg1 = parsed.get("msg1") or "Unknown error"
+                if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                raise KISClientError(f"KIS overseas error: {msg1}")
+            break
+
+        if data is None:
+            return []
+
+        # overseas output variable names differ; prefer 'output2' like domestic. Fallback to 'output'
+        return data.get("output2") or data.get("output") or []
+
+    @staticmethod
+    def _parse_overseas_candle(item: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not item:
+            return None
+
+        def _to_float(val: Any) -> float:
+            if val is None or val == "":
+                return float("nan")
+            try:
+                return float(str(val).replace(",", ""))
+            except ValueError:
+                return float("nan")
+
+        # Overseas fields typically: xymd, open, high, low, close/last, volume/tvol
+        return {
+            "date": str(item.get("xymd") or item.get("stck_bsop_date") or "").replace(
+                "-", ""
+            ),
+            "open": _to_float(item.get("open") or item.get("stck_oprc")),
+            "high": _to_float(item.get("high") or item.get("stck_hgpr")),
+            "low": _to_float(item.get("low") or item.get("stck_lwpr")),
+            "close": _to_float(
+                item.get("close")
+                or item.get("last")
+                or item.get("clos")
+                or item.get("stck_clpr")
+            ),
+            "volume": _to_float(
+                item.get("volume") or item.get("tvol") or item.get("acml_vol")
+            ),
+            "prev_close_diff": _to_float(item.get("prdy_vrss") or 0),
+        }
+
+    @staticmethod
+    def _parse_candle(item: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not item:
+            return None
+
+        def _to_float(val: Any) -> float:
+            if val is None or val == "":
+                return float("nan")
+            try:
+                return float(str(val).replace(",", ""))
+            except ValueError:
+                return float("nan")
+
+        return {
+            "date": item.get("stck_bsop_date"),
+            "open": _to_float(item.get("stck_oprc")),
+            "high": _to_float(item.get("stck_hgpr")),
+            "low": _to_float(item.get("stck_lwpr")),
+            "close": _to_float(item.get("stck_clpr")),
+            "volume": _to_float(item.get("acml_vol")),
+            "prev_close_diff": _to_float(item.get("prdy_vrss")),
+        }
+
+
+class _KISCalendarMixin(_KISClientState):
+    """Overseas holiday/calendar responsibilities."""
+
     def overseas_holidays(
         self,
         *,
@@ -685,226 +905,10 @@ class KISClient:
         )
         return items
 
-    # ------------------------------------------------------------------
-    # Overseas daily candles (US etc.) with accumulation
-    # ------------------------------------------------------------------
-    def overseas_daily_candles(
-        self,
-        *,
-        symbol: str,
-        exchange: str = "NASD",
-        count: int = 120,
-        adjusted: bool = True,
-    ) -> list[dict[str, Any]]:
-        symbol = symbol.strip().upper()
-        exchange = exchange.strip().upper()
-        if not symbol or not exchange:
-            raise KISClientError("Overseas symbol and exchange are required")
 
-        self.ensure_token()
+class _KISRankingMixin(_KISClientState):
+    """Domestic/overseas ranking responsibilities."""
 
-        target = max(count, 1)
-        chunk_days = 240
-        collected: dict[str, dict[str, Any]] = {}
-
-        now = dt.datetime.now()
-        chunk_end = now
-        earliest_allowed = now - dt.timedelta(days=365 * 10)
-        empty_streak = 0
-
-        while len(collected) < target and chunk_end > earliest_allowed:
-            start_dt = chunk_end - dt.timedelta(days=chunk_days)
-            if start_dt < earliest_allowed:
-                start_dt = earliest_allowed
-            start_str = start_dt.strftime("%Y%m%d")
-            end_str = chunk_end.strftime("%Y%m%d")
-
-            items = self._fetch_overseas_candle_chunk(
-                symbol=symbol,
-                exchange=exchange,
-                start_date=start_str,
-                end_date=end_str,
-                adjusted=adjusted,
-            )
-
-            parsed_dates: list[str] = []
-            for it in items:
-                parsed_item = self._parse_overseas_candle(it)
-                if parsed_item and parsed_item.get("date"):
-                    date_key = str(parsed_item["date"])
-                    collected[date_key] = parsed_item
-                    parsed_dates.append(date_key)
-
-            if not parsed_dates:
-                empty_streak += 1
-                if empty_streak >= self._max_attempts:
-                    break
-                chunk_end = start_dt - dt.timedelta(days=1)
-                continue
-
-            empty_streak = 0
-            oldest_dt = min(dt.datetime.strptime(d, "%Y%m%d") for d in parsed_dates)
-            chunk_end = oldest_dt - dt.timedelta(days=1)
-
-        rows = sorted(collected.values(), key=lambda x: x["date"])
-        if len(rows) > target:
-            rows = rows[-target:]
-        return rows
-
-    def _fetch_overseas_candle_chunk(
-        self,
-        *,
-        symbol: str,
-        exchange: str,
-        start_date: str,
-        end_date: str,
-        adjusted: bool,
-    ) -> list[dict[str, Any]]:
-        params = {
-            # KIS overseas params: EXCD(exchange), SYMB(symbol), GUBN(0:period), BYMD(end ymd), MODP(1:adjusted)
-            "EXCD": exchange,
-            "SYMB": symbol,
-            "GUBN": "0",
-            "BYMD": end_date,
-            "MODP": "1" if adjusted else "0",
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "authorization": self._access_token,
-            "appkey": self.creds.app_key,
-            "appsecret": self.creds.app_secret,
-            "tr_id": self.creds.overseas_tr_id,
-            "custtype": "P",
-        }
-
-        data: dict[str, Any] | None = None
-        for attempt in range(self._max_attempts):
-            try:
-                resp = self._request(
-                    "GET",
-                    self.creds.overseas_candle_url,
-                    headers=headers,
-                    params=params,
-                )
-            except requests.RequestException as exc:  # pragma: no cover
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError(f"Overseas daily request failed: {exc}")
-
-            try:
-                parsed = resp.json()
-            except ValueError as exc:
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError("Overseas daily response is not JSON") from exc
-
-            if not isinstance(parsed, dict):
-                raise KISClientError("Overseas daily response payload is not an object")
-
-            data = parsed
-
-            if resp.status_code != 200:
-                msg_cd = parsed.get("msg_cd") or ""
-                msg1 = parsed.get("msg1") or "Unknown error"
-                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
-                    # Token expired: refresh and retry
-                    self._access_token = None
-                    self._token_expiry = None
-                    self.ensure_token()
-                    headers["authorization"] = self._access_token or ""
-                    time.sleep(max(1.0, self._min_interval))
-                    continue
-                if attempt < self._max_attempts - 1:
-                    time.sleep(1.0)
-                    continue
-                raise KISClientError(
-                    f"Overseas daily HTTP {resp.status_code}: {resp.text}"
-                )
-
-            if str(parsed.get("rt_cd")) != "0":
-                msg_cd = parsed.get("msg_cd") or ""
-                msg1 = parsed.get("msg1") or "Unknown error"
-                if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
-                    time.sleep(max(1.0, self._min_interval))
-                    continue
-                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
-                    self._access_token = None
-                    self._token_expiry = None
-                    self.ensure_token()
-                    headers["authorization"] = self._access_token or ""
-                    time.sleep(max(1.0, self._min_interval))
-                    continue
-                raise KISClientError(f"KIS overseas error: {msg1}")
-            break
-
-        if data is None:
-            return []
-
-        # overseas output variable names differ; prefer 'output2' like domestic. Fallback to 'output'
-        return data.get("output2") or data.get("output") or []
-
-    @staticmethod
-    def _parse_overseas_candle(item: dict[str, Any] | None) -> Optional[dict[str, Any]]:
-        if not item:
-            return None
-
-        def _to_float(val: Any) -> float:
-            if val is None or val == "":
-                return float("nan")
-            try:
-                return float(str(val).replace(",", ""))
-            except ValueError:
-                return float("nan")
-
-        # Overseas fields typically: xymd, open, high, low, close/last, volume/tvol
-        return {
-            "date": str(item.get("xymd") or item.get("stck_bsop_date") or "").replace(
-                "-", ""
-            ),
-            "open": _to_float(item.get("open") or item.get("stck_oprc")),
-            "high": _to_float(item.get("high") or item.get("stck_hgpr")),
-            "low": _to_float(item.get("low") or item.get("stck_lwpr")),
-            "close": _to_float(
-                item.get("close")
-                or item.get("last")
-                or item.get("clos")
-                or item.get("stck_clpr")
-            ),
-            "volume": _to_float(
-                item.get("volume") or item.get("tvol") or item.get("acml_vol")
-            ),
-            "prev_close_diff": _to_float(item.get("prdy_vrss") or 0),
-        }
-
-    @staticmethod
-    def _parse_candle(item: dict[str, Any] | None) -> Optional[dict[str, Any]]:
-        if not item:
-            return None
-
-        def _to_float(val: Any) -> float:
-            if val is None or val == "":
-                return float("nan")
-            try:
-                return float(str(val).replace(",", ""))
-            except ValueError:
-                return float("nan")
-
-        return {
-            "date": item.get("stck_bsop_date"),
-            "open": _to_float(item.get("stck_oprc")),
-            "high": _to_float(item.get("stck_hgpr")),
-            "low": _to_float(item.get("stck_lwpr")),
-            "close": _to_float(item.get("stck_clpr")),
-            "volume": _to_float(item.get("acml_vol")),
-            "prev_close_diff": _to_float(item.get("prdy_vrss")),
-        }
-
-    # ------------------------------------------------------------------
-    # Screener helpers
-    # ------------------------------------------------------------------
     def volume_rank(
         self,
         *,
@@ -1043,9 +1047,6 @@ class KISClient:
 
         return results[:limit]
 
-    # ------------------------------------------------------------------
-    # Overseas ranking helpers
-    # ------------------------------------------------------------------
     def _fetch_overseas_rank_items(
         self,
         *,
@@ -1165,10 +1166,10 @@ class KISClient:
         limit: int,
         nday: str = "0",
         volume_filter: str = "0",
-        price_min: Optional[float] = None,
-        price_max: Optional[float] = None,
+        price_min: float | None = None,
+        price_max: float | None = None,
     ) -> list[dict[str, Any]]:
-        def _price(val: Optional[float]) -> str:
+        def _price(val: float | None) -> str:
             if val is None or val <= 0:
                 return ""
             return str(int(val))
@@ -1208,7 +1209,7 @@ class KISClient:
         )
 
     @staticmethod
-    def _parse_rank_item(item: dict[str, Any] | None) -> Optional[dict[str, Any]]:
+    def _parse_rank_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
         if not item:
             return None
 
@@ -1245,3 +1246,40 @@ class KISClient:
             "volume": volume,
             "amount": amount,
         }
+
+
+class KISClient(
+    _KISAuthMixin,
+    _KISQuoteMixin,
+    _KISCalendarMixin,
+    _KISRankingMixin,
+    _KISTransportMixin,
+):
+    """Facade that composes KIS responsibilities via internal mixins."""
+
+    def __init__(
+        self,
+        creds: KISCredentials,
+        *,
+        session: requests.Session | None = None,
+        cache_dir: str | None = None,
+        max_attempts: int = 3,
+        min_interval: float | None = None,
+    ):
+        self.creds = creds
+        self.session = session or requests.Session()
+        self._access_token: str | None = None
+        self._token_expiry: dt.datetime | None = None
+        self._cache_dir = cache_dir
+        self._token_cache_key = f"kis_token_{creds.env}"
+        self.cache_status: str | None = None
+        self._max_attempts = max(1, max_attempts)
+        # throttle between requests (seconds)
+        self._min_interval = (
+            float(min_interval)
+            if min_interval is not None
+            else (0.5 if creds.env == "demo" else 0.1)
+        )
+        self._last_request_at: dt.datetime | None = None
+
+        self._try_load_cached_token()
