@@ -5,6 +5,7 @@ import unittest
 
 from sab.data.holiday_cache import (
     HolidayEntry,
+    load_cached_holidays,
     lookup_holiday,
     merge_holidays,
 )
@@ -105,6 +106,42 @@ class HolidayCacheTests(unittest.TestCase):
             ]
             merged = merge_holidays(tmpdir, "US", items)
             self.assertNotIn("20251218", merged)
+
+    def test_load_cached_holidays_returns_empty_for_non_object_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = f"{tmpdir}/holidays_us.json"
+            with open(cache_path, "w", encoding="utf-8") as fp:
+                json.dump(["invalid", "root"], fp)
+
+            loaded = load_cached_holidays(tmpdir, "US")
+            self.assertEqual(loaded, {})
+
+    def test_load_cached_holidays_skips_invalid_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = f"{tmpdir}/holidays_us.json"
+            payload = {
+                "20250101": {"note": "Valid Closure", "is_open": False},
+                "bad-date": {"note": "Invalid key", "is_open": False},
+                "20250102": {"note": 123, "is_open": False},
+                "20250103": {"note": "Bad flag", "is_open": "MAYBE"},
+                "20250104": ["not", "an", "object"],
+                "20250105": {"note": None, "is_open": "N"},
+                "20250106": {"note": "Open day", "is_open": "Y"},
+                "20250107": {"note": "Numeric closed", "is_open": 0},
+            }
+            with open(cache_path, "w", encoding="utf-8") as fp:
+                json.dump(payload, fp)
+
+            loaded = load_cached_holidays(tmpdir, "US")
+
+            self.assertSetEqual(
+                set(loaded),
+                {"20250101", "20250105", "20250106", "20250107"},
+            )
+            self.assertFalse(loaded["20250101"].is_open)
+            self.assertFalse(loaded["20250105"].is_open)
+            self.assertTrue(loaded["20250106"].is_open)
+            self.assertFalse(loaded["20250107"].is_open)
 
 
 if __name__ == "__main__":

@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..utils.atomic_io import atomic_write_json
 from .kr_calendar import load_kr_trading_calendar
 from .us_calendar import load_us_trading_calendar
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class HolidayEntry:
     date: str
-    note: Optional[str]
+    note: str | None
     is_open: bool
 
 
@@ -23,27 +26,96 @@ def _cache_path(cache_dir: str, country_code: str) -> str:
     return os.path.join(cache_dir, f"holidays_{country_code.lower()}.json")
 
 
-def load_cached_holidays(cache_dir: str, country_code: str) -> Dict[str, HolidayEntry]:
+def _parse_is_open(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized in {"Y", "YES", "TRUE", "T", "1", "OPEN"}:
+            return True
+        if normalized in {"N", "NO", "FALSE", "F", "0", "CLOSE", "CLOSED"}:
+            return False
+        return None
+    if isinstance(value, int):
+        if value in {0, 1}:
+            return bool(value)
+        return None
+    return None
+
+
+def load_cached_holidays(cache_dir: str, country_code: str) -> dict[str, HolidayEntry]:
     path = _cache_path(cache_dir, country_code)
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fp:
+        with open(path, encoding="utf-8") as fp:
             data = json.load(fp)
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(data, dict):
+        logger.warning("Ignoring holiday cache %s: root JSON must be an object", path)
+        return {}
 
-    entries: Dict[str, HolidayEntry] = {}
+    entries: dict[str, HolidayEntry] = {}
     for key, value in data.items():
+        if not isinstance(key, str):
+            logger.warning(
+                "Skipping holiday cache entry with non-string key in %s: %r", path, key
+            )
+            continue
+        if len(key) != 8 or not key.isdigit():
+            logger.warning(
+                "Skipping holiday cache entry with invalid date key in %s: %s",
+                path,
+                key,
+            )
+            continue
+        if not isinstance(value, dict):
+            logger.warning(
+                "Skipping holiday cache entry %s in %s: value must be an object",
+                key,
+                path,
+            )
+            continue
+
+        note_raw = value.get("note")
+        note: str | None
+        if note_raw is None:
+            note = None
+        elif isinstance(note_raw, str):
+            note = note_raw
+        else:
+            logger.warning(
+                "Skipping holiday cache entry %s in %s: note must be string or null",
+                key,
+                path,
+            )
+            continue
+
+        is_open_raw = value.get("is_open", True)
+        is_open = _parse_is_open(is_open_raw)
+        if is_open is None:
+            logger.warning(
+                "Skipping holiday cache entry %s in %s: invalid is_open value %r",
+                key,
+                path,
+                is_open_raw,
+            )
+            continue
+
         entries[key] = HolidayEntry(
             date=key,
-            note=value.get("note"),
-            is_open=value.get("is_open", True),
+            note=note,
+            is_open=is_open,
         )
     return entries
 
 
-def save_holidays(cache_dir: str, country_code: str, entries: Dict[str, HolidayEntry]) -> None:
+def save_holidays(
+    cache_dir: str,
+    country_code: str,
+    entries: dict[str, HolidayEntry],
+) -> None:
     path = _cache_path(cache_dir, country_code)
     payload = {
         date: {"note": entry.note, "is_open": entry.is_open}
@@ -56,7 +128,7 @@ def merge_holidays(
     cache_dir: str,
     country_code: str,
     fetched: list[dict[str, Any]],
-) -> Dict[str, HolidayEntry]:
+) -> dict[str, HolidayEntry]:
     cached_raw = load_cached_holidays(cache_dir, country_code)
     country = country_code.strip().upper()
 
@@ -77,12 +149,12 @@ def merge_holidays(
             return False
         # Drop obvious noise strings.
         lowered = note.lower()
-        if lowered in {"amex", "아멕스"}:
-            return False
-        return True
+        return lowered not in {"amex", "아멕스"}
 
     cached = {
-        date: entry for date, entry in cached_raw.items() if _keep_cached(date, entry, trusted_dates)
+        date: entry
+        for date, entry in cached_raw.items()
+        if _keep_cached(date, entry, trusted_dates)
     }
 
     if country == "US":
@@ -148,7 +220,7 @@ def lookup_holiday(
     cache_dir: str,
     country_code: str,
     date: dt.date,
-) -> Optional[HolidayEntry]:
+) -> HolidayEntry | None:
     entries = load_cached_holidays(cache_dir, country_code)
     return entries.get(date.strftime("%Y%m%d"))
 
