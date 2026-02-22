@@ -8,6 +8,19 @@ export default defineConfig({
       "src/lib/__tests__/**/*.test.ts",
       "src/app/api/**/__tests__/**/*.test.ts",
     ],
+    coverage: {
+      provider: "v8",
+      include: [
+        "src/app/api/run/**/*.ts",
+        "src/app/api/reports/**/*.ts",
+        "src/app/api/holdings/**/*.ts",
+      ],
+      exclude: ["src/**/*.d.ts", "src/**/__tests__/**", "src/test-stubs/**"],
+      reporter: ["text", "lcov"],
+      thresholds: {
+        lines: 80,
+      },
+    },
   },
   resolve: {
     alias: {

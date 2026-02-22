@@ -62,8 +62,8 @@ jobs:
       - name: Mypy
         run: uv run mypy --config-file pyproject.toml
 
-      - name: Pytest
-        run: uv run python -m pytest -q
+      - name: Pytest (coverage gate)
+        run: uv run python -m pytest -q --cov=sab --cov-report=term --cov-fail-under=70
 
       - name: CLI smoke test
         run: uv run -m sab --help
@@ -161,8 +161,8 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Unit tests
-        run: pnpm run test
+      - name: Unit tests (coverage gate)
+        run: pnpm run test:coverage
 
       - name: Build
         run: pnpm run build
