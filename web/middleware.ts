@@ -75,3 +75,15 @@ export async function middleware(request: NextRequest) {
 
   return NextResponse.next();
 }
+
+export const config = {
+  matcher: [
+    "/",
+    "/holdings/:path*",
+    "/reports/:path*",
+    "/run/:path*",
+    "/api/holdings/:path*",
+    "/api/reports/:path*",
+    "/api/run/:path*",
+  ],
+};

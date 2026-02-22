@@ -1,13 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { middleware } from "../../../middleware";
+import { config, middleware } from "../../../middleware";
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe("middleware auth response shape", () => {
+  it("limits middleware execution to protected routes", () => {
+    expect(config.matcher).toEqual([
+      "/",
+      "/holdings/:path*",
+      "/reports/:path*",
+      "/run/:path*",
+      "/api/holdings/:path*",
+      "/api/reports/:path*",
+      "/api/run/:path*",
+    ]);
+  });
+
   it("returns JSON for unauthorized /api requests", async () => {
     const request = new NextRequest("http://localhost:55300/api/holdings", {
       method: "GET",
