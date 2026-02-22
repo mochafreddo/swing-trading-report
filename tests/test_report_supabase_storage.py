@@ -433,7 +433,7 @@ def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
     assert uploaded is None
 
 
-def test_maybe_upload_report_artifact_returns_uploaded_key_on_index_error(
+def test_maybe_upload_report_artifact_returns_none_on_local_index_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     report_path = tmp_path / "2026-02-13.buy.json"
@@ -467,7 +467,42 @@ def test_maybe_upload_report_artifact_returns_uploaded_key_on_index_error(
         logger=logging.getLogger("test"),
     )
 
-    assert uploaded == "2026/02/2026-02-13.buy.json"
+    assert uploaded is None
+
+
+def test_maybe_upload_report_artifact_raises_on_github_actions_index_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+
+    def _fake_upload(
+        *,
+        local_path: str,
+        run_type: str,
+        report_date: date,
+        config: SupabaseStorageConfig,
+    ) -> str:
+        del local_path, run_type, report_date, config
+        raise SupabaseReportIndexError(
+            "index down",
+            storage_key="2026/02/2026-02-13.buy.json",
+        )
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact", _fake_upload
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="index down"):
+        maybe_upload_report_artifact(
+            artifact_path=report_path.as_posix(),
+            run_type="buy",
+            logger=logging.getLogger("test"),
+        )
 
 
 def test_maybe_upload_report_artifact_requires_supabase_env_on_github_actions(

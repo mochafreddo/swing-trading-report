@@ -571,11 +571,13 @@ def maybe_upload_report_artifact(
             config=config,
         )
     except SupabaseReportIndexError as exc:
+        if required:
+            raise
         logger.warning(
             "Supabase report upload completed but index upsert failed: %s",
             exc,
         )
-        return exc.storage_key
+        return None
     except SupabaseStorageError:
         if required:
             raise

@@ -54,7 +54,7 @@ flowchart LR
 4. `kis` 경로에서는 호출 실패 시 캐시 유지 또는 KR 종목에 한해 PyKRX 폴백을 적용합니다.
 5. 시그널 평가 후 후보를 점수순 정렬하고 통화/시장 상태 표시를 덧붙입니다.
 6. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다.
-7. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+7. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다.
 
 ### 4.2 `sell` 플로우
 
@@ -132,6 +132,7 @@ flowchart LR
   - 리포트는 파일 락 + 원자적 쓰기로 기록
   - 중복 파일명은 suffix(`-1`, `-2`, ...)로 충돌 회피
   - Supabase 업로드도 duplicate index를 순차 탐색해 충돌 회피
+  - GitHub Actions 실행에서는 Storage 업로드 또는 `report_index` upsert 실패 시 run을 실패 처리(fail-closed)
 - 운영 자동화
   - `cleanup.yml`이 보관기간 초과 리포트를 정리
   - schedule 실행에서만 알림(텔레그램/슬랙) 전송

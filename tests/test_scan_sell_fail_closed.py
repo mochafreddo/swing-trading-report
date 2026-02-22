@@ -16,6 +16,7 @@ from sab.holdings_loader import (
     HoldingSettings,
     HoldingsLoadError,
 )
+from sab.report.supabase_storage import SupabaseReportIndexError
 from sab.scan import run_scan
 from sab.sell import run_sell
 from sab.signals.sell_rules import SellEvaluation
@@ -234,3 +235,76 @@ def test_run_sell_logs_kis_token_cache_status_once(
         if "KIS token cache status=" in record.getMessage()
     ]
     assert lines == [f"KIS token cache status=hit (env=real, cache_dir={tmp_path})"]
+
+
+def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+    )
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=["005930"]),
+        patch("sab.scan.KISClient", _FakeKISClient),
+        patch(
+            "sab.scan.write_report",
+            return_value=str(tmp_path / "2026-02-19.buy.md"),
+        ),
+        patch(
+            "sab.scan.maybe_upload_report_artifact",
+            side_effect=SupabaseReportIndexError(
+                "index down",
+                storage_key="2026/02/2026-02-19.buy.json",
+            ),
+        ),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 1
+
+
+def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["005930"]),
+    )
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.sell.KISClient", _FakeKISClient),
+        patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-19.sell.md"),
+        ),
+        patch(
+            "sab.sell.maybe_upload_report_artifact",
+            side_effect=SupabaseReportIndexError(
+                "index down",
+                storage_key="2026/02/2026-02-19.sell.json",
+            ),
+        ),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 1
