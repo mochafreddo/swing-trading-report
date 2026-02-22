@@ -1,4 +1,12 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import {
   buildWorkflowDispatchRequest,
@@ -9,6 +17,7 @@ import {
 beforeAll(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_server_key";
+  process.env.RUN_DISPATCH_ENABLED = "1";
   process.env.GITHUB_OWNER = "owner";
   process.env.GITHUB_REPO = "repo";
   process.env.GITHUB_PAT = "ghp_test_token";
@@ -16,6 +25,10 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  process.env.RUN_DISPATCH_ENABLED = "1";
 });
 
 describe("buildWorkflowDispatchRequest", () => {
@@ -53,6 +66,56 @@ describe("buildWorkflowDispatchRequest", () => {
 });
 
 describe("dispatchWorkflow", () => {
+  it("returns 503 when run dispatch feature is disabled", async () => {
+    process.env.RUN_DISPATCH_ENABLED = "0";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      dispatchWorkflow({
+        workflow: "scan",
+        provider: "kis",
+        universe: "both",
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("enables run dispatch in legacy mode when flag is unset and github env exists", async () => {
+    delete process.env.RUN_DISPATCH_ENABLED;
+    const mockFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }));
+
+    const result = await dispatchWorkflow({
+      workflow: "scan",
+      provider: "kis",
+      universe: "both",
+    });
+
+    expect(result.dispatched).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when RUN_DISPATCH_ENABLED has an invalid value", async () => {
+    process.env.RUN_DISPATCH_ENABLED = "true";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      dispatchWorkflow({
+        workflow: "scan",
+        provider: "kis",
+        universe: "both",
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("treats 204 as success", async () => {
     const mockFetch = vi
       .spyOn(globalThis, "fetch")

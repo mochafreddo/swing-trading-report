@@ -26,6 +26,38 @@ interface DispatchRequest {
   };
 }
 
+const GITHUB_DISPATCH_ENV_KEYS = [
+  "GITHUB_OWNER",
+  "GITHUB_REPO",
+  "GITHUB_PAT",
+] as const;
+
+function hasNonEmptyEnv(name: string): boolean {
+  const raw = process.env[name];
+  return typeof raw === "string" && raw.trim().length > 0;
+}
+
+function hasAllGitHubDispatchEnv(): boolean {
+  return GITHUB_DISPATCH_ENV_KEYS.every((name) => hasNonEmptyEnv(name));
+}
+
+function isRunDispatchEnabled(): boolean {
+  const raw = process.env.RUN_DISPATCH_ENABLED;
+  const value = typeof raw === "string" ? raw.trim() : "";
+
+  if (!value) {
+    // Backward compatibility: legacy deployments had no feature flag.
+    return hasAllGitHubDispatchEnv();
+  }
+  if (value === "1") {
+    return true;
+  }
+  if (value === "0") {
+    return false;
+  }
+  throw new GitHubDispatchError('RUN_DISPATCH_ENABLED must be "0" or "1"', 500);
+}
+
 export function buildWorkflowDispatchRequest(
   input: WorkflowDispatchInput,
 ): DispatchRequest {
@@ -58,8 +90,15 @@ export function buildWorkflowDispatchRequest(
 export async function dispatchWorkflow(
   input: WorkflowDispatchInput,
 ): Promise<WorkflowDispatchResult> {
-  const env = getGitHubEnv();
+  if (!isRunDispatchEnabled()) {
+    throw new GitHubDispatchError(
+      "Run dispatch is disabled. Set RUN_DISPATCH_ENABLED=1 to enable /api/run.",
+      503,
+    );
+  }
+
   const request = buildWorkflowDispatchRequest(input);
+  const env = getGitHubEnv();
 
   const response = await fetch(request.dispatchUrl, {
     method: "POST",
