@@ -7,7 +7,7 @@ from typing import Any
 
 from sab.data.kis_client import KISClientError
 from sab.market_data_pipeline import collect_market_data_from_kis
-from sab.scan_market_data import _scan_legacy_cache_keys
+from sab.market_data_service import scan_legacy_cache_keys as _scan_legacy_cache_keys
 
 
 def _build_runtime(

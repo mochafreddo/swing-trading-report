@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from functools import partial
 
-from . import sell_evaluation, sell_market_data, sell_runtime
+from . import sell_evaluation, sell_runtime
 from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.cache import load_json, save_json
@@ -11,6 +10,7 @@ from .data.kis_client import KISClient, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError
 from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
+from .market_data_service import MarketDataPolicy, MarketDataService
 from .report.sell_report import SellReportRow, write_sell_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_suffix
@@ -26,44 +26,64 @@ def _build_sell_runtime(cfg: Config, logger: logging.Logger) -> _SellRuntime:
     return sell_runtime._build_sell_runtime(cfg, logger)
 
 
+def _build_market_data_service() -> MarketDataService:
+    return MarketDataService(
+        KISCredentialsCls=KISCredentials,
+        KISClientCls=KISClient,
+        PykrxClientCls=PykrxClient,
+        PykrxClientErrorCls=PykrxClientError,
+        infer_env_from_base_fn=_infer_env_from_base,
+        load_json_fn=load_json,
+        save_json_fn=save_json,
+    )
+
+
+def _build_sell_market_data_policy(
+    runtime: _SellRuntime, *, target_bars: int
+) -> MarketDataPolicy:
+    return MarketDataPolicy(
+        tickers=runtime.unique_tickers,
+        target_bars=target_bars,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        pykrx_error_attr="pykrx_init_error",
+        pykrx_initialized_log_message="PyKRX client initialized",
+        pykrx_client_kwargs_fn=lambda state: {"cache_dir": state.cfg.data_dir},
+        init_unsupported_provider_message=(
+            "Provider '{provider}' not supported for sell command"
+        ),
+        init_mark_fatal_on_unsupported=True,
+        collect_unsupported_provider_message=None,
+        collect_mark_fatal_on_unsupported=False,
+    )
+
+
+def _resolve_sell_fx(runtime: _SellRuntime) -> None:
+    if not runtime.unique_tickers:
+        return
+    resolved_rate, resolved_note, fx_messages = resolve_fx_rate(
+        cfg=runtime.cfg,
+        ticker_currency=runtime.ticker_currency,
+        tickers=runtime.unique_tickers,
+        kis_client=runtime.kis_client,
+        logger=runtime.logger,
+    )
+    runtime.fx_rate = resolved_rate
+    runtime.fx_note = resolved_note
+    if fx_messages:
+        runtime.failures.extend(fx_messages)
+
+
 def _collect_sell_runtime(
     runtime: _SellRuntime,
     *,
     target_bars: int,
 ) -> None:
-    ensure_pykrx_client = partial(
-        sell_market_data._ensure_pykrx_client,
-        PykrxClientCls=PykrxClient,
-    )
-    collect_market_data_from_kis = partial(
-        sell_market_data._collect_market_data_from_kis,
-        load_json_fn=load_json,
-        save_json_fn=save_json,
-        ensure_pykrx_client_fn=ensure_pykrx_client,
-        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
-        exchange_from_suffix_fn=_exchange_from_suffix,
-    )
-    collect_market_data_from_pykrx = partial(
-        sell_market_data._collect_market_data_from_pykrx,
-        PykrxClientErrorCls=PykrxClientError,
-    )
-
-    sell_market_data._initialize_provider(
-        runtime,
-        KISCredentialsCls=KISCredentials,
-        KISClientCls=KISClient,
-        ensure_pykrx_client_fn=ensure_pykrx_client,
-        infer_env_from_base_fn=_infer_env_from_base,
-    )
-
-    sell_market_data._resolve_sell_fx(runtime, resolve_fx_rate_fn=resolve_fx_rate)
-
-    sell_market_data._collect_market_data(
-        runtime,
-        target_bars=target_bars,
-        collect_market_data_from_kis_fn=collect_market_data_from_kis,
-        collect_market_data_from_pykrx_fn=collect_market_data_from_pykrx,
-    )
+    market_data_service = _build_market_data_service()
+    policy = _build_sell_market_data_policy(runtime, target_bars=target_bars)
+    market_data_service.initialize_provider(runtime, policy=policy)
+    _resolve_sell_fx(runtime)
+    market_data_service.collect_market_data(runtime, policy=policy)
 
 
 def _evaluate_sell_runtime(runtime: _SellRuntime) -> list[SellReportRow]:
