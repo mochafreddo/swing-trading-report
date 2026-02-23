@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe("fetchReportIndexPage", () => {
   it("returns typed rows and parsed total count", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       reportIndexResponse(
         [
           {
@@ -66,6 +66,8 @@ describe("fetchReportIndexPage", () => {
 
     expect(result.total).toBe(12);
     expect(result.fetchedCount).toBe(1);
+    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBeNull();
     expect(result.items).toEqual([
       {
         report_key: REPORT_KEY_A,
@@ -78,6 +80,10 @@ describe("fetchReportIndexPage", () => {
         tickers_hydrated: true,
       },
     ]);
+
+    const [requestUrl] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.searchParams.get("limit")).toBe("10");
   });
 
   it("filters out malformed rows", async () => {
@@ -109,6 +115,71 @@ describe("fetchReportIndexPage", () => {
     expect(result.items).toHaveLength(1);
     expect(result.total).toBe(2);
     expect(result.fetchedCount).toBe(2);
+    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("uses keyset pagination without exact count when includeTotal is false", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reportIndexResponse(
+        [
+          {
+            report_key: "2026/02/2026-02-14.buy.json",
+            report_type: "buy",
+            report_date: "2026-02-14",
+            duplicate_index: 0,
+            generated_at: "2026-02-14T00:00:00Z",
+            summary: null,
+            tickers: ["AAPL.US"],
+            tickers_hydrated: true,
+          },
+          {
+            report_key: "2026/02/2026-02-13.buy.json",
+            report_type: "buy",
+            report_date: "2026-02-13",
+            duplicate_index: 0,
+            generated_at: "2026-02-13T00:00:00Z",
+            summary: null,
+            tickers: ["MSFT.US"],
+            tickers_hydrated: true,
+          },
+        ],
+        99,
+      ),
+    );
+
+    const result = await fetchReportIndexPage({
+      type: "buy",
+      limit: 1,
+      cursor: {
+        report_date: "2026-02-20",
+        duplicate_index: 0,
+        report_key: "2026/02/2026-02-20.buy.json",
+      },
+      includeTotal: false,
+      lookahead: true,
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.fetchedCount).toBe(1);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toEqual({
+      report_date: "2026-02-14",
+      duplicate_index: 0,
+      report_key: "2026/02/2026-02-14.buy.json",
+    });
+
+    const [requestUrl, init] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.searchParams.get("limit")).toBe("2");
+    expect(url.searchParams.get("report_type")).toBe("eq.buy");
+    expect(url.searchParams.get("or")).toContain("report_date.lt.");
+    expect(url.searchParams.get("or")).toContain("duplicate_index.lt.");
+    expect(url.searchParams.get("or")).toContain("report_key.lt.");
+
+    const headers = init?.headers as Record<string, string>;
+    expect(headers.Accept).toBe("application/json");
+    expect(headers.Prefer).toBeUndefined();
   });
 });
 

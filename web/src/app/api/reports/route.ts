@@ -8,7 +8,10 @@ import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
 import { reportListQuerySchema } from "@/lib/schemas";
-import { fetchReportIndexPage } from "@/lib/supabase-admin";
+import {
+  fetchReportIndexPage,
+  type ReportIndexCursor,
+} from "@/lib/supabase-admin";
 import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -131,8 +134,9 @@ export async function GET(request: NextRequest) {
     const matchedItems: ReportListItem[] = [];
     const warnings: ReportSearchWarning[] = [];
     let searched = 0;
-    let offset = 0;
-    let candidateTotal = 0;
+    let cursor: ReportIndexCursor | undefined;
+    let hasMoreCandidates = false;
+    let partialFailure = false;
     let incompleteRows = 0;
 
     while (searched < searchWindow) {
@@ -149,17 +153,19 @@ export async function GET(request: NextRequest) {
         page = await fetchReportIndexPage({
           type,
           limit: pageSize,
-          offset,
+          cursor,
+          includeTotal: false,
+          lookahead: true,
         });
       } catch (error) {
         if (searched === 0) {
           throw error;
         }
         warnings.push(buildPartialFailureWarning(error));
+        partialFailure = true;
         break;
       }
 
-      candidateTotal = Math.max(candidateTotal, page.total);
       if (page.fetchedCount <= 0) {
         break;
       }
@@ -184,10 +190,20 @@ export async function GET(request: NextRequest) {
       }
 
       searched += page.fetchedCount;
-      offset += page.fetchedCount;
-      if (page.fetchedCount < pageSize) {
+      hasMoreCandidates = page.hasMore;
+      if (!page.hasMore) {
         break;
       }
+      if (!page.nextCursor) {
+        warnings.push(
+          buildPartialFailureWarning(
+            new Error("검색 커서를 계산하지 못해 검색을 중단했습니다."),
+          ),
+        );
+        partialFailure = true;
+        break;
+      }
+      cursor = page.nextCursor;
     }
 
     if (incompleteRows > 0) {
@@ -199,7 +215,8 @@ export async function GET(request: NextRequest) {
       total: matchedItems.length,
       searched,
       searchWindow,
-      truncated: candidateTotal > searched,
+      truncated:
+        partialFailure || (searched >= searchWindow && hasMoreCandidates),
       warnings,
     });
   } catch (error) {

@@ -123,6 +123,8 @@ describe("GET /api/reports", () => {
       ],
       total: 3,
       fetchedCount: 2,
+      hasMore: false,
+      nextCursor: null,
     });
 
     const response = await GET(makeRequest("type=buy&limit=2"));
@@ -215,6 +217,8 @@ describe("GET /api/reports", () => {
       ],
       total: 4,
       fetchedCount: 4,
+      hasMore: false,
+      nextCursor: null,
     });
 
     const response = await GET(makeRequest("type=buy&limit=10&q=aa"));
@@ -231,7 +235,9 @@ describe("GET /api/reports", () => {
     expect(listMock).toHaveBeenCalledWith({
       type: "buy",
       limit: 10,
-      offset: 0,
+      cursor: undefined,
+      includeTotal: false,
+      lookahead: true,
     });
     expect(payload.items.map((item) => item.key)).toEqual([
       BUY_KEY_13,
@@ -275,6 +281,8 @@ describe("GET /api/reports", () => {
       ],
       total: 2,
       fetchedCount: 2,
+      hasMore: false,
+      nextCursor: null,
     });
 
     const response = await GET(makeRequest("type=buy&limit=10&q=aapl"));
@@ -303,6 +311,11 @@ describe("GET /api/reports", () => {
       tickers: ["AAPL.US"],
       tickers_hydrated: true,
     }));
+    const firstPageCursor = {
+      report_date: firstPage[firstPage.length - 1]!.report_date,
+      duplicate_index: firstPage[firstPage.length - 1]!.duplicate_index,
+      report_key: firstPage[firstPage.length - 1]!.report_key,
+    };
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "110");
     listMock
@@ -310,6 +323,8 @@ describe("GET /api/reports", () => {
         items: firstPage,
         total: 250,
         fetchedCount: 100,
+        hasMore: true,
+        nextCursor: firstPageCursor,
       })
       .mockRejectedValueOnce(new Error("temporary outage"));
 
@@ -332,17 +347,31 @@ describe("GET /api/reports", () => {
     expect(listMock).toHaveBeenNthCalledWith(1, {
       type: "buy",
       limit: 100,
-      offset: 0,
+      cursor: undefined,
+      includeTotal: false,
+      lookahead: true,
     });
     expect(listMock).toHaveBeenNthCalledWith(2, {
       type: "buy",
       limit: 10,
-      offset: 100,
+      cursor: firstPageCursor,
+      includeTotal: false,
+      lookahead: true,
     });
   });
 
-  it("advances offset using fetched row count when parsed items are fewer", async () => {
+  it("advances cursor using fetched row count when parsed items are fewer", async () => {
     const listMock = vi.mocked(fetchReportIndexPage);
+    const firstCursor = {
+      report_date: "2026-02-01",
+      duplicate_index: 99,
+      report_key: "2026/02/2026-02-01.buy.json",
+    };
+    const secondCursor = {
+      report_date: "2026-01-31",
+      duplicate_index: 0,
+      report_key: "2026/01/2026-01-31.buy.json",
+    };
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "110");
     listMock
@@ -361,6 +390,8 @@ describe("GET /api/reports", () => {
         ],
         total: 250,
         fetchedCount: 100,
+        hasMore: true,
+        nextCursor: firstCursor,
       })
       .mockResolvedValueOnce({
         items: [
@@ -377,6 +408,8 @@ describe("GET /api/reports", () => {
         ],
         total: 250,
         fetchedCount: 10,
+        hasMore: true,
+        nextCursor: secondCursor,
       });
 
     const response = await GET(makeRequest("type=buy&limit=10&q=aapl"));
@@ -400,12 +433,16 @@ describe("GET /api/reports", () => {
     expect(listMock).toHaveBeenNthCalledWith(1, {
       type: "buy",
       limit: 100,
-      offset: 0,
+      cursor: undefined,
+      includeTotal: false,
+      lookahead: true,
     });
     expect(listMock).toHaveBeenNthCalledWith(2, {
       type: "buy",
       limit: 10,
-      offset: 100,
+      cursor: firstCursor,
+      includeTotal: false,
+      lookahead: true,
     });
   });
 
@@ -427,6 +464,12 @@ describe("GET /api/reports", () => {
       items: windowRows,
       total: 11,
       fetchedCount: 10,
+      hasMore: true,
+      nextCursor: {
+        report_date: windowRows[windowRows.length - 1]!.report_date,
+        duplicate_index: windowRows[windowRows.length - 1]!.duplicate_index,
+        report_key: windowRows[windowRows.length - 1]!.report_key,
+      },
     });
 
     const response = await GET(makeRequest("type=buy&limit=5&q=aapl"));
