@@ -32,7 +32,7 @@ class RunScanUSHolidayCallTests(unittest.TestCase):
                     return_value=os.path.join(tmpdir, "report.md"),
                 ),
                 patch(
-                    "sab.scan.KISClient.overseas_holidays",
+                    "sab.market_data_common.KISClient.overseas_holidays",
                     autospec=True,
                     return_value=[{"TRD_DT": "20250101", "open_yn": "N"}],
                 ) as mock_holidays,

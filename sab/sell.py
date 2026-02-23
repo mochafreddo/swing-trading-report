@@ -5,12 +5,10 @@ import logging
 from . import sell_evaluation, sell_runtime
 from .config import Config, load_config
 from .config_loader import ConfigLoadError
-from .data.cache import load_json, save_json
-from .data.kis_client import KISClient, KISCredentials
-from .data.pykrx_client import PykrxClient, PykrxClientError
 from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
-from .market_data_service import MarketDataPolicy, MarketDataService
+from .market_data_common import build_market_data_dependencies
+from .market_data_service import SellMarketData
 from .report.sell_report import SellReportRow, write_sell_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_suffix
@@ -18,44 +16,12 @@ from .signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybri
 from .signals.sell_rules import SellSettings, evaluate_sell_signals
 
 
-def _infer_env_from_base(base_url: str) -> str:
-    return "demo" if "vts" in base_url.lower() else "real"
-
-
 def _build_sell_runtime(cfg: Config, logger: logging.Logger) -> _SellRuntime:
     return sell_runtime._build_sell_runtime(cfg, logger)
 
 
-def _build_market_data_service() -> MarketDataService:
-    return MarketDataService(
-        KISCredentialsCls=KISCredentials,
-        KISClientCls=KISClient,
-        PykrxClientCls=PykrxClient,
-        PykrxClientErrorCls=PykrxClientError,
-        infer_env_from_base_fn=_infer_env_from_base,
-        load_json_fn=load_json,
-        save_json_fn=save_json,
-    )
-
-
-def _build_sell_market_data_policy(
-    runtime: _SellRuntime, *, target_bars: int
-) -> MarketDataPolicy:
-    return MarketDataPolicy(
-        tickers=runtime.unique_tickers,
-        target_bars=target_bars,
-        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
-        exchange_from_suffix_fn=_exchange_from_suffix,
-        pykrx_error_attr="pykrx_init_error",
-        pykrx_initialized_log_message="PyKRX client initialized",
-        pykrx_client_kwargs_fn=lambda state: {"cache_dir": state.cfg.data_dir},
-        init_unsupported_provider_message=(
-            "Provider '{provider}' not supported for sell command"
-        ),
-        init_mark_fatal_on_unsupported=True,
-        collect_unsupported_provider_message=None,
-        collect_mark_fatal_on_unsupported=False,
-    )
+def _build_market_data_service() -> SellMarketData:
+    return SellMarketData(deps=build_market_data_dependencies())
 
 
 def _resolve_sell_fx(runtime: _SellRuntime) -> None:
@@ -80,10 +46,9 @@ def _collect_sell_runtime(
     target_bars: int,
 ) -> None:
     market_data_service = _build_market_data_service()
-    policy = _build_sell_market_data_policy(runtime, target_bars=target_bars)
-    market_data_service.initialize_provider(runtime, policy=policy)
+    market_data_service.initialize_provider(runtime)
     _resolve_sell_fx(runtime)
-    market_data_service.collect_market_data(runtime, policy=policy)
+    market_data_service.collect_market_data(runtime, target_bars=target_bars)
 
 
 def _evaluate_sell_runtime(runtime: _SellRuntime) -> list[SellReportRow]:

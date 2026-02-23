@@ -82,9 +82,12 @@ class RunScanUSScreenerMetaETFTests(unittest.TestCase):
                     return_value=os.path.join(tmpdir, "report.md"),
                 ),
                 patch("sab.scan.KUS.screen", return_value=kres),
-                patch("sab.scan.KISClient.overseas_holidays", return_value=[]),
                 patch(
-                    "sab.scan.KISClient.overseas_daily_candles",
+                    "sab.market_data_common.KISClient.overseas_holidays",
+                    return_value=[],
+                ),
+                patch(
+                    "sab.market_data_common.KISClient.overseas_daily_candles",
                     return_value=_build_us_candles(),
                 ),
                 patch("sab.scan.evaluate_ticker_hybrid", side_effect=fake_eval_hybrid),

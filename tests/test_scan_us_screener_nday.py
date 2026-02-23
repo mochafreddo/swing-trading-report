@@ -46,8 +46,14 @@ class RunScanUSScreenerNdayTests(unittest.TestCase):
                     return_value=os.path.join(tmpdir, "report.md"),
                 ),
                 patch("sab.scan.us_session_info", return_value=fake_session),
-                patch("sab.scan.KISClient.overseas_holidays", return_value=[]),
-                patch("sab.scan.KISClient.overseas_daily_candles", return_value=[]),
+                patch(
+                    "sab.market_data_common.KISClient.overseas_holidays",
+                    return_value=[],
+                ),
+                patch(
+                    "sab.market_data_common.KISClient.overseas_daily_candles",
+                    return_value=[],
+                ),
                 patch(
                     "sab.scan.KUS.screen",
                     autospec=True,

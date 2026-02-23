@@ -1,20 +1,73 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from .data.holiday_cache import load_cached_holidays
-from .data.kis_client import KISAuthError, KISClientError
+from .data.kis_client import KISAuthError, KISClient, KISClientError, KISCredentials
 from .data.kr_calendar import load_kr_trading_calendar
-from .data.pykrx_client import PykrxClientError, PykrxNotInstalledError
+from .data.pykrx_client import (
+    PykrxClient,
+    PykrxClientError,
+    PykrxNotInstalledError,
+)
 from .data.us_calendar import load_us_trading_calendar
 from .fx import SUFFIX_TO_EXCD
+from .market_data_common import Candle
 
 type _LegacyCacheKeysFn = Callable[[str, str, str | None], list[str]]
-type _OnCandlesAppliedFn = Callable[[Any, str, list[dict[str, Any]]], None]
+
+
+class _CollectionConfig(Protocol):
+    @property
+    def data_dir(self) -> str: ...
+
+    @property
+    def data_provider(self) -> str: ...
+
+    @property
+    def market_cache_stale_sessions_kr(self) -> int: ...
+
+    @property
+    def market_cache_stale_sessions_us(self) -> int: ...
+
+    @property
+    def kis_app_key(self) -> str | None: ...
+
+    @property
+    def kis_app_secret(self) -> str | None: ...
+
+    @property
+    def kis_base_url(self) -> str | None: ...
+
+    @property
+    def kis_min_interval_ms(self) -> float | None: ...
+
+
+class _CollectionRuntime(Protocol):
+    @property
+    def cfg(self) -> _CollectionConfig: ...
+
+    @property
+    def logger(self) -> logging.Logger: ...
+
+    failures: list[str]
+    fatal_failure: bool
+    market_data: dict[str, list[Candle]]
+    ticker_data_source: dict[str, str]
+    pykrx_warning_added: bool
+    kis_client: KISClient | None
+    pykrx_client: PykrxClient | None
+    cache_hint: str | None
+
+
+type _OnCandlesAppliedFn[TRuntime: _CollectionRuntime] = Callable[
+    [TRuntime, str, list[Candle]], None
+]
 
 
 @dataclass(frozen=True)
@@ -24,6 +77,28 @@ class _TickerTarget:
     exchange: str | None
     cache_key: str
     legacy_cache_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class KisCollectionRequest[TRuntime: _CollectionRuntime]:
+    tickers: list[str]
+    target_bars: int
+    load_json_fn: Callable[[str, str], list[Candle] | None]
+    save_json_fn: Callable[[str, str, list[Candle]], object]
+    ensure_pykrx_client_fn: Callable[[TRuntime], PykrxClient | None]
+    split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]]
+    exchange_from_suffix_fn: Callable[[str | None], str | None]
+    get_pykrx_error_fn: Callable[[TRuntime], str | None]
+    legacy_cache_keys_fn: _LegacyCacheKeysFn | None = None
+    on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None
+
+
+@dataclass(frozen=True)
+class PykrxCollectionRequest[TRuntime: _CollectionRuntime]:
+    tickers: list[str]
+    target_bars: int
+    PykrxClientErrorCls: type[Exception]
+    on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None
 
 
 _NORMALIZED_SUFFIX_TO_EXCD = {
@@ -65,7 +140,7 @@ def _ensure_aware_now(now: dt.datetime | None) -> dt.datetime:
     return now
 
 
-def _parse_session_date(value: Any) -> dt.date | None:
+def _parse_session_date(value: object) -> dt.date | None:
     text = str(value or "").strip().replace("-", "")
     if len(text) != 8 or not text.isdigit():
         return None
@@ -161,13 +236,12 @@ def _count_missing_sessions(
     return missing
 
 
-def _resolve_market_stale_limit(cfg: Any, *, market: str) -> int:
-    attr = (
-        "market_cache_stale_sessions_us"
+def _resolve_market_stale_limit(cfg: _CollectionConfig, *, market: str) -> int:
+    raw = (
+        cfg.market_cache_stale_sessions_us
         if market == "US"
-        else "market_cache_stale_sessions_kr"
+        else cfg.market_cache_stale_sessions_kr
     )
-    raw = getattr(cfg, attr, 1)
     try:
         return max(0, int(raw))
     except (TypeError, ValueError):
@@ -176,7 +250,7 @@ def _resolve_market_stale_limit(cfg: Any, *, market: str) -> int:
 
 def _evaluate_cache_staleness(
     *,
-    candles: list[dict[str, Any]],
+    candles: list[Candle],
     market: str,
     max_stale_sessions: int,
     closed_dates: set[dt.date],
@@ -244,30 +318,31 @@ def _resolve_ticker_target(
     )
 
 
-def _append_pykrx_warning_once(runtime: Any, message: str) -> None:
+def _append_pykrx_warning_once(runtime: _CollectionRuntime, message: str) -> None:
     if runtime.pykrx_warning_added:
         return
     runtime.failures.append(message)
     runtime.pykrx_warning_added = True
 
 
-def ensure_pykrx_client(
-    runtime: Any,
+def ensure_pykrx_client[TRuntime: _CollectionRuntime](
+    runtime: TRuntime,
     *,
-    PykrxClientCls: Any,
-    get_pykrx_error_fn: Callable[[Any], str | None],
-    set_pykrx_error_fn: Callable[[Any, str], None],
-    pykrx_client_kwargs_fn: Callable[[Any], dict[str, Any]] | None = None,
+    PykrxClientCls: type[PykrxClient],
+    get_pykrx_error_fn: Callable[[TRuntime], str | None],
+    set_pykrx_error_fn: Callable[[TRuntime, str], None],
+    pykrx_client_kwargs_fn: Callable[[TRuntime], dict[str, str | None]] | None = None,
     initialized_log_message: str,
-) -> Any | None:
+) -> PykrxClient | None:
     if runtime.pykrx_client is not None:
         return runtime.pykrx_client
     if get_pykrx_error_fn(runtime):
         return None
 
     kwargs = pykrx_client_kwargs_fn(runtime) if pykrx_client_kwargs_fn else {}
+    cache_dir = kwargs.get("cache_dir")
     try:
-        runtime.pykrx_client = PykrxClientCls(**kwargs)
+        runtime.pykrx_client = PykrxClientCls(cache_dir=cache_dir)
         runtime.logger.info(initialized_log_message)
         return runtime.pykrx_client
     except PykrxNotInstalledError as exc:
@@ -279,19 +354,22 @@ def ensure_pykrx_client(
     return None
 
 
-def initialize_provider(
-    runtime: Any,
+def initialize_provider[TRuntime: _CollectionRuntime](
+    runtime: TRuntime,
     *,
-    KISCredentialsCls: Any,
-    KISClientCls: Any,
-    ensure_pykrx_client_fn: Callable[[Any], Any | None],
+    KISCredentialsCls: type[KISCredentials],
+    KISClientCls: type[KISClient],
+    ensure_pykrx_client_fn: Callable[[TRuntime], PykrxClient | None],
     infer_env_from_base_fn: Callable[[str], str],
     unsupported_provider_message: str | None = None,
     mark_fatal_on_unsupported: bool = False,
 ) -> None:
     cfg = runtime.cfg
     if cfg.data_provider == "kis":
-        if not (cfg.kis_app_key and cfg.kis_app_secret and cfg.kis_base_url):
+        app_key = cfg.kis_app_key
+        app_secret = cfg.kis_app_secret
+        base_url = cfg.kis_base_url
+        if not (app_key and app_secret and base_url):
             msg = "KIS credentials missing. Set KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL in .env (see docs/kis-setup.md)."
             runtime.failures.append(msg)
             runtime.logger.error(msg)
@@ -299,10 +377,10 @@ def initialize_provider(
             return
 
         creds = KISCredentialsCls(
-            app_key=cfg.kis_app_key,
-            app_secret=cfg.kis_app_secret,
-            base_url=cfg.kis_base_url,
-            env=infer_env_from_base_fn(cfg.kis_base_url),
+            app_key=app_key,
+            app_secret=app_secret,
+            base_url=base_url,
+            env=infer_env_from_base_fn(base_url),
         )
         min_interval = None
         if cfg.kis_min_interval_ms is not None:
@@ -342,19 +420,10 @@ def initialize_provider(
             runtime.fatal_failure = True
 
 
-def collect_market_data_from_kis(
-    runtime: Any,
+def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
+    runtime: TRuntime,
     *,
-    tickers: list[str],
-    target_bars: int,
-    load_json_fn: Callable[[str, str], Any],
-    save_json_fn: Callable[[str, str, Any], None],
-    ensure_pykrx_client_fn: Callable[[Any], Any | None],
-    split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
-    exchange_from_suffix_fn: Callable[[str | None], str | None],
-    get_pykrx_error_fn: Callable[[Any], str | None],
-    legacy_cache_keys_fn: _LegacyCacheKeysFn | None = None,
-    on_candles_applied_fn: _OnCandlesAppliedFn | None = None,
+    request: KisCollectionRequest[TRuntime],
     now_fn: Callable[[], dt.datetime] | None = None,
 ) -> None:
     if runtime.kis_client is None:
@@ -363,22 +432,22 @@ def collect_market_data_from_kis(
     now = _ensure_aware_now(now_fn() if now_fn else None)
     holiday_dates_by_market: dict[str, set[dt.date]] = {}
 
-    for ticker in tickers:
+    for ticker in request.tickers:
         target = _resolve_ticker_target(
             ticker,
-            split_symbol_and_suffix_fn=split_symbol_and_suffix_fn,
-            exchange_from_suffix_fn=exchange_from_suffix_fn,
-            legacy_cache_keys_fn=legacy_cache_keys_fn,
+            split_symbol_and_suffix_fn=request.split_symbol_and_suffix_fn,
+            exchange_from_suffix_fn=request.exchange_from_suffix_fn,
+            legacy_cache_keys_fn=request.legacy_cache_keys_fn,
         )
         market = _market_from_exchange(target.exchange)
         max_stale_sessions = _resolve_market_stale_limit(runtime.cfg, market=market)
         cache_keys = (target.cache_key, *target.legacy_cache_keys)
-        cached: Any = None
+        cached: list[Candle] | None = None
         cached_key: str | None = None
         cached_stale_sessions: int | None = None
         cache_rejection_reason: str | None = None
         for cache_key in cache_keys:
-            candidate = load_json_fn(runtime.cfg.data_dir, cache_key)
+            candidate = request.load_json_fn(runtime.cfg.data_dir, cache_key)
             if isinstance(candidate, list) and candidate:
                 cached = candidate
                 cached_key = cache_key
@@ -402,11 +471,13 @@ def collect_market_data_from_kis(
             if cache_usable:
                 runtime.market_data[ticker] = cached
                 runtime.ticker_data_source.setdefault(ticker, runtime.cfg.data_provider)
-                if on_candles_applied_fn:
-                    on_candles_applied_fn(runtime, ticker, cached)
+                if request.on_candles_applied_fn:
+                    request.on_candles_applied_fn(runtime, ticker, cached)
                 if cached_key and cached_key != target.cache_key:
                     try:
-                        save_json_fn(runtime.cfg.data_dir, target.cache_key, cached)
+                        request.save_json_fn(
+                            runtime.cfg.data_dir, target.cache_key, cached
+                        )
                     except Exception as exc:
                         migration_msg = (
                             f"{ticker}: Failed to migrate cache key "
@@ -420,19 +491,19 @@ def collect_market_data_from_kis(
                 candles = runtime.kis_client.overseas_daily_candles(
                     symbol=target.base_symbol,
                     exchange=target.exchange,
-                    count=target_bars,
+                    count=request.target_bars,
                 )
             else:
                 candles = runtime.kis_client.daily_candles(
                     target.base_symbol,
-                    count=target_bars,
+                    count=request.target_bars,
                 )
             if candles:
                 runtime.market_data[ticker] = candles
                 runtime.ticker_data_source[ticker] = "kis"
-                save_json_fn(runtime.cfg.data_dir, target.cache_key, candles)
-                if on_candles_applied_fn:
-                    on_candles_applied_fn(runtime, ticker, candles)
+                request.save_json_fn(runtime.cfg.data_dir, target.cache_key, candles)
+                if request.on_candles_applied_fn:
+                    request.on_candles_applied_fn(runtime, ticker, candles)
                 runtime.logger.info("Fetched %s candles for %s", len(candles), ticker)
             else:
                 msg = f"{ticker}: No candle data returned"
@@ -453,13 +524,13 @@ def collect_market_data_from_kis(
                 runtime.logger.warning(msg)
                 continue
 
-            fallback_client = ensure_pykrx_client_fn(runtime)
-            fallback_error = get_pykrx_error_fn(runtime)
+            fallback_client = request.ensure_pykrx_client_fn(runtime)
+            fallback_error = request.get_pykrx_error_fn(runtime)
             if fallback_client is not None and target.exchange is None:
                 try:
                     candles = fallback_client.daily_candles(
                         target.base_symbol,
-                        count=target_bars,
+                        count=request.target_bars,
                     )
                 except PykrxClientError as py_exc:
                     fallback_client = None
@@ -468,8 +539,8 @@ def collect_market_data_from_kis(
                     if candles:
                         runtime.market_data[ticker] = candles
                         runtime.ticker_data_source[ticker] = "pykrx"
-                        if on_candles_applied_fn:
-                            on_candles_applied_fn(runtime, ticker, candles)
+                        if request.on_candles_applied_fn:
+                            request.on_candles_applied_fn(runtime, ticker, candles)
                         runtime.logger.warning(
                             "%s: KIS error (%s); used PyKRX fallback (%s candles)",
                             ticker,
@@ -498,21 +569,20 @@ def collect_market_data_from_kis(
             runtime.logger.error(msg)
 
 
-def collect_market_data_from_pykrx(
-    runtime: Any,
+def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
+    runtime: TRuntime,
     *,
-    tickers: list[str],
-    target_bars: int,
-    PykrxClientErrorCls: Any,
-    on_candles_applied_fn: _OnCandlesAppliedFn | None = None,
+    request: PykrxCollectionRequest[TRuntime],
 ) -> None:
     if runtime.pykrx_client is None:
         return
 
-    for ticker in tickers:
+    for ticker in request.tickers:
         try:
-            candles = runtime.pykrx_client.daily_candles(ticker, count=target_bars)
-        except PykrxClientErrorCls as exc:
+            candles = runtime.pykrx_client.daily_candles(
+                ticker, count=request.target_bars
+            )
+        except request.PykrxClientErrorCls as exc:
             msg = f"{ticker}: PyKRX error ({exc})"
             runtime.failures.append(msg)
             runtime.logger.error(msg)
@@ -521,8 +591,8 @@ def collect_market_data_from_pykrx(
         if candles:
             runtime.market_data[ticker] = candles
             runtime.ticker_data_source[ticker] = "pykrx"
-            if on_candles_applied_fn:
-                on_candles_applied_fn(runtime, ticker, candles)
+            if request.on_candles_applied_fn:
+                request.on_candles_applied_fn(runtime, ticker, candles)
             runtime.logger.info(
                 "Fetched %s candles via PyKRX for %s", len(candles), ticker
             )
@@ -531,31 +601,8 @@ def collect_market_data_from_pykrx(
             runtime.failures.append(msg)
             runtime.logger.warning(msg)
 
-    if tickers:
+    if request.tickers:
         _append_pykrx_warning_once(
             runtime,
             "Warning: PyKRX provider data is end-of-day and may lag intraday feeds.",
         )
-
-
-def collect_market_data(
-    runtime: Any,
-    *,
-    tickers: list[str],
-    collect_market_data_from_kis_fn: Callable[[Any], None],
-    collect_market_data_from_pykrx_fn: Callable[[Any], None],
-    unsupported_provider_message: str
-    | None = "Provider '{provider}' not yet implemented",
-    mark_fatal_on_unsupported: bool = True,
-) -> None:
-    provider = runtime.cfg.data_provider
-    if provider == "kis" and runtime.kis_client:
-        collect_market_data_from_kis_fn(runtime)
-        return
-    if provider == "pykrx" and runtime.pykrx_client:
-        collect_market_data_from_pykrx_fn(runtime)
-        return
-    if tickers and unsupported_provider_message:
-        runtime.failures.append(unsupported_provider_message.format(provider=provider))
-        if mark_fatal_on_unsupported:
-            runtime.fatal_failure = True

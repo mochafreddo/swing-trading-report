@@ -143,7 +143,7 @@ def test_run_sell_maps_exchange_per_ticker_without_suffix_scope_leak(
 
     with (
         patch("sab.sell.load_config", return_value=cfg),
-        patch("sab.sell.KISClient", _FakeKISClient),
+        patch("sab.market_data_common.KISClient", _FakeKISClient),
         patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
         patch(
             "sab.sell.write_sell_report",
@@ -177,7 +177,7 @@ def test_run_scan_logs_kis_token_cache_status_once(
     with (
         patch("sab.scan.load_config", return_value=cfg),
         patch("sab.scan.load_watchlist", return_value=["005930"]),
-        patch("sab.scan.KISClient", _FakeHitKISClient),
+        patch("sab.market_data_common.KISClient", _FakeHitKISClient),
         patch("sab.scan.maybe_upload_report_artifact", return_value=None),
         patch(
             "sab.scan.write_report",
@@ -218,7 +218,7 @@ def test_run_sell_logs_kis_token_cache_status_once(
 
     with (
         patch("sab.sell.load_config", return_value=cfg),
-        patch("sab.sell.KISClient", _FakeHitKISClient),
+        patch("sab.market_data_common.KISClient", _FakeHitKISClient),
         patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
         patch("sab.sell.maybe_upload_report_artifact", return_value=None),
         patch(
@@ -253,7 +253,7 @@ def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
     with (
         patch("sab.scan.load_config", return_value=cfg),
         patch("sab.scan.load_watchlist", return_value=["005930"]),
-        patch("sab.scan.KISClient", _FakeKISClient),
+        patch("sab.market_data_common.KISClient", _FakeKISClient),
         patch(
             "sab.scan.write_report",
             return_value=str(tmp_path / "2026-02-19.buy.md"),
@@ -291,7 +291,7 @@ def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
 
     with (
         patch("sab.sell.load_config", return_value=cfg),
-        patch("sab.sell.KISClient", _FakeKISClient),
+        patch("sab.market_data_common.KISClient", _FakeKISClient),
         patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
         patch(
             "sab.sell.write_sell_report",

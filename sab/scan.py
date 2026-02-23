@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-import datetime as dt
 import logging
 
 from . import scan_evaluation, scan_screener
 from .config import Config, load_config, load_watchlist
 from .config_loader import ConfigLoadError
-from .data.cache import load_json, save_json
-from .data.holiday_cache import HolidayEntry, lookup_holiday, merge_holidays
-from .data.kis_client import KISClient, KISClientError, KISCredentials
-from .data.pykrx_client import PykrxClient, PykrxClientError
+from .data.holiday_cache import lookup_holiday
 from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsLoadError
-from .market_data_service import (
-    MarketDataPolicy,
-    MarketDataService,
-    scan_legacy_cache_keys,
-)
+from .market_data_common import build_market_data_dependencies
+from .market_data_service import ScanMarketData
 from .report.markdown import write_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .scan_types import (
@@ -38,41 +31,8 @@ from .signals.hybrid_buy import HybridEvaluationSettings, evaluate_ticker_hybrid
 from .utils.market_time import us_market_status, us_session_info
 
 
-def _infer_env_from_base(base_url: str) -> str:
-    return "demo" if "vts" in base_url.lower() else "real"
-
-
-def _build_market_data_service() -> MarketDataService:
-    return MarketDataService(
-        KISCredentialsCls=KISCredentials,
-        KISClientCls=KISClient,
-        PykrxClientCls=PykrxClient,
-        PykrxClientErrorCls=PykrxClientError,
-        infer_env_from_base_fn=_infer_env_from_base,
-        load_json_fn=load_json,
-        save_json_fn=save_json,
-    )
-
-
-def _build_scan_market_data_policy(
-    runtime: _ScanRuntime, *, screener_enabled: bool
-) -> MarketDataPolicy:
-    unsupported_msg = (
-        "Screener currently supports KIS provider only." if screener_enabled else None
-    )
-    return MarketDataPolicy(
-        tickers=runtime.tickers,
-        target_bars=max(runtime.cfg.min_history_bars, 200),
-        split_symbol_and_suffix_fn=_split_overseas,
-        exchange_from_suffix_fn=_excd_from_suffix,
-        pykrx_error_attr="pykrx_import_error",
-        pykrx_initialized_log_message="PyKRX client initialized for fallback/provider usage",
-        init_unsupported_provider_message=unsupported_msg,
-        init_mark_fatal_on_unsupported=screener_enabled,
-        legacy_cache_keys_fn=scan_legacy_cache_keys,
-        on_candles_applied_fn=_update_latest_date,
-        before_kis_collection_fn=_refresh_us_holidays_if_needed,
-    )
+def _build_market_data_service() -> ScanMarketData:
+    return ScanMarketData(deps=build_market_data_dependencies())
 
 
 def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
@@ -92,58 +52,6 @@ def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
         runtime.failures.extend(fx_messages)
 
 
-def _refresh_us_holidays(runtime: _ScanRuntime) -> dict[str, HolidayEntry]:
-    if runtime.kis_client is None:
-        return {}
-    try:
-        now = dt.datetime.now()
-        start = now.strftime("%Y%m%d")
-        end = (now + dt.timedelta(days=30)).strftime("%Y%m%d")
-    except Exception:
-        start = end = dt.date.today().strftime("%Y%m%d")
-
-    runtime.logger.info("Refreshing US holidays via KIS: %s -> %s", start, end)
-    try:
-        items = runtime.kis_client.overseas_holidays(
-            country_code="US",
-            start_date=start,
-            end_date=end,
-        )
-    except KISClientError as exc:
-        message = str(exc)
-        if "HTTP 404" in message:
-            runtime.logger.info(
-                "US holiday API returned 404 (no entries from %s to %s)", start, end
-            )
-            return {}
-        runtime.logger.warning("Failed to refresh US holidays: %s", message)
-        return {}
-
-    runtime.logger.info(
-        "US holiday API succeeded: %s rows for %s -> %s", len(items), start, end
-    )
-    if items:
-        runtime.logger.debug("US holiday sample row: %s", items[0])
-    return merge_holidays(runtime.cfg.data_dir, "US", items)
-
-
-def _refresh_us_holidays_if_needed(runtime: _ScanRuntime) -> None:
-    if runtime.kis_client is None:
-        return
-    if "US" in runtime.cfg.universe_markets or any(
-        currency.upper() == "USD" for currency in runtime.ticker_currency.values()
-    ):
-        runtime.us_holidays_cache = _refresh_us_holidays(runtime)
-
-
-def _update_latest_date(
-    runtime: _ScanRuntime, ticker: str, candles: list[dict[str, float | str]]
-) -> None:
-    last_date = str(candles[-1].get("date") or "") if candles else ""
-    if last_date:
-        runtime.latest_dates[ticker] = last_date
-
-
 def _collect_scan_runtime(
     runtime: _ScanRuntime,
     *,
@@ -153,11 +61,10 @@ def _collect_scan_runtime(
     evaluation_limit: int | None,
 ) -> None:
     market_data_service = _build_market_data_service()
-    provider_policy = _build_scan_market_data_policy(
+    market_data_service.initialize_provider(
         runtime,
         screener_enabled=screener_enabled,
     )
-    market_data_service.initialize_provider(runtime, policy=provider_policy)
 
     scan_screener._run_screeners(
         runtime,
@@ -177,11 +84,7 @@ def _collect_scan_runtime(
     scan_screener._enforce_ticker_limit(runtime, ticker_limit=evaluation_limit)
 
     _resolve_scan_fx(runtime)
-    collect_policy = _build_scan_market_data_policy(
-        runtime,
-        screener_enabled=screener_enabled,
-    )
-    market_data_service.collect_market_data(runtime, policy=collect_policy)
+    market_data_service.collect_market_data(runtime)
 
 
 def _evaluate_scan_runtime(runtime: _ScanRuntime) -> None:

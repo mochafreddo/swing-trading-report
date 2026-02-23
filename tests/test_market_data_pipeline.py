@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
 from sab.data.kis_client import KISClientError
-from sab.market_data_pipeline import collect_market_data_from_kis
+from sab.market_data_pipeline import KisCollectionRequest, collect_market_data_from_kis
 from sab.market_data_service import scan_legacy_cache_keys as _scan_legacy_cache_keys
 
 
@@ -78,6 +79,37 @@ def _exchange_from_suffix(suffix: str | None) -> str | None:
     return None
 
 
+def _collect_market_data_from_kis(
+    runtime: Any,
+    *,
+    tickers: list[str],
+    target_bars: int,
+    load_json_fn: Callable[[str, str], Any],
+    save_json_fn: Callable[[str, str, Any], Any],
+    ensure_pykrx_client_fn: Callable[[Any], Any | None],
+    split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
+    exchange_from_suffix_fn: Callable[[str | None], str | None],
+    get_pykrx_error_fn: Callable[[Any], str | None],
+    legacy_cache_keys_fn: Callable[[str, str, str | None], list[str]] | None = None,
+    on_candles_applied_fn: Callable[[Any, str, list[dict[str, Any]]], None]
+    | None = None,
+    now_fn: Callable[[], dt.datetime] | None = None,
+) -> None:
+    request = KisCollectionRequest(
+        tickers=tickers,
+        target_bars=target_bars,
+        load_json_fn=load_json_fn,
+        save_json_fn=save_json_fn,
+        ensure_pykrx_client_fn=ensure_pykrx_client_fn,
+        split_symbol_and_suffix_fn=split_symbol_and_suffix_fn,
+        exchange_from_suffix_fn=exchange_from_suffix_fn,
+        get_pykrx_error_fn=get_pykrx_error_fn,
+        legacy_cache_keys_fn=legacy_cache_keys_fn,
+        on_candles_applied_fn=on_candles_applied_fn,
+    )
+    collect_market_data_from_kis(runtime, request=request, now_fn=now_fn)
+
+
 def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
     class _FailingKisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
@@ -98,7 +130,7 @@ def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
         assert payload
         saved_keys.append(key)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.UNKNOWN"],
         target_bars=220,
@@ -131,7 +163,7 @@ def test_collect_market_data_from_kis_adds_fallback_warning_once() -> None:
 
     runtime = _build_runtime(kis_client=_FailingKisClient())
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["005930", "000660"],
         target_bars=220,
@@ -162,7 +194,7 @@ def test_collect_market_data_from_kis_ignores_cache_migration_write_error() -> N
     runtime = _build_runtime(kis_client=_FailingKisClient())
     legacy_candles = _build_candles()
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.UNKNOWN"],
         target_bars=220,
@@ -183,6 +215,31 @@ def test_collect_market_data_from_kis_ignores_cache_migration_write_error() -> N
     assert any("Failed to migrate cache key" in message for message in runtime.failures)
 
 
+def test_collect_market_data_from_kis_ignores_non_list_cache_payload() -> None:
+    class _FailingKisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            raise KISClientError("KIS down")
+
+    runtime = _build_runtime(kis_client=_FailingKisClient())
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            {"date": "20250101"} if key == "candles_005930" else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+    )
+
+    assert "005930" not in runtime.market_data
+    assert any("KIS down" in msg for msg in runtime.failures)
+
+
 def test_collect_market_data_from_kis_uses_canonical_suffix_mapping_fallback() -> None:
     class _KisClient:
         def __init__(self) -> None:
@@ -200,7 +257,7 @@ def test_collect_market_data_from_kis_uses_canonical_suffix_mapping_fallback() -
     kis_client = _KisClient()
     runtime = _build_runtime(kis_client=kis_client)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.NAS-DAQ"],
         target_bars=220,
@@ -236,7 +293,7 @@ def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None
             return legacy_candles
         return None
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.NAS-DAQ"],
         target_bars=220,
@@ -262,7 +319,7 @@ def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None
     cached_candles = _candles_with_last_date("20250107")
     runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_kr=1)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["005930"],
         target_bars=220,
@@ -289,7 +346,7 @@ def test_collect_market_data_from_kis_rejects_kr_cache_over_stale_limit() -> Non
 
     runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_kr=1)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["005930"],
         target_bars=220,
@@ -324,7 +381,7 @@ def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
 
     runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_us=1)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.US"],
         target_bars=220,
@@ -357,7 +414,7 @@ def test_collect_market_data_from_kis_rejects_us_cache_over_stale_limit() -> Non
 
     runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_us=1)
 
-    collect_market_data_from_kis(
+    _collect_market_data_from_kis(
         runtime,
         tickers=["AAPL.US"],
         target_bars=220,

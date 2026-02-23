@@ -26,11 +26,11 @@ class _FakeMarketDataService:
     def __init__(self) -> None:
         self.collected_tickers: list[str] = []
 
-    def initialize_provider(self, runtime: Any, *, policy: Any) -> None:
-        del runtime, policy
+    def initialize_provider(self, runtime: Any, *, screener_enabled: bool) -> None:
+        del runtime, screener_enabled
 
-    def collect_market_data(self, runtime: Any, *, policy: Any) -> None:
-        self.collected_tickers = list(policy.tickers)
+    def collect_market_data(self, runtime: Any) -> None:
+        self.collected_tickers = list(runtime.tickers)
         runtime.market_data = {
             ticker: [
                 {
