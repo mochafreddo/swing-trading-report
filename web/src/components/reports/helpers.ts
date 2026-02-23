@@ -32,6 +32,16 @@ export function readNumber(value: unknown): number | null {
   return null;
 }
 
+export function formatPnlPercent(value: unknown): string {
+  const pnl = readNumber(value);
+  if (pnl === null) {
+    return "-";
+  }
+  const pct = pnl * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
 export function readApiError(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return undefined;

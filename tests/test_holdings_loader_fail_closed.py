@@ -187,6 +187,35 @@ def test_load_holdings_raises_on_missing_required_numeric_fields(
     ("yaml_body", "field_name"),
     [
         (
+            ("holdings:\n  - ticker: AAPL\n    quantity: -1\n    entry_price: 120.5\n"),
+            "quantity",
+        ),
+        (
+            ("holdings:\n  - ticker: AAPL\n    quantity: 1\n    entry_price: -120.5\n"),
+            "entry_price",
+        ),
+    ],
+)
+def test_load_holdings_raises_on_negative_required_numeric_fields(
+    tmp_path, yaml_body: str, field_name: str
+) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(yaml_body, encoding="utf-8")
+
+    with pytest.raises(HoldingsLoadError) as exc_info:
+        load_holdings(str(path))
+
+    message = str(exc_info.value)
+    assert "expected a number >= 0" in message
+    assert "index 0" in message
+    assert "ticker='AAPL'" in message
+    assert f"field='{field_name}'" in message
+
+
+@pytest.mark.parametrize(
+    ("yaml_body", "field_name"),
+    [
+        (
             (
                 "holdings:\n"
                 "  - ticker: AAPL\n"

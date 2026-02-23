@@ -1,6 +1,6 @@
 import styles from "../reports-client.module.css";
 
-import { readNumber } from "./helpers";
+import { formatPnlPercent, readNumber } from "./helpers";
 import type { ReportJson } from "./types";
 
 interface ReportDetailProps {
@@ -150,7 +150,7 @@ export function ReportDetail({
                       <td>{String(row.ticker ?? "-")}</td>
                       <td>{String(row.action ?? "-")}</td>
                       <td>{readNumber(row.last_price) ?? "-"}</td>
-                      <td>{readNumber(row.pnl_pct) ?? "-"}</td>
+                      <td>{formatPnlPercent(row.pnl_pct)}</td>
                     </tr>
                   ))}
                 </tbody>

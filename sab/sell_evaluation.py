@@ -112,12 +112,7 @@ def _evaluate_holdings(
             last_price = None
 
         pnl_pct = None
-        if (
-            entry_price
-            and entry_price != 0
-            and last_price is not None
-            and last_price != 0
-        ):
+        if entry_price is not None and entry_price != 0 and last_price is not None:
             try:
                 pnl_pct = (last_price - entry_price) / entry_price
             except TypeError:

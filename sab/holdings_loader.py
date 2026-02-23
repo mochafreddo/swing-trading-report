@@ -118,6 +118,7 @@ def load_holdings(path: str | None) -> HoldingsData:
         field_name: str,
         item_index: int,
         ticker: str,
+        min_value: float | None = None,
     ) -> float:
         if isinstance(value, bool):
             raise HoldingsLoadError(
@@ -138,6 +139,12 @@ def load_holdings(path: str | None) -> HoldingsData:
                 "Invalid holdings value in "
                 f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
                 f"expected a finite number, got {value!r}."
+            )
+        if min_value is not None and parsed < min_value:
+            raise HoldingsLoadError(
+                "Invalid holdings value in "
+                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
+                f"expected a number >= {min_value:g}, got {value!r}."
             )
         return parsed
 
@@ -207,6 +214,7 @@ def load_holdings(path: str | None) -> HoldingsData:
             field_name="quantity",
             item_index=item_index,
             ticker=ticker,
+            min_value=0,
         )
         entry_price = _parse_float_or_raise(
             value=_required_field_or_raise(
@@ -218,6 +226,7 @@ def load_holdings(path: str | None) -> HoldingsData:
             field_name="entry_price",
             item_index=item_index,
             ticker=ticker,
+            min_value=0,
         )
 
         entry_currency = item.get("entry_currency") or settings.default_currency
