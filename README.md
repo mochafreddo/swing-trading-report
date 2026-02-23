@@ -80,9 +80,7 @@
   - 기능:
     - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
       - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
-      - Storage key 목록 캐시: `REPORT_KEYS_CACHE_TTL_SECONDS` (기본 30초, `0`이면 캐시 비활성화, 최대 600초)
       - 런타임 상태 저장소: `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
-      - 티커 검색 다운로드 동시성: `REPORT_SEARCH_CONCURRENCY` (기본 8, 최소 1, 최대 16)
       - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
       - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`) + same-origin 검증을 필수로 요구
     - `Holdings`: Supabase `holdings` CRUD

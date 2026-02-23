@@ -16,7 +16,6 @@ const HOLDINGS_SELECT =
   "ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override,created_at,updated_at";
 
 const RUNTIME_STATE_SELECT = "state_key,state_payload,expires_at";
-const RUNTIME_STATE_STORAGE_KEYS_PREFIX = "storage_keys:";
 
 export class SupabaseApiError extends Error {
   constructor(
@@ -57,10 +56,6 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-export interface StorageListRow {
-  name?: string;
-}
-
 const REPORT_INDEX_SELECT =
   "report_key,report_type,report_date,duplicate_index,generated_at,summary,tickers,tickers_hydrated";
 
@@ -85,107 +80,6 @@ export interface ConsumeLoginThrottleAttemptResult {
   blockedUntil: number;
   isBlocked: boolean;
   retryAfterSeconds: number;
-}
-
-interface StorageListOptions {
-  prefix?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export async function listStorageObjectsPage(
-  bucket: string,
-  options: StorageListOptions = {},
-): Promise<StorageListRow[]> {
-  const { prefix = "", limit = 1000, offset = 0 } = options;
-  const env = getSupabaseEnv();
-  const url = `${env.SUPABASE_URL}/storage/v1/object/list/${encodeURIComponent(bucket)}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: buildAuthHeaders({
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    }),
-    body: JSON.stringify({
-      prefix,
-      limit,
-      offset,
-      sortBy: {
-        column: "name",
-        order: "asc",
-      },
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new SupabaseApiError(
-      `Failed to list storage objects: ${await parseError(response)}`,
-      response.status,
-    );
-  }
-
-  const payload = (await response.json()) as unknown;
-  if (!Array.isArray(payload)) {
-    return [];
-  }
-
-  return payload as StorageListRow[];
-}
-
-export async function listAllStorageKeys(bucket: string): Promise<string[]> {
-  const keys = new Set<string>();
-  const prefixesToVisit: string[] = [""];
-  const visitedPrefixes = new Set<string>();
-  const limit = 1000;
-
-  while (prefixesToVisit.length > 0) {
-    const prefix = prefixesToVisit.pop() ?? "";
-    if (visitedPrefixes.has(prefix)) {
-      continue;
-    }
-    visitedPrefixes.add(prefix);
-
-    let offset = 0;
-    while (true) {
-      const page = await listStorageObjectsPage(bucket, {
-        prefix,
-        limit,
-        offset,
-      });
-
-      for (const item of page) {
-        if (typeof item.name !== "string") {
-          continue;
-        }
-
-        const name = item.name.trim();
-        if (!name) {
-          continue;
-        }
-
-        const fullName =
-          prefix && name.startsWith(prefix) ? name : `${prefix}${name}`;
-
-        if (name.endsWith(".json")) {
-          keys.add(fullName);
-          continue;
-        }
-
-        if (!name.includes(".")) {
-          prefixesToVisit.push(`${fullName}/`);
-        }
-      }
-
-      if (page.length < limit) {
-        break;
-      }
-      offset += limit;
-    }
-  }
-
-  return Array.from(keys);
 }
 
 function parseRuntimeStateEntry(payload: unknown): RuntimeStateEntry | null {
@@ -392,128 +286,6 @@ export async function consumeLoginThrottleAttempt(
     );
   }
   return parsed;
-}
-
-interface CachedStorageKeysEntry {
-  keys: string[];
-  expiresAt: number;
-}
-
-const storageKeysCache = new Map<string, CachedStorageKeysEntry>();
-const storageKeysInFlight = new Map<string, Promise<string[]>>();
-
-function shouldUseInMemoryRuntimeStateStore(): boolean {
-  const raw = process.env.SAB_RUNTIME_STATE_STORE?.trim().toLowerCase();
-  if (raw === "memory") {
-    return true;
-  }
-  if (raw === "supabase") {
-    return false;
-  }
-  return process.env.NODE_ENV === "test";
-}
-
-function parseCachedStorageKeysPayload(
-  payload: Record<string, unknown>,
-): string[] | null {
-  const rawKeys = payload.keys;
-  if (!Array.isArray(rawKeys)) {
-    return null;
-  }
-
-  const keys = rawKeys
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return keys;
-}
-
-async function listAllStorageKeysCachedInMemory(
-  bucket: string,
-  ttlMilliseconds: number,
-): Promise<string[]> {
-  const now = Date.now();
-  const cached = storageKeysCache.get(bucket);
-  if (cached && cached.expiresAt > now) {
-    return [...cached.keys];
-  }
-
-  const loading = (async () => {
-    const keys = await listAllStorageKeys(bucket);
-    storageKeysCache.set(bucket, {
-      keys: [...keys],
-      expiresAt: Date.now() + ttlMilliseconds,
-    });
-    return [...keys];
-  })();
-  return loading;
-}
-
-async function listAllStorageKeysCachedInSupabase(
-  bucket: string,
-  ttlMilliseconds: number,
-): Promise<string[]> {
-  const cacheKey = `${RUNTIME_STATE_STORAGE_KEYS_PREFIX}${bucket}`;
-  const now = Date.now();
-  const cached = await fetchRuntimeStateEntry(cacheKey);
-  if (cached) {
-    const expiresAt = Date.parse(cached.expires_at);
-    if (Number.isFinite(expiresAt) && expiresAt > now) {
-      const cachedKeys = parseCachedStorageKeysPayload(cached.state_payload);
-      if (cachedKeys) {
-        return cachedKeys;
-      }
-    }
-    try {
-      await deleteRuntimeStateEntry(cacheKey);
-    } catch {
-      // Cleanup failure should not block storage key loading.
-    }
-  }
-
-  const keys = await listAllStorageKeys(bucket);
-  await upsertRuntimeStateEntry(
-    cacheKey,
-    { keys },
-    new Date(now + ttlMilliseconds).toISOString(),
-  );
-  return [...keys];
-}
-
-export function __resetStorageKeysCacheForTests(): void {
-  storageKeysCache.clear();
-  storageKeysInFlight.clear();
-}
-
-export async function listAllStorageKeysCached(
-  bucket: string,
-  ttlSeconds: number,
-): Promise<string[]> {
-  const ttlMilliseconds = Math.max(0, ttlSeconds) * 1000;
-  if (ttlMilliseconds === 0) {
-    return listAllStorageKeys(bucket);
-  }
-
-  const inFlight = storageKeysInFlight.get(bucket);
-  if (inFlight) {
-    const keys = await inFlight;
-    return [...keys];
-  }
-
-  const loading = shouldUseInMemoryRuntimeStateStore()
-    ? listAllStorageKeysCachedInMemory(bucket, ttlMilliseconds)
-    : listAllStorageKeysCachedInSupabase(bucket, ttlMilliseconds);
-
-  storageKeysInFlight.set(bucket, loading);
-
-  try {
-    const keys = await loading;
-    return [...keys];
-  } finally {
-    if (storageKeysInFlight.get(bucket) === loading) {
-      storageKeysInFlight.delete(bucket);
-    }
-  }
 }
 
 export interface ReportIndexRow {

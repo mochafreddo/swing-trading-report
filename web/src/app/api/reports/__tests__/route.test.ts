@@ -95,8 +95,6 @@ function makeRequest(query = ""): NextRequest {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("REPORT_SEARCH_WINDOW", "100");
-  vi.stubEnv("REPORT_KEYS_CACHE_TTL_SECONDS", "30");
-  vi.stubEnv("REPORT_SEARCH_CONCURRENCY", "8");
 });
 
 afterEach(() => {

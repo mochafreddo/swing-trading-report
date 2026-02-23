@@ -102,7 +102,7 @@ flowchart LR
 
 - `holdings`: 보유 종목 단일 소스(웹 CRUD 대상)
 - `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers)
-- `runtime_state`: 로그인 시도 제한 상태, 스토리지 키 캐시 등 단기 런타임 상태(기본 저장소)
+- `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 
 ## 6. 보안 경계
