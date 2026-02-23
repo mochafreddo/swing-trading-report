@@ -71,6 +71,23 @@ def test_choose_eval_index_us_after_close_keeps_last():
     assert dropped is False
 
 
+def test_choose_eval_index_us_after_close_thin_volume_keeps_last():
+    dates = [
+        dt.date(2025, 1, 6),
+        dt.date(2025, 1, 7),
+        dt.date(2025, 1, 8),
+        dt.date(2025, 1, 9),
+        dt.date(2025, 1, 10),
+        dt.date(2025, 1, 13),
+    ]
+    candles = _build_candles(dates, volume=2_000_000.0)
+    candles[-1]["volume"] = 50_000.0
+    now = dt.datetime(2025, 1, 13, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+    idx, dropped = choose_eval_index(candles, meta={"currency": "USD"}, now=now)
+    assert idx == len(candles) - 1
+    assert dropped is False
+
+
 def test_choose_eval_index_us_holiday_keeps_last(monkeypatch):
     import sab.signals.eval_index as ei
 
@@ -540,3 +557,241 @@ def test_evaluate_sell_signals_hybrid_use_eval_index(monkeypatch):
     assert isinstance(result, HybridSellEvaluation)
     assert result.eval_price == candles[-2]["close"]
     assert result.eval_index == len(candles) - 2
+
+
+def test_evaluate_sell_signals_requires_min_completed_bars(monkeypatch):
+    import sab.signals.sell_rules as sr
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        sr,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 2, True),
+    )
+
+    settings = SellSettings(
+        min_bars=3, ema_lengths=(2, 3), require_sma200=False, time_stop_days=0
+    )
+    result = evaluate_sell_signals("FAKE.US", candles, {"entry_price": 9.5}, settings)
+    assert result.action == "REVIEW"
+    assert result.reasons == ["Insufficient completed candles for sell evaluation"]
+
+
+def test_evaluate_sell_signals_hybrid_requires_min_completed_bars(monkeypatch):
+    import sab.signals.hybrid_sell as hs
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        hs,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 2, True),
+    )
+
+    settings = HybridSellSettings(
+        min_bars=3,
+        ema_short_period=2,
+        ema_mid_period=3,
+        sma_trend_period=2,
+        time_stop_days=0,
+    )
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", candles, {"entry_price": 9.5}, settings
+    )
+    assert result.action == "REVIEW"
+    assert result.reasons == ["Insufficient completed candles for hybrid sell"]
+
+
+def test_evaluate_sell_signals_reviews_non_finite_ohlc(monkeypatch):
+    import sab.signals.sell_rules as sr
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": float("nan"),
+            "volume": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        sr,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    settings = SellSettings(
+        min_bars=2, ema_lengths=(2, 3), require_sma200=False, time_stop_days=0
+    )
+    result = evaluate_sell_signals("FAKE.US", candles, {"entry_price": 9.5}, settings)
+    assert result.action == "REVIEW"
+    assert result.reasons == ["Invalid candle data: non-finite OHLC values"]
+
+
+def test_evaluate_sell_signals_hybrid_reviews_non_finite_close(monkeypatch):
+    import sab.signals.hybrid_sell as hs
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": 13,
+            "low": 10,
+            "close": float("nan"),
+            "volume": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        hs,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=3,
+        sma_trend_period=2,
+        time_stop_days=0,
+    )
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", candles, {"entry_price": 9.5}, settings
+    )
+    assert result.action == "REVIEW"
+    assert result.reasons == ["Invalid candle data: non-finite OHLC values"]
+
+
+def test_evaluate_sell_signals_hybrid_reviews_non_finite_high(monkeypatch):
+    import sab.signals.hybrid_sell as hs
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1_000_000,
+        },
+        {
+            "date": "20250109",
+            "open": 10,
+            "high": 12,
+            "low": 9.5,
+            "close": 11,
+            "volume": 1_100_000,
+        },
+        {
+            "date": "20250110",
+            "open": 11,
+            "high": float("nan"),
+            "low": 10,
+            "close": 12,
+            "volume": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        hs,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=3,
+        sma_trend_period=2,
+        time_stop_days=0,
+    )
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", candles, {"entry_price": 9.5}, settings
+    )
+    assert result.action == "REVIEW"
+    assert result.reasons == ["Invalid candle data: non-finite OHLC values"]

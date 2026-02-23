@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,13 +60,24 @@ def _compute_pnl_pct(
         return None
 
 
+def _to_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
 def evaluate_sell_signals_hybrid(
     ticker: str,
     candles: list[dict[str, float]],
     holding: dict[str, Any],
     settings: HybridSellSettings,
 ) -> HybridSellEvaluation:
-    if len(candles) < max(settings.min_bars, 2):
+    required_bars = max(settings.min_bars, 2)
+    if len(candles) < required_bars:
         return HybridSellEvaluation(
             action="REVIEW", reasons=["Insufficient data for hybrid sell evaluation"]
         )
@@ -83,9 +95,34 @@ def evaluate_sell_signals_hybrid(
         )
 
     candles_eval = candles[: idx_eval + 1]
-    closes = [float(c["close"]) for c in candles_eval]
-    latest = candles[idx_eval]
-    last_close = float(latest.get("close") or 0.0)
+    if len(candles_eval) < required_bars:
+        return HybridSellEvaluation(
+            action="REVIEW",
+            reasons=["Insufficient completed candles for hybrid sell"],
+        )
+
+    opens: list[float] = []
+    closes: list[float] = []
+    for candle in candles_eval:
+        open_price = _to_finite_float(candle.get("open"))
+        high_price = _to_finite_float(candle.get("high"))
+        low_price = _to_finite_float(candle.get("low"))
+        close_price = _to_finite_float(candle.get("close"))
+        if (
+            open_price is None
+            or high_price is None
+            or low_price is None
+            or close_price is None
+        ):
+            return HybridSellEvaluation(
+                action="REVIEW",
+                reasons=["Invalid candle data: non-finite OHLC values"],
+            )
+        opens.append(open_price)
+        closes.append(close_price)
+
+    latest = candles_eval[-1]
+    last_close = closes[-1]
     eval_date = str(latest.get("date") or "") or None
 
     ema_short = ema(closes, settings.ema_short_period)
@@ -153,12 +190,12 @@ def evaluate_sell_signals_hybrid(
         action = "SELL"
 
     # Consecutive bearish candles
-    if len(candles_eval) >= 3:
-        last_three = candles_eval[-3:]
-        if all(float(c["close"]) < float(c["open"]) for c in last_three):
-            reasons.append("Three consecutive bearish candles")
-            if action != "SELL":
-                action = "REVIEW"
+    if len(candles_eval) >= 3 and all(
+        closes[idx] < opens[idx] for idx in range(len(closes) - 3, len(closes))
+    ):
+        reasons.append("Three consecutive bearish candles")
+        if action != "SELL":
+            action = "REVIEW"
 
     # RSI breakdowns
     if rsi_today < 50.0:

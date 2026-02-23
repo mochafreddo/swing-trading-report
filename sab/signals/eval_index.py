@@ -192,9 +192,7 @@ def choose_eval_index(
             state = STATE_CLOSED
 
         if (state == STATE_INTRADAY and last_date == session_date) or (
-            state in {STATE_PRE_OPEN, STATE_AFTER_CLOSE}
-            and very_thin_today
-            and last_date == session_date
+            state == STATE_PRE_OPEN and very_thin_today and last_date == session_date
         ):
             idx_eval = idx_latest - 1
     else:

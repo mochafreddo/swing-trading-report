@@ -129,3 +129,50 @@ def test_evaluate_holdings_keeps_pnl_none_when_entry_price_is_zero() -> None:
 
     assert len(rows) == 1
     assert rows[0].pnl_pct is None
+
+
+def test_evaluate_holdings_skips_last_price_fallback_for_invalid_candle_data() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.market_data["AAPL.NASD"] = [
+        {
+            "date": "20250102",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250103",
+            "open": 110.0,
+            "high": 111.0,
+            "low": 109.0,
+            "close": 110.0,
+            "volume": 1.0,
+        },
+    ]
+
+    def _evaluate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            action="REVIEW",
+            reasons=["Invalid candle data: non-finite OHLC values"],
+            stop_price=None,
+            target_price=None,
+            eval_price=None,
+            eval_date="20250103",
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].last_price is None
+    assert rows[0].pnl_pct is None

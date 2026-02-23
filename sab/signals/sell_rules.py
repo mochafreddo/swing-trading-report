@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
@@ -20,6 +21,26 @@ class Candle(TypedDict):
 def _normalize_candle_date(value: Any) -> str:
     date_text = str(value or "").strip().replace("-", "")
     return date_text[:8]
+
+
+def _to_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _to_finite_series(values: list[Any]) -> list[float] | None:
+    out: list[float] = []
+    for value in values:
+        parsed = _to_finite_float(value)
+        if parsed is None:
+            return None
+        out.append(parsed)
+    return out
 
 
 @dataclass
@@ -67,9 +88,20 @@ def evaluate_sell_signals(
         return SellEvaluation(action="REVIEW", reasons=["Not enough completed candles"])
 
     candles_eval = candles[: idx_eval + 1]
-    closes = [c["close"] for c in candles_eval]
-    highs = [c["high"] for c in candles_eval]
-    lows = [c["low"] for c in candles_eval]
+    if len(candles_eval) < settings.min_bars:
+        return SellEvaluation(
+            action="REVIEW",
+            reasons=["Insufficient completed candles for sell evaluation"],
+        )
+
+    closes = _to_finite_series([c.get("close") for c in candles_eval])
+    highs = _to_finite_series([c.get("high") for c in candles_eval])
+    lows = _to_finite_series([c.get("low") for c in candles_eval])
+    if closes is None or highs is None or lows is None:
+        return SellEvaluation(
+            action="REVIEW",
+            reasons=["Invalid candle data: non-finite OHLC values"],
+        )
 
     atr_values = atr(highs, lows, closes, 14)
     stop_override = holding.get("stop_override")
@@ -80,8 +112,8 @@ def evaluate_sell_signals(
     ema_long = ema(closes, ema_len_long)
     rsi_values = rsi(closes, settings.rsi_period)
 
-    latest = candles[idx_eval]
-    close_today = float(latest.get("close") or 0.0)
+    latest = candles_eval[-1]
+    close_today = closes[-1]
     eval_date = str(latest.get("date") or "") or None
     atr_today = atr_values[-1]
 

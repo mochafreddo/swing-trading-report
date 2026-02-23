@@ -97,8 +97,18 @@ def _evaluate_holdings(
             isinstance(entry_price, float) and math.isnan(entry_price)
         ):
             entry_price = None
+
+        reason_messages = [
+            str(reason).strip().lower()
+            for reason in getattr(evaluation, "reasons", [])
+            if reason is not None
+        ]
+        has_invalid_candle_data = any(
+            reason.startswith("invalid candle data") for reason in reason_messages
+        )
+
         eval_price = getattr(evaluation, "eval_price", None)
-        if eval_price is None and ticker_candles:
+        if eval_price is None and ticker_candles and not has_invalid_candle_data:
             eval_price = ticker_candles[-1].get("close")
         try:
             last_price = float(eval_price) if eval_price is not None else None
