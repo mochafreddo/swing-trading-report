@@ -6,17 +6,8 @@ from sab.config import load_config
 from sab.config_loader import ConfigLoadError
 
 
-def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in (
-        "SAB_CONFIG",
-        "DATA_PROVIDER",
-        "SCREEN_LIMIT",
-        "REPORT_DIR",
-        "DATA_DIR",
-        "STRATEGY_MODE",
-        "SELL_MODE",
-        "FX_MODE",
-    ):
+def _reset_conflict_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("SAB_CONFIG", "DATA_PROVIDER", "SCREEN_LIMIT", "FX_MODE"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -24,29 +15,40 @@ def _force_fallback_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(env_loader, "_load_with_python_dotenv", lambda **_: False)
 
 
-def test_load_config_normalizes_invalid_modes_from_env(
+def test_load_config_rejects_duplicate_keys_between_env_and_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("{}\n", encoding="utf-8")
+    config_path.write_text(
+        """
+data:
+  screen_limit: 30
+fx:
+  mode: manual
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
-    _reset_config_env(monkeypatch)
+    _reset_conflict_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("STRATEGY_MODE", "invalid-mode")
-    monkeypatch.setenv("SELL_MODE", "invalid-mode")
-    monkeypatch.setenv("FX_MODE", "invalid-mode")
+    monkeypatch.setenv("SCREEN_LIMIT", "10")
+    monkeypatch.setenv("FX_MODE", "kis")
 
-    cfg = load_config()
+    with pytest.raises(
+        ConfigLoadError, match="Config conflict policy violation"
+    ) as exc:
+        load_config()
 
-    assert cfg.strategy_mode == "ema_cross"
-    assert cfg.sell_mode == "generic"
-    assert cfg.fx_mode == "manual"
+    msg = str(exc.value)
+    assert "SCREEN_LIMIT (data.screen_limit)" in msg
+    assert "FX_MODE (fx.mode)" in msg
 
 
-def test_load_config_applies_provider_and_limit_overrides(
+def test_load_config_detects_conflicts_before_cli_override(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -56,23 +58,21 @@ def test_load_config_applies_provider_and_limit_overrides(
         """
 data:
   provider: pykrx
-  screen_limit: 77
 """.strip()
         + "\n",
         encoding="utf-8",
     )
 
-    _reset_config_env(monkeypatch)
+    _reset_conflict_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("DATA_PROVIDER", "kis")
 
-    cfg = load_config(provider_override="kis", limit_override=12)
-
-    assert cfg.data_provider == "kis"
-    assert cfg.screen_limit == 12
+    with pytest.raises(ConfigLoadError, match=r"DATA_PROVIDER \(data.provider\)"):
+        load_config(provider_override="kis")
 
 
-def test_load_config_rejects_env_yaml_conflict_even_for_empty_env_value(
+def test_load_config_allows_env_when_yaml_key_is_absent(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -81,24 +81,18 @@ def test_load_config_rejects_env_yaml_conflict_even_for_empty_env_value(
     config_path.write_text(
         """
 data:
-  report_dir: custom-reports
-  data_dir: custom-data
+  provider: pykrx
 """.strip()
         + "\n",
         encoding="utf-8",
     )
 
-    _reset_config_env(monkeypatch)
+    _reset_conflict_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("REPORT_DIR", "")
-    monkeypatch.setenv("DATA_DIR", "")
+    monkeypatch.setenv("SCREEN_LIMIT", "12")
 
-    with pytest.raises(
-        ConfigLoadError, match="Config conflict policy violation"
-    ) as exc:
-        load_config()
+    cfg = load_config()
 
-    msg = str(exc.value)
-    assert "DATA_DIR (data.data_dir)" in msg
-    assert "REPORT_DIR (data.report_dir)" in msg
+    assert cfg.data_provider == "pykrx"
+    assert cfg.screen_limit == 12

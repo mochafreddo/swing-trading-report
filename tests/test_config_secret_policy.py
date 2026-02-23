@@ -1,18 +1,31 @@
 from __future__ import annotations
 
 import pytest
+from sab import env_loader
 from sab.config import load_config
 from sab.config_loader import ConfigLoadError
 
 
 def _clear_kis_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("SAB_CONFIG", "KIS_APP_KEY", "KIS_APP_SECRET", "KIS_BASE_URL"):
+    for key in (
+        "SAB_CONFIG",
+        "DATA_PROVIDER",
+        "KIS_APP_KEY",
+        "KIS_APP_SECRET",
+        "KIS_BASE_URL",
+    ):
         monkeypatch.delenv(key, raising=False)
+
+
+def _force_fallback_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(env_loader, "_load_with_python_dotenv", lambda **_: False)
 
 
 def test_load_config_rejects_kis_secrets_in_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """
@@ -28,6 +41,7 @@ kis:
     )
 
     _clear_kis_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
     with pytest.raises(ConfigLoadError, match="Security policy violation"):
@@ -37,6 +51,8 @@ kis:
 def test_load_config_reads_kis_secrets_from_env_only(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """
@@ -50,6 +66,7 @@ kis:
     )
 
     _clear_kis_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("KIS_APP_KEY", "env-key")
     monkeypatch.setenv("KIS_APP_SECRET", "env-secret")

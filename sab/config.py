@@ -27,6 +27,98 @@ def _has_secret_value(value: Any) -> bool:
     return True
 
 
+_ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("DATA_PROVIDER", "data.provider"),
+    ("SCREEN_LIMIT", "data.screen_limit"),
+    ("REPORT_DIR", "data.report_dir"),
+    ("DATA_DIR", "data.data_dir"),
+    ("HOLDINGS_FILE", "files.holdings"),
+    ("WATCHLIST_FILE", "files.watchlist"),
+    ("UNIVERSE_MARKETS", "universe.markets"),
+    ("SCREENER_ENABLED", "screener.enabled"),
+    ("SCREENER_LIMIT", "screener.limit"),
+    ("SCREENER_ONLY", "screener.only"),
+    ("US_SCREENER_LIMIT", "screener.us_limit"),
+    ("KIS_BASE_URL", "kis.base_url"),
+    ("KIS_MIN_INTERVAL_MS", "kis.min_interval_ms"),
+    ("STRATEGY_MODE", "strategy.mode"),
+    ("USE_SMA200_FILTER", "strategy.use_sma200_filter"),
+    ("GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier"),
+    ("MIN_DOLLAR_VOLUME", "screener.min_dollar_volume"),
+    ("MIN_HISTORY_BARS", "strategy.min_history_bars"),
+    ("EXCLUDE_ETF_ETN", "strategy.exclude_etf_etn"),
+    ("REQUIRE_SLOPE_UP", "strategy.require_slope_up"),
+    ("SCREENER_CACHE_TTL", "screener.cache_ttl_minutes"),
+    ("MIN_PRICE", "screener.min_price"),
+    ("RS_LOOKBACK_DAYS", "strategy.rs_lookback_days"),
+    ("RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return"),
+    ("HYBRID_SMA_TREND_PERIOD", "strategy.hybrid.sma_trend_period"),
+    ("HYBRID_EMA_SHORT_PERIOD", "strategy.hybrid.ema_short_period"),
+    ("HYBRID_EMA_MID_PERIOD", "strategy.hybrid.ema_mid_period"),
+    ("HYBRID_RSI_PERIOD", "strategy.hybrid.rsi_period"),
+    ("HYBRID_RSI_ZONE_LOW", "strategy.hybrid.rsi_zone_low"),
+    ("HYBRID_RSI_ZONE_HIGH", "strategy.hybrid.rsi_zone_high"),
+    ("HYBRID_RSI_OVERSOLD_LOW", "strategy.hybrid.rsi_oversold_low"),
+    ("HYBRID_RSI_OVERSOLD_HIGH", "strategy.hybrid.rsi_oversold_high"),
+    ("HYBRID_PULLBACK_MAX_BARS", "strategy.hybrid.pullback_max_bars"),
+    (
+        "HYBRID_BREAKOUT_CONS_MIN_BARS",
+        "strategy.hybrid.breakout_consolidation_min_bars",
+    ),
+    (
+        "HYBRID_BREAKOUT_CONS_MAX_BARS",
+        "strategy.hybrid.breakout_consolidation_max_bars",
+    ),
+    ("HYBRID_VOLUME_LOOKBACK_DAYS", "strategy.hybrid.volume_lookback_days"),
+    ("HYBRID_MAX_GAP_PCT", "strategy.hybrid.max_gap_pct"),
+    ("HYBRID_USE_SMA60_FILTER", "strategy.hybrid.use_sma60_filter"),
+    ("HYBRID_SMA60_PERIOD", "strategy.hybrid.sma60_period"),
+    (
+        "HYBRID_KR_BREAKOUT_NEEDS_CONFIRM",
+        "strategy.hybrid.kr_breakout_requires_confirmation",
+    ),
+    ("SELL_MODE", "sell.mode"),
+    ("SELL_ATR_MULTIPLIER", "sell.atr_trail_multiplier"),
+    ("SELL_TIME_STOP_DAYS", "sell.time_stop_days"),
+    ("SELL_REQUIRE_SMA200", "sell.require_sma200"),
+    ("SELL_EMA_SHORT", "sell.ema_short"),
+    ("SELL_EMA_LONG", "sell.ema_long"),
+    ("SELL_RSI_PERIOD", "sell.rsi_period"),
+    ("SELL_RSI_FLOOR", "sell.rsi_floor"),
+    ("SELL_RSI_FLOOR_ALT", "sell.rsi_floor_alt"),
+    ("SELL_MIN_BARS", "sell.min_bars"),
+    ("HYBRID_SELL_PROFIT_TARGET_LOW", "sell.hybrid.profit_target_low"),
+    ("HYBRID_SELL_PROFIT_TARGET_HIGH", "sell.hybrid.profit_target_high"),
+    ("HYBRID_SELL_PARTIAL_PROFIT_FLOOR", "sell.hybrid.partial_profit_floor"),
+    ("HYBRID_SELL_EMA_SHORT_PERIOD", "sell.hybrid.ema_short_period"),
+    ("HYBRID_SELL_EMA_MID_PERIOD", "sell.hybrid.ema_mid_period"),
+    ("HYBRID_SELL_SMA_TREND_PERIOD", "sell.hybrid.sma_trend_period"),
+    ("HYBRID_SELL_RSI_PERIOD", "sell.hybrid.rsi_period"),
+    ("HYBRID_SELL_STOP_LOSS_PCT_MIN", "sell.hybrid.stop_loss_pct_min"),
+    ("HYBRID_SELL_STOP_LOSS_PCT_MAX", "sell.hybrid.stop_loss_pct_max"),
+    (
+        "HYBRID_SELL_FAILED_BREAKOUT_DROP_PCT",
+        "sell.hybrid.failed_breakout_drop_pct",
+    ),
+    ("HYBRID_SELL_MIN_BARS", "sell.hybrid.min_bars"),
+    ("HYBRID_SELL_TIME_STOP_DAYS", "sell.hybrid.time_stop_days"),
+    ("HYBRID_SELL_TIME_STOP_GRACE_DAYS", "sell.hybrid.time_stop_grace_days"),
+    (
+        "HYBRID_SELL_TIME_STOP_PROFIT_FLOOR",
+        "sell.hybrid.time_stop_profit_floor",
+    ),
+    ("USD_KRW_RATE", "fx.usdkrw"),
+    ("FX_MODE", "fx.mode"),
+    ("FX_CACHE_TTL", "fx.cache_ttl_minutes"),
+    ("FX_KIS_SYMBOL", "fx.kis_symbol"),
+)
+
+
+def _yaml_path_exists(yaml_cfg: dict[str, Any], path: str) -> bool:
+    sentinel = object()
+    return _from_nested(yaml_cfg, path, sentinel) is not sentinel
+
+
 @dataclass(frozen=True)
 class HybridStrategyConfig:
     sma_trend_period: int = 20
@@ -184,6 +276,9 @@ class _ConfigParser:
     def from_yaml(self, path: str, default: Any = None) -> Any:
         return _from_nested(self._yaml_cfg, path, default)
 
+    def has_yaml_path(self, path: str) -> bool:
+        return _yaml_path_exists(self._yaml_cfg, path)
+
     def env_bool(self, key: str, path: str, default: bool) -> bool:
         env_val = os.getenv(key)
         if env_val is not None:
@@ -216,6 +311,28 @@ class _ConfigParser:
         if value is None:
             return default
         return str(value)
+
+
+def _collect_env_yaml_conflicts(parser: _ConfigParser) -> list[str]:
+    conflicts: set[str] = set()
+    for env_key, yaml_path in _ENV_YAML_CONFLICT_BINDINGS:
+        if os.getenv(env_key) is None:
+            continue
+        if parser.has_yaml_path(yaml_path):
+            conflicts.add(f"{env_key} ({yaml_path})")
+    return sorted(conflicts)
+
+
+def _enforce_env_yaml_conflict_policy(parser: _ConfigParser) -> None:
+    conflicts = _collect_env_yaml_conflicts(parser)
+    if not conflicts:
+        return
+    raise ConfigLoadError(
+        "Config conflict policy violation: duplicate keys are defined in both "
+        ".env/environment and config.yaml: "
+        f"{', '.join(conflicts)}. "
+        "Keep each setting key in a single source."
+    )
 
 
 @dataclass(frozen=True)
@@ -674,6 +791,7 @@ def load_config(
     limit_override: int | None = None,
 ) -> Config:
     parser = _create_config_parser()
+    _enforce_env_yaml_conflict_policy(parser)
     _enforce_secret_policy(parser)
 
     data_section = _parse_data_section(
