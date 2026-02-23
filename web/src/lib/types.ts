@@ -13,12 +13,18 @@ export interface ReportListItem {
   tickers?: string[];
 }
 
+export interface ReportSearchWarning {
+  code: "index_incomplete" | "partial_failure";
+  message: string;
+}
+
 export interface ReportsListResponse {
   items: ReportListItem[];
   total: number;
   searched: number;
   searchWindow: number;
   truncated: boolean;
+  warnings: ReportSearchWarning[];
 }
 
 export interface HoldingRecord {

@@ -1,26 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getSupabaseEnv } from "@/lib/env.server";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
-import { resolveReportSearchConcurrency } from "@/lib/report-performance-policy";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
-import { extractReportTickers } from "@/lib/report-tickers";
 import { reportListQuerySchema } from "@/lib/schemas";
-import {
-  downloadStorageJson,
-  fetchReportIndexPage,
-  SupabaseApiError,
-  upsertReportIndexEntry,
-} from "@/lib/supabase-admin";
-import type { ReportListItem } from "@/lib/types";
+import { fetchReportIndexPage } from "@/lib/supabase-admin";
+import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const REPORT_SEARCH_PAGE_SIZE = 100;
 
 function matchesTickerQuery(
   tickers: string[] | undefined,
@@ -31,16 +24,6 @@ function matchesTickerQuery(
   }
   const needle = query.toLowerCase();
   return tickers.some((ticker) => ticker.toLowerCase().includes(needle));
-}
-
-function extractSummary(
-  report: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const payload = report.summary;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  return payload as Record<string, unknown>;
 }
 
 function toReportListItem(
@@ -62,6 +45,21 @@ function toReportListItem(
     reportDate: row.report_date,
     duplicateIndex: row.duplicate_index,
     ...extras,
+  };
+}
+
+function buildPartialFailureWarning(error: unknown): ReportSearchWarning {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  return {
+    code: "partial_failure",
+    message: `검색 중 일부 인덱스 페이지를 불러오지 못했습니다: ${message}`,
+  };
+}
+
+function buildIndexIncompleteWarning(count: number): ReportSearchWarning {
+  return {
+    code: "index_incomplete",
+    message: `인덱스 미완료 리포트 ${count}건은 검색 결과에서 제외되었습니다.`,
   };
 }
 
@@ -113,9 +111,6 @@ export async function GET(request: NextRequest) {
   const searchWindow = resolveReportSearchWindow(
     process.env.REPORT_SEARCH_WINDOW,
   );
-  const searchConcurrency = resolveReportSearchConcurrency(
-    process.env.REPORT_SEARCH_CONCURRENCY,
-  );
 
   try {
     if (!q) {
@@ -129,118 +124,83 @@ export async function GET(request: NextRequest) {
         searched: 0,
         searchWindow,
         truncated: false,
+        warnings: [],
       });
     }
 
-    const { items: searchedCandidates, total } = await fetchReportIndexPage({
-      type,
-      limit: searchWindow,
-    });
-    const env = getSupabaseEnv();
-    const matchedByIndex = new Map<number, ReportListItem>();
-    let nextIndex = 0;
-    let workerError: unknown;
-    let shouldStop = false;
+    const matchedItems: ReportListItem[] = [];
+    const warnings: ReportSearchWarning[] = [];
+    let searched = 0;
+    let offset = 0;
+    let candidateTotal = 0;
+    let incompleteRows = 0;
 
-    const workerCount = Math.min(searchConcurrency, searchedCandidates.length);
-    await Promise.all(
-      Array.from({ length: workerCount }, async () => {
-        while (true) {
-          if (shouldStop) {
-            return;
-          }
+    while (searched < searchWindow) {
+      const pageSize = Math.min(
+        REPORT_SEARCH_PAGE_SIZE,
+        searchWindow - searched,
+      );
+      if (pageSize <= 0) {
+        break;
+      }
 
-          const index = nextIndex;
-          nextIndex += 1;
-          if (index >= searchedCandidates.length) {
-            return;
-          }
-
-          const row = searchedCandidates[index];
-          let tickers = row.tickers;
-          let generatedAt = row.generated_at ?? undefined;
-          let summary = row.summary ?? undefined;
-
-          if (!row.tickers_hydrated) {
-            let report: Record<string, unknown>;
-            try {
-              report = await downloadStorageJson(
-                env.SUPABASE_REPORTS_BUCKET,
-                row.report_key,
-              );
-            } catch (error) {
-              if (error instanceof SupabaseApiError && error.status === 404) {
-                continue;
-              }
-              if (!workerError) {
-                workerError = error;
-              }
-              shouldStop = true;
-              return;
-            }
-
-            tickers = extractReportTickers(report);
-            generatedAt =
-              generatedAt ??
-              (typeof report.generated_at === "string"
-                ? report.generated_at
-                : undefined);
-            summary = summary ?? extractSummary(report);
-
-            try {
-              await upsertReportIndexEntry({
-                reportKey: row.report_key,
-                reportType: row.report_type,
-                reportDate: row.report_date,
-                duplicateIndex: row.duplicate_index,
-                generatedAt,
-                summary,
-                tickers,
-                tickersHydrated: true,
-              });
-            } catch (error) {
-              const message =
-                error instanceof Error ? error.message : "Unknown error";
-              console.warn(
-                `Report index hydration failed for '${row.report_key}': ${message}`,
-              );
-            }
-          }
-
-          if (!matchesTickerQuery(tickers, q)) {
-            continue;
-          }
-
-          matchedByIndex.set(
-            index,
-            toReportListItem(row, {
-              generatedAt,
-              summary,
-              tickers: tickers.length > 0 ? tickers : undefined,
-            }),
-          );
+      let page: Awaited<ReturnType<typeof fetchReportIndexPage>>;
+      try {
+        page = await fetchReportIndexPage({
+          type,
+          limit: pageSize,
+          offset,
+        });
+      } catch (error) {
+        if (searched === 0) {
+          throw error;
         }
-      }),
-    );
+        warnings.push(buildPartialFailureWarning(error));
+        break;
+      }
 
-    if (workerError) {
-      throw workerError;
+      candidateTotal = Math.max(candidateTotal, page.total);
+      if (page.fetchedCount <= 0) {
+        break;
+      }
+
+      for (const row of page.items) {
+        if (!row.tickers_hydrated) {
+          incompleteRows += 1;
+          continue;
+        }
+
+        if (!matchesTickerQuery(row.tickers, q)) {
+          continue;
+        }
+
+        matchedItems.push(
+          toReportListItem(row, {
+            generatedAt: row.generated_at ?? undefined,
+            summary: row.summary ?? undefined,
+            tickers: row.tickers.length > 0 ? row.tickers : undefined,
+          }),
+        );
+      }
+
+      searched += page.fetchedCount;
+      offset += page.fetchedCount;
+      if (page.fetchedCount < pageSize) {
+        break;
+      }
     }
 
-    const matchedItems: ReportListItem[] = [];
-    for (let index = 0; index < searchedCandidates.length; index += 1) {
-      const item = matchedByIndex.get(index);
-      if (item) {
-        matchedItems.push(item);
-      }
+    if (incompleteRows > 0) {
+      warnings.push(buildIndexIncompleteWarning(incompleteRows));
     }
 
     return NextResponse.json({
       items: matchedItems.slice(0, limit),
       total: matchedItems.length,
-      searched: searchedCandidates.length,
+      searched,
       searchWindow,
-      truncated: total > searchedCandidates.length,
+      truncated: candidateTotal > searched,
+      warnings,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

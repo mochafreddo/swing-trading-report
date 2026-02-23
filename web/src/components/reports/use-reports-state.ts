@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type { ReportListItem, ReportsListResponse } from "@/lib/types";
+import type {
+  ReportListItem,
+  ReportsListResponse,
+  ReportSearchWarning,
+} from "@/lib/types";
 
 import {
   asRecord,
@@ -29,6 +33,7 @@ export function useReportsState() {
   const [searched, setSearched] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [searchWindow, setSearchWindow] = useState(100);
+  const [warnings, setWarnings] = useState<ReportSearchWarning[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(() =>
     searchParams.get("key"),
   );
@@ -121,6 +126,7 @@ export function useReportsState() {
     const load = async () => {
       setLoadingList(true);
       setError(null);
+      setWarnings([]);
 
       try {
         const params = new URLSearchParams({
@@ -147,6 +153,7 @@ export function useReportsState() {
         setSearched(typed.searched);
         setTruncated(typed.truncated);
         setSearchWindow(typed.searchWindow);
+        setWarnings(typed.warnings);
 
         const firstKey = typed.items[0]?.key ?? null;
         setSelectedKey((prev) => {
@@ -248,6 +255,7 @@ export function useReportsState() {
     searched,
     truncated,
     searchWindow,
+    warnings,
     selectedKey,
     detail,
     loadingList,

@@ -16,6 +16,7 @@ export function ReportsClient() {
     searched,
     truncated,
     searchWindow,
+    warnings,
     selectedKey,
     detail,
     loadingList,
@@ -44,6 +45,7 @@ export function ReportsClient() {
           searched={searched}
           truncated={truncated}
           searchWindow={searchWindow}
+          warnings={warnings}
           selectedKey={selectedKey}
           loadingList={loadingList}
           onReportTypeChange={setReportType}

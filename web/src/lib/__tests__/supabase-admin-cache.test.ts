@@ -328,6 +328,7 @@ describe("fetchReportIndexPage", () => {
     });
 
     expect(result.total).toBe(12);
+    expect(result.fetchedCount).toBe(1);
     expect(result.items).toEqual([
       {
         report_key: REPORT_KEY_A,
@@ -370,6 +371,7 @@ describe("fetchReportIndexPage", () => {
     const result = await fetchReportIndexPage();
     expect(result.items).toHaveLength(1);
     expect(result.total).toBe(2);
+    expect(result.fetchedCount).toBe(2);
   });
 });
 

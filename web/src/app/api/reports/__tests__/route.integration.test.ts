@@ -94,7 +94,7 @@ describe("/api/reports integration", () => {
     expect(requestUrl.pathname).toBe("/rest/v1/report_index");
     expect(requestUrl.searchParams.get("report_type")).toBe("eq.buy");
     expect(requestUrl.searchParams.get("order")).toBe(
-      "report_date.desc,duplicate_index.desc",
+      "report_date.desc,duplicate_index.desc,report_key.desc",
     );
     expect(requestUrl.searchParams.get("limit")).toBe("2");
   });

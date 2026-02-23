@@ -66,8 +66,9 @@ flowchart LR
 ### 4.3 웹 리포트 조회 플로우
 
 1. `/api/reports`는 `report_index`에서 목록을 조회합니다.
-2. ticker 검색(`q`) 시 `tickers_hydrated=false` 항목은 Storage JSON을 내려받아 ticker/summary를 보강한 뒤 index를 업데이트합니다.
-3. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
+2. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
+3. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
+4. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
 
 ### 4.4 웹 보유종목 CRUD 플로우
 

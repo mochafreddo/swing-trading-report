@@ -1,6 +1,6 @@
 import styles from "../reports-client.module.css";
 
-import type { ReportListItem } from "@/lib/types";
+import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
 
 import { formatDateLabel } from "./helpers";
 import type { ReportsFilterType } from "./types";
@@ -14,6 +14,7 @@ interface ReportsListProps {
   searched: number;
   truncated: boolean;
   searchWindow: number;
+  warnings: ReportSearchWarning[];
   selectedKey: string | null;
   loadingList: boolean;
   onReportTypeChange: (value: ReportsFilterType) => void;
@@ -30,6 +31,7 @@ export function ReportsList({
   searched,
   truncated,
   searchWindow,
+  warnings,
   selectedKey,
   loadingList,
   onReportTypeChange,
@@ -86,6 +88,11 @@ export function ReportsList({
             검색 범위 제한: 최신 {searchWindow}개 리포트만 검색됨
           </p>
         )}
+        {warnings.map((warning) => (
+          <p key={`${warning.code}:${warning.message}`} className="subtle">
+            {warning.message}
+          </p>
+        ))}
       </header>
 
       <ul className={styles.list} aria-busy={loadingList}>

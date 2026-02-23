@@ -530,11 +530,13 @@ export interface ReportIndexRow {
 export interface FetchReportIndexPageOptions {
   type?: ReportType | "all";
   limit?: number;
+  offset?: number;
 }
 
 export interface FetchReportIndexPageResult {
   items: ReportIndexRow[];
   total: number;
+  fetchedCount: number;
 }
 
 export interface ReportIndexUpsertInput {
@@ -642,10 +644,12 @@ export async function fetchReportIndexPage(
   const env = getSupabaseEnv();
   const type = options.type ?? "all";
   const pageSize = Math.min(Math.max(options.limit ?? 100, 1), 1000);
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const query = new URLSearchParams({
     select: REPORT_INDEX_SELECT,
-    order: "report_date.desc,duplicate_index.desc",
+    order: "report_date.desc,duplicate_index.desc,report_key.desc",
     limit: String(pageSize),
+    offset: String(offset),
   });
   if (type !== "all") {
     query.set("report_type", `eq.${type}`);
@@ -668,6 +672,7 @@ export async function fetchReportIndexPage(
   }
 
   const payload = (await response.json()) as unknown;
+  const fetchedCount = Array.isArray(payload) ? payload.length : 0;
   const items = parseReportIndexRows(payload);
   const total =
     parseContentRangeTotal(response.headers.get("content-range")) ??
@@ -675,6 +680,7 @@ export async function fetchReportIndexPage(
   return {
     items,
     total,
+    fetchedCount,
   };
 }
 
