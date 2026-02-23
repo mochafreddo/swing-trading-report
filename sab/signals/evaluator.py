@@ -76,7 +76,10 @@ def evaluate_ticker(
 
     # Market-aware price floor
     eff_min_price = settings.min_price
-    if meta.get("currency", "KRW").upper() == "USD" and settings.us_min_price:
+    if (
+        meta.get("currency", "KRW").upper() == "USD"
+        and settings.us_min_price is not None
+    ):
         eff_min_price = settings.us_min_price
 
     if eff_min_price and latest["close"] < eff_min_price:
@@ -152,7 +155,10 @@ def evaluate_ticker(
             avg_dollar_volume = total / count
     # Market-aware liquidity floor (USD for US, KRW for KR)
     eff_min_dv = settings.min_dollar_volume
-    if meta.get("currency", "KRW").upper() == "USD" and settings.us_min_dollar_volume:
+    if (
+        meta.get("currency", "KRW").upper() == "USD"
+        and settings.us_min_dollar_volume is not None
+    ):
         eff_min_dv = settings.us_min_dollar_volume
     if eff_min_dv > 0 and avg_dollar_volume < eff_min_dv:
         return EvaluationResult(

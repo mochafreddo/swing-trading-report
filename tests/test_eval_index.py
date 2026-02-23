@@ -471,6 +471,91 @@ def test_evaluate_ticker_excludes_etf_when_flag_true(monkeypatch):
     assert result.reason == "ETF/ETN excluded"
 
 
+def test_evaluate_ticker_us_zero_threshold_overrides_kr_floor(monkeypatch):
+    import sab.signals.evaluator as ev
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 52.0,
+            "low": 49.0,
+            "close": 51.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250103",
+            "open": 51.0,
+            "high": 53.0,
+            "low": 50.0,
+            "close": 52.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250104",
+            "open": 52.0,
+            "high": 54.0,
+            "low": 51.0,
+            "close": 53.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250105",
+            "open": 53.0,
+            "high": 55.0,
+            "low": 52.0,
+            "close": 54.0,
+            "volume": 1_000_000.0,
+        },
+    ]
+
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    def fake_ema(values, period):
+        n = len(values)
+        out = [1.0] * n
+        if period == 20:
+            out[-2] = 1.0
+            out[-1] = 2.0
+        elif period == 50:
+            out[-2] = 1.0
+            out[-1] = 1.0
+        return out
+
+    monkeypatch.setattr(ev, "ema", fake_ema)
+    monkeypatch.setattr(ev, "rsi", lambda values, period: [0.0, 0.0, 0.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        ev,
+        "atr",
+        lambda highs, lows, closes, period: [1.0] * len(closes),
+    )
+
+    settings = EvaluationSettings(
+        min_history_bars=5,
+        min_price=100.0,
+        us_min_price=0.0,
+        min_dollar_volume=1_000_000_000.0,
+        us_min_dollar_volume=0.0,
+        gap_atr_multiplier=0.0,
+        exclude_etf_etn=False,
+    )
+    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.reason is None
+    assert result.candidate is not None
+
+
 def test_evaluate_sell_signals_use_eval_index(monkeypatch):
     import sab.signals.sell_rules as sr
 

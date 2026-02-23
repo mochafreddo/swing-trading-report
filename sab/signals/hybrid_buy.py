@@ -157,7 +157,8 @@ def _detect_trend_pullback_bounce(
 
     # Very rough check for heavy selling: big red bar with volume >> avg
     heavy_selling = False
-    for bar in candles[-pullback_bars:]:
+    pullback_slice = candles[-pullback_bars:] if pullback_bars > 0 else []
+    for bar in pullback_slice:
         bar_open = float(bar.get("open") or 0.0)
         bar_close = float(bar.get("close") or 0.0)
         bar_volume = float(bar.get("volume") or 0.0)
@@ -357,6 +358,28 @@ def evaluate_ticker_hybrid(
     rsi_vals = rsi(closes, settings.rsi_period)
     atr_vals = atr(highs, lows, closes, 14)
     atr_value = atr_vals[-1] if atr_vals else float("nan")
+    latest = candles[idx_eval]
+    prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
+    prev_close = float(prev.get("close") or 0.0)
+    gap_pct = 0.0
+    if prev_close > 0:
+        gap_pct = (float(latest.get("open") or 0.0) - prev_close) / prev_close
+    if settings.max_gap_pct > 0 and abs(gap_pct) > settings.max_gap_pct:
+        return HybridEvaluationResult(
+            ticker,
+            None,
+            f"Gap {gap_pct * 100:.1f}% exceeds HYBRID_MAX_GAP_PCT {settings.max_gap_pct * 100:.1f}%",
+        )
+
+    if settings.use_sma60_filter:
+        sma60_vals = sma(closes, settings.sma60_period)
+        sma60 = sma60_vals[-1] if sma60_vals else float("nan")
+        if math.isnan(sma60) or last_close <= sma60:
+            return HybridEvaluationResult(
+                ticker,
+                None,
+                f"Close {last_close:.2f} <= SMA{settings.sma60_period} {sma60:.2f}",
+            )
 
     pattern: HybridPattern | None = None
     pattern_reasons: list[str] = []
@@ -400,11 +423,6 @@ def evaluate_ticker_hybrid(
         return HybridEvaluationResult(
             ticker, None, "Did not meet hybrid signal criteria"
         )
-
-    latest = candles[idx_eval]
-    prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
-
-    prev_close = float(prev.get("close") or 0.0)
     pct_change = (last_close - prev_close) / prev_close if prev_close else 0.0
 
     # Determine readiness (READY vs WATCH) using close-based confirmations only.
@@ -437,10 +455,21 @@ def evaluate_ticker_hybrid(
         extended = False
         if swing_high > 0 and not math.isnan(atr_value):
             extended = last_close > swing_high + atr_value
+        needs_kr_confirmation = (
+            currency != "USD"
+            and settings.kr_breakout_requires_confirmation
+            and swing_high > 0
+            and prev_close <= swing_high
+        )
         if extended:
             entry_state = "WATCH"
             entry_state_reason = (
                 "Breakout extended (>1 ATR above swing high); consider waiting"
+            )
+        elif needs_kr_confirmation:
+            entry_state = "WATCH"
+            entry_state_reason = (
+                "KR breakout needs one more close confirmation above swing high"
             )
         else:
             entry_state = "READY"

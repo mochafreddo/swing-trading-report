@@ -115,6 +115,7 @@ class _ScanRuntime:
     pykrx_import_error: str | None = None
     pykrx_warning_added: bool = False
     screener_meta_map: dict[str, dict[str, Any]] = field(default_factory=dict)
+    screener_seeded: bool = False
     ticker_currency: dict[str, str] = field(default_factory=dict)
     fx_rate: float | None = None
     fx_meta_note: str | None = None

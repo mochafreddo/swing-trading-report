@@ -6,6 +6,21 @@ from .config import Config
 from .scan_types import _ScanRuntime
 
 
+def _clear_non_screener_baseline_if_needed(
+    runtime: _ScanRuntime, *, screener_only: bool
+) -> None:
+    if not screener_only or not runtime.tickers:
+        return
+    # Keep existing tickers only when they are already seeded by a screener call.
+    if bool(getattr(runtime, "screener_seeded", False)):
+        return
+    runtime.logger.info(
+        "Screener-only mode: ignoring watchlist baseline (%s tickers)",
+        len(runtime.tickers),
+    )
+    runtime.tickers = []
+
+
 def _load_scan_tickers(
     cfg: Config,
     watchlist_path: str | None,
@@ -62,6 +77,7 @@ def _run_kr_screener(
     ScreenRequestCls: Any,
     KISScreenerCls: Any,
 ) -> int:
+    _clear_non_screener_baseline_if_needed(runtime, screener_only=screener_only)
     if "KR" not in runtime.cfg.universe_markets or runtime.kis_client is None:
         return 0
 
@@ -88,6 +104,7 @@ def _run_kr_screener(
         runtime.tickers = list(dict.fromkeys(runtime.tickers + kr_tickers))
     else:
         runtime.tickers = kr_tickers
+        runtime.screener_seeded = bool(runtime.tickers)
 
     runtime.logger.info(
         "KR screener selected %s tickers (cache: %s)",
@@ -110,10 +127,12 @@ def _run_us_screener(
     coerce_nday_fn: Any,
     format_ny_now_for_log_fn: Any,
 ) -> int:
+    _clear_non_screener_baseline_if_needed(runtime, screener_only=screener_only)
     if "US" not in runtime.cfg.universe_markets or runtime.kis_client is None:
         return 0
 
     cfg = runtime.cfg
+    us_limit = cfg.us_screener_limit or screener_limit
     us_tickers: list[str] = []
     us_source: str | None = None
     us_nday_used: int | None = None
@@ -139,7 +158,7 @@ def _run_us_screener(
             kscr = KUSCls(runtime.kis_client)
             kres = kscr.screen(
                 KUSReqCls(
-                    limit=cfg.us_screener_limit or screener_limit,
+                    limit=us_limit,
                     metric=cfg.us_screener_metric,
                     nday=preferred_nday,
                     fallback_ndays=fallback_ndays,
@@ -167,7 +186,7 @@ def _run_us_screener(
 
     if not us_tickers and cfg.us_screener_defaults:
         us_scr = USScreenerCls(cfg.us_screener_defaults)
-        us_res = us_scr.screen(USScreenRequestCls(limit=screener_limit))
+        us_res = us_scr.screen(USScreenRequestCls(limit=us_limit))
         us_tickers = us_res.tickers
         if us_tickers:
             us_source = (
@@ -191,7 +210,8 @@ def _run_us_screener(
     if not screener_only:
         runtime.tickers = list(dict.fromkeys(runtime.tickers + us_tickers))
     else:
-        runtime.tickers = list(dict.fromkeys(us_tickers + (runtime.tickers or [])))
+        runtime.tickers = list(dict.fromkeys(runtime.tickers + us_tickers))
+        runtime.screener_seeded = bool(runtime.tickers)
 
     runtime.logger.info(
         "US screener selected %s tickers (mode=%s, source=%s, nday=%s, state=%s)",
@@ -228,6 +248,9 @@ def _run_screeners(
         runtime.logger.error(msg)
         runtime.fatal_failure = True
         return
+    _clear_non_screener_baseline_if_needed(runtime, screener_only=screener_only)
+    if screener_only:
+        runtime.screener_seeded = False
 
     total_added = 0
     total_added += _run_kr_screener(
