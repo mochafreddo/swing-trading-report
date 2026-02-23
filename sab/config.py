@@ -41,6 +41,14 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("US_SCREENER_LIMIT", "screener.us_limit"),
     ("KIS_BASE_URL", "kis.base_url"),
     ("KIS_MIN_INTERVAL_MS", "kis.min_interval_ms"),
+    (
+        "MARKET_CACHE_STALE_SESSIONS_KR",
+        "data.market_cache_stale_sessions.kr",
+    ),
+    (
+        "MARKET_CACHE_STALE_SESSIONS_US",
+        "data.market_cache_stale_sessions.us",
+    ),
     ("STRATEGY_MODE", "strategy.mode"),
     ("USE_SMA200_FILTER", "strategy.use_sma200_filter"),
     ("GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier"),
@@ -178,6 +186,8 @@ class Config:
     exclude_etf_etn: bool = False
     require_slope_up: bool = False
     kis_min_interval_ms: float | None = None
+    market_cache_stale_sessions_kr: int = 1
+    market_cache_stale_sessions_us: int = 1
     screener_cache_ttl_minutes: float = 5.0
     min_price: float = 0.0
     rs_lookback_days: int = 20
@@ -419,6 +429,8 @@ class _DataSection:
     kis_app_secret: str | None
     kis_base_url: str | None
     kis_min_interval_ms: float | None
+    market_cache_stale_sessions_kr: int
+    market_cache_stale_sessions_us: int
 
 
 @dataclass(frozen=True)
@@ -550,6 +562,16 @@ def _parse_data_section(
         ),
         kis_min_interval_ms=parser.env_optional_float(
             "KIS_MIN_INTERVAL_MS", "kis.min_interval_ms"
+        ),
+        market_cache_stale_sessions_kr=parser.env_int(
+            "MARKET_CACHE_STALE_SESSIONS_KR",
+            "data.market_cache_stale_sessions.kr",
+            1,
+        ),
+        market_cache_stale_sessions_us=parser.env_int(
+            "MARKET_CACHE_STALE_SESSIONS_US",
+            "data.market_cache_stale_sessions.us",
+            1,
         ),
     )
 
@@ -839,6 +861,8 @@ def _compose_config(
         exclude_etf_etn=strategy.exclude_etf_etn,
         require_slope_up=strategy.require_slope_up,
         kis_min_interval_ms=data.kis_min_interval_ms,
+        market_cache_stale_sessions_kr=data.market_cache_stale_sessions_kr,
+        market_cache_stale_sessions_us=data.market_cache_stale_sessions_us,
         screener_cache_ttl_minutes=strategy.screener_cache_ttl_minutes,
         min_price=strategy.min_price,
         rs_lookback_days=strategy.rs_lookback_days,

@@ -14,6 +14,8 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SCREEN_LIMIT",
         "REPORT_DIR",
         "DATA_DIR",
+        "MARKET_CACHE_STALE_SESSIONS_KR",
+        "MARKET_CACHE_STALE_SESSIONS_US",
         "STRATEGY_MODE",
         "SELL_MODE",
         "FX_MODE",

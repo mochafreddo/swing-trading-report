@@ -7,6 +7,10 @@ data:
   screen_limit: 30
   report_dir: reports
   data_dir: data
+  # KIS 장애 시 캐시 폴백을 허용할 최대 stale 세션 수 (시장별)
+  market_cache_stale_sessions:
+    kr: 1
+    us: 1
 
 kis:
   # Security policy: keep credentials in .env only.
