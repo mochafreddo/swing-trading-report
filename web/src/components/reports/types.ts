@@ -1,2 +1,20 @@
+import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
+
 export type ReportsFilterType = "all" | "buy" | "sell";
 export type ReportJson = Record<string, unknown>;
+
+export interface ReportsInitialState {
+  reportType: ReportsFilterType;
+  query: string;
+  appliedQuery: string;
+  items: ReportListItem[];
+  total: number;
+  searched: number;
+  truncated: boolean;
+  searchWindow: number;
+  warnings: ReportSearchWarning[];
+  selectedKey: string | null;
+  detail: ReportJson | null;
+  detailKey: string | null;
+  showRaw: boolean;
+}

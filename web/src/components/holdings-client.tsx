@@ -10,9 +10,16 @@ import { HoldingsFormPanel } from "@/components/holdings/holdings-form-panel";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
 import { readApiError } from "@/components/holdings/helpers";
 import { useHoldingsForm } from "@/components/holdings/use-holdings-form";
-import { useHoldingsQuery } from "@/components/holdings/use-holdings-query";
+import {
+  type HoldingsInitialState,
+  useHoldingsQuery,
+} from "@/components/holdings/use-holdings-query";
 
-export function HoldingsClient() {
+interface HoldingsClientProps {
+  initialState?: HoldingsInitialState;
+}
+
+export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const [showInactive, setShowInactive] = useState(false);
   const {
     items,
@@ -23,7 +30,7 @@ export function HoldingsClient() {
     setError,
     refresh,
     loadMore,
-  } = useHoldingsQuery();
+  } = useHoldingsQuery(initialState);
   const {
     submitting,
     editingTicker,

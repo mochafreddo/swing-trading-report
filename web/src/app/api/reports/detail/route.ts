@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getSupabaseEnv } from "@/lib/env.server";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { InvalidReportKeyError, readReportDetail } from "@/lib/reports-data";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
-import { parseReportStorageKey } from "@/lib/report-key";
 import { reportDetailQuerySchema } from "@/lib/schemas";
-import { downloadStorageJson, SupabaseApiError } from "@/lib/supabase-admin";
+import { SupabaseApiError } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
@@ -55,22 +54,16 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const parsedKey = parseReportStorageKey(query.data.key);
-  if (!parsedKey) {
-    return NextResponse.json(
-      { error: "Invalid report key format" },
-      { status: 400 },
-    );
-  }
-
   try {
-    const env = getSupabaseEnv();
-    const report = await downloadStorageJson(
-      env.SUPABASE_REPORTS_BUCKET,
-      parsedKey.key,
-    );
-    return NextResponse.json({ key: parsedKey.key, report });
+    const payload = await readReportDetail(query.data.key);
+    return NextResponse.json(payload);
   } catch (error) {
+    if (error instanceof InvalidReportKeyError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
+    }
     if (error instanceof SupabaseApiError && error.status === 404) {
       return NextResponse.json({ error: "Report not found" }, { status: 404 });
     }

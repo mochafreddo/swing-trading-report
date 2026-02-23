@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { HoldingRecord, HoldingsListResponse } from "@/lib/types";
 
@@ -8,13 +8,24 @@ import {
   readApiError,
 } from "./helpers";
 
-export function useHoldingsQuery() {
-  const [items, setItems] = useState<HoldingRecord[]>([]);
+export interface HoldingsInitialState {
+  items: HoldingRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export function useHoldingsQuery(initialState?: HoldingsInitialState) {
+  const [items, setItems] = useState<HoldingRecord[]>(
+    () => initialState?.items ?? [],
+  );
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(() => initialState?.hasMore ?? false);
+  const [nextCursor, setNextCursor] = useState<string | null>(
+    () => initialState?.nextCursor ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
+  const skipInitialRefresh = useRef(Boolean(initialState));
 
   const fetchPage = useCallback(
     async (cursor?: string | null): Promise<HoldingsListResponse> => {
@@ -83,6 +94,10 @@ export function useHoldingsQuery() {
   }, [fetchPage, hasMore, loadingMore, nextCursor]);
 
   useEffect(() => {
+    if (skipInitialRefresh.current) {
+      skipInitialRefresh.current = false;
+      return;
+    }
     void refresh();
   }, [refresh]);
 

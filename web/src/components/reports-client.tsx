@@ -4,9 +4,14 @@ import styles from "./reports-client.module.css";
 
 import { ReportDetail } from "@/components/reports/report-detail";
 import { ReportsList } from "@/components/reports/reports-list";
+import type { ReportsInitialState } from "@/components/reports/types";
 import { useReportsState } from "@/components/reports/use-reports-state";
 
-export function ReportsClient() {
+interface ReportsClientProps {
+  initialState?: ReportsInitialState;
+}
+
+export function ReportsClient({ initialState }: ReportsClientProps) {
   const {
     reportType,
     query,
@@ -31,7 +36,7 @@ export function ReportsClient() {
     setQuery,
     setSelectedKey,
     toggleShowRaw,
-  } = useReportsState();
+  } = useReportsState(initialState);
 
   return (
     <section className={styles.wrapper}>

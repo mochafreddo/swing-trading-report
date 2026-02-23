@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type {
@@ -13,35 +13,61 @@ import {
   parseReportType,
   readApiError,
 } from "./helpers";
-import type { ReportJson, ReportsFilterType } from "./types";
+import type {
+  ReportJson,
+  ReportsFilterType,
+  ReportsInitialState,
+} from "./types";
 
 const PAGE_LIMIT = 30;
 
-export function useReportsState() {
+export function useReportsState(initialState?: ReportsInitialState) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [reportType, setReportType] = useState<ReportsFilterType>(() =>
-    parseReportType(searchParams.get("type")),
+  const [reportType, setReportType] = useState<ReportsFilterType>(
+    () => initialState?.reportType ?? parseReportType(searchParams.get("type")),
   );
-  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
-  const [appliedQuery, setAppliedQuery] = useState(() =>
-    (searchParams.get("q") ?? "").trim(),
+  const [query, setQuery] = useState(
+    () => initialState?.query ?? searchParams.get("q") ?? "",
   );
-  const [items, setItems] = useState<ReportListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [searched, setSearched] = useState(0);
-  const [truncated, setTruncated] = useState(false);
-  const [searchWindow, setSearchWindow] = useState(100);
-  const [warnings, setWarnings] = useState<ReportSearchWarning[]>([]);
-  const [selectedKey, setSelectedKey] = useState<string | null>(() =>
-    searchParams.get("key"),
+  const [appliedQuery, setAppliedQuery] = useState(
+    () => initialState?.appliedQuery ?? (searchParams.get("q") ?? "").trim(),
   );
-  const [detail, setDetail] = useState<ReportJson | null>(null);
+  const [items, setItems] = useState<ReportListItem[]>(
+    () => initialState?.items ?? [],
+  );
+  const [total, setTotal] = useState(() => initialState?.total ?? 0);
+  const [searched, setSearched] = useState(() => initialState?.searched ?? 0);
+  const [truncated, setTruncated] = useState(
+    () => initialState?.truncated ?? false,
+  );
+  const [searchWindow, setSearchWindow] = useState(
+    () => initialState?.searchWindow ?? 100,
+  );
+  const [warnings, setWarnings] = useState<ReportSearchWarning[]>(
+    () => initialState?.warnings ?? [],
+  );
+  const [selectedKey, setSelectedKey] = useState<string | null>(
+    () => initialState?.selectedKey ?? searchParams.get("key"),
+  );
+  const [detail, setDetail] = useState<ReportJson | null>(
+    () => initialState?.detail ?? null,
+  );
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showRaw, setShowRaw] = useState(() => searchParams.get("raw") === "1");
+  const [showRaw, setShowRaw] = useState(
+    () => initialState?.showRaw ?? searchParams.get("raw") === "1",
+  );
+  const skipInitialListFetch = useRef(Boolean(initialState));
+  const skipInitialDetailFetchKey = useRef<string | null>(
+    initialState?.detail &&
+      initialState.detailKey &&
+      initialState.detailKey === initialState.selectedKey
+      ? initialState.selectedKey
+      : null,
+  );
 
   const desiredQueryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -85,7 +111,8 @@ export function useReportsState() {
     const nextType = parseReportType(searchParams.get("type"));
     const nextQuery = searchParams.get("q") ?? "";
     const nextAppliedQuery = nextQuery.trim();
-    const nextKey = searchParams.get("key");
+    const nextKeyRaw = searchParams.get("key");
+    const nextKey = nextKeyRaw && nextKeyRaw.trim() ? nextKeyRaw : null;
     const nextShowRaw = searchParams.get("raw") === "1";
 
     setReportType((prev) => (prev === nextType ? prev : nextType));
@@ -93,9 +120,17 @@ export function useReportsState() {
     setAppliedQuery((prev) =>
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
     );
-    setSelectedKey((prev) => (prev === nextKey ? prev : nextKey));
+    setSelectedKey((prev) => {
+      if (!nextKey) {
+        return prev;
+      }
+      if (items.length > 0 && !items.some((item) => item.key === nextKey)) {
+        return prev;
+      }
+      return prev === nextKey ? prev : nextKey;
+    });
     setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [searchParams]);
+  }, [items, searchParams]);
 
   useEffect(() => {
     const nextAppliedQuery = query.trim();
@@ -121,6 +156,11 @@ export function useReportsState() {
   }, [currentQueryString, desiredQueryString, pathname, router]);
 
   useEffect(() => {
+    if (skipInitialListFetch.current) {
+      skipInitialListFetch.current = false;
+      return;
+    }
+
     const controller = new AbortController();
 
     const load = async () => {
@@ -189,6 +229,11 @@ export function useReportsState() {
       return;
     }
 
+    if (skipInitialDetailFetchKey.current === selectedKey) {
+      skipInitialDetailFetchKey.current = null;
+      return;
+    }
+
     const controller = new AbortController();
     const loadDetail = async () => {
       setLoadingDetail(true);
@@ -211,7 +256,8 @@ export function useReportsState() {
           );
         }
 
-        setDetail((payload as { report: ReportJson }).report);
+        const typedPayload = payload as { key: string; report: ReportJson };
+        setDetail(typedPayload.report);
       } catch (detailError) {
         if (controller.signal.aborted) {
           return;
@@ -238,8 +284,8 @@ export function useReportsState() {
   const buyRows = useMemo(() => asRecordArray(detail?.candidates), [detail]);
   const sellRows = useMemo(() => asRecordArray(detail?.evaluated), [detail]);
   const rawDetailJson = useMemo(
-    () => (detail ? JSON.stringify(detail, null, 2) : ""),
-    [detail],
+    () => (showRaw && detail ? JSON.stringify(detail, null, 2) : ""),
+    [detail, showRaw],
   );
 
   const toggleShowRaw = useCallback(() => {
