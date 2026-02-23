@@ -4,6 +4,7 @@ version: 1
 
 data:
   provider: kis
+  # 최종 평가 상한(워치리스트 + 스크리너 병합 후 적용, 0 이하는 무제한)
   screen_limit: 30
   report_dir: reports
   data_dir: data

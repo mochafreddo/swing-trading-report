@@ -13,10 +13,33 @@ def _load_scan_tickers(
     load_watchlist_fn: Any,
 ) -> list[str]:
     resolved_watchlist_path = watchlist_path or cfg.watchlist_path or "watchlist.txt"
-    tickers = load_watchlist_fn(resolved_watchlist_path)
-    if cfg.screen_limit and tickers:
-        return tickers[: cfg.screen_limit]
-    return tickers
+    return load_watchlist_fn(resolved_watchlist_path)
+
+
+def _enforce_ticker_limit(
+    runtime: _ScanRuntime,
+    *,
+    ticker_limit: int | None,
+) -> None:
+    if ticker_limit is None or ticker_limit <= 0:
+        return
+    if len(runtime.tickers) <= ticker_limit:
+        return
+
+    before = len(runtime.tickers)
+    runtime.tickers = runtime.tickers[:ticker_limit]
+    if runtime.screener_meta_map:
+        runtime.screener_meta_map = {
+            ticker: runtime.screener_meta_map[ticker]
+            for ticker in runtime.tickers
+            if ticker in runtime.screener_meta_map
+        }
+    runtime.logger.info(
+        "Ticker universe capped to %s after watchlist/screener merge (%s -> %s)",
+        ticker_limit,
+        before,
+        len(runtime.tickers),
+    )
 
 
 def _resolve_screener_flags(cfg: Config, universe: str | None) -> tuple[bool, bool]:

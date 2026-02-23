@@ -144,6 +144,7 @@ flowchart LR
 
 - 현재 구현 기준
   - CLI 오버라이드: 일부 필드(`provider`, `limit`, `watchlist`, `universe`, `screener-limit`)
+    - `limit`은 워치리스트/스크리너 병합 이후 최종 평가 ticker cap으로 적용
   - 환경변수/`.env` 우선
   - `config.yaml` 기본값
 - 운영 정책

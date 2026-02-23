@@ -150,6 +150,7 @@ def _collect_scan_runtime(
     screener_enabled: bool,
     screener_only: bool,
     screener_limit: int,
+    evaluation_limit: int | None,
 ) -> None:
     market_data_service = _build_market_data_service()
     provider_policy = _build_scan_market_data_policy(
@@ -173,6 +174,7 @@ def _collect_scan_runtime(
         coerce_nday_fn=_coerce_nday,
         format_ny_now_for_log_fn=_format_ny_now_for_log,
     )
+    scan_screener._enforce_ticker_limit(runtime, ticker_limit=evaluation_limit)
 
     _resolve_scan_fx(runtime)
     collect_policy = _build_scan_market_data_policy(
@@ -250,6 +252,7 @@ def run_scan(
         screener_enabled=screener_enabled,
         screener_only=screener_only,
         screener_limit=effective_screener_limit,
+        evaluation_limit=cfg.screen_limit,
     )
 
     if not runtime.tickers:

@@ -49,7 +49,7 @@
 
 - 실행 예시
   - 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
-  - 평가 상한 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
+  - 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
   - 스크리너 상위 N 조정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
   - 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
