@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, overload
+from typing import Any
 from urllib.parse import urlparse
 
 from .config_loader import ConfigLoadError, load_yaml_config
@@ -247,37 +247,69 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
-def _parse_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
         return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-@overload
-def _parse_float(value: Any, default: float) -> float: ...
+def _is_strict_config_mode() -> bool:
+    if _env_flag("GITHUB_ACTIONS") or _env_flag("CI"):
+        return True
 
-
-@overload
-def _parse_float(value: Any, default: None) -> float | None: ...
-
-
-def _parse_float(value: Any, default: float | None) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+    explicit = os.getenv("SAB_CONFIG_STRICT")
+    if explicit is not None:
+        return explicit.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
 
 
 class _ConfigParser:
-    def __init__(self, yaml_cfg: dict[str, Any]) -> None:
+    def __init__(self, yaml_cfg: dict[str, Any], *, strict: bool) -> None:
         self._yaml_cfg = yaml_cfg
+        self._strict = strict
+
+    @property
+    def strict(self) -> bool:
+        return self._strict
 
     def from_yaml(self, path: str, default: Any = None) -> Any:
         return _from_nested(self._yaml_cfg, path, default)
 
     def has_yaml_path(self, path: str) -> bool:
         return _yaml_path_exists(self._yaml_cfg, path)
+
+    def _coerce_numeric_or_default(
+        self,
+        *,
+        key: str,
+        path: str,
+        default: float | int | None,
+        parser: type[int] | type[float],
+        expected_type: str,
+        allow_none: bool = False,
+    ) -> float | int | None:
+        env_val = os.getenv(key)
+        if env_val is not None:
+            raw = env_val
+            source = f"environment variable '{key}'"
+            provided = True
+        else:
+            raw = self.from_yaml(path, default)
+            source = f"config.yaml '{path}'"
+            provided = self.has_yaml_path(path)
+
+        if allow_none and raw is None:
+            return None
+
+        try:
+            return parser(raw)
+        except (TypeError, ValueError) as err:
+            if self._strict and provided:
+                raise ConfigLoadError(
+                    f"Strict config parsing failed: {source} must be {expected_type}, got {raw!r}."
+                ) from err
+            return default
 
     def env_bool(self, key: str, path: str, default: bool) -> bool:
         env_val = os.getenv(key)
@@ -286,22 +318,53 @@ class _ConfigParser:
         return _parse_bool(self.from_yaml(path, default), default)
 
     def env_int(self, key: str, path: str, default: int) -> int:
-        env_val = os.getenv(key)
-        if env_val is not None:
-            return _parse_int(env_val, default)
-        return _parse_int(self.from_yaml(path, default), default)
+        parsed = self._coerce_numeric_or_default(
+            key=key,
+            path=path,
+            default=default,
+            parser=int,
+            expected_type="an integer",
+        )
+        if parsed is None:
+            return default
+        return int(parsed)
 
     def env_float(self, key: str, path: str, default: float) -> float:
-        env_val = os.getenv(key)
-        if env_val is not None:
-            return _parse_float(env_val, default)
-        return _parse_float(self.from_yaml(path, default), default)
+        parsed = self._coerce_numeric_or_default(
+            key=key,
+            path=path,
+            default=default,
+            parser=float,
+            expected_type="a float",
+        )
+        if parsed is None:
+            return default
+        return float(parsed)
 
     def env_optional_float(self, key: str, path: str) -> float | None:
-        env_val = os.getenv(key)
-        if env_val is not None:
-            return _parse_float(env_val, None)
-        return _parse_float(self.from_yaml(path), None)
+        parsed = self._coerce_numeric_or_default(
+            key=key,
+            path=path,
+            default=None,
+            parser=float,
+            expected_type="a float",
+            allow_none=True,
+        )
+        return None if parsed is None else float(parsed)
+
+    def yaml_optional_float(self, path: str) -> float | None:
+        raw = self.from_yaml(path)
+        provided = self.has_yaml_path(path)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError) as err:
+            if self._strict and provided:
+                raise ConfigLoadError(
+                    f"Strict config parsing failed: config.yaml '{path}' must be a float, got {raw!r}."
+                ) from err
+            return None
 
     def env_str(self, key: str, path: str, default: str | None) -> str | None:
         env_val = os.getenv(key)
@@ -402,7 +465,7 @@ class _FxSection:
 def _create_config_parser() -> _ConfigParser:
     yaml_cfg = load_yaml_config().raw
     load_dotenv_if_available(override=False)
-    return _ConfigParser(yaml_cfg)
+    return _ConfigParser(yaml_cfg, strict=_is_strict_config_mode())
 
 
 def _enforce_secret_policy(parser: _ConfigParser) -> None:
@@ -551,15 +614,13 @@ def _build_hybrid_strategy_config(parser: _ConfigParser) -> HybridStrategyConfig
 
 
 def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
-    strategy_mode_raw = (
-        os.getenv("STRATEGY_MODE")
-        or parser.from_yaml("strategy.mode", "ema_cross")
-        or "ema_cross"
-    )
-    us_min_price = _parse_float(parser.from_yaml("screener.us.min_price"), None)
-    us_min_dollar_volume = _parse_float(
-        parser.from_yaml("screener.us.min_dollar_volume"), None
-    )
+    strategy_mode_raw = os.getenv("STRATEGY_MODE")
+    if strategy_mode_raw is None:
+        strategy_mode_raw = parser.from_yaml("strategy.mode", "ema_cross")
+    if strategy_mode_raw is None:
+        strategy_mode_raw = "ema_cross"
+    us_min_price = parser.yaml_optional_float("screener.us.min_price")
+    us_min_dollar_volume = parser.yaml_optional_float("screener.us.min_dollar_volume")
 
     return _StrategySection(
         strategy_mode=str(strategy_mode_raw).strip().lower(),
@@ -647,9 +708,11 @@ def _build_hybrid_sell_config(parser: _ConfigParser) -> HybridSellConfig:
 
 
 def _parse_sell_section(parser: _ConfigParser) -> _SellSection:
-    sell_mode_raw = (
-        os.getenv("SELL_MODE") or parser.from_yaml("sell.mode", "generic") or "generic"
-    )
+    sell_mode_raw = os.getenv("SELL_MODE")
+    if sell_mode_raw is None:
+        sell_mode_raw = parser.from_yaml("sell.mode", "generic")
+    if sell_mode_raw is None:
+        sell_mode_raw = "generic"
     return _SellSection(
         sell_mode=str(sell_mode_raw).strip().lower(),
         sell_atr_multiplier=parser.env_float(
@@ -674,9 +737,11 @@ def _parse_sell_section(parser: _ConfigParser) -> _SellSection:
 
 
 def _parse_fx_section(parser: _ConfigParser) -> _FxSection:
-    fx_mode_raw = (
-        os.getenv("FX_MODE") or parser.from_yaml("fx.mode", "manual") or "manual"
-    )
+    fx_mode_raw = os.getenv("FX_MODE")
+    if fx_mode_raw is None:
+        fx_mode_raw = parser.from_yaml("fx.mode", "manual")
+    if fx_mode_raw is None:
+        fx_mode_raw = "manual"
     fx_kis_symbol_raw = parser.env_str("FX_KIS_SYMBOL", "fx.kis_symbol", None)
     return _FxSection(
         usd_krw_rate=parser.env_optional_float("USD_KRW_RATE", "fx.usdkrw"),
@@ -688,8 +753,22 @@ def _parse_fx_section(parser: _ConfigParser) -> _FxSection:
     )
 
 
-def _normalize_choice(value: str, *, allowed: set[str], default: str) -> str:
-    return value if value in allowed else default
+def _normalize_choice(
+    value: str,
+    *,
+    allowed: set[str],
+    default: str,
+    strict: bool,
+    source_name: str,
+) -> str:
+    if value in allowed:
+        return value
+    if strict:
+        allowed_values = ", ".join(sorted(allowed))
+        raise ConfigLoadError(
+            f"Strict config parsing failed: {source_name} must be one of {{{allowed_values}}}, got {value!r}."
+        )
+    return default
 
 
 def _validate_sections(
@@ -698,6 +777,7 @@ def _validate_sections(
     strategy: _StrategySection,
     sell: _SellSection,
     fx: _FxSection,
+    strict: bool,
 ) -> tuple[_DataSection, _StrategySection, _SellSection, _FxSection]:
     validated_strategy = replace(
         strategy,
@@ -705,6 +785,8 @@ def _validate_sections(
             strategy.strategy_mode,
             allowed={"ema_cross", "sma_ema_hybrid"},
             default="ema_cross",
+            strict=strict,
+            source_name="STRATEGY_MODE/strategy.mode",
         ),
     )
     validated_sell = replace(
@@ -713,6 +795,8 @@ def _validate_sections(
             sell.sell_mode,
             allowed={"generic", "sma_ema_hybrid"},
             default="generic",
+            strict=strict,
+            source_name="SELL_MODE/sell.mode",
         ),
     )
     validated_fx = replace(
@@ -721,6 +805,8 @@ def _validate_sections(
             fx.fx_mode,
             allowed={"manual", "kis", "off"},
             default="manual",
+            strict=strict,
+            source_name="FX_MODE/fx.mode",
         ),
     )
     return data, validated_strategy, validated_sell, validated_fx
@@ -811,6 +897,7 @@ def load_config(
         strategy=strategy_section,
         sell=sell_section,
         fx=fx_section,
+        strict=parser.strict,
     )
     return _compose_config(
         data=validated_data,

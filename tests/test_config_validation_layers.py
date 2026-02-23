@@ -9,6 +9,7 @@ from sab.config_loader import ConfigLoadError
 def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "SAB_CONFIG",
+        "SAB_CONFIG_STRICT",
         "DATA_PROVIDER",
         "SCREEN_LIMIT",
         "REPORT_DIR",
@@ -16,6 +17,9 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "STRATEGY_MODE",
         "SELL_MODE",
         "FX_MODE",
+        "GITHUB_ACTIONS",
+        "CI",
+        "MIN_DOLLAR_VOLUME",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -44,6 +48,103 @@ def test_load_config_normalizes_invalid_modes_from_env(
     assert cfg.strategy_mode == "ema_cross"
     assert cfg.sell_mode == "generic"
     assert cfg.fx_mode == "manual"
+
+
+def test_load_config_strict_mode_rejects_invalid_modes_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("STRATEGY_MODE", "invalid-mode")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_strict_mode_rejects_invalid_numeric_threshold(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("MIN_DOLLAR_VOLUME", "not-a-number")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_strict_mode_in_ci_cannot_be_disabled(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SAB_CONFIG_STRICT", "false")
+    monkeypatch.setenv("STRATEGY_MODE", "invalid-mode")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_strict_mode_allows_optional_float_null(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+fx:
+  usdkrw: null
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    cfg = load_config()
+    assert cfg.usd_krw_rate is None
+
+
+def test_load_config_strict_mode_rejects_empty_mode_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("STRATEGY_MODE", "")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
 
 
 def test_load_config_applies_provider_and_limit_overrides(

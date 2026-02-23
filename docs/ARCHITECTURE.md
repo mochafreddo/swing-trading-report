@@ -124,6 +124,8 @@ flowchart LR
 - 설정/입력 Fail-Closed
   - YAML 파싱 실패, 잘못된 루트 타입, 필수 설정 누락 시 즉시 실패
   - `kis.app_key`/`kis.app_secret`를 YAML에 저장하면 보안 정책 위반으로 실패
+  - `GITHUB_ACTIONS=true`(또는 `CI=true`)에서는 strict config parsing을 강제 적용하며, 숫자/enum 오입력은 기본값으로 회귀하지 않고 즉시 실패
+  - 로컬 운영에서도 `SAB_CONFIG_STRICT=true`를 설정하면 동일한 strict parsing 정책을 강제
 - 데이터 수집 내구성
   - KIS 재시도/백오프/토큰 재발급 처리
   - KR 심볼은 KIS 실패 시 PyKRX 폴백 가능(US는 폴백 없음)

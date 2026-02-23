@@ -52,8 +52,11 @@ def test_env_yaml_conflict_bindings_stay_in_sync_with_config_usage() -> None:
     used_env_keys = _collect_env_keys_from_usage(module_path)
 
     intentionally_unpaired_env_keys = {
+        "CI",
+        "GITHUB_ACTIONS",
         "KIS_APP_KEY",
         "KIS_APP_SECRET",
+        "SAB_CONFIG_STRICT",
     }
     expected_mapped_keys = used_env_keys - intentionally_unpaired_env_keys
 
