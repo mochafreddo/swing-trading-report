@@ -95,7 +95,7 @@ jobs:
           import json
           import os
           from urllib.error import HTTPError, URLError
-          from urllib.parse import quote
+          from urllib.parse import quote, urlencode
           from urllib.request import Request, urlopen
 
           from sab.report.retention import (
@@ -123,6 +123,7 @@ jobs:
           bucket = (os.environ.get("BUCKET") or "reports").strip()
           retention_days = int(os.environ["RETENTION_DAYS"])
           dry_run = (os.environ.get("DRY_RUN") or "true").strip().lower() == "true"
+          index_cleanup_enabled = bucket == "reports"
 
           headers = {
               "apikey": supabase_key,
@@ -131,11 +132,20 @@ jobs:
               "Accept": "application/json",
           }
 
-          def request_json(*, method: str, url: str, payload: object | None) -> object:
+          def request_json(
+              *,
+              method: str,
+              url: str,
+              payload: object | None,
+              extra_headers: dict[str, str] | None = None,
+          ) -> object:
               data = None
               if payload is not None:
                   data = json.dumps(payload).encode("utf-8")
-              request = Request(url, data=data, method=method, headers=headers)
+              request_headers = headers.copy()
+              if extra_headers:
+                  request_headers.update(extra_headers)
+              request = Request(url, data=data, method=method, headers=request_headers)
               try:
                   with urlopen(request, timeout=15) as response:
                       body = response.read().decode("utf-8")
@@ -222,8 +232,63 @@ jobs:
               retention_days=retention_days,
               today=today_utc,
           )
+          storage_key_set = set(all_keys)
 
-          deleted_count = 0
+          index_expired_keys: list[str] = []
+          if index_cleanup_enabled:
+              cutoff_date = today_utc - dt.timedelta(days=retention_days)
+              report_index_limit = 1000
+              report_index_offset = 0
+              while True:
+                  report_index_query = urlencode(
+                      {
+                          "select": "report_key",
+                          "report_date": f"lt.{cutoff_date.isoformat()}",
+                          "order": "report_date.asc,duplicate_index.asc,report_key.asc",
+                          "limit": str(report_index_limit),
+                          "offset": str(report_index_offset),
+                      }
+                  )
+                  report_index_url = f"{supabase_url}/rest/v1/report_index?{report_index_query}"
+                  report_index_response = request_json(
+                      method="GET",
+                      url=report_index_url,
+                      payload=None,
+                  )
+                  if not isinstance(report_index_response, list):
+                      raise SystemExit(
+                          "Supabase report_index list API response must be a JSON array"
+                      )
+
+                  for row in report_index_response:
+                      if not isinstance(row, dict):
+                          continue
+                      report_key = row.get("report_key")
+                      if not isinstance(report_key, str):
+                          continue
+                      stripped_report_key = report_key.strip()
+                      if stripped_report_key:
+                          index_expired_keys.append(stripped_report_key)
+
+                  if len(report_index_response) < report_index_limit:
+                      break
+                  report_index_offset += report_index_limit
+
+          dangling_index_keys = sorted(
+              key for key in set(index_expired_keys) if key not in storage_key_set
+          )
+          index_keys_to_delete = sorted(set(expired_keys) | set(dangling_index_keys))
+
+          def build_report_key_in_filter(keys: list[str]) -> str:
+              escaped_keys: list[str] = []
+              for key in keys:
+                  escaped_key = key.replace("\\", "\\\\").replace('"', '\\"')
+                  escaped_keys.append(f'"{escaped_key}"')
+              return f"in.({','.join(escaped_keys)})"
+
+          storage_deleted_count = 0
+          index_deleted_count = 0
+          index_deleted_unknown_count = 0
           if not dry_run and expired_keys:
               delete_url = f"{supabase_url}/storage/v1/object/{encoded_bucket}"
               chunk_size = 100
@@ -235,9 +300,29 @@ jobs:
                       payload={"prefixes": chunk},
                   )
                   if isinstance(result, list):
-                      deleted_count += len(result)
+                      storage_deleted_count += len(result)
                   else:
-                      deleted_count += len(chunk)
+                      storage_deleted_count += len(chunk)
+
+          if not dry_run and index_cleanup_enabled and index_keys_to_delete:
+              chunk_size = 50
+              for start in range(0, len(index_keys_to_delete), chunk_size):
+                  chunk = index_keys_to_delete[start : start + chunk_size]
+                  key_filter = build_report_key_in_filter(chunk)
+                  query = urlencode({"report_key": key_filter})
+                  delete_index_url = f"{supabase_url}/rest/v1/report_index?{query}"
+                  result = request_json(
+                      method="DELETE",
+                      url=delete_index_url,
+                      payload=None,
+                      extra_headers={"Prefer": "return=representation"},
+                  )
+                  if isinstance(result, list):
+                      index_deleted_count += len(result)
+                  else:
+                      index_deleted_unknown_count += len(chunk)
+
+          deleted_count = storage_deleted_count
 
           print("[cleanup] bucket=", bucket, sep="")
           print("[cleanup] dry_run=", str(dry_run).lower(), sep="")
@@ -246,6 +331,20 @@ jobs:
           print("[cleanup] pattern_matched_count=", pattern_matched_count, sep="")
           print("[cleanup] expired_count=", len(expired_keys), sep="")
           print("[cleanup] deleted_count=", deleted_count, sep="")
+          print("[cleanup] index_cleanup_enabled=", str(index_cleanup_enabled).lower(), sep="")
+          print("[cleanup] index_expired_count=", len(set(index_expired_keys)), sep="")
+          print("[cleanup] dangling_index_count=", len(dangling_index_keys), sep="")
+          print("[cleanup] index_delete_target_count=", len(index_keys_to_delete), sep="")
+          print("[cleanup] index_deleted_count=", index_deleted_count, sep="")
+          print(
+              "[cleanup] index_deleted_unknown_count=",
+              index_deleted_unknown_count,
+              sep="",
+          )
+          if not index_cleanup_enabled:
+              print(
+                  "[cleanup] report_index cleanup skipped because bucket is not 'reports'"
+              )
 
           preview_limit = 20
           for key in expired_keys[:preview_limit]:
@@ -254,6 +353,13 @@ jobs:
               print(
                   "[cleanup][expired] ... "
                   f"{len(expired_keys) - preview_limit} more key(s) omitted"
+              )
+          for key in dangling_index_keys[:preview_limit]:
+              print(f"[cleanup][dangling-index] {key}")
+          if len(dangling_index_keys) > preview_limit:
+              print(
+                  "[cleanup][dangling-index] ... "
+                  f"{len(dangling_index_keys) - preview_limit} more key(s) omitted"
               )
 
           output_path = os.environ.get("GITHUB_OUTPUT")
@@ -266,4 +372,14 @@ jobs:
                   output.write(f"pattern_matched_count={pattern_matched_count}\n")
                   output.write(f"expired_count={len(expired_keys)}\n")
                   output.write(f"deleted_count={deleted_count}\n")
+                  output.write(
+                      f"index_cleanup_enabled={str(index_cleanup_enabled).lower()}\n"
+                  )
+                  output.write(f"index_expired_count={len(set(index_expired_keys))}\n")
+                  output.write(f"dangling_index_count={len(dangling_index_keys)}\n")
+                  output.write(f"index_delete_target_count={len(index_keys_to_delete)}\n")
+                  output.write(f"index_deleted_count={index_deleted_count}\n")
+                  output.write(
+                      f"index_deleted_unknown_count={index_deleted_unknown_count}\n"
+                  )
           PY
