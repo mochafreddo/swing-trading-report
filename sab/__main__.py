@@ -78,6 +78,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["watchlist", "screener", "both"],
         help="Universe selection: watchlist only, screener only, or both",
     )
+    s.add_argument(
+        "--markets",
+        type=str,
+        default=None,
+        help="Comma-separated universe markets override (e.g. KR,US)",
+    )
 
     sell = sub.add_parser("sell", help="Evaluate holdings against sell/review rules")
     sell.add_argument(
@@ -86,6 +92,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=["kis", "pykrx"],
         help="Data provider override",
+    )
+    sell.add_argument(
+        "--holdings",
+        type=str,
+        default=None,
+        help="Path to holdings file override",
     )
     return p
 
@@ -104,10 +116,11 @@ def main(argv: list[str] | None = None) -> int:
             provider=ns.provider,
             screener_limit=ns.screener_limit,
             universe=ns.universe,
+            markets=ns.markets,
         )
 
     if ns.cmd == "sell":
-        return run_sell(provider=ns.provider)
+        return run_sell(provider=ns.provider, holdings_path=ns.holdings)
 
     parser.print_help()
     return 2

@@ -72,10 +72,13 @@ def _render_sell_report(runtime: _SellRuntime, results: list[SellReportRow]) -> 
     )
 
 
-def run_sell(*, provider: str | None) -> int:
+def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     logger = logging.getLogger(__name__)
     try:
-        cfg: Config = load_config(provider_override=provider)
+        cfg: Config = load_config(
+            provider_override=provider,
+            holdings_override=holdings_path,
+        )
     except (ConfigLoadError, HoldingsLoadError) as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1

@@ -12,8 +12,10 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SAB_CONFIG_STRICT",
         "DATA_PROVIDER",
         "SCREEN_LIMIT",
+        "HOLDINGS_FILE",
         "REPORT_DIR",
         "DATA_DIR",
+        "UNIVERSE_MARKETS",
         "MARKET_CACHE_STALE_SESSIONS_KR",
         "MARKET_CACHE_STALE_SESSIONS_US",
         "STRATEGY_MODE",
@@ -173,6 +175,61 @@ data:
 
     assert cfg.data_provider == "kis"
     assert cfg.screen_limit == 12
+
+
+def test_load_config_applies_holdings_and_markets_overrides(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+data:
+  provider: pykrx
+universe:
+  markets:
+    - KR
+files:
+  holdings: holdings.yaml
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "holdings.yaml").write_text(
+        """
+holdings:
+  - ticker: 005930
+    quantity: 1
+    entry_price: 70000
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    override_holdings = tmp_path / "holdings.generated.yaml"
+    override_holdings.write_text(
+        """
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 2
+    entry_price: 180
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config(
+        holdings_override=str(override_holdings),
+        markets_override=["US"],
+    )
+
+    assert cfg.holdings_path == str(override_holdings)
+    assert [item.ticker for item in cfg.holdings.holdings] == ["AAPL.NAS"]
+    assert cfg.universe_markets == ["US"]
 
 
 def test_load_config_rejects_env_yaml_conflict_even_for_empty_env_value(

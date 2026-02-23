@@ -496,6 +496,8 @@ def _parse_data_section(
     *,
     provider_override: str | None,
     limit_override: int | None,
+    holdings_override: str | None,
+    markets_override: list[str] | None,
 ) -> _DataSection:
     provider_raw = (
         provider_override
@@ -507,21 +509,30 @@ def _parse_data_section(
     screen_limit_cfg = parser.env_int("SCREEN_LIMIT", "data.screen_limit", 30)
     screen_limit = limit_override if limit_override is not None else screen_limit_cfg
 
-    holdings_path = parser.env_str("HOLDINGS_FILE", "files.holdings", None)
+    holdings_path = holdings_override
+    if holdings_path is None:
+        holdings_path = parser.env_str("HOLDINGS_FILE", "files.holdings", None)
     watchlist_path = parser.env_str("WATCHLIST_FILE", "files.watchlist", None)
 
-    markets_env = os.getenv("UNIVERSE_MARKETS")
-    if markets_env is not None:
+    if markets_override is not None:
         universe_markets = [
-            market.strip().upper()
-            for market in markets_env.split(",")
-            if market.strip()
+            market.strip().upper() for market in markets_override if market.strip()
         ]
     else:
-        raw_markets = parser.from_yaml("universe.markets", ["KR"]) or ["KR"]
-        universe_markets = [
-            str(market).strip().upper() for market in raw_markets if str(market).strip()
-        ]
+        markets_env = os.getenv("UNIVERSE_MARKETS")
+        if markets_env is not None:
+            universe_markets = [
+                market.strip().upper()
+                for market in markets_env.split(",")
+                if market.strip()
+            ]
+        else:
+            raw_markets = parser.from_yaml("universe.markets", ["KR"]) or ["KR"]
+            universe_markets = [
+                str(market).strip().upper()
+                for market in raw_markets
+                if str(market).strip()
+            ]
 
     us_screener_defaults_raw = parser.from_yaml("screener.us_defaults", []) or []
     us_screener_defaults = [
@@ -899,13 +910,19 @@ def load_config(
     *,
     provider_override: str | None = None,
     limit_override: int | None = None,
+    holdings_override: str | None = None,
+    markets_override: list[str] | None = None,
 ) -> Config:
     parser = _create_config_parser()
     _enforce_env_yaml_conflict_policy(parser)
     _enforce_secret_policy(parser)
 
     data_section = _parse_data_section(
-        parser, provider_override=provider_override, limit_override=limit_override
+        parser,
+        provider_override=provider_override,
+        limit_override=limit_override,
+        holdings_override=holdings_override,
+        markets_override=markets_override,
     )
     strategy_section = _parse_strategy_section(parser)
     sell_section = _parse_sell_section(parser)

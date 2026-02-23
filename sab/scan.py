@@ -116,10 +116,20 @@ def run_scan(
     provider: str | None,
     screener_limit: int | None = None,
     universe: str | None = None,
+    markets: str | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
+    markets_override: list[str] | None = None
+    if markets is not None:
+        parsed_markets = [item.strip() for item in markets.split(",") if item.strip()]
+        if parsed_markets:
+            markets_override = parsed_markets
     try:
-        cfg: Config = load_config(provider_override=provider, limit_override=limit)
+        cfg: Config = load_config(
+            provider_override=provider,
+            limit_override=limit,
+            markets_override=markets_override,
+        )
     except (ConfigLoadError, HoldingsLoadError) as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
