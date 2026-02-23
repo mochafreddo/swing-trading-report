@@ -1,6 +1,11 @@
 ## ADR-0006 — v1.1 오픈 결정 정리(인덱스/캔들 캐시/인증)
 
-상태: 채택(Accepted)  •  날짜: 2026-02-14
+상태: 대체됨(Superseded)  •  작성일: 2026-02-14  •  대체일: 2026-02-23
+
+대체 ADR: `ADR-0007-v1.1-current-architecture-baseline.md`
+
+> 참고: 본 ADR의 "인덱스 테이블 미도입" 및 "웹 UI 인증 미도입" 결정은 현재 구현과 불일치하며,
+> `ADR-0007-v1.1-current-architecture-baseline.md`에서 현행 아키텍처 기준으로 재정의되었습니다.
 
 ### 배경
 

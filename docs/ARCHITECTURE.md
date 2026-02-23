@@ -162,4 +162,4 @@ flowchart LR
 
 - 제품/요구사항: `docs/PRD.md`, `docs/spec-v1.1.md`
 - 운영: `docs/runbook.md`, `docs/kis-setup.md`
-- ADR: `docs/adr/README.md`
+- ADR: `docs/adr/README.md`, `docs/adr/ADR-0007-v1.1-current-architecture-baseline.md`

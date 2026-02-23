@@ -57,7 +57,7 @@
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 웹 UI(Next.js): `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
     - 로그인: `.env`에 `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET` 설정
-  - (예정) 익일 시초 체크: `uv run -m sab entry`
+  - 익일 시초 체크(Entry)는 아직 CLI 서브커맨드로 제공되지 않습니다.
 
 - 웹 UI 로컬 실행(Next.js + Docker)
   - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
@@ -99,6 +99,19 @@
   - Sell/Review: `reports/YYYY-MM-DD.sell.json`
   - Entry: `reports/YYYY-MM-DD.entry.json` — 예정
   - 웹 대시보드는 `reports/`의 JSON을 렌더링합니다.
+
+## CLI 서브커맨드
+
+`python -m sab` CLI는 현재 두 개의 서브커맨드만 제공합니다.
+
+<!-- CLI_SUBCOMMANDS_START -->
+| 실행 예 | 설명 |
+|---|---|
+| `UV_CACHE_DIR=.uv-cache uv run -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
+<!-- CLI_SUBCOMMANDS_END -->
+
+문서-구현 동기화 검증: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q tests/test_readme_cli_commands_sync.py`
 
 ## 개발 운영(1인 사이드 프로젝트)
 
@@ -179,7 +192,7 @@ Per‑market 임계치(권장)
 ## 파일/폴더 구조
 
 - `sab/` … Python 애플리케이션 코드
-  - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell` / `sab entry`)
+  - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell`)
   - `data/` … KIS/PyKRX 커넥터, 캐시
   - `signals/` … EMA/RSI/ATR 계산
   - `report/` … 리포트 아티팩트(JSON) 생성

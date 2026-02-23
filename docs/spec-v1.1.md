@@ -2,7 +2,7 @@
 
 상태: Accepted (v1.1 기준)  
 대상 릴리스: v1.1  
-최종 정합화: 2026-02-20  
+최종 정합화: 2026-02-23  
 목적: PRD/ADR의 결정을 바탕으로 **v1.1 구현에 필요한 인터페이스/데이터/플로우를 고정**한다.
 
 ## 0. 참고 문서(우선순위)
@@ -13,6 +13,7 @@
 - `docs/adr/ADR-0002-report-artifacts-dashboard.md` (JSON 아티팩트)
 - `docs/adr/ADR-0004-web-stack-nextjs-local-docker.md` (Next.js + 로컬 Docker)
 - `docs/adr/ADR-0005-automation-github-actions-supabase.md` (GHA schedule + Supabase)
+- `docs/adr/ADR-0007-v1.1-current-architecture-baseline.md` (현재 구현 기준선)
 - `docs/adr/ADR-0001-config-precedence.md`, `docs/adr/ADR-0003-config-conflict-policy.md` (설정/충돌 정책)
 
 ## 1. v1.1 목표 / 비목표
@@ -30,8 +31,8 @@
   - 알림은 **자동 실행일 때만** 전송
   - **리포트 retention 기본 30일** 정리 작업 수행
 - **Supabase** 를 단일 저장소로 사용
-  - Postgres: holdings(보유 목록) 단일 소스
-  - Storage: 리포트(공식 보관)
+  - Postgres: holdings(보유 목록), report_index(리포트 목록/검색), runtime_state(인증 런타임 상태)
+  - Storage: 리포트 원본 JSON(공식 보관)
 
 ### 1.2 비목표(Out of Scope)
 
@@ -51,8 +52,8 @@
 
 ### 3.1 웹에서 리포트 보기
 
-1. 웹 UI(Next.js)가 Supabase Storage에서 리포트 목록을 조회한다.
-2. 사용자가 리포트를 선택하면 해당 JSON을 읽어 화면에 렌더링한다.
+1. 웹 UI(Next.js)가 Supabase Postgres `report_index`에서 리포트 목록을 조회한다.
+2. 사용자가 리포트를 선택하면 `report_key`로 Supabase Storage 원본 JSON을 읽어 화면에 렌더링한다.
 
 ### 3.2 웹에서 holdings CRUD
 
@@ -64,7 +65,7 @@
 1. 사용자가 웹 UI에서 `scan` 또는 `sell`을 실행한다.
 2. 웹 UI는 GitHub API로 `workflow_dispatch`를 호출한다.
 3. GitHub Actions가 실행되며 `uv run -m sab scan|sell`을 수행한다.
-4. 생성된 JSON 아티팩트를 Supabase Storage에 업로드한다.
+4. 생성된 JSON 아티팩트를 Supabase Storage에 업로드하고, `report_index`를 upsert한다.
 5. 웹 UI는 Supabase에서 최신 리포트를 다시 조회해 확인한다.
 
 ### 3.4 자동 실행 및 알림
@@ -123,15 +124,83 @@
     - `YYYY/MM/YYYY-MM-DD-2.sell.json`
 - **콘텐츠**: ADR-0002의 JSON 아티팩트 스키마(`schema: "sab.report.v1"`) 준수
 
-### 4.3 (선택) Postgres: `run_history`
+### 4.3 Postgres: `report_index` (필수)
 
-v1.1에서는 “GitHub Actions 링크”로 충분하므로 **생략**한다(ADR-0006). 필요해지면 다음 테이블을 추가한다.
+**역할**: 리포트 목록/검색의 1차 조회 인덱스. 상세 본문은 `report_key`로 Storage에서 조회한다.
+
+- **테이블명**: `report_index`
+- **기본키**: `report_key` (TEXT, Storage object key와 동일)
+- **컬럼(현재 구현)**
+  - `report_key` TEXT PRIMARY KEY
+  - `report_type` TEXT NOT NULL (`buy`, `sell`만 허용)
+  - `report_date` DATE NOT NULL
+  - `duplicate_index` INTEGER NOT NULL DEFAULT 0 (`>= 0`)
+  - `generated_at` TEXT NULL
+  - `summary` JSONB NULL
+  - `tickers` TEXT[] NOT NULL DEFAULT `'{}'`
+  - `tickers_hydrated` BOOLEAN NOT NULL DEFAULT `false`
+  - `created_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`
+  - `updated_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`
+- **인덱스(현재 구현)**
+  - `report_index_type_date_duplicate_key_idx`
+    - (`report_type`, `report_date DESC`, `duplicate_index DESC`, `report_key DESC`)
+  - `report_index_date_duplicate_key_idx`
+    - (`report_date DESC`, `duplicate_index DESC`, `report_key DESC`)
+- **업서트 계약**
+  - 경로: `POST /rest/v1/report_index?on_conflict=report_key`
+  - 헤더: `Prefer: resolution=merge-duplicates,return=minimal`
+  - 필수 필드: `report_key`, `report_type`, `report_date`, `duplicate_index`
+  - 선택 필드: `generated_at`, `summary`, `tickers`, `tickers_hydrated`
+- **조회 계약**
+  - 목록 정렬: `report_date.desc,duplicate_index.desc,report_key.desc`
+  - ticker 검색(`q`)은 `tickers_hydrated=true` 행만 대상으로 한다.
+- **실패 정책**
+  - GitHub Actions 실행: Storage 업로드 또는 index upsert 실패 시 run 실패(fail-closed)
+  - 로컬 실행(`SAB_UPLOAD_REPORTS=true`): 업로드 성공 후 index upsert 실패는 경고 로그 후 계속 진행
+
+### 4.4 Postgres: `runtime_state` (필수)
+
+**역할**: 관리자 인증 경계에서 쓰는 단기 런타임 상태(로그인 시도 제한 상태)를 저장한다.
+
+- **테이블명**: `runtime_state`
+- **기본키**: `state_key` (TEXT)
+- **컬럼(현재 구현)**
+  - `state_key` TEXT PRIMARY KEY
+  - `state_payload` JSONB NOT NULL
+  - `expires_at` TIMESTAMPTZ NOT NULL
+  - `created_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`
+  - `updated_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`
+- **인덱스(현재 구현)**
+  - `runtime_state_expires_at_idx` (`expires_at`)
+  - `runtime_state_login_user_expires_at_idx` (`expires_at`) where `state_key like 'login_throttle:user:%'`
+- **키 규칙(로그인 시도 제한)**
+  - 글로벌: `login_throttle:__global__`
+  - 사용자별: `login_throttle:user:<normalized-username>`
+- **업서트/조회 계약**
+  - 조회: `GET /rest/v1/runtime_state?state_key=eq.<key>&limit=1`
+  - 업서트: `POST /rest/v1/runtime_state?on_conflict=state_key`
+  - 삭제: `DELETE /rest/v1/runtime_state?state_key=eq.<key>`
+  - 업서트 헤더: `Prefer: resolution=merge-duplicates,return=minimal`
+- **RPC 계약(원자적 실패 누적)**
+  - 경로: `POST /rest/v1/rpc/consume_login_throttle_attempt`
+  - 입력: `p_state_key`, `p_now`, `p_window_seconds`, `p_block_seconds`, `p_max_attempts`, `p_user_key_cap`
+  - 출력: `failures`, `window_started_at`, `blocked_until`, `is_blocked`, `retry_after_seconds`
+- **스토어 선택 정책**
+  - `SAB_RUNTIME_STATE_STORE=memory|supabase`
+  - 기본값: `NODE_ENV=test`이면 `memory`, 그 외는 `supabase`
+- **정리 정책**
+  - `expires_at` 기반 TTL을 사용한다.
+  - RPC 실행 시 만료된 `login_throttle:user:*` 키를 배치 정리하고, 활성 사용자별 키 수는 `p_user_key_cap`으로 상한 관리한다.
+
+### 4.5 (선택) Postgres: `run_history`
+
+v1.1 현재 구현은 `report_index` + GitHub Actions 런 링크로 충분하므로 `run_history`는 **미도입**이다(ADR-0007). 필요해지면 다음 테이블을 추가한다.
 
 - `run_history(id, run_type, trigger, started_at, finished_at, status, github_run_url, report_keys[])`
 
-### 4.4 (선택) 캔들 캐시(리텐션은 `max()` 기반)
+### 4.6 (선택) 캔들 캐시(리텐션은 `max()` 기반)
 
-v1.1에서는 **미도입**한다(ADR-0006). API 호출 수/속도가 문제가 되면 v1.2에서 재검토한다.
+v1.1에서는 **미도입**한다(ADR-0007에서도 유지). API 호출 수/속도가 문제가 되면 v1.2에서 재검토한다.
 
 - **정책**: 티커별 **최근 `max(min_history_bars, retention_bars)` 봉**만 유지
   - `min_history_bars`: 지표 계산에 필요한 최소 봉수(예: 200)
@@ -244,8 +313,8 @@ v1.1에서는 최소 입력만 제공한다(필요 시 확장).
 
 ## 9. 오픈 결정(정리)
 
-v1.1에서 아래 항목은 “미도입(보류)”로 정리한다(ADR-0006).
+v1.1 현재 기준선은 ADR-0007을 따른다.
 
-- 리포트 목록: Storage listing 기반 유지, `run_history`/인덱스 테이블 미도입
+- 리포트 목록/검색: `report_index`를 채택하고, `run_history`는 미도입으로 유지
 - 캔들 캐시: 미도입(필요 시 v1.2에서 JSONB-per-ticker 우선 검토)
-- 인증/권한: v1.1 로컬 전용(공개 배포 전 별도 ADR/SPEC으로 결정)
+- 인증/권한: 관리자 세션 인증 + same-origin/로컬 요청 강제를 채택(공개 배포 전 인증 모델은 별도 ADR/SPEC으로 재결정)
