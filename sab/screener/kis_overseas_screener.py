@@ -6,6 +6,17 @@ from typing import Any
 
 from ..data.kis_client import KISClient
 
+_KNOWN_EXCHANGE_SUFFIXES = {
+    "US",
+    "NASDAQ",
+    "NASD",
+    "NAS",
+    "NYSE",
+    "NYS",
+    "AMEX",
+    "AMS",
+}
+
 
 @dataclass
 class ScreenRequest:
@@ -155,11 +166,20 @@ class KISOverseasScreener:
             sym = self._symbol_from_row(row)
             if not sym:
                 continue
-            ticker = sym if "." in sym else f"{sym}.{exchange}"
+            ticker = (
+                sym if self._has_known_exchange_suffix(sym) else f"{sym}.{exchange}"
+            )
             enriched = dict(row)
             enriched.setdefault("exchange", exchange)
             normalized_rows.append((ticker, enriched))
         return normalized_rows
+
+    @staticmethod
+    def _has_known_exchange_suffix(symbol: str) -> bool:
+        if "." not in symbol:
+            return False
+        suffix = symbol.rsplit(".", 1)[1].strip().upper()
+        return suffix in _KNOWN_EXCHANGE_SUFFIXES
 
     @staticmethod
     def _round_robin_select(

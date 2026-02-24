@@ -410,6 +410,36 @@ def test_pullback_bounce_requires_actual_pullback_bars() -> None:
     assert reasons == ["No pullback bars near EMA short"]
 
 
+def test_pullback_bounce_accepts_reclaim_after_prior_pullback() -> None:
+    settings = _settings()
+    closes = [100.0, 99.0, 98.0, 99.0, 101.0]
+    sma_trend = [95.0, 95.0, 95.0, 95.0, 95.0]
+    ema_short = [100.5, 100.0, 99.5, 99.2, 100.0]
+    ema_mid = [99.0, 99.0, 99.0, 99.0, 99.0]
+    rsi_vals = [46.0, 47.0, 48.0, 49.0, 52.0]
+    candles = [
+        {"open": 100.5, "close": 100.0, "low": 99.0, "volume": 1_000_000.0},
+        {"open": 99.5, "close": 99.0, "low": 98.0, "volume": 1_000_000.0},
+        {"open": 98.5, "close": 98.0, "low": 97.5, "volume": 1_000_000.0},
+        {"open": 99.2, "close": 99.0, "low": 98.5, "volume": 1_000_000.0},
+        {"open": 99.5, "close": 101.0, "low": 99.0, "volume": 1_200_000.0},
+    ]
+
+    ok, reasons, pattern, _ = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is True
+    assert pattern == HybridPattern.TREND_PULLBACK_BOUNCE
+    assert "Close reclaimed EMA short" in reasons
+
+
 def test_hybrid_respects_max_gap_pct(monkeypatch):
     candles = _simple_candles(10)
     candles[-2]["close"] = 100.0

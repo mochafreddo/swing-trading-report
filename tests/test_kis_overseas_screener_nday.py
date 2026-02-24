@@ -199,3 +199,15 @@ def test_kis_overseas_screener_stops_refill_after_limit_is_met() -> None:
         call.kwargs.get("exchange") == "NYS" and call.kwargs.get("limit") == 4
         for call in client.overseas_trade_value_rank.call_args_list
     )
+
+
+def test_kis_overseas_screener_appends_exchange_for_dot_symbol_without_suffix() -> None:
+    client = MagicMock()
+    client.overseas_trade_volume_rank.return_value = [{"SYMB": "BRK.B"}]
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(
+        ScreenRequest(limit=1, metric="volume", exchange="NYS", nday=1)
+    )
+
+    assert result.tickers == ["BRK.B.NYS"]

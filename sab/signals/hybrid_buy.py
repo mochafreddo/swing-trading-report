@@ -216,9 +216,10 @@ def _detect_trend_pullback_bounce(
 
     prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
 
-    # Pullback region: last N bars where close <= ema_short
+    # Pullback region: bars immediately before today's signal bar where
+    # close stayed at/below EMA short.
     pullback_bars = 0
-    for i in range(idx, -1, -1):
+    for i in range(idx - 1, -1, -1):
         if closes[i] <= ema_short[i]:
             pullback_bars += 1
             if pullback_bars > settings.pullback_max_bars:
@@ -233,7 +234,8 @@ def _detect_trend_pullback_bounce(
 
     # Very rough check for heavy selling: big red bar with volume >> avg
     heavy_selling = False
-    pullback_slice = candles[-pullback_bars:] if pullback_bars > 0 else []
+    pullback_start = max(0, idx - pullback_bars)
+    pullback_slice = candles[pullback_start:idx] if pullback_bars > 0 else []
     for bar in pullback_slice:
         bar_open = _to_finite_or_default(bar.get("open"))
         bar_close = _to_finite_or_default(bar.get("close"))
