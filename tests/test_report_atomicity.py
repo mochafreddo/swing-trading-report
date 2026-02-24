@@ -209,3 +209,23 @@ def test_write_sell_report_uses_runtime_timezone_label(
     )
     payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
     assert payload["generated_at"] == "2026-02-06 09:30 EST"
+
+
+def test_write_report_emits_issue_split_fields(tmp_path: Path) -> None:
+    out_path = write_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        universe_count=2,
+        candidates=[{"ticker": "AAPL.US", "name": "Apple", "price": "190"}],
+        failures=["sys-1", "screen-1"],
+        system_issues=["sys-1"],
+        screen_outs=["screen-1"],
+        report_type="buy",
+    )
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["issues"] == ["sys-1", "screen-1"]
+    assert payload["system_issues"] == ["sys-1"]
+    assert payload["screen_outs"] == ["screen-1"]
+    assert payload["summary"]["issue_count"] == 2
+    assert payload["summary"]["system_issue_count"] == 1
+    assert payload["summary"]["screen_out_count"] == 1

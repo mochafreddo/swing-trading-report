@@ -88,3 +88,48 @@ def test_run_scan_applies_limit_after_screener_merge(tmp_path: Path) -> None:
 
     assert code == 0
     assert fake_market_data_service.collected_tickers == ["005930", "000660"]
+
+
+def test_run_scan_deduplicates_watchlist_after_market_filter(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        screen_limit=10,
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+        universe_markets=["KR"],
+    )
+    fake_market_data_service = _FakeMarketDataService()
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch(
+            "sab.scan.scan_screener._load_scan_tickers",
+            return_value=["005930", "005930", "000660", "005930"],
+        ),
+        patch(
+            "sab.scan.scan_screener._resolve_screener_flags",
+            return_value=(False, False),
+        ),
+        patch(
+            "sab.scan._build_market_data_service", return_value=fake_market_data_service
+        ),
+        patch("sab.scan._resolve_scan_fx", return_value=None),
+        patch("sab.scan._evaluate_scan_runtime", return_value=None),
+        patch(
+            "sab.scan._render_scan_report",
+            return_value=str(tmp_path / "2026-02-24.buy.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 0
+    assert fake_market_data_service.collected_tickers == ["005930", "000660"]

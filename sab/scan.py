@@ -35,6 +35,11 @@ def _build_market_data_service() -> ScanMarketData:
     return ScanMarketData(deps=build_market_data_dependencies())
 
 
+def _record_system_issue(runtime: _ScanRuntime, message: str) -> None:
+    runtime.failures.append(message)
+    runtime.system_issues.append(message)
+
+
 def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
     runtime.ticker_currency = {
         ticker: _infer_currency(ticker) for ticker in runtime.tickers
@@ -50,6 +55,7 @@ def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
     runtime.fx_meta_note = resolved_note
     if fx_messages:
         runtime.failures.extend(fx_messages)
+        runtime.system_issues.extend(fx_messages)
 
 
 def _collect_scan_runtime(
@@ -147,11 +153,18 @@ def run_scan(
             len(loaded_tickers),
             len(filtered_tickers),
         )
+    deduped_tickers = list(dict.fromkeys(filtered_tickers))
+    if len(deduped_tickers) != len(filtered_tickers):
+        logger.info(
+            "Watchlist deduplicated after market filter (%s -> %s tickers)",
+            len(filtered_tickers),
+            len(deduped_tickers),
+        )
 
     runtime = _ScanRuntime(
         cfg=cfg,
         logger=logger,
-        tickers=filtered_tickers,
+        tickers=deduped_tickers,
     )
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
@@ -170,7 +183,7 @@ def run_scan(
 
     if not runtime.tickers:
         msg = "No tickers provided (watchlist empty or missing)"
-        runtime.failures.append(msg)
+        _record_system_issue(runtime, msg)
         runtime.logger.error(msg)
         runtime.fatal_failure = True
 
@@ -189,7 +202,7 @@ def run_scan(
             logger=runtime.logger,
         )
     except SupabaseStorageError as exc:
-        runtime.failures.append(f"Supabase upload failed: {exc}")
+        _record_system_issue(runtime, f"Supabase upload failed: {exc}")
         runtime.fatal_failure = True
         runtime.logger.error("Supabase report upload failed: %s", exc)
     else:

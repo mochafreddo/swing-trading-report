@@ -372,6 +372,76 @@ def test_evaluate_ticker_uses_eval_index(monkeypatch):
     )
 
 
+def test_evaluate_ticker_requires_min_completed_history(monkeypatch):
+    import sab.signals.evaluator as ev
+
+    candles = [
+        _make_candle(dt.date(2025, 1, 6), 100.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 7), 101.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 8), 102.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 9), 103.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 10), 104.0, 1_000_000.0),
+    ]
+
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 2, True),
+    )
+
+    settings = EvaluationSettings(min_history_bars=5)
+    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.candidate is None
+    assert result.reason == "Not enough completed history (<5 bars)"
+
+
+def test_evaluate_ticker_hybrid_requires_min_completed_history(monkeypatch):
+    import sab.signals.hybrid_buy as hb
+
+    candles = [
+        _make_candle(dt.date(2025, 1, 6), 100.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 7), 101.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 8), 102.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 9), 103.0, 1_000_000.0),
+        _make_candle(dt.date(2025, 1, 10), 104.0, 1_000_000.0),
+    ]
+
+    monkeypatch.setattr(
+        hb,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None, **_: (len(data) - 2, True),
+    )
+
+    settings = HybridEvaluationSettings(
+        sma_trend_period=2,
+        ema_short_period=2,
+        ema_mid_period=3,
+        rsi_period=2,
+        rsi_zone_low=0.0,
+        rsi_zone_high=100.0,
+        rsi_oversold_low=0.0,
+        rsi_oversold_high=100.0,
+        pullback_max_bars=5,
+        breakout_consolidation_min_bars=2,
+        breakout_consolidation_max_bars=5,
+        volume_lookback_days=2,
+        max_gap_pct=0.1,
+        use_sma60_filter=False,
+        sma60_period=60,
+        kr_breakout_requires_confirmation=False,
+        min_history_bars=5,
+        min_price=0.0,
+        us_min_price=0.0,
+        min_dollar_volume=0.0,
+        us_min_dollar_volume=0.0,
+        exclude_etf_etn=False,
+        gap_atr_multiplier=1.0,
+    )
+    result = evaluate_ticker_hybrid("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.candidate is None
+    assert result.reason == "Not enough completed history (<5 bars)"
+
+
 def test_evaluate_ticker_excludes_etf_when_flag_true(monkeypatch):
     import sab.signals.evaluator as ev
 

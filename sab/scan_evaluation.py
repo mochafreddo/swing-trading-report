@@ -6,6 +6,29 @@ from typing import Any
 from .data.holiday_cache import HolidayEntry
 from .scan_types import _ScanRuntime, _to_float
 
+_SYSTEM_REASON_PREFIXES = (
+    "Not enough completed candles",
+    "Not enough completed history",
+    "Insufficient price data",
+    "No candle data",
+)
+
+
+def _is_system_issue_reason(reason: str) -> bool:
+    return reason.startswith(_SYSTEM_REASON_PREFIXES)
+
+
+def _is_system_result(result: Any) -> bool:
+    reason_kind = getattr(result, "reason_kind", None)
+    if reason_kind == "system":
+        return True
+    if reason_kind == "signal":
+        return False
+    reason = getattr(result, "reason", None)
+    if not isinstance(reason, str):
+        return False
+    return _is_system_issue_reason(reason)
+
 
 def _apply_currency_display(
     candidate: dict[str, Any],
@@ -106,20 +129,29 @@ def _evaluate_candidates(
             )
             if result_hybrid.candidate:
                 runtime.candidates.append(result_hybrid.candidate)
-            elif (
-                result_hybrid.reason
-                and result_hybrid.reason != "Did not meet hybrid signal criteria"
-            ):
-                runtime.failures.append(f"{ticker}: {result_hybrid.reason}")
-                runtime.logger.warning("%s: %s", ticker, result_hybrid.reason)
+            elif result_hybrid.reason:
+                detail = f"{ticker}: {result_hybrid.reason}"
+                if _is_system_result(result_hybrid):
+                    runtime.failures.append(detail)
+                    runtime.system_issues.append(detail)
+                    runtime.logger.warning("%s", detail)
+                else:
+                    runtime.screen_outs.append(detail)
+                    runtime.logger.info("%s", detail)
             continue
 
         result = evaluate_ticker_fn(ticker, ticker_candles, eval_settings, meta)
         if result.candidate:
             runtime.candidates.append(result.candidate)
-        elif result.reason and result.reason != "Did not meet signal criteria":
-            runtime.failures.append(f"{ticker}: {result.reason}")
-            runtime.logger.warning("%s: %s", ticker, result.reason)
+        elif result.reason:
+            detail = f"{ticker}: {result.reason}"
+            if _is_system_result(result):
+                runtime.failures.append(detail)
+                runtime.system_issues.append(detail)
+                runtime.logger.warning("%s", detail)
+            else:
+                runtime.screen_outs.append(detail)
+                runtime.logger.info("%s", detail)
 
 
 def _decorate_candidates(
@@ -157,12 +189,17 @@ def _decorate_candidates(
 
 
 def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
+    system_issues = list(dict.fromkeys(runtime.system_issues + runtime.failures))
+    screen_outs = list(dict.fromkeys(runtime.screen_outs))
+    combined_issues = list(dict.fromkeys(system_issues + screen_outs))
     return write_report_fn(
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
         universe_count=len(runtime.tickers),
         candidates=runtime.candidates,
-        failures=runtime.failures,
+        failures=combined_issues,
+        system_issues=system_issues,
+        screen_outs=screen_outs,
         cache_hint=runtime.cache_hint,
         report_type="buy",
         strategy_mode=runtime.cfg.strategy_mode,

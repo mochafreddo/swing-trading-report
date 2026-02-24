@@ -144,6 +144,65 @@ def test_pullback_bounce_ready(monkeypatch):
     assert "bounce confirmed" in result.candidate["entry_state_reason"].lower()
 
 
+def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):
+    candles = _simple_candles(10, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [2.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Bullish candle with rising volume"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_bullish_vol": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+                "avg_vol": 1_000_000.0,
+            },
+        ),
+    )
+    ready_result = evaluate_ticker_hybrid(
+        "READY.US", candles, _settings(), {"currency": "USD"}
+    )
+    assert ready_result.candidate is not None
+    assert ready_result.candidate["entry_state"] == "READY"
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *args, **kwargs: (
+            True,
+            ["Close broke above recent swing high with volume > 5d avg"],
+            HybridPattern.SWING_HIGH_BREAKOUT,
+            {"swing_high": 95.0, "avg_vol": 5_000_000.0},
+        ),
+    )
+    watch_result = evaluate_ticker_hybrid(
+        "WATCH.US", candles, _settings(), {"currency": "USD"}
+    )
+    assert watch_result.candidate is not None
+    assert watch_result.candidate["entry_state"] == "WATCH"
+    assert ready_result.candidate["score_value"] > watch_result.candidate["score_value"]
+    assert "entry_state=" in ready_result.candidate["score_notes"]
+
+
 def test_breakout_extended_sets_watch(monkeypatch):
     candles = _simple_candles(10, base=100.0)
     monkeypatch.setattr(

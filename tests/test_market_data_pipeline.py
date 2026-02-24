@@ -112,13 +112,18 @@ def _collect_market_data_from_kis(
 
 def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
     class _FailingKisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
             raise KISClientError("KIS down")
 
     legacy_candles = _build_candles()
     load_keys: list[str] = []
     saved_keys: list[str] = []
-    runtime = _build_runtime(kis_client=_FailingKisClient())
+    kis_client = _FailingKisClient()
+    runtime = _build_runtime(kis_client=kis_client)
 
     def load_json_fn(_: str, key: str) -> Any:
         load_keys.append(key)
@@ -149,7 +154,8 @@ def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
     assert runtime.ticker_data_source["AAPL.UNKNOWN"] == "kis"
     assert load_keys[:2] == ["candles_AAPL", "candles_AAPL.UNKNOWN"]
     assert "candles_AAPL" in saved_keys
-    assert any("API error, using cached data" in msg for msg in runtime.failures)
+    assert kis_client.calls == 0
+    assert runtime.failures == []
 
 
 def test_collect_market_data_from_kis_adds_fallback_warning_once() -> None:
@@ -275,9 +281,13 @@ def test_collect_market_data_from_kis_uses_canonical_suffix_mapping_fallback() -
 
 def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None:
     class _FailingKisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def overseas_daily_candles(
             self, *, symbol: str, exchange: str, count: int
         ) -> list[dict[str, Any]]:
+            self.calls += 1
             raise KISClientError("KIS down")
 
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
@@ -285,7 +295,8 @@ def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None
 
     legacy_candles = _build_candles()
     load_keys: list[str] = []
-    runtime = _build_runtime(kis_client=_FailingKisClient())
+    kis_client = _FailingKisClient()
+    runtime = _build_runtime(kis_client=kis_client)
 
     def load_json_fn(_: str, key: str) -> Any:
         load_keys.append(key)
@@ -308,16 +319,22 @@ def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None
 
     assert runtime.market_data["AAPL.NAS-DAQ"] == legacy_candles
     assert load_keys[:2] == ["candles_overseas_NAS_AAPL", "candles_AAPL.NAS-DAQ"]
-    assert any("API error, using cached data" in msg for msg in runtime.failures)
+    assert kis_client.calls == 0
+    assert runtime.failures == []
 
 
 def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None:
     class _FailingKisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
             raise KISClientError("KIS down")
 
     cached_candles = _candles_with_last_date("20250107")
-    runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_kr=1)
+    kis_client = _FailingKisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_kr=1)
 
     _collect_market_data_from_kis(
         runtime,
@@ -335,8 +352,8 @@ def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None
     )
 
     assert runtime.market_data["005930"] == cached_candles
-    assert any("API error, using cached data" in msg for msg in runtime.failures)
-    assert any("stale=1/1 KR sessions" in msg for msg in runtime.failures)
+    assert kis_client.calls == 0
+    assert runtime.failures == []
 
 
 def test_collect_market_data_from_kis_rejects_kr_cache_over_stale_limit() -> None:
@@ -371,15 +388,20 @@ def test_collect_market_data_from_kis_rejects_kr_cache_over_stale_limit() -> Non
 
 def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
     class _FailingKisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def overseas_daily_candles(
             self, *, symbol: str, exchange: str, count: int
         ) -> list[dict[str, Any]]:
+            self.calls += 1
             raise KISClientError("KIS down")
 
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
             return []
 
-    runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_us=1)
+    kis_client = _FailingKisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_us=1)
 
     _collect_market_data_from_kis(
         runtime,
@@ -399,7 +421,39 @@ def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
     )
 
     assert "AAPL.US" in runtime.market_data
-    assert any("stale=1/1 US sessions" in msg for msg in runtime.failures)
+    assert kis_client.calls == 0
+    assert runtime.failures == []
+
+
+def test_collect_market_data_from_kis_calls_api_when_cache_stale() -> None:
+    class _KisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
+            return _build_candles(count)
+
+    kis_client = _KisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            _candles_with_last_date("20250106") if key == "candles_005930" else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert kis_client.calls == 1
+    assert "005930" in runtime.market_data
 
 
 def test_collect_market_data_from_kis_rejects_us_cache_over_stale_limit() -> None:

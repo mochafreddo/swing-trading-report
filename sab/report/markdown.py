@@ -57,6 +57,8 @@ def write_report(
     universe_count: int,
     candidates: Iterable[dict],
     failures: Iterable[str] | None = None,
+    system_issues: Iterable[str] | None = None,
+    screen_outs: Iterable[str] | None = None,
     cache_hint: str | None = None,
     report_type: str = "buy",
     strategy_mode: str | None = None,
@@ -67,6 +69,8 @@ def write_report(
 
     cand_list = list(candidates)
     failures_list = list(failures or [])
+    system_issues_list = list(system_issues or [])
+    screen_outs_list = list(screen_outs or [])
     artifact: dict[str, Any] = {
         "schema": _ARTIFACT_SCHEMA,
         "type": normalized_report_type,
@@ -80,10 +84,14 @@ def write_report(
             "universe_count": universe_count,
             "candidate_count": len(cand_list),
             "issue_count": len(failures_list),
+            "system_issue_count": len(system_issues_list),
+            "screen_out_count": len(screen_outs_list),
         },
         "tickers": _collect_tickers(cand_list),
         "candidates": cand_list,
         "issues": failures_list,
+        "system_issues": system_issues_list,
+        "screen_outs": screen_outs_list,
     }
     if cache_hint:
         artifact["cache_hint"] = cache_hint

@@ -485,6 +485,14 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                         )
                         runtime.failures.append(migration_msg)
                         runtime.logger.warning(migration_msg)
+                runtime.logger.info(
+                    "Using cached candles for %s (market=%s, stale=%s/%s sessions)",
+                    ticker,
+                    market,
+                    cached_stale_sessions or 0,
+                    max_stale_sessions,
+                )
+                continue
 
         try:
             if target.exchange:

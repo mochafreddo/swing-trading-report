@@ -49,6 +49,7 @@ class HybridEvaluationResult:
     ticker: str
     candidate: dict[str, Any] | None
     reason: str | None = None
+    reason_kind: str | None = None
 
 
 def _avg_dollar_volume(candles: list[dict[str, Any]], window: int) -> float:
@@ -71,16 +72,18 @@ def _basic_filters(
     settings: HybridEvaluationSettings,
     meta: dict[str, Any],
     eval_index: int,
-) -> tuple[bool, str | None, float, float]:
-    if len(candles) < settings.min_history_bars:
+) -> tuple[bool, str | None, str | None, float, float]:
+    idx = max(0, min(eval_index, len(candles) - 1))
+    completed_bars = idx + 1
+    if completed_bars < settings.min_history_bars:
         return (
             False,
-            f"Not enough history (<{settings.min_history_bars} bars)",
+            f"Not enough completed history (<{settings.min_history_bars} bars)",
+            "system",
             0.0,
             0.0,
         )
 
-    idx = max(0, min(eval_index, len(candles) - 1))
     latest = candles[idx]
     currency = str(meta.get("currency", "KRW")).upper()
 
@@ -89,7 +92,13 @@ def _basic_filters(
     if currency == "USD" and settings.us_min_price is not None:
         eff_min_price = settings.us_min_price
     if eff_min_price and close < eff_min_price:
-        return False, f"Price {close:.2f} < MIN_PRICE {eff_min_price:.2f}", 0.0, 0.0
+        return (
+            False,
+            f"Price {close:.2f} < MIN_PRICE {eff_min_price:.2f}",
+            "signal",
+            0.0,
+            0.0,
+        )
 
     avg_dv = _avg_dollar_volume(candles[: idx + 1], 20)
     eff_min_dv = settings.min_dollar_volume
@@ -99,14 +108,15 @@ def _basic_filters(
         return (
             False,
             f"Avg dollar volume {avg_dv:,.0f} < {eff_min_dv:,.0f}",
+            "signal",
             0.0,
             avg_dv,
         )
 
     if settings.exclude_etf_etn and is_etf_or_leveraged(ticker, meta):
-        return False, "ETF/ETN excluded", close, avg_dv
+        return False, "ETF/ETN excluded", "signal", close, avg_dv
 
-    return True, None, close, avg_dv
+    return True, None, None, close, avg_dv
 
 
 def _volume_stats(
@@ -339,15 +349,15 @@ def evaluate_ticker_hybrid(
     provider = str(meta.get("data_source") or meta.get("provider") or "kis").lower()
     idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
     if idx_eval < 0:
-        return HybridEvaluationResult(ticker, None, "No candle data")
+        return HybridEvaluationResult(ticker, None, "No candle data", "system")
 
     candles_eval = candles[: idx_eval + 1]
 
-    ok, reason, last_close, avg_dv = _basic_filters(
+    ok, reason, reason_kind, last_close, avg_dv = _basic_filters(
         ticker, candles, settings, meta, idx_eval
     )
     if not ok:
-        return HybridEvaluationResult(ticker, None, reason)
+        return HybridEvaluationResult(ticker, None, reason, reason_kind or "signal")
 
     closes = [float(c.get("close") or 0.0) for c in candles_eval]
     highs = [float(c.get("high") or 0.0) for c in candles_eval]
@@ -369,6 +379,7 @@ def evaluate_ticker_hybrid(
             ticker,
             None,
             f"Gap {gap_pct * 100:.1f}% exceeds HYBRID_MAX_GAP_PCT {settings.max_gap_pct * 100:.1f}%",
+            "signal",
         )
 
     if settings.use_sma60_filter:
@@ -379,6 +390,7 @@ def evaluate_ticker_hybrid(
                 ticker,
                 None,
                 f"Close {last_close:.2f} <= SMA{settings.sma60_period} {sma60:.2f}",
+                "signal",
             )
 
     pattern: HybridPattern | None = None
@@ -421,13 +433,14 @@ def evaluate_ticker_hybrid(
 
     if not pattern:
         return HybridEvaluationResult(
-            ticker, None, "Did not meet hybrid signal criteria"
+            ticker, None, "Did not meet hybrid signal criteria", "signal"
         )
     pct_change = (last_close - prev_close) / prev_close if prev_close else 0.0
 
     # Determine readiness (READY vs WATCH) using close-based confirmations only.
     entry_state = "WATCH"
     entry_state_reason = "Early setup; awaiting confirmation"
+    extended_breakout = False
 
     if pattern == HybridPattern.TREND_PULLBACK_BOUNCE:
         rsi_val = float(pattern_context.get("rsi_val", rsi_vals[-1]))
@@ -455,6 +468,7 @@ def evaluate_ticker_hybrid(
         extended = False
         if swing_high > 0 and not math.isnan(atr_value):
             extended = last_close > swing_high + atr_value
+        extended_breakout = extended
         needs_kr_confirmation = (
             currency != "USD"
             and settings.kr_breakout_requires_confirmation
@@ -487,6 +501,33 @@ def evaluate_ticker_hybrid(
             entry_state_reason = (
                 "Early reversal; need RSI>=45 and close above EMA short"
             )
+
+    pattern_weights = {
+        HybridPattern.TREND_PULLBACK_BOUNCE: 0.30,
+        HybridPattern.SWING_HIGH_BREAKOUT: 0.25,
+        HybridPattern.RSI_OVERSOLD_REVERSAL: 0.20,
+    }
+    entry_state_score = 2.0 if entry_state == "READY" else 1.0
+    pattern_weight = pattern_weights.get(pattern, 0.0)
+    today_volume = float(latest.get("volume") or 0.0)
+    avg_volume = float(pattern_context.get("avg_vol") or 0.0)
+    has_volume_confirmation = bool(pattern_context.get("trigger_bullish_vol")) or (
+        avg_volume > 0 and today_volume >= avg_volume
+    )
+    volume_confirmation_bonus = 0.10 if has_volume_confirmation else 0.0
+    extended_penalty = 0.20 if extended_breakout else 0.0
+    score_value = (
+        entry_state_score
+        + pattern_weight
+        + volume_confirmation_bonus
+        - extended_penalty
+    )
+    score_notes = (
+        f"entry_state={entry_state_score:.1f},"
+        f" pattern={pattern_weight:.2f},"
+        f" volume_bonus={volume_confirmation_bonus:.2f},"
+        f" extended_penalty={extended_penalty:.2f}"
+    )
 
     def fmt(value: float, digits: int = 2) -> str:
         if digits == 0:
@@ -545,9 +586,9 @@ def evaluate_ticker_hybrid(
         if gap_guard_down_price
         else "-",
         "risk_guide": risk_guide,
-        # Score is kept for sorting compatibility but fixed for hybrid
-        "score_value": 1.0,
-        "score": "1.0",
+        "score_value": score_value,
+        "score": f"{score_value:.2f}",
+        "score_notes": score_notes,
     }
 
     return HybridEvaluationResult(ticker, candidate)

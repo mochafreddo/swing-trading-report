@@ -37,6 +37,10 @@ class KISOverseasScreener:
         exchanges = self._resolve_exchanges(request.exchange)
         tickers: list[str] = []
         by_ticker: dict[str, Any] = {}
+        try:
+            limit = max(0, int(request.limit))
+        except (TypeError, ValueError):
+            limit = 0
         ndays: list[int] = []
         if request.nday is not None:
             try:
@@ -55,33 +59,76 @@ class KISOverseasScreener:
 
         nday_used: int | None = None
         tried_ndays: list[int] = []
+        selection_mode = "round_robin_exchange"
+        exchange_bucket_sizes: dict[str, int] = {}
+
+        if limit <= 0:
+            return ScreenResult(
+                tickers=[],
+                metadata={
+                    "source": "kis_overseas_rank",
+                    "metric": metric,
+                    "exchanges": exchanges,
+                    "generated_at": dt.datetime.now().isoformat(),
+                    "nday_requested": request.nday,
+                    "nday_used": None,
+                    "nday_tried": tried_ndays,
+                    "selection_mode": selection_mode,
+                    "exchange_bucket_sizes": exchange_bucket_sizes,
+                    "by_ticker": by_ticker,
+                },
+            )
 
         for nd in ndays:
             tried_ndays.append(nd)
+            exchange_rows: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+            current_exchange_bucket_sizes: dict[str, int] = {}
+            base_fetch_limit = max(1, (limit + len(exchanges) - 1) // len(exchanges))
             for exch in exchanges:
-                remaining = request.limit - len(tickers)
-                if remaining <= 0:
-                    break
-                rows = self._fetch_rank(metric, exch, remaining, nday=nd)
+                rows = self._fetch_rank(metric, exch, base_fetch_limit, nday=nd)
                 if not rows:
                     continue
-                for row in rows:
-                    sym = self._symbol_from_row(row)
-                    if not sym:
-                        continue
-                    ticker = sym if "." in sym else f"{sym}.{exch}"
-                    if ticker in tickers:
-                        continue
-                    tickers.append(ticker)
-                    enriched = dict(row)
-                    enriched.setdefault("exchange", exch)
-                    by_ticker[ticker] = enriched
-                    if nday_used is None:
-                        nday_used = nd
-                    if len(tickers) >= request.limit:
-                        break
+                normalized_rows = self._normalize_rows(rows, exchange=exch)
+                if normalized_rows:
+                    exchange_rows[exch] = normalized_rows
+                    current_exchange_bucket_sizes[exch] = len(normalized_rows)
+            if exchange_rows:
+                tickers, by_ticker = self._round_robin_select(
+                    exchanges=exchanges,
+                    exchange_rows=exchange_rows,
+                    limit=limit,
+                )
+                remaining = limit - len(tickers)
+                if remaining > 0:
+                    for exch in exchanges:
+                        if remaining <= 0:
+                            break
+                        existing_rows = exchange_rows.get(exch, [])
+                        if not existing_rows:
+                            continue
+                        target_limit = min(limit, len(existing_rows) + remaining)
+                        if target_limit <= len(existing_rows):
+                            continue
+                        refill_rows = self._fetch_rank(
+                            metric, exch, target_limit, nday=nd
+                        )
+                        normalized_refill = self._normalize_rows(
+                            refill_rows, exchange=exch
+                        )
+                        if not normalized_refill:
+                            continue
+                        exchange_rows[exch] = normalized_refill
+                        current_exchange_bucket_sizes[exch] = len(normalized_refill)
+                        tickers, by_ticker = self._round_robin_select(
+                            exchanges=exchanges,
+                            exchange_rows=exchange_rows,
+                            limit=limit,
+                        )
+                        remaining = limit - len(tickers)
             if tickers:
                 # Prefer a single session's ranks; stop once we have results.
+                nday_used = nd
+                exchange_bucket_sizes = current_exchange_bucket_sizes
                 break
 
         return ScreenResult(
@@ -94,9 +141,58 @@ class KISOverseasScreener:
                 "nday_requested": request.nday,
                 "nday_used": nday_used,
                 "nday_tried": tried_ndays,
+                "selection_mode": selection_mode,
+                "exchange_bucket_sizes": exchange_bucket_sizes,
                 "by_ticker": by_ticker,
             },
         )
+
+    def _normalize_rows(
+        self, rows: list[dict[str, Any]], *, exchange: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        normalized_rows: list[tuple[str, dict[str, Any]]] = []
+        for row in rows:
+            sym = self._symbol_from_row(row)
+            if not sym:
+                continue
+            ticker = sym if "." in sym else f"{sym}.{exchange}"
+            enriched = dict(row)
+            enriched.setdefault("exchange", exchange)
+            normalized_rows.append((ticker, enriched))
+        return normalized_rows
+
+    @staticmethod
+    def _round_robin_select(
+        *,
+        exchanges: list[str],
+        exchange_rows: dict[str, list[tuple[str, dict[str, Any]]]],
+        limit: int,
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        tickers: list[str] = []
+        by_ticker: dict[str, dict[str, Any]] = {}
+        cursors = {exchange: 0 for exchange in exchanges}
+        selected: set[str] = set()
+        while len(tickers) < limit:
+            progressed = False
+            for exchange in exchanges:
+                rows = exchange_rows.get(exchange, [])
+                cursor = cursors.get(exchange, 0)
+                while cursor < len(rows):
+                    ticker, row = rows[cursor]
+                    cursor += 1
+                    cursors[exchange] = cursor
+                    if ticker in selected:
+                        continue
+                    tickers.append(ticker)
+                    by_ticker[ticker] = row
+                    selected.add(ticker)
+                    progressed = True
+                    break
+                if len(tickers) >= limit:
+                    break
+            if not progressed:
+                break
+        return tickers, by_ticker
 
     def _resolve_exchanges(self, exchange: str | None) -> list[str]:
         if exchange:

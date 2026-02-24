@@ -14,6 +14,7 @@ class EvaluationResult:
     ticker: str
     candidate: dict[str, Any] | None
     reason: str | None = None
+    reason_kind: str | None = None
 
 
 @dataclass
@@ -44,26 +45,28 @@ def evaluate_ticker(
     meta = meta or {}
     currency = meta.get("currency", "KRW")
 
-    if len(candles) < settings.min_history_bars:
-        return EvaluationResult(
-            ticker,
-            None,
-            f"Not enough history (<{settings.min_history_bars} bars)",
-        )
-
     provider = str(meta.get("data_source") or meta.get("provider") or "kis").lower()
     idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
     if idx_eval < 1:
-        return EvaluationResult(ticker, None, "Not enough completed candles")
+        return EvaluationResult(
+            ticker, None, "Not enough completed candles", reason_kind="system"
+        )
 
     candles_eval = candles[: idx_eval + 1]
+    if len(candles_eval) < settings.min_history_bars:
+        return EvaluationResult(
+            ticker,
+            None,
+            f"Not enough completed history (<{settings.min_history_bars} bars)",
+            reason_kind="system",
+        )
 
     closes = [c["close"] for c in candles_eval]
     highs = [c["high"] for c in candles_eval]
     lows = [c["low"] for c in candles_eval]
 
     if not (_clean(closes) and _clean(highs) and _clean(lows)):
-        return EvaluationResult(ticker, None, "Insufficient price data")
+        return EvaluationResult(ticker, None, "Insufficient price data", "system")
 
     ema20 = ema(closes, 20)
     ema50 = ema(closes, 50)
@@ -87,6 +90,7 @@ def evaluate_ticker(
             ticker,
             None,
             f"Price {latest['close']:.0f} < MIN_PRICE {eff_min_price:.0f}",
+            reason_kind="signal",
         )
 
     ema_cross_up = ema20[-1] > ema50[-1] and ema20[-2] <= ema50[-2]
@@ -99,9 +103,13 @@ def evaluate_ticker(
     atr_value = atr14[-1]
 
     if not ema_cross_up:
-        return EvaluationResult(ticker, None, "EMA(20/50) cross not satisfied")
+        return EvaluationResult(
+            ticker, None, "EMA(20/50) cross not satisfied", reason_kind="signal"
+        )
     if not (rsi_rebound and rsi_not_overbought):
-        return EvaluationResult(ticker, None, "RSI signal not satisfied")
+        return EvaluationResult(
+            ticker, None, "RSI signal not satisfied", reason_kind="signal"
+        )
 
     # SMA200 filter
     trend_pass = True
@@ -114,14 +122,18 @@ def evaluate_ticker(
             and ema50[-1] > sma200_value
         )
         if not trend_pass:
-            return EvaluationResult(ticker, None, "Below SMA200 filter")
+            return EvaluationResult(
+                ticker, None, "Below SMA200 filter", reason_kind="signal"
+            )
 
     # EMA slope requirement
     slope_pass = True
     if settings.require_slope_up:
         slope_pass = ema20[-1] > ema20[-2] and ema50[-1] > ema50[-2]
         if not slope_pass:
-            return EvaluationResult(ticker, None, "EMA slope not rising")
+            return EvaluationResult(
+                ticker, None, "EMA slope not rising", reason_kind="signal"
+            )
 
     # Gap threshold via ATR multiplier
     gap_threshold = 0.03
@@ -138,6 +150,7 @@ def evaluate_ticker(
             ticker,
             None,
             f"Gap {gap_pct * 100:.1f}% exceeds threshold",
+            reason_kind="signal",
         )
 
     # Liquidity: average dollar volume last 20 bars
@@ -165,11 +178,12 @@ def evaluate_ticker(
             ticker,
             None,
             f"Avg dollar volume {avg_dollar_volume:,.0f} < {eff_min_dv:,.0f}",
+            reason_kind="signal",
         )
 
     # ETF/ETN exclusion heuristic (including leveraged/inverse products)
     if settings.exclude_etf_etn and is_etf_or_leveraged(ticker, meta):
-        return EvaluationResult(ticker, None, "ETF/ETN excluded")
+        return EvaluationResult(ticker, None, "ETF/ETN excluded", reason_kind="signal")
 
     rs_return = None
     rs_diff = None

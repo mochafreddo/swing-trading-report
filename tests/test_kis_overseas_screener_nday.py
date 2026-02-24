@@ -98,15 +98,104 @@ def test_kis_overseas_screener_fills_across_exchanges_until_limit() -> None:
     result = screener.screen(ScreenRequest(limit=110, metric="value", nday=1))
 
     assert len(result.tickers) == 110
-    assert result.tickers[0] == "NAS001.NAS"
-    assert result.tickers[-1] == "NYS010.NYS"
+    assert result.tickers[:6] == [
+        "NAS001.NAS",
+        "NYS001.NYS",
+        "NAS002.NAS",
+        "NYS002.NYS",
+        "NAS003.NAS",
+        "NYS003.NYS",
+    ]
+    assert result.tickers[-1] == "NAS073.NAS"
+    assert result.metadata["selection_mode"] == "round_robin_exchange"
 
-    assert client.overseas_trade_value_rank.call_count == 2
+    assert client.overseas_trade_value_rank.call_count == 3
     first_call = client.overseas_trade_value_rank.call_args_list[0].kwargs
     second_call = client.overseas_trade_value_rank.call_args_list[1].kwargs
+    third_call = client.overseas_trade_value_rank.call_args_list[2].kwargs
     assert first_call["exchange"] == "NAS"
-    assert first_call["limit"] == 110
+    assert first_call["limit"] == 37
     assert first_call["nday"] == "1"
     assert second_call["exchange"] == "NYS"
-    assert second_call["limit"] == 10
+    assert second_call["limit"] == 37
     assert second_call["nday"] == "1"
+    assert third_call["exchange"] == "AMS"
+    assert third_call["limit"] == 37
+    assert third_call["nday"] == "1"
+
+
+def test_kis_overseas_screener_non_positive_limit_skips_api_calls() -> None:
+    client = MagicMock()
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(ScreenRequest(limit=0, metric="value", nday=1))
+
+    assert result.tickers == []
+    assert result.metadata["selection_mode"] == "round_robin_exchange"
+    assert client.overseas_trade_value_rank.call_count == 0
+
+
+def test_kis_overseas_screener_backfills_when_initial_round_robin_is_short() -> None:
+    client = MagicMock()
+
+    def value_rank(**kwargs):
+        exchange = kwargs.get("exchange")
+        limit = int(kwargs.get("limit") or 0)
+        if exchange == "NAS":
+            if limit <= 4:
+                return [{"SYMB": f"NAS{i:03d}"} for i in range(1, 5)]
+            return [{"SYMB": f"NAS{i:03d}"} for i in range(1, limit + 1)]
+        return []
+
+    client.overseas_trade_value_rank.side_effect = value_rank
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(ScreenRequest(limit=10, metric="value", nday=1))
+
+    assert len(result.tickers) == 10
+    assert result.tickers[0] == "NAS001.NAS"
+    assert result.tickers[-1] == "NAS010.NAS"
+    assert client.overseas_trade_value_rank.call_count == 4
+    first_call = client.overseas_trade_value_rank.call_args_list[0].kwargs
+    second_call = client.overseas_trade_value_rank.call_args_list[1].kwargs
+    third_call = client.overseas_trade_value_rank.call_args_list[2].kwargs
+    fourth_call = client.overseas_trade_value_rank.call_args_list[3].kwargs
+    assert first_call["exchange"] == "NAS" and first_call["limit"] == 4
+    assert second_call["exchange"] == "NYS" and second_call["limit"] == 4
+    assert third_call["exchange"] == "AMS" and third_call["limit"] == 4
+    assert fourth_call["exchange"] == "NAS" and fourth_call["limit"] == 10
+
+
+def test_kis_overseas_screener_stops_refill_after_limit_is_met() -> None:
+    client = MagicMock()
+
+    def value_rank(**kwargs):
+        exchange = kwargs.get("exchange")
+        limit = int(kwargs.get("limit") or 0)
+        if exchange == "NAS":
+            if limit <= 2:
+                return [{"SYMB": "NAS001"}, {"SYMB": "NAS002"}]
+            return [{"SYMB": f"NAS{i:03d}"} for i in range(1, limit + 1)]
+        if exchange == "NYS":
+            if limit <= 2:
+                return [{"SYMB": "NYS001"}, {"SYMB": "NYS002"}]
+            return [{"SYMB": f"NYS{i:03d}"} for i in range(1, limit + 1)]
+        return []
+
+    client.overseas_trade_value_rank.side_effect = value_rank
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(ScreenRequest(limit=6, metric="value", nday=1))
+
+    assert len(result.tickers) == 6
+    assert result.tickers[:4] == [
+        "NAS001.NAS",
+        "NYS001.NYS",
+        "NAS002.NAS",
+        "NYS002.NYS",
+    ]
+    assert client.overseas_trade_value_rank.call_count == 4
+    assert not any(
+        call.kwargs.get("exchange") == "NYS" and call.kwargs.get("limit") == 4
+        for call in client.overseas_trade_value_rank.call_args_list
+    )
