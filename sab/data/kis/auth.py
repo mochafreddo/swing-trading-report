@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from typing import Any
 
 import requests  # type: ignore[import-untyped]
@@ -16,6 +17,9 @@ from .common import (
 
 class _KISAuthMixin(_KISClientState):
     """Authentication/token lifecycle responsibilities."""
+
+    _TOKEN_RATE_LIMIT_CODE = "EGW00133"
+    _TOKEN_RATE_LIMIT_RETRY_SECONDS = 60.0
 
     def _try_load_cached_token(self) -> None:
         if not self._cache_dir:
@@ -85,6 +89,26 @@ class _KISAuthMixin(_KISClientState):
             return None
         return cls._normalize_expiry_dt(parsed)
 
+    @classmethod
+    def _is_token_rate_limited(cls, resp: requests.Response) -> bool:
+        if resp.status_code != 403:
+            return False
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+
+        if isinstance(data, dict):
+            error_code = data.get("error_code") or data.get("msg_cd")
+            if (
+                isinstance(error_code, str)
+                and error_code.strip().upper() == cls._TOKEN_RATE_LIMIT_CODE
+            ):
+                return True
+
+        return cls._TOKEN_RATE_LIMIT_CODE in resp.text
+
     def ensure_token(self) -> None:
         if (
             self._access_token
@@ -104,12 +128,29 @@ class _KISAuthMixin(_KISClientState):
             "charset": "UTF-8",
         }
 
-        try:
-            resp = self._request(
-                "POST", self.creds.token_url, headers=headers, json=payload
-            )
-        except requests.RequestException as exc:  # pragma: no cover
-            raise KISAuthError(f"Token request failed: {exc}") from exc
+        resp: requests.Response | None = None
+        for attempt in range(self._max_attempts):
+            try:
+                resp = self._request(
+                    "POST", self.creds.token_url, headers=headers, json=payload
+                )
+            except requests.RequestException as exc:  # pragma: no cover
+                raise KISAuthError(f"Token request failed: {exc}") from exc
+
+            if self._is_token_rate_limited(resp) and attempt < self._max_attempts - 1:
+                logger.warning(
+                    "KIS token issuance rate-limited (code=%s); retrying in %.0fs"
+                    " (attempt %d/%d)",
+                    self._TOKEN_RATE_LIMIT_CODE,
+                    self._TOKEN_RATE_LIMIT_RETRY_SECONDS,
+                    attempt + 1,
+                    self._max_attempts,
+                )
+                time.sleep(self._TOKEN_RATE_LIMIT_RETRY_SECONDS)
+                continue
+            break
+
+        assert resp is not None  # guarded by request call above
 
         if resp.status_code != 200:
             raise KISAuthError(f"Token request HTTP {resp.status_code}: {resp.text}")

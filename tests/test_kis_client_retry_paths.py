@@ -103,6 +103,38 @@ def test_ensure_token_raises_for_malformed_json() -> None:
         client.ensure_token()
 
 
+def test_ensure_token_retries_on_egw00133_rate_limit() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=2,
+    )
+    rate_limited = _response(
+        status_code=403,
+        payload={"error_code": "EGW00133", "error_description": "rate limit"},
+        text='{"error_code":"EGW00133"}',
+    )
+    success = _response(
+        status_code=200,
+        payload={
+            "access_token": "fresh-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        },
+    )
+    request_mock = _set_mock_method(
+        client, "_request", side_effect=[rate_limited, success]
+    )
+
+    with patch("sab.data.kis.auth.time.sleep") as mock_sleep:
+        client.ensure_token()
+
+    assert request_mock.call_count == 2
+    assert mock_sleep.call_args_list == [call(60.0)]
+    assert client._access_token == "Bearer fresh-token"
+
+
 def test_request_retries_with_backoff_on_429_and_503() -> None:
     session = MagicMock()
     rate_limited = _response(status_code=429, payload={"rt_cd": "1"})
