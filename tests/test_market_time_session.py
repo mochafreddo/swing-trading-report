@@ -7,6 +7,8 @@ from sab.utils.market_time import (
     STATE_CLOSED,
     STATE_INTRADAY,
     STATE_PRE_OPEN,
+    is_us_market_open,
+    us_market_status,
     us_session_info,
 )
 
@@ -65,3 +67,16 @@ def test_us_session_info_holiday_prefers_previous_session(tmp_path) -> None:
     info = us_session_info(now=now, data_dir=data_dir)
     assert info["state"] == STATE_CLOSED
     assert info["preferred_nday"] == 1
+
+
+def test_us_market_status_respects_holiday_calendar(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20261225": {"note": "Christmas", "is_open": false}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2026, 12, 25, 15, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    assert is_us_market_open(now, data_dir=data_dir) is False
+    assert us_market_status(now, data_dir=data_dir) == "closed"

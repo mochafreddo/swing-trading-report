@@ -39,12 +39,33 @@ class KISScreener:
         self._cache_ttl = cache_ttl_minutes
 
     def screen(self, request: ScreenRequest) -> ScreenResult:
+        try:
+            limit = int(request.limit)
+        except (TypeError, ValueError):
+            limit = 0
+        limit = max(0, limit)
+        if limit <= 0:
+            return ScreenResult(
+                tickers=[],
+                metadata={
+                    "source": "kis",
+                    "requested_limit": request.limit,
+                    "returned": 0,
+                    "filters": {
+                        "min_price": request.min_price,
+                        "min_dollar_volume": request.min_dollar_volume,
+                    },
+                    "rows": [],
+                    "by_ticker": {},
+                },
+            )
+
         if self._cache_dir:
             cached = self._load_cache(request)
             if cached:
                 return cached
 
-        raw = self._client.volume_rank(limit=max(request.limit * 2, 50))
+        raw = self._client.volume_rank(limit=max(limit * 2, 50))
 
         tickers: list[str] = []
         rows: list[dict[str, Any]] = []
@@ -77,7 +98,7 @@ class KISScreener:
             tickers.append(ticker)
             rows.append(enriched)
 
-            if len(tickers) >= request.limit:
+            if len(tickers) >= limit:
                 break
 
         result = ScreenResult(
@@ -102,11 +123,25 @@ class KISScreener:
 
     def _cache_key(self, request: ScreenRequest) -> str:
         parts = ["screener", f"limit{request.limit}"]
-        if request.min_price:
-            parts.append(f"price{int(request.min_price)}")
-        if request.min_dollar_volume:
-            parts.append(f"vol{int(request.min_dollar_volume)}")
+        min_price_key = self._format_cache_number(request.min_price)
+        if min_price_key is not None:
+            parts.append(f"price{min_price_key}")
+        min_dv_key = self._format_cache_number(request.min_dollar_volume)
+        if min_dv_key is not None:
+            parts.append(f"vol{min_dv_key}")
         return "_".join(parts)
+
+    @staticmethod
+    def _format_cache_number(value: float | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed <= 0:
+            return None
+        return format(parsed, ".12g")
 
     def _load_cache(self, request: ScreenRequest) -> ScreenResult | None:
         if self._cache_dir is None:

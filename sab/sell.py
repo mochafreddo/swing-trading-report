@@ -85,6 +85,10 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
 
     runtime = _build_sell_runtime(cfg, logger)
     _collect_sell_runtime(runtime, target_bars=max(cfg.min_history_bars, 200))
+    if runtime.unique_tickers and not runtime.market_data:
+        runtime.fatal_failure = True
+        runtime.failures.append("Failed to retrieve market data for holdings")
+        logger.error("Failed to retrieve market data for requested holdings")
     results = _evaluate_sell_runtime(runtime)
 
     out_path = _render_sell_report(runtime, results)

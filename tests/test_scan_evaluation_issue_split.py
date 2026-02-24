@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from typing import Any
 
 from sab.config import Config
-from sab.scan_evaluation import _evaluate_candidates, _write_scan_report
+from sab.scan_evaluation import (
+    _decorate_candidates,
+    _evaluate_candidates,
+    _write_scan_report,
+)
 from sab.scan_types import _ScanRuntime
 from sab.signals.evaluator import EvaluationSettings, evaluate_ticker
 from sab.signals.hybrid_buy import HybridEvaluationSettings, evaluate_ticker_hybrid
@@ -322,3 +326,32 @@ def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
     assert runtime.failures == [
         "AAPL.US: Unexpected evaluation error (RuntimeError: evaluation exploded)"
     ]
+
+
+def test_decorate_candidates_passes_data_dir_to_market_status_fallback() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(runtime.cfg, data_dir="custom-data-dir")
+    runtime.candidates = [
+        {
+            "ticker": "AAPL.US",
+            "currency": "USD",
+            "price_value": 100.0,
+            "score_value": 1.0,
+        }
+    ]
+
+    called: dict[str, str] = {}
+
+    def _fake_market_status(*, data_dir: str) -> str:
+        called["data_dir"] = data_dir
+        return "closed"
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=_fake_market_status,
+    )
+
+    assert called == {"data_dir": "custom-data-dir"}
+    assert runtime.candidates[0]["market_status"] == "US market closed"

@@ -13,18 +13,21 @@ STATE_AFTER_CLOSE = "after_close"
 STATE_CLOSED = "closed"
 
 
-def is_us_market_open(now: dt.datetime | None = None) -> bool:
-    now = now or dt.datetime.now(tz=ZoneInfo("UTC"))
-    ny = now.astimezone(ZoneInfo("America/New_York"))
-    if ny.weekday() >= 5:
-        return False
-    open_time = ny.replace(hour=9, minute=30, second=0, microsecond=0)
-    close_time = ny.replace(hour=16, minute=0, second=0, microsecond=0)
-    return open_time <= ny <= close_time
+def is_us_market_open(
+    now: dt.datetime | None = None,
+    *,
+    data_dir: str | None = None,
+) -> bool:
+    info = us_session_info(now=now, data_dir=data_dir)
+    return info.get("state") == STATE_INTRADAY
 
 
-def us_market_status(now: dt.datetime | None = None) -> str:
-    return "open" if is_us_market_open(now) else "closed"
+def us_market_status(
+    now: dt.datetime | None = None,
+    *,
+    data_dir: str | None = None,
+) -> str:
+    return "open" if is_us_market_open(now, data_dir=data_dir) else "closed"
 
 
 def us_session_info(

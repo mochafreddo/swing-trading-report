@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import sab.scan_screener as ss
+from sab.screener.kis_screener import KISScreener, ScreenRequest
 
 
 class _Logger:
@@ -199,3 +200,37 @@ def test_run_us_screener_direct_call_preserves_screener_seeded_baseline() -> Non
 
     assert runtime.tickers == ["005930", "AAPL.US"]
     assert runtime.screener_seeded is True
+
+
+def test_kis_screener_returns_empty_when_limit_non_positive() -> None:
+    class _Client:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def volume_rank(self, limit: int) -> list[dict[str, object]]:
+            self.calls += 1
+            return [{"ticker": "005930", "price": 100.0, "amount": 10_000.0}]
+
+    client = _Client()
+    screener = KISScreener(cast(Any, client))
+
+    assert screener.screen(ScreenRequest(limit=0)).tickers == []
+    assert screener.screen(ScreenRequest(limit=-5)).tickers == []
+    assert client.calls == 0
+
+
+def test_kis_screener_cache_key_distinguishes_float_thresholds() -> None:
+    class _Client:
+        def volume_rank(self, limit: int) -> list[dict[str, object]]:
+            return []
+
+    screener = KISScreener(cast(Any, _Client()))
+
+    key_a = screener._cache_key(
+        ScreenRequest(limit=20, min_price=10.1, min_dollar_volume=1000.9)
+    )
+    key_b = screener._cache_key(
+        ScreenRequest(limit=20, min_price=10.9, min_dollar_volume=1000.1)
+    )
+
+    assert key_a != key_b

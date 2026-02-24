@@ -194,7 +194,9 @@ def _decorate_candidates(
             note = holiday_entry.note or ""
             candidate["market_status"] = f"US {status}{(' - ' + note) if note else ''}"
         else:
-            candidate["market_status"] = f"US market {us_market_status_fn()}"
+            candidate["market_status"] = (
+                f"US market {us_market_status_fn(data_dir=runtime.cfg.data_dir)}"
+            )
 
 
 def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:

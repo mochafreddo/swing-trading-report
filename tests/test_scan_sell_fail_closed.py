@@ -427,6 +427,30 @@ def test_run_sell_returns_1_when_unexpected_ticker_evaluation_error_occurs(
     assert code == 1
 
 
+def test_run_sell_returns_1_when_all_market_data_missing(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["005930"]),
+    )
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.sell._collect_sell_runtime", return_value=None),
+        patch("sab.sell._evaluate_sell_runtime", return_value=[]),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-24.sell.missing-data.md"),
+        ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 1
+
+
 def test_run_scan_hybrid_returns_1_when_unexpected_ticker_evaluation_error_occurs(
     tmp_path: Path,
 ) -> None:

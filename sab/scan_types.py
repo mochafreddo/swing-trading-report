@@ -11,7 +11,17 @@ from .data.holiday_cache import HolidayEntry
 from .data.kis_client import KISClient
 from .data.pykrx_client import PykrxClient
 
-US_SUFFIXES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
+
+def _normalize_suffix(suffix: str | None) -> str:
+    if not suffix:
+        return ""
+    return "".join(ch for ch in suffix.upper() if ch.isalnum())
+
+
+US_SUFFIXES = {
+    _normalize_suffix(suffix)
+    for suffix in {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
+}
 
 
 def _format_ny_now_for_log(session_info: dict[str, object]) -> str:
@@ -27,7 +37,7 @@ def _infer_currency(ticker: str) -> str:
     suffix = None
     if "." in ticker:
         suffix = ticker.rsplit(".", 1)[1].strip().upper()
-    if suffix in US_SUFFIXES:
+    if _normalize_suffix(suffix) in US_SUFFIXES:
         return "USD"
     return "KRW"
 
@@ -36,7 +46,7 @@ def _infer_market(ticker: str) -> str:
     suffix = None
     if "." in ticker:
         suffix = ticker.rsplit(".", 1)[1].strip().upper()
-    if suffix in US_SUFFIXES:
+    if _normalize_suffix(suffix) in US_SUFFIXES:
         return "US"
     return "KR"
 
@@ -73,16 +83,16 @@ def _excd_from_suffix(suffix: str | None) -> str | None:
     if not suffix:
         return None
     mapping = {
-        "US": "NAS",
-        "NASDAQ": "NAS",
-        "NASD": "NAS",
-        "NAS": "NAS",
-        "NYSE": "NYS",
-        "NYS": "NYS",
-        "AMEX": "AMS",
-        "AMS": "AMS",
+        _normalize_suffix("US"): "NAS",
+        _normalize_suffix("NASDAQ"): "NAS",
+        _normalize_suffix("NASD"): "NAS",
+        _normalize_suffix("NAS"): "NAS",
+        _normalize_suffix("NYSE"): "NYS",
+        _normalize_suffix("NYS"): "NYS",
+        _normalize_suffix("AMEX"): "AMS",
+        _normalize_suffix("AMS"): "AMS",
     }
-    return mapping.get(suffix)
+    return mapping.get(_normalize_suffix(suffix))
 
 
 def _coerce_nday(value: object) -> int:
