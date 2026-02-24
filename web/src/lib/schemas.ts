@@ -66,7 +66,7 @@ const toTags = z.preprocess(
 
 const KR_TICKER_PATTERN = /^\d{6}$/;
 const US_TICKER_PATTERN =
-  /^[A-Z0-9][A-Z0-9._-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
+  /^[A-Z0-9][A-Z0-9._/-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
 
 export const holdingTickerSchema = z
   .string()
@@ -79,7 +79,7 @@ export const holdingTickerSchema = z
       KR_TICKER_PATTERN.test(ticker) || US_TICKER_PATTERN.test(ticker),
     {
       message:
-        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, AAPL.NASD)",
+        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, BRK/B.NYS)",
     },
   );
 

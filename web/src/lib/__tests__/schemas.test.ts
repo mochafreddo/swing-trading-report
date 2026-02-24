@@ -127,6 +127,16 @@ describe("holding schemas", () => {
     expect(parsed.ticker).toBe("005930");
   });
 
+  it("accepts US ticker format with slash", () => {
+    const parsed = holdingCreateSchema.parse({
+      ticker: "brk/b.nys",
+      quantity: 1,
+      entry_price: 450,
+    });
+
+    expect(parsed.ticker).toBe("BRK/B.NYS");
+  });
+
   it("rejects unsupported ticker format", () => {
     const parsed = holdingCreateSchema.safeParse({
       ticker: "AAPL",

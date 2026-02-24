@@ -19,6 +19,18 @@ type RouteContext = {
   params: { ticker: string } | Promise<{ ticker: string }>;
 };
 
+function parseTickerParam(rawTicker: string): string | null {
+  const candidate = (() => {
+    try {
+      return decodeURIComponent(rawTicker);
+    } catch {
+      return rawTicker;
+    }
+  })();
+  const parsed = holdingTickerSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     await requireAdminAuth(request);
@@ -48,11 +60,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const parsedTicker = holdingTickerSchema.safeParse(params.ticker);
-  if (!parsedTicker.success) {
+  const ticker = parseTickerParam(params.ticker);
+  if (!ticker) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
-  const ticker = parsedTicker.data;
 
   let payload: unknown;
   try {
@@ -122,11 +133,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const parsedTicker = holdingTickerSchema.safeParse(params.ticker);
-  if (!parsedTicker.success) {
+  const ticker = parseTickerParam(params.ticker);
+  if (!ticker) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
-  const ticker = parsedTicker.data;
 
   try {
     const deleted = await deleteHolding(ticker);

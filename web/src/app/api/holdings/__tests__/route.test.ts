@@ -241,6 +241,43 @@ describe("POST /api/holdings route", () => {
     expect(vi.mocked(createHolding)).not.toHaveBeenCalled();
   });
 
+  it("creates holding with slash ticker symbol", async () => {
+    vi.mocked(createHolding).mockResolvedValueOnce({
+      ticker: "BRK/B.NYS",
+      quantity: 1,
+      entry_price: 450,
+      entry_currency: null,
+      entry_date: null,
+      strategy: null,
+      notes: null,
+      tags: [],
+      stop_override: null,
+      target_override: null,
+      created_at: "2026-02-23T00:00:00Z",
+      updated_at: "2026-02-23T00:00:00Z",
+    });
+
+    const response = await POST(
+      makePostRequest({
+        ticker: "brk/b.nys",
+        quantity: 1,
+        entry_price: 450,
+      }),
+    );
+    const payload = (await response.json()) as { ticker: string };
+
+    expect(response.status).toBe(201);
+    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(vi.mocked(createHolding)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticker: "BRK/B.NYS",
+        quantity: 1,
+        entry_price: 450,
+        tags: [],
+      }),
+    );
+  });
+
   it("maps supabase API errors as-is", async () => {
     vi.mocked(createHolding).mockRejectedValueOnce(
       new SupabaseApiError("duplicate holding", 409),

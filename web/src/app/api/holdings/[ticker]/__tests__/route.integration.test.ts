@@ -21,8 +21,11 @@ vi.mock("@/lib/admin-auth", () => {
 
 import { DELETE, PATCH } from "@/app/api/holdings/[ticker]/route";
 
-function makePatchRequest(payload: unknown): NextRequest {
-  return new NextRequest("http://localhost:55300/api/holdings/aapl.us", {
+function makePatchRequest(
+  payload: unknown,
+  tickerPath = "aapl.us",
+): NextRequest {
+  return new NextRequest(`http://localhost:55300/api/holdings/${tickerPath}`, {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
@@ -33,8 +36,8 @@ function makePatchRequest(payload: unknown): NextRequest {
   });
 }
 
-function makeDeleteRequest(): NextRequest {
-  return new NextRequest("http://localhost:55300/api/holdings/AAPL.US", {
+function makeDeleteRequest(tickerPath = "AAPL.US"): NextRequest {
+  return new NextRequest(`http://localhost:55300/api/holdings/${tickerPath}`, {
     method: "DELETE",
     headers: {
       host: "localhost:55300",
@@ -80,6 +83,55 @@ describe("/api/holdings/[ticker] integration", () => {
     expect(requestUrl.searchParams.get("select")).toContain("ticker");
   });
 
+  it("PATCH accepts percent-encoded slash ticker symbol and preserves it in filter", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await PATCH(
+      makePatchRequest({ quantity: 1 }, "BRK%2FB.NYS"),
+      {
+        params: { ticker: "brk%2fb.nys" },
+      },
+    );
+    const payload = (await response.json()) as { ticker: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(requestUrl.searchParams.get("select")).toContain("ticker");
+  });
+
+  it("PATCH also accepts decoded slash ticker symbol", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await PATCH(makePatchRequest({ quantity: 1 }), {
+      params: { ticker: "brk/b.nys" },
+    });
+    const payload = (await response.json()) as { ticker: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(requestUrl.searchParams.get("select")).toContain("ticker");
+  });
+
   it("DELETE builds Supabase delete query with normalized ticker", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify([{ ticker: "AAPL.US" }]), {
@@ -103,6 +155,58 @@ describe("/api/holdings/[ticker] integration", () => {
     const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
     expect(requestUrl.pathname).toBe("/rest/v1/holdings");
     expect(requestUrl.searchParams.get("ticker")).toBe("eq.AAPL.US");
+    expect(requestUrl.searchParams.get("select")).toBe("ticker");
+  });
+
+  it("DELETE accepts percent-encoded slash ticker symbol and preserves it in filter", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await DELETE(makeDeleteRequest("BRK%2FB.NYS"), {
+      params: { ticker: "brk%2fb.nys" },
+    });
+    const payload = (await response.json()) as {
+      deleted: boolean;
+      ticker: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(requestUrl.searchParams.get("select")).toBe("ticker");
+  });
+
+  it("DELETE also accepts decoded slash ticker symbol", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await DELETE(makeDeleteRequest(), {
+      params: { ticker: "brk/b.nys" },
+    });
+    const payload = (await response.json()) as {
+      deleted: boolean;
+      ticker: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
     expect(requestUrl.searchParams.get("select")).toBe("ticker");
   });
 });
