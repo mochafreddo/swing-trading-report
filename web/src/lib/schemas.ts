@@ -131,6 +131,7 @@ export const holdingCreateSchema = z
 
 export const holdingPatchSchema = z
   .object({
+    ticker: holdingTickerSchema.optional(),
     quantity: toOptionalNonNegativeNumber,
     entry_price: toOptionalNonNegativeNumber,
     entry_currency: toNullableTrimmedString(12).optional(),

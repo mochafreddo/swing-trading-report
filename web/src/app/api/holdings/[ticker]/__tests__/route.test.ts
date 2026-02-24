@@ -280,6 +280,42 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     });
   });
 
+  it("accepts ticker rename payload and normalizes ticker", async () => {
+    vi.mocked(updateHolding).mockResolvedValueOnce({
+      ticker: "MSFT.US",
+      quantity: 3,
+      entry_price: 0,
+      entry_currency: null,
+      entry_date: null,
+      strategy: null,
+      notes: null,
+      tags: [],
+      stop_override: null,
+      target_override: null,
+      created_at: "2026-02-20T00:00:00Z",
+      updated_at: "2026-02-20T00:00:00Z",
+    });
+
+    const response = await PATCH(
+      makePatchRequest({ ticker: "msft.us", quantity: 3 }),
+      makeContext("005930"),
+    );
+    const payload = (await response.json()) as {
+      ticker: string;
+      quantity: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ticker: "MSFT.US",
+      quantity: 3,
+    });
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("005930", {
+      ticker: "MSFT.US",
+      quantity: 3,
+    });
+  });
+
   it("accepts slash ticker symbol for patch", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
       ticker: "BRK/B.NYS",

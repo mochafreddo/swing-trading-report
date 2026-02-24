@@ -69,6 +69,7 @@ export function buildCreatePayload(form: HoldingFormState) {
 
 export function buildPatchPayload(form: HoldingFormState) {
   return {
+    ticker: form.ticker,
     quantity: requiredNumber(form.quantity, "Quantity"),
     entry_price: requiredNumber(form.entry_price, "Entry Price"),
     entry_currency: stringOrNull(form.entry_currency),

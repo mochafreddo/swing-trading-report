@@ -52,9 +52,8 @@ export function HoldingsFormPanel({
             onChange={(event) =>
               onFieldChange("ticker", event.target.value.toUpperCase())
             }
-            disabled={Boolean(editingTicker)}
             placeholder="AAPL.US"
-            required={!editingTicker}
+            required
           />
         </label>
 

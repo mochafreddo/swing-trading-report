@@ -132,6 +132,40 @@ describe("/api/holdings/[ticker] integration", () => {
     expect(requestUrl.searchParams.get("select")).toContain("ticker");
   });
 
+  it("PATCH forwards normalized ticker rename payload", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "MSFT.US", quantity: 2 }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await PATCH(
+      makePatchRequest({ ticker: "msft.us", quantity: 2 }, "aapl.us"),
+      {
+        params: { ticker: "aapl.us" },
+      },
+    );
+    const payload = (await response.json()) as { ticker: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.ticker).toBe("MSFT.US");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.AAPL.US");
+
+    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const requestBody = JSON.parse(String(requestInit.body)) as {
+      ticker: string;
+      quantity: number;
+    };
+    expect(requestBody).toEqual({
+      ticker: "MSFT.US",
+      quantity: 2,
+    });
+  });
+
   it("DELETE builds Supabase delete query with normalized ticker", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify([{ ticker: "AAPL.US" }]), {

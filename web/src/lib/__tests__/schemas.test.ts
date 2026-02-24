@@ -151,4 +151,12 @@ describe("holding schemas", () => {
     const parsed = holdingPatchSchema.safeParse({});
     expect(parsed.success).toBe(false);
   });
+
+  it("accepts ticker-only patch payload and normalizes ticker", () => {
+    const parsed = holdingPatchSchema.parse({
+      ticker: "msft.us",
+    });
+
+    expect(parsed).toEqual({ ticker: "MSFT.US" });
+  });
 });
