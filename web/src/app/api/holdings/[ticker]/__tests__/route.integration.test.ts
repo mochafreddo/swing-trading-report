@@ -166,6 +166,40 @@ describe("/api/holdings/[ticker] integration", () => {
     });
   });
 
+  it("PATCH normalizes class ticker dot notation to slash in request body", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ ticker: "BRK/B.NYS", quantity: 2 }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const response = await PATCH(
+      makePatchRequest({ ticker: "brk.b.nys", quantity: 2 }, "BRK.B.NYS"),
+      {
+        params: { ticker: "BRK.B.NYS" },
+      },
+    );
+    const payload = (await response.json()) as { ticker: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+
+    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const requestBody = JSON.parse(String(requestInit.body)) as {
+      ticker: string;
+      quantity: number;
+    };
+    expect(requestBody).toEqual({
+      ticker: "BRK/B.NYS",
+      quantity: 2,
+    });
+  });
+
   it("DELETE builds Supabase delete query with normalized ticker", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify([{ ticker: "AAPL.US" }]), {
@@ -193,12 +227,20 @@ describe("/api/holdings/[ticker] integration", () => {
   });
 
   it("DELETE accepts percent-encoded slash ticker symbol and preserves it in filter", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
 
     const response = await DELETE(makeDeleteRequest("BRK%2FB.NYS"), {
       params: { ticker: "brk%2fb.nys" },
@@ -210,21 +252,32 @@ describe("/api/holdings/[ticker] integration", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
 
-    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
-    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
-    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
-    expect(requestUrl.searchParams.get("select")).toBe("ticker");
+    const firstUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const secondUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    expect(firstUrl.pathname).toBe("/rest/v1/holdings");
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(firstUrl.searchParams.get("select")).toBe("ticker");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(secondUrl.searchParams.get("select")).toBe("ticker");
   });
 
   it("DELETE also accepts decoded slash ticker symbol", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
 
     const response = await DELETE(makeDeleteRequest(), {
       params: { ticker: "brk/b.nys" },
@@ -236,11 +289,14 @@ describe("/api/holdings/[ticker] integration", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
 
-    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
-    expect(requestUrl.pathname).toBe("/rest/v1/holdings");
-    expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
-    expect(requestUrl.searchParams.get("select")).toBe("ticker");
+    const firstUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const secondUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    expect(firstUrl.pathname).toBe("/rest/v1/holdings");
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(firstUrl.searchParams.get("select")).toBe("ticker");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(secondUrl.searchParams.get("select")).toBe("ticker");
   });
 });

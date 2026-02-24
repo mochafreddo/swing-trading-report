@@ -10,6 +10,10 @@ import {
 
 import {
   fetchReportIndexPage,
+  createHolding,
+  deleteHolding,
+  SupabaseApiError,
+  updateHolding,
   upsertReportIndexEntry,
 } from "@/lib/supabase-admin";
 
@@ -207,5 +211,131 @@ describe("upsertReportIndexEntry", () => {
     expect(body).toContain('"report_key":"2026/02/2026-02-14.buy.json"');
     expect(body).toContain('"tickers":["AAPL.US"]');
     expect(body).toContain('"tickers_hydrated":true');
+  });
+});
+
+function holdingRow(
+  overrides: Partial<{
+    ticker: string;
+    quantity: number;
+    entry_price: number;
+  }> = {},
+) {
+  return {
+    ticker: overrides.ticker ?? "AAPL.US",
+    quantity: overrides.quantity ?? 1,
+    entry_price: overrides.entry_price ?? 100,
+    entry_currency: null,
+    entry_date: null,
+    strategy: null,
+    notes: null,
+    tags: [],
+    stop_override: null,
+    target_override: null,
+    created_at: "2026-02-24T00:00:00Z",
+    updated_at: "2026-02-24T00:00:00Z",
+  };
+}
+
+describe("holding mutations alias handling", () => {
+  it("createHolding blocks alias duplicates before insert", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([holdingRow({ ticker: "BRK.B.NYS" })]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      createHolding({
+        ticker: "BRK/B.NYS",
+        quantity: 1,
+        entry_price: 450,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "Holding 'BRK.B.NYS' already exists",
+    } satisfies Partial<SupabaseApiError>);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("updateHolding falls back to dotted alias when canonical ticker row is absent", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([holdingRow({ ticker: "BRK/B.NYS" })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    const updated = await updateHolding("BRK/B.NYS", {
+      ticker: "BRK/B.NYS",
+      quantity: 2,
+    });
+
+    expect(updated?.ticker).toBe("BRK/B.NYS");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+  });
+
+  it("deleteHolding falls back to dotted alias when canonical ticker row is absent", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK.B.NYS" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    const deleted = await deleteHolding("BRK/B.NYS");
+
+    expect(deleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+  });
+
+  it("deleteHolding keeps deleting aliases after first success", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK/B.NYS" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK.B.NYS" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    const deleted = await deleteHolding("BRK/B.NYS");
+
+    expect(deleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

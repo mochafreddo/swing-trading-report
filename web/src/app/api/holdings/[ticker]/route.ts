@@ -5,6 +5,7 @@ import {
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { holdingPatchSchema, holdingTickerSchema } from "@/lib/schemas";
 import {
@@ -28,7 +29,7 @@ function parseTickerParam(rawTicker: string): string | null {
     }
   })();
   const parsed = holdingTickerSchema.safeParse(candidate);
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? normalizeHoldingTickerForMutation(parsed.data) : null;
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {

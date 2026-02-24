@@ -4,6 +4,11 @@ import {
   isScanUniverseAllowed,
   PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
 } from "@/lib/run-dispatch-policy";
+import {
+  KR_TICKER_PATTERN,
+  normalizeHoldingTickerForMutation,
+  US_TICKER_PATTERN,
+} from "@/lib/holding-ticker";
 
 const toNullableTrimmedString = (maxLength: number) =>
   z.preprocess((value) => {
@@ -64,10 +69,6 @@ const toTags = z.preprocess(
   z.array(z.string().min(1).max(40)).max(20),
 );
 
-const KR_TICKER_PATTERN = /^\d{6}$/;
-const US_TICKER_PATTERN =
-  /^[A-Z0-9][A-Z0-9._/-]{0,30}\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
-
 export const holdingTickerSchema = z
   .string()
   .trim()
@@ -82,6 +83,9 @@ export const holdingTickerSchema = z
         "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, BRK/B.NYS)",
     },
   );
+const holdingMutationTickerSchema = holdingTickerSchema.transform((ticker) =>
+  normalizeHoldingTickerForMutation(ticker),
+);
 
 const entryDateSchema = z.preprocess(
   (value) => {
@@ -116,7 +120,7 @@ export const holdingListQuerySchema = z.object({
 
 export const holdingCreateSchema = z
   .object({
-    ticker: holdingTickerSchema,
+    ticker: holdingMutationTickerSchema,
     quantity: toOptionalNonNegativeNumber.default(0),
     entry_price: toOptionalNonNegativeNumber.default(0),
     entry_currency: toNullableTrimmedString(12).optional(),
@@ -131,7 +135,7 @@ export const holdingCreateSchema = z
 
 export const holdingPatchSchema = z
   .object({
-    ticker: holdingTickerSchema.optional(),
+    ticker: holdingMutationTickerSchema.optional(),
     quantity: toOptionalNonNegativeNumber,
     entry_price: toOptionalNonNegativeNumber,
     entry_currency: toNullableTrimmedString(12).optional(),

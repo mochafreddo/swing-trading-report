@@ -6,6 +6,7 @@ import {
   buildHoldingsKeysetFilter,
   encodeHoldingCursor,
 } from "@/lib/holdings-pagination";
+import { buildHoldingTickerAliases } from "@/lib/holding-ticker";
 import type {
   HoldingCursor,
   HoldingMutationInput,
@@ -659,40 +660,39 @@ export async function fetchHoldingsPage(
   };
 }
 
-export async function createHolding(
-  input: HoldingMutationInput,
-): Promise<HoldingRecord> {
+async function fetchHoldingByExactTicker(
+  ticker: string,
+): Promise<HoldingRecord | null> {
   const env = getSupabaseEnv();
-  const query = new URLSearchParams({ select: HOLDINGS_SELECT });
+  const query = new URLSearchParams({
+    select: HOLDINGS_SELECT,
+    ticker: `eq.${ticker}`,
+    limit: "1",
+  });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
-
   const response = await fetch(url, {
-    method: "POST",
     headers: buildAuthHeaders({
-      "Content-Type": "application/json",
       Accept: "application/json",
-      Prefer: "return=representation",
     }),
-    body: JSON.stringify(input),
     cache: "no-store",
   });
 
   if (!response.ok) {
     throw new SupabaseApiError(
-      `Failed to create holding: ${await parseError(response)}`,
+      `Failed to fetch holding '${ticker}': ${await parseError(response)}`,
       response.status,
     );
   }
 
   const payload = (await response.json()) as unknown;
   if (!Array.isArray(payload) || payload.length === 0) {
-    throw new SupabaseApiError("Supabase did not return created holding", 500);
+    return null;
   }
 
   return payload[0] as HoldingRecord;
 }
 
-export async function updateHolding(
+async function patchHoldingByExactTicker(
   ticker: string,
   patch: HoldingMutationInput,
 ): Promise<HoldingRecord | null> {
@@ -729,7 +729,7 @@ export async function updateHolding(
   return payload[0] as HoldingRecord;
 }
 
-export async function deleteHolding(ticker: string): Promise<boolean> {
+async function deleteHoldingByExactTicker(ticker: string): Promise<boolean> {
   const env = getSupabaseEnv();
   const query = new URLSearchParams({
     select: "ticker",
@@ -755,4 +755,74 @@ export async function deleteHolding(ticker: string): Promise<boolean> {
 
   const payload = (await response.json()) as unknown;
   return Array.isArray(payload) && payload.length > 0;
+}
+
+export async function createHolding(
+  input: HoldingMutationInput,
+): Promise<HoldingRecord> {
+  const ticker = typeof input.ticker === "string" ? input.ticker : "";
+  if (ticker) {
+    for (const alias of buildHoldingTickerAliases(ticker)) {
+      const existing = await fetchHoldingByExactTicker(alias);
+      if (existing) {
+        throw new SupabaseApiError(
+          `Holding '${existing.ticker}' already exists`,
+          409,
+        );
+      }
+    }
+  }
+
+  const env = getSupabaseEnv();
+  const query = new URLSearchParams({ select: HOLDINGS_SELECT });
+  const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Prefer: "return=representation",
+    }),
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to create holding: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!Array.isArray(payload) || payload.length === 0) {
+    throw new SupabaseApiError("Supabase did not return created holding", 500);
+  }
+
+  return payload[0] as HoldingRecord;
+}
+
+export async function updateHolding(
+  ticker: string,
+  patch: HoldingMutationInput,
+): Promise<HoldingRecord | null> {
+  for (const alias of buildHoldingTickerAliases(ticker)) {
+    const updated = await patchHoldingByExactTicker(alias, patch);
+    if (updated) {
+      return updated;
+    }
+  }
+  return null;
+}
+
+export async function deleteHolding(ticker: string): Promise<boolean> {
+  let deletedAny = false;
+  for (const alias of buildHoldingTickerAliases(ticker)) {
+    const deleted = await deleteHoldingByExactTicker(alias);
+    if (deleted) {
+      deletedAny = true;
+    }
+  }
+  return deletedAny;
 }

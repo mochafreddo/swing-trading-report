@@ -137,9 +137,29 @@ describe("holding schemas", () => {
     expect(parsed.ticker).toBe("BRK/B.NYS");
   });
 
+  it("normalizes US class ticker dot notation to slash", () => {
+    const parsed = holdingCreateSchema.parse({
+      ticker: "brk.b.nys",
+      quantity: 1,
+      entry_price: 450,
+    });
+
+    expect(parsed.ticker).toBe("BRK/B.NYS");
+  });
+
   it("rejects unsupported ticker format", () => {
     const parsed = holdingCreateSchema.safeParse({
       ticker: "AAPL",
+      quantity: 1,
+      entry_price: 172.5,
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects ticker with empty base segment", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "A..US",
       quantity: 1,
       entry_price: 172.5,
     });
@@ -158,5 +178,13 @@ describe("holding schemas", () => {
     });
 
     expect(parsed).toEqual({ ticker: "MSFT.US" });
+  });
+
+  it("normalizes class ticker dot notation in patch payload", () => {
+    const parsed = holdingPatchSchema.parse({
+      ticker: "brk.b.nys",
+    });
+
+    expect(parsed).toEqual({ ticker: "BRK/B.NYS" });
   });
 });
