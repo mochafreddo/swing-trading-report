@@ -804,6 +804,136 @@ def _normalize_choice(
     return default
 
 
+def _raise_range_error(path: str, detail: str) -> None:
+    raise ConfigLoadError(f"Invalid config value '{path}': {detail}")
+
+
+def _validate_positive(path: str, value: float) -> None:
+    if value <= 0:
+        _raise_range_error(path, f"must be > 0 (got {value!r})")
+
+
+def _validate_non_negative(path: str, value: float) -> None:
+    if value < 0:
+        _raise_range_error(path, f"must be >= 0 (got {value!r})")
+
+
+def _validate_int_min(path: str, value: int, minimum: int = 1) -> None:
+    if value < minimum:
+        _raise_range_error(path, f"must be >= {minimum} (got {value!r})")
+
+
+def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> None:
+    _validate_positive("sell.atr_trail_multiplier", sell.sell_atr_multiplier)
+    _validate_non_negative("sell.time_stop_days", float(sell.sell_time_stop_days))
+    _validate_int_min("sell.ema_short", sell.sell_ema_short)
+    _validate_int_min("sell.ema_long", sell.sell_ema_long)
+    _validate_int_min("sell.rsi_period", sell.sell_rsi_period)
+    _validate_non_negative("sell.rsi_floor", sell.sell_rsi_floor)
+    _validate_non_negative("sell.rsi_floor_alt", sell.sell_rsi_floor_alt)
+    _validate_int_min("sell.min_bars", sell.sell_min_bars)
+
+    _validate_non_negative("strategy.gap_atr_multiplier", strategy.gap_atr_multiplier)
+    _validate_non_negative("screener.min_price", strategy.min_price)
+    _validate_non_negative("screener.min_dollar_volume", strategy.min_dollar_volume)
+    if strategy.us_min_price is not None:
+        _validate_non_negative("screener.us.min_price", strategy.us_min_price)
+    if strategy.us_min_dollar_volume is not None:
+        _validate_non_negative(
+            "screener.us.min_dollar_volume", strategy.us_min_dollar_volume
+        )
+    _validate_int_min("strategy.min_history_bars", strategy.min_history_bars)
+    _validate_int_min("strategy.rs_lookback_days", strategy.rs_lookback_days)
+
+    hybrid_strategy = strategy.hybrid
+    _validate_int_min(
+        "strategy.hybrid.sma_trend_period", hybrid_strategy.sma_trend_period
+    )
+    _validate_int_min(
+        "strategy.hybrid.ema_short_period", hybrid_strategy.ema_short_period
+    )
+    _validate_int_min("strategy.hybrid.ema_mid_period", hybrid_strategy.ema_mid_period)
+    _validate_int_min("strategy.hybrid.rsi_period", hybrid_strategy.rsi_period)
+    _validate_non_negative("strategy.hybrid.rsi_zone_low", hybrid_strategy.rsi_zone_low)
+    _validate_non_negative(
+        "strategy.hybrid.rsi_zone_high", hybrid_strategy.rsi_zone_high
+    )
+    _validate_non_negative(
+        "strategy.hybrid.rsi_oversold_low", hybrid_strategy.rsi_oversold_low
+    )
+    _validate_non_negative(
+        "strategy.hybrid.rsi_oversold_high", hybrid_strategy.rsi_oversold_high
+    )
+    _validate_int_min(
+        "strategy.hybrid.pullback_max_bars", hybrid_strategy.pullback_max_bars
+    )
+    _validate_int_min(
+        "strategy.hybrid.breakout_consolidation_min_bars",
+        hybrid_strategy.breakout_consolidation_min_bars,
+    )
+    _validate_int_min(
+        "strategy.hybrid.breakout_consolidation_max_bars",
+        hybrid_strategy.breakout_consolidation_max_bars,
+    )
+    if (
+        hybrid_strategy.breakout_consolidation_min_bars
+        > hybrid_strategy.breakout_consolidation_max_bars
+    ):
+        _raise_range_error(
+            "strategy.hybrid.breakout_consolidation_min_bars",
+            "must be <= strategy.hybrid.breakout_consolidation_max_bars",
+        )
+    _validate_int_min(
+        "strategy.hybrid.volume_lookback_days", hybrid_strategy.volume_lookback_days
+    )
+    _validate_non_negative("strategy.hybrid.max_gap_pct", hybrid_strategy.max_gap_pct)
+    _validate_int_min("strategy.hybrid.sma60_period", hybrid_strategy.sma60_period)
+
+    hybrid_sell = sell.hybrid_sell
+    _validate_non_negative(
+        "sell.hybrid.profit_target_low", hybrid_sell.profit_target_low
+    )
+    _validate_non_negative(
+        "sell.hybrid.profit_target_high", hybrid_sell.profit_target_high
+    )
+    if hybrid_sell.profit_target_low > hybrid_sell.profit_target_high:
+        _raise_range_error(
+            "sell.hybrid.profit_target_low",
+            "must be <= sell.hybrid.profit_target_high",
+        )
+    _validate_non_negative(
+        "sell.hybrid.partial_profit_floor", hybrid_sell.partial_profit_floor
+    )
+    _validate_int_min("sell.hybrid.ema_short_period", hybrid_sell.ema_short_period)
+    _validate_int_min("sell.hybrid.ema_mid_period", hybrid_sell.ema_mid_period)
+    _validate_int_min("sell.hybrid.sma_trend_period", hybrid_sell.sma_trend_period)
+    _validate_int_min("sell.hybrid.rsi_period", hybrid_sell.rsi_period)
+    _validate_non_negative(
+        "sell.hybrid.stop_loss_pct_min", hybrid_sell.stop_loss_pct_min
+    )
+    _validate_non_negative(
+        "sell.hybrid.stop_loss_pct_max", hybrid_sell.stop_loss_pct_max
+    )
+    if hybrid_sell.stop_loss_pct_min > hybrid_sell.stop_loss_pct_max:
+        _raise_range_error(
+            "sell.hybrid.stop_loss_pct_min",
+            "must be <= sell.hybrid.stop_loss_pct_max",
+        )
+    _validate_non_negative(
+        "sell.hybrid.failed_breakout_drop_pct", hybrid_sell.failed_breakout_drop_pct
+    )
+    _validate_int_min("sell.hybrid.min_bars", hybrid_sell.min_bars)
+    _validate_non_negative(
+        "sell.hybrid.time_stop_days", float(hybrid_sell.time_stop_days)
+    )
+    _validate_non_negative(
+        "sell.hybrid.time_stop_grace_days", float(hybrid_sell.time_stop_grace_days)
+    )
+    _validate_non_negative(
+        "sell.hybrid.time_stop_profit_floor", hybrid_sell.time_stop_profit_floor
+    )
+
+
 def _validate_sections(
     *,
     data: _DataSection,
@@ -842,6 +972,7 @@ def _validate_sections(
             source_name="FX_MODE/fx.mode",
         ),
     )
+    _validate_risk_ranges(strategy=validated_strategy, sell=validated_sell)
     return data, validated_strategy, validated_sell, validated_fx
 
 

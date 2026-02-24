@@ -69,7 +69,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Data provider override",
     )
     s.add_argument(
-        "--screener-limit", type=int, default=None, help="Override screener top-N size"
+        "--screener-limit",
+        type=int,
+        default=None,
+        help="Override screener top-N size for both KR and US",
     )
     s.add_argument(
         "--universe",

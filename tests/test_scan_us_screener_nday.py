@@ -82,6 +82,58 @@ class RunScanUSScreenerNdayTests(unittest.TestCase):
             self.assertNotIn(0, req.fallback_ndays)
             self.assertTrue(all(n >= 1 for n in req.fallback_ndays))
 
+    def test_run_scan_cli_screener_limit_overrides_us_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._base_cfg(tmpdir)
+            fake_session = {
+                "state": "intraday",
+                "is_holiday": False,
+                "preferred_nday": 1,
+                "session_date": None,
+                "ny_now": None,
+            }
+
+            with (
+                patch("sab.scan.load_config", return_value=cfg),
+                patch("sab.scan.load_watchlist", return_value=[]),
+                patch(
+                    "sab.scan.write_report",
+                    return_value=os.path.join(tmpdir, "report.md"),
+                ),
+                patch("sab.scan.us_session_info", return_value=fake_session),
+                patch(
+                    "sab.market_data_common.KISClient.overseas_holidays",
+                    return_value=[],
+                ),
+                patch(
+                    "sab.market_data_common.KISClient.overseas_daily_candles",
+                    return_value=[],
+                ),
+                patch(
+                    "sab.scan.KUS.screen",
+                    autospec=True,
+                    return_value=type(
+                        "KRes",
+                        (),
+                        {
+                            "tickers": ["AAPL.NAS"],
+                            "metadata": {"nday_used": 1, "nday_tried": [1]},
+                        },
+                    )(),
+                ) as mock_screen,
+            ):
+                run_scan(
+                    limit=None,
+                    watchlist_path=None,
+                    provider=None,
+                    screener_limit=13,
+                    universe="screener",
+                )
+
+            args, kwargs = mock_screen.call_args
+            req = kwargs.get("request") or args[1]
+            self.assertEqual(req.limit, 13)
+
 
 if __name__ == "__main__":
     unittest.main()

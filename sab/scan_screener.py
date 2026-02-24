@@ -118,6 +118,7 @@ def _run_us_screener(
     runtime: _ScanRuntime,
     *,
     screener_limit: int,
+    screener_limit_from_cli: bool = False,
     screener_only: bool,
     KUSCls: Any,
     KUSReqCls: Any,
@@ -132,7 +133,10 @@ def _run_us_screener(
         return 0
 
     cfg = runtime.cfg
-    us_limit = cfg.us_screener_limit or screener_limit
+    if screener_limit_from_cli:
+        us_limit = screener_limit
+    else:
+        us_limit = cfg.us_screener_limit or screener_limit
     us_tickers: list[str] = []
     us_source: str | None = None
     us_nday_used: int | None = None
@@ -230,6 +234,7 @@ def _run_screeners(
     screener_enabled: bool,
     screener_only: bool,
     screener_limit: int,
+    screener_limit_from_cli: bool = False,
     ScreenRequestCls: Any,
     KISScreenerCls: Any,
     KUSCls: Any,
@@ -263,6 +268,7 @@ def _run_screeners(
     total_added += _run_us_screener(
         runtime,
         screener_limit=screener_limit,
+        screener_limit_from_cli=screener_limit_from_cli,
         screener_only=screener_only,
         KUSCls=KUSCls,
         KUSReqCls=KUSReqCls,

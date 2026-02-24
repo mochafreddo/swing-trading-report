@@ -1,3 +1,5 @@
+import datetime as dt
+
 from sab.signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
 
 
@@ -134,3 +136,97 @@ def test_hybrid_sell_target_override_prioritizes_display_target(monkeypatch):
 
     assert result.target_price == 123.0
     assert "Custom target override in effect" in result.reasons
+
+
+def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
+    class _FixedDate(dt.date):
+        @classmethod
+        def today(cls) -> "_FixedDate":
+            return cls(2025, 1, 15)
+
+    monkeypatch.setattr("sab.signals.hybrid_sell.dt.date", _FixedDate)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.ema", lambda closes, n: [50.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.sma", lambda closes, n: [50.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.rsi", lambda closes, n: [60.0] * len(closes)
+    )
+
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=3,
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-09"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(100.0), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert result.reasons == ["No hybrid sell criteria triggered"]
+
+
+def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
+    class _FixedDate(dt.date):
+        @classmethod
+        def today(cls) -> "_FixedDate":
+            return cls(2025, 1, 15)
+
+    monkeypatch.setattr("sab.signals.hybrid_sell.dt.date", _FixedDate)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.ema", lambda closes, n: [50.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.sma", lambda closes, n: [50.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.rsi", lambda closes, n: [60.0] * len(closes)
+    )
+
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=3,
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "BAD-DATE",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+
+    assert result.action == "HOLD"
+    assert any(
+        "Time stop skipped: invalid eval_date" in reason for reason in result.reasons
+    )

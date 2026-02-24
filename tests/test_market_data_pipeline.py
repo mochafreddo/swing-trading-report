@@ -221,6 +221,37 @@ def test_collect_market_data_from_kis_ignores_cache_migration_write_error() -> N
     assert any("Failed to migrate cache key" in message for message in runtime.failures)
 
 
+def test_collect_market_data_from_kis_continues_when_cache_persist_fails() -> None:
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            return _build_candles(count)
+
+    runtime = _build_runtime(kis_client=_KisClient())
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: (_ for _ in ()).throw(OSError("disk full")),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+    )
+
+    assert "005930" in runtime.market_data
+    assert runtime.ticker_data_source["005930"] == "kis"
+    assert any(
+        "Failed to persist cache" in message
+        and "005930" in message
+        and "candles_005930" in message
+        and "disk full" in message
+        for message in runtime.failures
+    )
+
+
 def test_collect_market_data_from_kis_ignores_non_list_cache_payload() -> None:
     class _FailingKisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:

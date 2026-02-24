@@ -21,7 +21,7 @@ kis:
 
 screener:
   enabled: true
-  limit: 20
+  limit: 20  # KR top-N (CLI --screener-limit 미지정 시 사용)
   only: false
   cache_ttl_minutes: 5
   min_price: 1000
@@ -41,7 +41,7 @@ screener:
   us_mode: defaults
   # US KIS rank metric: 'volume' | 'market_cap' | 'value'
   us_metric: volume
-  us_limit: 20
+  us_limit: 20  # US top-N (CLI --screener-limit 지정 시 KR/US 모두 CLI 값 우선)
 
 strategy:
   # Buy strategy mode: 'ema_cross' (current EMA20/50) or 'sma_ema_hybrid' (SMA20 + EMA10/21 hybrid, planned)
@@ -75,31 +75,31 @@ strategy:
 sell:
   # Sell mode: 'generic' (ATR/EMA20/50-based) or 'sma_ema_hybrid' (profit band + SMA20/EMA10/21 rules)
   mode: generic
-  atr_trail_multiplier: 1.0
-  time_stop_days: 10
+  atr_trail_multiplier: 1.0  # > 0
+  time_stop_days: 10         # >= 0
   require_sma200: true
-  ema_short: 20
-  ema_long: 50
-  rsi_period: 14
-  rsi_floor: 50
-  rsi_floor_alt: 30
-  min_bars: 20
+  ema_short: 20              # >= 1
+  ema_long: 50               # >= 1
+  rsi_period: 14             # >= 1
+  rsi_floor: 50              # >= 0
+  rsi_floor_alt: 30          # >= 0
+  min_bars: 20               # >= 1
   # Hybrid sell tuning (used when mode = sma_ema_hybrid)
   hybrid:
-    profit_target_low: 0.05        # 1st profit threshold (5%)
-    profit_target_high: 0.10       # high profit threshold (10%)
-    partial_profit_floor: 0.03     # partial-profit zone floor (3%)
-    ema_short_period: 10           # EMA short for trend breakdown
-    ema_mid_period: 21             # EMA mid for trend breakdown
-    sma_trend_period: 20           # SMA20 trend baseline
-    rsi_period: 14                 # RSI period for sell checks
-    stop_loss_pct_min: 0.03        # lower bound of hard stop band (3%)
-    stop_loss_pct_max: 0.05        # upper bound of hard stop band (5%)
-    failed_breakout_drop_pct: 0.03 # breakout failure threshold (3% below entry)
-    min_bars: 20                   # minimum bars required for evaluation
-    time_stop_days: 0              # optional time stop (0 disables)
-    time_stop_grace_days: 0        # extra days after time_stop_days before hard exit (0 disables)
-    time_stop_profit_floor: 0.00   # P&L floor to avoid hard exit after grace (e.g., 0.03 = 3%)
+    profit_target_low: 0.05        # >= 0 and <= profit_target_high
+    profit_target_high: 0.10       # >= 0
+    partial_profit_floor: 0.03     # >= 0
+    ema_short_period: 10           # >= 1
+    ema_mid_period: 21             # >= 1
+    sma_trend_period: 20           # >= 1
+    rsi_period: 14                 # >= 1
+    stop_loss_pct_min: 0.03        # >= 0 and <= stop_loss_pct_max
+    stop_loss_pct_max: 0.05        # >= 0
+    failed_breakout_drop_pct: 0.03 # >= 0
+    min_bars: 20                   # >= 1
+    time_stop_days: 0              # >= 0 (0 disables)
+    time_stop_grace_days: 0        # >= 0
+    time_stop_profit_floor: 0.00   # >= 0 (e.g., 0.03 = 3%)
 
 entry_check:
   enabled: false

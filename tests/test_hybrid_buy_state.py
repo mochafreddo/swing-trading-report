@@ -1,3 +1,5 @@
+import math
+
 from sab.signals.hybrid_buy import (
     HybridEvaluationSettings,
     HybridPattern,
@@ -201,6 +203,24 @@ def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):
     assert watch_result.candidate["entry_state"] == "WATCH"
     assert ready_result.candidate["score_value"] > watch_result.candidate["score_value"]
     assert "entry_state=" in ready_result.candidate["score_notes"]
+
+
+def test_hybrid_buy_non_finite_ohlc_returns_system_issue(monkeypatch):
+    candles = _simple_candles(10)
+    candles[-1]["high"] = math.inf
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is None
+    assert result.reason == "Invalid candle data: non-finite OHLC values"
+    assert result.reason_kind == "system"
 
 
 def test_breakout_extended_sets_watch(monkeypatch):

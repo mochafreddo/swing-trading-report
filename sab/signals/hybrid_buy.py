@@ -52,6 +52,28 @@ class HybridEvaluationResult:
     reason_kind: str | None = None
 
 
+def _to_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _has_non_finite_ohlc(candles: list[dict[str, Any]]) -> bool:
+    for candle in candles:
+        if (
+            _to_finite_float(candle.get("open")) is None
+            or _to_finite_float(candle.get("high")) is None
+            or _to_finite_float(candle.get("low")) is None
+            or _to_finite_float(candle.get("close")) is None
+        ):
+            return True
+    return False
+
+
 def _avg_dollar_volume(candles: list[dict[str, Any]], window: int) -> float:
     if not candles:
         return 0.0
@@ -352,6 +374,13 @@ def evaluate_ticker_hybrid(
         return HybridEvaluationResult(ticker, None, "No candle data", "system")
 
     candles_eval = candles[: idx_eval + 1]
+    if _has_non_finite_ohlc(candles_eval):
+        return HybridEvaluationResult(
+            ticker,
+            None,
+            "Invalid candle data: non-finite OHLC values",
+            "system",
+        )
 
     ok, reason, reason_kind, last_close, avg_dv = _basic_filters(
         ticker, candles, settings, meta, idx_eval

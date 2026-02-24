@@ -23,6 +23,16 @@ def _normalize_candle_date(value: Any) -> str:
     return date_text[:8]
 
 
+def _parse_eval_date(value: Any) -> dt.date | None:
+    date_text = _normalize_candle_date(value)
+    if not date_text:
+        return None
+    try:
+        return dt.datetime.strptime(date_text, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
 def _to_finite_float(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -202,14 +212,19 @@ def evaluate_sell_signals(
     if entry_date_str and time_stop_days > 0:
         try:
             entry_date = dt.date.fromisoformat(str(entry_date_str))
-            days_in_trade = (dt.date.today() - entry_date).days
-            if days_in_trade >= time_stop_days:
-                reasons.append(
-                    f"Time stop: {days_in_trade} days >= {time_stop_days} days"
-                )
-                action = "REVIEW" if action != "SELL" else action
         except ValueError:
-            pass
+            reasons.append("Entry date missing/invalid; time stop skipped")
+        else:
+            eval_anchor = _parse_eval_date(eval_date)
+            if eval_anchor is None:
+                reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
+            else:
+                days_in_trade = (eval_anchor - entry_date).days
+                if days_in_trade >= time_stop_days:
+                    reasons.append(
+                        f"Time stop: {days_in_trade} days >= {time_stop_days} days"
+                    )
+                    action = "REVIEW" if action != "SELL" else action
 
     if not reasons:
         reasons.append("No sell criteria triggered")

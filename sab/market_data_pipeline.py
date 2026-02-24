@@ -509,7 +509,17 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
             if candles:
                 runtime.market_data[ticker] = candles
                 runtime.ticker_data_source[ticker] = "kis"
-                request.save_json_fn(runtime.cfg.data_dir, target.cache_key, candles)
+                try:
+                    request.save_json_fn(
+                        runtime.cfg.data_dir, target.cache_key, candles
+                    )
+                except Exception as exc:
+                    cache_msg = (
+                        f"{ticker}: Failed to persist cache '{target.cache_key}' "
+                        f"after successful KIS fetch ({type(exc).__name__}: {exc})"
+                    )
+                    runtime.failures.append(cache_msg)
+                    runtime.logger.warning(cache_msg)
                 if request.on_candles_applied_fn:
                     request.on_candles_applied_fn(runtime, ticker, candles)
                 runtime.logger.info("Fetched %s candles for %s", len(candles), ticker)

@@ -50,7 +50,7 @@
 - 실행 예시
   - 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
   - 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
-  - 스크리너 상위 N 조정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
+  - 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
   - 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
@@ -173,6 +173,8 @@
 - 해외 스크리너 모드
   - `kis`: KIS 해외 랭킹 API(거래량/시가총액/거래대금 순위) 사용
   - `defaults`: 설정의 기본 유니버스(`screener.us_defaults`)에서 상위 N 선택
+  - `--screener-limit`을 명시하면 KR/US 모두 해당 값이 우선 적용됩니다.
+  - `--screener-limit` 미지정 시 KR은 `screener.limit`, US는 `screener.us_limit`을 사용합니다.
 - 미국 시장 시간대는 EST/EDT 기준(09:30–16:00)이며, 스크리너 메타데이터에 시장 상태(open/closed)를 표기합니다.
 - 환율/통화 병기: `FX_MODE=kis`로 두면 KIS 해외 현재가상세에서 실시간 환율(`t_rate`)을 읽어 자동 적용합니다. `USD_KRW_RATE`는 manual 모드나 폴백으로 사용됩니다.
 - `FX_MODE` 상세

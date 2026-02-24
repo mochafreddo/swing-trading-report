@@ -262,3 +262,66 @@ data:
     msg = str(exc.value)
     assert "DATA_DIR (data.data_dir)" in msg
     assert "REPORT_DIR (data.report_dir)" in msg
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "error_path"),
+    [
+        ("sell:\n  atr_trail_multiplier: 0\n", "sell.atr_trail_multiplier"),
+        ("sell:\n  time_stop_days: -1\n", "sell.time_stop_days"),
+        (
+            "sell:\n  hybrid:\n    profit_target_low: 0.11\n    profit_target_high: 0.10\n",
+            "sell.hybrid.profit_target_low",
+        ),
+        (
+            "sell:\n  hybrid:\n    stop_loss_pct_min: 0.06\n    stop_loss_pct_max: 0.05\n",
+            "sell.hybrid.stop_loss_pct_min",
+        ),
+        (
+            "sell:\n  hybrid:\n    failed_breakout_drop_pct: -0.01\n",
+            "sell.hybrid.failed_breakout_drop_pct",
+        ),
+        ("strategy:\n  min_history_bars: 0\n", "strategy.min_history_bars"),
+        ("sell:\n  rsi_period: 0\n", "sell.rsi_period"),
+    ],
+)
+def test_load_config_rejects_invalid_risk_ranges_even_when_not_strict(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    yaml_text: str,
+    error_path: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=error_path):
+        load_config()
+
+
+def test_load_config_allows_zero_gap_atr_multiplier(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+strategy:
+  gap_atr_multiplier: 0
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.gap_atr_multiplier == 0.0

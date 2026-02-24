@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 import pytest
 import sab.signals.sell_rules as sr
 from sab.signals.sell_rules import Candle, SellSettings, evaluate_sell_signals
@@ -215,3 +217,117 @@ def test_stop_override_keeps_non_sell_when_close_above_override(
     assert result.stop_price == pytest.approx(95.0)
     assert "Custom stop override in effect" in result.reasons
     assert "Price hit custom stop override" not in result.reasons
+
+
+def test_time_stop_uses_eval_date_instead_of_local_today(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FixedDate(dt.date):
+        @classmethod
+        def today(cls) -> _FixedDate:
+            return cls(2025, 1, 15)
+
+    monkeypatch.setattr(sr.dt, "date", _FixedDate)
+    monkeypatch.setattr(
+        sr,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(sr, "ema", lambda values, period: [90.0] * len(values))
+    monkeypatch.setattr(sr, "rsi", lambda values, period: [60.0] * len(values))
+    monkeypatch.setattr(
+        sr, "atr", lambda highs, lows, closes, period: [0.0] * len(closes)
+    )
+
+    candles: list[Candle] = [
+        {
+            "date": "20250108",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250109",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-09"}
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=3,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "HOLD"
+    assert result.reasons == ["No sell criteria triggered"]
+
+
+def test_time_stop_skips_when_eval_date_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FixedDate(dt.date):
+        @classmethod
+        def today(cls) -> _FixedDate:
+            return cls(2025, 1, 15)
+
+    monkeypatch.setattr(sr.dt, "date", _FixedDate)
+    monkeypatch.setattr(
+        sr,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(sr, "ema", lambda values, period: [90.0] * len(values))
+    monkeypatch.setattr(sr, "rsi", lambda values, period: [60.0] * len(values))
+    monkeypatch.setattr(
+        sr, "atr", lambda highs, lows, closes, period: [0.0] * len(closes)
+    )
+
+    candles: list[Candle] = [
+        {
+            "date": "20250108",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "BAD-DATE",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=3,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "HOLD"
+    assert any(
+        "Time stop skipped: invalid eval_date" in reason for reason in result.reasons
+    )

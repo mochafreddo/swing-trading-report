@@ -64,6 +64,7 @@ def _collect_scan_runtime(
     screener_enabled: bool,
     screener_only: bool,
     screener_limit: int,
+    screener_limit_from_cli: bool,
     evaluation_limit: int | None,
 ) -> None:
     market_data_service = _build_market_data_service()
@@ -77,6 +78,7 @@ def _collect_scan_runtime(
         screener_enabled=screener_enabled,
         screener_only=screener_only,
         screener_limit=screener_limit,
+        screener_limit_from_cli=screener_limit_from_cli,
         ScreenRequestCls=ScreenRequest,
         KISScreenerCls=KISScreener,
         KUSCls=KUS,
@@ -166,6 +168,7 @@ def run_scan(
         logger=logger,
         tickers=deduped_tickers,
     )
+    screener_limit_from_cli = screener_limit is not None
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
     )
@@ -178,6 +181,7 @@ def run_scan(
         screener_enabled=screener_enabled,
         screener_only=screener_only,
         screener_limit=effective_screener_limit,
+        screener_limit_from_cli=screener_limit_from_cli,
         evaluation_limit=cfg.screen_limit,
     )
 
