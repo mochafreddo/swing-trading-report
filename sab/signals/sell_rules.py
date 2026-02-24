@@ -151,8 +151,16 @@ def evaluate_sell_signals(
     stop_price = None
     entry_date_str = holding.get("entry_date")
     if stop_override is not None:
-        stop_price = float(stop_override)
-        reasons.append("Custom stop override in effect")
+        parsed_stop_override = _to_finite_float(stop_override)
+        if parsed_stop_override is None:
+            reasons.append("Invalid custom stop override ignored")
+            action = "REVIEW" if action != "SELL" else action
+        else:
+            stop_price = parsed_stop_override
+            reasons.append("Custom stop override in effect")
+            if close_today <= stop_price:
+                reasons.append("Price hit custom stop override")
+                action = "SELL"
     elif atr_today > 0:
         start_idx = max(0, len(closes) - settings.min_bars)
         if entry_date_str:

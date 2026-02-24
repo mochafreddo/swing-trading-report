@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 from sab.config import Config
 from sab.scan_evaluation import _evaluate_candidates, _write_scan_report
 from sab.scan_types import _ScanRuntime
+from sab.signals.evaluator import EvaluationSettings, evaluate_ticker
 
 
 def _build_runtime() -> _ScanRuntime:
@@ -131,6 +133,58 @@ def test_evaluate_candidates_prefers_reason_kind_over_text_prefix() -> None:
     assert runtime.failures == []
     assert runtime.system_issues == []
     assert runtime.screen_outs == ["AAPL.US: Insufficient price data"]
+
+
+def test_evaluate_candidates_routes_non_finite_ohlc_to_system_issues() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(runtime.cfg, min_history_bars=2)
+    runtime.market_data["AAPL.US"] = [
+        {
+            "date": "20250108",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250109",
+            "open": 101.0,
+            "high": math.inf,
+            "low": 100.0,
+            "close": 101.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250110",
+            "open": 102.0,
+            "high": 103.0,
+            "low": 101.0,
+            "close": 102.0,
+            "volume": 1_000_000.0,
+        },
+    ]
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=EvaluationSettings,
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=evaluate_ticker,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert runtime.screen_outs == []
+    assert runtime.system_issues == [
+        "AAPL.US: Invalid candle data: non-finite OHLC values"
+    ]
+    assert runtime.failures == ["AAPL.US: Invalid candle data: non-finite OHLC values"]
 
 
 def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None:

@@ -173,31 +173,14 @@ def choose_eval_index(
     if last_date and last_date < session_date:
         return idx_latest, False
 
-    # Compute volume heuristic using only data before the latest candle.
-    prev_slice_start = max(0, idx_latest - lookback_for_volume)
-    prev_slice = candles[prev_slice_start:idx_latest]
-    avg_vol = 0.0
-    if prev_slice:
-        avg_vol = sum(float(c.get("volume") or 0.0) for c in prev_slice) / len(
-            prev_slice
-        )
-    last_vol = float(last.get("volume") or 0.0)
-    very_thin_today = avg_vol > volume_floor and last_vol < avg_vol * thin_ratio
-
     idx_eval = idx_latest
-    is_us_holiday = False
     if market == "US":
         is_us_holiday = _is_us_holiday(session_date, data_dir=data_dir)
         if is_us_holiday:
             state = STATE_CLOSED
 
-        if (state == STATE_INTRADAY and last_date == session_date) or (
-            state == STATE_PRE_OPEN and very_thin_today and last_date == session_date
-        ):
-            idx_eval = idx_latest - 1
-    else:
-        if state == STATE_INTRADAY and very_thin_today and last_date == session_date:
-            idx_eval = idx_latest - 1
+    if state in {STATE_PRE_OPEN, STATE_INTRADAY} and last_date == session_date:
+        idx_eval = idx_latest - 1
 
     if idx_eval < 0:
         idx_eval = 0

@@ -133,14 +133,28 @@ def evaluate_sell_signals_hybrid(
     reasons: list[str] = []
     action = "HOLD"
 
-    entry_price = holding.get("entry_price")
-    entry_price = float(entry_price) if isinstance(entry_price, (int | float)) else None
+    entry_price = _to_finite_float(holding.get("entry_price"))
+    stop_override = _to_finite_float(holding.get("stop_override"))
+    target_override = _to_finite_float(holding.get("target_override"))
 
     pnl_pct = _compute_pnl_pct(entry_price, last_close)
 
     # --- 1) Profit taking logic ---
     stop_price: float | None = None
     target_price: float | None = None
+    if stop_override is not None:
+        stop_price = stop_override
+        reasons.append("Custom stop override in effect")
+        if last_close <= stop_price:
+            reasons.append("Price hit custom stop override")
+            action = "SELL"
+
+    if target_override is not None:
+        target_price = target_override
+        reasons.append("Custom target override in effect")
+    elif entry_price is not None:
+        # Suggest a notional target price (can be surfaced in report)
+        target_price = entry_price * (1.0 + settings.profit_target_high)
 
     if pnl_pct is not None and pnl_pct >= settings.profit_target_high:
         reasons.append(
@@ -159,10 +173,6 @@ def evaluate_sell_signals_hybrid(
         )
         if action != "SELL":
             action = "REVIEW"
-
-    # Suggest a notional target price (can be surfaced in report)
-    if entry_price is not None:
-        target_price = entry_price * (1.0 + settings.profit_target_high)
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
     ema_s = ema_short[-1]
@@ -222,7 +232,7 @@ def evaluate_sell_signals_hybrid(
         action = "SELL"
 
     # --- 4) Hard stop loss band (3–5%) ---
-    if entry_price is not None:
+    if entry_price is not None and stop_override is None:
         loss_pct = _compute_pnl_pct(entry_price, last_close)
         if loss_pct is not None and loss_pct < 0:
             loss_abs = abs(loss_pct)

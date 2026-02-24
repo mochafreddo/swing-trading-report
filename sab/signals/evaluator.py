@@ -32,8 +32,14 @@ class EvaluationSettings:
     us_min_price: float | None = None
 
 
-def _clean(values: list[float]) -> list[float]:
-    return [v for v in values if not math.isnan(v)]
+def _to_finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
 
 
 def evaluate_ticker(
@@ -61,21 +67,42 @@ def evaluate_ticker(
             reason_kind="system",
         )
 
-    closes = [c["close"] for c in candles_eval]
-    highs = [c["high"] for c in candles_eval]
-    lows = [c["low"] for c in candles_eval]
-
-    if not (_clean(closes) and _clean(highs) and _clean(lows)):
-        return EvaluationResult(ticker, None, "Insufficient price data", "system")
+    opens: list[float] = []
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    for candle in candles_eval:
+        open_price = _to_finite_float(candle.get("open"))
+        high_price = _to_finite_float(candle.get("high"))
+        low_price = _to_finite_float(candle.get("low"))
+        close_price = _to_finite_float(candle.get("close"))
+        if (
+            open_price is None
+            or high_price is None
+            or low_price is None
+            or close_price is None
+        ):
+            return EvaluationResult(
+                ticker,
+                None,
+                "Invalid candle data: non-finite OHLC values",
+                reason_kind="system",
+            )
+        opens.append(open_price)
+        highs.append(high_price)
+        lows.append(low_price)
+        closes.append(close_price)
 
     ema20 = ema(closes, 20)
     ema50 = ema(closes, 50)
     rsi14 = rsi(closes, 14)
     atr14 = atr(highs, lows, closes, 14)
     sma200 = sma(closes, 200)
-
-    latest = candles[idx_eval]
-    previous = candles[idx_eval - 1]
+    latest_close = closes[-1]
+    previous_close = closes[-2]
+    latest_open = opens[-1]
+    latest_high = highs[-1]
+    latest_low = lows[-1]
 
     # Market-aware price floor
     eff_min_price = settings.min_price
@@ -85,11 +112,11 @@ def evaluate_ticker(
     ):
         eff_min_price = settings.us_min_price
 
-    if eff_min_price and latest["close"] < eff_min_price:
+    if eff_min_price and latest_close < eff_min_price:
         return EvaluationResult(
             ticker,
             None,
-            f"Price {latest['close']:.0f} < MIN_PRICE {eff_min_price:.0f}",
+            f"Price {latest_close:.0f} < MIN_PRICE {eff_min_price:.0f}",
             reason_kind="signal",
         )
 
@@ -97,8 +124,8 @@ def evaluate_ticker(
     rsi_rebound = rsi14[-1] > 30 and rsi14[-2] <= 30
     rsi_not_overbought = rsi14[-1] < 70
     gap_pct = 0.0
-    if previous["close"]:
-        gap_pct = (latest["open"] - previous["close"]) / previous["close"]
+    if previous_close:
+        gap_pct = (latest_open - previous_close) / previous_close
 
     atr_value = atr14[-1]
 
@@ -117,7 +144,7 @@ def evaluate_ticker(
     if settings.use_sma200_filter:
         trend_pass = (
             not math.isnan(sma200_value)
-            and latest["close"] > sma200_value
+            and latest_close > sma200_value
             and ema20[-1] > sma200_value
             and ema50[-1] > sma200_value
         )
@@ -141,9 +168,9 @@ def evaluate_ticker(
         settings.gap_atr_multiplier > 0
         and not math.isnan(atr_value)
         and atr_value > 0
-        and previous["close"] > 0
+        and previous_close > 0
     ):
-        gap_threshold = settings.gap_atr_multiplier * atr_value / previous["close"]
+        gap_threshold = settings.gap_atr_multiplier * atr_value / previous_close
     gap_ok = abs(gap_pct) <= gap_threshold
     if not gap_ok:
         return EvaluationResult(
@@ -155,13 +182,15 @@ def evaluate_ticker(
 
     # Liquidity: average dollar volume last 20 bars
     avg_dollar_volume = 0.0
-    window = candles_eval[-20:] if len(candles_eval) >= 20 else candles_eval
-    if window:
+    window_start = max(0, len(candles_eval) - 20)
+    if len(candles_eval) > 0:
         total = 0.0
         count = 0
-        for c in window:
-            price = c.get("close") or 0.0
-            volume = c.get("volume") or 0.0
+        for idx in range(window_start, len(candles_eval)):
+            volume = _to_finite_float(candles_eval[idx].get("volume"))
+            if volume is None:
+                volume = 0.0
+            price = closes[idx]
             total += price * volume
             count += 1
         if count:
@@ -190,12 +219,12 @@ def evaluate_ticker(
     if settings.rs_lookback_days > 0 and len(closes) > settings.rs_lookback_days:
         base_close = closes[-settings.rs_lookback_days - 1]
         if base_close:
-            rs_return = (latest["close"] - base_close) / base_close
+            rs_return = (latest_close - base_close) / base_close
             rs_diff = rs_return - settings.rs_benchmark_return
 
     pct_change = 0.0
-    if previous["close"]:
-        pct_change = (latest["close"] - previous["close"]) / previous["close"]
+    if previous_close:
+        pct_change = (latest_close - previous_close) / previous_close
 
     def fmt(value: float, digits: int = 2) -> str:
         if value is None or math.isnan(value):
@@ -206,8 +235,8 @@ def evaluate_ticker(
 
     risk_guide = "-"
     if not math.isnan(atr_value):
-        stop = max(latest["close"] - atr_value, 0)
-        target = latest["close"] + atr_value * 2
+        stop = max(latest_close - atr_value, 0)
+        target = latest_close + atr_value * 2
         risk_guide = f"Stop {fmt(stop, 0)} / Target {fmt(target, 0)} (~1:2)"
 
     score = 0.0
@@ -248,7 +277,7 @@ def evaluate_ticker(
     candidate = {
         "ticker": ticker,
         "name": meta.get("name", ticker),
-        "price": fmt(latest["close"], 0),
+        "price": fmt(latest_close, 0),
         "ema20": fmt(ema20[-1]),
         "ema50": fmt(ema50[-1]),
         "rsi14": fmt(rsi14[-1]),
@@ -256,8 +285,8 @@ def evaluate_ticker(
         "gap": f"{gap_pct * 100:.1f}%",
         "gap_threshold": f"{gap_threshold * 100:.1f}%",
         "pct_change": f"{pct_change * 100:.1f}%",
-        "high": fmt(latest["high"], 0),
-        "low": fmt(latest["low"], 0),
+        "high": fmt(latest_high, 0),
+        "low": fmt(latest_low, 0),
         "risk_guide": risk_guide,
         "sma200": fmt(
             sma200_value if not math.isnan(sma200_value) else float("nan"), 0
@@ -272,7 +301,7 @@ def evaluate_ticker(
         "trend_pass": "Yes" if trend_pass else "No",
         "slope_pass": "Yes" if slope_pass else "No",
         "currency": currency,
-        "price_value": latest["close"],
+        "price_value": latest_close,
     }
 
     return EvaluationResult(ticker, candidate)

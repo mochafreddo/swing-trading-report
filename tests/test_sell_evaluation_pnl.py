@@ -176,3 +176,30 @@ def test_evaluate_holdings_skips_last_price_fallback_for_invalid_candle_data() -
     assert len(rows) == 1
     assert rows[0].last_price is None
     assert rows[0].pnl_pct is None
+
+
+def test_evaluate_holdings_emits_review_row_when_market_data_missing() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.market_data = {}
+
+    def _evaluate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        raise AssertionError("evaluation should not be called without market data")
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].ticker == "AAPL.NASD"
+    assert rows[0].action == "REVIEW"
+    assert rows[0].reasons == ["No market data available for sell evaluation"]
+    assert rows[0].last_price is None
+    assert rows[0].pnl_pct is None
+    assert "AAPL.NASD: No market data available for sell evaluation" in runtime.failures

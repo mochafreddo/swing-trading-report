@@ -57,13 +57,41 @@ def _evaluate_holdings(
 
     for holding in runtime.holdings:
         ticker = holding.ticker
+        entry_price = holding.entry_price or None
+        if entry_price is not None and (
+            isinstance(entry_price, float) and math.isnan(entry_price)
+        ):
+            entry_price = None
+        currency: str | None = holding.entry_currency or runtime.ticker_currency.get(
+            ticker
+        )
+        if currency:
+            currency = currency.upper()
+
         ticker_candles = runtime.market_data.get(ticker)
         if not ticker_candles:
+            missing_reason = "No market data available for sell evaluation"
             if ticker not in runtime.missing_logged:
-                runtime.failures.append(
-                    f"{ticker}: No market data available for sell evaluation"
-                )
+                runtime.failures.append(f"{ticker}: {missing_reason}")
                 runtime.missing_logged.add(ticker)
+            results.append(
+                SellReportRowCls(
+                    ticker=ticker,
+                    name=ticker,
+                    quantity=holding.quantity,
+                    entry_price=entry_price,
+                    entry_date=holding.entry_date,
+                    last_price=None,
+                    pnl_pct=None,
+                    action="REVIEW",
+                    reasons=[missing_reason],
+                    stop_price=None,
+                    target_price=None,
+                    notes=holding.notes,
+                    currency=currency,
+                    eval_date=None,
+                )
+            )
             continue
 
         _, suffix = split_symbol_and_suffix_fn(ticker)
@@ -91,12 +119,6 @@ def _evaluate_holdings(
             evaluation = evaluate_sell_signals_fn(
                 ticker, ticker_candles, holding_dict, settings
             )
-
-        entry_price = holding.entry_price or None
-        if entry_price is not None and (
-            isinstance(entry_price, float) and math.isnan(entry_price)
-        ):
-            entry_price = None
 
         reason_messages = [
             str(reason).strip().lower()
@@ -127,12 +149,6 @@ def _evaluate_holdings(
                 pnl_pct = (last_price - entry_price) / entry_price
             except TypeError:
                 pnl_pct = None
-
-        currency: str | None = holding.entry_currency or runtime.ticker_currency.get(
-            ticker
-        )
-        if currency:
-            currency = currency.upper()
 
         eval_date = getattr(evaluation, "eval_date", None)
         if eval_date is None and ticker_candles:

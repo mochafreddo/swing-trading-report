@@ -189,7 +189,7 @@ def test_choose_eval_index_kr_intraday_thin_volume_drops_today():
     assert dropped is True
 
 
-def test_choose_eval_index_kr_intraday_normal_volume_keeps_last():
+def test_choose_eval_index_kr_intraday_normal_volume_drops_today():
     dates = [
         dt.date(2025, 1, 6),
         dt.date(2025, 1, 7),
@@ -200,8 +200,23 @@ def test_choose_eval_index_kr_intraday_normal_volume_keeps_last():
     candles = _build_candles(dates, close_start=50000.0, volume=5_000_000.0)
     now = dt.datetime(2025, 1, 10, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
     idx, dropped = choose_eval_index(candles, meta={"currency": "KRW"}, now=now)
-    assert idx == len(candles) - 1
-    assert dropped is False
+    assert idx == len(candles) - 2
+    assert dropped is True
+
+
+def test_choose_eval_index_kr_pre_open_drops_today_even_with_normal_volume():
+    dates = [
+        dt.date(2025, 1, 6),
+        dt.date(2025, 1, 7),
+        dt.date(2025, 1, 8),
+        dt.date(2025, 1, 9),
+        dt.date(2025, 1, 10),
+    ]
+    candles = _build_candles(dates, close_start=50000.0, volume=5_000_000.0)
+    now = dt.datetime(2025, 1, 10, 8, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    idx, dropped = choose_eval_index(candles, meta={"currency": "KRW"}, now=now)
+    assert idx == len(candles) - 2
+    assert dropped is True
 
 
 def test_choose_eval_index_single_candle_returns_zero():

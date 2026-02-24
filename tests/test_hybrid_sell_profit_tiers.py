@@ -102,3 +102,35 @@ def test_hybrid_sell_profit_below_partial_keeps_hold(monkeypatch):
     )
     assert result.action == "HOLD"
     assert result.reasons == ["No hybrid sell criteria triggered"]
+
+
+def test_hybrid_sell_stop_override_triggers_sell(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 100.0, "stop_override": 95.0}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(94.0), holding, settings
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 95.0
+    assert "Custom stop override in effect" in result.reasons
+    assert "Price hit custom stop override" in result.reasons
+
+
+def test_hybrid_sell_target_override_prioritizes_display_target(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 100.0, "target_override": 123.0}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(102.0), holding, settings
+    )
+
+    assert result.target_price == 123.0
+    assert "Custom target override in effect" in result.reasons

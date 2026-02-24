@@ -133,3 +133,85 @@ def test_atr_trail_falls_back_to_recent_window_when_entry_date_missing(
     assert result.stop_price == pytest.approx(12.0)
     assert "Entry date missing/invalid; ATR trail uses recent window" in result.reasons
     assert "Price hit ATR trailing stop" in result.reasons
+
+
+def test_stop_override_triggers_sell_when_close_below_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 99,
+            "high": 100,
+            "low": 97,
+            "close": 98,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 98,
+            "high": 99,
+            "low": 95,
+            "close": 96,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01", "stop_override": 97.0}
+    settings = SellSettings(require_sma200=False, min_bars=3, time_stop_days=0)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "SELL"
+    assert result.stop_price == pytest.approx(97.0)
+    assert "Custom stop override in effect" in result.reasons
+    assert "Price hit custom stop override" in result.reasons
+
+
+def test_stop_override_keeps_non_sell_when_close_above_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01", "stop_override": 95.0}
+    settings = SellSettings(require_sma200=False, min_bars=3, time_stop_days=0)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "HOLD"
+    assert result.stop_price == pytest.approx(95.0)
+    assert "Custom stop override in effect" in result.reasons
+    assert "Price hit custom stop override" not in result.reasons
