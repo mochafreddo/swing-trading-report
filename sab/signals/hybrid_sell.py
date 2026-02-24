@@ -251,17 +251,23 @@ def evaluate_sell_signals_hybrid(
         loss_pct = _compute_pnl_pct(entry_price, last_close)
         if loss_pct is not None and loss_pct < 0:
             loss_abs = abs(loss_pct)
-            if loss_abs >= settings.stop_loss_pct_min:
+            hard_stop_price = entry_price * (1.0 - settings.stop_loss_pct_max)
+            if loss_abs >= settings.stop_loss_pct_max:
                 reasons.append(
-                    f"Hit hard stop band (loss {loss_abs * 100:.1f}% ≥ "
-                    f"{settings.stop_loss_pct_min * 100:.1f}% min)"
+                    f"Hit hard stop max (loss {loss_abs * 100:.1f}% ≥ "
+                    f"{settings.stop_loss_pct_max * 100:.1f}% max)"
                 )
                 action = "SELL"
-                # Set stop at the midpoint of the band for reporting
-                mid_band = (
-                    settings.stop_loss_pct_min + settings.stop_loss_pct_max
-                ) / 2.0
-                stop_price = entry_price * (1.0 - mid_band)
+                stop_price = hard_stop_price
+            elif loss_abs >= settings.stop_loss_pct_min:
+                reasons.append(
+                    f"Loss within hard stop band ({loss_abs * 100:.1f}% in "
+                    f"{settings.stop_loss_pct_min * 100:.1f}%–"
+                    f"{settings.stop_loss_pct_max * 100:.1f}%)"
+                )
+                if action != "SELL":
+                    action = "REVIEW"
+                stop_price = hard_stop_price
 
     # --- 5) Optional time stop ---
     time_stop_days = settings.time_stop_days

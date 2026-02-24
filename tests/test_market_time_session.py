@@ -80,3 +80,188 @@ def test_us_market_status_respects_holiday_calendar(tmp_path) -> None:
 
     assert is_us_market_open(now, data_dir=data_dir) is False
     assert us_market_status(now, data_dir=data_dir) == "closed"
+
+
+def test_us_session_info_early_close_uses_custom_close_time(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close 13:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["state"] == STATE_AFTER_CLOSE
+    assert info["preferred_nday"] == 0
+    assert is_us_market_open(now, data_dir=data_dir) is False
+
+
+def test_us_session_info_early_close_parses_korean_hour_note(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "조기폐장 13시", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["state"] == STATE_AFTER_CLOSE
+    assert info["preferred_nday"] == 0
+    assert is_us_market_open(now, data_dir=data_dir) is False
+
+
+def test_us_session_info_early_close_parses_korean_1si_as_13(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "조기폐장 1시", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_parses_english_1pm_without_ampm(
+    tmp_path,
+) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close 1:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_prefers_close_time_when_open_time_also_present(
+    tmp_path,
+) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Open 09:30 ET, Early close 1:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_parses_time_range_end_as_close(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Short session 09:30-13:00", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_prefers_labeled_close_time(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close: open 09:30, close 13:00", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_ignores_regular_close_label(tmp_path) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close: close 1:00 PM (regular close 4:00 PM)", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_INTRADAY
+    assert info["preferred_nday"] == 1
+    assert is_us_market_open(now, data_dir=data_dir) is True
+
+
+def test_us_session_info_early_close_prefers_non_regular_close_with_slash(
+    tmp_path,
+) -> None:
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Half day regular close 4:00 PM / close 1:00 PM", "is_open": true}}',
+        encoding="utf-8",
+    )
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    info = us_session_info(now=now, data_dir=data_dir)
+
+    assert info["close_time"] == dt.time(13, 0)
+    assert info["state"] == STATE_AFTER_CLOSE
+    assert info["preferred_nday"] == 0
+    assert is_us_market_open(now, data_dir=data_dir) is False
+
+
+def test_us_early_close_time_reuses_cached_holiday_load(tmp_path, monkeypatch) -> None:
+    import sab.utils.market_time as mt
+
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close 13:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+    day = dt.date(2025, 12, 24)
+
+    if hasattr(mt, "_US_CACHED_HOLIDAYS_BY_DIR"):
+        mt._US_CACHED_HOLIDAYS_BY_DIR.clear()
+
+    original_loader = mt.load_cached_holidays
+    calls = {"count": 0}
+
+    def _counting_loader(cache_dir: str, country_code: str):
+        calls["count"] += 1
+        return original_loader(cache_dir, country_code)
+
+    monkeypatch.setattr(mt, "load_cached_holidays", _counting_loader)
+
+    assert mt.us_early_close_time(day, data_dir=data_dir) == dt.time(13, 0)
+    assert mt.us_early_close_time(day, data_dir=data_dir) == dt.time(13, 0)
+    assert calls["count"] == 1

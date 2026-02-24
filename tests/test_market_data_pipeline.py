@@ -456,6 +456,54 @@ def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
     assert runtime.failures == []
 
 
+def test_collect_market_data_from_kis_honors_us_early_close_for_staleness(
+    tmp_path,
+) -> None:
+    class _FailingKisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def overseas_daily_candles(
+            self, *, symbol: str, exchange: str, count: int
+        ) -> list[dict[str, Any]]:
+            self.calls += 1
+            raise KISClientError("KIS down")
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            return []
+
+    data_dir = tmp_path.as_posix()
+    (tmp_path / "holidays_us.json").write_text(
+        '{"20251224": {"note": "Early close 13:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    kis_client = _FailingKisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_us=0)
+    runtime.cfg.data_dir = data_dir
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["AAPL.US"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            _candles_with_last_date("20251224")
+            if key == "candles_overseas_NAS_AAPL"
+            else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 12, 24, 19, 30, tzinfo=dt.UTC),
+    )
+
+    assert "AAPL.US" in runtime.market_data
+    assert kis_client.calls == 0
+    assert runtime.failures == []
+
+
 def test_collect_market_data_from_kis_calls_api_when_cache_stale() -> None:
     class _KisClient:
         def __init__(self) -> None:

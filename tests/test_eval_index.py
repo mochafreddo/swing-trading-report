@@ -596,6 +596,88 @@ def test_evaluate_ticker_excludes_etf_when_flag_true(monkeypatch):
     assert result.reason == "ETF/ETN excluded"
 
 
+def test_evaluate_ticker_treats_non_finite_volume_as_system_issue(monkeypatch):
+    import sab.signals.evaluator as ev
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250102",
+            "open": 10.0,
+            "high": 11.5,
+            "low": 9.5,
+            "close": 11.0,
+            "volume": float("inf"),
+        },
+        {
+            "date": "20250103",
+            "open": 11.0,
+            "high": 12.0,
+            "low": 10.0,
+            "close": 12.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250104",
+            "open": 12.0,
+            "high": 13.0,
+            "low": 11.0,
+            "close": 13.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250105",
+            "open": 13.0,
+            "high": 14.0,
+            "low": 12.0,
+            "close": 14.0,
+            "volume": 1_000_000.0,
+        },
+    ]
+
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    def fake_ema(values, period):
+        n = len(values)
+        out = [1.0] * n
+        if period == 20:
+            out[-2] = 1.0
+            out[-1] = 2.0
+        elif period == 50:
+            out[-2] = 1.0
+            out[-1] = 1.0
+        return out
+
+    monkeypatch.setattr(ev, "ema", fake_ema)
+    monkeypatch.setattr(ev, "rsi", lambda values, period: [0.0, 0.0, 0.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        ev, "atr", lambda highs, lows, closes, period: [1.0] * len(closes)
+    )
+
+    settings = EvaluationSettings(
+        min_history_bars=5,
+        min_price=0.0,
+        min_dollar_volume=0.0,
+        gap_atr_multiplier=0.0,
+        exclude_etf_etn=False,
+    )
+    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.candidate is None
+    assert result.reason == "Invalid candle data: non-finite volume values"
+    assert result.reason_kind == "system"
+
+
 def test_evaluate_ticker_us_zero_threshold_overrides_kr_floor(monkeypatch):
     import sab.signals.evaluator as ev
 
@@ -679,6 +761,183 @@ def test_evaluate_ticker_us_zero_threshold_overrides_kr_floor(monkeypatch):
     result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
     assert result.reason is None
     assert result.candidate is not None
+
+
+def test_choose_eval_index_us_early_close_keeps_today_after_1300(tmp_path):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close 13:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 1
+    assert dropped is False
+
+
+def test_choose_eval_index_us_early_close_parses_1pm_without_ampm(tmp_path):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close 1:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 2
+    assert dropped is True
+
+
+def test_choose_eval_index_us_early_close_ignores_open_time_in_note(tmp_path):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Open 09:30 ET, Early close 1:00 ET", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 2
+    assert dropped is True
+
+
+def test_choose_eval_index_us_early_close_prefers_labeled_close_time(tmp_path):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close: open 09:30, close 13:00", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 12, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 2
+    assert dropped is True
+
+
+def test_choose_eval_index_us_early_close_ignores_regular_close_label(tmp_path):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Early close: close 1:00 PM (regular close 4:00 PM)", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 1
+    assert dropped is False
+
+
+def test_choose_eval_index_us_early_close_prefers_non_regular_close_with_slash(
+    tmp_path,
+):
+    data_dir = tmp_path.as_posix()
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        '{"20251224": {"note": "Half day regular close 4:00 PM / close 1:00 PM", "is_open": true}}',
+        encoding="utf-8",
+    )
+
+    dates = [
+        dt.date(2025, 12, 22),
+        dt.date(2025, 12, 23),
+        dt.date(2025, 12, 24),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 24, 14, 30, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 1
+    assert dropped is False
+
+
+def test_choose_eval_index_us_weekend_state_not_overridden_by_close_time(tmp_path):
+    data_dir = tmp_path.as_posix()
+    dates = [
+        dt.date(2025, 12, 27),
+        dt.date(2025, 12, 28),
+    ]
+    candles = _build_candles(dates)
+    now = dt.datetime(2025, 12, 28, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=data_dir,
+    )
+    assert idx == len(candles) - 1
+    assert dropped is False
 
 
 def test_evaluate_sell_signals_use_eval_index(monkeypatch):

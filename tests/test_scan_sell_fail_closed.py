@@ -238,6 +238,51 @@ def test_run_sell_logs_kis_token_cache_status_once(
     assert lines == [f"KIS token cache status=hit (env=real, cache_dir={tmp_path})"]
 
 
+def test_run_sell_expands_target_bars_for_long_held_positions(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=HoldingsData(
+            path=None,
+            settings=HoldingSettings(),
+            holdings=[
+                Holding(
+                    ticker="005930",
+                    quantity=1.0,
+                    entry_price=100.0,
+                    entry_date="2020-01-02",
+                )
+            ],
+        ),
+    )
+    captured_target_bars: list[int] = []
+
+    def _collect_runtime(runtime: Any, *, target_bars: int) -> None:
+        captured_target_bars.append(target_bars)
+        runtime.market_data = {"005930": _build_candles()}
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.sell._collect_sell_runtime", side_effect=_collect_runtime),
+        patch("sab.sell._evaluate_sell_runtime", return_value=[]),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-24.sell.long-hold.md"),
+        ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 0
+    assert captured_target_bars
+    assert captured_target_bars[0] > 200
+
+
 def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:
     cfg = replace(
         Config(),

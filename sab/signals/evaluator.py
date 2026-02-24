@@ -182,6 +182,7 @@ def evaluate_ticker(
 
     # Liquidity: average dollar volume last 20 bars
     avg_dollar_volume = 0.0
+    has_invalid_volume = False
     window_start = max(0, len(candles_eval) - 20)
     if len(candles_eval) > 0:
         total = 0.0
@@ -189,10 +190,18 @@ def evaluate_ticker(
         for idx in range(window_start, len(candles_eval)):
             volume = _to_finite_float(candles_eval[idx].get("volume"))
             if volume is None:
-                volume = 0.0
+                has_invalid_volume = True
+                break
             price = closes[idx]
             total += price * volume
             count += 1
+        if has_invalid_volume:
+            return EvaluationResult(
+                ticker,
+                None,
+                "Invalid candle data: non-finite volume values",
+                reason_kind="system",
+            )
         if count:
             avg_dollar_volume = total / count
     # Market-aware liquidity floor (USD for US, KRW for KR)

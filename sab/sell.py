@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 from . import sell_evaluation, sell_runtime
@@ -72,6 +73,34 @@ def _render_sell_report(runtime: _SellRuntime, results: list[SellReportRow]) -> 
     )
 
 
+def _resolve_sell_target_bars(runtime: _SellRuntime) -> int:
+    base_target_bars = max(runtime.cfg.min_history_bars, 200)
+    oldest_entry_date: dt.date | None = None
+
+    for holding in runtime.holdings:
+        raw_entry_date = getattr(holding, "entry_date", None)
+        if not raw_entry_date:
+            continue
+        try:
+            entry_date = dt.date.fromisoformat(str(raw_entry_date))
+        except ValueError:
+            continue
+        if oldest_entry_date is None or entry_date < oldest_entry_date:
+            oldest_entry_date = entry_date
+
+    if oldest_entry_date is None:
+        return base_target_bars
+
+    today = dt.date.today()
+    if oldest_entry_date >= today:
+        return base_target_bars
+
+    # Calendar days -> trading sessions approximation with conservative buffer.
+    holding_days = (today - oldest_entry_date).days
+    estimated_sessions = int(holding_days * (5 / 7)) + 30
+    return max(base_target_bars, min(estimated_sessions, 4000))
+
+
 def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     logger = logging.getLogger(__name__)
     try:
@@ -84,7 +113,7 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
         return 1
 
     runtime = _build_sell_runtime(cfg, logger)
-    _collect_sell_runtime(runtime, target_bars=max(cfg.min_history_bars, 200))
+    _collect_sell_runtime(runtime, target_bars=_resolve_sell_target_bars(runtime))
     if runtime.unique_tickers and not runtime.market_data:
         runtime.fatal_failure = True
         runtime.failures.append("Failed to retrieve market data for holdings")

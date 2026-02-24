@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sab.data.us_calendar import load_us_trading_calendar
+from sab.utils.market_time import us_early_close_time
 
 KR_ZONE = ZoneInfo("Asia/Seoul")
 US_ZONE = ZoneInfo("America/New_York")
@@ -154,8 +155,8 @@ def choose_eval_index(
     zone = US_ZONE if market == "US" else KR_ZONE
     aware_now = _ensure_now(now)
     local_now = _to_zone(aware_now, zone)
-    state = _session_state(market, local_now)
     session_date = local_now.date()
+    state = _session_state(market, local_now)
 
     idx_latest = len(candles) - 1
     last = candles[-1]
@@ -166,12 +167,23 @@ def choose_eval_index(
     if last_date and last_date < session_date:
         return idx_latest, False
 
-    idx_eval = idx_latest
     if market == "US":
         is_us_holiday = _is_us_holiday(session_date, data_dir=data_dir)
         if is_us_holiday:
             state = STATE_CLOSED
+        elif state != STATE_CLOSED:
+            close_time = us_early_close_time(
+                session_date, data_dir=data_dir
+            ) or dt.time(16, 0)
+            now_time = local_now.time()
+            if now_time < dt.time(9, 30):
+                state = STATE_PRE_OPEN
+            elif now_time < close_time:
+                state = STATE_INTRADAY
+            else:
+                state = STATE_AFTER_CLOSE
 
+    idx_eval = idx_latest
     if state in {STATE_PRE_OPEN, STATE_INTRADAY} and last_date == session_date:
         idx_eval = idx_latest - 1
 

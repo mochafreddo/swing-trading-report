@@ -106,6 +106,26 @@ def test_hybrid_sell_profit_below_partial_keeps_hold(monkeypatch):
     assert result.reasons == ["No hybrid sell criteria triggered"]
 
 
+def test_hybrid_sell_loss_between_min_and_max_sets_review(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.03,
+        stop_loss_pct_max=0.05,
+    )
+    holding = {"entry_price": 100.0}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "REVIEW"
+    assert any("within hard stop band" in r for r in result.reasons)
+
+
 def test_hybrid_sell_stop_override_triggers_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(

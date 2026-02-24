@@ -18,6 +18,7 @@ from .data.pykrx_client import (
 from .data.us_calendar import load_us_trading_calendar
 from .fx import SUFFIX_TO_EXCD
 from .market_data_common import Candle
+from .utils.market_time import us_early_close_time
 
 type _LegacyCacheKeysFn = Callable[[str, str, str | None], list[str]]
 
@@ -200,11 +201,17 @@ def _latest_completed_session_date(
     market: str,
     now: dt.datetime,
     closed_dates: set[dt.date],
+    data_dir: str | None = None,
 ) -> dt.date | None:
     zone = _US_ZONE if market == "US" else _KR_ZONE
-    close_time = dt.time(16, 0) if market == "US" else dt.time(15, 30)
     local_now = now.astimezone(zone)
     session_date = local_now.date()
+    if market == "US":
+        close_time = us_early_close_time(session_date, data_dir=data_dir) or dt.time(
+            16, 0
+        )
+    else:
+        close_time = dt.time(15, 30)
 
     if _is_trading_session(session_date, closed_dates=closed_dates):
         if local_now.time() >= close_time:
@@ -255,6 +262,7 @@ def _evaluate_cache_staleness(
     max_stale_sessions: int,
     closed_dates: set[dt.date],
     now: dt.datetime,
+    data_dir: str | None = None,
 ) -> tuple[bool, int | None, str | None]:
     latest_raw = candles[-1].get("date") if candles else None
     latest_candle_date = _parse_session_date(latest_raw)
@@ -269,6 +277,7 @@ def _evaluate_cache_staleness(
         market=market,
         now=now,
         closed_dates=closed_dates,
+        data_dir=None if market != "US" else data_dir,
     )
     if latest_completed is None:
         return True, 0, None
@@ -467,6 +476,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 max_stale_sessions=max_stale_sessions,
                 closed_dates=closed_dates,
                 now=now,
+                data_dir=runtime.cfg.data_dir,
             )
             if cache_usable:
                 runtime.market_data[ticker] = cached
