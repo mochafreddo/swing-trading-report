@@ -111,14 +111,41 @@ def _evaluate_holdings(
             "data_dir": runtime.cfg.data_dir,
         }
 
-        if runtime.cfg.sell_mode == "sma_ema_hybrid":
-            evaluation = evaluate_sell_signals_hybrid_fn(
-                ticker, ticker_candles, holding_dict, hybrid_settings
+        try:
+            if runtime.cfg.sell_mode == "sma_ema_hybrid":
+                evaluation = evaluate_sell_signals_hybrid_fn(
+                    ticker, ticker_candles, holding_dict, hybrid_settings
+                )
+            else:
+                evaluation = evaluate_sell_signals_fn(
+                    ticker, ticker_candles, holding_dict, settings
+                )
+        except Exception as exc:
+            reason = f"Unexpected sell evaluation error ({type(exc).__name__}: {exc})"
+            runtime.fatal_failure = True
+            runtime.failures.append(f"{ticker}: {reason}")
+            logger = getattr(runtime, "logger", None)
+            if logger is not None:
+                logger.exception("%s: %s", ticker, reason)
+            results.append(
+                SellReportRowCls(
+                    ticker=ticker,
+                    name=ticker,
+                    quantity=holding.quantity,
+                    entry_price=entry_price,
+                    entry_date=holding.entry_date,
+                    last_price=None,
+                    pnl_pct=None,
+                    action="REVIEW",
+                    reasons=[reason],
+                    stop_price=None,
+                    target_price=None,
+                    notes=holding.notes,
+                    currency=currency,
+                    eval_date=None,
+                )
             )
-        else:
-            evaluation = evaluate_sell_signals_fn(
-                ticker, ticker_candles, holding_dict, settings
-            )
+            continue
 
         reason_messages = [
             str(reason).strip().lower()

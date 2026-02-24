@@ -3,6 +3,7 @@ import math
 from sab.signals.hybrid_buy import (
     HybridEvaluationSettings,
     HybridPattern,
+    _detect_rsi_oversold_reversal,
     _detect_trend_pullback_bounce,
     evaluate_ticker_hybrid,
 )
@@ -556,3 +557,123 @@ def test_hybrid_kr_breakout_confirmation_disabled_allows_ready(monkeypatch):
     result = evaluate_ticker_hybrid("FAKE.KR", candles, settings, {"currency": "KRW"})
     assert result.candidate is not None
     assert result.candidate["entry_state"] == "READY"
+
+
+def test_hybrid_rejects_non_finite_volume_as_system_issue(monkeypatch):
+    candles = _simple_candles(10)
+    candles[-1]["volume"] = "N/A"
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is None
+    assert result.reason == "Invalid candle data: non-finite volume values"
+    assert result.reason_kind == "system"
+
+
+def test_pullback_bounce_handles_zero_close_without_crash() -> None:
+    settings = _settings()
+    closes = [1.0, 0.0]
+    sma_trend = [0.5, -1.0]
+    ema_short = [0.4, -0.1]
+    ema_mid = [0.3, -0.2]
+    rsi_vals = [49.0, 51.0]
+    candles = [
+        {"open": 1.0, "close": 1.0, "low": 0.9, "volume": 10.0},
+        {"open": 1.0, "close": 0.0, "low": -2.0, "volume": 10.0},
+    ]
+
+    ok, reasons, pattern, _ = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert isinstance(ok, bool)
+    assert isinstance(reasons, list)
+    assert pattern in {None, HybridPattern.TREND_PULLBACK_BOUNCE}
+
+
+def test_rsi_oversold_reversal_handles_zero_close_without_crash() -> None:
+    settings = _settings()
+    closes = [1.0, 0.0]
+    sma_trend = [0.5, -1.0]
+    ema_short = [0.4, -0.1]
+    ema_mid = [0.3, -0.2]
+    rsi_vals = [35.0, 41.0]
+    candles = [
+        {"open": 1.0, "close": 1.0, "low": 0.9, "volume": 10.0},
+        {"open": -1.0, "close": 0.0, "low": -3.0, "volume": 10.0},
+    ]
+
+    ok, reasons, pattern, _ = _detect_rsi_oversold_reversal(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert isinstance(ok, bool)
+    assert isinstance(reasons, list)
+    assert pattern in {None, HybridPattern.RSI_OVERSOLD_REVERSAL}
+
+
+def test_hybrid_candidate_exposes_configured_indicator_period_keys(monkeypatch):
+    candles = _simple_candles(10)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [1.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *a, **k: (False, [], None, {}),
+    )
+
+    settings = _settings(min_history=2)
+    settings.sma_trend_period = 30
+    settings.ema_short_period = 8
+    settings.ema_mid_period = 34
+
+    result = evaluate_ticker_hybrid("FAKE.US", candles, settings, {"currency": "USD"})
+
+    assert result.candidate is not None
+    assert result.candidate["sma_trend_period"] == 30
+    assert result.candidate["ema_short_period"] == 8
+    assert result.candidate["ema_mid_period"] == 34
+    assert result.candidate["sma30"] == result.candidate["sma_trend"]
+    assert result.candidate["ema8"] == result.candidate["ema_short"]
+    assert result.candidate["ema34"] == result.candidate["ema_mid"]

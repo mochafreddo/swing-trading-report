@@ -62,6 +62,22 @@ def _to_finite_float(value: Any) -> float | None:
     return parsed
 
 
+def _to_finite_or_default(value: Any, *, default: float = 0.0) -> float:
+    parsed = _to_finite_float(value)
+    if parsed is None:
+        return default
+    return parsed
+
+
+def _to_volume_and_invalid(value: Any) -> tuple[float, bool]:
+    if value is None or value == "":
+        return 0.0, False
+    parsed = _to_finite_float(value)
+    if parsed is None:
+        return 0.0, True
+    return parsed, False
+
+
 def _has_non_finite_ohlc(candles: list[dict[str, Any]]) -> bool:
     for candle in candles:
         if (
@@ -74,18 +90,22 @@ def _has_non_finite_ohlc(candles: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _avg_dollar_volume(candles: list[dict[str, Any]], window: int) -> float:
+def _avg_dollar_volume(
+    candles: list[dict[str, Any]], window: int
+) -> tuple[float, bool]:
     if not candles:
-        return 0.0
+        return 0.0, False
     sub = candles[-window:] if len(candles) >= window else candles
     total = 0.0
     count = 0
+    has_invalid_volume = False
     for c in sub:
-        price = float(c.get("close") or 0.0)
-        volume = float(c.get("volume") or 0.0)
+        price = _to_finite_or_default(c.get("close"))
+        volume, invalid_volume = _to_volume_and_invalid(c.get("volume"))
+        has_invalid_volume = has_invalid_volume or invalid_volume
         total += price * volume
         count += 1
-    return total / count if count else 0.0
+    return (total / count if count else 0.0), has_invalid_volume
 
 
 def _basic_filters(
@@ -109,7 +129,15 @@ def _basic_filters(
     latest = candles[idx]
     currency = str(meta.get("currency", "KRW")).upper()
 
-    close = float(latest.get("close") or 0.0)
+    close = _to_finite_float(latest.get("close"))
+    if close is None:
+        return (
+            False,
+            "Invalid candle data: non-finite OHLC values",
+            "system",
+            0.0,
+            0.0,
+        )
     eff_min_price = settings.min_price
     if currency == "USD" and settings.us_min_price is not None:
         eff_min_price = settings.us_min_price
@@ -122,7 +150,15 @@ def _basic_filters(
             0.0,
         )
 
-    avg_dv = _avg_dollar_volume(candles[: idx + 1], 20)
+    avg_dv, has_invalid_volume = _avg_dollar_volume(candles[: idx + 1], 20)
+    if has_invalid_volume:
+        return (
+            False,
+            "Invalid candle data: non-finite volume values",
+            "system",
+            close,
+            avg_dv,
+        )
     eff_min_dv = settings.min_dollar_volume
     if currency == "USD" and settings.us_min_dollar_volume is not None:
         eff_min_dv = settings.us_min_dollar_volume
@@ -146,7 +182,10 @@ def _volume_stats(
 ) -> tuple[float, float]:
     if not candles:
         return 0.0, 0.0
-    vols = [float(c.get("volume") or 0.0) for c in candles]
+    vols: list[float] = []
+    for candle in candles:
+        volume, _ = _to_volume_and_invalid(candle.get("volume"))
+        vols.append(volume)
     prev_vol = vols[-2] if len(vols) >= 2 else vols[-1]
     window = vols[-lookback_days:] if len(vols) >= lookback_days else vols
     avg_vol = sum(window) / len(window) if window else 0.0
@@ -191,9 +230,9 @@ def _detect_trend_pullback_bounce(
     heavy_selling = False
     pullback_slice = candles[-pullback_bars:] if pullback_bars > 0 else []
     for bar in pullback_slice:
-        bar_open = float(bar.get("open") or 0.0)
-        bar_close = float(bar.get("close") or 0.0)
-        bar_volume = float(bar.get("volume") or 0.0)
+        bar_open = _to_finite_or_default(bar.get("open"))
+        bar_close = _to_finite_or_default(bar.get("close"))
+        bar_volume, _ = _to_volume_and_invalid(bar.get("volume"))
         if bar_close < bar_open and avg_vol > 0 and bar_volume > avg_vol * 1.5:
             heavy_selling = True
             break
@@ -205,7 +244,7 @@ def _detect_trend_pullback_bounce(
     flags: dict[str, Any] = {
         "rsi_val": rsi_val,
         "avg_vol": avg_vol,
-        "today_vol": float(candles[-1].get("volume") or 0.0),
+        "today_vol": _to_volume_and_invalid(candles[-1].get("volume"))[0],
         "close_above_ema_short": close > ema_short[idx],
     }
     if idx >= 1 and closes[idx - 1] <= ema_short[idx - 1] and close > ema_short[idx]:
@@ -216,10 +255,10 @@ def _detect_trend_pullback_bounce(
     today = candles[-1]
     yest = candles[-2] if len(candles) >= 2 else None
     if yest is not None:
-        o = float(today.get("open") or 0.0)
-        close_today = float(today.get("close") or 0.0)
-        v = float(today.get("volume") or 0.0)
-        prev_v = float(yest.get("volume") or 0.0)
+        o = _to_finite_or_default(today.get("open"))
+        close_today = _to_finite_or_default(today.get("close"))
+        v, _ = _to_volume_and_invalid(today.get("volume"))
+        prev_v, _ = _to_volume_and_invalid(yest.get("volume"))
         if close_today > o and v > max(prev_v, avg_vol):
             reasons.append("Bullish candle with rising volume")
             triggered = True
@@ -230,10 +269,11 @@ def _detect_trend_pullback_bounce(
         triggered = True
         flags["trigger_rsi50"] = True
 
-    low = float(today.get("low") or 0.0)
-    body = abs(close - float(today.get("open") or close))
-    lower_shadow = min(close, float(today.get("open") or close)) - low
-    if lower_shadow > body and abs(low - ema_short[idx]) / close < 0.02:
+    low = _to_finite_or_default(today.get("low"))
+    open_price = _to_finite_or_default(today.get("open"), default=close)
+    body = abs(close - open_price)
+    lower_shadow = min(close, open_price) - low
+    if close > 0 and lower_shadow > body and abs(low - ema_short[idx]) / close < 0.02:
         reasons.append("Reversal candle near EMA short")
         triggered = True
         flags["trigger_hammer_near_ema"] = True
@@ -270,8 +310,8 @@ def _detect_swing_high_breakout(
     if len(window) < min_bars:
         return False, ["Not enough bars for consolidation"], None, {}
 
-    highs = [float(c.get("high") or 0.0) for c in window]
-    lows = [float(c.get("low") or 0.0) for c in window]
+    highs = [_to_finite_or_default(c.get("high")) for c in window]
+    lows = [_to_finite_or_default(c.get("low")) for c in window]
     swing_high = max(highs[:-1]) if len(highs) > 1 else highs[0]
     range_pct = (max(highs) - min(lows)) / swing_high if swing_high else 0.0
     if range_pct > 0.1:
@@ -279,7 +319,8 @@ def _detect_swing_high_breakout(
 
     today = candles[-1]
     prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
-    if not (close > swing_high and float(today.get("volume") or 0.0) > avg_vol):
+    today_volume, _ = _to_volume_and_invalid(today.get("volume"))
+    if not (close > swing_high and today_volume > avg_vol):
         return (
             False,
             ["No confirmed breakout over swing high"],
@@ -327,19 +368,19 @@ def _detect_rsi_oversold_reversal(
 
     today = candles[-1]
     prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
-    o = float(today.get("open") or 0.0)
-    c = float(today.get("close") or 0.0)
-    v = float(today.get("volume") or 0.0)
+    o = _to_finite_or_default(today.get("open"))
+    c = _to_finite_or_default(today.get("close"))
+    v, _ = _to_volume_and_invalid(today.get("volume"))
     if c <= o or not (avg_vol == 0.0 or v >= avg_vol):
         return False, ["No strong bullish candle with rising volume"], None, {}
 
-    low = float(today.get("low") or 0.0)
+    low = _to_finite_or_default(today.get("low"))
     body = abs(c - o)
     lower_shadow = min(c, o) - low
     if lower_shadow <= body:
         return False, ["No clear reversal candle off lows"], None, {}
 
-    if (
+    if close > 0 and (
         abs(low - ema_short[idx]) / close < 0.03
         or abs(low - ema_mid[idx]) / close < 0.03
     ):
@@ -586,6 +627,15 @@ def evaluate_ticker_hybrid(
         gap_guard_up_price = last_close * (1 + gap_guard_pct)
         gap_guard_down_price = last_close * (1 - gap_guard_pct)
 
+    sma_trend_key = f"sma{settings.sma_trend_period}"
+    ema_short_key = f"ema{settings.ema_short_period}"
+    ema_mid_key = f"ema{settings.ema_mid_period}"
+    rsi_key = f"rsi{settings.rsi_period}"
+    sma_trend_value = fmt(sma_trend[-1], 2)
+    ema_short_value = fmt(ema_short[-1], 2)
+    ema_mid_value = fmt(ema_mid[-1], 2)
+    rsi_value = fmt(rsi_vals[-1], 1)
+
     candidate: dict[str, Any] = {
         "ticker": ticker,
         "name": meta.get("name", ticker),
@@ -593,12 +643,16 @@ def evaluate_ticker_hybrid(
         "price_value": last_close,
         "currency": currency,
         "pct_change": f"{pct_change * 100:.1f}%",
-        "high": fmt(float(latest.get("high") or 0.0), 0),
-        "low": fmt(float(latest.get("low") or 0.0), 0),
-        "sma20": fmt(sma_trend[-1], 2),
-        "ema10": fmt(ema_short[-1], 2),
-        "ema21": fmt(ema_mid[-1], 2),
-        "rsi14": fmt(rsi_vals[-1], 1),
+        "high": fmt(_to_finite_or_default(latest.get("high")), 0),
+        "low": fmt(_to_finite_or_default(latest.get("low")), 0),
+        "sma_trend_period": settings.sma_trend_period,
+        "ema_short_period": settings.ema_short_period,
+        "ema_mid_period": settings.ema_mid_period,
+        "rsi_period": settings.rsi_period,
+        "sma_trend": sma_trend_value,
+        "ema_short": ema_short_value,
+        "ema_mid": ema_mid_value,
+        "rsi": rsi_value,
         "avg_dollar_volume": fmt(avg_dv, 0),
         "pattern": pattern.value,
         "pattern_reasons": ", ".join(pattern_reasons),
@@ -619,6 +673,10 @@ def evaluate_ticker_hybrid(
         "score": f"{score_value:.2f}",
         "score_notes": score_notes,
     }
+    candidate[sma_trend_key] = sma_trend_value
+    candidate[ema_short_key] = ema_short_value
+    candidate[ema_mid_key] = ema_mid_value
+    candidate[rsi_key] = rsi_value
 
     return HybridEvaluationResult(ticker, candidate)
 

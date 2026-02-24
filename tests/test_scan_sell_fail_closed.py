@@ -4,6 +4,7 @@ import datetime as dt
 import logging
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -304,6 +305,252 @@ def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
                 storage_key="2026/02/2026-02-19.sell.json",
             ),
         ),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 1
+
+
+def test_run_scan_returns_1_when_unexpected_ticker_evaluation_error_occurs(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+        universe_markets=["US"],
+    )
+
+    def _collect_runtime(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.market_data = {
+            "AAPL.US": _build_candles(),
+            "MSFT.US": _build_candles(),
+        }
+        runtime.ticker_currency = {"AAPL.US": "USD", "MSFT.US": "USD"}
+
+    def _evaluate_ticker(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        _meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        if ticker == "AAPL.US":
+            raise RuntimeError("evaluation exploded")
+        return SimpleNamespace(
+            candidate={"ticker": ticker, "score_value": 1.0},
+            reason=None,
+        )
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=["AAPL.US", "MSFT.US"]),
+        patch("sab.scan._collect_scan_runtime", side_effect=_collect_runtime),
+        patch("sab.scan.evaluate_ticker", side_effect=_evaluate_ticker),
+        patch(
+            "sab.scan.write_report",
+            return_value=str(tmp_path / "2026-02-24.buy.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 1
+
+
+def test_run_sell_returns_1_when_unexpected_ticker_evaluation_error_occurs(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["AAPL.NAS", "MSFT.NAS"]),
+        sell_mode="generic",
+    )
+
+    def _evaluate_sell_signals(
+        ticker: str,
+        candles: list[dict[str, float]],
+        _holding: dict[str, Any],
+        _settings: Any,
+    ) -> SellEvaluation:
+        if ticker == "AAPL.NAS":
+            raise RuntimeError("sell evaluation exploded")
+        return SellEvaluation(
+            action="HOLD",
+            reasons=["ok"],
+            eval_price=float(candles[-1]["close"]),
+            eval_date=str(candles[-1]["date"]),
+        )
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.market_data_common.KISClient", _FakeKISClient),
+        patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
+        patch("sab.sell.evaluate_sell_signals", side_effect=_evaluate_sell_signals),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-24.sell.md"),
+        ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 1
+
+
+def test_run_scan_hybrid_returns_1_when_unexpected_ticker_evaluation_error_occurs(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+        strategy_mode="sma_ema_hybrid",
+        universe_markets=["US"],
+    )
+
+    def _collect_runtime(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.market_data = {
+            "AAPL.US": _build_candles(),
+            "MSFT.US": _build_candles(),
+        }
+        runtime.ticker_currency = {"AAPL.US": "USD", "MSFT.US": "USD"}
+
+    def _evaluate_ticker_hybrid(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        _meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        if ticker == "AAPL.US":
+            raise RuntimeError("hybrid evaluation exploded")
+        return SimpleNamespace(
+            candidate={"ticker": ticker, "score_value": 1.0},
+            reason=None,
+        )
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=["AAPL.US", "MSFT.US"]),
+        patch("sab.scan._collect_scan_runtime", side_effect=_collect_runtime),
+        patch(
+            "sab.scan.evaluate_ticker",
+            side_effect=AssertionError("generic evaluator should not be used"),
+        ),
+        patch("sab.scan.evaluate_ticker_hybrid", side_effect=_evaluate_ticker_hybrid),
+        patch(
+            "sab.scan.write_report",
+            return_value=str(tmp_path / "2026-02-24.buy.hybrid.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 1
+
+
+def test_run_sell_hybrid_returns_1_when_unexpected_ticker_evaluation_error_occurs(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["AAPL.NAS", "MSFT.NAS"]),
+        sell_mode="sma_ema_hybrid",
+    )
+
+    def _evaluate_sell_signals_hybrid(
+        ticker: str,
+        candles: list[dict[str, float]],
+        _holding: dict[str, Any],
+        _settings: Any,
+    ) -> SimpleNamespace:
+        if ticker == "AAPL.NAS":
+            raise RuntimeError("hybrid sell evaluation exploded")
+        return SimpleNamespace(
+            action="HOLD",
+            reasons=["ok"],
+            stop_price=None,
+            target_price=None,
+            eval_price=float(candles[-1]["close"]),
+            eval_date=str(candles[-1]["date"]),
+        )
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.market_data_common.KISClient", _FakeKISClient),
+        patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
+        patch(
+            "sab.sell.evaluate_sell_signals",
+            side_effect=AssertionError("generic evaluator should not be used"),
+        ),
+        patch(
+            "sab.sell.evaluate_sell_signals_hybrid",
+            side_effect=_evaluate_sell_signals_hybrid,
+        ),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-24.sell.hybrid.md"),
+        ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
     ):
         code = run_sell(provider=None)
 

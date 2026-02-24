@@ -269,3 +269,56 @@ def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None
         "system-failure-1",
         "AAPL.US: RSI signal not satisfied",
     ]
+
+
+def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
+    runtime = _build_runtime()
+    runtime.tickers = ["AAPL.US", "MSFT.US"]
+    runtime.market_data["MSFT.US"] = [
+        {
+            "date": "20250110",
+            "open": 200.0,
+            "high": 201.0,
+            "low": 199.0,
+            "close": 200.0,
+            "volume": 1_000_000.0,
+        }
+    ]
+    runtime.ticker_currency["MSFT.US"] = "USD"
+
+    def _evaluate_ticker(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        _meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        if ticker == "AAPL.US":
+            raise RuntimeError("evaluation exploded")
+        return SimpleNamespace(
+            candidate={"ticker": ticker, "score_value": 1.0},
+            reason=None,
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=_evaluate_ticker,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert runtime.candidates == [{"ticker": "MSFT.US", "score_value": 1.0}]
+    assert runtime.screen_outs == []
+    assert runtime.system_issues == [
+        "AAPL.US: Unexpected evaluation error (RuntimeError: evaluation exploded)"
+    ]
+    assert runtime.failures == [
+        "AAPL.US: Unexpected evaluation error (RuntimeError: evaluation exploded)"
+    ]

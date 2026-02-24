@@ -123,35 +123,44 @@ def _evaluate_candidates(
         if runtime.fx_rate is not None:
             meta["usd_krw_rate"] = runtime.fx_rate
 
-        if cfg.strategy_mode == "sma_ema_hybrid":
-            result_hybrid = evaluate_ticker_hybrid_fn(
-                ticker, ticker_candles, hybrid_settings, meta
-            )
-            if result_hybrid.candidate:
-                runtime.candidates.append(result_hybrid.candidate)
-            elif result_hybrid.reason:
-                detail = f"{ticker}: {result_hybrid.reason}"
-                if _is_system_result(result_hybrid):
+        try:
+            if cfg.strategy_mode == "sma_ema_hybrid":
+                result_hybrid = evaluate_ticker_hybrid_fn(
+                    ticker, ticker_candles, hybrid_settings, meta
+                )
+                if result_hybrid.candidate:
+                    runtime.candidates.append(result_hybrid.candidate)
+                elif result_hybrid.reason:
+                    detail = f"{ticker}: {result_hybrid.reason}"
+                    if _is_system_result(result_hybrid):
+                        runtime.failures.append(detail)
+                        runtime.system_issues.append(detail)
+                        runtime.logger.warning("%s", detail)
+                    else:
+                        runtime.screen_outs.append(detail)
+                        runtime.logger.info("%s", detail)
+                continue
+
+            result = evaluate_ticker_fn(ticker, ticker_candles, eval_settings, meta)
+            if result.candidate:
+                runtime.candidates.append(result.candidate)
+            elif result.reason:
+                detail = f"{ticker}: {result.reason}"
+                if _is_system_result(result):
                     runtime.failures.append(detail)
                     runtime.system_issues.append(detail)
                     runtime.logger.warning("%s", detail)
                 else:
                     runtime.screen_outs.append(detail)
                     runtime.logger.info("%s", detail)
-            continue
-
-        result = evaluate_ticker_fn(ticker, ticker_candles, eval_settings, meta)
-        if result.candidate:
-            runtime.candidates.append(result.candidate)
-        elif result.reason:
-            detail = f"{ticker}: {result.reason}"
-            if _is_system_result(result):
-                runtime.failures.append(detail)
-                runtime.system_issues.append(detail)
-                runtime.logger.warning("%s", detail)
-            else:
-                runtime.screen_outs.append(detail)
-                runtime.logger.info("%s", detail)
+        except Exception as exc:
+            detail = (
+                f"{ticker}: Unexpected evaluation error ({type(exc).__name__}: {exc})"
+            )
+            runtime.failures.append(detail)
+            runtime.system_issues.append(detail)
+            runtime.fatal_failure = True
+            runtime.logger.exception("%s", detail)
 
 
 def _decorate_candidates(

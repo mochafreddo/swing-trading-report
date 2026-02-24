@@ -172,6 +172,46 @@ def test_choose_eval_index_us_intraday_without_today_keeps_last():
     assert dropped is False
 
 
+def test_choose_eval_index_pykrx_intraday_drops_today() -> None:
+    dates = [
+        dt.date(2025, 1, 6),
+        dt.date(2025, 1, 7),
+        dt.date(2025, 1, 8),
+        dt.date(2025, 1, 9),
+        dt.date(2025, 1, 10),
+    ]
+    candles = _build_candles(dates, close_start=50000.0, volume=5_000_000.0)
+    now = dt.datetime(2025, 1, 10, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "KRW"},
+        provider="pykrx",
+        now=now,
+    )
+    assert idx == len(candles) - 2
+    assert dropped is True
+
+
+def test_choose_eval_index_pykrx_after_close_keeps_last() -> None:
+    dates = [
+        dt.date(2025, 1, 6),
+        dt.date(2025, 1, 7),
+        dt.date(2025, 1, 8),
+        dt.date(2025, 1, 9),
+        dt.date(2025, 1, 10),
+    ]
+    candles = _build_candles(dates, close_start=50000.0, volume=5_000_000.0)
+    now = dt.datetime(2025, 1, 10, 16, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    idx, dropped = choose_eval_index(
+        candles,
+        meta={"currency": "KRW"},
+        provider="pykrx",
+        now=now,
+    )
+    assert idx == len(candles) - 1
+    assert dropped is False
+
+
 def test_choose_eval_index_kr_intraday_thin_volume_drops_today():
     dates = [
         dt.date(2025, 1, 6),

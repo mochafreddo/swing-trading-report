@@ -203,3 +203,74 @@ def test_evaluate_holdings_emits_review_row_when_market_data_missing() -> None:
     assert rows[0].last_price is None
     assert rows[0].pnl_pct is None
     assert "AAPL.NASD: No market data available for sell evaluation" in runtime.failures
+
+
+def test_evaluate_holdings_isolates_unexpected_ticker_exceptions() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.holdings.append(
+        SimpleNamespace(
+            ticker="MSFT.NASD",
+            quantity=2.0,
+            entry_price=100.0,
+            entry_date="2025-01-01",
+            stop_override=None,
+            target_override=None,
+            strategy=None,
+            entry_currency="USD",
+            notes=None,
+        )
+    )
+    runtime.market_data["MSFT.NASD"] = [
+        {
+            "date": "20250103",
+            "open": 110.0,
+            "high": 111.0,
+            "low": 109.0,
+            "close": 110.0,
+            "volume": 1.0,
+        }
+    ]
+    runtime.ticker_currency["MSFT.NASD"] = "USD"
+
+    def _evaluate(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _holding: dict[str, Any],
+        _settings: Any,
+    ) -> SimpleNamespace:
+        if ticker == "AAPL.NASD":
+            raise RuntimeError("sell evaluation exploded")
+        return SimpleNamespace(
+            action="HOLD",
+            reasons=["ok"],
+            stop_price=None,
+            target_price=None,
+            eval_price=110.0,
+            eval_date="20250103",
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 2
+    by_ticker = {row.ticker: row for row in rows}
+    assert by_ticker["AAPL.NASD"].action == "REVIEW"
+    assert by_ticker["AAPL.NASD"].last_price is None
+    assert by_ticker["AAPL.NASD"].pnl_pct is None
+    assert by_ticker["AAPL.NASD"].reasons == [
+        "Unexpected sell evaluation error (RuntimeError: sell evaluation exploded)"
+    ]
+    assert by_ticker["MSFT.NASD"].action == "HOLD"
+    assert by_ticker["MSFT.NASD"].last_price == 110.0
+    assert by_ticker["MSFT.NASD"].pnl_pct == 0.1
+    assert runtime.failures == [
+        "AAPL.NASD: Unexpected sell evaluation error (RuntimeError: sell evaluation exploded)"
+    ]

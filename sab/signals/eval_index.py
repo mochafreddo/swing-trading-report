@@ -149,13 +149,6 @@ def choose_eval_index(
         meta_data_dir = meta.get("data_dir")
         if isinstance(meta_data_dir, str) and meta_data_dir.strip():
             data_dir = meta_data_dir.strip()
-    provider_hint = (
-        str(meta.get("data_source") or meta.get("provider") or provider or "kis")
-        .strip()
-        .lower()
-    )
-    if provider_hint == "pykrx":
-        return len(candles) - 1, False
 
     market = _infer_market(meta)
     zone = US_ZONE if market == "US" else KR_ZONE
