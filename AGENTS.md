@@ -11,7 +11,19 @@
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
-## pre-commit (샌드박스)
+## TDD (Red/Green/Refactor)
+
+- 기능 추가/버그 수정은 기본적으로 Red/Green/Refactor 사이클을 따릅니다.
+- Red: 먼저 실패하는 테스트를 작성하고, 실패를 확인한 뒤 구현을 시작합니다.
+- Green: 테스트를 통과시키는 최소한의 코드만 작성합니다.
+- Refactor: 테스트가 통과한 상태에서만 중복 제거와 구조 개선을 수행합니다.
+- 버그 수정 시 재현 테스트(회귀 테스트) 없이 코드부터 수정하지 않습니다.
+- 사이클 완료 전 아래 품질 게이트를 모두 통과합니다.
+- `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
+- `UV_CACHE_DIR=.uv-cache uv run ruff check .`
+- `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
+
+## Pre-commit (샌드박스)
 
 - 전체 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
 - 단일 훅 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run mypy --all-files`
@@ -43,17 +55,13 @@
 - 서로 다른 관심사가 섞여 있으면 커밋을 분리합니다.
 - 모호한 커밋 메시지는 피합니다.
 - 커밋 메시지의 제목과 본문은 한글로 작성합니다.
-- 커밋 메시지 기본 형식:
-  - 제목 1줄 (`type(scope): 요약`)
-  - 빈 줄 1줄
-  - 본문(필요한 경우에만) 문단/불릿으로 작성
-- 본문 작성 규칙:
-  - 문장마다 줄을 띄우지 않고 문단 단위로 작성합니다.
-  - CLI에서 `-m`를 문장별로 여러 번 쓰지 않습니다.
-  - 권장: `-m "제목"` + `-m "본문 전체"` 형태로 작성합니다.
-  - 본문에 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 않습니다(문자 그대로 `\n`이 커밋 메시지에 저장될 수 있음).
-    - 권장: zsh의 `$'...'` 인용을 사용합니다. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
-    - 대안: `git commit`로 편집기를 열어 작성합니다.
-  - 이미 푸시한 커밋 메시지를 고칠 때는 `git rebase -i`로 `reword` 후 `git push --force-with-lease`를 사용합니다(브랜치 정책/협업 상황 확인).
+- 커밋 메시지 기본 형식은 제목 1줄(`type(scope): 요약`) + 빈 줄 1줄 + 본문(필요한 경우)입니다.
+- 본문은 문장마다 줄을 띄우지 않고 문단 단위로 작성합니다.
+- CLI에서 `-m`를 문장별로 여러 번 쓰지 않습니다.
+- 권장 형식: `git commit -m "제목" -m "본문 전체"`
+- 본문 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 않습니다(문자 그대로 `\n`이 저장될 수 있음).
+- 줄바꿈 권장 방식: zsh의 `$'...'` 인용 사용. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
+- 줄바꿈 대안: `git commit`으로 편집기를 열어 작성합니다.
+- 이미 푸시한 커밋 메시지를 고칠 때는 `git rebase -i`로 `reword` 후 `git push --force-with-lease`를 사용합니다(브랜치 정책/협업 상황 확인).
 - `git status`, `git add`, `git commit` 같은 git 명령은 `/bin/zsh -lc` 같은 셸 래퍼 없이 직접 실행합니다.
-- `git push`는 권한 상승(`sandbox_permissions=\"require_escalated\"`)으로 실행합니다.
+- `git push`는 권한 상승(`sandbox_permissions="require_escalated"`)으로 실행합니다.
