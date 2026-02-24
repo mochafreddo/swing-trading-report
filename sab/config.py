@@ -186,8 +186,8 @@ class Config:
     exclude_etf_etn: bool = False
     require_slope_up: bool = False
     kis_min_interval_ms: float | None = None
-    market_cache_stale_sessions_kr: int = 1
-    market_cache_stale_sessions_us: int = 1
+    market_cache_stale_sessions_kr: int = 0
+    market_cache_stale_sessions_us: int = 0
     screener_cache_ttl_minutes: float = 5.0
     min_price: float = 0.0
     rs_lookback_days: int = 20
@@ -577,12 +577,12 @@ def _parse_data_section(
         market_cache_stale_sessions_kr=parser.env_int(
             "MARKET_CACHE_STALE_SESSIONS_KR",
             "data.market_cache_stale_sessions.kr",
-            1,
+            0,
         ),
         market_cache_stale_sessions_us=parser.env_int(
             "MARKET_CACHE_STALE_SESSIONS_US",
             "data.market_cache_stale_sessions.us",
-            1,
+            0,
         ),
     )
 

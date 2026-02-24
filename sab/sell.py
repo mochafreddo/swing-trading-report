@@ -101,6 +101,23 @@ def _resolve_sell_target_bars(runtime: _SellRuntime) -> int:
     return max(base_target_bars, min(estimated_sessions, 4000))
 
 
+def _mark_missing_sell_market_data(runtime: _SellRuntime) -> None:
+    if not runtime.unique_tickers:
+        return
+    missing = [
+        ticker for ticker in runtime.unique_tickers if ticker not in runtime.market_data
+    ]
+    if not missing:
+        return
+    preview = ", ".join(missing[:10])
+    if len(missing) > 10:
+        preview = f"{preview}, +{len(missing) - 10} more"
+    message = f"Missing market data for {len(missing)} holdings: {preview}"
+    runtime.failures.append(message)
+    runtime.fatal_failure = True
+    runtime.logger.error("%s", message)
+
+
 def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     logger = logging.getLogger(__name__)
     try:
@@ -114,10 +131,7 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
 
     runtime = _build_sell_runtime(cfg, logger)
     _collect_sell_runtime(runtime, target_bars=_resolve_sell_target_bars(runtime))
-    if runtime.unique_tickers and not runtime.market_data:
-        runtime.fatal_failure = True
-        runtime.failures.append("Failed to retrieve market data for holdings")
-        logger.error("Failed to retrieve market data for requested holdings")
+    _mark_missing_sell_market_data(runtime)
     results = _evaluate_sell_runtime(runtime)
 
     out_path = _render_sell_report(runtime, results)

@@ -325,3 +325,20 @@ strategy:
 
     cfg = load_config()
     assert cfg.gap_atr_multiplier == 0.0
+
+
+def test_load_config_defaults_market_cache_staleness_to_zero_sessions(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.market_cache_stale_sessions_kr == 0
+    assert cfg.market_cache_stale_sessions_us == 0

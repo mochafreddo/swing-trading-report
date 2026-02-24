@@ -77,6 +77,7 @@ class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
         *,
         tickers: list[str],
         target_bars: int,
+        adjusted: bool = True,
         split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
         exchange_from_suffix_fn: Callable[[str | None], str | None],
         get_pykrx_error_fn: Callable[[TRuntime], str | None],
@@ -97,6 +98,7 @@ class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
             split_symbol_and_suffix_fn=split_symbol_and_suffix_fn,
             exchange_from_suffix_fn=exchange_from_suffix_fn,
             get_pykrx_error_fn=get_pykrx_error_fn,
+            adjusted=adjusted,
             legacy_cache_keys_fn=legacy_cache_keys_fn,
             on_candles_applied_fn=on_candles_applied_fn,
         )
@@ -111,12 +113,14 @@ class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
         *,
         tickers: list[str],
         target_bars: int,
+        adjusted: bool = True,
         on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None,
     ) -> None:
         request = market_data_pipeline.PykrxCollectionRequest(
             tickers=tickers,
             target_bars=target_bars,
             PykrxClientErrorCls=self._deps.PykrxClientErrorCls,
+            adjusted=adjusted,
             on_candles_applied_fn=on_candles_applied_fn,
         )
         market_data_pipeline.collect_market_data_from_pykrx(
@@ -151,6 +155,7 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
                 runtime,
                 tickers=tickers,
                 target_bars=target_bars,
+                adjusted=True,
                 split_symbol_and_suffix_fn=_split_overseas,
                 exchange_from_suffix_fn=_excd_from_suffix,
                 get_pykrx_error_fn=lambda state: state.pykrx_import_error,
@@ -166,6 +171,7 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
                 runtime,
                 tickers=tickers,
                 target_bars=target_bars,
+                adjusted=True,
                 on_candles_applied_fn=self._update_latest_date,
             )
             return
@@ -260,6 +266,7 @@ class SellMarketData(_BaseMarketDataService[_SellRuntime]):
                 runtime,
                 tickers=tickers,
                 target_bars=target_bars,
+                adjusted=False,
                 split_symbol_and_suffix_fn=_split_symbol_and_suffix,
                 exchange_from_suffix_fn=_exchange_from_suffix,
                 get_pykrx_error_fn=lambda state: state.pykrx_init_error,
@@ -272,6 +279,7 @@ class SellMarketData(_BaseMarketDataService[_SellRuntime]):
                 runtime,
                 tickers=tickers,
                 target_bars=target_bars,
+                adjusted=False,
             )
 
     def _ensure_sell_pykrx_client(

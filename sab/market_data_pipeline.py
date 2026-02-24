@@ -90,6 +90,7 @@ class KisCollectionRequest[TRuntime: _CollectionRuntime]:
     split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]]
     exchange_from_suffix_fn: Callable[[str | None], str | None]
     get_pykrx_error_fn: Callable[[TRuntime], str | None]
+    adjusted: bool = True
     legacy_cache_keys_fn: _LegacyCacheKeysFn | None = None
     on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None
 
@@ -99,6 +100,7 @@ class PykrxCollectionRequest[TRuntime: _CollectionRuntime]:
     tickers: list[str]
     target_bars: int
     PykrxClientErrorCls: type[Exception]
+    adjusted: bool = True
     on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None
 
 
@@ -252,7 +254,7 @@ def _resolve_market_stale_limit(cfg: _CollectionConfig, *, market: str) -> int:
     try:
         return max(0, int(raw))
     except (TypeError, ValueError):
-        return 1
+        return 0
 
 
 def _evaluate_cache_staleness(
@@ -332,6 +334,11 @@ def _append_pykrx_warning_once(runtime: _CollectionRuntime, message: str) -> Non
         return
     runtime.failures.append(message)
     runtime.pykrx_warning_added = True
+
+
+def _is_adjusted_kwarg_type_error(exc: TypeError) -> bool:
+    message = str(exc)
+    return "unexpected keyword argument" in message and "adjusted" in message
 
 
 def ensure_pykrx_client[TRuntime: _CollectionRuntime](
@@ -506,16 +513,39 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
 
         try:
             if target.exchange:
-                candles = runtime.kis_client.overseas_daily_candles(
-                    symbol=target.base_symbol,
-                    exchange=target.exchange,
-                    count=request.target_bars,
-                )
+                try:
+                    candles = runtime.kis_client.overseas_daily_candles(
+                        symbol=target.base_symbol,
+                        exchange=target.exchange,
+                        count=request.target_bars,
+                        adjusted=request.adjusted,
+                    )
+                except TypeError as type_exc:
+                    if not _is_adjusted_kwarg_type_error(type_exc):
+                        raise
+                    # Backward compatibility for stub/test clients that
+                    # do not yet expose the adjusted kwarg.
+                    candles = runtime.kis_client.overseas_daily_candles(
+                        symbol=target.base_symbol,
+                        exchange=target.exchange,
+                        count=request.target_bars,
+                    )
             else:
-                candles = runtime.kis_client.daily_candles(
-                    target.base_symbol,
-                    count=request.target_bars,
-                )
+                try:
+                    candles = runtime.kis_client.daily_candles(
+                        target.base_symbol,
+                        count=request.target_bars,
+                        adjusted=request.adjusted,
+                    )
+                except TypeError as type_exc:
+                    if not _is_adjusted_kwarg_type_error(type_exc):
+                        raise
+                    # Backward compatibility for stub/test clients that
+                    # do not yet expose the adjusted kwarg.
+                    candles = runtime.kis_client.daily_candles(
+                        target.base_symbol,
+                        count=request.target_bars,
+                    )
             if candles:
                 runtime.market_data[ticker] = candles
                 runtime.ticker_data_source[ticker] = "kis"
@@ -556,10 +586,21 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
             fallback_error = request.get_pykrx_error_fn(runtime)
             if fallback_client is not None and target.exchange is None:
                 try:
-                    candles = fallback_client.daily_candles(
-                        target.base_symbol,
-                        count=request.target_bars,
-                    )
+                    try:
+                        candles = fallback_client.daily_candles(
+                            target.base_symbol,
+                            count=request.target_bars,
+                            adjusted=request.adjusted,
+                        )
+                    except TypeError as type_exc:
+                        if not _is_adjusted_kwarg_type_error(type_exc):
+                            raise
+                        # Backward compatibility for stub/test clients that
+                        # do not yet expose the adjusted kwarg.
+                        candles = fallback_client.daily_candles(
+                            target.base_symbol,
+                            count=request.target_bars,
+                        )
                 except PykrxClientError as py_exc:
                     fallback_client = None
                     fallback_error = str(py_exc)
@@ -607,9 +648,21 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
 
     for ticker in request.tickers:
         try:
-            candles = runtime.pykrx_client.daily_candles(
-                ticker, count=request.target_bars
-            )
+            try:
+                candles = runtime.pykrx_client.daily_candles(
+                    ticker,
+                    count=request.target_bars,
+                    adjusted=request.adjusted,
+                )
+            except TypeError as type_exc:
+                if not _is_adjusted_kwarg_type_error(type_exc):
+                    raise
+                # Backward compatibility for stub/test clients that do not
+                # expose the adjusted kwarg.
+                candles = runtime.pykrx_client.daily_candles(
+                    ticker,
+                    count=request.target_bars,
+                )
         except request.PykrxClientErrorCls as exc:
             msg = f"{ticker}: PyKRX error ({exc})"
             runtime.failures.append(msg)

@@ -42,17 +42,138 @@ class KISClientOverseasHolidaysTests(unittest.TestCase):
             )
 
             # Verify request
-            request_mock.assert_called_once()
-            method, url = request_mock.call_args[0][:2]
-            kwargs = request_mock.call_args.kwargs
+            assert request_mock.call_count == 35
+            first_call = request_mock.call_args_list[0]
+            last_call = request_mock.call_args_list[-1]
+            method, url = first_call[0][:2]
+            kwargs = first_call.kwargs
+            last_kwargs = last_call.kwargs
 
             self.assertEqual(method, "GET")
             self.assertEqual(url, self.client.creds.overseas_holiday_url)
             self.assertEqual(kwargs["params"]["TRAD_DT"], "20251127")
+            self.assertEqual(last_kwargs["params"]["TRAD_DT"], "20251231")
 
             # Verify parsing
             self.assertEqual(len(items), 1)
             self.assertEqual(items[0]["evnt_nm"], "Thanksgiving")
+
+    def test_overseas_holidays_filters_output_by_country_code(self) -> None:
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "rt_cd": "0",
+            "msg_cd": "00000",
+            "msg1": "OK",
+            "output": [
+                {
+                    "TRD_DT": "20251127",
+                    "natn_eng_abrv_cd": "US",
+                    "evnt_nm": "Thanksgiving",
+                    "open_yn": "N",
+                },
+                {
+                    "TRD_DT": "20251128",
+                    "tr_natn_cd": "840",
+                    "evnt_nm": "US Market Holiday",
+                    "open_yn": "N",
+                },
+                {
+                    "TRD_DT": "20251127",
+                    "natn_eng_abrv_cd": "KR",
+                    "evnt_nm": "KR Holiday",
+                    "open_yn": "N",
+                },
+            ],
+        }
+
+        with patch.object(
+            self.client, "_request", MagicMock(return_value=fake_resp)
+        ) as request_mock:
+            items = self.client.overseas_holidays(
+                country_code="US",
+                start_date="20251127",
+                end_date="20251127",
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(
+            [item["evnt_nm"] for item in items], ["Thanksgiving", "US Market Holiday"]
+        )
+
+    def test_overseas_holidays_keeps_numeric_rows_for_mapped_country_code(
+        self,
+    ) -> None:
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "rt_cd": "0",
+            "msg_cd": "00000",
+            "msg1": "OK",
+            "output": [
+                {
+                    "TRD_DT": "20251127",
+                    "tr_natn_cd": "276",
+                    "evnt_nm": "DE Holiday",
+                    "open_yn": "N",
+                },
+                {
+                    "TRD_DT": "20251127",
+                    "natn_eng_abrv_cd": "US",
+                    "evnt_nm": "US Holiday",
+                    "open_yn": "N",
+                },
+            ],
+        }
+
+        with patch.object(
+            self.client, "_request", MagicMock(return_value=fake_resp)
+        ) as request_mock:
+            items = self.client.overseas_holidays(
+                country_code="DE",
+                start_date="20251127",
+                end_date="20251127",
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual([item["evnt_nm"] for item in items], ["DE Holiday"])
+
+    def test_overseas_holidays_filters_numeric_rows_for_unmapped_country_code(
+        self,
+    ) -> None:
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "rt_cd": "0",
+            "msg_cd": "00000",
+            "msg1": "OK",
+            "output": [
+                {
+                    "TRD_DT": "20251127",
+                    "tr_natn_cd": "840",
+                    "evnt_nm": "US Holiday",
+                    "open_yn": "N",
+                },
+                {
+                    "TRD_DT": "20251127",
+                    "natn_eng_abrv_cd": "US",
+                    "evnt_nm": "US Holiday (alpha)",
+                    "open_yn": "N",
+                },
+            ],
+        }
+
+        with patch.object(
+            self.client, "_request", MagicMock(return_value=fake_resp)
+        ) as request_mock:
+            items = self.client.overseas_holidays(
+                country_code="ZZ",
+                start_date="20251127",
+                end_date="20251127",
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(items, [])
 
 
 if __name__ == "__main__":

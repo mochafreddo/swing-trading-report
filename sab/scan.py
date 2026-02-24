@@ -40,6 +40,23 @@ def _record_system_issue(runtime: _ScanRuntime, message: str) -> None:
     runtime.system_issues.append(message)
 
 
+def _mark_missing_scan_market_data(runtime: _ScanRuntime) -> None:
+    if not runtime.tickers:
+        return
+    missing = [
+        ticker for ticker in runtime.tickers if ticker not in runtime.market_data
+    ]
+    if not missing:
+        return
+    preview = ", ".join(missing[:10])
+    if len(missing) > 10:
+        preview = f"{preview}, +{len(missing) - 10} more"
+    message = f"Missing market data for {len(missing)} tickers: {preview}"
+    _record_system_issue(runtime, message)
+    runtime.fatal_failure = True
+    runtime.logger.error("%s", message)
+
+
 def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
     runtime.ticker_currency = {
         ticker: _infer_currency(ticker) for ticker in runtime.tickers
@@ -192,10 +209,7 @@ def run_scan(
         runtime.fatal_failure = True
 
     _evaluate_scan_runtime(runtime)
-
-    if runtime.tickers and not runtime.market_data:
-        runtime.fatal_failure = True
-        runtime.logger.error("Failed to retrieve market data for requested tickers")
+    _mark_missing_scan_market_data(runtime)
 
     out_path = _render_scan_report(runtime)
     runtime.logger.info("Buy report written to: %s", out_path)

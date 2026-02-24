@@ -226,6 +226,11 @@ def _detect_trend_pullback_bounce(
         else:
             break
 
+    if pullback_bars == 0:
+        return False, ["No pullback bars near EMA short"], None, {}
+    if pullback_bars > settings.pullback_max_bars:
+        return False, ["Pullback exceeds max bars"], None, {}
+
     # Very rough check for heavy selling: big red bar with volume >> avg
     heavy_selling = False
     pullback_slice = candles[-pullback_bars:] if pullback_bars > 0 else []

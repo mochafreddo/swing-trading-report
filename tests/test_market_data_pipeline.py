@@ -6,8 +6,14 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from sab.data.kis_client import KISClientError
-from sab.market_data_pipeline import KisCollectionRequest, collect_market_data_from_kis
+from sab.market_data_pipeline import (
+    KisCollectionRequest,
+    PykrxCollectionRequest,
+    collect_market_data_from_kis,
+    collect_market_data_from_pykrx,
+)
 from sab.market_data_service import scan_legacy_cache_keys as _scan_legacy_cache_keys
 
 
@@ -94,10 +100,12 @@ def _collect_market_data_from_kis(
     on_candles_applied_fn: Callable[[Any, str, list[dict[str, Any]]], None]
     | None = None,
     now_fn: Callable[[], dt.datetime] | None = None,
+    adjusted: bool = True,
 ) -> None:
     request = KisCollectionRequest(
         tickers=tickers,
         target_bars=target_bars,
+        adjusted=adjusted,
         load_json_fn=load_json_fn,
         save_json_fn=save_json_fn,
         ensure_pykrx_client_fn=ensure_pykrx_client_fn,
@@ -570,3 +578,112 @@ def test_collect_market_data_from_kis_rejects_us_cache_over_stale_limit() -> Non
         for msg in runtime.failures
     )
     assert not any("API error, using cached data" in msg for msg in runtime.failures)
+
+
+def test_collect_market_data_from_kis_passes_adjusted_flag_to_provider() -> None:
+    class _KisClient:
+        def __init__(self) -> None:
+            self.adjusted_flags: list[bool] = []
+
+        def daily_candles(
+            self, symbol: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            self.adjusted_flags.append(adjusted)
+            return _build_candles(count)
+
+    kis_client = _KisClient()
+    runtime = _build_runtime(kis_client=kis_client)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        adjusted=False,
+    )
+
+    assert kis_client.adjusted_flags == [False]
+
+
+def test_collect_market_data_from_pykrx_passes_adjusted_flag_to_provider() -> None:
+    class _PykrxClient:
+        def __init__(self) -> None:
+            self.adjusted_flags: list[bool] = []
+
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            self.adjusted_flags.append(adjusted)
+            return _build_candles(count)
+
+    pykrx_client = _PykrxClient()
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    runtime.pykrx_client = pykrx_client
+
+    request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
+        tickers=["005930"],
+        target_bars=220,
+        adjusted=False,
+        PykrxClientErrorCls=RuntimeError,
+    )
+    collect_market_data_from_pykrx(runtime, request=request)
+
+    assert pykrx_client.adjusted_flags == [False]
+
+
+def test_collect_market_data_from_kis_does_not_suppress_non_kwarg_type_error() -> None:
+    class _KisClient:
+        def daily_candles(
+            self, symbol: str, *, count: int, **kwargs: Any
+        ) -> list[dict[str, Any]]:
+            del symbol
+            if "adjusted" in kwargs:
+                raise TypeError("internal converter failed")
+            return _build_candles(count)
+
+    runtime = _build_runtime(kis_client=_KisClient())
+
+    with pytest.raises(TypeError, match="internal converter failed"):
+        _collect_market_data_from_kis(
+            runtime,
+            tickers=["005930"],
+            target_bars=220,
+            load_json_fn=lambda *_: None,
+            save_json_fn=lambda *_: None,
+            ensure_pykrx_client_fn=lambda _: None,
+            split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+            exchange_from_suffix_fn=_exchange_from_suffix,
+            get_pykrx_error_fn=lambda _: None,
+            adjusted=False,
+        )
+
+
+def test_collect_market_data_from_pykrx_does_not_suppress_non_kwarg_type_error() -> (
+    None
+):
+    class _PykrxClient:
+        def daily_candles(
+            self, ticker: str, *, count: int, **kwargs: Any
+        ) -> list[dict[str, Any]]:
+            del ticker
+            if "adjusted" in kwargs:
+                raise TypeError("vectorization failed")
+            return _build_candles(count)
+
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    runtime.pykrx_client = _PykrxClient()
+
+    request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
+        tickers=["005930"],
+        target_bars=220,
+        adjusted=False,
+        PykrxClientErrorCls=RuntimeError,
+    )
+
+    with pytest.raises(TypeError, match="vectorization failed"):
+        collect_market_data_from_pykrx(runtime, request=request)

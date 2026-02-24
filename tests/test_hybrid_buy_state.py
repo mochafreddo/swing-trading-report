@@ -381,6 +381,35 @@ def test_pullback_heavy_selling_check_skips_when_no_pullback() -> None:
     assert not (ok is False and reasons == ["Heavy selling volume during pullback"])
 
 
+def test_pullback_bounce_requires_actual_pullback_bars() -> None:
+    settings = _settings()
+    closes = [10.0, 11.0, 12.0, 13.0, 14.0]
+    sma_trend = [9.0, 10.0, 11.0, 12.0, 13.0]
+    ema_short = [8.0, 9.0, 10.0, 11.0, 12.0]
+    ema_mid = [7.0, 8.0, 9.0, 10.0, 11.0]
+    rsi_vals = [45.0, 48.0, 50.0, 52.0, 54.0]
+    candles = [
+        {"open": 10.0, "close": 10.0, "low": 9.0, "volume": 1_000_000.0},
+        {"open": 11.0, "close": 11.0, "low": 10.0, "volume": 1_000_000.0},
+        {"open": 12.0, "close": 12.0, "low": 11.0, "volume": 1_000_000.0},
+        {"open": 13.0, "close": 13.0, "low": 12.0, "volume": 1_000_000.0},
+        {"open": 14.0, "close": 14.0, "low": 13.0, "volume": 1_200_000.0},
+    ]
+
+    ok, reasons, _, _ = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is False
+    assert reasons == ["No pullback bars near EMA short"]
+
+
 def test_hybrid_respects_max_gap_pct(monkeypatch):
     candles = _simple_candles(10)
     candles[-2]["close"] = 100.0
