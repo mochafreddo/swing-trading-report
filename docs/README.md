@@ -5,9 +5,6 @@
 ## 제품/요구사항
 
 - [PRD](PRD.md)
-- [v1.1 구현 명세](spec-v1.1.md)
-- [v1.1 구현 계획](plan-v1.1.md)
-- [v1.2 백로그 스펙 (Holdings Import/Export)](spec-v1.2-holdings-import-export.md)
 
 ## 운영/설정
 
