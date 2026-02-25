@@ -341,6 +341,46 @@ def _is_adjusted_kwarg_type_error(exc: TypeError) -> bool:
     return "unexpected keyword argument" in message and "adjusted" in message
 
 
+def _apply_cached_candles[TRuntime: _CollectionRuntime](
+    runtime: TRuntime,
+    *,
+    ticker: str,
+    candles: list[Candle] | None,
+    request: KisCollectionRequest[TRuntime],
+    cached_key: str | None,
+    target_cache_key: str,
+    market: str,
+    stale_sessions: int | None,
+    max_stale_sessions: int,
+) -> None:
+    if not candles:
+        return
+
+    runtime.market_data[ticker] = candles
+    runtime.ticker_data_source.setdefault(ticker, runtime.cfg.data_provider)
+    if request.on_candles_applied_fn:
+        request.on_candles_applied_fn(runtime, ticker, candles)
+
+    if cached_key and cached_key != target_cache_key:
+        try:
+            request.save_json_fn(runtime.cfg.data_dir, target_cache_key, candles)
+        except Exception as exc:
+            migration_msg = (
+                f"{ticker}: Failed to migrate cache key "
+                f"'{cached_key}' -> '{target_cache_key}' ({exc})"
+            )
+            runtime.failures.append(migration_msg)
+            runtime.logger.warning(migration_msg)
+
+    runtime.logger.info(
+        "Using cached candles for %s (market=%s, stale=%s/%s sessions)",
+        ticker,
+        market,
+        stale_sessions or 0,
+        max_stale_sessions,
+    )
+
+
 def ensure_pykrx_client[TRuntime: _CollectionRuntime](
     runtime: TRuntime,
     *,
@@ -461,6 +501,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
         cached: list[Candle] | None = None
         cached_key: str | None = None
         cached_stale_sessions: int | None = None
+        cache_usable = False
         cache_rejection_reason: str | None = None
         for cache_key in cache_keys:
             candidate = request.load_json_fn(runtime.cfg.data_dir, cache_key)
@@ -486,28 +527,16 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 data_dir=runtime.cfg.data_dir,
             )
             if cache_usable:
-                runtime.market_data[ticker] = cached
-                runtime.ticker_data_source.setdefault(ticker, runtime.cfg.data_provider)
-                if request.on_candles_applied_fn:
-                    request.on_candles_applied_fn(runtime, ticker, cached)
-                if cached_key and cached_key != target.cache_key:
-                    try:
-                        request.save_json_fn(
-                            runtime.cfg.data_dir, target.cache_key, cached
-                        )
-                    except Exception as exc:
-                        migration_msg = (
-                            f"{ticker}: Failed to migrate cache key "
-                            f"'{cached_key}' -> '{target.cache_key}' ({exc})"
-                        )
-                        runtime.failures.append(migration_msg)
-                        runtime.logger.warning(migration_msg)
-                runtime.logger.info(
-                    "Using cached candles for %s (market=%s, stale=%s/%s sessions)",
-                    ticker,
-                    market,
-                    cached_stale_sessions or 0,
-                    max_stale_sessions,
+                _apply_cached_candles(
+                    runtime,
+                    ticker=ticker,
+                    candles=cached,
+                    request=request,
+                    cached_key=cached_key,
+                    target_cache_key=target.cache_key,
+                    market=market,
+                    stale_sessions=cached_stale_sessions,
+                    max_stale_sessions=max_stale_sessions,
                 )
                 continue
 
@@ -570,18 +599,6 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 runtime.failures.append(msg)
                 runtime.logger.warning(msg)
         except (KISClientError, KISAuthError) as exc:
-            if ticker in runtime.market_data:
-                stale_note = ""
-                if cached_stale_sessions is not None:
-                    stale_note = (
-                        f", stale={cached_stale_sessions}/{max_stale_sessions} "
-                        f"{market} sessions"
-                    )
-                msg = f"{ticker}: API error, using cached data{stale_note} ({exc})"
-                runtime.failures.append(msg)
-                runtime.logger.warning(msg)
-                continue
-
             fallback_client = request.ensure_pykrx_client_fn(runtime)
             fallback_error = request.get_pykrx_error_fn(runtime)
             if fallback_client is not None and target.exchange is None:

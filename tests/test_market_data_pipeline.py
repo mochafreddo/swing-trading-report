@@ -395,6 +395,41 @@ def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None
     assert runtime.failures == []
 
 
+def test_collect_market_data_from_kis_does_not_refresh_api_when_cache_usable() -> None:
+    class _KisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
+            assert symbol == "005930"
+            assert count == 220
+            return _candles_with_last_date("20250108")
+
+    cached_candles = _candles_with_last_date("20250107")
+    kis_client = _KisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == "candles_005930" else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert kis_client.calls == 0
+    assert runtime.market_data["005930"] == cached_candles
+    assert runtime.failures == []
+
+
 def test_collect_market_data_from_kis_rejects_kr_cache_over_stale_limit() -> None:
     class _FailingKisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:

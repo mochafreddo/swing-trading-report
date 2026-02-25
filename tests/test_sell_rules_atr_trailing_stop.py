@@ -361,10 +361,58 @@ def test_corporate_action_guard_returns_review(monkeypatch: pytest.MonkeyPatch) 
             "volume": 1000,
         },
     ]
-    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-01",
+        "stop_override": 1.0,
+    }
     settings = SellSettings(require_sma200=False, min_bars=3, time_stop_days=0)
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
     assert result.action == "REVIEW"
+    assert any("Potential corporate action" in reason for reason in result.reasons)
+
+
+def test_corporate_action_guard_downgrades_sell_signal_to_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 50,
+            "high": 51,
+            "low": 49,
+            "close": 50,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 48,
+            "high": 49,
+            "low": 47,
+            "close": 48,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-01",
+        "stop_override": 49.0,
+    }
+    settings = SellSettings(require_sma200=False, min_bars=3, time_stop_days=0)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert "Price hit custom stop override" in result.reasons
     assert any("Potential corporate action" in reason for reason in result.reasons)

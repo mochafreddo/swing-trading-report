@@ -170,7 +170,31 @@ def _decorate_candidates(
     lookup_holiday_fn: Any,
     us_market_status_fn: Any,
 ) -> None:
-    runtime.candidates.sort(key=lambda c: c.get("score_value", 0.0), reverse=True)
+    def _metric(
+        candidate: dict[str, Any],
+        primary_key: str,
+        *,
+        fallback_key: str | None = None,
+        default: float = float("-inf"),
+    ) -> float:
+        primary = _to_float(candidate.get(primary_key))
+        if primary is not None:
+            return primary
+        if fallback_key is not None:
+            fallback = _to_float(candidate.get(fallback_key))
+            if fallback is not None:
+                return fallback
+        return default
+
+    runtime.candidates.sort(
+        key=lambda candidate: (
+            -_metric(candidate, "score_value", fallback_key="score", default=0.0),
+            -_metric(candidate, "rs_diff_value"),
+            -_metric(candidate, "avg_dollar_volume_value"),
+            -_metric(candidate, "pct_change_value"),
+            str(candidate.get("ticker", "")),
+        )
+    )
     for candidate in runtime.candidates:
         apply_currency_display_fn(candidate, runtime.fx_rate, runtime.fx_meta_note)
         if candidate.get("currency", "KRW").upper() != "USD":

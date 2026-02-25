@@ -355,3 +355,39 @@ def test_decorate_candidates_passes_data_dir_to_market_status_fallback() -> None
 
     assert called == {"data_dir": "custom-data-dir"}
     assert runtime.candidates[0]["market_status"] == "US market closed"
+
+
+def test_decorate_candidates_breaks_score_ties_with_quality_metrics() -> None:
+    runtime = _build_runtime()
+    runtime.candidates = [
+        {
+            "ticker": "LOW.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "rs_diff_value": 0.1,
+            "avg_dollar_volume_value": 100_000.0,
+            "pct_change_value": 0.01,
+        },
+        {
+            "ticker": "HIGH.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "rs_diff_value": 0.3,
+            "avg_dollar_volume_value": 300_000.0,
+            "pct_change_value": 0.03,
+        },
+    ]
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=lambda **_kwargs: "closed",
+    )
+
+    assert [candidate["ticker"] for candidate in runtime.candidates] == [
+        "HIGH.KR",
+        "LOW.KR",
+    ]

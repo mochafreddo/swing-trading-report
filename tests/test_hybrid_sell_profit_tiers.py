@@ -257,7 +257,7 @@ def test_hybrid_sell_corporate_action_guard_returns_review(monkeypatch):
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
     )
-    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+    holding = {"entry_price": 50.0, "entry_date": "2025-01-01"}
     candles = [
         {
             "date": "20250101",
@@ -288,4 +288,50 @@ def test_hybrid_sell_corporate_action_guard_returns_review(monkeypatch):
     result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
 
     assert result.action == "REVIEW"
+    assert any("Potential corporate action" in reason for reason in result.reasons)
+
+
+def test_hybrid_sell_corporate_action_guard_downgrades_sell_signal_to_review(
+    monkeypatch,
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-01",
+        "stop_override": 49.0,
+    }
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250103",
+            "open": 48.0,
+            "high": 49.0,
+            "low": 47.0,
+            "close": 48.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert "Price hit custom stop override" in result.reasons
     assert any("Potential corporate action" in reason for reason in result.reasons)

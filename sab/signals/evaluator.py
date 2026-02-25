@@ -301,8 +301,11 @@ def evaluate_ticker(
             sma200_value if not math.isnan(sma200_value) else float("nan"), 0
         ),
         "avg_dollar_volume": fmt(avg_dollar_volume, 0),
+        "avg_dollar_volume_value": avg_dollar_volume,
         "rs_return": f"{rs_return * 100:.1f}%" if rs_return is not None else "-",
+        "rs_return_value": rs_return,
         "rs_diff": f"{rs_diff * 100:.1f}%" if rs_diff is not None else "-",
+        "rs_diff_value": rs_diff,
         "rs_benchmark": f"{settings.rs_benchmark_return * 100:.1f}%",
         "score": score_display,
         "score_value": score,
@@ -311,6 +314,7 @@ def evaluate_ticker(
         "slope_pass": "Yes" if slope_pass else "No",
         "currency": currency,
         "price_value": latest_close,
+        "pct_change_value": pct_change,
     }
 
     return EvaluationResult(ticker, candidate)
