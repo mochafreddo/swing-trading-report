@@ -26,15 +26,14 @@
   - 확인: `uv --version`
 
 - 의존성/프로젝트 준비
-  - 기존 저장소라면 `pyproject.toml` 추가 후 의존성 동기화
-  - 기본(슬림) 프로파일: `uv sync`
-  - 개발 의존성 포함: `uv sync --all-groups`
+  - 기본(슬림) 프로파일: `UV_CACHE_DIR=.uv-cache uv sync`
+  - 개발 의존성 포함: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
   - `.env` 자동 로딩은 기본 내장 파서로 동작(추가 의존성 불필요)
-  - (선택) `python-dotenv` 고급 파싱 사용: `uv sync --extra dotenv`
-  - (선택) 거래소 휴장일 자동 캘린더: `uv sync --extra calendar`
-  - (선택) PyKRX 데이터 제공자/폴백: `uv sync --extra pykrx`
-  - (선택) 전체 기능: `uv sync --all-extras --all-groups`
-  - 잠금 갱신이 필요하면: `uv lock`
+  - (선택) `python-dotenv` 고급 파싱 사용: `UV_CACHE_DIR=.uv-cache uv sync --extra dotenv`
+  - (선택) 거래소 휴장일 자동 캘린더: `UV_CACHE_DIR=.uv-cache uv sync --extra calendar`
+  - (선택) PyKRX 데이터 제공자/폴백: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
+  - (선택) 전체 기능: `UV_CACHE_DIR=.uv-cache uv sync --all-extras --all-groups`
+  - 잠금 갱신이 필요하면: `UV_CACHE_DIR=.uv-cache uv lock` (업그레이드: `UV_CACHE_DIR=.uv-cache uv lock --upgrade`)
 
 - .env 설정(예시)
   - 원칙:
@@ -44,8 +43,13 @@
   - 최소 예시(필수):
     - `KIS_APP_KEY=...`
     - `KIS_APP_SECRET=...`
+  - 웹 UI 추가(필수):
+    - `SUPABASE_URL=...`
+    - `SUPABASE_SECRET_KEY=...` (또는 `SUPABASE_SERVICE_ROLE_KEY=...`)
+    - `SAB_BASIC_AUTH_USER=...`, `SAB_BASIC_AUTH_PASS=...`, `SAB_SESSION_SECRET=...`
   - 선택(로컬 운영 편의):
     - `LOG_LEVEL=INFO`
+  - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
 - 실행 예시
   - 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
@@ -53,11 +57,11 @@
   - 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
   - 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
-  - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `uv sync --extra pykrx`
+  - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
-  - 웹 UI(Next.js): `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
-    - 로그인: `.env`에 `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS`, `SAB_SESSION_SECRET` 설정
-  - 익일 시초 체크(Entry)는 아직 CLI 서브커맨드로 제공되지 않습니다.
+  - 웹 UI(Next.js): `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web` → `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
+  - 로컬 CLI 실행 결과도 웹에서 보고 싶다면: `.env`에 `SAB_UPLOAD_REPORTS=true` (Supabase 설정 필요)
+  - 익일 시초 체크(Entry)는 아직 CLI 서브커맨드로 제공되지 않습니다(구상/문서화만).
 
 - 웹 UI 로컬 실행(Next.js + Docker)
   - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
@@ -95,10 +99,11 @@
       - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
 
 - 결과(리포트 분리 설계)
-  - Buy: `reports/YYYY-MM-DD.buy.json`
-  - Sell/Review: `reports/YYYY-MM-DD.sell.json`
-  - Entry: `reports/YYYY-MM-DD.entry.json` — 예정
-  - 웹 대시보드는 `reports/`의 JSON을 렌더링합니다.
+  - Buy: `reports/YYYY-MM-DD(-n).buy.json`
+  - Sell/Review: `reports/YYYY-MM-DD(-n).sell.json`
+  - Entry: `reports/YYYY-MM-DD(-n).entry.json` — 예정
+  - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
+    - 업로드는 GitHub Actions에서 기본 수행, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때만 수행합니다.
 
 ## CLI 서브커맨드
 
@@ -200,7 +205,7 @@ Per‑market 임계치(권장)
   - `report/` … 리포트 아티팩트(JSON) 생성
 - `web/` … Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` … 생성된 JSON 리포트 아티팩트 출력 폴더
-- `data/` … 캐시/상태(JSON 또는 SQLite)
+- `data/` … 캐시/상태(현재 JSON, 추후 SQLite 고려)
 - `docs/README.md` … 문서 인덱스(진입점)
   - `docs/adr/README.md` … ADR 인덱스
   - `docs/reviews/README.md` … 리뷰 인덱스
@@ -209,12 +214,10 @@ Per‑market 임계치(권장)
 
 ## 스크립트화 권장
 
-반복 명령은 스크립트/Makefile로 캡슐화하면 편합니다.
+반복 명령은 스크립트/Makefile로 캡슐화하면 편합니다(필요 시 직접 추가).
 
-- `bin/scan`
-  - `uv run -m sab scan "$@"`
-- `Makefile`
-  - `scan`, `scan-limit`, `scan-watchlist`, `lock`, `sync` 등 타깃 정의
+- 예시: `bin/scan` → `UV_CACHE_DIR=.uv-cache uv run -m sab scan "$@"`
+- 예시: `Makefile` → `scan`, `scan-limit`, `scan-watchlist`, `lock`, `sync` 등 타깃 정의
 
 ## 상태
 
@@ -223,7 +226,6 @@ Per‑market 임계치(권장)
 ## 라이선스
 
 - 본 리포지토리의 소스코드는 MIT License를 따릅니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
-- `open-trading-api/` 디렉터리는 한국투자증권 KIS Developers 공개 샘플로, 해당 프로젝트의 라이선스/약관을 따릅니다(해당 폴더의 README/라이선스 참고).
 
 ## 전략(요약)
 
@@ -244,12 +246,13 @@ Per‑market 임계치(권장)
 
 ## 보유/매도 평가(개요)
 
-- holdings.yaml에 보유 종목을 기록하고, 무효화(EMA 되크로스/RSI 붕괴), 리스크(ATR 트레일), 시간 스탑 규칙으로 Sell/Review 섹션을 생성합니다.
+- (권장) 보유 목록은 Supabase `holdings`를 단일 소스로 사용합니다(웹 UI에서 CRUD).
+- 로컬에서 `sab sell`을 직접 실행할 때는 `holdings.yaml`(백업 파일) 또는 `--holdings <path>`로 지정한 파일을 입력으로 사용합니다.
 - 스키마와 예시는 `docs/holdings-schema.md` 및 `holdings.example.yaml`을 참고하세요.
 
-## 장 오픈 진입 체크(개요)
+## 장 오픈 진입 체크(개요, 예정)
 
-- 전일 리포트의 매수 후보를 기준으로, 다음 날 시초가 갭을 ATR 규칙으로 확인 후 5–15분 재확인(ORH 돌파/첫 눌림 재상승) 가이드 텍스트를 생성합니다.
+- 전일 리포트의 매수 후보를 기준으로, 다음 날 시초가 갭을 ATR 규칙으로 확인 후 5–15분 재확인(ORH 돌파/첫 눌림 재상승) 가이드 텍스트를 생성하는 기능을 계획 중입니다(현재는 CLI 서브커맨드/리포트 아티팩트로 제공되지 않음).
 
 ## 데이터 수집(히스토리 누적)
 
