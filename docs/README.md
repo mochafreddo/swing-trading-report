@@ -19,6 +19,10 @@
 
 - [시스템 아키텍처 개요](ARCHITECTURE.md)
 
+## 전략/로직
+
+- [Swing 핵심 로직 설계(신호/리스크)](STRATEGY.md)
+
 ## 거버넌스
 
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)

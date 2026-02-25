@@ -23,6 +23,11 @@
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 
+## 문서(설계 로직)
+
+- 설계 로직(신호/리스크/평가 기준/모드별 규칙)이 변경될 경우 [STRATEGY.md](docs/STRATEGY.md) 를 함께 업데이트합니다.
+- 로직/플로우/컴포넌트 책임이 변경될 경우 [ARCHITECTURE.md](docs/ARCHITECTURE.md) 업데이트 필요 여부를 함께 검토합니다.
+
 ## Pre-commit (샌드박스)
 
 - 전체 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
