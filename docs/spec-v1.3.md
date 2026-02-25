@@ -49,9 +49,10 @@
 
 - `uv run python -m sab entry`
   - `--buy-report` (optional): 입력 buy JSON 경로. 미지정 시 `reports/`에서 최신 buy를 자동 선택.
-  - `--provider` (optional): `kis|pykrx`. entry는 실시간/당일 가격이 필요하므로 기본 `kis`를 권장(단, 구현 가능성에 따라 pykrx는 “EOD 이후” 모드로 제한).
-  - `--mode` (optional): `PRE_OPEN|INTRADAY` (기본 `PRE_OPEN`)
-  - `--upload` (optional): Storage 업로드/인덱싱 수행 여부(기본: v1.1 정책과 동일)
+  - `--market` (optional): `KR|US`. 미지정 시 입력 buy 리포트에서 단일 시장을 추론(혼합이면 오류).
+  - `--provider` (optional): `kis|pykrx`. entry는 실시간/당일 가격이 필요하므로 기본 `kis`를 권장(단, `pykrx`는 “EOD 이후(AFTER_CLOSE)” 모드로 제한).
+  - `--mode` (optional): `PRE_OPEN|INTRADAY|AFTER_CLOSE` (기본 `PRE_OPEN`)
+  - `--upload` (optional): (확장) Storage 업로드/인덱싱 수행 여부. `report_index`가 `entry`를 허용(5.3)하기 전에는 로컬 파일만 생성하는 것을 권장합니다.
 
 #### 4.1.3 출력 아티팩트
 
@@ -65,22 +66,32 @@
 ### 4.2 Entry 리포트 JSON 스키마(초안)
 
 - 최상위 필드(필수)
-  - `schema_version`: `"entry-v1"`
-  - `report_type`: `"entry"`
-  - `generated_at`: ISO8601 string
+  - `schema`: `"sab.report.v1"`
+  - `type`: `"entry"`
+  - `generated_at`: 기존 리포트와 동일한 사람이 읽기 쉬운 실행 시각 문자열(예: `2026-02-25 09:30 KST`)
+  - `run_id`: UUID string
+  - `run_ts_utc`: ISO8601 string (재현성 기준 시각)
+  - `git_sha`: string|null
+  - `eval_context`: object (6.2 표준)
+  - `config_snapshot`: `object|null` (6.2 표준, 민감정보 제외)
+  - `provider`: `kis|pykrx`
+  - `mode`: `PRE_OPEN|INTRADAY|AFTER_CLOSE`
+  - `market`: `KR|US` (단일 시장)
   - `source_buy_report`: 입력 buy 리포트의 파일명 또는 storage key
-  - `signal_eval_date`: buy 리포트의 평가 캔들 날짜(=신호일)
-  - `entry_session_date`: entry 실행 세션 날짜(=실행일)
+  - `signal_eval_date`: `YYYY-MM-DD` (신호일; `market`의 세션 날짜 기준 — `KR: KST(Asia/Seoul)`, `US: ET(America/New_York)`)
+  - `entry_session_date`: `YYYY-MM-DD` (실행일; `market`의 세션 날짜 기준 — `KR: KST(Asia/Seoul)`, `US: ET(America/New_York)`)
   - `entries`: 배열
-  - `system_issues`: 배열(가격 조회 실패, 데이터 부족 등)
+  - `system_issues`: `string[]` (가격 조회 실패, 데이터 부족 등)
+
+> `schema_version/report_type`는 출력 계약으로 채택하지 않습니다. 필요 시 reader 측 alias로만 처리합니다.
 
 - `entries[]` 필드(필수)
   - `ticker`
   - `action`: `ENTER|REVIEW|SKIP`
   - `reasons`: string[]
   - `signal_close` (numeric): 신호일 종가(또는 eval candle close)
-  - `entry_price` (numeric): entry 시점 관측 가격(모드별 정의)
-  - `gap_pct` (numeric)
+  - `entry_price` (numeric): entry 시점 관측 가격(5.1.3의 모드별 정의)
+  - `gap_pct` (numeric; ratio)
   - `gap_guard_pct` (numeric|null)
   - `gap_guard_up_price` / `gap_guard_down_price` (numeric|null)
   - `strategy_mode` + (선택) `pattern` / `entry_state` (hybrid의 경우)
@@ -103,11 +114,20 @@ Entry는 “진입 가능성”을 세 단계로 분류합니다.
 
 #### 5.1.2 갭 계산/가드
 
-- `gap_pct = (entry_price - signal_close) / signal_close`
-- `gap_guard_pct`는 ATR 기반 가드로 산출하며, v1.3에서는 buy report에 모든 candidate가 이를 포함하도록 표준화합니다(6.1).
+- `gap_pct = (entry_price - signal_close) / signal_close` (ratio; 예: `0.023` = +2.3%)
+- `gap_guard_pct`는 ATR 기반 가드로 산출하며, 단위는 `gap_pct`와 동일하게 ratio 입니다(예: `0.02` = ±2.0%). v1.3에서는 buy report에 모든 candidate가 이를 포함하도록 표준화합니다(6.1).
 - 기본 정책(초안):
   - `abs(gap_pct) <= gap_guard_pct` → 통과
   - `abs(gap_pct) > gap_guard_pct` → `SKIP` + reason에 guard 초과 기록
+
+#### 5.1.3 `entry_price` 모드별 정의(계약)
+
+`entry_price`는 “갭/가드 판단을 위한 기준 가격”이며, **조회 불가 시 `null` + `REVIEW`(우선순위 1)** 로 처리합니다.
+
+- `PRE_OPEN`: 장 시작 전 스냅샷 기준의 “예상 체결/indicative” 가격(가능한 경우). 불가하면 `null`.
+- `INTRADAY`: 장중 스냅샷 기준의 “현재가/체결가(last)” 가격. 불가하면 `null`.
+- `AFTER_CLOSE`: 해당 세션의 “종가(EOD close)” 가격.
+  - `pykrx` provider는 이 모드에서만 허용합니다.
 
 ### 5.2 ema_cross score 계약 정합성(필수)
 
@@ -148,6 +168,11 @@ v1.3 계약(권장):
   - `days_in_trade_sessions` (int)
   - `time_stop_triggered` (bool)
 
+정의(고정):
+
+- `days_in_trade_sessions = max(count_trading_sessions(entry_date, eval_date, market, inclusive=True) - 1, 0)`
+- 의도: v1.2의 `days_in_trade = (eval_date - entry_date).days`와 동일하게 “진입일 제외” 의미를 유지하면서, 단위만 sessions로 변경합니다.
+
 > 구현은 KR/US 각각의 trading calendar(내장 + override JSON) 기반으로 “entry_date → eval_date 사이의 장 개장일 수”를 계산합니다.
 
 ## 6. 데이터/스키마 변경(Report-level)
@@ -172,13 +197,15 @@ buy/sell/entry 공통으로 아래 메타를 포함합니다.
 - `run_ts_utc` (ISO8601)
 - `git_sha` (가능하면; 로컬은 optional)
 - `eval_context`:
-  - `market`(KR/US), `session_state`(PRE_OPEN/INTRADAY/AFTER_CLOSE), `eval_index_policy` 등
-- `config_snapshot`(선택): 핵심 파라미터만 축약해 포함(민감정보 제외)
+  - `market`(KR|US|MIXED), `session_state`(PRE_OPEN/INTRADAY/AFTER_CLOSE), `eval_index_policy` 등
+  - (선택) `markets`: `market="MIXED"`일 때 상세 시장 목록(예: `["KR","US"]`)
+- `config_snapshot`(필수 키, `object|null`): 핵심 파라미터만 축약해 포함(민감정보 제외)
 
 ## 7. 수용 기준(Acceptance Criteria)
 
 - `sab entry`는 최소 1개 buy 리포트를 입력으로 받아, `entries[]`를 가진 entry JSON을 생성한다.
 - entry JSON은 각 엔트리에 대해 `gap_pct` 및 갭 가드 관련 필드가 채워져야 한다(가드 산출 불가 시 null + reason).
+- buy/sell/entry 리포트는 재현 메타(`run_id`, `run_ts_utc`, `eval_context`, `config_snapshot`)를 포함한다.
 - ema_cross score/notes는 옵션 필터가 비활성일 때 해당 항목을 포함하지 않는다.
 - sell 평가에서 corporate action 의심이 발생해도 기존 `SELL` 액션은 `REVIEW`로 다운그레이드되지 않는다(플래그로 표현).
 - time stop은 “세션 기준” 계산값이 리포트에 노출되며, 주말/휴일이 결과에 일관되게 반영된다.
