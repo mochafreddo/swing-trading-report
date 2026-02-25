@@ -291,3 +291,4 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - RS(상대강도) 벤치마크를 “상수”가 아닌 시장별 지수 시계열로 정의
 - volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
 - 리포트 재현성 메타데이터(`run_ts`, `git_sha`, `eval_date`, 주요 파라미터 스냅샷) 포함
+- 다음 구현 스펙: `docs/spec-v1.3.md`
