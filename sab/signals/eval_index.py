@@ -132,11 +132,7 @@ def choose_eval_index(
     candles: Sequence[Mapping[str, Any]],
     *,
     meta: dict[str, Any] | None = None,
-    provider: str | None = None,
     now: dt.datetime | None = None,
-    lookback_for_volume: int = 5,
-    thin_ratio: float = 0.2,
-    volume_floor: float = 1_000.0,
     data_dir: str | None = None,
 ) -> tuple[int, bool]:
     """Decide which candle index should be used for evaluation."""

@@ -158,7 +158,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - EMA20/EMA50이 전일 대비 상승.
 - 갭 필터:
   - 평가 캔들의 `open`과 전일 `close`로 갭을 계산하고(= **신호일 당일 갭**),
-  - `|gap| ≤ (gap_atr_multiplier × ATR / 전일종가)`를 만족해야 합니다(기본 multiplier 1.0).
+  - `gap_atr_multiplier > 0`이면 `|gap| ≤ (gap_atr_multiplier × ATR / 전일종가)`를 만족해야 합니다(기본 multiplier 1.0).
+  - `gap_atr_multiplier > 0`인데 ATR/전일종가 입력이 유효하지 않으면 **system 이슈(fail-closed)** 로 처리합니다.
+  - `gap_atr_multiplier = 0`이면 갭 필터를 비활성화합니다.
   - 다음 거래일 시초 갭을 직접 제어하는 규칙은 아닙니다(4.2 참고).
 - 유동성(거래대금) 필터:
   - 최근 20봉 평균 거래대금이 `min_dollar_volume`(KRW) 또는 `us_min_dollar_volume`(USD) 이상이어야 합니다.
@@ -231,7 +233,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - `rsi_floor` 미만 → `REVIEW`
   - `rsi_floor_alt` 미만 → `SELL`
 - ATR 트레일:
-  - 피크 종가(진입 이후 구간 기준)에서 `atr_trail_multiplier × ATR`을 뺀 값을 stop으로 제안합니다.
+  - 진입 이후 구간에서 `peak_close - (atr_trail_multiplier × ATR)`을 계산해 stop을 제안합니다.
+  - stop은 “내려가지 않도록” 단조 강화되며(= 과거에 계산된 stop보다 완화되지 않음), 따라서 변동성(ATR) 급증이 있어도 stop이 후퇴하지 않습니다.
   - `stop_override`가 있으면 이를 우선합니다.
 - 타임 스탑:
   - `time_stop_days`는 달력일이 아닌 **trading sessions** 기준으로 계산합니다.

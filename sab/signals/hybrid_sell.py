@@ -172,8 +172,7 @@ def evaluate_sell_signals_hybrid(
     meta["exchange"] = holding.get("exchange")
     meta["data_source"] = holding.get("data_source")
     meta["data_dir"] = holding.get("data_dir")
-    provider = str(meta.get("data_source") or holding.get("provider") or "kis").lower()
-    idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
     if idx_eval < 1:
         return HybridSellEvaluation(
             action="REVIEW", reasons=["Not enough completed candles for hybrid sell"]

@@ -138,6 +138,120 @@ def test_atr_trail_falls_back_to_recent_window_when_entry_date_missing(
     assert "Price hit ATR trailing stop" in result.reasons
 
 
+def test_atr_trail_does_not_loosen_when_latest_atr_spikes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sr, "choose_eval_index", lambda data, meta=None: (len(data) - 1, False)
+    )
+    monkeypatch.setattr(sr, "ema", lambda values, period: [80.0] * len(values))
+    monkeypatch.setattr(sr, "rsi", lambda values, period: [60.0] * len(values))
+    monkeypatch.setattr(
+        sr,
+        "atr",
+        lambda highs, lows, closes, period: [2.0, 2.0, 2.0, 2.0, 10.0],
+    )
+
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 110,
+            "high": 111,
+            "low": 109,
+            "close": 110,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 120,
+            "high": 121,
+            "low": 119,
+            "close": 120,
+            "volume": 1000,
+        },
+        {
+            "date": "20250104",
+            "open": 118,
+            "high": 119,
+            "low": 117,
+            "close": 118,
+            "volume": 1000,
+        },
+        {
+            "date": "20250105",
+            "open": 117,
+            "high": 118,
+            "low": 116,
+            "close": 117,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+    settings = SellSettings(require_sma200=False, min_bars=3, atr_trail_multiplier=1.0)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "SELL"
+    assert result.stop_price == pytest.approx(118.0)
+    assert "Price hit ATR trailing stop" in result.reasons
+
+
+def test_atr_trail_does_not_use_future_peak_with_earlier_atr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sr, "choose_eval_index", lambda data, meta=None: (len(data) - 1, False)
+    )
+    monkeypatch.setattr(sr, "ema", lambda values, period: [80.0] * len(values))
+    monkeypatch.setattr(sr, "rsi", lambda values, period: [60.0] * len(values))
+    monkeypatch.setattr(
+        sr,
+        "atr",
+        lambda highs, lows, closes, period: [1.0, 1.0, 20.0],
+    )
+
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 90,
+            "high": 91,
+            "low": 89,
+            "close": 90,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 110,
+            "high": 111,
+            "low": 109,
+            "close": 110,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 90.0, "entry_date": "2025-01-01"}
+    settings = SellSettings(require_sma200=False, min_bars=3, atr_trail_multiplier=1.0)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.stop_price == pytest.approx(99.0)
+
+
 def test_stop_override_triggers_sell_when_close_below_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
