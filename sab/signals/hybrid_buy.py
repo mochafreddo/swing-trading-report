@@ -465,6 +465,8 @@ def evaluate_ticker_hybrid(
     atr_vals = atr(highs, lows, closes, 14)
     atr_value = atr_vals[-1] if atr_vals else float("nan")
     latest = candles[idx_eval]
+    eval_date_raw = str(latest.get("date") or "").strip()
+    eval_date = eval_date_raw or None
     prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
     prev_close = float(prev.get("close") or 0.0)
     gap_pct = 0.0
@@ -669,6 +671,7 @@ def evaluate_ticker_hybrid(
         "price_value": last_close,
         "close_value": last_close,
         "currency": currency,
+        "eval_date": eval_date,
         "pct_change": f"{pct_change * 100:.1f}%",
         "pct_change_value": pct_change,
         "high": fmt(_to_finite_or_default(latest.get("high")), price_digits),

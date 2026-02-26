@@ -167,6 +167,37 @@ def test_resolve_signal_eval_date_falls_back_to_report_date() -> None:
     assert resolved == "2026-02-25"
 
 
+def test_resolve_signal_eval_date_prefers_candidate_eval_date_majority() -> None:
+    source_report = {
+        "run_ts_utc": "2026-02-26T01:30:00Z",
+        "report_date": "2026-02-26",
+        "candidates": [
+            {"ticker": "AAPL.NASD", "eval_date": "20260225"},
+            {"ticker": "MSFT.NASD", "eval_date": "20260225"},
+            {"ticker": "NVDA.NASD", "eval_date": "20260224"},
+        ],
+    }
+
+    resolved = _resolve_signal_eval_date(report=source_report, market="US")
+
+    assert resolved == "2026-02-25"
+
+
+def test_resolve_signal_eval_date_breaks_tie_with_latest_date() -> None:
+    source_report = {
+        "run_ts_utc": "2026-02-26T01:30:00Z",
+        "report_date": "2026-02-26",
+        "candidates": [
+            {"ticker": "AAPL.NASD", "eval_date": "20260224"},
+            {"ticker": "MSFT.NASD", "eval_date": "20260225"},
+        ],
+    }
+
+    resolved = _resolve_signal_eval_date(report=source_report, market="US")
+
+    assert resolved == "2026-02-25"
+
+
 def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -224,6 +255,134 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
     assert payload["entries"][0]["ticker"] == "AAPL.NASD"
     assert payload["entries"][0]["action"] == "REVIEW"
     assert payload["entries"][0]["entry_price"] is None
+
+
+def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    {
+                        "ticker": "AAPL.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                        "eval_date": "20260224",
+                    },
+                    {
+                        "ticker": "MSFT.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                        "eval_date": "20260224",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["signal_eval_date"] == "2026-02-24"
+
+
+def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    {
+                        "ticker": "AAPL.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                        "eval_date": "20260224",
+                    },
+                    {
+                        "ticker": "MSFT.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                        "eval_date": "20260225",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["signal_eval_date"] == "2026-02-25"
+    assert any(
+        issue.startswith("Mixed candidate eval_date values:")
+        for issue in payload["system_issues"]
+    )
 
 
 def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -> None:

@@ -283,7 +283,10 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 ### 7.1 Buy report (candidate)
 
 - 공통적으로 ticker, price, 지표/메트릭, 점수, 통화, 데이터 소스 등을 포함합니다.
+- `eval_date`(YYYYMMDD): 해당 candidate가 실제로 평가된 완성 일봉 날짜를 포함합니다(`choose_eval_index()` 결과 기준).
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
+- `sab entry`의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
+- candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
 
 ### 7.2 Sell report (row)
 
