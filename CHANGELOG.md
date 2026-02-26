@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.2...v1.3.3) (2026-02-26)
+
+
+### Bug Fixes
+
+* **entry:** eval_date 기반 signal_eval_date 정합성 ([#13](https://github.com/mochafreddo/swing-trading-report/issues/13)) ([4fed4e6](https://github.com/mochafreddo/swing-trading-report/commit/4fed4e6cd074c25c1c3c35618bd02fe82f3ff777))
+
 ## [1.3.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.1...v1.3.2) (2026-02-26)
 
 
