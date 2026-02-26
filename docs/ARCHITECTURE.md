@@ -156,7 +156,8 @@ flowchart LR
 - 단일 사용자/로컬 중심 설계이며 멀티유저 권한 모델은 범위 밖입니다.
 - Python 엔진은 직접 Supabase `holdings`를 읽지 않고, 워크플로우 단계에서 파일 입력으로 브리지합니다.
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
-- Entry 파이프라인(`entry`)은 아직 구현 범위에 포함되지 않습니다.
+- Entry 파이프라인(`entry`)은 구현되어 로컬 JSON 리포트(`*.entry.json`)를 생성합니다.
+  - 현재 범위는 로컬 파일 생성(MVP)이며, Storage/Index/UI 연동은 후속 단계로 분리되어 있습니다.
 
 ## 10. 관련 문서
 

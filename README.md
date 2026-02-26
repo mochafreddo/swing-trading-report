@@ -59,9 +59,9 @@
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
+  - 진입 평가(Entry): `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
   - 웹 UI(Next.js): `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web` → `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
   - 로컬 CLI 실행 결과도 웹에서 보고 싶다면: `.env`에 `SAB_UPLOAD_REPORTS=true` (Supabase 설정 필요)
-  - 익일 시초 체크(Entry)는 아직 CLI 서브커맨드로 제공되지 않습니다(구상/문서화만).
 
 - 웹 UI 로컬 실행(Next.js + Docker)
   - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
@@ -101,19 +101,20 @@
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD(-n).buy.json`
   - Sell/Review: `reports/YYYY-MM-DD(-n).sell.json`
-  - Entry: `reports/YYYY-MM-DD(-n).entry.json` — 예정
+  - Entry: `reports/YYYY-MM-DD(-n).entry.json`
   - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
     - 업로드는 GitHub Actions에서 기본 수행, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때만 수행합니다.
 
 ## CLI 서브커맨드
 
-`python -m sab` CLI는 현재 두 개의 서브커맨드만 제공합니다.
+`python -m sab` CLI는 아래 서브커맨드를 제공합니다.
 
 <!-- CLI_SUBCOMMANDS_START -->
 | 실행 예 | 설명 |
 |---|---|
 | `UV_CACHE_DIR=.uv-cache uv run -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
 <!-- CLI_SUBCOMMANDS_END -->
 
 문서-구현 동기화 검증: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q tests/test_readme_cli_commands_sync.py`
@@ -199,7 +200,7 @@ Per‑market 임계치(권장)
 ## 파일/폴더 구조
 
 - `sab/` … Python 애플리케이션 코드
-  - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell`)
+  - `__main__.py` … CLI 엔트리(`sab scan` / `sab sell` / `sab entry`)
   - `data/` … KIS/PyKRX 커넥터, 캐시
   - `signals/` … EMA/RSI/ATR 계산
   - `report/` … 리포트 아티팩트(JSON) 생성
@@ -221,7 +222,7 @@ Per‑market 임계치(권장)
 
 ## 상태
 
-- Buy 파이프라인 및 Sell 서브커맨드 동작. Entry 서브커맨드는 순차 구현 예정.
+- Buy/Sell/Entry 파이프라인이 로컬 JSON 리포트 생성까지 동작.
 
 ## 라이선스
 

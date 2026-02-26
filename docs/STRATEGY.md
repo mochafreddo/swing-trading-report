@@ -114,7 +114,7 @@
 - `sab scan`의 candidate는 “내일 시초/장중 진입”을 자동으로 보장하는 entry 시그널이 아니라,
   - 오늘(평가 캔들)까지의 데이터로 “관찰/준비할 후보”를 정리한 결과입니다.
 - 따라서 다음 거래일의 시초 갭/장중 체결 가능성/슬리피지 리스크는,
-  - 별도의 `entry` 단계(현재 미구현, 9장 Backlog)에서 계약으로 다루는 것을 전제로 합니다.
+  - 별도의 `entry` 단계(`sab entry`)에서 계약으로 다루는 것을 전제로 합니다.
 
 ## 5. Buy(Scan) 로직 설계
 
@@ -169,7 +169,8 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 #### 5.2.4 점수/정렬 계약
 
 - 점수는 “조건 통과 여부” 기반 가산점(정수형)에 가깝습니다.
-  - 예: ema_cross, rsi, sma200, slope, gap, liquidity, (선택) rs 등.
+  - 예: ema_cross, rsi, gap, liquidity, (선택) rs 등.
+  - `sma200`/`slope` 점수 항목은 각각 옵션(`use_sma200_filter`, `require_slope_up`)이 켜진 경우에만 반영됩니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
 
@@ -206,7 +207,7 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 #### 5.3.4 gap guard(ATR 기반) 계약
 
 - hybrid buy candidate는 ATR 기반 `gap_guard_pct`와 상/하단 가격을 함께 산출합니다.
-- 이는 “다음 거래일 시초 갭” 해석을 위한 **가이드 값**이며, 현재 구현에서 자동 의사결정(진입/스킵)을 강제하지는 않습니다.
+- 이는 “다음 거래일 시초 갭” 해석을 위한 **가드 값**이며, `sab entry` 단계에서 `ENTER|REVIEW|SKIP` 판정에 사용됩니다.
 
 ## 6. Sell 로직 설계
 
@@ -228,8 +229,10 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - 피크 종가(진입 이후 구간 기준)에서 `atr_trail_multiplier × ATR`을 뺀 값을 stop으로 제안합니다.
   - `stop_override`가 있으면 이를 우선합니다.
 - 타임 스탑:
-  - `time_stop_days` 경과 시 `REVIEW`
-- corporate action 의심(분할 유사 급변) 감지 시 `REVIEW`
+  - `time_stop_days`는 달력일이 아닌 **trading sessions** 기준으로 계산합니다.
+  - `time_stop_days` 경과 시 `REVIEW`(단, 이미 `SELL`이면 유지)
+- corporate action 의심(분할 유사 급변) 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다.
+  - corporate action 플래그는 action을 덮어쓰지 않습니다(`SELL` 유지).
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익실현 티어 + 하드스탑)
 
@@ -247,7 +250,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
-- corporate action 의심 감지 시 `REVIEW`
+- corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다(action 유지).
 
 ### 6.3 corporate action(분할/역분할 등) 감지 계약
 
@@ -255,7 +258,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 - 최근 N봉(기본 5) 내에 **전일 대비 비정상 급변(기본 ±45% 이상)** 이 발생했고,
   - 그 비율이 split-like ratio(2:1, 3:1, 1:2 등)로 보이면 corporate action 가능성을 기록합니다.
-- 이 경우 action은 강제 SELL이 아니라 `REVIEW`로 올려 “단가/수량/데이터 조정 여부”를 먼저 확인하도록 합니다.
+- 이 경우 action은 변경하지 않고 `CORPORATE_ACTION_SUSPECT` 플래그로 기록해,
+  - “단가/수량/데이터 조정 여부”를 먼저 확인하도록 합니다.
 
 ### 6.4 sell의 히스토리 길이(target_bars) 정책(요약)
 
@@ -287,8 +291,6 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 ## 9. Open decisions / Backlog
 
-- `entry` 서브커맨드(다음 날 갭/초반 가격 행동 체크) 구현 및 buy→entry 계약 정립
 - RS(상대강도) 벤치마크를 “상수”가 아닌 시장별 지수 시계열로 정의
 - volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
-- 리포트 재현성 메타데이터(`run_ts`, `git_sha`, `eval_date`, 주요 파라미터 스냅샷) 포함
 - 다음 구현 스펙: `docs/spec-v1.3.md`
