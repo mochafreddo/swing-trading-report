@@ -50,6 +50,13 @@ class KISCredentials:
         )
 
     @property
+    def domestic_price_detail_url(self) -> str:
+        return (
+            f"{self.base_url.rstrip('/')}/uapi/domestic-stock/v1/quotations/"
+            "inquire-price"
+        )
+
+    @property
     def volume_rank_tr_id(self) -> str:
         return "FHPST01710000"
 

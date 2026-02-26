@@ -70,6 +70,86 @@ class _KISQuoteMixin(_KISClientState):
 
         return rows
 
+    def domestic_price_detail(self, *, ticker: str) -> dict[str, Any]:
+        ticker = (ticker or "").strip().upper()
+        if not ticker:
+            raise KISClientError("Ticker is required for domestic price detail")
+
+        self.ensure_token()
+
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": ticker,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "authorization": self._access_token,
+            "appkey": self.creds.app_key,
+            "appsecret": self.creds.app_secret,
+            "tr_id": "FHKST01010100",
+            "custtype": "P",
+        }
+
+        for attempt in range(self._max_attempts):
+            resp = self._request(
+                "GET",
+                self.creds.domestic_price_detail_url,
+                headers=headers,
+                params=params,
+            )
+
+            data: dict[str, Any] | None = None
+            try:
+                data = resp.json()
+            except ValueError:
+                data = None
+
+            if resp.status_code != 200:
+                msg_cd = str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(
+                    f"Domestic price detail HTTP {resp.status_code}: {resp.text}"
+                )
+
+            if data is None:
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError("Domestic price detail response is not JSON")
+
+            if str(data.get("rt_cd")) != "0":
+                msg_cd = str(data.get("msg_cd") or "")
+                msg1 = str(data.get("msg1") or "Unknown error")
+                if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                    self._access_token = None
+                    self._token_expiry = None
+                    self.ensure_token()
+                    headers["authorization"] = self._access_token or ""
+                    time.sleep(max(1.0, self._min_interval))
+                    continue
+                if attempt < self._max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                raise KISClientError(f"KIS domestic price detail error: {msg1}")
+
+            output = data.get("output")
+            if isinstance(output, dict):
+                return output
+            if isinstance(output, list):
+                return output[0] if output else {}
+            return {}
+
+        raise KISClientError("Domestic price detail request failed after retries")
+
     def overseas_price_detail(self, *, symbol: str, exchange: str) -> dict[str, Any]:
         symbol = (symbol or "").strip().upper()
         exchange = (exchange or "").strip().upper()

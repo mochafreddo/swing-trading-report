@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from sab.report.sell_report import SellReportRow, write_sell_report
-from sab.sell_evaluation import _evaluate_holdings
+from sab.sell_evaluation import _evaluate_holdings, _write_sell_report
 
 
 def _runtime_with_single_holding() -> Any:
@@ -27,6 +27,7 @@ def _runtime_with_single_holding() -> Any:
         time_stop_profit_floor=0.0,
     )
     cfg = SimpleNamespace(
+        report_dir="reports",
         sell_atr_multiplier=1.0,
         sell_time_stop_days=10,
         sell_require_sma200=True,
@@ -200,3 +201,111 @@ def test_write_sell_report_counts_collected_time_stop_market_warning(tmp_path) -
 
     assert payload["summary"]["issue_count"] == 1
     assert payload["issues"] == [failure]
+
+
+def test_write_sell_runtime_report_uses_resolved_session_state(
+    monkeypatch,
+) -> None:
+    runtime = _runtime_with_single_holding()
+    runtime.unique_tickers = ["AAPL.NASD"]
+    runtime.cache_hint = None
+    runtime.fx_rate = None
+    runtime.fx_note = None
+
+    rows = [
+        SellReportRow(
+            ticker="AAPL.NASD",
+            name="Apple",
+            quantity=1.0,
+            entry_price=100.0,
+            entry_date="2025-01-10",
+            last_price=101.0,
+            pnl_pct=0.01,
+            action="HOLD",
+            reasons=["No sell criteria triggered"],
+            stop_price=None,
+            target_price=None,
+            currency="USD",
+            eval_date="20250113",
+            flags=None,
+            days_in_trade_sessions=1,
+            time_stop_triggered=False,
+        )
+    ]
+
+    monkeypatch.setattr(
+        "sab.sell_evaluation.resolve_run_session_state",
+        lambda *_args, **_kwargs: "INTRADAY",
+        raising=False,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_sell_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-sell.json"
+
+    _write_sell_report(runtime, rows, write_sell_report_fn=_fake_write_sell_report)
+
+    assert (
+        captured["run_meta"]["eval_context"]["session_state"]  # type: ignore[index]
+        == "INTRADAY"
+    )
+
+
+def test_write_sell_runtime_report_emits_session_state_by_market_for_mixed_run(
+    monkeypatch,
+) -> None:
+    runtime = _runtime_with_single_holding()
+    runtime.unique_tickers = ["AAPL.NASD", "005930"]
+    runtime.ticker_currency = {"AAPL.NASD": "USD", "005930": "KRW"}
+    runtime.cache_hint = None
+    runtime.fx_rate = None
+    runtime.fx_note = None
+
+    rows = [
+        SellReportRow(
+            ticker="AAPL.NASD",
+            name="Apple",
+            quantity=1.0,
+            entry_price=100.0,
+            entry_date="2025-01-10",
+            last_price=101.0,
+            pnl_pct=0.01,
+            action="HOLD",
+            reasons=["No sell criteria triggered"],
+            stop_price=None,
+            target_price=None,
+            currency="USD",
+            eval_date="20250113",
+            flags=None,
+            days_in_trade_sessions=1,
+            time_stop_triggered=False,
+        )
+    ]
+
+    monkeypatch.setattr(
+        "sab.sell_evaluation.resolve_run_session_state",
+        lambda *_args, **_kwargs: "INTRADAY",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "sab.sell_evaluation.resolve_run_session_state_map",
+        lambda *_args, **_kwargs: {"KR": "AFTER_CLOSE", "US": "INTRADAY"},
+        raising=False,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_sell_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-sell.json"
+
+    _write_sell_report(runtime, rows, write_sell_report_fn=_fake_write_sell_report)
+
+    eval_context = captured["run_meta"]["eval_context"]  # type: ignore[index]
+    assert eval_context["market"] == "MIXED"
+    assert eval_context["session_state_by_market"] == {
+        "KR": "AFTER_CLOSE",
+        "US": "INTRADAY",
+    }

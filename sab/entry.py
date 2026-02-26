@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import os
 import re
 from collections import Counter
@@ -37,7 +38,14 @@ def _to_finite_float(value: Any) -> float | None:
         parsed = float(value)
     except (TypeError, ValueError):
         return None
-    if parsed != parsed:  # NaN
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _to_positive_price(value: Any) -> float | None:
+    parsed = _to_finite_float(value)
+    if parsed is None or parsed <= 0:
         return None
     return parsed
 
@@ -165,6 +173,8 @@ def evaluate_entry_candidates(
             system_issues.append(issue)
 
         entry_price = price_lookup_fn(ticker)
+        if entry_price is not None and entry_price <= 0:
+            entry_price = None
         if entry_price is None:
             issue = f"{ticker}: price snapshot unavailable"
             reasons.append("price snapshot unavailable")
@@ -386,7 +396,7 @@ def _make_price_lookup(
                     rows = kis_client.daily_candles(symbol, count=1, adjusted=False)
                 if not rows:
                     return None
-                return _to_finite_float(rows[-1].get("close"))
+                return _to_positive_price(rows[-1].get("close"))
 
             if market == "US":
                 symbol, exchange = _split_symbol_and_exchange(ticker)
@@ -400,12 +410,18 @@ def _make_price_lookup(
                     "ovrs_nmix_prpr",
                     "ovrs_prpr",
                 ):
-                    parsed = _to_finite_float(detail.get(key))
+                    parsed = _to_positive_price(detail.get(key))
                     if parsed is not None:
                         return parsed
                 return None
 
-            # KR PRE_OPEN/INTRADAY indicative quote support is not implemented yet.
+            symbol, _ = _split_symbol_and_exchange(ticker)
+            detail = kis_client.domestic_price_detail(ticker=symbol)
+            # Use only live traded price for KR PRE_OPEN/INTRADAY.
+            # Fallback fields (prev close/open/high/low) can misclassify gap guard.
+            live_price = _to_positive_price(detail.get("stck_prpr"))
+            if live_price is not None:
+                return live_price
             return None
         except KISClientError:
             return None

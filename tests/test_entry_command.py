@@ -291,6 +291,137 @@ def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -
     assert payload["entries"][0]["entry_price"] == 101.5
 
 
+def test_run_entry_e2e_uses_kis_kr_snapshot_price_intraday(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "KR"},
+                "candidates": [
+                    {
+                        "ticker": "005930",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.05,
+                        "strategy_mode": "ema_cross",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+            assert ticker == "005930"
+            return {"stck_prpr": "101.2"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="INTRADAY",
+        market="KR",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][0]["entry_price"] == 101.2
+
+
+def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "KR"},
+                "candidates": [
+                    {
+                        "ticker": "005930",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.05,
+                        "strategy_mode": "ema_cross",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+            assert ticker == "005930"
+            return {
+                "stck_prpr": "0",
+                "stck_prdy_clpr": "101.0",
+            }
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="KR",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["entries"][0]["action"] == "REVIEW"
+    assert payload["entries"][0]["entry_price"] is None
+
+
 def test_run_entry_e2e_uses_pykrx_after_close_price(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -4,6 +4,7 @@ import datetime as dt
 import os
 import subprocess
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 _ALLOWED_MARKETS = {"KR", "US", "MIXED"}
@@ -44,6 +45,20 @@ def _normalize_session_state(value: str) -> str:
     return session_state
 
 
+def _normalize_session_state_by_market(
+    value: Mapping[str, str] | None,
+) -> dict[str, str] | None:
+    if not value:
+        return None
+    normalized: dict[str, str] = {}
+    for market, state in value.items():
+        market_key = str(market).strip().upper()
+        if market_key not in {"KR", "US"}:
+            continue
+        normalized[market_key] = _normalize_session_state(str(state))
+    return normalized or None
+
+
 def _format_utc_iso(now: dt.datetime) -> str:
     aware = now
     if aware.tzinfo is None:
@@ -60,6 +75,7 @@ def build_run_meta(
     eval_index_policy: str,
     config_snapshot: dict[str, Any] | None,
     markets: list[str] | None = None,
+    session_state_by_market: Mapping[str, str] | None = None,
     now: dt.datetime | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
@@ -83,6 +99,9 @@ def build_run_meta(
         )
         if normalized_markets:
             eval_context["markets"] = normalized_markets
+    normalized_state_map = _normalize_session_state_by_market(session_state_by_market)
+    if normalized_state_map:
+        eval_context["session_state_by_market"] = normalized_state_map
 
     return {
         "run_id": resolved_run_id,
