@@ -127,6 +127,8 @@ def evaluate_ticker(
         gap_pct = (latest_open - previous_close) / previous_close
 
     atr_value = atr14[-1]
+    eval_date_raw = str(candles_eval[-1].get("date") or "").strip()
+    eval_date = eval_date_raw or None
 
     if not ema_cross_up:
         return EvaluationResult(
@@ -334,6 +336,7 @@ def evaluate_ticker(
         "trend_pass": "Yes" if trend_pass else "No",
         "slope_pass": "Yes" if slope_pass else "No",
         "currency": currency,
+        "eval_date": eval_date,
         "price_value": latest_close,
         "close_value": latest_close,
         "pct_change_value": pct_change,

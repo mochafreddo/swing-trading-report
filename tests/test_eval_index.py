@@ -383,6 +383,7 @@ def test_evaluate_ticker_hybrid_uses_eval_index(monkeypatch):
     result = evaluate_ticker_hybrid("FAKE.US", candles, settings, {"currency": "USD"})
     assert result.candidate is not None
     assert result.candidate["price_value"] == candles[-2]["close"]
+    assert result.candidate["eval_date"] == candles[-2]["date"]
     assert result.candidate.get("entry_state") in {"READY", "WATCH"}
     assert "stub" in result.candidate["pattern_reasons"]
 
@@ -871,6 +872,163 @@ def test_evaluate_ticker_us_zero_threshold_overrides_kr_floor(monkeypatch):
     result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
     assert result.reason is None
     assert result.candidate is not None
+    assert result.candidate["eval_date"] == candles[-1]["date"]
+
+
+def test_evaluate_ticker_sets_eval_date_none_when_missing(monkeypatch):
+    import sab.signals.evaluator as ev
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 52.0,
+            "low": 49.0,
+            "close": 51.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250103",
+            "open": 51.0,
+            "high": 53.0,
+            "low": 50.0,
+            "close": 52.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250104",
+            "open": 52.0,
+            "high": 54.0,
+            "low": 51.0,
+            "close": 53.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "",
+            "open": 53.0,
+            "high": 55.0,
+            "low": 52.0,
+            "close": 54.0,
+            "volume": 1_000_000.0,
+        },
+    ]
+
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+
+    def fake_ema(values, period):
+        n = len(values)
+        out = [1.0] * n
+        if period == 20:
+            out[-2] = 1.0
+            out[-1] = 2.0
+        elif period == 50:
+            out[-2] = 1.0
+            out[-1] = 1.0
+        return out
+
+    monkeypatch.setattr(ev, "ema", fake_ema)
+    monkeypatch.setattr(ev, "rsi", lambda values, period: [0.0, 0.0, 0.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        ev,
+        "atr",
+        lambda highs, lows, closes, period: [1.0] * len(closes),
+    )
+
+    settings = EvaluationSettings(
+        min_history_bars=5,
+        min_price=0.0,
+        us_min_price=0.0,
+        min_dollar_volume=1_000_000_000.0,
+        us_min_dollar_volume=0.0,
+        gap_atr_multiplier=0.0,
+        exclude_etf_etn=False,
+    )
+    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.reason is None
+    assert result.candidate is not None
+    assert result.candidate["eval_date"] is None
+
+
+def test_evaluate_ticker_hybrid_sets_eval_date_none_when_missing(monkeypatch):
+    import sab.signals.hybrid_buy as hb
+
+    candles = [
+        {
+            "date": "20250108",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 2_000_000.0,
+        },
+        {
+            "date": "20250109",
+            "open": 11.0,
+            "high": 12.0,
+            "low": 10.5,
+            "close": 11.5,
+            "volume": 2_100_000.0,
+        },
+        {
+            "date": "",
+            "open": 11.4,
+            "high": 12.3,
+            "low": 11.0,
+            "close": 12.0,
+            "volume": 500.0,
+        },
+    ]
+
+    def fake_eval_index(data, meta=None, provider=None, **_):
+        return len(data) - 1, False
+
+    def fake_pattern(*_):
+        return True, ["stub"], HybridPattern.TREND_PULLBACK_BOUNCE, {}
+
+    monkeypatch.setattr(hb, "choose_eval_index", fake_eval_index)
+    monkeypatch.setattr(hb, "_detect_trend_pullback_bounce", fake_pattern)
+
+    settings = HybridEvaluationSettings(
+        sma_trend_period=2,
+        ema_short_period=2,
+        ema_mid_period=3,
+        rsi_period=2,
+        rsi_zone_low=0.0,
+        rsi_zone_high=100.0,
+        rsi_oversold_low=0.0,
+        rsi_oversold_high=100.0,
+        pullback_max_bars=5,
+        breakout_consolidation_min_bars=2,
+        breakout_consolidation_max_bars=5,
+        volume_lookback_days=2,
+        max_gap_pct=0.1,
+        use_sma60_filter=False,
+        sma60_period=60,
+        kr_breakout_requires_confirmation=False,
+        min_history_bars=2,
+        min_price=0.0,
+        us_min_price=0.0,
+        min_dollar_volume=0.0,
+        us_min_dollar_volume=0.0,
+        exclude_etf_etn=False,
+        gap_atr_multiplier=1.0,
+    )
+
+    result = evaluate_ticker_hybrid("FAKE.US", candles, settings, {"currency": "USD"})
+    assert result.candidate is not None
+    assert result.candidate["eval_date"] is None
 
 
 def test_choose_eval_index_us_early_close_keeps_today_after_1300(tmp_path):

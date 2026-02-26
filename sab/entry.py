@@ -318,10 +318,41 @@ def _parse_report_date(value: Any) -> str | None:
     return parsed.isoformat()
 
 
+def _collect_candidate_eval_dates(report: dict[str, Any]) -> list[str]:
+    candidates = report.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+
+    normalized_dates: list[str] = []
+    for row in candidates:
+        if not isinstance(row, dict):
+            continue
+        parsed = _parse_report_date(row.get("eval_date"))
+        if parsed is not None:
+            normalized_dates.append(parsed)
+
+    return normalized_dates
+
+
+def _resolve_candidate_eval_date(report: dict[str, Any]) -> str | None:
+    normalized_dates = _collect_candidate_eval_dates(report)
+    if not normalized_dates:
+        return None
+
+    counts = Counter(normalized_dates)
+    top_count = max(counts.values())
+    top_dates = [date for date, count in counts.items() if count == top_count]
+    return max(top_dates)
+
+
 def _resolve_signal_eval_date(*, report: dict[str, Any], market: str) -> str:
     direct = _parse_report_date(report.get("signal_eval_date"))
     if direct is not None:
         return direct
+
+    candidate_eval_date = _resolve_candidate_eval_date(report)
+    if candidate_eval_date is not None:
+        return candidate_eval_date
 
     run_ts_utc = _parse_iso_datetime(report.get("run_ts_utc"))
     if run_ts_utc is not None:
@@ -534,6 +565,14 @@ def run_entry(
         report=source_report,
         market=resolved_market,
     )
+    candidate_eval_dates = sorted(set(_collect_candidate_eval_dates(source_report)))
+    if len(candidate_eval_dates) > 1:
+        max_preview = 5
+        preview = ", ".join(candidate_eval_dates[:max_preview])
+        if len(candidate_eval_dates) > max_preview:
+            preview = f"{preview}, +{len(candidate_eval_dates) - max_preview} more"
+        mixed_issue = f"Mixed candidate eval_date values: {preview}"
+        system_issues.append(mixed_issue)
 
     artifact = {
         "provider": normalized_provider,
