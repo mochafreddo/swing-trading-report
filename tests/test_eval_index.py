@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import json
+from typing import cast
 from zoneinfo import ZoneInfo
 
+import pytest
 from sab.signals.eval_index import choose_eval_index
 from sab.signals.evaluator import EvaluationSettings, evaluate_ticker
 from sab.signals.hybrid_buy import (
@@ -37,6 +40,14 @@ def _build_candles(
     for idx, date in enumerate(dates):
         candles.append(_make_candle(date, close_start + idx, volume))
     return candles
+
+
+def test_choose_eval_index_signature_exposes_only_supported_inputs() -> None:
+    params = inspect.signature(choose_eval_index).parameters
+    assert "provider" not in params
+    assert "lookback_for_volume" not in params
+    assert "thin_ratio" not in params
+    assert "volume_floor" not in params
 
 
 def test_choose_eval_index_us_intraday_drops_today():
@@ -185,7 +196,6 @@ def test_choose_eval_index_pykrx_intraday_drops_today() -> None:
     idx, dropped = choose_eval_index(
         candles,
         meta={"currency": "KRW"},
-        provider="pykrx",
         now=now,
     )
     assert idx == len(candles) - 2
@@ -205,7 +215,6 @@ def test_choose_eval_index_pykrx_after_close_keeps_last() -> None:
     idx, dropped = choose_eval_index(
         candles,
         meta={"currency": "KRW"},
-        provider="pykrx",
         now=now,
     )
     assert idx == len(candles) - 1
@@ -414,7 +423,12 @@ def test_evaluate_ticker_uses_eval_index(monkeypatch):
     monkeypatch.setattr(ev, "choose_eval_index", fake_eval_index)
 
     settings = EvaluationSettings(min_history_bars=2)
-    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    result = evaluate_ticker(
+        "FAKE.US",
+        cast(list[dict[str, float]], candles),
+        settings,
+        {"currency": "USD"},
+    )
     assert result.candidate is None  # EMA cross likely false on short data
     assert (
         result.reason
@@ -445,7 +459,12 @@ def test_evaluate_ticker_requires_min_completed_history(monkeypatch):
     )
 
     settings = EvaluationSettings(min_history_bars=5)
-    result = evaluate_ticker("FAKE.US", candles, settings, {"currency": "USD"})
+    result = evaluate_ticker(
+        "FAKE.US",
+        cast(list[dict[str, float]], candles),
+        settings,
+        {"currency": "USD"},
+    )
     assert result.candidate is None
     assert result.reason == "Not enough completed history (<5 bars)"
 
@@ -676,6 +695,97 @@ def test_evaluate_ticker_treats_non_finite_volume_as_system_issue(monkeypatch):
     assert result.candidate is None
     assert result.reason == "Invalid candle data: non-finite volume values"
     assert result.reason_kind == "system"
+
+
+def test_evaluate_ticker_gap_filter_fails_closed_when_atr_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sab.signals.evaluator as ev
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250102",
+            "open": 10.1,
+            "high": 11.2,
+            "low": 9.9,
+            "close": 10.8,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250103",
+            "open": 10.8,
+            "high": 11.4,
+            "low": 10.4,
+            "close": 11.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250104",
+            "open": 11.0,
+            "high": 11.6,
+            "low": 10.6,
+            "close": 11.2,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250105",
+            "open": 11.2,
+            "high": 11.7,
+            "low": 10.9,
+            "close": 11.3,
+            "volume": 1_000_000.0,
+        },
+    ]
+
+    monkeypatch.setattr(
+        ev,
+        "choose_eval_index",
+        lambda data, meta=None: (len(data) - 1, False),
+    )
+
+    def fake_ema(values, period):
+        n = len(values)
+        out = [1.0] * n
+        if period == 20:
+            out[-2] = 1.0
+            out[-1] = 2.0
+        elif period == 50:
+            out[-2] = 1.0
+            out[-1] = 1.0
+        return out
+
+    monkeypatch.setattr(ev, "ema", fake_ema)
+    monkeypatch.setattr(ev, "rsi", lambda values, period: [0.0, 0.0, 0.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        ev,
+        "atr",
+        lambda highs, lows, closes, period: [float("nan")] * len(closes),
+    )
+
+    settings = EvaluationSettings(
+        min_history_bars=5,
+        min_price=0.0,
+        min_dollar_volume=0.0,
+        gap_atr_multiplier=1.0,
+        exclude_etf_etn=False,
+    )
+    result = evaluate_ticker(
+        "FAKE.US",
+        cast(list[dict[str, float]], candles),
+        settings,
+        {"currency": "USD"},
+    )
+    assert result.candidate is None
+    assert result.reason_kind == "system"
+    assert result.reason == "Gap filter unavailable: ATR/price inputs invalid"
 
 
 def test_evaluate_ticker_us_zero_threshold_overrides_kr_floor(monkeypatch):

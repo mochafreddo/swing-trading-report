@@ -162,8 +162,7 @@ def evaluate_sell_signals(
     meta["exchange"] = holding.get("exchange")
     meta["data_source"] = holding.get("data_source")
     meta["data_dir"] = holding.get("data_dir")
-    provider = str(meta.get("data_source") or holding.get("provider") or "kis").lower()
-    idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
     if idx_eval < 1:
         return SellEvaluation(action="REVIEW", reasons=["Not enough completed candles"])
 
@@ -267,15 +266,31 @@ def evaluate_sell_signals(
             reasons.append("Entry date missing/invalid; ATR trail uses recent window")
 
         trail_closes = closes[start_idx:]
-        peak_close = max(trail_closes) if trail_closes else close_today
-        stop_price = peak_close - settings.atr_trail_multiplier * atr_today
-        reasons.append(
-            f"ATR trail (peak close {peak_close:.2f}) "
-            f"{settings.atr_trail_multiplier:g}×ATR → {stop_price:.2f}"
-        )
-        if close_today <= stop_price:
-            reasons.append("Price hit ATR trailing stop")
-            action = "SELL"
+        trail_atr_values = atr_values[start_idx:]
+        peak_close = float("-inf")
+        trailing_stop: float | None = None
+        stop_anchor_peak = 0.0
+        stop_anchor_atr = 0.0
+        for idx, trail_close in enumerate(trail_closes):
+            peak_close = max(peak_close, trail_close)
+            trail_atr = trail_atr_values[idx]
+            if math.isnan(trail_atr) or trail_atr <= 0:
+                continue
+            next_stop = peak_close - settings.atr_trail_multiplier * trail_atr
+            if trailing_stop is None or next_stop > trailing_stop:
+                trailing_stop = next_stop
+                stop_anchor_peak = peak_close
+                stop_anchor_atr = trail_atr
+
+        if trailing_stop is not None:
+            stop_price = trailing_stop
+            reasons.append(
+                f"ATR trail (peak close {stop_anchor_peak:.2f}, ATR {stop_anchor_atr:.2f}) "
+                f"{settings.atr_trail_multiplier:g}×ATR → {stop_price:.2f}"
+            )
+            if close_today <= stop_price:
+                reasons.append("Price hit ATR trailing stop")
+                action = "SELL"
 
     target_price = float(target_override) if target_override is not None else None
 

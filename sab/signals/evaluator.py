@@ -51,8 +51,7 @@ def evaluate_ticker(
     meta = meta or {}
     currency = meta.get("currency", "KRW")
 
-    provider = str(meta.get("data_source") or meta.get("provider") or "kis").lower()
-    idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
     if idx_eval < 1:
         return EvaluationResult(
             ticker, None, "Not enough completed candles", reason_kind="system"
@@ -162,23 +161,26 @@ def evaluate_ticker(
                 ticker, None, "EMA slope not rising", reason_kind="signal"
             )
 
-    # Gap threshold via ATR multiplier
-    gap_threshold = 0.03
-    if (
-        settings.gap_atr_multiplier > 0
-        and not math.isnan(atr_value)
-        and atr_value > 0
-        and previous_close > 0
-    ):
+    # Gap filter (fail-closed): ATR multiplier > 0 requires valid ATR inputs.
+    gap_threshold: float | None = None
+    gap_ok = True
+    if settings.gap_atr_multiplier > 0:
+        if math.isnan(atr_value) or atr_value <= 0 or previous_close <= 0:
+            return EvaluationResult(
+                ticker,
+                None,
+                "Gap filter unavailable: ATR/price inputs invalid",
+                reason_kind="system",
+            )
         gap_threshold = settings.gap_atr_multiplier * atr_value / previous_close
-    gap_ok = abs(gap_pct) <= gap_threshold
-    if not gap_ok:
-        return EvaluationResult(
-            ticker,
-            None,
-            f"Gap {gap_pct * 100:.1f}% exceeds threshold",
-            reason_kind="signal",
-        )
+        gap_ok = abs(gap_pct) <= gap_threshold
+        if not gap_ok:
+            return EvaluationResult(
+                ticker,
+                None,
+                f"Gap {gap_pct * 100:.1f}% exceeds threshold",
+                reason_kind="signal",
+            )
 
     gap_guard_pct_value = None
     gap_guard_up_price_value = None
@@ -278,7 +280,7 @@ def evaluate_ticker(
         score += 1
         breakdown.append("slope")
 
-    if gap_ok:
+    if settings.gap_atr_multiplier > 0 and gap_ok:
         score += 1
         breakdown.append("gap")
 
@@ -306,7 +308,9 @@ def evaluate_ticker(
         "atr14": fmt(atr_value),
         "atr14_value": None if math.isnan(atr_value) else atr_value,
         "gap": f"{gap_pct * 100:.1f}%",
-        "gap_threshold": f"{gap_threshold * 100:.1f}%",
+        "gap_threshold": f"{gap_threshold * 100:.1f}%"
+        if gap_threshold is not None
+        else "-",
         "gap_guard_pct_value": gap_guard_pct_value,
         "gap_guard_up_price_value": gap_guard_up_price_value,
         "gap_guard_down_price_value": gap_guard_down_price_value,

@@ -436,8 +436,7 @@ def evaluate_ticker_hybrid(
     meta = meta or {}
     currency = str(meta.get("currency", "KRW")).upper()
 
-    provider = str(meta.get("data_source") or meta.get("provider") or "kis").lower()
-    idx_eval, _ = choose_eval_index(candles, meta=meta, provider=provider)
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
     if idx_eval < 0:
         return HybridEvaluationResult(ticker, None, "No candle data", "system")
 
