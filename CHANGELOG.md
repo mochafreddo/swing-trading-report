@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.0...v1.3.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* **strategy:** 하이브리드 매수/엔트리/세션 메타 보정 ([#9](https://github.com/mochafreddo/swing-trading-report/issues/9)) ([e29b1f6](https://github.com/mochafreddo/swing-trading-report/commit/e29b1f65c2df19dd81b867a41e1c2a6aa810f71a))
+
 ## [1.3.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.2.0...v1.3.0) (2026-02-26)
 
 
