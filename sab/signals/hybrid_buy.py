@@ -192,6 +192,20 @@ def _volume_stats(
     return prev_vol, avg_vol
 
 
+def _avg_volume_excluding_latest(
+    candles: list[dict[str, Any]], lookback_days: int
+) -> float:
+    if len(candles) <= 1 or lookback_days <= 0:
+        return 0.0
+    historical = candles[:-1]
+    vols: list[float] = []
+    for candle in historical:
+        volume, _ = _to_volume_and_invalid(candle.get("volume"))
+        vols.append(volume)
+    window = vols[-lookback_days:] if len(vols) >= lookback_days else vols
+    return sum(window) / len(window) if window else 0.0
+
+
 def _detect_trend_pullback_bounce(
     closes: list[float],
     sma_trend: list[float],
@@ -310,22 +324,25 @@ def _detect_swing_high_breakout(
     if rsi_vals[idx] >= 60:
         return False, ["RSI too extended for breakout"], None, {}
 
-    # Consolidation: price staying within a relatively tight range
+    # Consolidation: price staying within a relatively tight range.
+    # Use only pre-breakout bars for consolidation range; including the
+    # breakout bar itself makes strong breakouts look "too wide".
     min_bars = settings.breakout_consolidation_min_bars
     max_bars = settings.breakout_consolidation_max_bars
-    window = candles[-max_bars:] if len(candles) >= max_bars else candles
+    pre_breakout = candles[:-1]
+    window = pre_breakout[-max_bars:] if len(pre_breakout) >= max_bars else pre_breakout
     if len(window) < min_bars:
         return False, ["Not enough bars for consolidation"], None, {}
 
     highs = [_to_finite_or_default(c.get("high")) for c in window]
     lows = [_to_finite_or_default(c.get("low")) for c in window]
-    swing_high = max(highs[:-1]) if len(highs) > 1 else highs[0]
+    swing_high = max(highs)
     range_pct = (max(highs) - min(lows)) / swing_high if swing_high else 0.0
     if range_pct > 0.1:
         return False, ["Consolidation range too wide"], None, {"swing_high": swing_high}
 
     today = candles[-1]
-    prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
+    avg_vol = _avg_volume_excluding_latest(candles, settings.volume_lookback_days)
     today_volume, _ = _to_volume_and_invalid(today.get("volume"))
     if not (close > swing_high and today_volume > avg_vol):
         return (
@@ -336,7 +353,10 @@ def _detect_swing_high_breakout(
         )
 
     # KR-specific confirmation can be applied later in entry logic; for now we only mark pattern.
-    reasons.append("Close broke above recent swing high with volume > 5d avg")
+    reasons.append(
+        "Close broke above recent swing high with volume > "
+        f"{settings.volume_lookback_days}d avg (excluding breakout bar)"
+    )
     return (
         True,
         reasons,
@@ -646,14 +666,14 @@ def evaluate_ticker_hybrid(
     candidate: dict[str, Any] = {
         "ticker": ticker,
         "name": meta.get("name", ticker),
-        "price": fmt(last_close, 0),
+        "price": fmt(last_close, price_digits),
         "price_value": last_close,
         "close_value": last_close,
         "currency": currency,
         "pct_change": f"{pct_change * 100:.1f}%",
         "pct_change_value": pct_change,
-        "high": fmt(_to_finite_or_default(latest.get("high")), 0),
-        "low": fmt(_to_finite_or_default(latest.get("low")), 0),
+        "high": fmt(_to_finite_or_default(latest.get("high")), price_digits),
+        "low": fmt(_to_finite_or_default(latest.get("low")), price_digits),
         "sma_trend_period": settings.sma_trend_period,
         "ema_short_period": settings.ema_short_period,
         "ema_mid_period": settings.ema_mid_period,

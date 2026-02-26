@@ -52,6 +52,22 @@ def test_write_buy_report_includes_standard_run_meta(tmp_path: Path) -> None:
     assert "config_snapshot" in payload
 
 
+def test_build_run_meta_includes_session_state_by_market_when_provided() -> None:
+    meta = build_run_meta(
+        market="MIXED",
+        markets=["US", "KR"],
+        session_state="INTRADAY",
+        session_state_by_market={"US": "INTRADAY", "KR": "AFTER_CLOSE"},
+        eval_index_policy="choose_eval_index:v1",
+        config_snapshot=None,
+    )
+
+    assert meta["eval_context"]["session_state_by_market"] == {
+        "KR": "AFTER_CLOSE",
+        "US": "INTRADAY",
+    }
+
+
 def test_write_sell_report_includes_standard_run_meta(tmp_path: Path) -> None:
     row = SellReportRow(
         ticker="AAPL.NASD",

@@ -275,6 +275,68 @@ def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None
     ]
 
 
+def test_write_scan_report_uses_resolved_session_state(monkeypatch: Any) -> None:
+    runtime = _build_runtime()
+    runtime.failures = []
+    runtime.system_issues = []
+    runtime.screen_outs = []
+
+    monkeypatch.setattr(
+        "sab.scan_evaluation.resolve_run_session_state",
+        lambda *_args, **_kwargs: "PRE_OPEN",
+        raising=False,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_scan_report(runtime, write_report_fn=_fake_write_report)
+
+    assert (
+        captured["run_meta"]["eval_context"]["session_state"]  # type: ignore[index]
+        == "PRE_OPEN"
+    )
+
+
+def test_write_scan_report_emits_session_state_by_market_for_mixed_run(
+    monkeypatch: Any,
+) -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(runtime.cfg, universe_markets=["KR", "US"])
+    runtime.failures = []
+    runtime.system_issues = []
+    runtime.screen_outs = []
+
+    monkeypatch.setattr(
+        "sab.scan_evaluation.resolve_run_session_state",
+        lambda *_args, **_kwargs: "PRE_OPEN",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "sab.scan_evaluation.resolve_run_session_state_map",
+        lambda *_args, **_kwargs: {"KR": "AFTER_CLOSE", "US": "PRE_OPEN"},
+        raising=False,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_scan_report(runtime, write_report_fn=_fake_write_report)
+
+    eval_context = captured["run_meta"]["eval_context"]  # type: ignore[index]
+    assert eval_context["market"] == "MIXED"
+    assert eval_context["session_state_by_market"] == {
+        "KR": "AFTER_CLOSE",
+        "US": "PRE_OPEN",
+    }
+
+
 def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
     runtime = _build_runtime()
     runtime.tickers = ["AAPL.US", "MSFT.US"]

@@ -4,6 +4,10 @@ import math
 from typing import Any
 
 from .report.run_meta import build_run_meta
+from .report.session_state import (
+    resolve_run_session_state,
+    resolve_run_session_state_map,
+)
 from .sell_types import _SellRuntime
 
 _SYSTEM_REASON_PREFIXES = ("time stop skipped: unable to resolve holding market",)
@@ -291,6 +295,16 @@ def _write_sell_report(
     else:
         eval_market = "MIXED"
         eval_markets = markets or None
+    state_markets = [eval_market] if eval_market in {"KR", "US"} else eval_markets
+    session_state_by_market = resolve_run_session_state_map(
+        markets=state_markets,
+        data_dir=runtime.cfg.data_dir,
+    )
+    session_state = resolve_run_session_state(
+        markets=state_markets,
+        data_dir=runtime.cfg.data_dir,
+        session_state_by_market=session_state_by_market,
+    )
 
     config_snapshot: dict[str, Any] = {
         "sell_mode": runtime.cfg.sell_mode,
@@ -323,7 +337,10 @@ def _write_sell_report(
     run_meta = build_run_meta(
         market=eval_market,
         markets=eval_markets,
-        session_state="AFTER_CLOSE",
+        session_state=session_state,
+        session_state_by_market=(
+            session_state_by_market if eval_market == "MIXED" else None
+        ),
         eval_index_policy="choose_eval_index:v1",
         config_snapshot=config_snapshot,
     )

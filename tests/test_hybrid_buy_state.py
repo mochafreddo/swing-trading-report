@@ -4,6 +4,7 @@ from sab.signals.hybrid_buy import (
     HybridEvaluationSettings,
     HybridPattern,
     _detect_rsi_oversold_reversal,
+    _detect_swing_high_breakout,
     _detect_trend_pullback_bounce,
     evaluate_ticker_hybrid,
 )
@@ -741,3 +742,175 @@ def test_hybrid_candidate_exposes_configured_indicator_period_keys(monkeypatch):
     assert result.candidate["sma30"] == result.candidate["sma_trend"]
     assert result.candidate["ema8"] == result.candidate["ema_short"]
     assert result.candidate["ema34"] == result.candidate["ema_mid"]
+
+
+def test_swing_breakout_uses_pre_breakout_consolidation_range() -> None:
+    settings = _settings(min_history=2)
+    settings.breakout_consolidation_min_bars = 5
+    settings.breakout_consolidation_max_bars = 15
+
+    candles = []
+    for idx in range(14):
+        candles.append(
+            {
+                "date": f"202501{idx + 1:02d}",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1_000_000.0,
+            }
+        )
+    candles.append(
+        {
+            "date": "20250115",
+            "open": 102.0,
+            "high": 110.0,
+            "low": 101.0,
+            "close": 109.0,
+            "volume": 2_000_000.0,
+        }
+    )
+
+    closes = [100.0] * 14 + [109.0]
+    sma_trend = [95.0] * len(candles)
+    ema_short = [101.0] * len(candles)
+    ema_mid = [100.0] * len(candles)
+    rsi_vals = [55.0] * len(candles)
+
+    ok, reasons, pattern, _ = _detect_swing_high_breakout(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+        "USD",
+    )
+
+    assert ok is True
+    assert reasons
+    assert pattern == HybridPattern.SWING_HIGH_BREAKOUT
+
+
+def test_swing_breakout_volume_check_uses_pre_breakout_average() -> None:
+    settings = _settings(min_history=2)
+    settings.breakout_consolidation_min_bars = 5
+    settings.breakout_consolidation_max_bars = 10
+    settings.volume_lookback_days = 5
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 200.0,
+        },
+        {
+            "date": "20250102",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        },
+        {
+            "date": "20250103",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        },
+        {
+            "date": "20250104",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        },
+        {
+            "date": "20250105",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        },
+        {
+            "date": "20250106",
+            "open": 101.0,
+            "high": 103.0,
+            "low": 100.0,
+            "close": 102.0,
+            "volume": 70.0,
+        },
+    ]
+    closes = [100.0, 100.0, 100.0, 100.0, 100.0, 102.0]
+    sma_trend = [95.0] * len(candles)
+    ema_short = [101.0] * len(candles)
+    ema_mid = [100.0] * len(candles)
+    rsi_vals = [55.0] * len(candles)
+
+    ok, reasons, pattern, context = _detect_swing_high_breakout(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+        "USD",
+    )
+
+    assert ok is False
+    assert pattern is None
+    assert reasons == ["No confirmed breakout over swing high"]
+    assert context["swing_high"] == 101.0
+
+
+def test_hybrid_candidate_formats_usd_price_with_decimals(monkeypatch):
+    candles = _simple_candles(10, base=123.45)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [1.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *a, **k: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US",
+        candles,
+        _settings(min_history=2),
+        {"currency": "USD"},
+    )
+
+    assert result.candidate is not None
+    assert "." in result.candidate["price"]
