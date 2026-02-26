@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from ..data.trading_sessions import count_trading_sessions
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
 
@@ -31,6 +32,33 @@ def _parse_eval_date(value: Any) -> dt.date | None:
         return dt.datetime.strptime(date_text, "%Y%m%d").date()
     except ValueError:
         return None
+
+
+_US_EXCHANGE_CODES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
+
+
+def _resolve_holding_market(*, ticker: str, holding: dict[str, Any]) -> str | None:
+    exchange_raw = str(holding.get("exchange") or "").strip().upper()
+    if exchange_raw in _US_EXCHANGE_CODES:
+        return "US"
+
+    currency_raw = (
+        str(holding.get("entry_currency") or holding.get("currency") or "")
+        .strip()
+        .upper()
+    )
+    if currency_raw == "USD":
+        return "US"
+    if currency_raw == "KRW":
+        return "KR"
+
+    normalized_ticker = str(ticker or "").strip().upper()
+    if "." in normalized_ticker:
+        suffix = normalized_ticker.rsplit(".", 1)[1].strip().upper()
+        if suffix in _US_EXCHANGE_CODES:
+            return "US"
+
+    return None
 
 
 def _to_finite_float(value: Any) -> float | None:
@@ -113,6 +141,9 @@ class SellEvaluation:
     eval_price: float | None = None
     eval_index: int | None = None
     eval_date: str | None = None
+    flags: list[str] | None = None
+    days_in_trade_sessions: int | None = None
+    time_stop_triggered: bool = False
 
 
 def evaluate_sell_signals(
@@ -167,6 +198,7 @@ def evaluate_sell_signals(
     atr_today = atr_values[-1]
 
     reasons: list[str] = []
+    flags: list[str] = []
     action = "HOLD"
     corporate_action_move = _detect_corporate_action_move(closes)
 
@@ -249,6 +281,8 @@ def evaluate_sell_signals(
 
     # Time stop: days since entry
     time_stop_days = settings.time_stop_days
+    days_in_trade_sessions: int | None = None
+    time_stop_triggered = False
     if entry_date_str and time_stop_days > 0:
         try:
             entry_date = dt.date.fromisoformat(str(entry_date_str))
@@ -259,19 +293,45 @@ def evaluate_sell_signals(
             if eval_anchor is None:
                 reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
             else:
-                days_in_trade = (eval_anchor - entry_date).days
-                if days_in_trade >= time_stop_days:
+                resolved_market = _resolve_holding_market(
+                    ticker=ticker, holding=holding
+                )
+                if resolved_market is None:
                     reasons.append(
-                        f"Time stop: {days_in_trade} days >= {time_stop_days} days"
+                        "Time stop skipped: unable to resolve holding market"
                     )
-                    action = "REVIEW" if action != "SELL" else action
+                    if action == "HOLD":
+                        action = "REVIEW"
+                else:
+                    days_in_trade_sessions = max(
+                        count_trading_sessions(
+                            entry_date,
+                            eval_anchor,
+                            market=resolved_market,
+                            inclusive=True,
+                            data_dir=(
+                                str(holding.get("data_dir"))
+                                if holding.get("data_dir")
+                                else None
+                            ),
+                        )
+                        - 1,
+                        0,
+                    )
+                    if days_in_trade_sessions >= time_stop_days:
+                        time_stop_triggered = True
+                        reasons.append(
+                            "Time stop: "
+                            f"{days_in_trade_sessions} sessions >= {time_stop_days} sessions"
+                        )
+                        action = "REVIEW" if action != "SELL" else action
 
     if corporate_action_move is not None:
         reasons.append(
             "Potential corporate action: abnormal one-day move "
             f"{corporate_action_move * 100:.1f}%"
         )
-        action = "REVIEW"
+        flags.append("CORPORATE_ACTION_SUSPECT")
 
     if not reasons:
         reasons.append("No sell criteria triggered")
@@ -284,4 +344,7 @@ def evaluate_sell_signals(
         eval_price=close_today,
         eval_index=idx_eval,
         eval_date=eval_date,
+        flags=flags or None,
+        days_in_trade_sessions=days_in_trade_sessions,
+        time_stop_triggered=time_stop_triggered,
     )

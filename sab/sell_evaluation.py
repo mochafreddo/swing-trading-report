@@ -3,7 +3,32 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .report.run_meta import build_run_meta
 from .sell_types import _SellRuntime
+
+_SYSTEM_REASON_PREFIXES = ("time stop skipped: unable to resolve holding market",)
+
+
+def _extract_system_issues_from_reasons(
+    ticker: str, reasons: list[Any] | None
+) -> list[str]:
+    if not reasons:
+        return []
+    issues: list[str] = []
+    seen: set[str] = set()
+    for reason in reasons:
+        text = str(reason or "").strip()
+        if not text:
+            continue
+        normalized = text.lower()
+        if not any(normalized.startswith(prefix) for prefix in _SYSTEM_REASON_PREFIXES):
+            continue
+        issue = f"{ticker}: {text}"
+        if issue in seen:
+            continue
+        seen.add(issue)
+        issues.append(issue)
+    return issues
 
 
 def _build_sell_settings(cfg: Any, *, SellSettingsCls: Any) -> Any:
@@ -50,6 +75,7 @@ def _evaluate_holdings(
     exchange_from_suffix_fn: Any,
 ) -> list[Any]:
     results: list[Any] = []
+    seen_failures: set[str] = set(runtime.failures)
     settings = _build_sell_settings(runtime.cfg, SellSettingsCls=SellSettingsCls)
     hybrid_settings = _build_hybrid_sell_settings(
         runtime.cfg, HybridSellSettingsCls=HybridSellSettingsCls
@@ -72,7 +98,9 @@ def _evaluate_holdings(
         if not ticker_candles:
             missing_reason = "No market data available for sell evaluation"
             if ticker not in runtime.missing_logged:
-                runtime.failures.append(f"{ticker}: {missing_reason}")
+                failure = f"{ticker}: {missing_reason}"
+                runtime.failures.append(failure)
+                seen_failures.add(failure)
                 runtime.missing_logged.add(ticker)
             results.append(
                 SellReportRowCls(
@@ -90,6 +118,9 @@ def _evaluate_holdings(
                     notes=holding.notes,
                     currency=currency,
                     eval_date=None,
+                    flags=None,
+                    days_in_trade_sessions=None,
+                    time_stop_triggered=False,
                 )
             )
             continue
@@ -123,7 +154,9 @@ def _evaluate_holdings(
         except Exception as exc:
             reason = f"Unexpected sell evaluation error ({type(exc).__name__}: {exc})"
             runtime.fatal_failure = True
-            runtime.failures.append(f"{ticker}: {reason}")
+            failure = f"{ticker}: {reason}"
+            runtime.failures.append(failure)
+            seen_failures.add(failure)
             logger = getattr(runtime, "logger", None)
             if logger is not None:
                 logger.exception("%s: %s", ticker, reason)
@@ -143,6 +176,9 @@ def _evaluate_holdings(
                     notes=holding.notes,
                     currency=currency,
                     eval_date=None,
+                    flags=None,
+                    days_in_trade_sessions=None,
+                    time_stop_triggered=False,
                 )
             )
             continue
@@ -155,6 +191,15 @@ def _evaluate_holdings(
         has_invalid_candle_data = any(
             reason.startswith("invalid candle data") for reason in reason_messages
         )
+        system_issues = _extract_system_issues_from_reasons(
+            ticker,
+            getattr(evaluation, "reasons", None),
+        )
+        for issue in system_issues:
+            if issue in seen_failures:
+                continue
+            runtime.failures.append(issue)
+            seen_failures.add(issue)
 
         eval_price = getattr(evaluation, "eval_price", None)
         if eval_price is None and ticker_candles and not has_invalid_candle_data:
@@ -199,6 +244,13 @@ def _evaluate_holdings(
                 notes=holding.notes,
                 currency=currency,
                 eval_date=eval_date,
+                flags=getattr(evaluation, "flags", None),
+                days_in_trade_sessions=getattr(
+                    evaluation, "days_in_trade_sessions", None
+                ),
+                time_stop_triggered=bool(
+                    getattr(evaluation, "time_stop_triggered", False)
+                ),
             )
         )
 
@@ -225,6 +277,57 @@ def _write_sell_report(
     *,
     write_sell_report_fn: Any,
 ) -> str:
+    markets = sorted(
+        {
+            "US"
+            if str(runtime.ticker_currency.get(ticker, "")).strip().upper() == "USD"
+            else "KR"
+            for ticker in runtime.unique_tickers
+        }
+    )
+    if len(markets) == 1:
+        eval_market = markets[0]
+        eval_markets = None
+    else:
+        eval_market = "MIXED"
+        eval_markets = markets or None
+
+    config_snapshot: dict[str, Any] = {
+        "sell_mode": runtime.cfg.sell_mode,
+        "sell_atr_multiplier": runtime.cfg.sell_atr_multiplier,
+        "sell_time_stop_days": runtime.cfg.sell_time_stop_days,
+        "sell_require_sma200": runtime.cfg.sell_require_sma200,
+        "sell_ema_short": runtime.cfg.sell_ema_short,
+        "sell_ema_long": runtime.cfg.sell_ema_long,
+        "sell_rsi_period": runtime.cfg.sell_rsi_period,
+        "sell_rsi_floor": runtime.cfg.sell_rsi_floor,
+        "sell_rsi_floor_alt": runtime.cfg.sell_rsi_floor_alt,
+        "sell_min_bars": runtime.cfg.sell_min_bars,
+    }
+    if runtime.cfg.sell_mode == "sma_ema_hybrid":
+        config_snapshot["hybrid_sell"] = {
+            "profit_target_low": runtime.cfg.hybrid_sell.profit_target_low,
+            "profit_target_high": runtime.cfg.hybrid_sell.profit_target_high,
+            "partial_profit_floor": runtime.cfg.hybrid_sell.partial_profit_floor,
+            "ema_short_period": runtime.cfg.hybrid_sell.ema_short_period,
+            "ema_mid_period": runtime.cfg.hybrid_sell.ema_mid_period,
+            "sma_trend_period": runtime.cfg.hybrid_sell.sma_trend_period,
+            "rsi_period": runtime.cfg.hybrid_sell.rsi_period,
+            "stop_loss_pct_min": runtime.cfg.hybrid_sell.stop_loss_pct_min,
+            "stop_loss_pct_max": runtime.cfg.hybrid_sell.stop_loss_pct_max,
+            "failed_breakout_drop_pct": runtime.cfg.hybrid_sell.failed_breakout_drop_pct,
+            "time_stop_days": runtime.cfg.hybrid_sell.time_stop_days,
+            "time_stop_grace_days": runtime.cfg.hybrid_sell.time_stop_grace_days,
+            "time_stop_profit_floor": runtime.cfg.hybrid_sell.time_stop_profit_floor,
+        }
+    run_meta = build_run_meta(
+        market=eval_market,
+        markets=eval_markets,
+        session_state="AFTER_CLOSE",
+        eval_index_policy="choose_eval_index:v1",
+        config_snapshot=config_snapshot,
+    )
+
     return write_sell_report_fn(
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
@@ -237,4 +340,5 @@ def _write_sell_report(
         fx_note=runtime.fx_note,
         sell_mode=runtime.cfg.sell_mode,
         sell_mode_note=_build_sell_mode_note(runtime.cfg),
+        run_meta=run_meta,
     )

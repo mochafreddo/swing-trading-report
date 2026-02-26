@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
 
 _ARTIFACT_SCHEMA = "sab.report.v1"
@@ -45,6 +46,24 @@ class SellReportRow:
     notes: str | None = None
     currency: str | None = None
     eval_date: str | None = None
+    flags: list[str] | None = None
+    days_in_trade_sessions: int | None = None
+    time_stop_triggered: bool = False
+
+
+def _infer_market(rows: list[dict[str, Any]]) -> tuple[str, list[str] | None]:
+    markets: set[str] = set()
+    for row in rows:
+        currency = str(row.get("currency") or "").strip().upper()
+        if currency == "USD":
+            markets.add("US")
+        elif currency:
+            markets.add("KR")
+    if not markets:
+        return "MIXED", None
+    if len(markets) == 1:
+        return next(iter(markets)), None
+    return "MIXED", sorted(markets)
 
 
 def _collect_tickers(rows: list[dict[str, Any]]) -> list[str]:
@@ -95,6 +114,7 @@ def write_sell_report(
     sell_mode: str | None = None,
     sell_mode_note: str | None = None,
     quantity_digits: int = 6,
+    run_meta: dict[str, Any] | None = None,
 ) -> str:
     del quantity_digits  # Legacy formatting option kept for API compatibility.
 
@@ -114,10 +134,25 @@ def write_sell_report(
         "action_counts": dict(sorted(action_counts.items())),
     }
 
+    inferred_market, inferred_markets = _infer_market(rows)
+    default_run_meta = build_run_meta(
+        market=inferred_market,
+        markets=inferred_markets,
+        session_state="AFTER_CLOSE",
+        eval_index_policy="choose_eval_index:v1",
+        config_snapshot=None,
+    )
+    resolved_run_meta = run_meta or default_run_meta
+
     artifact: dict[str, Any] = {
         "schema": _ARTIFACT_SCHEMA,
         "type": "sell",
         "generated_at": f"{now_str} {tz_label}",
+        "run_id": resolved_run_meta["run_id"],
+        "run_ts_utc": resolved_run_meta["run_ts_utc"],
+        "git_sha": resolved_run_meta.get("git_sha"),
+        "eval_context": resolved_run_meta["eval_context"],
+        "config_snapshot": resolved_run_meta.get("config_snapshot"),
         "report_date": today,
         "provider": provider,
         "summary": summary,

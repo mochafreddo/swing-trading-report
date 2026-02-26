@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 
+from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .scan import run_scan
 from .sell import run_sell
@@ -102,6 +103,43 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to holdings file override",
     )
+
+    entry = sub.add_parser(
+        "entry",
+        help="Evaluate buy candidates for next-session entry conditions",
+    )
+    entry.add_argument(
+        "--buy-report",
+        type=str,
+        default=None,
+        help="Input buy report path (defaults to latest reports/*.buy.json)",
+    )
+    entry.add_argument(
+        "--provider",
+        type=str,
+        default=None,
+        choices=["kis", "pykrx"],
+        help="Price provider override",
+    )
+    entry.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["PRE_OPEN", "INTRADAY", "AFTER_CLOSE"],
+        help="Entry evaluation mode",
+    )
+    entry.add_argument(
+        "--market",
+        type=str,
+        default=None,
+        choices=["KR", "US"],
+        help="Single market override",
+    )
+    entry.add_argument(
+        "--upload",
+        action="store_true",
+        help="Reserved for future remote upload support (M4 scope)",
+    )
     return p
 
 
@@ -124,6 +162,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if ns.cmd == "sell":
         return run_sell(provider=ns.provider, holdings_path=ns.holdings)
+
+    if ns.cmd == "entry":
+        return run_entry(
+            buy_report_path=ns.buy_report,
+            provider=ns.provider,
+            mode=ns.mode,
+            market=ns.market,
+            upload=ns.upload,
+        )
 
     parser.print_help()
     return 2

@@ -648,6 +648,7 @@ def evaluate_ticker_hybrid(
         "name": meta.get("name", ticker),
         "price": fmt(last_close, 0),
         "price_value": last_close,
+        "close_value": last_close,
         "currency": currency,
         "pct_change": f"{pct_change * 100:.1f}%",
         "pct_change_value": pct_change,
@@ -668,15 +669,19 @@ def evaluate_ticker_hybrid(
         "entry_state": entry_state,
         "entry_state_reason": entry_state_reason,
         "atr14": fmt(atr_value),
+        "atr14_value": None if math.isnan(atr_value) else atr_value,
         "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%"
         if gap_guard_pct is not None
         else "-",
+        "gap_guard_pct_value": gap_guard_pct,
         "gap_guard_up_price": fmt(gap_guard_up_price, gap_price_digits)
         if gap_guard_up_price
         else "-",
+        "gap_guard_up_price_value": gap_guard_up_price,
         "gap_guard_down_price": fmt(gap_guard_down_price, gap_price_digits)
         if gap_guard_down_price
         else "-",
+        "gap_guard_down_price_value": gap_guard_down_price,
         "risk_guide": risk_guide,
         "score_value": score_value,
         "score": f"{score_value:.2f}",

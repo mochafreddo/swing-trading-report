@@ -180,6 +180,19 @@ def evaluate_ticker(
             reason_kind="signal",
         )
 
+    gap_guard_pct_value = None
+    gap_guard_up_price_value = None
+    gap_guard_down_price_value = None
+    if (
+        settings.gap_atr_multiplier > 0
+        and not math.isnan(atr_value)
+        and atr_value > 0
+        and latest_close > 0
+    ):
+        gap_guard_pct_value = settings.gap_atr_multiplier * atr_value / latest_close
+        gap_guard_up_price_value = latest_close * (1.0 + gap_guard_pct_value)
+        gap_guard_down_price_value = latest_close * (1.0 - gap_guard_pct_value)
+
     # Liquidity: average dollar volume last 20 bars
     avg_dollar_volume = 0.0
     has_invalid_volume = False
@@ -257,11 +270,11 @@ def evaluate_ticker(
     score += 1
     breakdown.append("rsi")
 
-    if trend_pass:
+    if settings.use_sma200_filter and trend_pass:
         score += 1
         breakdown.append("sma200")
 
-    if slope_pass:
+    if settings.require_slope_up and slope_pass:
         score += 1
         breakdown.append("slope")
 
@@ -291,8 +304,12 @@ def evaluate_ticker(
         "ema50": fmt(ema50[-1]),
         "rsi14": fmt(rsi14[-1]),
         "atr14": fmt(atr_value),
+        "atr14_value": None if math.isnan(atr_value) else atr_value,
         "gap": f"{gap_pct * 100:.1f}%",
         "gap_threshold": f"{gap_threshold * 100:.1f}%",
+        "gap_guard_pct_value": gap_guard_pct_value,
+        "gap_guard_up_price_value": gap_guard_up_price_value,
+        "gap_guard_down_price_value": gap_guard_down_price_value,
         "pct_change": f"{pct_change * 100:.1f}%",
         "high": fmt(latest_high, 0),
         "low": fmt(latest_low, 0),
@@ -314,6 +331,7 @@ def evaluate_ticker(
         "slope_pass": "Yes" if slope_pass else "No",
         "currency": currency,
         "price_value": latest_close,
+        "close_value": latest_close,
         "pct_change_value": pct_change,
     }
 

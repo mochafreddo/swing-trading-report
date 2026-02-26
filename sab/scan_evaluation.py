@@ -4,6 +4,7 @@ import datetime as dt
 from typing import Any
 
 from .data.holiday_cache import HolidayEntry
+from .report.run_meta import build_run_meta
 from .scan_types import _ScanRuntime, _to_float
 
 _SYSTEM_REASON_PREFIXES = (
@@ -227,6 +228,38 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
     system_issues = list(dict.fromkeys(runtime.system_issues + runtime.failures))
     screen_outs = list(dict.fromkeys(runtime.screen_outs))
     combined_issues = list(dict.fromkeys(system_issues + screen_outs))
+    markets = sorted(
+        {
+            str(market).strip().upper()
+            for market in runtime.cfg.universe_markets
+            if str(market).strip()
+        }
+    )
+    if len(markets) == 1 and markets[0] in {"KR", "US"}:
+        eval_market = markets[0]
+        eval_markets = None
+    else:
+        eval_market = "MIXED"
+        eval_markets = [m for m in markets if m in {"KR", "US"}] or None
+    run_meta = build_run_meta(
+        market=eval_market,
+        markets=eval_markets,
+        session_state="AFTER_CLOSE",
+        eval_index_policy="choose_eval_index:v1",
+        config_snapshot={
+            "strategy_mode": runtime.cfg.strategy_mode,
+            "use_sma200_filter": runtime.cfg.use_sma200_filter,
+            "require_slope_up": runtime.cfg.require_slope_up,
+            "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
+            "min_history_bars": runtime.cfg.min_history_bars,
+            "min_price": runtime.cfg.min_price,
+            "us_min_price": runtime.cfg.us_min_price,
+            "min_dollar_volume": runtime.cfg.min_dollar_volume,
+            "us_min_dollar_volume": runtime.cfg.us_min_dollar_volume,
+            "exclude_etf_etn": runtime.cfg.exclude_etf_etn,
+            "universe_markets": runtime.cfg.universe_markets,
+        },
+    )
     return write_report_fn(
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
@@ -238,4 +271,5 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         cache_hint=runtime.cache_hint,
         report_type="buy",
         strategy_mode=runtime.cfg.strategy_mode,
+        run_meta=run_meta,
     )

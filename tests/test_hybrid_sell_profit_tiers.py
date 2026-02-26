@@ -1,4 +1,6 @@
 import datetime as dt
+from pathlib import Path
+from typing import cast
 
 from sab.signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
 
@@ -194,6 +196,8 @@ def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
 
     assert result.action == "HOLD"
     assert result.reasons == ["No hybrid sell criteria triggered"]
+    assert result.days_in_trade_sessions == 0
+    assert result.time_stop_triggered is False
 
 
 def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
@@ -244,15 +248,21 @@ def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
         },
     ]
 
-    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
 
     assert result.action == "HOLD"
     assert any(
         "Time stop skipped: invalid eval_date" in reason for reason in result.reasons
     )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
 
 
-def test_hybrid_sell_corporate_action_guard_returns_review(monkeypatch):
+def test_hybrid_sell_corporate_action_guard_adds_flag_without_action_override(
+    monkeypatch,
+):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -285,13 +295,16 @@ def test_hybrid_sell_corporate_action_guard_returns_review(monkeypatch):
         },
     ]
 
-    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
 
-    assert result.action == "REVIEW"
+    assert result.action == "HOLD"
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)
 
 
-def test_hybrid_sell_corporate_action_guard_downgrades_sell_signal_to_review(
+def test_hybrid_sell_corporate_action_guard_keeps_sell_with_flag(
     monkeypatch,
 ):
     _patch_indicators(monkeypatch)
@@ -330,8 +343,143 @@ def test_hybrid_sell_corporate_action_guard_downgrades_sell_signal_to_review(
         },
     ]
 
-    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "SELL"
+    assert "Price hit custom stop override" in result.reasons
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert any("Potential corporate action" in reason for reason in result.reasons)
+
+
+def test_hybrid_sell_time_stop_uses_trading_sessions_not_calendar_days(
+    monkeypatch, tmp_path: Path
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=2,
+    )
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-10",
+        "currency": "USD",
+        "data_dir": tmp_path.as_posix(),
+    }
+    candles = [
+        {
+            "date": "20250110",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250113",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert result.days_in_trade_sessions == 1
+    assert result.time_stop_triggered is False
+
+
+def test_hybrid_sell_time_stop_market_unresolved_promotes_hold_to_review(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=100,
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-10"}
+    candles = [
+        {
+            "date": "20250110",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250113",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "TEST", cast(list[dict[str, float]], candles), holding, settings
+    )
 
     assert result.action == "REVIEW"
+    assert any(
+        "Time stop skipped: unable to resolve holding market" in reason
+        for reason in result.reasons
+    )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+
+
+def test_hybrid_sell_time_stop_market_unresolved_keeps_sell_action(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=100,
+    )
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-10",
+        "stop_override": 95.0,
+    }
+    candles = [
+        {
+            "date": "20250110",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250113",
+            "open": 94.0,
+            "high": 95.0,
+            "low": 93.0,
+            "close": 94.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "TEST", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "SELL"
     assert "Price hit custom stop override" in result.reasons
-    assert any("Potential corporate action" in reason for reason in result.reasons)
+    assert any(
+        "Time stop skipped: unable to resolve holding market" in reason
+        for reason in result.reasons
+    )

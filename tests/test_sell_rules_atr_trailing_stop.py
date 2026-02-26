@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 import pytest
 import sab.signals.sell_rules as sr
@@ -265,7 +266,11 @@ def test_time_stop_uses_eval_date_instead_of_local_today(
             "volume": 1000,
         },
     ]
-    holding = {"entry_price": 100.0, "entry_date": "2025-01-09"}
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-09",
+        "currency": "USD",
+    }
     settings = SellSettings(
         require_sma200=False,
         min_bars=2,
@@ -277,6 +282,8 @@ def test_time_stop_uses_eval_date_instead_of_local_today(
 
     assert result.action == "HOLD"
     assert result.reasons == ["No sell criteria triggered"]
+    assert result.days_in_trade_sessions == 1
+    assert result.time_stop_triggered is False
 
 
 def test_time_stop_skips_when_eval_date_is_invalid(
@@ -331,9 +338,13 @@ def test_time_stop_skips_when_eval_date_is_invalid(
     assert any(
         "Time stop skipped: invalid eval_date" in reason for reason in result.reasons
     )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
 
 
-def test_corporate_action_guard_returns_review(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_corporate_action_guard_adds_flag_without_overriding_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_atr_only(monkeypatch)
     candles: list[Candle] = [
         {
@@ -370,11 +381,12 @@ def test_corporate_action_guard_returns_review(monkeypatch: pytest.MonkeyPatch) 
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
-    assert result.action == "REVIEW"
+    assert result.action == "HOLD"
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)
 
 
-def test_corporate_action_guard_downgrades_sell_signal_to_review(
+def test_corporate_action_guard_keeps_sell_action_with_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_atr_only(monkeypatch)
@@ -413,6 +425,134 @@ def test_corporate_action_guard_downgrades_sell_signal_to_review(
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
-    assert result.action == "REVIEW"
+    assert result.action == "SELL"
     assert "Price hit custom stop override" in result.reasons
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)
+
+
+def test_time_stop_uses_trading_sessions_not_calendar_days(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250113",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-10",
+        "currency": "USD",
+        "data_dir": tmp_path.as_posix(),
+    }
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=2,
+    )
+
+    result = evaluate_sell_signals("AAPL.NASD", candles, holding, settings)
+
+    assert result.action == "HOLD"
+    assert result.days_in_trade_sessions == 1
+    assert result.time_stop_triggered is False
+
+
+def test_time_stop_market_unresolved_promotes_hold_to_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250113",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-10"}
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=100,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert any(
+        "Time stop skipped: unable to resolve holding market" in reason
+        for reason in result.reasons
+    )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+
+
+def test_time_stop_market_unresolved_keeps_sell_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250113",
+            "open": 94,
+            "high": 95,
+            "low": 93,
+            "close": 94,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-10",
+        "stop_override": 95.0,
+    }
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=100,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "SELL"
+    assert "Price hit custom stop override" in result.reasons
+    assert any(
+        "Time stop skipped: unable to resolve holding market" in reason
+        for reason in result.reasons
+    )
