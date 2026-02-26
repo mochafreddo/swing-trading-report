@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.1...v1.3.2) (2026-02-26)
+
+
+### Bug Fixes
+
+* **signals:** fail-closed 갭 필터 및 ATR 트레일 보강 ([#11](https://github.com/mochafreddo/swing-trading-report/issues/11)) ([13251f4](https://github.com/mochafreddo/swing-trading-report/commit/13251f4a0ad1ff37b3b3481632a2513d2a267d4f))
+
 ## [1.3.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.0...v1.3.1) (2026-02-26)
 
 
