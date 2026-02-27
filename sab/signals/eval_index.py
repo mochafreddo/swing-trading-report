@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sab.data.us_calendar import load_us_trading_calendar
+from sab.tickers import is_us_exchange
 from sab.utils.market_time import us_early_close_time
 
 KR_ZONE = ZoneInfo("Asia/Seoul")
@@ -101,6 +102,8 @@ def _parse_candle_date(value: Any) -> dt.date | None:
 
 
 def _infer_market(meta: dict[str, Any]) -> str:
+    if is_us_exchange(str(meta.get("exchange") or "")):
+        return "US"
     currency = str(meta.get("currency", "KRW")).upper()
     if currency == "USD":
         return "US"
