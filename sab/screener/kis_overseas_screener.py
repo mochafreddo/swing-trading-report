@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from ..data.kis_client import KISClient
+from ..tickers import (
+    canonical_exchange_from_suffix,
+    normalize_suffix,
+    parse_ticker,
+    split_symbol_and_suffix,
+    validate_strict_us_ticker,
+)
 
-_KNOWN_EXCHANGE_SUFFIXES = {
-    "US",
-    "NASDAQ",
-    "NASD",
-    "NAS",
-    "NYSE",
-    "NYS",
-    "AMEX",
-    "AMS",
-}
+_CLASS_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:[/.][ABC])$")
 
 
 @dataclass
@@ -162,24 +161,56 @@ class KISOverseasScreener:
         self, rows: list[dict[str, Any]], *, exchange: str
     ) -> list[tuple[str, dict[str, Any]]]:
         normalized_rows: list[tuple[str, dict[str, Any]]] = []
-        for row in rows:
+        bucket_exchange = self._normalize_exchange(exchange)
+        for idx, row in enumerate(rows):
             sym = self._symbol_from_row(row)
             if not sym:
-                continue
-            ticker = (
-                sym if self._has_known_exchange_suffix(sym) else f"{sym}.{exchange}"
-            )
+                raise ValueError(
+                    "invalid overseas rank row: "
+                    f"exchange={bucket_exchange}, index={idx}, empty symbol"
+                )
+            base_symbol, suffix = split_symbol_and_suffix(sym)
+            if not base_symbol:
+                raise ValueError(
+                    "invalid overseas rank row: "
+                    f"exchange={bucket_exchange}, index={idx}, symbol={sym!r}"
+                )
+
+            resolved_base_symbol = base_symbol
+            ticker_exchange: str
+            if suffix is None or normalize_suffix(suffix) == "US":
+                ticker_exchange = bucket_exchange
+            else:
+                canonical_exchange = canonical_exchange_from_suffix(suffix)
+                if canonical_exchange is None and self._looks_like_class_symbol(sym):
+                    resolved_base_symbol = sym
+                    ticker_exchange = bucket_exchange
+                elif canonical_exchange is None:
+                    raise ValueError(
+                        "invalid overseas rank row: "
+                        f"exchange={bucket_exchange}, index={idx}, symbol={sym!r} "
+                        f"(unsupported suffix {suffix!r})"
+                    )
+                else:
+                    ticker_exchange = canonical_exchange
+
+            ticker_raw = f"{resolved_base_symbol}.{ticker_exchange}"
+            ticker = parse_ticker(ticker_raw).ticker
+            ticker_issue = validate_strict_us_ticker(ticker)
+            if ticker_issue is not None:
+                raise ValueError(
+                    "invalid overseas rank row: "
+                    f"exchange={bucket_exchange}, index={idx}, symbol={sym!r} "
+                    f"({ticker_issue})"
+                )
             enriched = dict(row)
-            enriched.setdefault("exchange", exchange)
+            enriched.setdefault("exchange", ticker_exchange)
             normalized_rows.append((ticker, enriched))
         return normalized_rows
 
     @staticmethod
-    def _has_known_exchange_suffix(symbol: str) -> bool:
-        if "." not in symbol:
-            return False
-        suffix = symbol.rsplit(".", 1)[1].strip().upper()
-        return suffix in _KNOWN_EXCHANGE_SUFFIXES
+    def _looks_like_class_symbol(symbol: str) -> bool:
+        return _CLASS_SYMBOL_PATTERN.fullmatch(symbol) is not None
 
     @staticmethod
     def _round_robin_select(
@@ -222,7 +253,6 @@ class KISOverseasScreener:
     @staticmethod
     def _normalize_exchange(exchange: str) -> str:
         mapping = {
-            "US": "NAS",
             "NASDAQ": "NAS",
             "NASD": "NAS",
             "NAS": "NAS",
@@ -231,8 +261,15 @@ class KISOverseasScreener:
             "AMEX": "AMS",
             "AMS": "AMS",
         }
-        code = (exchange or "NAS").strip().upper()
-        return mapping.get(code, code)
+        code = (exchange or "").strip().upper()
+        if not code:
+            return "NAS"
+        normalized = mapping.get(code)
+        if normalized is None:
+            raise ValueError(
+                f"unsupported overseas exchange {exchange!r}; use NAS, NYS, or AMS"
+            )
+        return normalized
 
     def _fetch_rank(
         self, metric: str, exchange: str, limit: int, *, nday: int = 0

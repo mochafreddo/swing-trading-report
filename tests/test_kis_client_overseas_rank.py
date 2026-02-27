@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 from unittest.mock import MagicMock, patch
 
-from sab.data.kis_client import KISClient, KISCredentials
+from sab.data.kis_client import KISApiError, KISClient, KISCredentials
 
 
 class KISClientOverseasTradeValueRankTests(unittest.TestCase):
@@ -123,6 +123,66 @@ class KISClientOverseasRankPaginationTests(unittest.TestCase):
             second_call = request_mock.call_args_list[1].kwargs
             self.assertEqual(second_call["headers"].get("tr_cont"), "N")
             self.assertEqual(second_call["params"].get("KEYB"), "CUR1")
+
+    def test_fetch_overseas_rank_items_raises_api_error_with_msg_cd_on_rt_cd_failure(
+        self,
+    ) -> None:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {}
+        resp.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW93001",
+            "msg1": "invalid ranking query",
+        }
+        self.client._max_attempts = 1
+
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(return_value=resp)
+            ) as request_mock,
+            self.assertRaises(KISApiError) as ctx,
+        ):
+            self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS"},
+                limit=1,
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(ctx.exception.msg_cd, "EGW93001")
+        self.assertIn("msg_cd=EGW93001", str(ctx.exception))
+
+    def test_fetch_overseas_rank_items_raises_api_error_with_msg_cd_on_http_failure(
+        self,
+    ) -> None:
+        resp = MagicMock()
+        resp.status_code = 502
+        resp.headers = {}
+        resp.text = "bad gateway"
+        resp.json.return_value = {
+            "msg_cd": "EGW93222",
+            "msg1": "upstream unavailable",
+        }
+        self.client._max_attempts = 1
+
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(return_value=resp)
+            ) as request_mock,
+            self.assertRaises(KISApiError) as ctx,
+        ):
+            self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS"},
+                limit=1,
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(ctx.exception.msg_cd, "EGW93222")
+        self.assertIn("msg_cd=EGW93222", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
-from .common import KISClientError, _KISClientState
+from .common import KISApiError, KISClientError, _KISClientState
 
 
 class _KISRankingMixin(_KISClientState):
@@ -92,11 +92,20 @@ class _KISRankingMixin(_KISClientState):
                         self._token_expiry = None
                         self.ensure_token()
                         headers["authorization"] = self._access_token or ""
+                        hdrs["authorization"] = self._access_token or ""
                         time.sleep(max(1.0, self._min_interval))
                         continue
                     if attempt < self._max_attempts - 1:
                         time.sleep(1.0)
                         continue
+                    if msg_cd:
+                        raise KISApiError(
+                            f"Volume rank HTTP {resp.status_code}: {msg1} ({resp.text})",
+                            msg_cd=msg_cd,
+                            msg1=str(msg1),
+                            http_status=resp.status_code,
+                            context="volume_rank",
+                        )
                     raise KISClientError(
                         f"Volume rank HTTP {resp.status_code}: {msg1} ({resp.text})"
                     )
@@ -108,8 +117,8 @@ class _KISRankingMixin(_KISClientState):
                     raise KISClientError("Volume rank response is not JSON")
 
                 if str(data.get("rt_cd")) != "0":
-                    msg_cd = data.get("msg_cd") or ""
-                    msg1 = data.get("msg1") or "Unknown error"
+                    msg_cd = str(data.get("msg_cd") or "")
+                    msg1 = str(data.get("msg1") or "Unknown error")
                     if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
                         time.sleep(max(1.0, self._min_interval))
                         continue
@@ -119,9 +128,16 @@ class _KISRankingMixin(_KISClientState):
                         self._token_expiry = None
                         self.ensure_token()
                         headers["authorization"] = self._access_token or ""
+                        hdrs["authorization"] = self._access_token or ""
                         time.sleep(max(1.0, self._min_interval))
                         continue
-                    raise KISClientError(f"KIS volume rank error: {msg1}")
+                    raise KISApiError(
+                        f"KIS volume rank error: {msg1}",
+                        msg_cd=msg_cd,
+                        msg1=msg1,
+                        rt_cd=str(data.get("rt_cd") or ""),
+                        context="volume_rank",
+                    )
                 break
 
             if data is None or resp is None:
@@ -185,6 +201,23 @@ class _KISRankingMixin(_KISClientState):
             resp = self._request("GET", url, headers=headers, params=request_params)
 
             if resp.status_code != 200:
+                error_body: dict[str, Any] | None = None
+                try:
+                    parsed = resp.json()
+                    if isinstance(parsed, dict):
+                        error_body = parsed
+                except ValueError:
+                    error_body = None
+                msg_cd = str((error_body or {}).get("msg_cd") or "")
+                msg1 = str((error_body or {}).get("msg1") or msg_cd or "Unknown error")
+                if msg_cd:
+                    raise KISApiError(
+                        f"Overseas rank HTTP {resp.status_code}: {resp.text}",
+                        msg_cd=msg_cd,
+                        msg1=msg1,
+                        http_status=resp.status_code,
+                        context="overseas_rank",
+                    )
                 raise KISClientError(
                     f"Overseas rank HTTP {resp.status_code}: {resp.text}"
                 )
@@ -195,8 +228,15 @@ class _KISRankingMixin(_KISClientState):
                 raise KISClientError("Overseas rank response is not JSON") from exc
 
             if str(data.get("rt_cd")) != "0":
-                msg = data.get("msg1") or data.get("msg_cd") or "Unknown error"
-                raise KISClientError(f"KIS overseas rank error: {msg}")
+                msg_cd = str(data.get("msg_cd") or "")
+                msg1 = str(data.get("msg1") or msg_cd or "Unknown error")
+                raise KISApiError(
+                    f"KIS overseas rank error: {msg1}",
+                    msg_cd=msg_cd,
+                    msg1=msg1,
+                    rt_cd=str(data.get("rt_cd") or ""),
+                    context="overseas_rank",
+                )
 
             items = data.get("output2") or data.get("output") or []
             if isinstance(items, dict):

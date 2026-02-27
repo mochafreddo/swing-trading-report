@@ -16,6 +16,42 @@ class KISClientError(RuntimeError):
     """Base error for KIS client."""
 
 
+class KISApiError(KISClientError):
+    """KIS API business-level failure with structured error fields."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        msg_cd: str = "",
+        msg1: str = "",
+        rt_cd: str | None = None,
+        http_status: int | None = None,
+        context: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.msg_cd = msg_cd
+        self.msg1 = msg1
+        self.rt_cd = rt_cd
+        self.http_status = http_status
+        self.context = context
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        details: list[str] = []
+        if self.msg_cd:
+            details.append(f"msg_cd={self.msg_cd}")
+        if self.rt_cd:
+            details.append(f"rt_cd={self.rt_cd}")
+        if self.http_status is not None:
+            details.append(f"http_status={self.http_status}")
+        if self.context:
+            details.append(f"context={self.context}")
+        if not details:
+            return base
+        return f"{base} ({', '.join(details)})"
+
+
 class KISAuthError(KISClientError):
     """Authentication/authz failure."""
 
@@ -106,6 +142,7 @@ class _KISClientState:
     _max_attempts: int
     _min_interval: float
     _last_request_at: dt.datetime | None
+    _overseas_symbol_preference: dict[str, str]
 
     def _request(
         self,

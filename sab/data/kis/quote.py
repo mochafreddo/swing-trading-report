@@ -1,16 +1,74 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import time
 from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
-from .common import KISClientError, _KISClientState
+from .common import KISApiError, KISClientError, _KISClientState
+
+_CLASS_DOT_SYMBOL_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)\.([ABC])$")
+_CLASS_SLASH_SYMBOL_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)/([ABC])$")
+_OVERSEAS_INVALID_SYMBOL_MSG_CDS = frozenset({"SYMB0001"})
 
 
 class _KISQuoteMixin(_KISClientState):
     """Domestic/overseas quote and candle responsibilities."""
+
+    @staticmethod
+    def _normalize_overseas_symbol(symbol: str) -> str:
+        return str(symbol or "").strip().upper()
+
+    @staticmethod
+    def _class_symbol_parts(symbol: str) -> tuple[str, str] | None:
+        dot_match = _CLASS_DOT_SYMBOL_PATTERN.fullmatch(symbol)
+        if dot_match is not None:
+            return dot_match.group(1), dot_match.group(2)
+        slash_match = _CLASS_SLASH_SYMBOL_PATTERN.fullmatch(symbol)
+        if slash_match is not None:
+            return slash_match.group(1), slash_match.group(2)
+        return None
+
+    def _overseas_symbol_candidates(self, symbol: str) -> list[str]:
+        normalized = self._normalize_overseas_symbol(symbol)
+        parts = self._class_symbol_parts(normalized)
+        if parts is None:
+            return [normalized]
+        base, class_code = parts
+        dot_symbol = f"{base}.{class_code}"
+        slash_symbol = f"{base}/{class_code}"
+        preferred = self._overseas_symbol_preference.get(dot_symbol)
+        if preferred in {dot_symbol, slash_symbol}:
+            first = preferred
+        else:
+            first = (
+                normalized if normalized in {dot_symbol, slash_symbol} else dot_symbol
+            )
+        second = slash_symbol if first == dot_symbol else dot_symbol
+        return [first, second]
+
+    @staticmethod
+    def _can_fallback_overseas_symbol(error: KISClientError) -> bool:
+        return (
+            isinstance(error, KISApiError)
+            and error.msg_cd in _OVERSEAS_INVALID_SYMBOL_MSG_CDS
+        )
+
+    def _remember_overseas_symbol_preference(
+        self, *, requested_symbol: str, resolved_symbol: str
+    ) -> None:
+        normalized_requested = self._normalize_overseas_symbol(requested_symbol)
+        parts = self._class_symbol_parts(normalized_requested)
+        if parts is None:
+            return
+        base, class_code = parts
+        dot_symbol = f"{base}.{class_code}"
+        slash_symbol = f"{base}/{class_code}"
+        normalized_resolved = self._normalize_overseas_symbol(resolved_symbol)
+        if normalized_resolved in {dot_symbol, slash_symbol}:
+            self._overseas_symbol_preference[dot_symbol] = normalized_resolved
 
     def daily_candles(
         self, ticker: str, *, count: int = 120, adjusted: bool = True
@@ -151,11 +209,46 @@ class _KISQuoteMixin(_KISClientState):
         raise KISClientError("Domestic price detail request failed after retries")
 
     def overseas_price_detail(self, *, symbol: str, exchange: str) -> dict[str, Any]:
-        symbol = (symbol or "").strip().upper()
+        normalized_symbol = self._normalize_overseas_symbol(symbol)
         exchange = (exchange or "").strip().upper()
-        if not symbol or not exchange:
+        if not normalized_symbol or not exchange:
             raise KISClientError("Symbol and exchange are required for price detail")
 
+        attempted_symbols: list[str] = []
+        last_error: KISClientError | None = None
+        for candidate_symbol in self._overseas_symbol_candidates(normalized_symbol):
+            attempted_symbols.append(candidate_symbol)
+            try:
+                result = self._overseas_price_detail_once(
+                    symbol=candidate_symbol,
+                    exchange=exchange,
+                )
+            except KISClientError as exc:
+                last_error = exc
+                if len(attempted_symbols) < 2 and self._can_fallback_overseas_symbol(
+                    exc
+                ):
+                    continue
+                raise
+            self._remember_overseas_symbol_preference(
+                requested_symbol=normalized_symbol,
+                resolved_symbol=candidate_symbol,
+            )
+            return result
+
+        assert last_error is not None
+        if len(attempted_symbols) > 1:
+            raise KISClientError(
+                f"{last_error} (overseas symbol candidates tried: {attempted_symbols})"
+            ) from last_error
+        raise last_error
+
+    def _overseas_price_detail_once(
+        self,
+        *,
+        symbol: str,
+        exchange: str,
+    ) -> dict[str, Any]:
         self.ensure_token()
 
         params = {
@@ -205,6 +298,14 @@ class _KISQuoteMixin(_KISClientState):
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
+                if msg_cd:
+                    raise KISApiError(
+                        f"Overseas price detail HTTP {resp.status_code}: {resp.text}",
+                        msg_cd=msg_cd,
+                        msg1=str(msg1),
+                        http_status=resp.status_code,
+                        context="overseas_price_detail",
+                    )
                 raise KISClientError(
                     f"Overseas price detail HTTP {resp.status_code}: {resp.text}"
                 )
@@ -216,8 +317,8 @@ class _KISQuoteMixin(_KISClientState):
                 raise KISClientError("Overseas price detail response is not JSON")
 
             if str(data.get("rt_cd")) != "0":
-                msg_cd = data.get("msg_cd") or ""
-                msg1 = data.get("msg1") or "Unknown error"
+                msg_cd = str(data.get("msg_cd") or "")
+                msg1 = str(data.get("msg1") or "Unknown error")
                 if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
                     time.sleep(max(1.0, self._min_interval))
                     continue
@@ -228,7 +329,13 @@ class _KISQuoteMixin(_KISClientState):
                     headers["authorization"] = self._access_token or ""
                     time.sleep(max(1.0, self._min_interval))
                     continue
-                raise KISClientError(f"KIS overseas price detail error: {msg1}")
+                raise KISApiError(
+                    f"KIS overseas price detail error: {msg1}",
+                    msg_cd=msg_cd,
+                    msg1=msg1,
+                    rt_cd=str(data.get("rt_cd") or ""),
+                    context="overseas_price_detail",
+                )
 
             output = data.get("output")
             if isinstance(output, list):
@@ -292,8 +399,8 @@ class _KISQuoteMixin(_KISClientState):
             data = parsed
 
             if resp.status_code != 200:
-                msg_cd = parsed.get("msg_cd") or ""
-                msg1 = parsed.get("msg1") or "Unknown error"
+                msg_cd = str(parsed.get("msg_cd") or "")
+                msg1 = str(parsed.get("msg1") or "Unknown error")
                 if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                     # Token expired: refresh and retry
                     self._access_token = None
@@ -402,6 +509,48 @@ class _KISQuoteMixin(_KISClientState):
         end_date: str,
         adjusted: bool,
     ) -> list[dict[str, Any]]:
+        normalized_symbol = self._normalize_overseas_symbol(symbol)
+        attempted_symbols: list[str] = []
+        last_error: KISClientError | None = None
+        for candidate_symbol in self._overseas_symbol_candidates(normalized_symbol):
+            attempted_symbols.append(candidate_symbol)
+            try:
+                rows = self._fetch_overseas_candle_chunk_once(
+                    symbol=candidate_symbol,
+                    exchange=exchange,
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjusted=adjusted,
+                )
+            except KISClientError as exc:
+                last_error = exc
+                if len(attempted_symbols) < 2 and self._can_fallback_overseas_symbol(
+                    exc
+                ):
+                    continue
+                raise
+            self._remember_overseas_symbol_preference(
+                requested_symbol=normalized_symbol,
+                resolved_symbol=candidate_symbol,
+            )
+            return rows
+
+        assert last_error is not None
+        if len(attempted_symbols) > 1:
+            raise KISClientError(
+                f"{last_error} (overseas symbol candidates tried: {attempted_symbols})"
+            ) from last_error
+        raise last_error
+
+    def _fetch_overseas_candle_chunk_once(
+        self,
+        *,
+        symbol: str,
+        exchange: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+    ) -> list[dict[str, Any]]:
         params = {
             # KIS overseas params: EXCD(exchange), SYMB(symbol), GUBN(0:period), BYMD(end ymd), MODP(1:adjusted)
             "EXCD": exchange,
@@ -449,8 +598,8 @@ class _KISQuoteMixin(_KISClientState):
             data = parsed
 
             if resp.status_code != 200:
-                msg_cd = parsed.get("msg_cd") or ""
-                msg1 = parsed.get("msg1") or "Unknown error"
+                msg_cd = str(parsed.get("msg_cd") or "")
+                msg1 = str(parsed.get("msg1") or "Unknown error")
                 if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                     # Token expired: refresh and retry
                     self._access_token = None
@@ -462,13 +611,21 @@ class _KISQuoteMixin(_KISClientState):
                 if attempt < self._max_attempts - 1:
                     time.sleep(1.0)
                     continue
+                if msg_cd:
+                    raise KISApiError(
+                        f"Overseas daily HTTP {resp.status_code}: {resp.text}",
+                        msg_cd=msg_cd,
+                        msg1=msg1,
+                        http_status=resp.status_code,
+                        context="overseas_daily",
+                    )
                 raise KISClientError(
                     f"Overseas daily HTTP {resp.status_code}: {resp.text}"
                 )
 
             if str(parsed.get("rt_cd")) != "0":
-                msg_cd = parsed.get("msg_cd") or ""
-                msg1 = parsed.get("msg1") or "Unknown error"
+                msg_cd = str(parsed.get("msg_cd") or "")
+                msg1 = str(parsed.get("msg1") or "Unknown error")
                 if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
                     time.sleep(max(1.0, self._min_interval))
                     continue
@@ -479,7 +636,13 @@ class _KISQuoteMixin(_KISClientState):
                     headers["authorization"] = self._access_token or ""
                     time.sleep(max(1.0, self._min_interval))
                     continue
-                raise KISClientError(f"KIS overseas error: {msg1}")
+                raise KISApiError(
+                    f"KIS overseas error: {msg1}",
+                    msg_cd=msg_cd,
+                    msg1=msg1,
+                    rt_cd=str(parsed.get("rt_cd") or ""),
+                    context="overseas_daily",
+                )
             break
 
         if data is None:

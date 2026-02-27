@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 from unittest.mock import MagicMock, patch
 
-from sab.data.kis_client import KISClient, KISCredentials
+from sab.data.kis_client import KISApiError, KISClient, KISCredentials
 
 
 class KISClientOverseasHolidaysTests(unittest.TestCase):
@@ -174,6 +174,63 @@ class KISClientOverseasHolidaysTests(unittest.TestCase):
 
         assert request_mock.call_count == 1
         self.assertEqual(items, [])
+
+    def test_overseas_holidays_raises_api_error_with_msg_cd_on_rt_cd_failure(
+        self,
+    ) -> None:
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW90001",
+            "msg1": "holiday query failed",
+        }
+        fake_resp.text = '{"rt_cd":"1"}'
+        self.client._max_attempts = 1
+
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(return_value=fake_resp)
+            ) as request_mock,
+            self.assertRaises(KISApiError) as ctx,
+        ):
+            self.client.overseas_holidays(
+                country_code="US",
+                start_date="20251127",
+                end_date="20251127",
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(ctx.exception.msg_cd, "EGW90001")
+        self.assertIn("msg_cd=EGW90001", str(ctx.exception))
+
+    def test_overseas_holidays_raises_api_error_with_msg_cd_on_http_failure(
+        self,
+    ) -> None:
+        fake_resp = MagicMock()
+        fake_resp.status_code = 500
+        fake_resp.json.return_value = {
+            "msg_cd": "EGW91111",
+            "msg1": "server busy",
+        }
+        fake_resp.text = '{"msg_cd":"EGW91111"}'
+        self.client._max_attempts = 1
+
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(return_value=fake_resp)
+            ) as request_mock,
+            self.assertRaises(KISApiError) as ctx,
+        ):
+            self.client.overseas_holidays(
+                country_code="US",
+                start_date="20251127",
+                end_date="20251127",
+            )
+
+        assert request_mock.call_count == 1
+        self.assertEqual(ctx.exception.msg_cd, "EGW91111")
+        self.assertIn("msg_cd=EGW91111", str(ctx.exception))
 
 
 if __name__ == "__main__":

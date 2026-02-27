@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from sab.screener.kis_overseas_screener import KISOverseasScreener, ScreenRequest
 
 
@@ -211,3 +212,81 @@ def test_kis_overseas_screener_appends_exchange_for_dot_symbol_without_suffix() 
     )
 
     assert result.tickers == ["BRK.B.NYS"]
+
+
+def test_kis_overseas_screener_normalizes_us_and_alias_suffixes() -> None:
+    client = MagicMock()
+    client.overseas_trade_value_rank.return_value = [
+        {"SYMB": "AAPL.US"},
+        {"SYMB": "MSFT.NASDAQ"},
+        {"SYMB": "BRK.B"},
+    ]
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(
+        ScreenRequest(limit=10, metric="value", exchange="NAS", nday=1)
+    )
+
+    assert result.tickers == ["AAPL.NAS", "MSFT.NAS", "BRK.B.NAS"]
+
+
+def test_kis_overseas_screener_canonicalizes_class_symbol_and_metadata_key() -> None:
+    client = MagicMock()
+    client.overseas_trade_value_rank.return_value = [
+        {"SYMB": "BRK/B"},
+    ]
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(
+        ScreenRequest(limit=10, metric="value", exchange="NYS", nday=1)
+    )
+
+    assert result.tickers == ["BRK.B.NYS"]
+    by_ticker = result.metadata.get("by_ticker", {})
+    assert isinstance(by_ticker, dict)
+    assert "BRK.B.NYS" in by_ticker
+    assert "BRK/B.NYS" not in by_ticker
+
+
+def test_kis_overseas_screener_fails_on_unsupported_suffix_rows() -> None:
+    client = MagicMock()
+    client.overseas_trade_value_rank.return_value = [
+        {"SYMB": "AAPL.XNAS"},
+        {"SYMB": "TSLA.NYS"},
+    ]
+    screener = KISOverseasScreener(client)
+
+    with pytest.raises(ValueError, match="unsupported suffix"):
+        screener.screen(ScreenRequest(limit=10, metric="value", exchange="NAS", nday=1))
+
+
+def test_kis_overseas_screener_fails_on_exchange_marker_like_symbols() -> None:
+    client = MagicMock()
+    client.overseas_trade_value_rank.return_value = [
+        {"SYMB": "AAPL.O"},
+        {"SYMB": "MSFT.NAS"},
+    ]
+    screener = KISOverseasScreener(client)
+
+    with pytest.raises(ValueError, match="unsupported suffix"):
+        screener.screen(ScreenRequest(limit=10, metric="value", exchange="NAS", nday=1))
+
+
+def test_kis_overseas_screener_fails_on_malformed_class_symbol_rows() -> None:
+    client = MagicMock()
+    client.overseas_trade_value_rank.return_value = [
+        {"SYMB": "A..B"},
+        {"SYMB": "BRK.B"},
+    ]
+    screener = KISOverseasScreener(client)
+
+    with pytest.raises(ValueError, match="unsupported suffix"):
+        screener.screen(ScreenRequest(limit=10, metric="value", exchange="NAS", nday=1))
+
+
+def test_kis_overseas_screener_rejects_ambiguous_exchange_request() -> None:
+    client = MagicMock()
+    screener = KISOverseasScreener(client)
+
+    with pytest.raises(ValueError, match="unsupported overseas exchange"):
+        screener.screen(ScreenRequest(limit=1, metric="value", exchange="US", nday=1))

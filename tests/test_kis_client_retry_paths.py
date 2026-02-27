@@ -441,6 +441,143 @@ def test_overseas_price_detail_retries_on_rate_limit_body_error() -> None:
     assert mock_sleep.call_args_list == [call(1.0)]
 
 
+def test_volume_rank_refreshes_token_on_egw00123() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=2,
+        min_interval=0,
+    )
+    token_values = ["Bearer initial-token", "Bearer refreshed-token"]
+    token_call_count = {"value": 0}
+
+    def _fake_ensure_token() -> None:
+        idx = token_call_count["value"]
+        client._access_token = token_values[min(idx, len(token_values) - 1)]
+        client._token_expiry = _future_expiry()
+        token_call_count["value"] += 1
+
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
+    token_error = _response(
+        status_code=200,
+        payload={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "expired"},
+    )
+    success = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output": [
+                {
+                    "shrn_iscd": "005930",
+                    "hts_kor_isnm": "SAMSUNG",
+                    "stck_prpr": "70000",
+                    "stck_cnt": "1000",
+                    "acml_tr_pbmn": "70000000",
+                }
+            ],
+        },
+    )
+    responses = iter([token_error, success])
+    seen_authorizations: list[str] = []
+
+    def _request_side_effect(*_args: Any, **kwargs: Any) -> MagicMock:
+        headers = kwargs.get("headers") or {}
+        seen_authorizations.append(str(headers.get("authorization") or ""))
+        return next(responses)
+
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
+
+    with patch("sab.data.kis.ranking.time.sleep") as mock_sleep:
+        rows = client.volume_rank(limit=1)
+
+    assert rows
+    assert ensure_token_mock.call_count == 2
+    assert seen_authorizations == ["Bearer initial-token", "Bearer refreshed-token"]
+    assert mock_sleep.call_args_list == [call(1.0)]
+
+
+def test_volume_rank_keeps_refreshed_token_on_following_pages() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=2,
+        min_interval=0,
+    )
+    token_values = ["Bearer initial-token", "Bearer refreshed-token"]
+    token_call_count = {"value": 0}
+
+    def _fake_ensure_token() -> None:
+        idx = token_call_count["value"]
+        client._access_token = token_values[min(idx, len(token_values) - 1)]
+        client._token_expiry = _future_expiry()
+        token_call_count["value"] += 1
+
+    ensure_token_mock = _set_mock_method(
+        client, "ensure_token", side_effect=_fake_ensure_token
+    )
+    token_error = _response(
+        status_code=200,
+        payload={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "expired"},
+    )
+    page_1 = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output": [
+                {
+                    "shrn_iscd": "005930",
+                    "hts_kor_isnm": "SAMSUNG",
+                    "stck_prpr": "70000",
+                    "stck_cnt": "1000",
+                    "acml_tr_pbmn": "70000000",
+                }
+            ],
+        },
+    )
+    page_1.headers = {"tr_cont": "M"}
+    page_2 = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output": [
+                {
+                    "shrn_iscd": "000660",
+                    "hts_kor_isnm": "SK HYNIX",
+                    "stck_prpr": "100000",
+                    "stck_cnt": "500",
+                    "acml_tr_pbmn": "50000000",
+                }
+            ],
+        },
+    )
+    page_2.headers = {}
+    responses = iter([token_error, page_1, page_2])
+    seen_authorizations: list[str] = []
+
+    def _request_side_effect(*_args: Any, **kwargs: Any) -> MagicMock:
+        headers = kwargs.get("headers") or {}
+        seen_authorizations.append(str(headers.get("authorization") or ""))
+        return next(responses)
+
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
+
+    with patch("sab.data.kis.ranking.time.sleep") as mock_sleep:
+        rows = client.volume_rank(limit=2)
+
+    assert [row["ticker"] for row in rows] == ["005930", "000660"]
+    assert ensure_token_mock.call_count == 2
+    assert seen_authorizations == [
+        "Bearer initial-token",
+        "Bearer refreshed-token",
+        "Bearer refreshed-token",
+    ]
+    assert mock_sleep.call_args_list == [call(1.0)]
+
+
 def test_overseas_price_detail_retries_when_response_json_is_malformed() -> None:
     client = KISClient(
         _build_creds(),
@@ -512,3 +649,175 @@ def test_overseas_price_detail_raises_after_all_retries_fail() -> None:
     assert ensure_token_mock.call_count == 1
     assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
+
+
+def test_overseas_price_detail_falls_back_to_slash_class_symbol_and_memoizes() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    first_attempt_invalid = _response(
+        status_code=200,
+        payload={"rt_cd": "1", "msg_cd": "SYMB0001", "msg1": "invalid symbol"},
+    )
+    first_success = _response(
+        status_code=200,
+        payload={"rt_cd": "0", "output": {"last": "333.33"}},
+    )
+    second_success = _response(
+        status_code=200,
+        payload={"rt_cd": "0", "output": {"last": "444.44"}},
+    )
+    responses = iter([first_attempt_invalid, first_success, second_success])
+    requested_symbols: list[str] = []
+
+    def _request_side_effect(*_args: Any, **kwargs: Any) -> MagicMock:
+        params = kwargs.get("params") or {}
+        requested_symbols.append(str(params.get("SYMB") or ""))
+        return next(responses)
+
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
+
+    first = client.overseas_price_detail(symbol="BRK.B", exchange="NYS")
+    second = client.overseas_price_detail(symbol="BRK.B", exchange="NYS")
+
+    assert first == {"last": "333.33"}
+    assert second == {"last": "444.44"}
+    assert requested_symbols == ["BRK.B", "BRK/B", "BRK/B"]
+
+
+def test_fetch_overseas_candle_chunk_falls_back_to_slash_class_symbol() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+    client._access_token = "Bearer stable-token"
+    client._token_expiry = _future_expiry()
+
+    first_attempt_invalid = _response(
+        status_code=200,
+        payload={"rt_cd": "1", "msg_cd": "SYMB0001", "msg1": "invalid symbol"},
+    )
+    first_success = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output2": [
+                {
+                    "xymd": "20240102",
+                    "open": "10",
+                    "high": "12",
+                    "low": "9",
+                    "close": "11",
+                    "tvol": "1000",
+                }
+            ],
+        },
+    )
+    second_success = _response(
+        status_code=200,
+        payload={"rt_cd": "0", "output2": []},
+    )
+    responses = iter([first_attempt_invalid, first_success, second_success])
+    requested_symbols: list[str] = []
+
+    def _request_side_effect(*_args: Any, **kwargs: Any) -> MagicMock:
+        params = kwargs.get("params") or {}
+        requested_symbols.append(str(params.get("SYMB") or ""))
+        return next(responses)
+
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
+
+    rows = client._fetch_overseas_candle_chunk(
+        symbol="BRK.B",
+        exchange="NYS",
+        start_date="20240101",
+        end_date="20240131",
+        adjusted=True,
+    )
+    assert rows
+
+    second_rows = client._fetch_overseas_candle_chunk(
+        symbol="BRK.B",
+        exchange="NYS",
+        start_date="20240201",
+        end_date="20240228",
+        adjusted=True,
+    )
+
+    assert second_rows == []
+    assert requested_symbols == ["BRK.B", "BRK/B", "BRK/B"]
+
+
+def test_overseas_price_detail_does_not_fallback_on_rate_limit_error() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    request_mock = _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "rate limit"},
+        ),
+    )
+
+    with pytest.raises(
+        KISClientError, match="KIS overseas price detail error: rate limit"
+    ):
+        client.overseas_price_detail(symbol="BRK.B", exchange="NYS")
+
+    assert request_mock.call_count == 1
+
+
+def test_fetch_overseas_candle_chunk_does_not_fallback_on_non_symbol_error() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+    client._access_token = "Bearer stable-token"
+    client._token_expiry = _future_expiry()
+    request_mock = _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "1", "msg_cd": "EGW99999", "msg1": "internal"},
+        ),
+    )
+
+    with pytest.raises(KISClientError, match="KIS overseas error: internal"):
+        client._fetch_overseas_candle_chunk(
+            symbol="BRK.B",
+            exchange="NYS",
+            start_date="20240101",
+            end_date="20240131",
+            adjusted=True,
+        )
+
+    assert request_mock.call_count == 1

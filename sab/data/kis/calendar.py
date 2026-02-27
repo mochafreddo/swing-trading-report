@@ -7,7 +7,7 @@ from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
-from .common import KISClientError, _KISClientState, logger
+from .common import KISApiError, KISClientError, _KISClientState, logger
 
 _COUNTRY_CODE_ALIASES: dict[str, set[str]] = {
     "US": {"USA", "840"},
@@ -141,7 +141,8 @@ class _KISCalendarMixin(_KISClientState):
                 payload = parsed
 
                 if resp.status_code != 200:
-                    msg_cd = payload.get("msg_cd") or ""
+                    msg_cd = str(payload.get("msg_cd") or "")
+                    msg1 = str(payload.get("msg1") or msg_cd or "Unknown error")
                     if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                         # Token expired: refresh and retry
                         self._access_token = None
@@ -153,13 +154,21 @@ class _KISCalendarMixin(_KISClientState):
                     if attempt < self._max_attempts - 1:
                         time.sleep(1.0)
                         continue
+                    if msg_cd:
+                        raise KISApiError(
+                            f"Overseas holiday HTTP {resp.status_code}: {resp.text}",
+                            msg_cd=msg_cd,
+                            msg1=msg1,
+                            http_status=resp.status_code,
+                            context="overseas_holiday",
+                        )
                     raise KISClientError(
                         f"Overseas holiday HTTP {resp.status_code}: {resp.text}"
                     )
 
                 if str(payload.get("rt_cd")) != "0":
-                    msg_cd = payload.get("msg_cd") or ""
-                    msg1 = payload.get("msg1") or msg_cd or "Unknown error"
+                    msg_cd = str(payload.get("msg_cd") or "")
+                    msg1 = str(payload.get("msg1") or msg_cd or "Unknown error")
                     if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                         self._access_token = None
                         self._token_expiry = None
@@ -167,7 +176,13 @@ class _KISCalendarMixin(_KISClientState):
                         headers["authorization"] = self._access_token or ""
                         time.sleep(max(1.0, self._min_interval))
                         continue
-                    raise KISClientError(f"KIS overseas holiday error: {msg1}")
+                    raise KISApiError(
+                        f"KIS overseas holiday error: {msg1}",
+                        msg_cd=msg_cd,
+                        msg1=msg1,
+                        rt_cd=str(payload.get("rt_cd") or ""),
+                        context="overseas_holiday",
+                    )
                 break
 
             if payload is not None:

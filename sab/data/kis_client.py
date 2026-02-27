@@ -7,6 +7,7 @@ from typing import Any
 import requests  # type: ignore[import-untyped]
 
 from .kis import (
+    KISApiError,
     KISAuthError,
     KISClientError,
     KISCredentials,
@@ -108,11 +109,13 @@ class KISClient(
             else (0.5 if creds.env == "demo" else 0.1)
         )
         self._last_request_at: dt.datetime | None = None
+        self._overseas_symbol_preference: dict[str, str] = {}
 
         self._try_load_cached_token()
 
 
 __all__ = [
+    "KISApiError",
     "KISAuthError",
     "KISClient",
     "KISClientError",
