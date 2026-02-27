@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.3...v1.4.0) (2026-02-27)
+
+
+### Features
+
+* **core:** 티커/홀딩스 입력 검증을 fail-closed로 강화 ([ce9cb48](https://github.com/mochafreddo/swing-trading-report/commit/ce9cb48340a759cffdd38236f598d59cec684b6c))
+
+
+### Bug Fixes
+
+* **calendar:** PMC break 경고 억제를 안전하게 적용 ([a10a6ac](https://github.com/mochafreddo/swing-trading-report/commit/a10a6ac2339d134a413b346b7c9b7e4ebcea025a))
+* **kis:** 해외 시세/랭킹/스크리너 안정성 개선 ([40fb095](https://github.com/mochafreddo/swing-trading-report/commit/40fb095b575a05173fadaf7519319e284e1861c6))
+* **scan:** watchlist/screener 경계를 fail-closed로 강화 ([3e08841](https://github.com/mochafreddo/swing-trading-report/commit/3e088415b0b2c728e573c918eef0cc9a3af22ca3))
+* **signals:** eval_index 시장 추론에서 거래소를 우선 ([93a8150](https://github.com/mochafreddo/swing-trading-report/commit/93a8150306a66e36e879f3912005bc0b5f3557ec))
+* **signals:** 갭 필터 ATR을 신호 전 값으로 계산 ([2ea1e68](https://github.com/mochafreddo/swing-trading-report/commit/2ea1e68736869977bd2a37adeda5528ed0588553))
+* **web:** holdings 티커를 strict exchange suffix로 정규화 ([0ea3c9d](https://github.com/mochafreddo/swing-trading-report/commit/0ea3c9d2d98e2ff0fc0d8ecf7ad4a7a1c3076718))
+
 ## [1.3.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.2...v1.3.3) (2026-02-26)
 
 
