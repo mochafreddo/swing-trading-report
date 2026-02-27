@@ -243,7 +243,7 @@ describe("POST /api/holdings route", () => {
 
   it("creates holding with slash ticker symbol", async () => {
     vi.mocked(createHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 1,
       entry_price: 450,
       entry_currency: null,
@@ -267,10 +267,10 @@ describe("POST /api/holdings route", () => {
     const payload = (await response.json()) as { ticker: string };
 
     expect(response.status).toBe(201);
-    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(payload.ticker).toBe("BRK.B.NYS");
     expect(vi.mocked(createHolding)).toHaveBeenCalledWith(
       expect.objectContaining({
-        ticker: "BRK/B.NYS",
+        ticker: "BRK.B.NYS",
         quantity: 1,
         entry_price: 450,
         tags: [],
@@ -278,9 +278,9 @@ describe("POST /api/holdings route", () => {
     );
   });
 
-  it("normalizes class ticker dot notation to slash on create", async () => {
+  it("keeps class ticker dot notation as canonical on create", async () => {
     vi.mocked(createHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 1,
       entry_price: 450,
       entry_currency: null,
@@ -304,10 +304,10 @@ describe("POST /api/holdings route", () => {
     const payload = (await response.json()) as { ticker: string };
 
     expect(response.status).toBe(201);
-    expect(payload.ticker).toBe("BRK/B.NYS");
+    expect(payload.ticker).toBe("BRK.B.NYS");
     expect(vi.mocked(createHolding)).toHaveBeenCalledWith(
       expect.objectContaining({
-        ticker: "BRK/B.NYS",
+        ticker: "BRK.B.NYS",
         quantity: 1,
         entry_price: 450,
         tags: [],

@@ -1,21 +1,39 @@
 export const KR_TICKER_PATTERN = /^\d{6}$/;
 export const US_TICKER_PATTERN =
-  /^[A-Z0-9]+(?:[._/-][A-Z0-9]+)*\.(US|NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
+  /^[A-Z][A-Z0-9]*(?:[/.][ABC])?\.(NASDAQ|NASD|NAS|NYSE|NYS|AMEX|AMS)$/;
 
-const US_TICKER_SUFFIXES = new Set([
-  "US",
-  "NASDAQ",
-  "NASD",
-  "NAS",
-  "NYSE",
-  "NYS",
-  "AMEX",
-  "AMS",
+const US_BASE_SYMBOL_PATTERN = /^[A-Z][A-Z0-9]*$/;
+const US_CLASS_DOT_SYMBOL_PATTERN = /^([A-Z][A-Z0-9]*)\.([ABC])$/;
+const US_CLASS_SLASH_SYMBOL_PATTERN = /^([A-Z][A-Z0-9]*)\/([ABC])$/;
+
+const US_TICKER_SUFFIX_TO_EXCHANGE = new Map([
+  ["NASDAQ", "NAS"],
+  ["NASD", "NAS"],
+  ["NAS", "NAS"],
+  ["NYSE", "NYS"],
+  ["NYS", "NYS"],
+  ["AMEX", "AMS"],
+  ["AMS", "AMS"],
 ]);
 
 interface UsTickerParts {
   base: string;
   suffix: string;
+}
+
+function canonicalizeUsSymbol(base: string): string | null {
+  if (US_BASE_SYMBOL_PATTERN.test(base)) {
+    return base;
+  }
+  const dotMatch = base.match(US_CLASS_DOT_SYMBOL_PATTERN);
+  if (dotMatch) {
+    return `${dotMatch[1]}.${dotMatch[2]}`;
+  }
+  const slashMatch = base.match(US_CLASS_SLASH_SYMBOL_PATTERN);
+  if (slashMatch) {
+    return `${slashMatch[1]}.${slashMatch[2]}`;
+  }
+  return null;
 }
 
 function parseUsTickerParts(ticker: string): UsTickerParts | null {
@@ -24,9 +42,11 @@ function parseUsTickerParts(ticker: string): UsTickerParts | null {
   if (lastDotIndex <= 0) {
     return null;
   }
-  const base = normalized.slice(0, lastDotIndex);
-  const suffix = normalized.slice(lastDotIndex + 1);
-  if (!base || !US_TICKER_SUFFIXES.has(suffix)) {
+  const baseRaw = normalized.slice(0, lastDotIndex);
+  const base = canonicalizeUsSymbol(baseRaw);
+  const suffixRaw = normalized.slice(lastDotIndex + 1);
+  const suffix = US_TICKER_SUFFIX_TO_EXCHANGE.get(suffixRaw);
+  if (!base || !suffix) {
     return null;
   }
   return { base, suffix };
@@ -43,16 +63,7 @@ export function normalizeHoldingTickerForMutation(ticker: string): string {
     return normalized;
   }
 
-  const baseSegments = parts.base.split(".");
-  if (
-    parts.base.includes("/") ||
-    baseSegments.length !== 2 ||
-    baseSegments.some((segment) => !segment)
-  ) {
-    return normalized;
-  }
-
-  return `${baseSegments[0]}/${baseSegments[1]}.${parts.suffix}`;
+  return `${parts.base}.${parts.suffix}`;
 }
 
 export function buildHoldingTickerAliases(ticker: string): string[] {
@@ -64,12 +75,10 @@ export function buildHoldingTickerAliases(ticker: string): string[] {
     return aliases;
   }
 
-  const baseSegments = parts.base.split("/");
-  if (baseSegments.length === 2 && baseSegments.every(Boolean)) {
-    const dotted = `${baseSegments[0]}.${baseSegments[1]}.${parts.suffix}`;
-    if (dotted !== canonical) {
-      aliases.push(dotted);
-    }
+  const classMatch = parts.base.match(US_CLASS_DOT_SYMBOL_PATTERN);
+  if (classMatch) {
+    const slash = `${classMatch[1]}/${classMatch[2]}.${parts.suffix}`;
+    aliases.push(slash);
   }
 
   return aliases;

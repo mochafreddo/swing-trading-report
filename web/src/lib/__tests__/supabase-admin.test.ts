@@ -260,7 +260,7 @@ describe("holding mutations alias handling", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("updateHolding falls back to dotted alias when canonical ticker row is absent", async () => {
+  it("updateHolding falls back to slash alias when canonical dot ticker row is absent", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -286,11 +286,11 @@ describe("holding mutations alias handling", () => {
 
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
-    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
-    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
   });
 
-  it("deleteHolding falls back to dotted alias when canonical ticker row is absent", async () => {
+  it("deleteHolding falls back to slash alias when canonical dot ticker row is absent", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -313,8 +313,8 @@ describe("holding mutations alias handling", () => {
 
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
-    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
-    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
+    expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
   });
 
   it("deleteHolding keeps deleting aliases after first success", async () => {

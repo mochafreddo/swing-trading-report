@@ -52,7 +52,7 @@ export function HoldingsFormPanel({
             onChange={(event) =>
               onFieldChange("ticker", event.target.value.toUpperCase())
             }
-            placeholder="AAPL.US"
+            placeholder="AAPL.NAS"
             required
           />
         </label>

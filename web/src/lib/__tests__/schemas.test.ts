@@ -106,13 +106,13 @@ describe("holding schemas", () => {
 
   it("normalizes create payload", () => {
     const parsed = holdingCreateSchema.parse({
-      ticker: "aapl.us",
+      ticker: "aapl.nasdaq",
       quantity: "3",
       entry_price: "172.5",
       tags: "core, swing",
     });
 
-    expect(parsed.ticker).toBe("AAPL.US");
+    expect(parsed.ticker).toBe("AAPL.NAS");
     expect(parsed.quantity).toBe(3);
     expect(parsed.tags).toEqual(["core", "swing"]);
   });
@@ -134,17 +134,17 @@ describe("holding schemas", () => {
       entry_price: 450,
     });
 
-    expect(parsed.ticker).toBe("BRK/B.NYS");
+    expect(parsed.ticker).toBe("BRK.B.NYS");
   });
 
-  it("normalizes US class ticker dot notation to slash", () => {
+  it("keeps US class ticker dot notation as canonical", () => {
     const parsed = holdingCreateSchema.parse({
       ticker: "brk.b.nys",
       quantity: 1,
       entry_price: 450,
     });
 
-    expect(parsed.ticker).toBe("BRK/B.NYS");
+    expect(parsed.ticker).toBe("BRK.B.NYS");
   });
 
   it("rejects unsupported ticker format", () => {
@@ -159,7 +159,37 @@ describe("holding schemas", () => {
 
   it("rejects ticker with empty base segment", () => {
     const parsed = holdingCreateSchema.safeParse({
-      ticker: "A..US",
+      ticker: "A..NAS",
+      quantity: 1,
+      entry_price: 172.5,
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects ambiguous .US suffix", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.US",
+      quantity: 1,
+      entry_price: 172.5,
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects exchange-marker-like US symbol", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.O.NAS",
+      quantity: 1,
+      entry_price: 172.5,
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects numeric-only US symbol", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "005930.NAS",
       quantity: 1,
       entry_price: 172.5,
     });
@@ -174,17 +204,17 @@ describe("holding schemas", () => {
 
   it("accepts ticker-only patch payload and normalizes ticker", () => {
     const parsed = holdingPatchSchema.parse({
-      ticker: "msft.us",
+      ticker: "msft.nasd",
     });
 
-    expect(parsed).toEqual({ ticker: "MSFT.US" });
+    expect(parsed).toEqual({ ticker: "MSFT.NAS" });
   });
 
-  it("normalizes class ticker dot notation in patch payload", () => {
+  it("normalizes class ticker slash notation in patch payload", () => {
     const parsed = holdingPatchSchema.parse({
-      ticker: "brk.b.nys",
+      ticker: "brk/b.nys",
     });
 
-    expect(parsed).toEqual({ ticker: "BRK/B.NYS" });
+    expect(parsed).toEqual({ ticker: "BRK.B.NYS" });
   });
 });

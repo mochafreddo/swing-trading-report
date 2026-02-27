@@ -80,7 +80,7 @@ export const holdingTickerSchema = z
       KR_TICKER_PATTERN.test(ticker) || US_TICKER_PATTERN.test(ticker),
     {
       message:
-        "Ticker must be KR 6-digit code or US symbol with suffix (e.g. AAPL.US, BRK/B.NYS)",
+        "Ticker must be KR 6-digit code or US symbol with exchange suffix (e.g. AAPL.NAS, BRK.B.NYS)",
     },
   );
 const holdingMutationTickerSchema = holdingTickerSchema.transform((ticker) =>

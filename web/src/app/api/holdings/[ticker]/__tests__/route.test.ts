@@ -263,7 +263,7 @@ describe("PATCH /api/holdings/[ticker] route", () => {
 
     const response = await PATCH(
       makePatchRequest({ quantity: 3 }),
-      makeContext("aapl.us"),
+      makeContext("aapl.nas"),
     );
     const payload = (await response.json()) as {
       ticker: string;
@@ -275,14 +275,14 @@ describe("PATCH /api/holdings/[ticker] route", () => {
       ticker: "005930",
       quantity: 3,
     });
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("AAPL.US", {
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("AAPL.NAS", {
       quantity: 3,
     });
   });
 
   it("accepts ticker rename payload and normalizes ticker", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "MSFT.US",
+      ticker: "MSFT.NAS",
       quantity: 3,
       entry_price: 0,
       entry_currency: null,
@@ -297,7 +297,7 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     });
 
     const response = await PATCH(
-      makePatchRequest({ ticker: "msft.us", quantity: 3 }),
+      makePatchRequest({ ticker: "msft.nas", quantity: 3 }),
       makeContext("005930"),
     );
     const payload = (await response.json()) as {
@@ -307,18 +307,18 @@ describe("PATCH /api/holdings/[ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      ticker: "MSFT.US",
+      ticker: "MSFT.NAS",
       quantity: 3,
     });
     expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("005930", {
-      ticker: "MSFT.US",
+      ticker: "MSFT.NAS",
       quantity: 3,
     });
   });
 
-  it("normalizes class ticker dot notation to slash on rename payload", async () => {
+  it("keeps class ticker dot notation as canonical on rename payload", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
       entry_price: 0,
       entry_currency: null,
@@ -343,18 +343,18 @@ describe("PATCH /api/holdings/[ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
     });
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK/B.NYS", {
-      ticker: "BRK/B.NYS",
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
+      ticker: "BRK.B.NYS",
       quantity: 3,
     });
   });
 
   it("accepts slash ticker symbol for patch", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
       entry_price: 450,
       entry_currency: null,
@@ -379,17 +379,17 @@ describe("PATCH /api/holdings/[ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
     });
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK/B.NYS", {
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
       quantity: 3,
     });
   });
 
   it("accepts percent-encoded slash ticker symbol for patch", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
       entry_price: 450,
       entry_currency: null,
@@ -414,10 +414,10 @@ describe("PATCH /api/holdings/[ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
     });
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK/B.NYS", {
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
       quantity: 3,
     });
   });
@@ -480,15 +480,15 @@ describe("DELETE /api/holdings/[ticker] route", () => {
   it("returns deleted response with normalized ticker", async () => {
     vi.mocked(deleteHolding).mockResolvedValueOnce(true);
 
-    const response = await DELETE(makeDeleteRequest(), makeContext("aapl.us"));
+    const response = await DELETE(makeDeleteRequest(), makeContext("aapl.nas"));
     const payload = (await response.json()) as {
       deleted: boolean;
       ticker: string;
     };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ deleted: true, ticker: "AAPL.US" });
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("AAPL.US");
+    expect(payload).toEqual({ deleted: true, ticker: "AAPL.NAS" });
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("AAPL.NAS");
   });
 
   it("accepts slash ticker symbol for delete", async () => {
@@ -504,11 +504,11 @@ describe("DELETE /api/holdings/[ticker] route", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK/B.NYS");
+    expect(payload).toEqual({ deleted: true, ticker: "BRK.B.NYS" });
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
   });
 
-  it("normalizes class ticker dot notation to slash for delete", async () => {
+  it("keeps class ticker dot notation as canonical for delete", async () => {
     vi.mocked(deleteHolding).mockResolvedValueOnce(true);
 
     const response = await DELETE(
@@ -521,8 +521,8 @@ describe("DELETE /api/holdings/[ticker] route", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK/B.NYS");
+    expect(payload).toEqual({ deleted: true, ticker: "BRK.B.NYS" });
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
   });
 
   it("accepts percent-encoded slash ticker symbol for delete", async () => {
@@ -538,7 +538,7 @@ describe("DELETE /api/holdings/[ticker] route", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK/B.NYS");
+    expect(payload).toEqual({ deleted: true, ticker: "BRK.B.NYS" });
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
   });
 });

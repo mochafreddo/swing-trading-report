@@ -98,7 +98,7 @@ beforeEach(() => {
 describe("/api/holdings/[...ticker] route", () => {
   it("reconstructs segmented ticker path for patch", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
       entry_price: 450,
       entry_currency: null,
@@ -118,15 +118,15 @@ describe("/api/holdings/[...ticker] route", () => {
     const payload = (await response.json()) as { ticker: string };
 
     expect(response.status).toBe(200);
-    expect(payload.ticker).toBe("BRK/B.NYS");
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK/B.NYS", {
+    expect(payload.ticker).toBe("BRK.B.NYS");
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
       quantity: 3,
     });
   });
 
   it("decodes percent-encoded slash ticker for patch", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce({
-      ticker: "BRK/B.NYS",
+      ticker: "BRK.B.NYS",
       quantity: 3,
       entry_price: 450,
       entry_currency: null,
@@ -145,7 +145,7 @@ describe("/api/holdings/[...ticker] route", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK/B.NYS", {
+    expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
       quantity: 3,
     });
   });
@@ -162,8 +162,8 @@ describe("/api/holdings/[...ticker] route", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ deleted: true, ticker: "BRK/B.NYS" });
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK/B.NYS");
+    expect(payload).toEqual({ deleted: true, ticker: "BRK.B.NYS" });
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
   });
 
   it("decodes percent-encoded slash ticker for delete", async () => {
@@ -174,6 +174,6 @@ describe("/api/holdings/[...ticker] route", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK/B.NYS");
+    expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
   });
 });
