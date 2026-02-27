@@ -11,6 +11,9 @@ from sab.scan import run_scan
 class RunScanUSHolidayCallTests(unittest.TestCase):
     def test_run_scan_calls_overseas_holidays_when_us_universe(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            watchlist_path = os.path.join(tmpdir, "watchlist.txt")
+            with open(watchlist_path, "w", encoding="utf-8") as watchlist_file:
+                watchlist_file.write("AAPL.US\n")
             base_cfg = Config()
             cfg = replace(
                 base_cfg,
@@ -20,6 +23,7 @@ class RunScanUSHolidayCallTests(unittest.TestCase):
                 universe_markets=["US"],
                 data_dir=tmpdir,
                 report_dir=tmpdir,
+                watchlist_path=watchlist_path,
                 screener_enabled=False,
                 screener_only=False,
             )

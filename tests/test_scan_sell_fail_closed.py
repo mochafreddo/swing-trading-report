@@ -413,6 +413,8 @@ def test_run_sell_maps_exchange_per_ticker_without_suffix_scope_leak(
 def test_run_scan_logs_kis_token_cache_status_once(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("005930\n", encoding="utf-8")
     cfg = replace(
         Config(),
         data_provider="kis",
@@ -421,6 +423,7 @@ def test_run_scan_logs_kis_token_cache_status_once(
         kis_base_url="https://example.com",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
     )

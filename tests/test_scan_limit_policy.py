@@ -47,11 +47,14 @@ class _FakeMarketDataService:
 
 
 def test_run_scan_applies_limit_after_screener_merge(tmp_path: Path) -> None:
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("005930\n", encoding="utf-8")
     cfg = replace(
         Config(),
         screen_limit=2,
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=True,
         screener_only=False,
     )
@@ -91,11 +94,14 @@ def test_run_scan_applies_limit_after_screener_merge(tmp_path: Path) -> None:
 
 
 def test_run_scan_deduplicates_watchlist_after_market_filter(tmp_path: Path) -> None:
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("005930\n", encoding="utf-8")
     cfg = replace(
         Config(),
         screen_limit=10,
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
         universe_markets=["KR"],
