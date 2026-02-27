@@ -38,7 +38,7 @@
 - 기본 규칙:
   - `currency == "USD"` → US market
   - 그 외 → KR market
-- scan에서는 ticker suffix로 통화를 추론합니다(예: `.US`, `.NASDAQ`, `.NYSE` 등).
+- scan에서는 ticker suffix로 통화를 추론합니다(예: `.NAS/.NYS/.AMS`, `.NASDAQ/.NYSE/.AMEX` 등).
 
 ### 3.3 Volume(거래량) 처리 정책
 
@@ -92,6 +92,26 @@
 - 운영 가이드:
   - `max=0`은 “최신 데이터 아니면 캐시 미사용(=fail-closed 성향)”입니다.
   - `max>0`은 “일시적 API 장애 시 약간 stale한 데이터로도 리포트를 생성(=fail-soft 성향)”입니다.
+
+### 3.7 티커 정규화/검증 계약(fail-closed)
+
+- KR 티커:
+  - 6자리 숫자 코드만 허용합니다(예: `005930`).
+- US 티커:
+  - 거래소 suffix가 명시된 형식만 허용합니다(예: `.NAS/.NYS/.AMS`와 동의어).
+  - `.US` suffix는 모호성 방지를 위해 허용하지 않습니다.
+- US 클래스 티커:
+  - 내부 캐노니컬 표기는 `BASE.CLASS.EXCH`입니다(예: `BRK.B.NYS`).
+  - `BRK/B.NYS` 입력은 허용하되 내부 저장/평가/메타데이터 키에서는 `BRK.B.NYS`로 정규화합니다.
+  - KIS 호출 경계에서는 `invalid symbol(msg_cd=SYMB0001)`일 때에만 `BASE.CLASS`와 `BASE/CLASS` 대체 표기를 1회 시도하고, 성공한 provider 표기를 런타임 동안 재사용합니다.
+  - 레이트리밋/토큰/서버 오류에서는 class 표기 대체를 시도하지 않고 즉시 실패합니다(호출 폭증 방지).
+- US 스크리너(`screener.us_mode=kis`):
+  - 기본값 리스트(`screener.us_defaults`) 자동 폴백을 사용하지 않습니다.
+  - `--universe screener`에서 검증 실패/빈 결과가 발생하면 즉시 실패합니다.
+  - `--universe both`에서는 watchlist는 유지하고 US 스크리너만 건너뜁니다.
+- watchlist 경계:
+  - `--universe watchlist|both`에서 watchlist 파일이 누락되면 즉시 실패합니다.
+  - `--universe screener`에서는 watchlist를 로드/검증하지 않습니다.
 
 ## 4. 평가 기준 시점(완성 캔들) 계약
 
@@ -158,8 +178,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - EMA20/EMA50이 전일 대비 상승.
 - 갭 필터:
   - 평가 캔들의 `open`과 전일 `close`로 갭을 계산하고(= **신호일 당일 갭**),
-  - `gap_atr_multiplier > 0`이면 `|gap| ≤ (gap_atr_multiplier × ATR / 전일종가)`를 만족해야 합니다(기본 multiplier 1.0).
-  - `gap_atr_multiplier > 0`인데 ATR/전일종가 입력이 유효하지 않으면 **system 이슈(fail-closed)** 로 처리합니다.
+  - `gap_atr_multiplier > 0`이면 `|gap| ≤ (gap_atr_multiplier × ATR(t-1) / 전일종가)`를 만족해야 합니다(기본 multiplier 1.0).
+  - 여기서 `ATR(t-1)`은 신호봉을 제외한 직전 완성봉 기준 ATR입니다(신호봉 갭으로 ATR 임계가 자기완화되는 문제 방지).
+  - `gap_atr_multiplier > 0`인데 `ATR(t-1)`/전일종가 입력이 유효하지 않으면 **system 이슈(fail-closed)** 로 처리합니다.
   - `gap_atr_multiplier = 0`이면 갭 필터를 비활성화합니다.
   - 다음 거래일 시초 갭을 직접 제어하는 규칙은 아닙니다(4.2 참고).
 - 유동성(거래대금) 필터:
@@ -214,6 +235,7 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 #### 5.3.4 gap guard(ATR 기반) 계약
 
 - hybrid buy candidate는 ATR 기반 `gap_guard_pct`와 상/하단 가격을 함께 산출합니다.
+- gap guard는 **신호봉 종가 시점의 ATR(t)** 를 사용해 다음 세션 entry 판단에 필요한 최신 변동성 가이드를 제공합니다.
 - 이는 “다음 거래일 시초 갭” 해석을 위한 **가드 값**이며, `sab entry` 단계에서 `ENTER|REVIEW|SKIP` 판정에 사용됩니다.
 
 ## 6. Sell 로직 설계

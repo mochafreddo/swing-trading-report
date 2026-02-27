@@ -57,6 +57,14 @@
   - 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
   - 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
   - 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
+  - 워치리스트 티커 정책(fail-closed):
+    - KR은 6자리 숫자 코드만 허용(예: `005930`)
+    - US는 명시 거래소 suffix 필수(예: `AAPL.NAS`, `IBM.NYS`, `SPY.AMS`)
+    - US 클래스 티커는 `BASE.CLASS.EXCH`를 캐노니컬로 사용(예: `BRK.B.NYS`), `BRK/B.NYS` 입력은 허용하되 내부에서 `BRK.B.NYS`로 정규화
+    - `AAPL`(bare), `.US`(모호 suffix), 미지원 suffix(`AAPL.XNAS`)는 즉시 실패
+  - 유니버스별 watchlist 로드 정책:
+    - `--universe screener`: watchlist 파일을 로드/검증하지 않음
+    - `--universe watchlist|both`: watchlist를 로드하며, 파일 누락/티커 검증 실패 시 즉시 실패
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 진입 평가(Entry): `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
@@ -179,6 +187,10 @@
 - 해외 스크리너 모드
   - `kis`: KIS 해외 랭킹 API(거래량/시가총액/거래대금 순위) 사용
   - `defaults`: 설정의 기본 유니버스(`screener.us_defaults`)에서 상위 N 선택
+  - `screener.us_defaults`는 명시 거래소 suffix 티커만 허용(`AAPL.NAS`, `MSFT.NAS` 등). bare/KR/`.US`/미지원 suffix는 설정 로드 단계에서 즉시 실패
+  - `screener.us_mode=kis`는 fail-closed로 동작하며 `screener.us_defaults` 자동 폴백을 사용하지 않습니다.
+  - `--universe screener`에서 US KIS 스크리너가 실패/빈 결과면 즉시 실패합니다.
+  - `--universe both`에서 US KIS 스크리너가 실패/빈 결과면 watchlist는 유지하고 US 스크리너만 건너뜁니다.
   - `--screener-limit`을 명시하면 KR/US 모두 해당 값이 우선 적용됩니다.
   - `--screener-limit` 미지정 시 KR은 `screener.limit`, US는 `screener.us_limit`을 사용합니다.
 - 미국 시장 시간대는 EST/EDT 기준(09:30–16:00)이며, 스크리너 메타데이터에 시장 상태(open/closed)를 표기합니다.
@@ -249,6 +261,7 @@ Per‑market 임계치(권장)
 
 - (권장) 보유 목록은 Supabase `holdings`를 단일 소스로 사용합니다(웹 UI에서 CRUD).
 - 로컬에서 `sab sell`을 직접 실행할 때는 `holdings.yaml`(백업 파일) 또는 `--holdings <path>`로 지정한 파일을 입력으로 사용합니다.
+- `--holdings <path>` 또는 `files.holdings`가 지정된 경우, 파일이 존재하지 않으면 즉시 실패합니다.
 - 스키마와 예시는 `docs/holdings-schema.md` 및 `holdings.example.yaml`을 참고하세요.
 
 ## 장 오픈 진입 체크(개요, 예정)

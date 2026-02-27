@@ -18,7 +18,7 @@
 version: 1
 
 holdings:
-  - ticker: 005930
+  - ticker: "005930"
     quantity: 12
     entry_price: 71200
     entry_date: 2024-09-12
@@ -30,16 +30,16 @@ holdings:
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `ticker` | string | 종목 식별자. 국내는 숫자, 해외는 `티커.거래소`(예: `TSLA.US`) |
+| `ticker` | string | 종목 식별자. 국내는 **6자리 숫자 코드 문자열**(예: `"005930"`), 해외는 `티커.거래소`(예: `TSLA.NAS`, `AAPL.NYS`) |
 | `quantity` | int/float | 보유 수량 |
 | `entry_price` | float | 평균 매입가 (기본 통화) |
-| `entry_currency` | string (선택) | 통화 표시 (예: `KRW`, `USD`). 미지정 시 `settings.default_currency` 적용 |
+| `entry_currency` | string (선택) | 통화 표시 (예: `KRW`, `USD`). US-only 보유 파일에서 `settings.default_currency: USD`를 쓸 때만 row 생략 허용 |
 | `entry_date` | string (YYYY-MM-DD) | 최초(또는 평균) 매입일 |
 | `strategy` | string (선택) | 전략 구분 (예: `swing`, `core`). 미지정 시 `settings.default_strategy` 적용 |
 | `notes` | string (선택) | 메모 |
 | `tags` | list[string] (선택) | 태그 목록 |
-| `stop_override` | float (선택) | 사용자 정의 손절가 |
-| `target_override` | float (선택) | 사용자 정의 목표가 |
+| `stop_override` | float (선택) | 사용자 정의 손절가 (`0` 이상만 허용) |
+| `target_override` | float (선택) | 사용자 정의 목표가 (`0` 이상만 허용) |
 
 ## settings 블록 (선택)
 
@@ -55,10 +55,33 @@ settings:
 - `default_strategy`: `strategy` 미지정 시 사용
 - `default_tags`: 태그 미지정 시 초기값으로 사용
 
+### Fail-closed 통화 규칙
+
+- US-only 보유 파일에서는 `settings.default_currency`를 `USD`(또는 미지정)로만 허용합니다.
+- US-only + `settings.default_currency: USD`인 경우, row별 `entry_currency` 생략 시 `USD`로 처리합니다.
+- US/KR 혼합 보유 파일에서는 `settings.default_currency` 사용을 금지하고 row마다 `entry_currency`를 명시해야 합니다.
+- US 티커의 유효 통화는 항상 `USD`여야 하며, `USD`가 아닌 값은 즉시 실패합니다.
+- KR-only 보유 파일에서 `settings.default_currency: USD`는 즉시 실패합니다.
+- `entry_currency: USD`를 쓸 때는 티커도 US suffix를 가져야 합니다(예: `AAPL.NAS`).
+- `entry_currency` 허용값은 `KRW`, `USD`만 지원합니다. 그 외 값(`EUR` 등)은 즉시 실패합니다.
+
+### Fail-closed 티커 규칙
+
+- `ticker`가 suffix 없이 입력된 경우, KR 숫자 코드만 허용됩니다(예: `005930`).
+- KR 숫자 코드는 6자리만 허용됩니다(예: `005930`).
+- `AAPL`처럼 suffix 없는 영문 티커는 즉시 실패합니다.
+- `.US` suffix는 모호성 방지를 위해 허용되지 않으며, `.NAS/.NYS/.AMS`처럼 거래소를 명시해야 합니다.
+- US 클래스 티커는 `BASE.CLASS.EXCH`를 캐노니컬로 사용합니다(예: `BRK.B.NYS`).
+- `BRK/B.NYS` 입력은 허용되지만 내부 저장/평가 시 `BRK.B.NYS`로 정규화됩니다.
+- `AAPL.XNAS`처럼 지원되지 않은 suffix는 즉시 실패합니다.
+- KR 숫자 코드는 YAML 파서에서 앞자리 0이 소실되지 않도록 문자열로 적어야 합니다(예: `ticker: "005930"`).
+- `stop_override`, `target_override`는 `0` 이상만 허용되며, 음수 값은 즉시 실패합니다.
+
 ## 예시 파일
 
 - 리포지토리 루트에 있는 `holdings.example.yaml` 참조
 - 기본 경로는 `config.yaml`의 `files.holdings` 또는 `.env`의 `HOLDINGS_FILE`로 설정할 수 있습니다.
+- `files.holdings`/`HOLDINGS_FILE` 경로를 지정했는데 파일이 없으면 로더는 즉시 실패합니다.
 
 ## 활용
 
