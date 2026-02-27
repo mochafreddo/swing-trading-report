@@ -127,6 +127,7 @@ def evaluate_ticker(
         gap_pct = (latest_open - previous_close) / previous_close
 
     atr_value = atr14[-1]
+    atr_pre_signal_value = atr14[-2]
     eval_date_raw = str(candles_eval[-1].get("date") or "").strip()
     eval_date = eval_date_raw or None
 
@@ -167,14 +168,20 @@ def evaluate_ticker(
     gap_threshold: float | None = None
     gap_ok = True
     if settings.gap_atr_multiplier > 0:
-        if math.isnan(atr_value) or atr_value <= 0 or previous_close <= 0:
+        if (
+            math.isnan(atr_pre_signal_value)
+            or atr_pre_signal_value <= 0
+            or previous_close <= 0
+        ):
             return EvaluationResult(
                 ticker,
                 None,
                 "Gap filter unavailable: ATR/price inputs invalid",
                 reason_kind="system",
             )
-        gap_threshold = settings.gap_atr_multiplier * atr_value / previous_close
+        gap_threshold = (
+            settings.gap_atr_multiplier * atr_pre_signal_value / previous_close
+        )
         gap_ok = abs(gap_pct) <= gap_threshold
         if not gap_ok:
             return EvaluationResult(
