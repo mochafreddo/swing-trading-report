@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -382,6 +383,61 @@ def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
     assert any(
         issue.startswith("Mixed candidate eval_date values:")
         for issue in payload["system_issues"]
+    )
+
+
+def test_run_entry_e2e_rejects_ambiguous_us_suffix_immediately(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    {
+                        "ticker": "AAPL.US",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.05,
+                        "strategy_mode": "ema_cross",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+    caplog.set_level(logging.ERROR)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 1
+    assert list(report_dir.glob("*.entry.json")) == []
+    assert any(
+        "explicit US exchange suffix required" in record.getMessage()
+        for record in caplog.records
     )
 
 

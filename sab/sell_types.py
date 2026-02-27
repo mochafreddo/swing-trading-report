@@ -7,41 +7,32 @@ from typing import Any
 from .config import Config
 from .data.kis_client import KISClient
 from .data.pykrx_client import PykrxClient
-from .fx import SUFFIX_TO_EXCD
+from .tickers import (
+    SUFFIX_TO_EXCHANGE,
+    canonical_exchange_from_suffix,
+    infer_currency_from_ticker,
+    normalize_suffix,
+    split_symbol_and_suffix,
+)
 
 
 def _normalize_suffix(suffix: str | None) -> str:
-    if not suffix:
-        return ""
-    return "".join(ch for ch in suffix.upper() if ch.isalnum())
+    return normalize_suffix(suffix)
 
 
-US_SUFFIXES = {_normalize_suffix(s) for s in SUFFIX_TO_EXCD}
+US_SUFFIXES = {_normalize_suffix(s) for s in SUFFIX_TO_EXCHANGE}
 
 
 def _split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
-    if "." not in ticker:
-        return ticker.strip().upper(), None
-    base, suffix = ticker.rsplit(".", 1)
-    return base.strip().upper(), suffix.strip().upper()
+    return split_symbol_and_suffix(ticker)
 
 
 def _exchange_from_suffix(suffix: str | None) -> str | None:
-    if not suffix:
-        return None
-    norm = _normalize_suffix(suffix)
-    for key, value in SUFFIX_TO_EXCD.items():
-        if _normalize_suffix(key) == norm:
-            return value
-    return SUFFIX_TO_EXCD.get(norm)
+    return canonical_exchange_from_suffix(suffix)
 
 
 def _infer_currency_from_ticker(ticker: str) -> str:
-    _, suffix = _split_symbol_and_suffix(ticker)
-    norm = _normalize_suffix(suffix)
-    if norm in US_SUFFIXES:
-        return "USD"
-    return "KRW"
+    return infer_currency_from_ticker(ticker)
 
 
 @dataclass

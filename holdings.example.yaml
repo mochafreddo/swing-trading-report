@@ -4,7 +4,7 @@
 version: 1
 
 holdings:
-  - ticker: 005930      # 삼성전자 (KRX)
+  - ticker: "005930"    # 삼성전자 (KRX) - 앞자리 0 보존을 위해 문자열 필수
     quantity: 12         # 주식 수량 (정수)
     entry_price: 71200   # 평균 매입가 (KRW)
     entry_date: 2024-09-12
@@ -12,7 +12,7 @@ holdings:
     tags:
       - core
       - semiconductor
-  - ticker: TSLA.US     # 미국 주식 - 티커.거래소 형식 예시
+  - ticker: TSLA.NAS    # 미국 주식 - 명시 거래소 suffix 필수
     quantity: 5
     entry_price: 255.4   # USD
     entry_currency: USD
@@ -22,7 +22,7 @@ holdings:
     tags:
       - us
       - leader
-  - ticker: 091990
+  - ticker: "091990"
     quantity: 20
     entry_price: 18000
     stop_override: 16500     # 선택: 수동 스탑가

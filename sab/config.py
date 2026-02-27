@@ -8,6 +8,11 @@ from urllib.parse import urlparse
 from .config_loader import ConfigLoadError, load_yaml_config
 from .env_loader import load_dotenv_if_available
 from .holdings_loader import HoldingsData, load_holdings
+from .tickers import (
+    parse_ticker,
+    validate_strict_holdings_ticker,
+    validate_strict_us_ticker,
+)
 
 
 def _from_nested(d: dict[str, Any], path: str, default: Any = None) -> Any:
@@ -535,11 +540,19 @@ def _parse_data_section(
             ]
 
     us_screener_defaults_raw = parser.from_yaml("screener.us_defaults", []) or []
-    us_screener_defaults = [
-        str(ticker).strip().upper()
-        for ticker in us_screener_defaults_raw
-        if str(ticker).strip()
-    ]
+    us_screener_defaults: list[str] = []
+    for idx, ticker_raw in enumerate(us_screener_defaults_raw):
+        ticker_text = str(ticker_raw).strip()
+        if not ticker_text:
+            continue
+        ticker_issue = validate_strict_us_ticker(ticker_text)
+        if ticker_issue is not None:
+            raise ConfigLoadError(
+                "Invalid config value "
+                f"'screener.us_defaults[{idx}]': {ticker_issue} "
+                f"(got {ticker_raw!r})."
+            )
+        us_screener_defaults.append(parse_ticker(ticker_text).ticker)
 
     return _DataSection(
         provider=provider,
@@ -1084,11 +1097,21 @@ def load_watchlist(path: str | None) -> list[str]:
         return []
     if not os.path.exists(path):
         return []
-    with open(path, encoding="utf-8") as f:
-        tickers: list[str] = []
-        for line in f:
-            t = line.strip()
-            if not t or t.startswith("#"):
-                continue
-            tickers.append(t)
+    tickers: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line_number, raw_line in enumerate(f, start=1):
+                line_body = raw_line.split("#", 1)[0].strip()
+                if not line_body:
+                    continue
+                ticker_issue = validate_strict_holdings_ticker(line_body)
+                if ticker_issue is not None:
+                    raise ConfigLoadError(
+                        "Watchlist validation failed: "
+                        f"invalid ticker {line_body!r} in '{path}' line {line_number} "
+                        f"({ticker_issue})."
+                    )
+                tickers.append(parse_ticker(line_body).ticker)
+    except OSError as exc:
+        raise ConfigLoadError(f"Failed to read watchlist file '{path}': {exc}") from exc
     return tickers

@@ -10,12 +10,17 @@ from .config import Config
 from .data.holiday_cache import HolidayEntry
 from .data.kis_client import KISClient
 from .data.pykrx_client import PykrxClient
+from .tickers import (
+    canonical_exchange_from_suffix,
+    infer_currency_from_ticker,
+    infer_market_from_ticker,
+    normalize_suffix,
+    split_symbol_and_suffix,
+)
 
 
 def _normalize_suffix(suffix: str | None) -> str:
-    if not suffix:
-        return ""
-    return "".join(ch for ch in suffix.upper() if ch.isalnum())
+    return normalize_suffix(suffix)
 
 
 US_SUFFIXES = {
@@ -34,21 +39,11 @@ def _format_ny_now_for_log(session_info: dict[str, object]) -> str:
 
 
 def _infer_currency(ticker: str) -> str:
-    suffix = None
-    if "." in ticker:
-        suffix = ticker.rsplit(".", 1)[1].strip().upper()
-    if _normalize_suffix(suffix) in US_SUFFIXES:
-        return "USD"
-    return "KRW"
+    return infer_currency_from_ticker(ticker)
 
 
 def _infer_market(ticker: str) -> str:
-    suffix = None
-    if "." in ticker:
-        suffix = ticker.rsplit(".", 1)[1].strip().upper()
-    if _normalize_suffix(suffix) in US_SUFFIXES:
-        return "US"
-    return "KR"
+    return infer_market_from_ticker(ticker)
 
 
 def _filter_tickers_by_markets(
@@ -75,24 +70,11 @@ def _to_float(value: Any) -> float | None:
 def _split_overseas(ticker: str) -> tuple[str, str | None]:
     if "." not in ticker:
         return ticker, None
-    base, suffix = ticker.rsplit(".", 1)
-    return base.strip().upper(), suffix.strip().upper()
+    return split_symbol_and_suffix(ticker)
 
 
 def _excd_from_suffix(suffix: str | None) -> str | None:
-    if not suffix:
-        return None
-    mapping = {
-        _normalize_suffix("US"): "NAS",
-        _normalize_suffix("NASDAQ"): "NAS",
-        _normalize_suffix("NASD"): "NAS",
-        _normalize_suffix("NAS"): "NAS",
-        _normalize_suffix("NYSE"): "NYS",
-        _normalize_suffix("NYS"): "NYS",
-        _normalize_suffix("AMEX"): "AMS",
-        _normalize_suffix("AMS"): "AMS",
-    }
-    return mapping.get(_normalize_suffix(suffix))
+    return canonical_exchange_from_suffix(suffix)
 
 
 def _coerce_nday(value: object) -> int:

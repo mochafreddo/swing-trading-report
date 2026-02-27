@@ -6,17 +6,9 @@ import logging
 from .config import Config
 from .data.cache import load_json, save_json
 from .data.kis_client import KISClient, KISClientError
+from .tickers import SUFFIX_TO_EXCHANGE, canonical_exchange_from_suffix
 
-SUFFIX_TO_EXCD = {
-    "US": "NAS",
-    "NASDAQ": "NAS",
-    "NASD": "NAS",
-    "NAS": "NAS",
-    "NYSE": "NYS",
-    "NYS": "NYS",
-    "AMEX": "AMS",
-    "AMS": "AMS",
-}
+SUFFIX_TO_EXCD = dict(SUFFIX_TO_EXCHANGE)
 FX_CACHE_KEY = "fx_usdkrw"
 DEFAULT_SYMBOL = "SPY"
 DEFAULT_EXCHANGE = "NAS"
@@ -145,9 +137,7 @@ def _split_symbol(raw: str | None) -> tuple[str, str | None]:
 
 
 def _to_exchange(suffix: str | None) -> str | None:
-    if not suffix:
-        return None
-    return SUFFIX_TO_EXCD.get(suffix.upper())
+    return canonical_exchange_from_suffix(suffix)
 
 
 def _format_symbol_label(symbol: str, exchange: str) -> str:

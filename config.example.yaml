@@ -31,12 +31,12 @@ screener:
     min_dollar_volume: 5_000_000  # USD 기준(예: 500만 달러)
   # US simple screener defaults (optional)
   us_defaults:
-    - AAPL.US
-    - MSFT.US
-    - NVDA.US
-    - AMZN.US
-    - META.US
-    - GOOGL.US
+    - AAPL.NAS
+    - MSFT.NAS
+    - NVDA.NAS
+    - AMZN.NAS
+    - META.NAS
+    - GOOGL.NAS
   # US screener mode: 'defaults' or 'kis' (KIS rank APIs)
   us_mode: defaults
   # US KIS rank metric: 'volume' | 'market_cap' | 'value'

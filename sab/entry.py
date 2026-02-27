@@ -16,11 +16,18 @@ from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.kis_client import KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError, PykrxNotInstalledError
-from .fx import SUFFIX_TO_EXCD
 from .holdings_loader import HoldingsLoadError
 from .market_data_common import infer_env_from_base_url
 from .report.entry_report import EntryReportRow, write_entry_report
 from .report.run_meta import build_run_meta
+from .tickers import (
+    infer_market_from_ticker as infer_market_from_ticker_strict,
+)
+from .tickers import (
+    parse_ticker,
+    validate_strict_holdings_ticker,
+    validate_strict_us_ticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,29 +62,49 @@ def _normalize_ticker(ticker: Any) -> str:
 
 
 def _infer_market_from_ticker(ticker: str) -> str:
-    if "." not in ticker:
-        return "KR"
-    suffix = ticker.rsplit(".", 1)[1].strip().upper()
-    normalized = "".join(ch for ch in suffix if ch.isalnum())
-    for key in SUFFIX_TO_EXCD:
-        if "".join(ch for ch in key.upper() if ch.isalnum()) == normalized:
-            return "US"
-    return "KR"
+    return infer_market_from_ticker_strict(_normalize_ticker(ticker))
 
 
 def _split_symbol_and_exchange(ticker: str) -> tuple[str, str]:
     normalized = _normalize_ticker(ticker)
-    if "." not in normalized:
-        return normalized, _DEFAULT_US_EXCHANGE
-    symbol, suffix = normalized.rsplit(".", 1)
-    exchange = SUFFIX_TO_EXCD.get(suffix.upper())
-    if not exchange:
-        collapsed = "".join(ch for ch in suffix.upper() if ch.isalnum())
-        for key, value in SUFFIX_TO_EXCD.items():
-            if "".join(ch for ch in key.upper() if ch.isalnum()) == collapsed:
-                exchange = value
-                break
-    return symbol.strip().upper(), (exchange or _DEFAULT_US_EXCHANGE)
+    ticker_issue = validate_strict_holdings_ticker(normalized)
+    if ticker_issue is not None:
+        raise ValueError(f"{normalized}: {ticker_issue}")
+    parsed = parse_ticker(normalized)
+    if parsed.suffix is None:
+        return parsed.symbol, _DEFAULT_US_EXCHANGE
+    if parsed.exchange is None:
+        raise ValueError(f"{normalized}: unsupported ticker suffix {parsed.suffix!r}")
+    return parsed.symbol, parsed.exchange
+
+
+def _validate_candidate_tickers(candidates: list[dict[str, Any]]) -> None:
+    for idx, candidate in enumerate(candidates):
+        ticker = _normalize_ticker(candidate.get("ticker"))
+        if not ticker:
+            raise ValueError(f"Buy report candidate[{idx}] missing ticker")
+        ticker_issue = validate_strict_holdings_ticker(ticker)
+        if ticker_issue is not None:
+            raise ValueError(f"{ticker}: {ticker_issue}")
+
+
+def _validate_candidates_for_market(
+    *, candidates: list[dict[str, Any]], market: str
+) -> None:
+    for candidate in candidates:
+        ticker = _normalize_ticker(candidate.get("ticker"))
+        if not ticker:
+            raise ValueError("Buy report candidate ticker must not be empty")
+        if market == "US":
+            ticker_issue = validate_strict_us_ticker(ticker)
+            if ticker_issue is not None:
+                raise ValueError(f"{ticker}: {ticker_issue}")
+        inferred_market = _infer_market_from_ticker(ticker)
+        if inferred_market != market:
+            raise ValueError(
+                f"{ticker}: ticker market {inferred_market} "
+                f"mismatches entry market {market}"
+            )
 
 
 def _normalize_mode(mode: str | None) -> str:
@@ -535,6 +562,12 @@ def run_entry(
         return 1
 
     try:
+        _validate_candidate_tickers(candidates)
+    except ValueError as exc:
+        logger.error("Buy report ticker validation failed: %s", exc)
+        return 1
+
+    try:
         resolved_market = _infer_single_market(
             report=source_report,
             candidates=candidates,
@@ -542,6 +575,12 @@ def run_entry(
         )
     except ValueError as exc:
         logger.error("%s", exc)
+        return 1
+
+    try:
+        _validate_candidates_for_market(candidates=candidates, market=resolved_market)
+    except ValueError as exc:
+        logger.error("Buy report ticker validation failed: %s", exc)
         return 1
 
     if normalized_provider == "pykrx" and resolved_market != "KR":

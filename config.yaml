@@ -24,12 +24,12 @@ screener:
   us_metric: value # 'volume' | 'market_cap' | 'value' (used when us_mode=kis)
   us_limit: 300
   us_defaults: # used when us_mode='defaults' or KIS falls back
-    - AAPL.US
-    - MSFT.US
-    - NVDA.US
-    - AMZN.US
-    - META.US
-    - GOOGL.US
+    - AAPL.NAS
+    - MSFT.NAS
+    - NVDA.NAS
+    - AMZN.NAS
+    - META.NAS
+    - GOOGL.NAS
   us:
     min_price: 20
     min_dollar_volume: 5_000_000

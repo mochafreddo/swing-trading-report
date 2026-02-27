@@ -213,6 +213,7 @@ holdings:
   - ticker: AAPL.NAS
     quantity: 2
     entry_price: 180
+    entry_currency: USD
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -262,6 +263,51 @@ data:
     msg = str(exc.value)
     assert "DATA_DIR (data.data_dir)" in msg
     assert "REPORT_DIR (data.report_dir)" in msg
+
+
+@pytest.mark.parametrize("ticker", ["AAPL.XNAS", "005930", "AAPL.US"])
+def test_load_config_rejects_invalid_us_screener_defaults_ticker(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, ticker: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        (f"screener:\n  us_defaults:\n    - {ticker}\n"),
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match="screener.us_defaults"):
+        load_config()
+
+
+def test_load_config_normalizes_us_screener_defaults_to_canonical_exchange(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        (
+            "screener:\n"
+            "  us_defaults:\n"
+            "    - aapl.nas-daq\n"
+            "    - ibm.nyse\n"
+            "    - spy.amex\n"
+        ),
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.us_screener_defaults == ["AAPL.NAS", "IBM.NYS", "SPY.AMS"]
 
 
 @pytest.mark.parametrize(
