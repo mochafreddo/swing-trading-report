@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 from datetime import date
-from typing import Dict
+
+from .calendar_warnings import suppress_pmc_discontinued_break_warning
 
 # KRX holiday seeds (non-exhaustive) for 2024–2026.
-_BUILTIN_KR_HOLIDAYS: Dict[str, str] = {
+_BUILTIN_KR_HOLIDAYS: dict[str, str] = {
     # 2024 (partial, major closures)
     "20240101": "New Year's Day",
     "20240209": "Lunar New Year",
@@ -54,7 +55,7 @@ _BUILTIN_KR_HOLIDAYS: Dict[str, str] = {
 }
 
 
-def _load_override_file(data_dir: str | None) -> Dict[str, str]:
+def _load_override_file(data_dir: str | None) -> dict[str, str]:
     if not data_dir:
         return {}
     path = os.path.join(data_dir, "kr_trading_calendar.json")
@@ -67,7 +68,7 @@ def _load_override_file(data_dir: str | None) -> Dict[str, str]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for key, val in raw.items():
         key_str = str(key or "").replace("-", "")
         if not key_str:
@@ -81,8 +82,12 @@ def _load_override_file(data_dir: str | None) -> Dict[str, str]:
     return out
 
 
-def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
-    use_pandas = os.getenv("SAB_USE_PMC_CALENDAR", "1").strip().lower() not in {"0", "false", "no"}
+def _maybe_pandas_holidays(start_year: int, end_year: int) -> dict[str, str]:
+    use_pandas = os.getenv("SAB_USE_PMC_CALENDAR", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
     if not use_pandas:
         return {}
     try:
@@ -90,14 +95,15 @@ def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
     except Exception:
         return {}
 
-    cal = pmc.get_calendar("XKRX")
-    start_dt = date.fromisoformat(f"{start_year}-01-01")
-    end_dt = date.fromisoformat(f"{end_year}-12-31")
     try:
-        holidays = cal.holidays()
+        with suppress_pmc_discontinued_break_warning():
+            cal = pmc.get_calendar("XKRX")
+            holidays = cal.holidays()
     except Exception:
         return {}
-    out: Dict[str, str] = {}
+    start_dt = date.fromisoformat(f"{start_year}-01-01")
+    end_dt = date.fromisoformat(f"{end_year}-12-31")
+    out: dict[str, str] = {}
     for ts in getattr(holidays, "holidays", []):
         try:
             d = ts.date()
@@ -108,7 +114,7 @@ def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
     return out
 
 
-def load_kr_trading_calendar(data_dir: str | None = None) -> Dict[str, str]:
+def load_kr_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
     overrides = _load_override_file(data_dir)
     merged = dict(_BUILTIN_KR_HOLIDAYS)
     today = date.today()

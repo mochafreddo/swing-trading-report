@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 from datetime import date
-from typing import Dict
+
+from .calendar_warnings import suppress_pmc_discontinued_break_warning
 
 # Built-in US market holiday dates (NYSE/NASDAQ) for 2024–2026.
 # Keys are YYYYMMDD, values are human-readable notes.
-_BUILTIN_US_HOLIDAYS: Dict[str, str] = {
+_BUILTIN_US_HOLIDAYS: dict[str, str] = {
     # 2024
     "20240101": "New Year's Day",
     "20240115": "Martin Luther King Jr. Day",
@@ -44,7 +45,7 @@ _BUILTIN_US_HOLIDAYS: Dict[str, str] = {
 }
 
 
-def _load_override_file(data_dir: str | None) -> Dict[str, str]:
+def _load_override_file(data_dir: str | None) -> dict[str, str]:
     if not data_dir:
         return {}
     path = os.path.join(data_dir, "us_trading_calendar.json")
@@ -57,7 +58,7 @@ def _load_override_file(data_dir: str | None) -> Dict[str, str]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for key, val in raw.items():
         key_str = str(key or "").replace("-", "")
         if not key_str:
@@ -71,8 +72,12 @@ def _load_override_file(data_dir: str | None) -> Dict[str, str]:
     return out
 
 
-def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
-    use_pandas = os.getenv("SAB_USE_PMC_CALENDAR", "1").strip().lower() not in {"0", "false", "no"}
+def _maybe_pandas_holidays(start_year: int, end_year: int) -> dict[str, str]:
+    use_pandas = os.getenv("SAB_USE_PMC_CALENDAR", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
     if not use_pandas:
         return {}
     try:
@@ -80,14 +85,15 @@ def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
     except Exception:
         return {}
 
-    cal = pmc.get_calendar("XNYS")
-    start_dt = date.fromisoformat(f"{start_year}-01-01")
-    end_dt = date.fromisoformat(f"{end_year}-12-31")
     try:
-        holidays = cal.holidays()
+        with suppress_pmc_discontinued_break_warning():
+            cal = pmc.get_calendar("XNYS")
+            holidays = cal.holidays()
     except Exception:
         return {}
-    out: Dict[str, str] = {}
+    start_dt = date.fromisoformat(f"{start_year}-01-01")
+    end_dt = date.fromisoformat(f"{end_year}-12-31")
+    out: dict[str, str] = {}
     for ts in getattr(holidays, "holidays", []):
         try:
             d = ts.date()
@@ -98,7 +104,7 @@ def _maybe_pandas_holidays(start_year: int, end_year: int) -> Dict[str, str]:
     return out
 
 
-def load_us_trading_calendar(data_dir: str | None = None) -> Dict[str, str]:
+def load_us_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
     """Return mapping of YYYYMMDD -> note for known US market holidays."""
     overrides = _load_override_file(data_dir)
     merged = dict(_BUILTIN_US_HOLIDAYS)
