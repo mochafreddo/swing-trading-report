@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from . import scan_evaluation, scan_screener
 from .config import Config, load_config, load_watchlist
@@ -106,9 +107,13 @@ def _collect_scan_runtime(
         coerce_nday_fn=_coerce_nday,
         format_ny_now_for_log_fn=_format_ny_now_for_log,
     )
+    if runtime.fatal_failure:
+        return
     scan_screener._enforce_ticker_limit(runtime, ticker_limit=evaluation_limit)
 
     _resolve_scan_fx(runtime)
+    if runtime.fatal_failure:
+        return
     market_data_service.collect_market_data(runtime)
 
 
@@ -159,11 +164,31 @@ def run_scan(
         logger.error("Configuration loading failed: %s", exc)
         return 1
 
-    loaded_tickers = scan_screener._load_scan_tickers(
-        cfg,
-        watchlist_path,
-        load_watchlist_fn=load_watchlist,
+    screener_enabled, screener_only = scan_screener._resolve_screener_flags(
+        cfg, universe
     )
+    if screener_only:
+        logger.info("Screener-only universe selected; skipping watchlist loading.")
+        loaded_tickers: list[str] = []
+    else:
+        resolved_watchlist_path = (
+            watchlist_path or cfg.watchlist_path or "watchlist.txt"
+        )
+        if not os.path.exists(resolved_watchlist_path):
+            logger.error(
+                "Watchlist file '%s' does not exist; aborting for fail-closed safety.",
+                resolved_watchlist_path,
+            )
+            return 1
+        try:
+            loaded_tickers = scan_screener._load_scan_tickers(
+                cfg,
+                watchlist_path,
+                load_watchlist_fn=load_watchlist,
+            )
+        except ConfigLoadError as exc:
+            logger.error("Watchlist loading failed: %s", exc)
+            return 1
     filtered_tickers = _filter_tickers_by_markets(loaded_tickers, cfg.universe_markets)
     if len(filtered_tickers) != len(loaded_tickers):
         logger.info(
@@ -189,9 +214,6 @@ def run_scan(
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
     )
-    screener_enabled, screener_only = scan_screener._resolve_screener_flags(
-        cfg, universe
-    )
 
     _collect_scan_runtime(
         runtime,
@@ -202,14 +224,15 @@ def run_scan(
         evaluation_limit=cfg.screen_limit,
     )
 
-    if not runtime.tickers:
+    if not runtime.fatal_failure and not runtime.tickers:
         msg = "No tickers provided (watchlist empty or missing)"
         _record_system_issue(runtime, msg)
         runtime.logger.error(msg)
         runtime.fatal_failure = True
 
-    _evaluate_scan_runtime(runtime)
-    _mark_missing_scan_market_data(runtime)
+    if not runtime.fatal_failure:
+        _evaluate_scan_runtime(runtime)
+        _mark_missing_scan_market_data(runtime)
 
     out_path = _render_scan_report(runtime)
     runtime.logger.info("Buy report written to: %s", out_path)

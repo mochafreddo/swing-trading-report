@@ -40,6 +40,257 @@ def test_run_scan_returns_1_when_config_loading_fails(err: Exception) -> None:
     assert code == 1
 
 
+def test_run_scan_returns_1_when_watchlist_loading_fails() -> None:
+    cfg = replace(Config(), data_provider="pykrx")
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch(
+            "sab.scan.load_watchlist",
+            side_effect=ConfigLoadError("watchlist has invalid ticker"),
+        ),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe=None,
+        )
+
+    assert code == 1
+
+
+def test_run_scan_returns_1_when_watchlist_file_missing_in_watchlist_universe(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        watchlist_path=str(tmp_path / "missing-watchlist.txt"),
+    )
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist") as mock_load_watchlist,
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 1
+    mock_load_watchlist.assert_not_called()
+
+
+def test_run_scan_returns_1_when_watchlist_file_missing_in_both_universe(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        watchlist_path=str(tmp_path / "missing-watchlist.txt"),
+        screener_enabled=True,
+    )
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist") as mock_load_watchlist,
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="both",
+        )
+
+    assert code == 1
+    mock_load_watchlist.assert_not_called()
+
+
+def test_run_scan_screener_universe_allows_missing_watchlist_file(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        watchlist_path=str(tmp_path / "missing-watchlist.txt"),
+        universe_markets=["US"],
+    )
+
+    def _fake_collect(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.tickers = ["AAPL.US"]
+        runtime.market_data = {
+            "AAPL.US": [
+                {
+                    "date": "20250101",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.0,
+                    "volume": 1_000_000.0,
+                }
+            ]
+        }
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.scan_screener._load_scan_tickers") as mock_load_scan_tickers,
+        patch("sab.scan._collect_scan_runtime", side_effect=_fake_collect),
+        patch("sab.scan._evaluate_scan_runtime", return_value=None),
+        patch(
+            "sab.scan._render_scan_report",
+            return_value=str(tmp_path / "2026-02-26.buy.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="screener",
+        )
+
+    assert code == 0
+    mock_load_scan_tickers.assert_not_called()
+
+
+def test_run_scan_screener_universe_skips_watchlist_loading(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        universe_markets=["US"],
+    )
+
+    def _fake_collect(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.tickers = ["AAPL.US"]
+        runtime.market_data = {
+            "AAPL.US": [
+                {
+                    "date": "20250101",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.0,
+                    "volume": 1_000_000.0,
+                }
+            ]
+        }
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.scan_screener._load_scan_tickers") as mock_load_scan_tickers,
+        patch("sab.scan._collect_scan_runtime", side_effect=_fake_collect),
+        patch("sab.scan._evaluate_scan_runtime", return_value=None),
+        patch(
+            "sab.scan._render_scan_report",
+            return_value=str(tmp_path / "2026-02-26.buy.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="screener",
+        )
+
+    assert code == 0
+    mock_load_scan_tickers.assert_not_called()
+
+
+def test_run_scan_fails_fast_when_collection_sets_fatal(tmp_path: Path) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+    )
+
+    def _fake_collect(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.failures.append("fatal from screener boundary")
+        runtime.fatal_failure = True
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.scan_screener._load_scan_tickers", return_value=[]),
+        patch("sab.scan._collect_scan_runtime", side_effect=_fake_collect),
+        patch("sab.scan._evaluate_scan_runtime") as mock_evaluate,
+        patch("sab.scan._mark_missing_scan_market_data") as mock_mark_missing,
+        patch(
+            "sab.scan._render_scan_report",
+            return_value=str(tmp_path / "2026-02-26.buy.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe=None,
+        )
+
+    assert code == 1
+    mock_evaluate.assert_not_called()
+    mock_mark_missing.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "err",
     [ConfigLoadError("bad config"), HoldingsLoadError("bad holdings")],

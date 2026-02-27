@@ -28,7 +28,7 @@ def _runtime(
     cfg = SimpleNamespace(
         universe_markets=["US"],
         us_screener_mode=us_screener_mode,
-        us_screener_defaults=["AAPL.US", "MSFT.US", "NVDA.US"],
+        us_screener_defaults=["AAPL.NAS", "MSFT.NAS", "NVDA.NAS"],
         us_screener_limit=us_screener_limit,
         us_screener_metric="volume",
         data_dir="data",
@@ -88,13 +88,13 @@ def test_run_us_screener_defaults_uses_us_screener_limit() -> None:
 
     assert captured_limit["value"] == 2
     assert added == 2
-    assert runtime.tickers == ["AAPL.US", "MSFT.US"]
+    assert runtime.tickers == ["AAPL.NAS", "MSFT.NAS"]
 
 
 def test_run_screeners_screener_only_ignores_watchlist_baseline(
     monkeypatch: Any,
 ) -> None:
-    runtime = _runtime(tickers=["TSLA.US"], us_screener_mode="defaults")
+    runtime = _runtime(tickers=["TSLA.NAS"], us_screener_mode="defaults")
     captured_baseline: dict[str, list[str]] = {}
 
     def _fake_run_kr(*_args: Any, **_kwargs: Any) -> int:
@@ -105,7 +105,7 @@ def test_run_screeners_screener_only_ignores_watchlist_baseline(
         **_kwargs: Any,
     ) -> int:
         captured_baseline["tickers"] = list(runtime_obj.tickers)
-        runtime_obj.tickers = ["AAPL.US"]
+        runtime_obj.tickers = ["AAPL.NAS"]
         return 1
 
     monkeypatch.setattr(ss, "_run_kr_screener", _fake_run_kr)
@@ -128,12 +128,12 @@ def test_run_screeners_screener_only_ignores_watchlist_baseline(
     )
 
     assert captured_baseline["tickers"] == []
-    assert runtime.tickers == ["AAPL.US"]
+    assert runtime.tickers == ["AAPL.NAS"]
 
 
 def test_run_us_screener_direct_call_clears_watchlist_in_screener_only() -> None:
     runtime = _runtime(
-        tickers=["TSLA.US"],
+        tickers=["TSLA.NAS"],
         us_screener_mode="defaults",
         us_screener_limit=1,
     )
@@ -162,7 +162,7 @@ def test_run_us_screener_direct_call_clears_watchlist_in_screener_only() -> None
         format_ny_now_for_log_fn=lambda _session: "-",
     )
 
-    assert runtime.tickers == ["AAPL.US"]
+    assert runtime.tickers == ["AAPL.NAS"]
     assert runtime.screener_seeded is True
 
 
@@ -198,8 +198,207 @@ def test_run_us_screener_direct_call_preserves_screener_seeded_baseline() -> Non
         format_ny_now_for_log_fn=lambda _session: "-",
     )
 
-    assert runtime.tickers == ["005930", "AAPL.US"]
+    assert runtime.tickers == ["005930", "AAPL.NAS"]
     assert runtime.screener_seeded is True
+
+
+def test_run_us_screener_fails_closed_on_invalid_ticker() -> None:
+    runtime = _runtime(us_screener_mode="defaults", us_screener_limit=1)
+    runtime.cfg.us_screener_defaults = ["AAPL.US"]
+
+    class _USRequest:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+    class _DefaultsScreener:
+        def __init__(self, defaults: list[str]) -> None:
+            self.defaults = defaults
+
+        def screen(self, request: _USRequest) -> Any:
+            return SimpleNamespace(
+                tickers=self.defaults[: request.limit],
+                metadata={},
+            )
+
+    added = ss._run_us_screener(
+        runtime,
+        screener_limit=1,
+        screener_only=False,
+        KUSCls=object,
+        KUSReqCls=object,
+        USScreenerCls=_DefaultsScreener,
+        USScreenRequestCls=_USRequest,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert added == 0
+    assert runtime.fatal_failure is True
+    assert runtime.tickers == []
+    assert any(
+        "US screener validation failed" in message for message in runtime.failures
+    )
+
+
+def test_run_us_screener_fails_closed_on_invalid_symbol_shape() -> None:
+    runtime = _runtime(us_screener_mode="defaults", us_screener_limit=1)
+    runtime.cfg.us_screener_defaults = ["AAPL.O.NAS"]
+
+    class _USRequest:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+    class _DefaultsScreener:
+        def __init__(self, defaults: list[str]) -> None:
+            self.defaults = defaults
+
+        def screen(self, request: _USRequest) -> Any:
+            return SimpleNamespace(
+                tickers=self.defaults[: request.limit],
+                metadata={},
+            )
+
+    added = ss._run_us_screener(
+        runtime,
+        screener_limit=1,
+        screener_only=False,
+        KUSCls=object,
+        KUSReqCls=object,
+        USScreenerCls=_DefaultsScreener,
+        USScreenRequestCls=_USRequest,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert added == 0
+    assert runtime.fatal_failure is True
+    assert runtime.tickers == []
+    assert any(
+        "US screener validation failed" in message for message in runtime.failures
+    )
+
+
+def test_run_us_screener_keeps_running_when_kis_input_invalid_in_non_screener_only() -> (
+    None
+):
+    runtime = _runtime(us_screener_mode="kis", us_screener_limit=1)
+
+    class _KUSScreener:
+        def __init__(self, _client: object) -> None:
+            pass
+
+        def screen(self, _request: object) -> Any:
+            raise ValueError("unsupported overseas exchange 'US'")
+
+    class _KUSRequest:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    added = ss._run_us_screener(
+        runtime,
+        screener_limit=1,
+        screener_only=False,
+        KUSCls=_KUSScreener,
+        KUSReqCls=_KUSRequest,
+        USScreenerCls=object,
+        USScreenRequestCls=object,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert added == 0
+    assert runtime.fatal_failure is False
+    assert runtime.tickers == []
+    assert any(
+        "US KIS screener validation failed" in message for message in runtime.failures
+    )
+
+
+def test_run_us_screener_sets_fatal_failure_when_kis_input_invalid_in_screener_only() -> (
+    None
+):
+    runtime = _runtime(us_screener_mode="kis", us_screener_limit=1)
+
+    class _KUSScreener:
+        def __init__(self, _client: object) -> None:
+            pass
+
+        def screen(self, _request: object) -> Any:
+            raise ValueError("unsupported overseas exchange 'US'")
+
+    class _KUSRequest:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    added = ss._run_us_screener(
+        runtime,
+        screener_limit=1,
+        screener_only=True,
+        KUSCls=_KUSScreener,
+        KUSReqCls=_KUSRequest,
+        USScreenerCls=object,
+        USScreenRequestCls=object,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert added == 0
+    assert runtime.fatal_failure is True
+    assert runtime.tickers == []
+    assert any(
+        "US KIS screener validation failed" in message for message in runtime.failures
+    )
+
+
+def test_run_us_screener_kis_mode_does_not_fallback_to_defaults() -> None:
+    runtime = _runtime(us_screener_mode="kis", us_screener_limit=2)
+    runtime.cfg.us_screener_defaults = ["AAPL.NAS", "MSFT.NAS"]
+
+    class _KUSScreener:
+        def __init__(self, _client: object) -> None:
+            pass
+
+        def screen(self, _request: object) -> Any:
+            return SimpleNamespace(tickers=[], metadata={})
+
+    class _KUSRequest:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    class _USRequest:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+    class _DefaultsScreener:
+        def __init__(self, defaults: list[str]) -> None:
+            self.defaults = defaults
+
+        def screen(self, request: _USRequest) -> Any:
+            return SimpleNamespace(
+                tickers=self.defaults[: request.limit],
+                metadata={},
+            )
+
+    added = ss._run_us_screener(
+        runtime,
+        screener_limit=2,
+        screener_only=False,
+        KUSCls=_KUSScreener,
+        KUSReqCls=_KUSRequest,
+        USScreenerCls=_DefaultsScreener,
+        USScreenRequestCls=_USRequest,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert added == 0
+    assert runtime.fatal_failure is False
+    assert runtime.tickers == []
 
 
 def test_kis_screener_returns_empty_when_limit_non_positive() -> None:

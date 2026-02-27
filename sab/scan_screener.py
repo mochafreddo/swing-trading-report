@@ -4,6 +4,7 @@ from typing import Any
 
 from .config import Config
 from .scan_types import _ScanRuntime
+from .tickers import parse_ticker, validate_strict_us_ticker
 
 
 def _clear_non_screener_baseline_if_needed(
@@ -55,6 +56,29 @@ def _enforce_ticker_limit(
         before,
         len(runtime.tickers),
     )
+
+
+def _normalize_us_screener_tickers(
+    runtime: _ScanRuntime,
+    *,
+    tickers: list[str],
+    source: str,
+) -> list[str]:
+    normalized_tickers: list[str] = []
+    for idx, ticker_raw in enumerate(tickers):
+        ticker_text = str(ticker_raw).strip()
+        ticker_issue = validate_strict_us_ticker(ticker_text)
+        if ticker_issue is not None:
+            message = (
+                "US screener validation failed: "
+                f"source={source}, index={idx}, ticker={ticker_raw!r} ({ticker_issue})"
+            )
+            runtime.failures.append(message)
+            runtime.logger.error(message)
+            runtime.fatal_failure = True
+            return []
+        normalized_tickers.append(parse_ticker(ticker_text).ticker)
+    return normalized_tickers
 
 
 def _resolve_screener_flags(cfg: Config, universe: str | None) -> tuple[bool, bool]:
@@ -170,7 +194,19 @@ def _run_us_screener(
             )
             us_tickers = kres.tickers
             us_nday_used = kres.metadata.get("nday_used")
-            runtime.screener_meta_map.update(kres.metadata.get("by_ticker", {}))
+            by_ticker_raw = kres.metadata.get("by_ticker", {})
+            if isinstance(by_ticker_raw, dict):
+                canonical_by_ticker: dict[str, Any] = {}
+                for ticker_key, ticker_meta in by_ticker_raw.items():
+                    ticker_text = str(ticker_key).strip()
+                    if not ticker_text:
+                        continue
+                    canonical_key = parse_ticker(ticker_text).ticker
+                    if isinstance(ticker_meta, dict):
+                        canonical_by_ticker[canonical_key] = dict(ticker_meta)
+                    else:
+                        canonical_by_ticker[canonical_key] = {}
+                runtime.screener_meta_map.update(canonical_by_ticker)
             if us_tickers:
                 us_source = "kis_overseas_rank"
                 runtime.logger.info(
@@ -179,29 +215,50 @@ def _run_us_screener(
                     kres.metadata.get("nday_tried"),
                     session_info.get("state"),
                 )
+        except ValueError as exc:
+            message = f"US KIS screener validation failed ({exc})"
+            runtime.failures.append(message)
+            if screener_only:
+                runtime.logger.error(message)
+                runtime.fatal_failure = True
             else:
                 runtime.logger.warning(
-                    "US KIS screener returned 0 tickers; falling back to defaults if configured"
+                    "US KIS screener validation failed; "
+                    "skipping US screener for safety (%s)",
+                    exc,
                 )
+            return 0
         except Exception as exc:
-            runtime.logger.warning(
-                "US KIS screener failed (%s); falling back to defaults", exc
-            )
+            message = f"US KIS screener failed ({exc})"
+            runtime.failures.append(message)
+            if screener_only:
+                runtime.logger.error(message)
+                runtime.fatal_failure = True
+            else:
+                runtime.logger.warning(
+                    "US KIS screener failed; skipping US screener for safety (%s)",
+                    exc,
+                )
+            return 0
 
-    if not us_tickers and cfg.us_screener_defaults:
+        if not us_tickers:
+            message = (
+                "US KIS screener returned 0 tickers; skipping US screener for safety"
+            )
+            runtime.failures.append(message)
+            if screener_only:
+                runtime.logger.error(message)
+                runtime.fatal_failure = True
+            else:
+                runtime.logger.warning(message)
+            return 0
+
+    if cfg.us_screener_mode != "kis" and not us_tickers and cfg.us_screener_defaults:
         us_scr = USScreenerCls(cfg.us_screener_defaults)
         us_res = us_scr.screen(USScreenRequestCls(limit=us_limit))
         us_tickers = us_res.tickers
         if us_tickers:
-            us_source = (
-                "us_defaults (fallback)"
-                if cfg.us_screener_mode == "kis"
-                else "us_defaults"
-            )
-            if cfg.us_screener_mode == "kis":
-                runtime.logger.info(
-                    "US defaults list used as fallback (%s tickers)", len(us_tickers)
-                )
+            us_source = "us_defaults"
         else:
             runtime.logger.warning(
                 "US defaults list configured but returned zero tickers; US universe skipped"
@@ -210,6 +267,15 @@ def _run_us_screener(
         runtime.logger.warning(
             "US screener produced no tickers and no defaults configured; US universe skipped"
         )
+
+    if us_tickers:
+        us_tickers = _normalize_us_screener_tickers(
+            runtime,
+            tickers=us_tickers,
+            source=us_source or cfg.us_screener_mode,
+        )
+        if runtime.fatal_failure:
+            return 0
 
     if not screener_only:
         runtime.tickers = list(dict.fromkeys(runtime.tickers + us_tickers))
