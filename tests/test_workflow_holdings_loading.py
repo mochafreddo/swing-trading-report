@@ -34,6 +34,16 @@ def test_scan_workflow_does_not_load_holdings_from_supabase() -> None:
     assert "HOLDINGS_FILE" not in env
 
 
+def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
+    workflow = _load_workflow(".github/workflows/scan.yml")
+    steps = workflow["jobs"]["scan"]["steps"]
+
+    ensure_step = _find_step_by_name(steps, "Ensure watchlist file")
+    run_script = str(ensure_step.get("run") or "")
+    assert "watchlist.txt" in run_script
+    assert ": > watchlist.txt" in run_script
+
+
 def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     workflow = _load_workflow(".github/workflows/sell.yml")
     steps = workflow["jobs"]["sell"]["steps"]

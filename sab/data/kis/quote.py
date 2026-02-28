@@ -445,60 +445,70 @@ class _KISQuoteMixin(_KISClientState):
         count: int = 120,
         adjusted: bool = True,
     ) -> list[dict[str, Any]]:
-        symbol = symbol.strip().upper()
+        requested_symbol = symbol.strip().upper()
         exchange = exchange.strip().upper()
-        if not symbol or not exchange:
+        if not requested_symbol or not exchange:
             raise KISClientError("Overseas symbol and exchange are required")
 
         self.ensure_token()
 
         target = max(count, 1)
         chunk_days = 240
-        collected: dict[str, dict[str, Any]] = {}
-
         now = dt.datetime.now()
-        chunk_end = now
         earliest_allowed = now - dt.timedelta(days=365 * 10)
-        empty_streak = 0
-
-        while len(collected) < target and chunk_end > earliest_allowed:
-            start_dt = chunk_end - dt.timedelta(days=chunk_days)
-            if start_dt < earliest_allowed:
-                start_dt = earliest_allowed
-            start_str = start_dt.strftime("%Y%m%d")
-            end_str = chunk_end.strftime("%Y%m%d")
-
-            items = self._fetch_overseas_candle_chunk(
-                symbol=symbol,
-                exchange=exchange,
-                start_date=start_str,
-                end_date=end_str,
-                adjusted=adjusted,
-            )
-
-            parsed_dates: list[str] = []
-            for it in items:
-                parsed_item = self._parse_overseas_candle(it)
-                if parsed_item and parsed_item.get("date"):
-                    date_key = str(parsed_item["date"])
-                    collected[date_key] = parsed_item
-                    parsed_dates.append(date_key)
-
-            if not parsed_dates:
-                empty_streak += 1
-                if empty_streak >= self._max_attempts:
-                    break
-                chunk_end = start_dt - dt.timedelta(days=1)
-                continue
-
+        for candidate_symbol in self._overseas_symbol_candidates(requested_symbol):
+            collected: dict[str, dict[str, Any]] = {}
+            chunk_end = now
             empty_streak = 0
-            oldest_dt = min(dt.datetime.strptime(d, "%Y%m%d") for d in parsed_dates)
-            chunk_end = oldest_dt - dt.timedelta(days=1)
 
-        rows = sorted(collected.values(), key=lambda x: x["date"])
-        if len(rows) > target:
-            rows = rows[-target:]
-        return rows
+            while len(collected) < target and chunk_end > earliest_allowed:
+                start_dt = chunk_end - dt.timedelta(days=chunk_days)
+                if start_dt < earliest_allowed:
+                    start_dt = earliest_allowed
+                start_str = start_dt.strftime("%Y%m%d")
+                end_str = chunk_end.strftime("%Y%m%d")
+
+                items = self._fetch_overseas_candle_chunk(
+                    symbol=candidate_symbol,
+                    exchange=exchange,
+                    start_date=start_str,
+                    end_date=end_str,
+                    adjusted=adjusted,
+                )
+
+                parsed_dates: list[str] = []
+                for it in items:
+                    parsed_item = self._parse_overseas_candle(it)
+                    if parsed_item and parsed_item.get("date"):
+                        date_key = str(parsed_item["date"])
+                        collected[date_key] = parsed_item
+                        parsed_dates.append(date_key)
+
+                if not parsed_dates:
+                    empty_streak += 1
+                    if empty_streak >= self._max_attempts:
+                        break
+                    chunk_end = start_dt - dt.timedelta(days=1)
+                    continue
+
+                empty_streak = 0
+                oldest_dt = min(
+                    dt.datetime.strptime(date_text, "%Y%m%d")
+                    for date_text in parsed_dates
+                )
+                chunk_end = oldest_dt - dt.timedelta(days=1)
+
+            rows = sorted(collected.values(), key=lambda x: x["date"])
+            if len(rows) > target:
+                rows = rows[-target:]
+            if rows:
+                self._remember_overseas_symbol_preference(
+                    requested_symbol=requested_symbol,
+                    resolved_symbol=candidate_symbol,
+                )
+                return rows
+
+        return []
 
     def _fetch_overseas_candle_chunk(
         self,
@@ -529,10 +539,11 @@ class _KISQuoteMixin(_KISClientState):
                 ):
                     continue
                 raise
-            self._remember_overseas_symbol_preference(
-                requested_symbol=normalized_symbol,
-                resolved_symbol=candidate_symbol,
-            )
+            if rows:
+                self._remember_overseas_symbol_preference(
+                    requested_symbol=normalized_symbol,
+                    resolved_symbol=candidate_symbol,
+                )
             return rows
 
         assert last_error is not None

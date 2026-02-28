@@ -133,6 +133,14 @@ jobs:
             uv sync --locked --all-groups
           fi
 
+      - name: Ensure watchlist file
+        run: |
+          set -euo pipefail
+          if [[ ! -f watchlist.txt ]]; then
+            : > watchlist.txt
+            echo "Created empty watchlist.txt for scan workflow baseline."
+          fi
+
       - name: Validate pykrx watchlist
         if: steps.params.outputs.provider == 'pykrx'
         run: |

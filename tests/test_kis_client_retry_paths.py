@@ -761,6 +761,81 @@ def test_fetch_overseas_candle_chunk_falls_back_to_slash_class_symbol() -> None:
     assert requested_symbols == ["BRK.B", "BRK/B", "BRK/B"]
 
 
+def test_overseas_daily_candles_falls_back_to_slash_on_empty_class_symbol() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+    client._access_token = "Bearer stable-token"
+    client._token_expiry = _future_expiry()
+
+    empty_rows = _response(
+        status_code=200,
+        payload={"rt_cd": "0", "output2": []},
+    )
+    first_success = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output2": [
+                {
+                    "xymd": "20240102",
+                    "open": "10",
+                    "high": "12",
+                    "low": "9",
+                    "close": "11",
+                    "tvol": "1000",
+                }
+            ],
+        },
+    )
+    second_success = _response(
+        status_code=200,
+        payload={
+            "rt_cd": "0",
+            "output2": [
+                {
+                    "xymd": "20240103",
+                    "open": "11",
+                    "high": "13",
+                    "low": "10",
+                    "close": "12",
+                    "tvol": "1100",
+                }
+            ],
+        },
+    )
+    responses = iter([empty_rows, first_success, second_success])
+    requested_symbols: list[str] = []
+
+    def _request_side_effect(*_args: Any, **kwargs: Any) -> MagicMock:
+        params = kwargs.get("params") or {}
+        requested_symbols.append(str(params.get("SYMB") or ""))
+        return next(responses)
+
+    _set_mock_method(client, "_request", side_effect=_request_side_effect)
+
+    first_rows = client.overseas_daily_candles(
+        symbol="BRK.B",
+        exchange="NYS",
+        count=1,
+        adjusted=True,
+    )
+    second_rows = client.overseas_daily_candles(
+        symbol="BRK.B",
+        exchange="NYS",
+        count=1,
+        adjusted=True,
+    )
+
+    assert first_rows and first_rows[0]["close"] == 11.0
+    assert second_rows and second_rows[0]["close"] == 12.0
+    assert requested_symbols == ["BRK.B", "BRK/B", "BRK/B"]
+
+
 def test_overseas_price_detail_does_not_fallback_on_rate_limit_error() -> None:
     client = KISClient(
         _build_creds(),
