@@ -132,3 +132,36 @@ def test_ema_cross_candidate_exposes_entry_numeric_fields(
     assert candidate["gap_guard_down_price_value"] == pytest.approx(
         candidate["close_value"] * (1.0 - candidate["gap_guard_pct_value"])
     )
+
+
+def test_ema_cross_candidate_exposes_structured_reasons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=True,
+            require_slope_up=True,
+            gap_atr_multiplier=1.0,
+        ),
+        {"currency": "USD"},
+    )
+
+    assert result.candidate is not None
+    reasons = result.candidate["reasons"]
+    assert isinstance(reasons, list)
+    assert all(isinstance(item, dict) for item in reasons)
+    ids = {str(item.get("id")) for item in reasons}
+    assert {
+        "ema_cross",
+        "rsi_rebound",
+        "gap_within_limit",
+        "liquidity",
+        "sma200_trend_filter",
+        "ema_slope_up",
+    }.issubset(ids)
+    statuses = {str(item.get("status")) for item in reasons}
+    assert statuses.issubset({"pass", "warn"})

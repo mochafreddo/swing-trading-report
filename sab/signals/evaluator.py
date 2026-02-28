@@ -274,35 +274,121 @@ def evaluate_ticker(
 
     score = 0.0
     breakdown: list[str] = []
+    reasons: list[dict[str, Any]] = []
+
+    def add_reason(
+        *,
+        reason_id: str,
+        label: str,
+        kind: str,
+        status: str = "pass",
+        points: float | None = None,
+        value: float | str | None = None,
+        threshold: float | str | None = None,
+    ) -> None:
+        reason: dict[str, Any] = {
+            "id": reason_id,
+            "label": label,
+            "kind": kind,
+            "status": status,
+        }
+        if points is not None:
+            reason["points"] = points
+        if value is not None:
+            reason["value"] = value
+        if threshold is not None:
+            reason["threshold"] = threshold
+        reasons.append(reason)
 
     score += 1
     breakdown.append("ema_cross")
+    add_reason(
+        reason_id="ema_cross",
+        label="EMA20/50 골든크로스",
+        kind="signal",
+        points=1,
+    )
 
     score += 1
     breakdown.append("rsi")
+    add_reason(
+        reason_id="rsi_rebound",
+        label="RSI 반등",
+        kind="signal",
+        points=1,
+        value=rsi14[-1],
+        threshold=30.0,
+    )
 
     if settings.use_sma200_filter and trend_pass:
         score += 1
         breakdown.append("sma200")
+        add_reason(
+            reason_id="sma200_trend_filter",
+            label="SMA200 상단 추세 필터",
+            kind="filter",
+            points=1,
+            value=latest_close,
+            threshold=sma200_value,
+        )
 
     if settings.require_slope_up and slope_pass:
         score += 1
         breakdown.append("slope")
+        add_reason(
+            reason_id="ema_slope_up",
+            label="EMA 기울기 상승",
+            kind="filter",
+            points=1,
+        )
 
     if settings.gap_atr_multiplier > 0 and gap_ok:
         score += 1
         breakdown.append("gap")
+        add_reason(
+            reason_id="gap_within_limit",
+            label="갭 허용 범위",
+            kind="filter",
+            points=1,
+            value=gap_pct,
+            threshold=gap_threshold,
+        )
 
     if avg_dollar_volume > 0:
         score += 1
         breakdown.append("liquidity")
+        add_reason(
+            reason_id="liquidity",
+            label="유동성 확보",
+            kind="filter",
+            points=1,
+            value=avg_dollar_volume,
+            threshold=eff_min_dv if eff_min_dv > 0 else 0.0,
+        )
 
     if rs_return is not None:
         if rs_diff is None or rs_diff >= 0:
             score += 1
             breakdown.append("rs")
+            add_reason(
+                reason_id="rs_above_benchmark",
+                label="상대강도 양호",
+                kind="filter",
+                points=1,
+                value=rs_diff,
+                threshold=0.0,
+            )
         else:
             breakdown.append("rs_below")
+            add_reason(
+                reason_id="rs_below_benchmark",
+                label="상대강도 약함",
+                kind="filter",
+                status="warn",
+                points=0,
+                value=rs_diff,
+                threshold=0.0,
+            )
 
     score_display = f"{score:.1f}"
     score_notes = ", ".join(breakdown)
@@ -340,6 +426,7 @@ def evaluate_ticker(
         "score": score_display,
         "score_value": score,
         "score_notes": score_notes,
+        "reasons": reasons,
         "trend_pass": "Yes" if trend_pass else "No",
         "slope_pass": "Yes" if slope_pass else "No",
         "currency": currency,

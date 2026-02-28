@@ -1,8 +1,14 @@
+import { Fragment, useState } from "react";
+
 import styles from "../reports-client.module.css";
 
 import { formatSummaryKeyForDisplay } from "@/lib/report-summary-label";
 
-import { formatPnlPercent, readNumber } from "./helpers";
+import {
+  buildBuyCandidateViewModel,
+  type ChipTone,
+} from "./buy-candidate-view-model";
+import { asRecord, formatPnlPercent, readNumber } from "./helpers";
 import type { ReportJson } from "./types";
 
 interface ReportDetailProps {
@@ -27,6 +33,58 @@ function formatSummaryValue(value: unknown): string {
   return String(value);
 }
 
+function readString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function readNumberLike(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function formatScoreValue(row: ReportJson): string {
+  const scoreValue = readNumberLike(row.score_value);
+  if (scoreValue !== null) {
+    return scoreValue.toFixed(2).replace(/\.00$/, "");
+  }
+  const score = readNumberLike(row.score);
+  if (score !== null) {
+    return score.toFixed(2).replace(/\.00$/, "");
+  }
+  return "-";
+}
+
+function chipToneClass(tone: ChipTone): string {
+  if (tone === "warning") {
+    return styles.chipWarning;
+  }
+  if (tone === "neutral") {
+    return styles.chipNeutral;
+  }
+  return styles.chipPositive;
+}
+
 export function ReportDetail({
   detail,
   loadingDetail,
@@ -38,6 +96,38 @@ export function ReportDetail({
   rawDetailJson,
   onToggleRaw,
 }: ReportDetailProps) {
+  const [expandedBuyRowKey, setExpandedBuyRowKey] = useState<string | null>(
+    null,
+  );
+  const strategyMode = readString(detail?.strategy_mode);
+  const evalContext = asRecord(detail?.eval_context);
+  const evalMarket = readString(evalContext?.market);
+  const evalSessionState = readString(evalContext?.session_state);
+  const systemIssues = asStringArray(detail?.system_issues);
+  const screenOuts = asStringArray(detail?.screen_outs);
+  const combinedIssues = asStringArray(detail?.issues);
+  const issueSections = [
+    {
+      key: "system",
+      title: `System issues (${systemIssues.length})`,
+      items: systemIssues,
+    },
+    {
+      key: "screen-outs",
+      title: `Screen outs (${screenOuts.length})`,
+      items: screenOuts,
+    },
+    {
+      key: "all",
+      title: `Issues (${combinedIssues.length})`,
+      items: combinedIssues,
+    },
+  ].filter((section) => section.items.length > 0);
+
+  const handleToggleBuyRowDetail = (rowKey: string) => {
+    setExpandedBuyRowKey((prev) => (prev === rowKey ? null : rowKey));
+  };
+
   return (
     <section className="panel" aria-busy={loadingDetail}>
       <div className={styles.detailHeaderRow}>
@@ -97,6 +187,18 @@ export function ReportDetail({
               <dt>provider</dt>
               <dd>{String(detail.provider ?? "-")}</dd>
             </div>
+            <div>
+              <dt>strategy_mode</dt>
+              <dd>{strategyMode ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>market</dt>
+              <dd>{evalMarket ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>session_state</dt>
+              <dd>{evalSessionState ?? "-"}</dd>
+            </div>
           </dl>
 
           {summary && (
@@ -113,6 +215,10 @@ export function ReportDetail({
               ))}
             </div>
           )}
+          <p className={styles.infoNote}>
+            후보는 평가 캔들(EOD) 기준 발굴 결과이며, 다음 세션 체결을 보장하지
+            않습니다.
+          </p>
 
           {buyRows.length > 0 && (
             <div className={styles.tableWrap}>
@@ -126,17 +232,91 @@ export function ReportDetail({
                     <th>Name</th>
                     <th>Price</th>
                     <th>Score</th>
+                    <th>근거</th>
+                    <th>리스크</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {buyRows.slice(0, 20).map((row, idx) => (
-                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
-                      <td>{String(row.ticker ?? "-")}</td>
-                      <td>{String(row.name ?? "-")}</td>
-                      <td>{String(row.price ?? "-")}</td>
-                      <td>{readNumber(row.score) ?? "-"}</td>
-                    </tr>
-                  ))}
+                  {buyRows.map((row, idx) => {
+                    const rowKey = `${String(row.ticker ?? "-")}-${idx}`;
+                    const detailId = `buy-row-detail-${idx}`;
+                    const isExpanded = expandedBuyRowKey === rowKey;
+                    const viewModel = buildBuyCandidateViewModel(
+                      row,
+                      strategyMode,
+                    );
+                    return (
+                      <Fragment key={rowKey}>
+                        <tr>
+                          <td data-label="Ticker">
+                            {String(row.ticker ?? "-")}
+                          </td>
+                          <td data-label="Name">{String(row.name ?? "-")}</td>
+                          <td data-label="Price">{String(row.price ?? "-")}</td>
+                          <td data-label="Score">{formatScoreValue(row)}</td>
+                          <td data-label="근거">
+                            <div className={styles.reasonCell}>
+                              <div className={styles.chipRow}>
+                                {viewModel.reasonChips.map((chip) => (
+                                  <span
+                                    key={chip.label}
+                                    className={`${styles.reasonChip} ${chipToneClass(
+                                      chip.tone,
+                                    )}`}
+                                  >
+                                    {chip.label}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className={styles.reasonSummary}>
+                                {viewModel.reasonSummary}
+                              </p>
+                              <button
+                                type="button"
+                                className={styles.rowDetailToggle}
+                                onClick={() => handleToggleBuyRowDetail(rowKey)}
+                                aria-expanded={isExpanded}
+                                aria-controls={detailId}
+                              >
+                                {isExpanded ? "상세 접기" : "상세 보기"}
+                              </button>
+                            </div>
+                          </td>
+                          <td data-label="리스크" className={styles.riskCell}>
+                            {viewModel.riskSummary}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className={styles.expandedRow}>
+                            <td colSpan={6}>
+                              <div
+                                id={detailId}
+                                className={styles.expandedPanel}
+                              >
+                                {viewModel.detailSections.map((section) => (
+                                  <section
+                                    key={section.title}
+                                    className={styles.expandedSection}
+                                  >
+                                    <h4>{section.title}</h4>
+                                    <ul>
+                                      {section.lines.map((line, lineIndex) => (
+                                        <li
+                                          key={`${section.title}-${lineIndex}`}
+                                        >
+                                          {line}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </section>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -159,14 +339,34 @@ export function ReportDetail({
                 <tbody>
                   {sellRows.slice(0, 20).map((row, idx) => (
                     <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
-                      <td>{String(row.ticker ?? "-")}</td>
-                      <td>{String(row.action ?? "-")}</td>
-                      <td>{readNumber(row.last_price) ?? "-"}</td>
-                      <td>{formatPnlPercent(row.pnl_pct)}</td>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Action">{String(row.action ?? "-")}</td>
+                      <td data-label="Last">
+                        {readNumber(row.last_price) ?? "-"}
+                      </td>
+                      <td data-label="PnL%">{formatPnlPercent(row.pnl_pct)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {issueSections.length > 0 && (
+            <div className={styles.issuesWrap}>
+              <h3 className={styles.sectionTitle}>Issues</h3>
+              <div className={styles.issuesGrid}>
+                {issueSections.map((section) => (
+                  <details key={section.key} className={styles.issueSection}>
+                    <summary>{section.title}</summary>
+                    <ul>
+                      {section.items.map((item, index) => (
+                        <li key={`${section.key}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
             </div>
           )}
 

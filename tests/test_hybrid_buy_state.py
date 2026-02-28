@@ -153,6 +153,52 @@ def test_pullback_bounce_ready(monkeypatch):
     assert "bounce confirmed" in result.candidate["entry_state_reason"].lower()
 
 
+def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
+    candles = _simple_candles(10)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [1.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short", "RSI crossed above 50"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 51.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *a, **k: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *a, **k: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
+    assert result.candidate is not None
+    reasons = result.candidate["reasons"]
+    assert isinstance(reasons, list)
+    ids = {str(item.get("id")) for item in reasons}
+    assert {
+        "pattern_trend_pullback_bounce",
+        "entry_state_ready",
+        "trigger_close_reclaimed_ema_short",
+        "trigger_rsi_crossed_above_50",
+    }.issubset(ids)
+
+
 def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):
     candles = _simple_candles(10, base=100.0)
     monkeypatch.setattr(

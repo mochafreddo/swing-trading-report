@@ -184,6 +184,12 @@
   word-break: break-word;
 }
 
+.infoNote {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
 .tableWrap {
   margin-top: var(--space-4);
 }
@@ -216,6 +222,141 @@
   font-size: 0.875rem;
 }
 
+.reasonCell {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reasonChip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.chipPositive {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-soft);
+}
+
+.chipWarning {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: color-mix(in srgb, var(--danger) 80%, #fff 20%);
+}
+
+.chipNeutral {
+  background: color-mix(in srgb, var(--line) 25%, transparent);
+  color: var(--ink-muted);
+}
+
+.reasonSummary {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.riskCell {
+  color: var(--ink-muted);
+}
+
+.rowDetailToggle {
+  width: fit-content;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  color: var(--ink);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.rowDetailToggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.expandedRow td {
+  padding: var(--space-2) 0;
+}
+
+.expandedPanel {
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 10px;
+  padding: var(--space-2);
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.expandedSection h4 {
+  margin: 0;
+  color: var(--accent-soft);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.expandedSection ul {
+  margin: var(--space-1) 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 4px;
+}
+
+.expandedSection li {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.issuesWrap {
+  margin-top: var(--space-4);
+}
+
+.issuesGrid {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.issueSection {
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 10px;
+  padding: var(--space-2);
+  background: color-mix(in srgb, var(--panel) 78%, transparent);
+}
+
+.issueSection summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.issueSection ul {
+  margin: var(--space-2) 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 4px;
+}
+
+.issueSection li {
+  color: var(--ink-muted);
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
 .raw {
   margin-top: var(--space-3);
   border-radius: 10px;
@@ -239,5 +380,55 @@
 
   .metaGrid {
     grid-template-columns: 1fr;
+  }
+
+  .tableWrap table,
+  .tableWrap tbody,
+  .tableWrap tr,
+  .tableWrap td {
+    display: block;
+    width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tr {
+    border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    border-radius: 10px;
+    padding: var(--space-2);
+    margin-bottom: var(--space-2);
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+  }
+
+  .tableWrap td {
+    border: 0;
+    padding: 0;
+    margin: var(--space-1) 0 0;
+  }
+
+  .tableWrap td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--ink-muted);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+
+  .expandedRow {
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .expandedRow td::before {
+    content: none;
+  }
+
+  .expandedRow td {
+    margin: 0;
   }
 }

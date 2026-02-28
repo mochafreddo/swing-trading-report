@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -50,6 +51,43 @@ class HybridEvaluationResult:
     candidate: dict[str, Any] | None
     reason: str | None = None
     reason_kind: str | None = None
+
+
+def _slugify_reason_token(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "unknown"
+
+
+def _pattern_label(pattern: HybridPattern) -> str:
+    labels = {
+        HybridPattern.TREND_PULLBACK_BOUNCE: "눌림 반등",
+        HybridPattern.SWING_HIGH_BREAKOUT: "스윙 고점 돌파",
+        HybridPattern.RSI_OVERSOLD_REVERSAL: "RSI 과매도 반전",
+    }
+    return labels.get(pattern, pattern.value)
+
+
+def _pattern_reason_id_label(reason: str) -> tuple[str, str]:
+    if reason == "Close reclaimed EMA short":
+        return "trigger_close_reclaimed_ema_short", "EMA 단기선 회복"
+    if reason == "Bullish candle with rising volume":
+        return "trigger_bullish_candle_rising_volume", "양봉+거래량 증가"
+    if reason == "RSI crossed above 50":
+        return "trigger_rsi_crossed_above_50", "RSI 50 상향"
+    if reason == "Reversal candle near EMA short":
+        return "trigger_reversal_near_ema_short", "EMA 단기선 부근 반전"
+    if reason.startswith("Close broke above recent swing high with volume >"):
+        return (
+            "trigger_breakout_above_swing_high_with_volume",
+            "전고점 돌파(거래량 확인)",
+        )
+    if reason == "Reversal off EMA short/mid with volume":
+        return (
+            "trigger_reversal_off_ema_support_with_volume",
+            "EMA 지지 반전(거래량 확인)",
+        )
+    return f"trigger_{_slugify_reason_token(reason)}", reason
 
 
 def _to_finite_float(value: Any) -> float | None:
@@ -626,6 +664,31 @@ def evaluate_ticker_hybrid(
         f" volume_bonus={volume_confirmation_bonus:.2f},"
         f" extended_penalty={extended_penalty:.2f}"
     )
+    reasons: list[dict[str, Any]] = []
+
+    def add_reason(
+        *,
+        reason_id: str,
+        label: str,
+        kind: str,
+        status: str = "pass",
+        points: float | None = None,
+        value: float | str | None = None,
+        threshold: float | str | None = None,
+    ) -> None:
+        reason: dict[str, Any] = {
+            "id": reason_id,
+            "label": label,
+            "kind": kind,
+            "status": status,
+        }
+        if points is not None:
+            reason["points"] = points
+        if value is not None:
+            reason["value"] = value
+        if threshold is not None:
+            reason["threshold"] = threshold
+        reasons.append(reason)
 
     def fmt(value: float, digits: int = 2) -> str:
         if digits == 0:
@@ -654,6 +717,53 @@ def evaluate_ticker_hybrid(
         gap_guard_pct = settings.gap_atr_multiplier * atr_value / last_close
         gap_guard_up_price = last_close * (1 + gap_guard_pct)
         gap_guard_down_price = last_close * (1 - gap_guard_pct)
+
+    add_reason(
+        reason_id=f"pattern_{pattern.value}",
+        label=f"패턴: {_pattern_label(pattern)}",
+        kind="pattern",
+        points=pattern_weight,
+    )
+    add_reason(
+        reason_id=f"entry_state_{entry_state.lower()}",
+        label="READY(확인)" if entry_state == "READY" else "WATCH(대기)",
+        kind="state",
+        status="pass" if entry_state == "READY" else "warn",
+        points=entry_state_score,
+        value=entry_state_reason,
+    )
+    for reason_text in pattern_reasons:
+        reason_id, reason_label = _pattern_reason_id_label(reason_text)
+        add_reason(
+            reason_id=reason_id,
+            label=reason_label,
+            kind="trigger",
+            points=0.0,
+            value=reason_text,
+        )
+    if has_volume_confirmation:
+        add_reason(
+            reason_id="volume_confirmation",
+            label="거래량 확인",
+            kind="trigger",
+            points=volume_confirmation_bonus,
+        )
+    if extended_breakout:
+        add_reason(
+            reason_id="breakout_extended",
+            label="돌파 과열 구간",
+            kind="risk",
+            status="warn",
+            points=-extended_penalty,
+        )
+    if gap_guard_pct is not None:
+        add_reason(
+            reason_id="gap_guard_atr",
+            label="ATR 기반 갭 가드",
+            kind="risk",
+            points=0.0,
+            value=gap_guard_pct,
+        )
 
     sma_trend_key = f"sma{settings.sma_trend_period}"
     ema_short_key = f"ema{settings.ema_short_period}"
@@ -708,6 +818,7 @@ def evaluate_ticker_hybrid(
         "score_value": score_value,
         "score": f"{score_value:.2f}",
         "score_notes": score_notes,
+        "reasons": reasons,
     }
     candidate[sma_trend_key] = sma_trend_value
     candidate[ema_short_key] = ema_short_value

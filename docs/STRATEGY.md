@@ -238,6 +238,32 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 - gap guard는 **신호봉 종가 시점의 ATR(t)** 를 사용해 다음 세션 entry 판단에 필요한 최신 변동성 가이드를 제공합니다.
 - 이는 “다음 거래일 시초 갭” 해석을 위한 **가드 값**이며, `sab entry` 단계에서 `ENTER|REVIEW|SKIP` 판정에 사용됩니다.
 
+### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
+
+buy candidate는 기존 문자열 필드(`score_notes`, `pattern_reasons`, `entry_state_reason`)를 유지하면서,
+UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `reasons[]`를 함께 포함합니다.
+
+- 스키마(요약):
+  - `id`: 근거 식별자(예: `ema_cross`, `entry_state_ready`, `gap_within_limit`)
+  - `label`: 사용자 표시용 텍스트
+  - `kind`: `signal | filter | pattern | state | trigger | risk`
+  - `status`: `pass | warn` (기본 `pass`)
+  - `points`(선택): 점수 기여도
+  - `value`/`threshold`(선택): 근거 수치/임계치
+- `strategy_mode=ema_cross` 예:
+  - `ema_cross`, `rsi_rebound`, `gap_within_limit`, `liquidity`
+  - 옵션 사용 시 `sma200_trend_filter`, `ema_slope_up`
+  - RS 약세 시 `rs_below_benchmark`(`status=warn`)
+- `strategy_mode=sma_ema_hybrid` 예:
+  - `pattern_*`, `entry_state_*`
+  - 패턴 트리거(`trigger_*`)
+  - 리스크 가드(`gap_guard_atr`, 필요 시 `breakout_extended`)
+
+운영/호환성 원칙:
+
+- 구조화 필드를 우선 사용하고, 없는 경우 기존 문자열 필드로 폴백합니다.
+- 기존 자동화/스크립트와의 호환을 위해 레거시 문자열 필드는 제거하지 않습니다.
+
 ## 6. Sell 로직 설계
 
 Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
