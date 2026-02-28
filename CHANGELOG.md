@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.4.0...v1.4.1) (2026-02-28)
+
+
+### Bug Fixes
+
+* **ci:** scan/watchlist와 sell US 클래스 심볼 폴백 오류 수정 ([14cb0a1](https://github.com/mochafreddo/swing-trading-report/commit/14cb0a12ae30313193098db21772b3bce1eacb25))
+
 ## [1.4.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.3.3...v1.4.0) (2026-02-27)
 
 
