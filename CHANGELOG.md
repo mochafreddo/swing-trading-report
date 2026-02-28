@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.4.1...v1.5.0) (2026-02-28)
+
+
+### Features
+
+* **web:** 홀딩스 티커 검색 UX와 기본값 개선 ([7bfb088](https://github.com/mochafreddo/swing-trading-report/commit/7bfb088c607a6968fc03ffca63f49e1c6a1c33f9))
+
 ## [1.4.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.4.0...v1.4.1) (2026-02-28)
 
 
