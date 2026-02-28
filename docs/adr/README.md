@@ -9,3 +9,4 @@
 - [ADR-0005 자동 실행: GitHub Actions 런너 + Supabase 저장소](ADR-0005-automation-github-actions-supabase.md) - 상태: Accepted (2026-02-08)
 - [ADR-0006 v1.1 오픈 결정 정리](ADR-0006-open-decisions-v1.1.md) - 상태: Superseded (2026-02-23, ADR-0007로 대체)
 - [ADR-0007 v1.1 현재 아키텍처 기준선(report_index/관리자 인증)](ADR-0007-v1.1-current-architecture-baseline.md) - 상태: Accepted (2026-02-23)
+- [ADR-0008 Holdings 티커 입력 UX: 티커 디렉토리(캐시) + 검색/최근 후보](ADR-0008-holdings-ticker-directory.md) - 상태: Accepted (2026-02-28)

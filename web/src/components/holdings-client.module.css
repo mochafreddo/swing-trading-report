@@ -46,6 +46,59 @@
   gap: var(--space-2);
 }
 
+.lookupPanel {
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.lookupPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.lookupPanelTitle {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.lookupPanelLink {
+  font-size: 0.8rem;
+}
+
+.lookupList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.lookupItemButton {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  text-align: left;
+}
+
+.lookupTicker {
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+}
+
+.lookupName {
+  font-size: 0.875rem;
+}
+
 .formActions {
   display: flex;
   gap: var(--space-2);

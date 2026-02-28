@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 
 import type { HoldingRecord } from "@/lib/types";
 
-import { EMPTY_FORM, type HoldingFormState } from "./form-state";
+import { createEmptyHoldingForm, type HoldingFormState } from "./form-state";
 import {
   buildCreatePayload,
   buildPatchPayload,
@@ -19,9 +19,12 @@ interface UseHoldingsFormOptions {
 export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
   const [submitting, setSubmitting] = useState(false);
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
-  const [form, setForm] = useState<HoldingFormState>(EMPTY_FORM);
-  const [baselineForm, setBaselineForm] =
-    useState<HoldingFormState>(EMPTY_FORM);
+  const [form, setForm] = useState<HoldingFormState>(() =>
+    createEmptyHoldingForm(),
+  );
+  const [baselineForm, setBaselineForm] = useState<HoldingFormState>(() =>
+    createEmptyHoldingForm(),
+  );
 
   const modeLabel = useMemo(
     () => (editingTicker ? `Edit ${editingTicker}` : "Create Holding"),
@@ -122,8 +125,9 @@ export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
         }
 
         setEditingTicker(null);
-        setForm(EMPTY_FORM);
-        setBaselineForm(EMPTY_FORM);
+        const emptyForm = createEmptyHoldingForm();
+        setForm(emptyForm);
+        setBaselineForm(emptyForm);
         await refresh();
       } catch (submitError) {
         setError(
@@ -144,9 +148,10 @@ export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
   }, []);
 
   const cancelEdit = useCallback(() => {
+    const emptyForm = createEmptyHoldingForm();
     setEditingTicker(null);
-    setForm(EMPTY_FORM);
-    setBaselineForm(EMPTY_FORM);
+    setForm(emptyForm);
+    setBaselineForm(emptyForm);
   }, []);
 
   return {

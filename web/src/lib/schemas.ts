@@ -113,6 +113,16 @@ export const reportDetailQuerySchema = z.object({
   key: z.string().trim().min(1),
 });
 
+export const tickerSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(120),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const recentBuyCandidatesQuerySchema = z.object({
+  limitReports: z.coerce.number().int().min(1).max(50).default(10),
+  limitCandidates: z.coerce.number().int().min(1).max(100).default(30),
+});
+
 export const holdingListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
   cursor: z.string().trim().min(1).optional(),

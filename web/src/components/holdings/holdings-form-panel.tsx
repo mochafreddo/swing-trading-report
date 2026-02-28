@@ -4,15 +4,31 @@ import styles from "../holdings-client.module.css";
 
 import type { HoldingFormState } from "./form-state";
 
+interface TickerLookupItem {
+  ticker: string;
+  name: string | null;
+}
+
 interface HoldingsFormPanelProps {
   modeLabel: string;
   submitting: boolean;
   editingTicker: string | null;
   hasUnsavedChanges: boolean;
   form: HoldingFormState;
+  tickerLookupQuery: string;
+  tickerLookupResults: TickerLookupItem[];
+  tickerLookupLoading: boolean;
+  tickerLookupError: string | null;
+  recentCandidates: TickerLookupItem[];
+  recentCandidatesReportKey: string | null;
+  recentCandidatesReportDate: string | null;
+  recentCandidatesLoading: boolean;
+  recentCandidatesError: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onCancelEdit: () => void;
   onFieldChange: (field: keyof HoldingFormState, value: string) => void;
+  onTickerLookupQueryChange: (value: string) => void;
+  onSelectTicker: (ticker: string) => void;
 }
 
 export function HoldingsFormPanel({
@@ -21,9 +37,20 @@ export function HoldingsFormPanel({
   editingTicker,
   hasUnsavedChanges,
   form,
+  tickerLookupQuery,
+  tickerLookupResults,
+  tickerLookupLoading,
+  tickerLookupError,
+  recentCandidates,
+  recentCandidatesReportKey,
+  recentCandidatesReportDate,
+  recentCandidatesLoading,
+  recentCandidatesError,
   onSubmit,
   onCancelEdit,
   onFieldChange,
+  onTickerLookupQueryChange,
+  onSelectTicker,
 }: HoldingsFormPanelProps) {
   return (
     <aside className="panel">
@@ -56,6 +83,85 @@ export function HoldingsFormPanel({
             required
           />
         </label>
+        <label>
+          Ticker Search
+          <input
+            name="tickerLookup"
+            autoComplete="off"
+            value={tickerLookupQuery}
+            onChange={(event) => onTickerLookupQueryChange(event.target.value)}
+            placeholder="코스트코 / COST / 애브비"
+          />
+        </label>
+        {tickerLookupLoading && <p className="subtle">검색 중…</p>}
+        {tickerLookupError && (
+          <p className={styles.error} role="status" aria-live="polite">
+            {tickerLookupError}
+          </p>
+        )}
+        {tickerLookupResults.length > 0 && (
+          <ul className={styles.lookupList}>
+            {tickerLookupResults.map((item) => (
+              <li key={item.ticker}>
+                <button
+                  type="button"
+                  className={styles.lookupItemButton}
+                  onClick={() => onSelectTicker(item.ticker)}
+                >
+                  <span className={styles.lookupTicker}>{item.ticker}</span>
+                  <span className={styles.lookupName}>
+                    {item.name ?? "이름 없음"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <section className={styles.lookupPanel}>
+          <div className={styles.lookupPanelHeader}>
+            <h3 className={styles.lookupPanelTitle}>최근 Buy 후보</h3>
+            {recentCandidatesReportKey && (
+              <a
+                href={`/reports?key=${encodeURIComponent(recentCandidatesReportKey)}`}
+                className={styles.lookupPanelLink}
+              >
+                리포트 보기
+              </a>
+            )}
+          </div>
+          {recentCandidatesReportDate && (
+            <p className="subtle">{recentCandidatesReportDate} 리포트 기준</p>
+          )}
+          {recentCandidatesLoading && <p className="subtle">로딩 중…</p>}
+          {recentCandidatesError && (
+            <p className={styles.error} role="status" aria-live="polite">
+              {recentCandidatesError}
+            </p>
+          )}
+          {!recentCandidatesLoading &&
+            !recentCandidatesError &&
+            recentCandidates.length <= 0 && (
+              <p className="subtle">표시할 후보가 없습니다.</p>
+            )}
+          {!recentCandidatesLoading && recentCandidates.length > 0 && (
+            <ul className={styles.lookupList}>
+              {recentCandidates.map((item) => (
+                <li key={`recent-${item.ticker}`}>
+                  <button
+                    type="button"
+                    className={styles.lookupItemButton}
+                    onClick={() => onSelectTicker(item.ticker)}
+                  >
+                    <span className={styles.lookupTicker}>{item.ticker}</span>
+                    <span className={styles.lookupName}>
+                      {item.name ?? "이름 없음"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <div className={styles.rowTwo}>
           <label>

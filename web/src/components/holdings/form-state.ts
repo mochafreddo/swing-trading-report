@@ -11,15 +11,25 @@ export interface HoldingFormState {
   target_override: string;
 }
 
-export const EMPTY_FORM: HoldingFormState = {
-  ticker: "",
-  quantity: "",
-  entry_price: "",
-  entry_currency: "",
-  entry_date: "",
-  strategy: "",
-  notes: "",
-  tags: "",
-  stop_override: "",
-  target_override: "",
-};
+function formatTodayLocalDate(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+export function createEmptyHoldingForm(): HoldingFormState {
+  return {
+    ticker: "",
+    quantity: "",
+    entry_price: "",
+    entry_currency: "USD",
+    entry_date: formatTodayLocalDate(),
+    strategy: "swing",
+    notes: "",
+    tags: "",
+    stop_override: "",
+    target_override: "",
+  };
+}
+
+export const EMPTY_FORM: HoldingFormState = createEmptyHoldingForm();
