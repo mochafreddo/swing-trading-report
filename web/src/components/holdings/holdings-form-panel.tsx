@@ -1,4 +1,5 @@
 import type { FormEvent } from "react";
+import Link from "next/link";
 
 import styles from "../holdings-client.module.css";
 
@@ -121,12 +122,12 @@ export function HoldingsFormPanel({
           <div className={styles.lookupPanelHeader}>
             <h3 className={styles.lookupPanelTitle}>최근 Buy 후보</h3>
             {recentCandidatesReportKey && (
-              <a
+              <Link
                 href={`/reports?key=${encodeURIComponent(recentCandidatesReportKey)}`}
                 className={styles.lookupPanelLink}
               >
                 리포트 보기
-              </a>
+              </Link>
             )}
           </div>
           {recentCandidatesReportDate && (

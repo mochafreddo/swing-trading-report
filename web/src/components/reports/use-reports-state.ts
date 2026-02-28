@@ -13,6 +13,7 @@ import {
   parseReportType,
   readApiError,
 } from "./helpers";
+import { resolveSelectedKeyFromUrl } from "./selected-key-sync";
 import type {
   ReportJson,
   ReportsFilterType,
@@ -112,7 +113,6 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const nextQuery = searchParams.get("q") ?? "";
     const nextAppliedQuery = nextQuery.trim();
     const nextKeyRaw = searchParams.get("key");
-    const nextKey = nextKeyRaw && nextKeyRaw.trim() ? nextKeyRaw : null;
     const nextShowRaw = searchParams.get("raw") === "1";
 
     setReportType((prev) => (prev === nextType ? prev : nextType));
@@ -120,17 +120,14 @@ export function useReportsState(initialState?: ReportsInitialState) {
     setAppliedQuery((prev) =>
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
     );
-    setSelectedKey((prev) => {
-      if (!nextKey) {
-        return prev;
-      }
-      if (items.length > 0 && !items.some((item) => item.key === nextKey)) {
-        return prev;
-      }
-      return prev === nextKey ? prev : nextKey;
-    });
+    setSelectedKey((prev) =>
+      resolveSelectedKeyFromUrl({
+        previousSelectedKey: prev,
+        nextKeyRaw,
+      }),
+    );
     setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [items, searchParams]);
+  }, [searchParams]);
 
   useEffect(() => {
     const nextAppliedQuery = query.trim();
