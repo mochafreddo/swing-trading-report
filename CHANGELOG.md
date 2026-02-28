@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.5.0...v1.5.1) (2026-02-28)
+
+
+### Bug Fixes
+
+* **web:** 리포트 summary 텍스트 overflow를 방지 ([b92d328](https://github.com/mochafreddo/swing-trading-report/commit/b92d328002978597866638f4a859132107613979))
+
 ## [1.5.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.4.1...v1.5.0) (2026-02-28)
 
 
