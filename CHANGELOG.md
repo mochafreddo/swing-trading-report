@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.5.1...v1.6.0) (2026-02-28)
+
+
+### Features
+
+* **report:** 매수 후보 근거 구조화 및 상세 표시 고도화 ([f3cf338](https://github.com/mochafreddo/swing-trading-report/commit/f3cf338d1deac75987d7866057b84ecf46a24f6e))
+* **web:** 리포트 페이지 캐시 계층과 새로고침 플로우 추가 ([3d0273e](https://github.com/mochafreddo/swing-trading-report/commit/3d0273e3df2833db84edcdc242eef94b61d4d2d9))
+
+
+### Bug Fixes
+
+* **reports:** 키 동기화 루프로 인한 무한 로딩 재발 방지 ([df6a507](https://github.com/mochafreddo/swing-trading-report/commit/df6a50779c226eda91a323299a79754c2766a5b7))
+
 ## [1.5.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.5.0...v1.5.1) (2026-02-28)
 
 
