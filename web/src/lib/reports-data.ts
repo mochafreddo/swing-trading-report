@@ -1,4 +1,5 @@
 import { getSupabaseEnv } from "@/lib/env.server";
+import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
 import { parseReportStorageKey } from "@/lib/report-key";
 import {
   downloadStorageJson,
@@ -13,6 +14,11 @@ import type {
 } from "@/lib/types";
 
 const REPORT_SEARCH_PAGE_SIZE = 100;
+const REPORT_LIST_CACHE_TTL_MS = 5_000;
+const REPORT_SEARCH_CACHE_TTL_MS = 10_000;
+const REPORT_DETAIL_CACHE_TTL_MS = 60 * 60 * 1000;
+const REPORT_LIST_CACHE_MAX_ENTRIES = 100;
+const REPORT_DETAIL_CACHE_MAX_ENTRIES = 200;
 
 type ReportIndexRow = Awaited<
   ReturnType<typeof fetchReportIndexPage>
@@ -62,10 +68,45 @@ export interface ListReportsOptions {
   q: string;
   limit: number;
   searchWindow: number;
+  refresh?: boolean;
 }
 
-export async function listReports(
-  options: ListReportsOptions,
+type ListReportsInput = Omit<ListReportsOptions, "refresh">;
+
+const reportListCache = createMemoryTtlLruCache<ReportsListResponse>({
+  maxEntries: REPORT_LIST_CACHE_MAX_ENTRIES,
+});
+
+const reportDetailCache = createMemoryTtlLruCache<{
+  key: string;
+  report: Record<string, unknown>;
+}>({
+  maxEntries: REPORT_DETAIL_CACHE_MAX_ENTRIES,
+});
+
+function isReportsCacheEnabled(): boolean {
+  if (process.env.NODE_ENV !== "test") {
+    return true;
+  }
+  return process.env.SAB_ENABLE_REPORTS_CACHE_IN_TEST === "1";
+}
+
+function buildListReportsCacheKey(options: ListReportsInput): string {
+  const normalizedQuery = options.q.trim().toLowerCase();
+  return [
+    `type=${options.type}`,
+    `q=${normalizedQuery}`,
+    `limit=${options.limit}`,
+    `searchWindow=${options.searchWindow}`,
+  ].join("&");
+}
+
+function resolveListReportsTtlMs(query: string): number {
+  return query.trim() ? REPORT_SEARCH_CACHE_TTL_MS : REPORT_LIST_CACHE_TTL_MS;
+}
+
+async function listReportsUncached(
+  options: ListReportsInput,
 ): Promise<ReportsListResponse> {
   const { type, q, limit, searchWindow } = options;
 
@@ -171,6 +212,29 @@ export async function listReports(
   };
 }
 
+export async function listReports(
+  options: ListReportsOptions,
+): Promise<ReportsListResponse> {
+  const input: ListReportsInput = {
+    type: options.type,
+    q: options.q.trim(),
+    limit: options.limit,
+    searchWindow: options.searchWindow,
+  };
+  const refresh = options.refresh === true;
+
+  if (!isReportsCacheEnabled()) {
+    return listReportsUncached(input);
+  }
+
+  return reportListCache.getOrLoad({
+    key: buildListReportsCacheKey(input),
+    ttlMs: resolveListReportsTtlMs(input.q),
+    refresh,
+    load: () => listReportsUncached(input),
+  });
+}
+
 export class InvalidReportKeyError extends Error {
   readonly status = 400;
 
@@ -179,7 +243,19 @@ export class InvalidReportKeyError extends Error {
   }
 }
 
-export async function readReportDetail(key: string): Promise<{
+async function readReportDetailUncached(key: string): Promise<{
+  key: string;
+  report: Record<string, unknown>;
+}> {
+  const env = getSupabaseEnv();
+  const report = await downloadStorageJson(env.SUPABASE_REPORTS_BUCKET, key);
+  return { key, report };
+}
+
+export async function readReportDetail(
+  key: string,
+  options?: { refresh?: boolean },
+): Promise<{
   key: string;
   report: Record<string, unknown>;
 }> {
@@ -188,10 +264,20 @@ export async function readReportDetail(key: string): Promise<{
     throw new InvalidReportKeyError();
   }
 
-  const env = getSupabaseEnv();
-  const report = await downloadStorageJson(
-    env.SUPABASE_REPORTS_BUCKET,
-    parsedKey.key,
-  );
-  return { key: parsedKey.key, report };
+  const refresh = options?.refresh === true;
+  if (!isReportsCacheEnabled()) {
+    return readReportDetailUncached(parsedKey.key);
+  }
+
+  return reportDetailCache.getOrLoad({
+    key: parsedKey.key,
+    ttlMs: REPORT_DETAIL_CACHE_TTL_MS,
+    refresh,
+    load: () => readReportDetailUncached(parsedKey.key),
+  });
+}
+
+export function __resetReportsCacheForTests(): void {
+  reportListCache.clear();
+  reportDetailCache.clear();
 }

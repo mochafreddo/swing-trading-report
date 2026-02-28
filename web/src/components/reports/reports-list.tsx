@@ -17,9 +17,11 @@ interface ReportsListProps {
   warnings: ReportSearchWarning[];
   selectedKey: string | null;
   loadingList: boolean;
+  refreshing: boolean;
   onReportTypeChange: (value: ReportsFilterType) => void;
   onQueryChange: (value: string) => void;
   onSelectKey: (key: string) => void;
+  onRefresh: () => void;
 }
 
 export function ReportsList({
@@ -34,14 +36,26 @@ export function ReportsList({
   warnings,
   selectedKey,
   loadingList,
+  refreshing,
   onReportTypeChange,
   onQueryChange,
   onSelectKey,
+  onRefresh,
 }: ReportsListProps) {
   return (
     <>
       <header className="panel">
-        <h2 className="panelTitle">Reports</h2>
+        <div className={styles.listHeaderRow}>
+          <h2 className="panelTitle">Reports</h2>
+          <button
+            type="button"
+            className={styles.toggleButton}
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? "새로고침 중..." : "새로고침"}
+          </button>
+        </div>
         <p className="subtle">Supabase Storage 리포트 탐색</p>
 
         <div className={styles.controls}>

@@ -68,9 +68,13 @@ flowchart LR
 ### 4.3 웹 리포트 조회 플로우
 
 1. `/api/reports`는 `report_index`에서 목록을 조회합니다.
-2. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
-3. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
-4. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
+2. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
+3. 서버(`web/src/lib/reports-data.ts`)는 in-memory TTL/LRU 캐시를 사용합니다.
+   - 목록: `type/q/limit/searchWindow` 키 기준 단기 TTL(검색 없음 5초, 검색 10초)
+   - 상세: `report_key` 기준 장기 TTL(1시간)
+4. 클라이언트(`ReportsClient`)는 목록/상세 요청에 in-flight dedupe + 세션 메모리 캐시를 적용합니다.
+5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
+6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
 
 ### 4.4 웹 보유종목 CRUD 플로우
 

@@ -21,6 +21,222 @@ import type {
 } from "./types";
 
 const PAGE_LIMIT = 30;
+const LIST_CACHE_TTL_MS = 5_000;
+const SEARCH_CACHE_TTL_MS = 10_000;
+const DETAIL_CACHE_TTL_MS = 60 * 60 * 1000;
+const LIST_CACHE_MAX_ENTRIES = 100;
+const DETAIL_CACHE_MAX_ENTRIES = 200;
+
+interface TimedCacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+type ReportDetailResponse = { key: string; report: ReportJson };
+
+interface ReportsListRequestPathOptions {
+  type: ReportsFilterType;
+  limit: number;
+  query: string;
+  refresh?: boolean;
+}
+
+interface ReportDetailRequestPathOptions {
+  key: string;
+  refresh?: boolean;
+}
+
+const reportListCache = new Map<string, TimedCacheEntry<ReportsListResponse>>();
+const reportListInFlight = new Map<string, Promise<ReportsListResponse>>();
+const reportDetailCache = new Map<
+  string,
+  TimedCacheEntry<ReportDetailResponse>
+>();
+const reportDetailInFlight = new Map<string, Promise<ReportDetailResponse>>();
+
+function readTimedCache<T>(
+  cache: Map<string, TimedCacheEntry<T>>,
+  key: string,
+): T | null {
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function writeTimedCache<T>(
+  cache: Map<string, TimedCacheEntry<T>>,
+  key: string,
+  value: T,
+  ttlMs: number,
+  maxEntries: number,
+): void {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
+function resolveListCacheTtlMs(query: string): number {
+  return query.trim() ? SEARCH_CACHE_TTL_MS : LIST_CACHE_TTL_MS;
+}
+
+function buildListCacheKey(
+  reportType: ReportsFilterType,
+  appliedQuery: string,
+): string {
+  const normalizedQuery = appliedQuery.trim().toLowerCase();
+  return `type=${reportType}&q=${normalizedQuery}&limit=${PAGE_LIMIT}`;
+}
+
+export function buildReportsListRequestPath(
+  options: ReportsListRequestPathOptions,
+): string {
+  const params = new URLSearchParams({
+    type: options.type,
+    limit: String(options.limit),
+  });
+  if (options.query) {
+    params.set("q", options.query);
+  }
+  if (options.refresh) {
+    params.set("refresh", "1");
+  }
+  return `/api/reports?${params.toString()}`;
+}
+
+export function buildReportDetailRequestPath(
+  options: ReportDetailRequestPathOptions,
+): string {
+  const params = new URLSearchParams({ key: options.key });
+  if (options.refresh) {
+    params.set("refresh", "1");
+  }
+  return `/api/reports/detail?${params.toString()}`;
+}
+
+async function fetchReportsListCached(
+  reportType: ReportsFilterType,
+  appliedQuery: string,
+  refresh = false,
+): Promise<ReportsListResponse> {
+  const cacheKey = buildListCacheKey(reportType, appliedQuery);
+  if (!refresh) {
+    const cached = readTimedCache(reportListCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const inFlight = reportListInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+  }
+
+  const load = async () => {
+    const path = buildReportsListRequestPath({
+      type: reportType,
+      limit: PAGE_LIMIT,
+      query: appliedQuery,
+      refresh,
+    });
+    const response = await fetch(path, {
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as unknown;
+    if (!response.ok) {
+      throw new Error(readApiError(payload) || "Failed to load reports");
+    }
+
+    const typed = payload as ReportsListResponse;
+    writeTimedCache(
+      reportListCache,
+      cacheKey,
+      typed,
+      resolveListCacheTtlMs(appliedQuery),
+      LIST_CACHE_MAX_ENTRIES,
+    );
+    return typed;
+  };
+
+  if (refresh) {
+    return load();
+  }
+
+  const loadPromise = load();
+
+  reportListInFlight.set(cacheKey, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    reportListInFlight.delete(cacheKey);
+  }
+}
+
+async function fetchReportDetailCached(
+  key: string,
+  refresh = false,
+): Promise<ReportDetailResponse> {
+  if (!refresh) {
+    const cached = readTimedCache(reportDetailCache, key);
+    if (cached) {
+      return cached;
+    }
+
+    const inFlight = reportDetailInFlight.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+  }
+
+  const load = async () => {
+    const path = buildReportDetailRequestPath({
+      key,
+      refresh,
+    });
+    const response = await fetch(path, {
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as unknown;
+    if (!response.ok) {
+      throw new Error(readApiError(payload) || "Failed to load report detail");
+    }
+    const typed = payload as ReportDetailResponse;
+    writeTimedCache(
+      reportDetailCache,
+      key,
+      typed,
+      DETAIL_CACHE_TTL_MS,
+      DETAIL_CACHE_MAX_ENTRIES,
+    );
+    return typed;
+  };
+
+  if (refresh) {
+    return load();
+  }
+
+  const loadPromise = load();
+
+  reportDetailInFlight.set(key, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    reportDetailInFlight.delete(key);
+  }
+}
 
 export function useReportsState(initialState?: ReportsInitialState) {
   const searchParams = useSearchParams();
@@ -61,7 +277,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [showRaw, setShowRaw] = useState(
     () => initialState?.showRaw ?? searchParams.get("raw") === "1",
   );
+  const [refreshToken, setRefreshToken] = useState(0);
   const skipInitialListFetch = useRef(Boolean(initialState));
+  const consumedListRefreshToken = useRef(0);
+  const consumedDetailRefreshToken = useRef(0);
   const skipInitialDetailFetchKey = useRef<string | null>(
     initialState?.detail &&
       initialState.detailKey &&
@@ -158,7 +377,11 @@ export function useReportsState(initialState?: ReportsInitialState) {
       return;
     }
 
-    const controller = new AbortController();
+    let cancelled = false;
+    const forceRefresh = refreshToken > consumedListRefreshToken.current;
+    if (forceRefresh) {
+      consumedListRefreshToken.current = refreshToken;
+    }
 
     const load = async () => {
       setLoadingList(true);
@@ -166,25 +389,14 @@ export function useReportsState(initialState?: ReportsInitialState) {
       setWarnings([]);
 
       try {
-        const params = new URLSearchParams({
-          type: reportType,
-          limit: String(PAGE_LIMIT),
-        });
-        if (appliedQuery) {
-          params.set("q", appliedQuery);
+        const typed = await fetchReportsListCached(
+          reportType,
+          appliedQuery,
+          forceRefresh,
+        );
+        if (cancelled) {
+          return;
         }
-
-        const response = await fetch(`/api/reports?${params.toString()}`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(readApiError(payload) || "Failed to load reports");
-        }
-
-        const typed = payload as ReportsListResponse;
         setItems(typed.items);
         setTotal(typed.total);
         setSearched(typed.searched);
@@ -200,7 +412,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
           return firstKey;
         });
       } catch (loadError) {
-        if (controller.signal.aborted) {
+        if (cancelled) {
           return;
         }
         const message =
@@ -209,7 +421,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
             : "Failed to load reports";
         setError(message);
       } finally {
-        if (!controller.signal.aborted) {
+        if (!cancelled) {
           setLoadingList(false);
         }
       }
@@ -217,8 +429,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
     void load();
 
-    return () => controller.abort();
-  }, [appliedQuery, reportType]);
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedQuery, reportType, refreshToken]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -231,32 +445,26 @@ export function useReportsState(initialState?: ReportsInitialState) {
       return;
     }
 
-    const controller = new AbortController();
+    let cancelled = false;
+    const forceRefresh = refreshToken > consumedDetailRefreshToken.current;
+    if (forceRefresh) {
+      consumedDetailRefreshToken.current = refreshToken;
+    }
     const loadDetail = async () => {
       setLoadingDetail(true);
       setError(null);
 
       try {
-        const params = new URLSearchParams({ key: selectedKey });
-        const response = await fetch(
-          `/api/reports/detail?${params.toString()}`,
-          {
-            signal: controller.signal,
-            cache: "no-store",
-          },
+        const typedPayload = await fetchReportDetailCached(
+          selectedKey,
+          forceRefresh,
         );
-        const payload = (await response.json()) as unknown;
-
-        if (!response.ok) {
-          throw new Error(
-            readApiError(payload) || "Failed to load report detail",
-          );
+        if (cancelled) {
+          return;
         }
-
-        const typedPayload = payload as { key: string; report: ReportJson };
         setDetail(typedPayload.report);
       } catch (detailError) {
-        if (controller.signal.aborted) {
+        if (cancelled) {
           return;
         }
         const message =
@@ -266,7 +474,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
         setError(message);
         setDetail(null);
       } finally {
-        if (!controller.signal.aborted) {
+        if (!cancelled) {
           setLoadingDetail(false);
         }
       }
@@ -274,8 +482,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
     void loadDetail();
 
-    return () => controller.abort();
-  }, [selectedKey]);
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshToken, selectedKey]);
 
   const summary = useMemo(() => asRecord(detail?.summary), [detail]);
   const buyRows = useMemo(() => asRecordArray(detail?.candidates), [detail]);
@@ -287,6 +497,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
   const toggleShowRaw = useCallback(() => {
     setShowRaw((prev) => !prev);
+  }, []);
+
+  const refreshReports = useCallback(() => {
+    setRefreshToken((prev) => prev + 1);
   }, []);
 
   return {
@@ -312,6 +526,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     setReportType,
     setQuery,
     setSelectedKey,
+    refreshReports,
     toggleShowRaw,
   };
 }

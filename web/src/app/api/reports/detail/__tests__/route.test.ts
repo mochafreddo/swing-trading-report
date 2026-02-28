@@ -85,6 +85,8 @@ import {
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { downloadStorageJson, SupabaseApiError } from "@/lib/supabase-admin";
 
+const CACHE_CONTROL_VALUE = "private, no-store, max-age=0, must-revalidate";
+
 function makeRequest(query = ""): NextRequest {
   const suffix = query ? `?${query}` : "";
   return new NextRequest(`http://localhost:55300/api/reports/detail${suffix}`);
@@ -107,6 +109,7 @@ describe("GET /api/reports/detail route", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("x-auth-required")).toBe("1");
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Unauthorized");
     expect(vi.mocked(assertSameOrigin)).not.toHaveBeenCalled();
     expect(vi.mocked(assertLocalRequest)).not.toHaveBeenCalled();
@@ -121,6 +124,7 @@ describe("GET /api/reports/detail route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Cross-site blocked");
     expect(vi.mocked(assertLocalRequest)).not.toHaveBeenCalled();
   });
@@ -134,6 +138,7 @@ describe("GET /api/reports/detail route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Local only");
   });
 
@@ -145,6 +150,7 @@ describe("GET /api/reports/detail route", () => {
     };
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Invalid query parameters");
     expect(payload.details?.fieldErrors?.key).toBeDefined();
     expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
@@ -155,6 +161,7 @@ describe("GET /api/reports/detail route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Invalid report key format");
     expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
   });
@@ -169,6 +176,7 @@ describe("GET /api/reports/detail route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("Report not found");
     expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
       "reports",
@@ -191,6 +199,7 @@ describe("GET /api/reports/detail route", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.key).toBe("2026/02/2026-02-14.buy.json");
     expect(payload.report).toEqual(report);
   });
@@ -203,6 +212,7 @@ describe("GET /api/reports/detail route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.error).toBe("boom");
   });
 });

@@ -69,6 +69,25 @@ const toTags = z.preprocess(
   z.array(z.string().min(1).max(40)).max(20),
 );
 
+const toBooleanRefreshFlag = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true") {
+      return true;
+    }
+    if (normalized === "0" || normalized === "false" || normalized === "") {
+      return false;
+    }
+  }
+  if (value == null) {
+    return undefined;
+  }
+  return value;
+}, z.boolean().default(false));
+
 export const holdingTickerSchema = z
   .string()
   .trim()
@@ -107,10 +126,12 @@ export const reportListQuerySchema = z.object({
   type: z.enum(["all", "buy", "sell"]).default("all"),
   q: z.string().trim().default(""),
   limit: z.coerce.number().int().min(1).max(200).default(30),
+  refresh: toBooleanRefreshFlag,
 });
 
 export const reportDetailQuerySchema = z.object({
   key: z.string().trim().min(1),
+  refresh: toBooleanRefreshFlag,
 });
 
 export const tickerSearchQuerySchema = z.object({

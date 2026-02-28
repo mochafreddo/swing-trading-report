@@ -11,6 +11,22 @@ import { reportDetailQuerySchema } from "@/lib/schemas";
 import { SupabaseApiError } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
+const REPORTS_CACHE_CONTROL = "private, no-store, max-age=0, must-revalidate";
+
+function jsonWithNoStore(
+  payload: unknown,
+  init?: {
+    status?: number;
+    headers?: HeadersInit;
+  },
+): NextResponse {
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", REPORTS_CACHE_CONTROL);
+  return NextResponse.json(payload, {
+    status: init?.status,
+    headers,
+  });
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,33 +35,34 @@ export async function GET(request: NextRequest) {
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof AdminAuthError) {
-      return NextResponse.json(
+      return jsonWithNoStore(
         { error: error.message },
         { status: error.status, headers: error.headers },
       );
     }
     if (error instanceof SameOriginError) {
-      return NextResponse.json(
+      return jsonWithNoStore(
         { error: error.message },
         { status: error.status },
       );
     }
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json(
+      return jsonWithNoStore(
         { error: error.message },
         { status: error.status },
       );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonWithNoStore({ error: message }, { status: 500 });
   }
 
   const query = reportDetailQuerySchema.safeParse({
     key: request.nextUrl.searchParams.get("key") ?? undefined,
+    refresh: request.nextUrl.searchParams.get("refresh") ?? undefined,
   });
 
   if (!query.success) {
-    return NextResponse.json(
+    return jsonWithNoStore(
       {
         error: "Invalid query parameters",
         details: query.error.flatten(),
@@ -55,20 +72,22 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = await readReportDetail(query.data.key);
-    return NextResponse.json(payload);
+    const payload = await readReportDetail(query.data.key, {
+      refresh: query.data.refresh,
+    });
+    return jsonWithNoStore(payload);
   } catch (error) {
     if (error instanceof InvalidReportKeyError) {
-      return NextResponse.json(
+      return jsonWithNoStore(
         { error: error.message },
         { status: error.status },
       );
     }
     if (error instanceof SupabaseApiError && error.status === 404) {
-      return NextResponse.json({ error: "Report not found" }, { status: 404 });
+      return jsonWithNoStore({ error: "Report not found" }, { status: 404 });
     }
 
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonWithNoStore({ error: message }, { status: 500 });
   }
 }

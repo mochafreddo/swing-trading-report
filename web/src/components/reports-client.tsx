@@ -35,6 +35,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
     setReportType,
     setQuery,
     setSelectedKey,
+    refreshReports,
     toggleShowRaw,
   } = useReportsState(initialState);
 
@@ -53,9 +54,11 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
           warnings={warnings}
           selectedKey={selectedKey}
           loadingList={loadingList}
+          refreshing={loadingList || loadingDetail}
           onReportTypeChange={setReportType}
           onQueryChange={setQuery}
           onSelectKey={setSelectedKey}
+          onRefresh={refreshReports}
         />
       </div>
 

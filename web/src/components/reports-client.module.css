@@ -16,6 +16,13 @@
   margin-top: var(--space-3);
 }
 
+.listHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .controls label {
   display: grid;
   gap: var(--space-1);

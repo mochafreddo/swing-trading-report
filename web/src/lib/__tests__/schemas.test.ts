@@ -5,6 +5,8 @@ import {
   holdingListQuerySchema,
   holdingCreateSchema,
   holdingPatchSchema,
+  reportDetailQuerySchema,
+  reportListQuerySchema,
   runDispatchSchema,
 } from "@/lib/schemas";
 
@@ -216,5 +218,37 @@ describe("holding schemas", () => {
     });
 
     expect(parsed).toEqual({ ticker: "BRK.B.NYS" });
+  });
+});
+
+describe("report query schemas", () => {
+  it("normalizes report list refresh flag from query string", () => {
+    const parsed = reportListQuerySchema.parse({
+      type: "buy",
+      q: "aapl",
+      limit: "20",
+      refresh: "1",
+    });
+
+    expect(parsed.refresh).toBe(true);
+  });
+
+  it("defaults refresh=false when omitted", () => {
+    const parsed = reportListQuerySchema.parse({
+      type: "all",
+      q: "",
+      limit: "30",
+    });
+
+    expect(parsed.refresh).toBe(false);
+  });
+
+  it("normalizes report detail refresh flag from query string", () => {
+    const parsed = reportDetailQuerySchema.parse({
+      key: "2026/02/2026-02-14.buy.json",
+      refresh: "true",
+    });
+
+    expect(parsed.refresh).toBe(true);
   });
 });
