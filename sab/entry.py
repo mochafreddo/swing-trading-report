@@ -16,7 +16,6 @@ from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.kis_client import KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError, PykrxNotInstalledError
-from .holdings_loader import HoldingsLoadError
 from .market_data_common import infer_env_from_base_url
 from .report.entry_report import EntryReportRow, write_entry_report
 from .report.run_meta import build_run_meta
@@ -536,7 +535,7 @@ def run_entry(
 
     try:
         cfg = load_config(provider_override=normalized_provider)
-    except (ConfigLoadError, HoldingsLoadError) as exc:
+    except ConfigLoadError as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
 

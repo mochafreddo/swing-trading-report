@@ -55,13 +55,14 @@ flowchart LR
 5. 시그널 평가 후 후보를 점수순 정렬하고 통화/시장 상태 표시를 덧붙입니다.
 6. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다.
 7. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다.
+8. `scan`/`entry`는 holdings 파일을 읽지 않습니다.
 
 ### 4.2 `sell` 플로우
 
-1. 보유 종목을 로드해 런타임을 구성합니다.
+1. 보유 종목을 로드해 런타임을 구성합니다(로컬 기본: `holdings.yaml`).
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다.
-4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `HOLDINGS_FILE`로 주입합니다.
+4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
 
 ### 4.3 웹 리포트 조회 플로우
 
@@ -155,6 +156,8 @@ flowchart LR
 
 - 단일 사용자/로컬 중심 설계이며 멀티유저 권한 모델은 범위 밖입니다.
 - Python 엔진은 직접 Supabase `holdings`를 읽지 않고, 워크플로우 단계에서 파일 입력으로 브리지합니다.
+  - `scan`/`entry`는 holdings 비의존 경로를 유지합니다.
+  - `sell`만 holdings 파일 입력을 요구합니다.
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
 - Entry 파이프라인(`entry`)은 구현되어 로컬 JSON 리포트(`*.entry.json`)를 생성합니다.
   - 현재 범위는 로컬 파일 생성(MVP)이며, Storage/Index/UI 연동은 후속 단계로 분리되어 있습니다.

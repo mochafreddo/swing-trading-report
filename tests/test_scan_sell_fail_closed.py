@@ -15,7 +15,6 @@ from sab.holdings_loader import (
     Holding,
     HoldingsData,
     HoldingSettings,
-    HoldingsLoadError,
 )
 from sab.report.supabase_storage import SupabaseReportIndexError
 from sab.scan import run_scan
@@ -25,7 +24,7 @@ from sab.signals.sell_rules import SellEvaluation
 
 @pytest.mark.parametrize(
     "err",
-    [ConfigLoadError("bad config"), HoldingsLoadError("bad holdings")],
+    [ConfigLoadError("bad config")],
 )
 def test_run_scan_returns_1_when_config_loading_fails(err: Exception) -> None:
     with patch("sab.scan.load_config", side_effect=err):
@@ -293,10 +292,27 @@ def test_run_scan_fails_fast_when_collection_sets_fatal(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "err",
-    [ConfigLoadError("bad config"), HoldingsLoadError("bad holdings")],
+    [ConfigLoadError("bad config")],
 )
 def test_run_sell_returns_1_when_config_loading_fails(err: Exception) -> None:
     with patch("sab.sell.load_config", side_effect=err):
+        code = run_sell(provider=None)
+
+    assert code == 1
+
+
+def test_run_sell_returns_1_when_resolved_holdings_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings_path=str(tmp_path / "missing-holdings.yaml"),
+    )
+
+    with patch("sab.sell.load_config", return_value=cfg):
         code = run_sell(provider=None)
 
     assert code == 1

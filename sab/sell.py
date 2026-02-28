@@ -7,7 +7,7 @@ from . import sell_evaluation, sell_runtime
 from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .fx import resolve_fx_rate
-from .holdings_loader import HoldingsLoadError
+from .holdings_loader import HoldingsData, HoldingsLoadError, load_holdings
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import SellMarketData
 from .report.sell_report import SellReportRow, write_sell_report
@@ -17,8 +17,10 @@ from .signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybri
 from .signals.sell_rules import SellSettings, evaluate_sell_signals
 
 
-def _build_sell_runtime(cfg: Config, logger: logging.Logger) -> _SellRuntime:
-    return sell_runtime._build_sell_runtime(cfg, logger)
+def _build_sell_runtime(
+    cfg: Config, logger: logging.Logger, *, holdings: HoldingsData
+) -> _SellRuntime:
+    return sell_runtime._build_sell_runtime(cfg, logger, holdings=holdings)
 
 
 def _build_market_data_service() -> SellMarketData:
@@ -118,6 +120,13 @@ def _mark_missing_sell_market_data(runtime: _SellRuntime) -> None:
     runtime.logger.error("%s", message)
 
 
+def _resolve_sell_holdings(cfg: Config) -> HoldingsData:
+    if cfg.holdings.holdings:
+        return cfg.holdings
+    resolved_holdings_path = cfg.holdings_path or "holdings.yaml"
+    return load_holdings(resolved_holdings_path)
+
+
 def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     logger = logging.getLogger(__name__)
     try:
@@ -125,11 +134,17 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
             provider_override=provider,
             holdings_override=holdings_path,
         )
-    except (ConfigLoadError, HoldingsLoadError) as exc:
+    except ConfigLoadError as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
 
-    runtime = _build_sell_runtime(cfg, logger)
+    try:
+        holdings_data = _resolve_sell_holdings(cfg)
+    except HoldingsLoadError as exc:
+        logger.error("Holdings loading failed: %s", exc)
+        return 1
+
+    runtime = _build_sell_runtime(cfg, logger, holdings=holdings_data)
     _collect_sell_runtime(runtime, target_bars=_resolve_sell_target_bars(runtime))
     _mark_missing_sell_market_data(runtime)
     results = _evaluate_sell_runtime(runtime)

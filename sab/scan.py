@@ -8,7 +8,6 @@ from .config import Config, load_config, load_watchlist
 from .config_loader import ConfigLoadError
 from .data.holiday_cache import lookup_holiday
 from .fx import resolve_fx_rate
-from .holdings_loader import HoldingsLoadError
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import ScanMarketData
 from .report.markdown import write_report
@@ -160,7 +159,7 @@ def run_scan(
             limit_override=limit,
             markets_override=markets_override,
         )
-    except (ConfigLoadError, HoldingsLoadError) as exc:
+    except ConfigLoadError as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1
 

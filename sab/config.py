@@ -421,7 +421,6 @@ class _DataSection:
     data_dir: str
     watchlist_path: str | None
     holdings_path: str | None
-    holdings: HoldingsData
     screener_enabled: bool
     screener_limit: int
     screener_only: bool
@@ -562,7 +561,6 @@ def _parse_data_section(
         data_dir=os.getenv("DATA_DIR") or parser.from_yaml("data.data_dir", "data"),
         watchlist_path=watchlist_path,
         holdings_path=holdings_path,
-        holdings=load_holdings(holdings_path),
         screener_enabled=parser.env_bool("SCREENER_ENABLED", "screener.enabled", False),
         screener_limit=parser.env_int("SCREENER_LIMIT", "screener.limit", 20),
         screener_only=parser.env_bool("SCREENER_ONLY", "screener.only", False),
@@ -1023,7 +1021,6 @@ def _compose_config(
         rs_lookback_days=strategy.rs_lookback_days,
         rs_benchmark_return=strategy.rs_benchmark_return,
         holdings_path=data.holdings_path,
-        holdings=data.holdings,
         sell_mode=sell.sell_mode,
         sell_atr_multiplier=sell.sell_atr_multiplier,
         sell_time_stop_days=sell.sell_time_stop_days,

@@ -229,7 +229,7 @@ holdings:
     )
 
     assert cfg.holdings_path == str(override_holdings)
-    assert [item.ticker for item in cfg.holdings.holdings] == ["AAPL.NAS"]
+    assert cfg.holdings.holdings == []
     assert cfg.universe_markets == ["US"]
 
 
