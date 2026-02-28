@@ -1,5 +1,7 @@
 import styles from "../reports-client.module.css";
 
+import { formatSummaryKeyForDisplay } from "@/lib/report-summary-label";
+
 import { formatPnlPercent, readNumber } from "./helpers";
 import type { ReportJson } from "./types";
 
@@ -13,6 +15,16 @@ interface ReportDetailProps {
   sellRows: ReportJson[];
   rawDetailJson: string;
   onToggleRaw: () => void;
+}
+
+function formatSummaryValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
 }
 
 export function ReportDetail({
@@ -91,11 +103,11 @@ export function ReportDetail({
             <div className={styles.summaryBoxes}>
               {Object.entries(summary).map(([key, value]) => (
                 <article key={key} className={styles.summaryBox}>
-                  <h3>{key}</h3>
-                  <p>
-                    {typeof value === "object"
-                      ? JSON.stringify(value)
-                      : String(value)}
+                  <h3 className={styles.summaryKey}>
+                    {formatSummaryKeyForDisplay(key)}
+                  </h3>
+                  <p className={styles.summaryValue}>
+                    {formatSummaryValue(value)}
                   </p>
                 </article>
               ))}

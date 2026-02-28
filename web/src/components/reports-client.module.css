@@ -149,6 +149,7 @@
   border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   border-radius: 10px;
   padding: var(--space-2);
+  min-width: 0;
 }
 
 .summaryBox h3 {
@@ -159,10 +160,21 @@
   color: var(--ink-muted);
 }
 
+.summaryKey {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .summaryBox p {
   margin: var(--space-2) 0 0;
   font-size: 0.88rem;
   font-family: var(--font-mono), monospace;
+}
+
+.summaryValue {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tableWrap {
