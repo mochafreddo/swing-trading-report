@@ -12,3 +12,4 @@
 - [ADR-0008 Holdings 티커 입력 UX: 티커 디렉토리(캐시) + 검색/최근 후보](ADR-0008-holdings-ticker-directory.md) - 상태: Accepted (2026-02-28)
 - [ADR-0009 웹 리포트 페이지 캐시: in-memory 2계층(서버 LRU + 클라이언트 dedupe)](ADR-0009-web-reports-caching.md) - 상태: Accepted (2026-02-28)
 - [ADR-0010 Holdings 추가매수(Add Buy) 입력: Supabase RPC 원자 업데이트 + 평단 자동 재계산](ADR-0010-holdings-add-buy.md) - 상태: Accepted (2026-03-03)
+- [ADR-0011 마켓 데이터 캐시 정책: adjusted 분리 + stale refresh + 미완성 캔들 방지](ADR-0011-market-data-cache-policy.md) - 상태: Accepted (2026-03-03)

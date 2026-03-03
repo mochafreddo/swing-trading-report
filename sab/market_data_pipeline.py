@@ -129,10 +129,11 @@ def _canonical_exchange_from_suffix(suffix: str | None) -> str | None:
     return _NORMALIZED_SUFFIX_TO_EXCD.get(norm)
 
 
-def _build_cache_key(base_symbol: str, exchange: str | None) -> str:
+def _build_cache_key(base_symbol: str, exchange: str | None, *, adjusted: bool) -> str:
+    adjusted_prefix = "adj" if adjusted else "raw"
     if exchange:
-        return f"candles_overseas_{exchange}_{base_symbol}"
-    return f"candles_{base_symbol}"
+        return f"candles_overseas_{adjusted_prefix}_{exchange}_{base_symbol}"
+    return f"candles_{adjusted_prefix}_{base_symbol}"
 
 
 def _ensure_aware_now(now: dt.datetime | None) -> dt.datetime:
@@ -301,6 +302,7 @@ def _evaluate_cache_staleness(
 def _resolve_ticker_target(
     ticker: str,
     *,
+    adjusted: bool,
     split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
     exchange_from_suffix_fn: Callable[[str | None], str | None],
     legacy_cache_keys_fn: _LegacyCacheKeysFn | None = None,
@@ -314,7 +316,7 @@ def _resolve_ticker_target(
         exchange = _canonical_exchange_from_suffix(suffix)
     elif isinstance(exchange, str):
         exchange = exchange.strip().upper() or None
-    cache_key = _build_cache_key(base_symbol, exchange)
+    cache_key = _build_cache_key(base_symbol, exchange, adjusted=adjusted)
     legacy_cache_keys: tuple[str, ...] = ()
     if legacy_cache_keys_fn is not None:
         legacy_cache_keys = tuple(
@@ -339,6 +341,37 @@ def _append_pykrx_warning_once(runtime: _CollectionRuntime, message: str) -> Non
 def _is_adjusted_kwarg_type_error(exc: TypeError) -> bool:
     message = str(exc)
     return "unexpected keyword argument" in message and "adjusted" in message
+
+
+def _trim_incomplete_candle_tail(
+    candles: list[Candle],
+    *,
+    market: str,
+    now: dt.datetime,
+    closed_dates: set[dt.date],
+    data_dir: str | None = None,
+) -> tuple[list[Candle], int]:
+    if not candles:
+        return [], 0
+    latest_completed = _latest_completed_session_date(
+        market=market,
+        now=now,
+        closed_dates=closed_dates,
+        data_dir=None if market != "US" else data_dir,
+    )
+    if latest_completed is None:
+        return list(candles), 0
+
+    trimmed = list(candles)
+    removed_count = 0
+    while trimmed:
+        latest_raw = trimmed[-1].get("date")
+        latest_date = _parse_session_date(latest_raw)
+        if latest_date is None or latest_date <= latest_completed:
+            break
+        trimmed.pop()
+        removed_count += 1
+    return trimmed, removed_count
 
 
 def _apply_cached_candles[TRuntime: _CollectionRuntime](
@@ -491,6 +524,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
     for ticker in request.tickers:
         target = _resolve_ticker_target(
             ticker,
+            adjusted=request.adjusted,
             split_symbol_and_suffix_fn=request.split_symbol_and_suffix_fn,
             exchange_from_suffix_fn=request.exchange_from_suffix_fn,
             legacy_cache_keys_fn=request.legacy_cache_keys_fn,
@@ -503,17 +537,48 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
         cached_stale_sessions: int | None = None
         cache_usable = False
         cache_rejection_reason: str | None = None
+
+        closed_dates = holiday_dates_by_market.get(market)
+        if closed_dates is None:
+            closed_dates = _load_market_holiday_dates(runtime.cfg.data_dir, market)
+            holiday_dates_by_market[market] = closed_dates
+
         for cache_key in cache_keys:
             candidate = request.load_json_fn(runtime.cfg.data_dir, cache_key)
             if isinstance(candidate, list) and candidate:
-                cached = candidate
+                normalized_candidate, dropped_tail = _trim_incomplete_candle_tail(
+                    candidate,
+                    market=market,
+                    now=now,
+                    closed_dates=closed_dates,
+                    data_dir=runtime.cfg.data_dir,
+                )
+                if dropped_tail > 0:
+                    runtime.logger.info(
+                        "%s: Trimmed %s incomplete candle(s) from cache '%s'",
+                        ticker,
+                        dropped_tail,
+                        cache_key,
+                    )
+                    try:
+                        request.save_json_fn(
+                            runtime.cfg.data_dir,
+                            cache_key,
+                            normalized_candidate,
+                        )
+                    except Exception as exc:
+                        cache_msg = (
+                            f"{ticker}: Failed to persist sanitized cache "
+                            f"'{cache_key}' ({type(exc).__name__}: {exc})"
+                        )
+                        runtime.failures.append(cache_msg)
+                        runtime.logger.warning(cache_msg)
+                if not normalized_candidate:
+                    continue
+                cached = normalized_candidate
                 cached_key = cache_key
                 break
         if isinstance(cached, list) and cached:
-            closed_dates = holiday_dates_by_market.get(market)
-            if closed_dates is None:
-                closed_dates = _load_market_holiday_dates(runtime.cfg.data_dir, market)
-                holiday_dates_by_market[market] = closed_dates
             (
                 cache_usable,
                 cached_stale_sessions,
@@ -526,7 +591,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 now=now,
                 data_dir=runtime.cfg.data_dir,
             )
-            if cache_usable:
+            if cache_usable and (cached_stale_sessions or 0) == 0:
                 _apply_cached_candles(
                     runtime,
                     ticker=ticker,
@@ -539,6 +604,11 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                     max_stale_sessions=max_stale_sessions,
                 )
                 continue
+        cache_fallback_allowed = (
+            cache_usable
+            and isinstance(cached, list)
+            and (cached_stale_sessions or 0) > 0
+        )
 
         try:
             if target.exchange:
@@ -576,11 +646,51 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                         count=request.target_bars,
                     )
             if candles:
-                runtime.market_data[ticker] = candles
+                normalized_candles, dropped_tail = _trim_incomplete_candle_tail(
+                    candles,
+                    market=market,
+                    now=now,
+                    closed_dates=closed_dates,
+                    data_dir=runtime.cfg.data_dir,
+                )
+                if dropped_tail > 0:
+                    runtime.logger.info(
+                        "%s: Trimmed %s incomplete candle(s) from provider response",
+                        ticker,
+                        dropped_tail,
+                    )
+
+                if not normalized_candles:
+                    if cache_fallback_allowed and cached is not None:
+                        _apply_cached_candles(
+                            runtime,
+                            ticker=ticker,
+                            candles=cached,
+                            request=request,
+                            cached_key=cached_key,
+                            target_cache_key=target.cache_key,
+                            market=market,
+                            stale_sessions=cached_stale_sessions,
+                            max_stale_sessions=max_stale_sessions,
+                        )
+                        runtime.logger.warning(
+                            "%s: Provider returned only incomplete candles; "
+                            "used stale cache fallback",
+                            ticker,
+                        )
+                        continue
+                    msg = f"{ticker}: No complete candle data returned"
+                    if cache_rejection_reason:
+                        msg += f" (cache unavailable: {cache_rejection_reason})"
+                    runtime.failures.append(msg)
+                    runtime.logger.warning(msg)
+                    continue
+
+                runtime.market_data[ticker] = normalized_candles
                 runtime.ticker_data_source[ticker] = "kis"
                 try:
                     request.save_json_fn(
-                        runtime.cfg.data_dir, target.cache_key, candles
+                        runtime.cfg.data_dir, target.cache_key, normalized_candles
                     )
                 except Exception as exc:
                     cache_msg = (
@@ -590,15 +700,51 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                     runtime.failures.append(cache_msg)
                     runtime.logger.warning(cache_msg)
                 if request.on_candles_applied_fn:
-                    request.on_candles_applied_fn(runtime, ticker, candles)
-                runtime.logger.info("Fetched %s candles for %s", len(candles), ticker)
+                    request.on_candles_applied_fn(runtime, ticker, normalized_candles)
+                runtime.logger.info(
+                    "Fetched %s candles for %s", len(normalized_candles), ticker
+                )
             else:
+                if cache_fallback_allowed and cached is not None:
+                    _apply_cached_candles(
+                        runtime,
+                        ticker=ticker,
+                        candles=cached,
+                        request=request,
+                        cached_key=cached_key,
+                        target_cache_key=target.cache_key,
+                        market=market,
+                        stale_sessions=cached_stale_sessions,
+                        max_stale_sessions=max_stale_sessions,
+                    )
+                    runtime.logger.warning(
+                        "%s: Provider returned no data; used stale cache fallback",
+                        ticker,
+                    )
+                    continue
                 msg = f"{ticker}: No candle data returned"
                 if cache_rejection_reason:
                     msg += f" (cache unavailable: {cache_rejection_reason})"
                 runtime.failures.append(msg)
                 runtime.logger.warning(msg)
         except (KISClientError, KISAuthError) as exc:
+            if cache_fallback_allowed and cached is not None:
+                _apply_cached_candles(
+                    runtime,
+                    ticker=ticker,
+                    candles=cached,
+                    request=request,
+                    cached_key=cached_key,
+                    target_cache_key=target.cache_key,
+                    market=market,
+                    stale_sessions=cached_stale_sessions,
+                    max_stale_sessions=max_stale_sessions,
+                )
+                runtime.logger.warning(
+                    "%s: KIS error (%s); used stale cache fallback", ticker, exc
+                )
+                continue
+
             fallback_client = request.ensure_pykrx_client_fn(runtime)
             fallback_error = request.get_pykrx_error_fn(runtime)
             if fallback_client is not None and target.exchange is None:

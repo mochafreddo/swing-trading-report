@@ -66,6 +66,7 @@
   - 의도: 보유(진입단가/손절/타깃) 판단을 **원시 가격 기준**으로 해석하고, corporate action은 “자동 결론”이 아닌 `REVIEW`로 올려 수동 확인을 유도합니다(6장 참고).
 - 운영 유의:
   - 같은 티커라도 scan vs sell에서 adjusted 정책이 다르므로, 지표/가격 레벨의 절대값이 일치하지 않을 수 있습니다.
+  - adjusted/raw 캔들은 캐시 키가 분리되어 서로 섞이지 않습니다(ADR-0011).
   - 분할/권리락/특이 이벤트가 의심되면 sell 리포트의 corporate action 사유를 최우선으로 확인합니다.
 
 ### 3.5 데이터 제공자(provider) 및 폴백 정책(요약)
@@ -84,11 +85,16 @@
 근거 코드: `sab/market_data_pipeline.py`, `sab/config.py`
 
 - 캔들은 `data/`의 JSON 캐시를 우선 사용합니다.
+- 캐시 키는 `adjusted` 여부를 포함해 분리됩니다(예: `candles_adj_005930` vs `candles_raw_005930`).
+- 캐시는 “완성 세션 기준”으로만 저장/재사용합니다.
+  - 장중/장전에는 “당일 미완성 일봉”을 제거한 상태로만 캐시를 사용/저장합니다(ADR-0011).
 - 캐시 사용 여부는 “최신 완성 세션 대비 누락된 거래 세션 수(stale_sessions)”로 판단합니다.
   - KR/US 각각 `market_cache_stale_sessions_kr/us`가 허용 최대치입니다.
-- `stale_sessions <= max`이면 **캐시를 사용**하고 provider 재수집을 생략합니다.
-- `stale_sessions > max`이면 캐시는 거부되고 provider 재수집을 시도합니다.
-  - 재수집도 실패하면 해당 티커의 market data가 비어 결과 품질/신뢰도에 직접 영향을 줍니다(리포트의 `system_issues/failures`로 노출).
+- `stale_sessions == 0`이면 **캐시를 사용**하고 provider 재수집을 생략합니다.
+- `stale_sessions > 0`이면 provider 재수집을 **우선 시도**합니다.
+  - 재수집 성공: 최신 캔들을 저장하고 사용합니다.
+  - 재수집 실패: `stale_sessions <= max`이면 캐시로 폴백합니다(=fail-soft).
+  - `stale_sessions > max`이면 폴백하지 않고 실패합니다(=fail-closed).
 - 운영 가이드:
   - `max=0`은 “최신 데이터 아니면 캐시 미사용(=fail-closed 성향)”입니다.
   - `max>0`은 “일시적 API 장애 시 약간 stale한 데이터로도 리포트를 생성(=fail-soft 성향)”입니다.

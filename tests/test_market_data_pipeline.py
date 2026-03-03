@@ -72,6 +72,18 @@ def _candles_with_last_date(date_key: str) -> list[dict[str, float | str]]:
     ]
 
 
+def _cache_key(
+    base_symbol: str,
+    *,
+    exchange: str | None = None,
+    adjusted: bool = True,
+) -> str:
+    prefix = "adj" if adjusted else "raw"
+    if exchange:
+        return f"candles_overseas_{prefix}_{exchange}_{base_symbol}"
+    return f"candles_{prefix}_{base_symbol}"
+
+
 def _split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
     if "." not in ticker:
         return ticker, None
@@ -160,9 +172,9 @@ def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
 
     assert runtime.market_data["AAPL.UNKNOWN"] == legacy_candles
     assert runtime.ticker_data_source["AAPL.UNKNOWN"] == "kis"
-    assert load_keys[:2] == ["candles_AAPL", "candles_AAPL.UNKNOWN"]
-    assert "candles_AAPL" in saved_keys
-    assert kis_client.calls == 0
+    assert load_keys[:2] == [_cache_key("AAPL"), "candles_AAPL.UNKNOWN"]
+    assert _cache_key("AAPL") in saved_keys
+    assert kis_client.calls == 1
     assert runtime.failures == []
 
 
@@ -254,7 +266,7 @@ def test_collect_market_data_from_kis_continues_when_cache_persist_fails() -> No
     assert any(
         "Failed to persist cache" in message
         and "005930" in message
-        and "candles_005930" in message
+        and _cache_key("005930") in message
         and "disk full" in message
         for message in runtime.failures
     )
@@ -272,7 +284,7 @@ def test_collect_market_data_from_kis_ignores_non_list_cache_payload() -> None:
         tickers=["005930"],
         target_bars=220,
         load_json_fn=lambda _dir, key: (
-            {"date": "20250101"} if key == "candles_005930" else None
+            {"date": "20250101"} if key == _cache_key("005930") else None
         ),
         save_json_fn=lambda *_: None,
         ensure_pykrx_client_fn=lambda _: None,
@@ -357,8 +369,8 @@ def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None
     )
 
     assert runtime.market_data["AAPL.NAS-DAQ"] == legacy_candles
-    assert load_keys[:2] == ["candles_overseas_NAS_AAPL", "candles_AAPL.NAS-DAQ"]
-    assert kis_client.calls == 0
+    assert load_keys[:2] == [_cache_key("AAPL", exchange="NAS"), "candles_AAPL.NAS-DAQ"]
+    assert kis_client.calls == 1
     assert runtime.failures == []
 
 
@@ -380,7 +392,7 @@ def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None
         tickers=["005930"],
         target_bars=220,
         load_json_fn=lambda _dir, key: (
-            cached_candles if key == "candles_005930" else None
+            cached_candles if key == _cache_key("005930") else None
         ),
         save_json_fn=lambda *_: None,
         ensure_pykrx_client_fn=lambda _: None,
@@ -391,11 +403,47 @@ def test_collect_market_data_from_kis_uses_kr_cache_within_stale_limit() -> None
     )
 
     assert runtime.market_data["005930"] == cached_candles
-    assert kis_client.calls == 0
+    assert kis_client.calls == 1
     assert runtime.failures == []
 
 
-def test_collect_market_data_from_kis_does_not_refresh_api_when_cache_usable() -> None:
+def test_collect_market_data_from_kis_refreshes_api_when_cache_is_stale() -> None:
+    class _KisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
+            assert symbol == "005930"
+            assert count == 220
+            return _candles_with_last_date("20250108")
+
+    cached_candles = _candles_with_last_date("20250107")
+    fresh_candles = _candles_with_last_date("20250108")
+    kis_client = _KisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert kis_client.calls == 1
+    assert runtime.market_data["005930"] == fresh_candles
+    assert runtime.failures == []
+
+
+def test_collect_market_data_from_kis_uses_cache_without_refresh_when_fresh() -> None:
     class _KisClient:
         def __init__(self) -> None:
             self.calls = 0
@@ -415,14 +463,14 @@ def test_collect_market_data_from_kis_does_not_refresh_api_when_cache_usable() -
         tickers=["005930"],
         target_bars=220,
         load_json_fn=lambda _dir, key: (
-            cached_candles if key == "candles_005930" else None
+            cached_candles if key == _cache_key("005930") else None
         ),
         save_json_fn=lambda *_: None,
         ensure_pykrx_client_fn=lambda _: None,
         split_symbol_and_suffix_fn=_split_symbol_and_suffix,
         exchange_from_suffix_fn=_exchange_from_suffix,
         get_pykrx_error_fn=lambda _: None,
-        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+        now_fn=lambda: dt.datetime(2025, 1, 8, 5, 0, tzinfo=dt.UTC),
     )
 
     assert kis_client.calls == 0
@@ -442,7 +490,7 @@ def test_collect_market_data_from_kis_rejects_kr_cache_over_stale_limit() -> Non
         tickers=["005930"],
         target_bars=220,
         load_json_fn=lambda _dir, key: (
-            _candles_with_last_date("20250106") if key == "candles_005930" else None
+            _candles_with_last_date("20250106") if key == _cache_key("005930") else None
         ),
         save_json_fn=lambda *_: None,
         ensure_pykrx_client_fn=lambda _: None,
@@ -483,7 +531,7 @@ def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
         target_bars=220,
         load_json_fn=lambda _dir, key: (
             _candles_with_last_date("20250103")
-            if key == "candles_overseas_NAS_AAPL"
+            if key == _cache_key("AAPL", exchange="NAS")
             else None
         ),
         save_json_fn=lambda *_: None,
@@ -495,7 +543,7 @@ def test_collect_market_data_from_kis_uses_us_session_based_staleness() -> None:
     )
 
     assert "AAPL.US" in runtime.market_data
-    assert kis_client.calls == 0
+    assert kis_client.calls == 1
     assert runtime.failures == []
 
 
@@ -531,7 +579,7 @@ def test_collect_market_data_from_kis_honors_us_early_close_for_staleness(
         target_bars=220,
         load_json_fn=lambda _dir, key: (
             _candles_with_last_date("20251224")
-            if key == "candles_overseas_NAS_AAPL"
+            if key == _cache_key("AAPL", exchange="NAS")
             else None
         ),
         save_json_fn=lambda *_: None,
@@ -564,7 +612,7 @@ def test_collect_market_data_from_kis_calls_api_when_cache_stale() -> None:
         tickers=["005930"],
         target_bars=220,
         load_json_fn=lambda _dir, key: (
-            _candles_with_last_date("20250106") if key == "candles_005930" else None
+            _candles_with_last_date("20250106") if key == _cache_key("005930") else None
         ),
         save_json_fn=lambda *_: None,
         ensure_pykrx_client_fn=lambda _: None,
@@ -596,7 +644,7 @@ def test_collect_market_data_from_kis_rejects_us_cache_over_stale_limit() -> Non
         target_bars=220,
         load_json_fn=lambda _dir, key: (
             _candles_with_last_date("20250103")
-            if key == "candles_overseas_NAS_AAPL"
+            if key == _cache_key("AAPL", exchange="NAS")
             else None
         ),
         save_json_fn=lambda *_: None,
@@ -613,6 +661,94 @@ def test_collect_market_data_from_kis_rejects_us_cache_over_stale_limit() -> Non
         for msg in runtime.failures
     )
     assert not any("API error, using cached data" in msg for msg in runtime.failures)
+
+
+def test_collect_market_data_from_kis_uses_raw_cache_key_when_adjusted_false() -> None:
+    class _KisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            self.calls += 1
+            del symbol
+            del count
+            return _candles_with_last_date("20250108")
+
+    queried_keys: list[str] = []
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+    cached_candles = _candles_with_last_date("20250107")
+
+    def load_json_fn(_: str, key: str) -> Any:
+        queried_keys.append(key)
+        if key == _cache_key("005930", adjusted=False):
+            return cached_candles
+        return None
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        adjusted=False,
+        load_json_fn=load_json_fn,
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 5, 0, tzinfo=dt.UTC),
+    )
+
+    assert queried_keys[0] == _cache_key("005930", adjusted=False)
+    assert _cache_key("005930", adjusted=True) not in queried_keys
+    assert runtime.market_data["005930"] == cached_candles
+
+
+def test_collect_market_data_from_kis_drops_intraday_incomplete_candle_on_save() -> (
+    None
+):
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            del symbol
+            del count
+            return [
+                {
+                    "date": "20250107",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.0,
+                    "volume": 1_000_000.0,
+                },
+                {
+                    "date": "20250108",
+                    "open": 101.0,
+                    "high": 102.0,
+                    "low": 100.0,
+                    "close": 101.0,
+                    "volume": 1_100_000.0,
+                },
+            ]
+
+    saved_payloads: dict[str, list[dict[str, Any]]] = {}
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda _dir, key, payload: saved_payloads.setdefault(key, payload),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 5, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == [_candles_with_last_date("20250107")[0]]
+    assert saved_payloads[_cache_key("005930")] == [
+        _candles_with_last_date("20250107")[0]
+    ]
 
 
 def test_collect_market_data_from_kis_passes_adjusted_flag_to_provider() -> None:
