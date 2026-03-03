@@ -137,6 +137,91 @@ describe("searchTickerDirectory", () => {
     ]);
     expect(vi.mocked(upsertRuntimeStateEntry)).toHaveBeenCalledTimes(1);
   });
+
+  it("incrementally merges only new reports when cache already exists", async () => {
+    vi.mocked(fetchRuntimeStateEntry).mockResolvedValueOnce({
+      state_key: "ticker_directory:v1",
+      expires_at: "2099-01-01T00:00:00.000Z",
+      state_payload: {
+        version: 1,
+        builtAtMs: Date.now(),
+        source: {
+          buyReportsScanned: 1,
+          buyReportKeys: ["2026/02/2026-02-26.buy.json"],
+        },
+        entries: [
+          {
+            ticker: "ABBV.NYS",
+            name: "애브비",
+            aliases: ["ABBV.NYS", "ABBV", "애브비"],
+            lastSeenReportDate: "2026-02-26",
+            lastSeenReportKey: "2026/02/2026-02-26.buy.json",
+            updatedAtMs: Date.now() - 1000,
+          },
+        ],
+      },
+    });
+    vi.mocked(fetchReportIndexPage)
+      .mockResolvedValueOnce({
+        items: [
+          {
+            report_key: "2026/02/2026-02-27.buy.json",
+            report_type: "buy",
+            report_date: "2026-02-27",
+            duplicate_index: 0,
+            generated_at: "2026-02-27T00:00:00Z",
+            summary: null,
+            tickers: [],
+            tickers_hydrated: true,
+          },
+        ],
+        total: 1,
+        fetchedCount: 1,
+        hasMore: false,
+        nextCursor: null,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            report_key: "2026/02/2026-02-27.buy.json",
+            report_type: "buy",
+            report_date: "2026-02-27",
+            duplicate_index: 0,
+            generated_at: "2026-02-27T00:00:00Z",
+            summary: null,
+            tickers: [],
+            tickers_hydrated: true,
+          },
+          {
+            report_key: "2026/02/2026-02-26.buy.json",
+            report_type: "buy",
+            report_date: "2026-02-26",
+            duplicate_index: 0,
+            generated_at: "2026-02-26T00:00:00Z",
+            summary: null,
+            tickers: [],
+            tickers_hydrated: true,
+          },
+        ],
+        total: 2,
+        fetchedCount: 2,
+        hasMore: false,
+        nextCursor: null,
+      });
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [{ ticker: "ETN.NYS", name: "이튼" }],
+    });
+
+    const result = await searchTickerDirectory({ q: "이튼", limit: 5 });
+
+    expect(result.results).toEqual([{ ticker: "ETN.NYS", name: "이튼" }]);
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
+      "reports",
+      "2026/02/2026-02-27.buy.json",
+    );
+    expect(vi.mocked(upsertRuntimeStateEntry)).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("listRecentBuyCandidates", () => {

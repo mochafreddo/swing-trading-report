@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ from .storage_key import build_report_storage_key
 
 _DEFAULT_BUCKET = "reports"
 _MAX_DUPLICATE_INDEX = 999
+_REPORT_INDEX_UPSERT_RETRY_ATTEMPTS = 3
+_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS = 0.2
 _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _REPORT_KEY_PATTERN = re.compile(
     r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell)\.json$"
@@ -38,9 +41,16 @@ class SupabaseStorageConflictError(SupabaseStorageError):
 class SupabaseReportIndexError(SupabaseStorageError):
     """Raised when report-index upsert fails after object upload."""
 
-    def __init__(self, message: str, *, storage_key: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        storage_key: str,
+        cleanup_failed: bool = False,
+    ) -> None:
         super().__init__(message)
         self.storage_key = storage_key
+        self.cleanup_failed = cleanup_failed
 
 
 @dataclass(frozen=True)
@@ -290,6 +300,22 @@ def _report_index_upsert_request(
     return _response_to_data(response)
 
 
+def _storage_delete_request(
+    *,
+    config: SupabaseStorageConfig,
+    key: str,
+    session: requests.Session,
+) -> _HttpResponseData:
+    quoted_key = quote(key, safe="/")
+    url = f"{config.url}/storage/v1/object/{config.bucket}/{quoted_key}"
+    response = session.delete(
+        url,
+        headers=_auth_headers(config),
+        timeout=config.timeout_seconds,
+    )
+    return _response_to_data(response)
+
+
 def _safe_json_dict(payload: bytes) -> dict[str, object]:
     try:
         decoded = json.loads(payload.decode("utf-8"))
@@ -397,13 +423,24 @@ def _upsert_report_index(
         report_date=report_date,
         report_payload=report_payload,
     )
-    response = _report_index_upsert_request(
-        config=config,
-        row=row,
-        session=session,
-    )
-    if response.status_code in {200, 201, 204}:
-        return
+    response: _HttpResponseData | None = None
+    for attempt in range(1, _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS + 1):
+        response = _report_index_upsert_request(
+            config=config,
+            row=row,
+            session=session,
+        )
+        if response.status_code in {200, 201, 204}:
+            return
+        if (
+            response.status_code >= 500
+            and attempt < _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS
+        ):
+            time.sleep(_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS * attempt)
+            continue
+        break
+
+    assert response is not None
     raise SupabaseReportIndexError(
         f"failed to upsert report index for '{storage_key}': "
         f"{_response_message(status_code=response.status_code, text=response.text)}",
@@ -489,6 +526,23 @@ def _upload_json_payload(
     )
 
 
+def _delete_uploaded_object(
+    *,
+    config: SupabaseStorageConfig,
+    key: str,
+    session: requests.Session,
+) -> None:
+    response = _storage_delete_request(config=config, key=key, session=session)
+    if response.status_code in {200, 204}:
+        return
+    if _is_not_found_response(status_code=response.status_code, text=response.text):
+        return
+    raise SupabaseStorageError(
+        f"failed to delete uploaded report object '{key}': "
+        f"{_response_message(status_code=response.status_code, text=response.text)}"
+    )
+
+
 def upload_report_artifact(
     *,
     local_path: str,
@@ -536,6 +590,23 @@ def upload_report_artifact(
             session=active_session,
         )
         return resolved_key
+    except SupabaseReportIndexError as exc:
+        cleanup_failed = False
+        cleanup_error_message = ""
+        try:
+            _delete_uploaded_object(
+                config=config,
+                key=exc.storage_key,
+                session=active_session,
+            )
+        except SupabaseStorageError as cleanup_exc:
+            cleanup_failed = True
+            cleanup_error_message = f"; rollback delete failed: {cleanup_exc}"
+        raise SupabaseReportIndexError(
+            f"{exc}{cleanup_error_message}",
+            storage_key=exc.storage_key,
+            cleanup_failed=cleanup_failed,
+        ) from exc
     finally:
         if should_close_session:
             active_session.close()
@@ -571,10 +642,10 @@ def maybe_upload_report_artifact(
             config=config,
         )
     except SupabaseReportIndexError as exc:
-        if required:
+        if required or exc.cleanup_failed:
             raise
         logger.warning(
-            "Supabase report upload completed but index upsert failed: %s",
+            "Supabase report upload rolled back after index upsert failure: %s",
             exc,
         )
         return None

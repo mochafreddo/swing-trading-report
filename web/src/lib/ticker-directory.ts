@@ -16,6 +16,7 @@ const DIRECTORY_STALE_MS = 24 * 60 * 60 * 1000;
 const DIRECTORY_EXPIRES_MS = 365 * 24 * 60 * 60 * 1000;
 const DIRECTORY_BUILD_REPORT_LIMIT = 60;
 const REPORT_PAGE_SIZE = 20;
+const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
 
 export interface TickerDirectoryCandidate {
   ticker: string;
@@ -75,6 +76,15 @@ interface SearchOptions {
 interface RecentCandidatesOptions {
   limitReports?: number;
   limitCandidates?: number;
+}
+
+interface MutableTickerDirectoryEntry {
+  ticker: string;
+  name: string | null;
+  aliases: Set<string>;
+  lastSeenReportDate: string | null;
+  lastSeenReportKey: string | null;
+  updatedAtMs: number;
 }
 
 function normalizeSearchText(value: string): string {
@@ -221,6 +231,95 @@ function clampInt(value: number | undefined, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value ?? min)));
 }
 
+function parseDuplicateIndexFromBuyKey(key: string | null): number {
+  if (!key) {
+    return 0;
+  }
+  const match = REPORT_DUPLICATE_INDEX_PATTERN.exec(key);
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number.parseInt(match[1] ?? "0", 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function toMutableEntryMap(
+  entries: TickerDirectoryEntryV1[],
+): Map<string, MutableTickerDirectoryEntry> {
+  const map = new Map<string, MutableTickerDirectoryEntry>();
+  for (const entry of entries) {
+    const aliases =
+      entry.aliases.length > 0
+        ? entry.aliases
+        : collectTickerAliases(entry.ticker, entry.name);
+    map.set(entry.ticker, {
+      ticker: entry.ticker,
+      name: entry.name,
+      aliases: new Set(aliases),
+      lastSeenReportDate: entry.lastSeenReportDate,
+      lastSeenReportKey: entry.lastSeenReportKey,
+      updatedAtMs: entry.updatedAtMs,
+    });
+  }
+  return map;
+}
+
+function shouldUpdateLastSeen(
+  row: ReportIndexRow,
+  existing: MutableTickerDirectoryEntry,
+): boolean {
+  const rowDate = row.report_date;
+  if (!rowDate) {
+    return false;
+  }
+  const existingDate = existing.lastSeenReportDate;
+  if (!existingDate) {
+    return true;
+  }
+  if (rowDate !== existingDate) {
+    return rowDate > existingDate;
+  }
+  const existingDuplicateIndex = parseDuplicateIndexFromBuyKey(
+    existing.lastSeenReportKey,
+  );
+  return row.duplicate_index > existingDuplicateIndex;
+}
+
+function mergeCandidatesFromReport(
+  entries: Map<string, MutableTickerDirectoryEntry>,
+  row: ReportIndexRow,
+  candidates: TickerDirectoryCandidate[],
+  nowMs: number,
+): void {
+  for (const candidate of candidates) {
+    const aliases = collectTickerAliases(candidate.ticker, candidate.name);
+    const existing = entries.get(candidate.ticker);
+    if (!existing) {
+      entries.set(candidate.ticker, {
+        ticker: candidate.ticker,
+        name: candidate.name,
+        aliases: new Set(aliases),
+        lastSeenReportDate: row.report_date,
+        lastSeenReportKey: row.report_key,
+        updatedAtMs: nowMs,
+      });
+      continue;
+    }
+
+    if (!existing.name && candidate.name) {
+      existing.name = candidate.name;
+    }
+    for (const alias of aliases) {
+      existing.aliases.add(alias);
+    }
+    if (shouldUpdateLastSeen(row, existing)) {
+      existing.lastSeenReportDate = row.report_date;
+      existing.lastSeenReportKey = row.report_key;
+    }
+    existing.updatedAtMs = nowMs;
+  }
+}
+
 async function collectRecentBuyRows(
   limitReports: number,
 ): Promise<ReportIndexRow[]> {
@@ -319,23 +418,19 @@ function shouldRefreshDirectory(
   return false;
 }
 
-async function rebuildDirectory(): Promise<TickerDirectoryPayloadV1> {
+async function refreshDirectory(
+  cached: TickerDirectoryPayloadV1 | null,
+): Promise<TickerDirectoryPayloadV1> {
   const nowMs = Date.now();
   const env = getSupabaseEnv();
   const rows = await collectRecentBuyRows(DIRECTORY_BUILD_REPORT_LIMIT);
-  const entries = new Map<
-    string,
-    {
-      ticker: string;
-      name: string | null;
-      aliases: Set<string>;
-      lastSeenReportDate: string | null;
-      lastSeenReportKey: string | null;
-      updatedAtMs: number;
-    }
-  >();
+  const entries = toMutableEntryMap(cached?.entries ?? []);
+  const knownKeys = new Set(cached?.source.buyReportKeys ?? []);
+  const rowsToMerge = cached
+    ? rows.filter((row) => !knownKeys.has(row.report_key))
+    : rows;
 
-  for (const row of rows) {
+  for (const row of rowsToMerge) {
     let report: Record<string, unknown>;
     try {
       report = await downloadStorageJson(
@@ -345,29 +440,12 @@ async function rebuildDirectory(): Promise<TickerDirectoryPayloadV1> {
     } catch {
       continue;
     }
-    const candidates = extractBuyCandidatesFromReport(report);
-    for (const candidate of candidates) {
-      const existing = entries.get(candidate.ticker);
-      const aliases = collectTickerAliases(candidate.ticker, candidate.name);
-      if (!existing) {
-        entries.set(candidate.ticker, {
-          ticker: candidate.ticker,
-          name: candidate.name,
-          aliases: new Set(aliases),
-          lastSeenReportDate: row.report_date,
-          lastSeenReportKey: row.report_key,
-          updatedAtMs: nowMs,
-        });
-        continue;
-      }
-
-      if (!existing.name && candidate.name) {
-        existing.name = candidate.name;
-      }
-      for (const alias of aliases) {
-        existing.aliases.add(alias);
-      }
-    }
+    mergeCandidatesFromReport(
+      entries,
+      row,
+      extractBuyCandidatesFromReport(report),
+      nowMs,
+    );
   }
 
   const payload: TickerDirectoryPayloadV1 = {
@@ -413,7 +491,7 @@ async function loadDirectoryForSearch(): Promise<TickerDirectoryPayloadV1> {
   }
 
   try {
-    return await rebuildDirectory();
+    return await refreshDirectory(cached);
   } catch {
     if (cached) {
       return cached;

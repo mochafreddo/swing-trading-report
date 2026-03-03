@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
   decodeHoldingCursor,
   HoldingCursorError,
 } from "@/lib/holdings-pagination";
-import {
-  assertLocalRequest,
-  LocalRequestGuardError,
-} from "@/lib/local-request-guard";
-import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
-import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { holdingCreateSchema, holdingListQuerySchema } from "@/lib/schemas";
 import {
   createHolding,
@@ -21,11 +16,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  try {
-    await requireAdminAuth(request);
-    assertSameOrigin(request);
-    assertLocalRequest(request);
+  const guardError = await enforceAdminApiGuard(request);
+  if (guardError) {
+    return guardError;
+  }
 
+  try {
     const parsedQuery = holdingListQuerySchema.safeParse({
       limit: request.nextUrl.searchParams.get("limit") ?? undefined,
       cursor: request.nextUrl.searchParams.get("cursor") ?? undefined,
@@ -50,25 +46,7 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json(page);
   } catch (error) {
-    if (error instanceof AdminAuthError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status, headers: error.headers },
-      );
-    }
-    if (error instanceof SameOriginError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
     if (error instanceof HoldingCursorError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    if (error instanceof LocalRequestGuardError) {
       return NextResponse.json(
         { error: error.message },
         { status: error.status },
@@ -86,31 +64,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    await requireAdminAuth(request);
-    assertSameOrigin(request);
-    assertLocalRequest(request);
-  } catch (error) {
-    if (error instanceof AdminAuthError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status, headers: error.headers },
-      );
-    }
-    if (error instanceof SameOriginError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+  const guardError = await enforceAdminApiGuard(request);
+  if (guardError) {
+    return guardError;
   }
 
   let payload: unknown;

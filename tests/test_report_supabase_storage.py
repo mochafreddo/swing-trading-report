@@ -28,11 +28,14 @@ class _FakeSession:
         *,
         get_responses: list[_FakeResponse],
         post_responses: list[_FakeResponse],
+        delete_responses: list[_FakeResponse] | None = None,
     ) -> None:
         self._get_responses = list(get_responses)
         self._post_responses = list(post_responses)
+        self._delete_responses = list(delete_responses or [])
         self.get_calls: list[dict[str, object]] = []
         self.post_calls: list[dict[str, object]] = []
+        self.delete_calls: list[dict[str, object]] = []
 
     def get(
         self, url: str, *, headers: dict[str, str], timeout: float
@@ -61,6 +64,14 @@ class _FakeSession:
         if not self._post_responses:
             raise AssertionError("unexpected POST request")
         return self._post_responses.pop(0)
+
+    def delete(
+        self, url: str, *, headers: dict[str, str], timeout: float
+    ) -> _FakeResponse:
+        self.delete_calls.append({"url": url, "headers": headers, "timeout": timeout})
+        if not self._delete_responses:
+            raise AssertionError("unexpected DELETE request")
+        return self._delete_responses.pop(0)
 
 
 def test_is_not_found_response_classifies_expected_statuses() -> None:
@@ -362,7 +373,13 @@ def test_upload_report_artifact_raises_index_error_when_upsert_fails(
 
     session = _FakeSession(
         get_responses=[_FakeResponse(404)],
-        post_responses=[_FakeResponse(201), _FakeResponse(500, "index down")],
+        post_responses=[
+            _FakeResponse(201),
+            _FakeResponse(500, "index down"),
+            _FakeResponse(500, "index down"),
+            _FakeResponse(500, "index down"),
+        ],
+        delete_responses=[_FakeResponse(200)],
     )
     config = SupabaseStorageConfig(
         url="https://example.supabase.co",
@@ -380,6 +397,78 @@ def test_upload_report_artifact_raises_index_error_when_upsert_fails(
         )
 
     assert exc_info.value.storage_key == "2026/02/2026-02-13.buy.json"
+    assert not exc_info.value.cleanup_failed
+    assert len(session.delete_calls) == 1
+
+
+def test_upload_report_artifact_retries_index_upsert_on_server_error(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[
+            _FakeResponse(201),
+            _FakeResponse(500, "index transient 1"),
+            _FakeResponse(502, "index transient 2"),
+            _FakeResponse(201),
+        ],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="buy",
+        report_date=date(2026, 2, 13),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/02/2026-02-13.buy.json"
+    assert len(session.post_calls) == 4
+    assert session.delete_calls == []
+
+
+def test_upload_report_artifact_marks_cleanup_failed_when_rollback_delete_fails(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[
+            _FakeResponse(201),
+            _FakeResponse(500, "index down"),
+            _FakeResponse(500, "index down"),
+            _FakeResponse(500, "index down"),
+        ],
+        delete_responses=[_FakeResponse(500, "delete down")],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="rollback delete failed") as exc:
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.storage_key == "2026/02/2026-02-13.buy.json"
+    assert exc.value.cleanup_failed
+    assert len(session.delete_calls) == 1
 
 
 def test_maybe_upload_report_artifact_skips_when_disabled(
@@ -498,6 +587,43 @@ def test_maybe_upload_report_artifact_raises_on_github_actions_index_error(
     )
 
     with pytest.raises(SupabaseReportIndexError, match="index down"):
+        maybe_upload_report_artifact(
+            artifact_path=report_path.as_posix(),
+            run_type="buy",
+            logger=logging.getLogger("test"),
+        )
+
+
+def test_maybe_upload_report_artifact_raises_on_local_index_error_when_cleanup_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("SAB_UPLOAD_REPORTS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+
+    def _fake_upload(
+        *,
+        local_path: str,
+        run_type: str,
+        report_date: date,
+        config: SupabaseStorageConfig,
+    ) -> str:
+        del local_path, run_type, report_date, config
+        raise SupabaseReportIndexError(
+            "index down; rollback delete failed: delete down",
+            storage_key="2026/02/2026-02-13.buy.json",
+            cleanup_failed=True,
+        )
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact", _fake_upload
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="rollback delete failed"):
         maybe_upload_report_artifact(
             artifact_path=report_path.as_posix(),
             run_type="buy",

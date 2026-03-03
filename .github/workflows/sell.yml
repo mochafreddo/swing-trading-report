@@ -25,6 +25,7 @@ permissions:
 env:
   UV_CACHE_DIR: .uv-cache
   PYTHONUNBUFFERED: "1"
+  PYTHON_VERSION: "3.14"
 
 jobs:
   sell:
@@ -46,15 +47,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.14"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Restore uv cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.UV_CACHE_DIR }}
-          key: uv-${{ runner.os }}-3.13-${{ hashFiles('uv.lock') }}
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            uv-${{ runner.os }}-3.13-
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
             uv-${{ runner.os }}-
 
       - name: Resolve workflow inputs

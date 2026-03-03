@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
-import {
-  assertLocalRequest,
-  LocalRequestGuardError,
-} from "@/lib/local-request-guard";
-import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { holdingAddBuySchema, holdingTickerSchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
@@ -29,31 +24,9 @@ function parseTickerParam(rawTicker: string): string | null {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
-  try {
-    await requireAdminAuth(request);
-    assertSameOrigin(request);
-    assertLocalRequest(request);
-  } catch (error) {
-    if (error instanceof AdminAuthError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status, headers: error.headers },
-      );
-    }
-    if (error instanceof SameOriginError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+  const guardError = await enforceAdminApiGuard(request);
+  if (guardError) {
+    return guardError;
   }
 
   const params = await context.params;

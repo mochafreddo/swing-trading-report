@@ -1,47 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
-import {
-  assertLocalRequest,
-  LocalRequestGuardError,
-} from "@/lib/local-request-guard";
 import {
   isScanUniverseAllowed,
   PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
 } from "@/lib/run-dispatch-policy";
-import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
-import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import { runDispatchSchema } from "@/lib/schemas";
 import type { WorkflowDispatchInput } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  try {
-    await requireAdminAuth(request);
-    assertSameOrigin(request);
-    assertLocalRequest(request);
-  } catch (error) {
-    if (error instanceof AdminAuthError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status, headers: error.headers },
-      );
-    }
-    if (error instanceof SameOriginError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
-    }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+  const guardError = await enforceAdminApiGuard(request);
+  if (guardError) {
+    return guardError;
   }
 
   let payload: unknown;

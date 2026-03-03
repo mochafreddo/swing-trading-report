@@ -18,6 +18,16 @@ describe("parseReportStorageKey", () => {
     expect(parseReportStorageKey("reports/2026-02-14.buy.json")).toBeNull();
     expect(parseReportStorageKey("2026/02/2026-02-14.entry.json")).toBeNull();
   });
+
+  it("rejects impossible calendar dates", () => {
+    expect(parseReportStorageKey("2026/02/2026-02-31.buy.json")).toBeNull();
+    expect(parseReportStorageKey("2026/13/2026-13-01.sell.json")).toBeNull();
+  });
+
+  it("rejects path/date mismatch", () => {
+    expect(parseReportStorageKey("2026/03/2026-02-14.buy.json")).toBeNull();
+    expect(parseReportStorageKey("2025/02/2026-02-14.sell.json")).toBeNull();
+  });
 });
 
 describe("filterAndSortReportKeys", () => {

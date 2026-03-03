@@ -130,6 +130,15 @@ class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
 
 
 class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
+    def __init__(self, *, deps: MarketDataDependencies) -> None:
+        super().__init__(deps=deps)
+        self._provider_collectors: dict[
+            str, Callable[[_ScanRuntime, list[str], int], None]
+        ] = {
+            "kis": self._collect_with_kis_provider,
+            "pykrx": self._collect_with_pykrx_provider,
+        }
+
     def initialize_provider(
         self, runtime: _ScanRuntime, *, screener_enabled: bool
     ) -> None:
@@ -149,36 +158,57 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
         target_bars = max(runtime.cfg.min_history_bars, 200)
         tickers = list(runtime.tickers)
         provider = runtime.cfg.data_provider
-
-        if provider == "kis" and runtime.kis_client:
-            self._collect_from_kis(
-                runtime,
-                tickers=tickers,
-                target_bars=target_bars,
-                adjusted=True,
-                split_symbol_and_suffix_fn=_split_overseas,
-                exchange_from_suffix_fn=_excd_from_suffix,
-                get_pykrx_error_fn=lambda state: state.pykrx_import_error,
-                ensure_pykrx_client_fn=self._ensure_scan_pykrx_client,
-                legacy_cache_keys_fn=scan_legacy_cache_keys,
-                on_candles_applied_fn=self._update_latest_date,
-                before_kis_collection_fn=self._refresh_us_holidays_if_needed,
-            )
+        collector = self._provider_collectors.get(provider)
+        if collector is None:
+            if tickers:
+                runtime.failures.append(f"Provider '{provider}' not yet implemented")
+                runtime.fatal_failure = True
             return
+        collector(runtime, tickers, target_bars)
 
-        if provider == "pykrx" and runtime.pykrx_client:
-            self._collect_from_pykrx(
-                runtime,
-                tickers=tickers,
-                target_bars=target_bars,
-                adjusted=True,
-                on_candles_applied_fn=self._update_latest_date,
-            )
+    def _collect_with_kis_provider(
+        self,
+        runtime: _ScanRuntime,
+        tickers: list[str],
+        target_bars: int,
+    ) -> None:
+        if not runtime.kis_client:
+            if tickers:
+                runtime.failures.append("KIS provider is not initialized")
+                runtime.fatal_failure = True
             return
+        self._collect_from_kis(
+            runtime,
+            tickers=tickers,
+            target_bars=target_bars,
+            adjusted=True,
+            split_symbol_and_suffix_fn=_split_overseas,
+            exchange_from_suffix_fn=_excd_from_suffix,
+            get_pykrx_error_fn=lambda state: state.pykrx_import_error,
+            ensure_pykrx_client_fn=self._ensure_scan_pykrx_client,
+            legacy_cache_keys_fn=scan_legacy_cache_keys,
+            on_candles_applied_fn=self._update_latest_date,
+            before_kis_collection_fn=self._refresh_us_holidays_if_needed,
+        )
 
-        if tickers:
-            runtime.failures.append(f"Provider '{provider}' not yet implemented")
-            runtime.fatal_failure = True
+    def _collect_with_pykrx_provider(
+        self,
+        runtime: _ScanRuntime,
+        tickers: list[str],
+        target_bars: int,
+    ) -> None:
+        if not runtime.pykrx_client:
+            if tickers:
+                runtime.failures.append("PyKRX provider is not initialized")
+                runtime.fatal_failure = True
+            return
+        self._collect_from_pykrx(
+            runtime,
+            tickers=tickers,
+            target_bars=target_bars,
+            adjusted=True,
+            on_candles_applied_fn=self._update_latest_date,
+        )
 
     def _ensure_scan_pykrx_client(
         self,
@@ -249,6 +279,15 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
 
 
 class SellMarketData(_BaseMarketDataService[_SellRuntime]):
+    def __init__(self, *, deps: MarketDataDependencies) -> None:
+        super().__init__(deps=deps)
+        self._provider_collectors: dict[
+            str, Callable[[_SellRuntime, list[str], int], None]
+        ] = {
+            "kis": self._collect_with_kis_provider,
+            "pykrx": self._collect_with_pykrx_provider,
+        }
+
     def initialize_provider(self, runtime: _SellRuntime) -> None:
         self._initialize_provider(
             runtime,
@@ -260,27 +299,55 @@ class SellMarketData(_BaseMarketDataService[_SellRuntime]):
     def collect_market_data(self, runtime: _SellRuntime, *, target_bars: int) -> None:
         tickers = list(runtime.unique_tickers)
         provider = runtime.cfg.data_provider
-
-        if provider == "kis" and runtime.kis_client:
-            self._collect_from_kis(
-                runtime,
-                tickers=tickers,
-                target_bars=target_bars,
-                adjusted=False,
-                split_symbol_and_suffix_fn=_split_symbol_and_suffix,
-                exchange_from_suffix_fn=_exchange_from_suffix,
-                get_pykrx_error_fn=lambda state: state.pykrx_init_error,
-                ensure_pykrx_client_fn=self._ensure_sell_pykrx_client,
-            )
+        collector = self._provider_collectors.get(provider)
+        if collector is None:
+            if tickers:
+                runtime.failures.append(
+                    f"Provider '{provider}' not supported for sell command"
+                )
+                runtime.fatal_failure = True
             return
+        collector(runtime, tickers, target_bars)
 
-        if provider == "pykrx" and runtime.pykrx_client:
-            self._collect_from_pykrx(
-                runtime,
-                tickers=tickers,
-                target_bars=target_bars,
-                adjusted=False,
-            )
+    def _collect_with_kis_provider(
+        self,
+        runtime: _SellRuntime,
+        tickers: list[str],
+        target_bars: int,
+    ) -> None:
+        if not runtime.kis_client:
+            if tickers:
+                runtime.failures.append("KIS provider is not initialized")
+                runtime.fatal_failure = True
+            return
+        self._collect_from_kis(
+            runtime,
+            tickers=tickers,
+            target_bars=target_bars,
+            adjusted=False,
+            split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+            exchange_from_suffix_fn=_exchange_from_suffix,
+            get_pykrx_error_fn=lambda state: state.pykrx_init_error,
+            ensure_pykrx_client_fn=self._ensure_sell_pykrx_client,
+        )
+
+    def _collect_with_pykrx_provider(
+        self,
+        runtime: _SellRuntime,
+        tickers: list[str],
+        target_bars: int,
+    ) -> None:
+        if not runtime.pykrx_client:
+            if tickers:
+                runtime.failures.append("PyKRX provider is not initialized")
+                runtime.fatal_failure = True
+            return
+        self._collect_from_pykrx(
+            runtime,
+            tickers=tickers,
+            target_bars=target_bars,
+            adjusted=False,
+        )
 
     def _ensure_sell_pykrx_client(
         self,

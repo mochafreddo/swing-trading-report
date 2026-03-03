@@ -12,6 +12,25 @@ export interface ParsedReportStorageKey {
   month: number;
 }
 
+function isValidReportDate(year: number, month: number, day: number): boolean {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return false;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCDate() === day
+  );
+}
+
 export function parseReportStorageKey(
   key: string,
 ): ParsedReportStorageKey | null {
@@ -22,8 +41,20 @@ export function parseReportStorageKey(
   }
 
   const date = match.groups.date;
-  const parsedDate = new Date(`${date}T00:00:00Z`);
-  if (Number.isNaN(parsedDate.getTime())) {
+  const year = Number.parseInt(match.groups.year, 10);
+  const month = Number.parseInt(match.groups.month, 10);
+  const [dateYearText, dateMonthText, dateDayText] = date.split("-");
+  const dateYear = Number.parseInt(dateYearText ?? "", 10);
+  const dateMonth = Number.parseInt(dateMonthText ?? "", 10);
+  const dateDay = Number.parseInt(dateDayText ?? "", 10);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    year !== dateYear ||
+    month !== dateMonth ||
+    !isValidReportDate(dateYear, dateMonth, dateDay)
+  ) {
     return null;
   }
 
@@ -39,8 +70,8 @@ export function parseReportStorageKey(
     type: match.groups.type as ReportType,
     reportDate: date,
     duplicateIndex,
-    year: Number.parseInt(match.groups.year, 10),
-    month: Number.parseInt(match.groups.month, 10),
+    year,
+    month,
   };
 }
 
