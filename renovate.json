@@ -21,7 +21,8 @@
     "npm",
     "dockerfile",
     "docker-compose",
-    "github-actions"
+    "github-actions",
+    "custom.regex"
   ],
   "ignorePaths": [
     "data/**",
@@ -29,6 +30,17 @@
     "output/**",
     "dist/**",
     ".pre-commit-config.yaml"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/.*\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n\\s*version:\\s*['\"]?(?<currentValue>[^'\"\\s]+)['\"]?"
+      ]
+    }
   ],
   "lockFileMaintenance": {
     "enabled": true,

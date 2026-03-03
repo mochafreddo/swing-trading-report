@@ -38,6 +38,7 @@ jobs:
       - name: Run Trivy audit (vuln + secret)
         uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518 # 0.34.1
         with:
+          # renovate: datasource=github-releases depName=aquasecurity/trivy versioning=semver
           version: v0.69.2
           scan-type: fs
           scan-ref: .
