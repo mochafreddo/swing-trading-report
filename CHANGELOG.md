@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.0...v1.7.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* **strategy:** entry/scan 전략 모드 계약 정합화 ([063a966](https://github.com/mochafreddo/swing-trading-report/commit/063a9666bac1c927f0e3370e4366f104cf7da19c))
+
 ## [1.7.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.6.1...v1.7.0) (2026-03-03)
 
 
