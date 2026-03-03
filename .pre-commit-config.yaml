@@ -33,3 +33,10 @@ repos:
         entry: pnpm --dir web run format:check
         files: ^web/
         pass_filenames: false
+
+      - id: web-route-static-check
+        name: web route static check (next.js)
+        language: system
+        entry: uv run python scripts/check_next_app_routes.py
+        files: ^web/src/app/
+        pass_filenames: false
