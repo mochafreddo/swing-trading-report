@@ -331,6 +331,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 ### 7.1 Buy report (candidate)
 
 - 공통적으로 ticker, price, 지표/메트릭, 점수, 통화, 데이터 소스 등을 포함합니다.
+- `strategy_mode`: 각 candidate는 평가에 사용된 전략 모드(`ema_cross` 또는 `sma_ema_hybrid`)를 포함합니다.
+- `sab entry`는 candidate의 `strategy_mode`를 우선 사용하며, 레거시 리포트처럼 candidate 필드가 없는 경우 buy report top-level `strategy_mode`(또는 `config_snapshot.strategy_mode`)를 폴백으로 사용합니다.
 - `eval_date`(YYYYMMDD): 해당 candidate가 실제로 평가된 완성 일봉 날짜를 포함합니다(`choose_eval_index()` 결과 기준).
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
 - `sab entry`의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.

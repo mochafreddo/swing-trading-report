@@ -72,6 +72,12 @@ def _evaluate_candidates(
     excd_from_suffix_fn: Any,
 ) -> None:
     cfg = runtime.cfg
+
+    def _with_strategy_mode(candidate: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(candidate)
+        enriched.setdefault("strategy_mode", cfg.strategy_mode)
+        return enriched
+
     eval_settings = EvaluationSettingsCls(
         use_sma200_filter=cfg.use_sma200_filter,
         gap_atr_multiplier=cfg.gap_atr_multiplier,
@@ -134,7 +140,9 @@ def _evaluate_candidates(
                     ticker, ticker_candles, hybrid_settings, meta
                 )
                 if result_hybrid.candidate:
-                    runtime.candidates.append(result_hybrid.candidate)
+                    runtime.candidates.append(
+                        _with_strategy_mode(result_hybrid.candidate)
+                    )
                 elif result_hybrid.reason:
                     detail = f"{ticker}: {result_hybrid.reason}"
                     if _is_system_result(result_hybrid):
@@ -148,7 +156,7 @@ def _evaluate_candidates(
 
             result = evaluate_ticker_fn(ticker, ticker_candles, eval_settings, meta)
             if result.candidate:
-                runtime.candidates.append(result.candidate)
+                runtime.candidates.append(_with_strategy_mode(result.candidate))
             elif result.reason:
                 detail = f"{ticker}: {result.reason}"
                 if _is_system_result(result):

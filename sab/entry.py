@@ -36,6 +36,7 @@ _BUY_REPORT_PATTERN = re.compile(
 _SUPPORTED_MODES = {"PRE_OPEN", "INTRADAY", "AFTER_CLOSE"}
 _SUPPORTED_MARKETS = {"KR", "US"}
 _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
+_SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
 
 
@@ -165,9 +166,33 @@ def _extract_gap_guard(
     return pct, up, down
 
 
-def _resolve_strategy_mode(candidate: dict[str, Any]) -> str:
-    mode = str(candidate.get("strategy_mode") or "ema_cross").strip().lower()
-    return mode or "ema_cross"
+def _normalize_strategy_mode(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in _SUPPORTED_STRATEGY_MODES:
+        return normalized
+    return None
+
+
+def _resolve_strategy_mode(
+    candidate: dict[str, Any], *, default_strategy_mode: str | None = None
+) -> str:
+    candidate_mode = _normalize_strategy_mode(candidate.get("strategy_mode"))
+    if candidate_mode is not None:
+        return candidate_mode
+    if default_strategy_mode is not None:
+        return default_strategy_mode
+    return "ema_cross"
+
+
+def _resolve_report_strategy_mode(report: dict[str, Any]) -> str | None:
+    direct = _normalize_strategy_mode(report.get("strategy_mode"))
+    if direct is not None:
+        return direct
+
+    config_snapshot = report.get("config_snapshot")
+    if isinstance(config_snapshot, dict):
+        return _normalize_strategy_mode(config_snapshot.get("strategy_mode"))
+    return None
 
 
 def evaluate_entry_candidates(
@@ -175,9 +200,11 @@ def evaluate_entry_candidates(
     candidates: list[dict[str, Any]],
     price_lookup_fn: Callable[[str], float | None],
     gap_breach_action: str = "SKIP",
+    default_strategy_mode: str | None = None,
 ) -> tuple[list[EntryReportRow], list[str]]:
     rows: list[EntryReportRow] = []
     system_issues: list[str] = []
+    resolved_default_strategy_mode = _normalize_strategy_mode(default_strategy_mode)
 
     for candidate in candidates:
         ticker = _normalize_ticker(candidate.get("ticker"))
@@ -189,7 +216,10 @@ def evaluate_entry_candidates(
         gap_guard_pct, gap_guard_up_price, gap_guard_down_price = _extract_gap_guard(
             candidate
         )
-        strategy_mode = _resolve_strategy_mode(candidate)
+        strategy_mode = _resolve_strategy_mode(
+            candidate,
+            default_strategy_mode=resolved_default_strategy_mode,
+        )
         entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
         pattern = str(candidate.get("pattern") or "").strip() or None
 
@@ -596,6 +626,7 @@ def run_entry(
         candidates=candidates,
         price_lookup_fn=price_lookup_fn,
         gap_breach_action="SKIP",
+        default_strategy_mode=_resolve_report_strategy_mode(source_report),
     )
     rows.sort(key=lambda row: (row.action, row.ticker))
 
