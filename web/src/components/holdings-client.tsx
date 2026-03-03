@@ -443,7 +443,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         }
 
         const response = await fetch(
-          `/api/holdings/${encodeURIComponent(addBuyTicker)}/add-buy`,
+          `/api/holdings/add-buy/${encodeURIComponent(addBuyTicker)}`,
           {
             method: "POST",
             headers: {

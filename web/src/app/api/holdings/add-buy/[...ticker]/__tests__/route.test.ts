@@ -67,12 +67,12 @@ vi.mock("@/lib/supabase-admin", () => {
   };
 });
 
-import { POST } from "@/app/api/holdings/[...ticker]/add-buy/route";
+import { POST } from "@/app/api/holdings/add-buy/[...ticker]/route";
 import { addBuyToHolding } from "@/lib/supabase-admin";
 
 function makeRequest(payload: object): NextRequest {
   return new NextRequest(
-    "http://localhost:55300/api/holdings/BRK/B.NYS/add-buy",
+    "http://localhost:55300/api/holdings/add-buy/BRK/B.NYS",
     {
       method: "POST",
       headers: {
@@ -88,7 +88,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("/api/holdings/[...ticker]/add-buy route", () => {
+describe("/api/holdings/add-buy/[...ticker] route", () => {
   it("reconstructs segmented ticker path for add-buy", async () => {
     vi.mocked(addBuyToHolding).mockResolvedValueOnce({
       ticker: "BRK.B.NYS",
