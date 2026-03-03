@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.1...v1.7.2) (2026-03-03)
+
+
+### Bug Fixes
+
+* **market-data:** 캐시 신선도 정책과 캔들 정합성 개선 ([09f1971](https://github.com/mochafreddo/swing-trading-report/commit/09f1971458925e7d640ccae7cb71b86ef4901286))
+
 ## [1.7.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.0...v1.7.1) (2026-03-03)
 
 
