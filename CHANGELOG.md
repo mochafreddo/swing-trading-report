@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.6.0...v1.6.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* **ci:** audit 워크플로 Trivy 버전 고정 ([cba1d1c](https://github.com/mochafreddo/swing-trading-report/commit/cba1d1c412125d513123b256b5e1fe866d5e9332))
+
 ## [1.6.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.5.1...v1.6.0) (2026-02-28)
 
 
