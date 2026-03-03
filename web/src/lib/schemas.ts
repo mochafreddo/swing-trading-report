@@ -50,6 +50,17 @@ const toNullableNonNegativeNumber = z.preprocess((value) => {
   return value;
 }, z.number().finite().min(0).nullable());
 
+const toPositiveNumber = z.preprocess((value) => {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const n = Number(value.trim());
+    return Number.isNaN(n) ? value : n;
+  }
+  return value;
+}, z.number().finite().gt(0));
+
 const toTags = z.preprocess(
   (value) => {
     if (value == null || value === "") {
@@ -162,7 +173,11 @@ export const holdingCreateSchema = z
     stop_override: toNullableNonNegativeNumber.optional(),
     target_override: toNullableNonNegativeNumber.optional(),
   })
-  .strict();
+  .strict()
+  .refine((payload) => payload.quantity === 0 || payload.entry_price > 0, {
+    message: "entry_price must be > 0 when quantity > 0",
+    path: ["entry_price"],
+  });
 
 export const holdingPatchSchema = z
   .object({
@@ -178,9 +193,46 @@ export const holdingPatchSchema = z
     target_override: toNullableNonNegativeNumber.optional(),
   })
   .strict()
+  .refine(
+    (payload) => {
+      if (payload.quantity == null || payload.entry_price == null) {
+        return true;
+      }
+      return payload.quantity === 0 || payload.entry_price > 0;
+    },
+    {
+      message: "entry_price must be > 0 when quantity > 0",
+      path: ["entry_price"],
+    },
+  )
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one field must be provided",
   });
+
+const addBuyDateSchema = z.preprocess(
+  (value) => {
+    if (value == null) {
+      return undefined;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : undefined;
+    }
+    return value;
+  },
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+);
+
+export const holdingAddBuySchema = z
+  .object({
+    buy_quantity: toPositiveNumber,
+    buy_price: toPositiveNumber,
+    buy_date: addBuyDateSchema,
+  })
+  .strict();
 
 export const runDispatchSchema = z.union([
   z

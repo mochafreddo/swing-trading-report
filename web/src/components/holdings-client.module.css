@@ -4,6 +4,12 @@
   gap: var(--space-4);
 }
 
+.sidebar {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
 .form {
   margin-top: var(--space-3);
   display: grid;

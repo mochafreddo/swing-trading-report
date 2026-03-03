@@ -610,6 +610,12 @@ export interface FetchHoldingsPageResult {
   hasMore: boolean;
 }
 
+export interface HoldingAddBuyInput {
+  buy_quantity: number;
+  buy_price: number;
+  buy_date?: string;
+}
+
 export async function fetchHoldingsPage(
   options: FetchHoldingsPageOptions = {},
 ): Promise<FetchHoldingsPageResult> {
@@ -825,4 +831,39 @@ export async function deleteHolding(ticker: string): Promise<boolean> {
     }
   }
   return deletedAny;
+}
+
+export async function addBuyToHolding(
+  ticker: string,
+  input: HoldingAddBuyInput,
+): Promise<HoldingRecord | null> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/holdings_add_buy_v1`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_ticker: ticker,
+      p_buy_quantity: input.buy_quantity,
+      p_buy_price: input.buy_price,
+      p_buy_date: input.buy_date ?? null,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to add buy to holding '${ticker}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+  return payload[0] as HoldingRecord;
 }

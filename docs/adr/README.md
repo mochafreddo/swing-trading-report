@@ -11,3 +11,4 @@
 - [ADR-0007 v1.1 현재 아키텍처 기준선(report_index/관리자 인증)](ADR-0007-v1.1-current-architecture-baseline.md) - 상태: Accepted (2026-02-23)
 - [ADR-0008 Holdings 티커 입력 UX: 티커 디렉토리(캐시) + 검색/최근 후보](ADR-0008-holdings-ticker-directory.md) - 상태: Accepted (2026-02-28)
 - [ADR-0009 웹 리포트 페이지 캐시: in-memory 2계층(서버 LRU + 클라이언트 dedupe)](ADR-0009-web-reports-caching.md) - 상태: Accepted (2026-02-28)
+- [ADR-0010 Holdings 추가매수(Add Buy) 입력: Supabase RPC 원자 업데이트 + 평단 자동 재계산](ADR-0010-holdings-add-buy.md) - 상태: Accepted (2026-03-03)

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE } from "@/lib/run-dispatch-policy";
 import {
+  holdingAddBuySchema,
   holdingListQuerySchema,
   holdingCreateSchema,
   holdingPatchSchema,
@@ -199,6 +200,26 @@ describe("holding schemas", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("rejects create payload when quantity is positive and entry_price is zero", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 0,
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) {
+      return;
+    }
+    expect(
+      parsed.error.issues.some(
+        (issue) =>
+          issue.path.join(".") === "entry_price" &&
+          issue.message === "entry_price must be > 0 when quantity > 0",
+      ),
+    ).toBe(true);
+  });
+
   it("requires at least one patch field", () => {
     const parsed = holdingPatchSchema.safeParse({});
     expect(parsed.success).toBe(false);
@@ -218,6 +239,66 @@ describe("holding schemas", () => {
     });
 
     expect(parsed).toEqual({ ticker: "BRK.B.NYS" });
+  });
+
+  it("rejects patch payload when quantity is positive and entry_price is zero", () => {
+    const parsed = holdingPatchSchema.safeParse({
+      quantity: 1,
+      entry_price: 0,
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) {
+      return;
+    }
+    expect(
+      parsed.error.issues.some(
+        (issue) =>
+          issue.path.join(".") === "entry_price" &&
+          issue.message === "entry_price must be > 0 when quantity > 0",
+      ),
+    ).toBe(true);
+  });
+
+  it("normalizes add-buy payload", () => {
+    const parsed = holdingAddBuySchema.parse({
+      buy_quantity: "2.5",
+      buy_price: "182.45",
+      buy_date: "2026-03-03",
+    });
+
+    expect(parsed).toEqual({
+      buy_quantity: 2.5,
+      buy_price: 182.45,
+      buy_date: "2026-03-03",
+    });
+  });
+
+  it("rejects non-positive add-buy quantity or price", () => {
+    expect(
+      holdingAddBuySchema.safeParse({
+        buy_quantity: 0,
+        buy_price: 10,
+      }).success,
+    ).toBe(false);
+    expect(
+      holdingAddBuySchema.safeParse({
+        buy_quantity: 1,
+        buy_price: -1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts add-buy payload without buy_date", () => {
+    const parsed = holdingAddBuySchema.parse({
+      buy_quantity: 1,
+      buy_price: 100,
+    });
+
+    expect(parsed).toEqual({
+      buy_quantity: 1,
+      buy_price: 100,
+    });
   });
 });
 

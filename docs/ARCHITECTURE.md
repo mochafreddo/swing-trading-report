@@ -40,7 +40,7 @@ flowchart LR
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/supabase_storage.py` |
 | 웹 API 경계 | 인증, same-origin, localhost 가드, API 라우트 | `web/middleware.ts`, `web/src/app/api/**/route.ts` |
-| Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 | `web/src/lib/supabase-admin.ts` |
+| Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹, 계획) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공 | `docs/holdings-ticker-lookup.md`, ADR-0008 |
 | 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml` |
@@ -81,7 +81,8 @@ flowchart LR
 
 1. `/api/holdings`가 cursor 기반 페이지네이션으로 목록을 제공합니다.
 2. `/api/holdings` `POST`, `/api/holdings/[ticker]` `PATCH`/`DELETE`로 PostgREST를 통해 `holdings`를 수정합니다.
-3. (계획, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
+3. `/api/holdings/[ticker]/add-buy` `POST`는 Supabase RPC(`holdings_add_buy_v1`)를 호출해 추가매수(수량/평단/진입일/통화)를 원자적으로 갱신합니다.
+4. (계획, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
    - 검색/후보 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용합니다.
    - 캐시는 Supabase `runtime_state`에 저장되며 stale 시 점진 갱신합니다.
 

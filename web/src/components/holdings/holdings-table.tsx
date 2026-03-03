@@ -16,6 +16,7 @@ interface HoldingsTableProps {
   onRefresh: () => void | Promise<void>;
   onToggleShowInactive: (nextValue: boolean) => void;
   onEdit: (row: HoldingRecord) => void;
+  onAddBuy: (row: HoldingRecord) => void;
   onDelete: (ticker: string) => void | Promise<void>;
   onLoadMore: () => void | Promise<void>;
 }
@@ -33,6 +34,7 @@ export function HoldingsTable({
   onRefresh,
   onToggleShowInactive,
   onEdit,
+  onAddBuy,
   onDelete,
   onLoadMore,
 }: HoldingsTableProps) {
@@ -127,6 +129,9 @@ export function HoldingsTable({
                       <div className={styles.inlineActions}>
                         <button type="button" onClick={() => onEdit(row)}>
                           Edit
+                        </button>
+                        <button type="button" onClick={() => onAddBuy(row)}>
+                          Add Buy
                         </button>
                         <button
                           type="button"

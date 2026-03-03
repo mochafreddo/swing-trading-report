@@ -5,6 +5,7 @@
 ## 제품/요구사항
 
 - [PRD](PRD.md)
+- [Holdings 추가매수 입력 설계](holdings-add-buy.md)
 
 ## 운영/설정
 

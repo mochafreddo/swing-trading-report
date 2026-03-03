@@ -1,11 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import styles from "./holdings-client.module.css";
 
 import { partitionHoldingsByActivity } from "@/lib/holding-activity";
+import type { HoldingRecord } from "@/lib/types";
 
+import {
+  type AddBuyFormState,
+  type AddBuyPreview,
+  HoldingsAddBuyPanel,
+} from "@/components/holdings/holdings-add-buy-panel";
+import {
+  getAddBuyPrecheckError,
+  inferRequiredCurrency,
+} from "@/components/holdings/add-buy-precheck";
 import { HoldingsFormPanel } from "@/components/holdings/holdings-form-panel";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
 import { readApiError } from "@/components/holdings/helpers";
@@ -34,6 +50,85 @@ interface RecentCandidatesApiPayload {
     reportDate?: unknown;
   } | null;
   candidates?: unknown;
+}
+
+function formatTodayLocalDate(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+function createEmptyAddBuyForm(): AddBuyFormState {
+  return {
+    buy_quantity: "",
+    buy_price: "",
+    buy_date: formatTodayLocalDate(),
+  };
+}
+
+function parsePositiveNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function resolveNextEntryDate(
+  currentEntryDate: string | null,
+  buyDateInput: string,
+): string | null {
+  const buyDate = buyDateInput.trim();
+  if (!buyDate) {
+    return currentEntryDate;
+  }
+  if (!currentEntryDate) {
+    return buyDate;
+  }
+  return buyDate < currentEntryDate ? buyDate : currentEntryDate;
+}
+
+function buildAddBuyPreview(
+  target: HoldingRecord | null,
+  form: AddBuyFormState,
+): AddBuyPreview | null {
+  if (!target) {
+    return null;
+  }
+  const buyQuantity = parsePositiveNumber(form.buy_quantity);
+  const buyPrice = parsePositiveNumber(form.buy_price);
+  if (buyQuantity == null || buyPrice == null) {
+    return null;
+  }
+
+  const nextQuantity = target.quantity + buyQuantity;
+  if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+    return null;
+  }
+
+  const nextEntryPrice =
+    target.quantity === 0
+      ? buyPrice
+      : (target.quantity * target.entry_price + buyQuantity * buyPrice) /
+        nextQuantity;
+
+  return {
+    next_quantity: roundTo(nextQuantity, 6),
+    next_entry_price: roundTo(nextEntryPrice, 4),
+    next_entry_date: resolveNextEntryDate(target.entry_date, form.buy_date),
+    next_entry_currency:
+      target.entry_currency?.trim().toUpperCase() ||
+      inferRequiredCurrency(target.ticker),
+  };
 }
 
 function parseTickerLookupResults(payload: unknown): TickerLookupResult[] {
@@ -83,6 +178,12 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const [recentCandidatesReportDate, setRecentCandidatesReportDate] = useState<
     string | null
   >(null);
+  const [addBuyTicker, setAddBuyTicker] = useState<string | null>(null);
+  const [addBuyForm, setAddBuyForm] = useState<AddBuyFormState>(() =>
+    createEmptyAddBuyForm(),
+  );
+  const [addBuySubmitting, setAddBuySubmitting] = useState(false);
+  const [addBuyError, setAddBuyError] = useState<string | null>(null);
   const {
     items,
     loading,
@@ -109,6 +210,19 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     [items],
   );
   const visibleItems = showInactive ? items : partitioned.active;
+  const addBuyTarget = useMemo(
+    () => items.find((item) => item.ticker === addBuyTicker) ?? null,
+    [addBuyTicker, items],
+  );
+  const addBuyPrecheckError = useMemo(
+    () => getAddBuyPrecheckError(addBuyTarget),
+    [addBuyTarget],
+  );
+  const addBuyPreview = useMemo(
+    () =>
+      addBuyPrecheckError ? null : buildAddBuyPreview(addBuyTarget, addBuyForm),
+    [addBuyForm, addBuyPrecheckError, addBuyTarget],
+  );
 
   const applyTickerFromLookup = useCallback(
     (ticker: string) => {
@@ -255,6 +369,11 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         if (editingTicker === ticker) {
           cancelEdit();
         }
+        if (addBuyTicker === ticker) {
+          setAddBuyTicker(null);
+          setAddBuyForm(createEmptyAddBuyForm());
+          setAddBuyError(null);
+        }
         await refresh();
       } catch (deleteError) {
         setError(
@@ -262,32 +381,134 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         );
       }
     },
-    [cancelEdit, editingTicker, refresh, setError],
+    [addBuyTicker, cancelEdit, editingTicker, refresh, setError],
+  );
+
+  const beginAddBuy = useCallback(
+    (row: HoldingRecord) => {
+      setAddBuyTicker(row.ticker);
+      setAddBuyForm(createEmptyAddBuyForm());
+      setAddBuyError(null);
+      setError(null);
+    },
+    [setError],
+  );
+
+  const updateAddBuyField = useCallback(
+    (field: keyof AddBuyFormState, value: string) => {
+      setAddBuyForm((prev) => ({ ...prev, [field]: value }));
+    },
+    [],
+  );
+
+  const cancelAddBuy = useCallback(() => {
+    setAddBuyTicker(null);
+    setAddBuyForm(createEmptyAddBuyForm());
+    setAddBuyError(null);
+  }, []);
+
+  const submitAddBuy = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!addBuyTicker) {
+        setAddBuyError("Add Buy 대상 티커를 선택하세요.");
+        return;
+      }
+      if (addBuyPrecheckError) {
+        return;
+      }
+
+      const buyQuantity = parsePositiveNumber(addBuyForm.buy_quantity);
+      const buyPrice = parsePositiveNumber(addBuyForm.buy_price);
+      if (buyQuantity == null || buyPrice == null) {
+        setAddBuyError("Buy Quantity/Price는 0보다 큰 숫자여야 합니다.");
+        return;
+      }
+
+      setAddBuySubmitting(true);
+      setAddBuyError(null);
+      setError(null);
+      try {
+        const payload: {
+          buy_quantity: number;
+          buy_price: number;
+          buy_date?: string;
+        } = {
+          buy_quantity: buyQuantity,
+          buy_price: buyPrice,
+        };
+        const buyDate = addBuyForm.buy_date.trim();
+        if (buyDate) {
+          payload.buy_date = buyDate;
+        }
+
+        const response = await fetch(
+          `/api/holdings/${encodeURIComponent(addBuyTicker)}/add-buy`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        );
+        const responsePayload = (await response.json()) as unknown;
+        if (!response.ok) {
+          throw new Error(readApiError(responsePayload) || "Add buy failed");
+        }
+
+        setAddBuyTicker(null);
+        setAddBuyForm(createEmptyAddBuyForm());
+        await refresh();
+      } catch (addBuySubmitError) {
+        setAddBuyError(
+          addBuySubmitError instanceof Error
+            ? addBuySubmitError.message
+            : "Add buy failed",
+        );
+      } finally {
+        setAddBuySubmitting(false);
+      }
+    },
+    [addBuyForm, addBuyPrecheckError, addBuyTicker, refresh, setError],
   );
 
   return (
     <section className={styles.wrapper}>
-      <HoldingsFormPanel
-        modeLabel={modeLabel}
-        submitting={submitting}
-        editingTicker={editingTicker}
-        hasUnsavedChanges={hasUnsavedChanges}
-        form={form}
-        tickerLookupQuery={tickerLookupQuery}
-        tickerLookupResults={tickerLookupResults}
-        tickerLookupLoading={tickerLookupLoading}
-        tickerLookupError={tickerLookupError}
-        recentCandidates={recentCandidates}
-        recentCandidatesReportKey={recentCandidatesReportKey}
-        recentCandidatesReportDate={recentCandidatesReportDate}
-        recentCandidatesLoading={recentCandidatesLoading}
-        recentCandidatesError={recentCandidatesError}
-        onSubmit={onSubmit}
-        onCancelEdit={cancelEdit}
-        onFieldChange={updateField}
-        onTickerLookupQueryChange={setTickerLookupQuery}
-        onSelectTicker={applyTickerFromLookup}
-      />
+      <div className={styles.sidebar}>
+        <HoldingsFormPanel
+          modeLabel={modeLabel}
+          submitting={submitting}
+          editingTicker={editingTicker}
+          hasUnsavedChanges={hasUnsavedChanges}
+          form={form}
+          tickerLookupQuery={tickerLookupQuery}
+          tickerLookupResults={tickerLookupResults}
+          tickerLookupLoading={tickerLookupLoading}
+          tickerLookupError={tickerLookupError}
+          recentCandidates={recentCandidates}
+          recentCandidatesReportKey={recentCandidatesReportKey}
+          recentCandidatesReportDate={recentCandidatesReportDate}
+          recentCandidatesLoading={recentCandidatesLoading}
+          recentCandidatesError={recentCandidatesError}
+          onSubmit={onSubmit}
+          onCancelEdit={cancelEdit}
+          onFieldChange={updateField}
+          onTickerLookupQueryChange={setTickerLookupQuery}
+          onSelectTicker={applyTickerFromLookup}
+        />
+        <HoldingsAddBuyPanel
+          target={addBuyTarget}
+          form={addBuyForm}
+          submitting={addBuySubmitting}
+          error={addBuyError}
+          precheckError={addBuyPrecheckError}
+          preview={addBuyPreview}
+          onFieldChange={updateAddBuyField}
+          onSubmit={submitAddBuy}
+          onCancel={cancelAddBuy}
+        />
+      </div>
       <HoldingsTable
         items={items}
         visibleItems={visibleItems}
@@ -301,6 +522,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         onRefresh={refresh}
         onToggleShowInactive={setShowInactive}
         onEdit={beginEdit}
+        onAddBuy={beginAddBuy}
         onDelete={removeHolding}
         onLoadMore={loadMore}
       />

@@ -9,6 +9,7 @@ import {
 } from "vitest";
 
 import {
+  addBuyToHolding,
   fetchReportIndexPage,
   createHolding,
   deleteHolding,
@@ -337,5 +338,76 @@ describe("holding mutations alias handling", () => {
 
     expect(deleted).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("addBuyToHolding", () => {
+  it("calls holdings_add_buy_v1 RPC and returns updated holding", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([holdingRow({ ticker: "AAPL.NAS" })]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const updated = await addBuyToHolding("AAPL.NAS", {
+      buy_quantity: 2,
+      buy_price: 170.25,
+      buy_date: "2026-03-03",
+    });
+
+    expect(updated?.ticker).toBe("AAPL.NAS");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.pathname).toBe("/rest/v1/rpc/holdings_add_buy_v1");
+    expect(requestInit?.method).toBe("POST");
+
+    const body =
+      typeof requestInit?.body === "string"
+        ? (JSON.parse(requestInit.body) as Record<string, unknown>)
+        : null;
+    expect(body).toEqual({
+      p_ticker: "AAPL.NAS",
+      p_buy_quantity: 2,
+      p_buy_price: 170.25,
+      p_buy_date: "2026-03-03",
+    });
+  });
+
+  it("returns null when RPC reports no matching holding", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const updated = await addBuyToHolding("AAPL.NAS", {
+      buy_quantity: 2,
+      buy_price: 170.25,
+    });
+
+    expect(updated).toBeNull();
+  });
+
+  it("maps Supabase RPC failures to SupabaseApiError", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "currency mismatch" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      addBuyToHolding("AAPL.NAS", {
+        buy_quantity: 1,
+        buy_price: 100,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "Failed to add buy to holding 'AAPL.NAS': currency mismatch",
+    } satisfies Partial<SupabaseApiError>);
   });
 });
