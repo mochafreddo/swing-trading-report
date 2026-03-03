@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.6.1...v1.7.0) (2026-03-03)
+
+
+### Features
+
+* **holdings:** 추가매수 입력 및 유효성 검증 강화 ([48bbbb4](https://github.com/mochafreddo/swing-trading-report/commit/48bbbb472ae6f72de0f98cd29ec5373f456157ac))
+
+
+### Bug Fixes
+
+* **web:** add-buy catch-all 라우트 빌드 오류 수정 ([3c77a6e](https://github.com/mochafreddo/swing-trading-report/commit/3c77a6ed4f1bd96d47c0bdba1ae993dafb282b3a))
+
 ## [1.6.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.6.0...v1.6.1) (2026-03-03)
 
 
