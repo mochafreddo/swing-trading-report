@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 from types import ModuleType
-from typing import Any, Optional
+from typing import Any
 
 
 class PykrxClientError(RuntimeError):
@@ -17,7 +17,7 @@ class PykrxNotInstalledError(PykrxClientError):
 class PykrxClient:
     """Thin wrapper around pykrx.stock daily OHLC fetch."""
 
-    def __init__(self, *, cache_dir: Optional[str] = None) -> None:
+    def __init__(self, *, cache_dir: str | None = None) -> None:
         self.cache_dir = cache_dir
         self._stock_module: ModuleType = _import_pykrx_stock()
 

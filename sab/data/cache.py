@@ -28,7 +28,7 @@ def load_json(base_dir: str, key: str) -> Any | None:
     if not os.path.exists(p):
         return None
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
