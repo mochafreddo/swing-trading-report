@@ -819,6 +819,72 @@ def test_run_scan_returns_1_when_partial_market_data_missing(tmp_path: Path) -> 
     assert code == 1
 
 
+def test_run_scan_allows_partial_market_data_when_coverage_meets_threshold(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        screener_enabled=False,
+        screener_only=False,
+        universe_markets=["US"],
+    )
+    tickers = [
+        "AAPL.NAS",
+        "MSFT.NAS",
+        "AMZN.NAS",
+        "GOOG.NAS",
+        "META.NAS",
+        "TSLA.NAS",
+        "NVDA.NAS",
+        "NFLX.NAS",
+        "INTC.NAS",
+        "AMD.NAS",
+    ]
+
+    def _collect_runtime(
+        runtime: Any,
+        *,
+        screener_enabled: bool,
+        screener_only: bool,
+        screener_limit: int,
+        screener_limit_from_cli: bool,
+        evaluation_limit: int | None,
+    ) -> None:
+        del (
+            screener_enabled,
+            screener_only,
+            screener_limit,
+            screener_limit_from_cli,
+            evaluation_limit,
+        )
+        runtime.market_data = {ticker: _build_candles() for ticker in tickers[:7]}
+        runtime.ticker_currency = {ticker: "USD" for ticker in tickers}
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=tickers),
+        patch("sab.scan._collect_scan_runtime", side_effect=_collect_runtime),
+        patch("sab.scan._evaluate_scan_runtime", return_value=None),
+        patch(
+            "sab.scan.write_report",
+            return_value=str(tmp_path / "2026-02-24.buy.coverage-threshold.md"),
+        ),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 0
+
+
 def test_run_sell_returns_1_when_partial_market_data_missing(tmp_path: Path) -> None:
     cfg = replace(
         Config(),
@@ -845,6 +911,48 @@ def test_run_sell_returns_1_when_partial_market_data_missing(tmp_path: Path) -> 
         code = run_sell(provider=None)
 
     assert code == 1
+
+
+def test_run_sell_allows_partial_market_data_when_coverage_meets_threshold(
+    tmp_path: Path,
+) -> None:
+    tickers = [
+        "AAPL.NAS",
+        "MSFT.NAS",
+        "AMZN.NAS",
+        "GOOG.NAS",
+        "META.NAS",
+        "TSLA.NAS",
+        "NVDA.NAS",
+        "NFLX.NAS",
+        "INTC.NAS",
+        "AMD.NAS",
+    ]
+    cfg = replace(
+        Config(),
+        data_provider="pykrx",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(tickers),
+    )
+
+    def _collect_runtime(runtime: Any, *, target_bars: int) -> None:
+        del target_bars
+        runtime.market_data = {ticker: _build_candles() for ticker in tickers[:7]}
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.sell._collect_sell_runtime", side_effect=_collect_runtime),
+        patch("sab.sell._evaluate_sell_runtime", return_value=[]),
+        patch(
+            "sab.sell.write_sell_report",
+            return_value=str(tmp_path / "2026-02-24.sell.coverage-threshold.md"),
+        ),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 0
 
 
 def test_run_scan_hybrid_returns_1_when_unexpected_ticker_evaluation_error_occurs(

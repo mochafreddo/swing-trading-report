@@ -6,7 +6,12 @@ import {
   buildHoldingsKeysetFilter,
   encodeHoldingCursor,
 } from "@/lib/holdings-pagination";
+import {
+  ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+  ADD_BUY_IDEMPOTENCY_MISMATCH_DETAIL,
+} from "@/lib/add-buy-idempotency";
 import { buildHoldingTickerAliases } from "@/lib/holding-ticker";
+import { FetchTimeoutError, fetchWithTimeout } from "@/lib/fetch-timeout";
 import type {
   HoldingCursor,
   HoldingMutationInput,
@@ -19,11 +24,43 @@ const HOLDINGS_SELECT =
 const RUNTIME_STATE_SELECT = "state_key,state_payload,expires_at";
 
 export class SupabaseApiError extends Error {
+  public readonly code: string | null;
+  public readonly upstreamCode: string | null;
+  public readonly details: string | null;
+  public readonly hint: string | null;
+
   constructor(
     message: string,
     public readonly status: number,
+    options?: {
+      code?: string | null;
+      upstreamCode?: string | null;
+      details?: string | null;
+      hint?: string | null;
+    },
   ) {
     super(message);
+    this.code = options?.code ?? null;
+    this.upstreamCode = options?.upstreamCode ?? null;
+    this.details = options?.details ?? null;
+    this.hint = options?.hint ?? null;
+  }
+}
+
+async function fetchSupabase(
+  url: string,
+  init: Omit<RequestInit, "signal">,
+): Promise<Response> {
+  try {
+    return await fetchWithTimeout(url, init);
+  } catch (error) {
+    if (error instanceof FetchTimeoutError) {
+      throw new SupabaseApiError(
+        `Supabase request timed out after ${error.timeoutMs}ms`,
+        504,
+      );
+    }
+    throw error;
   }
 }
 
@@ -43,18 +80,63 @@ function encodeStorageKey(key: string): string {
     .join("/");
 }
 
-async function parseError(response: Response): Promise<string> {
+interface ParsedSupabaseErrorPayload {
+  message: string;
+  code: string | null;
+  details: string | null;
+  hint: string | null;
+}
+
+function trimTextOrNull(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+async function parseErrorPayload(
+  response: Response,
+): Promise<ParsedSupabaseErrorPayload> {
   const text = await response.text();
   if (!text) {
-    return `HTTP ${response.status}`;
+    return {
+      message: `HTTP ${response.status}`,
+      code: null,
+      details: null,
+      hint: null,
+    };
   }
 
   try {
-    const parsed = JSON.parse(text) as { message?: string; error?: string };
-    return parsed.message || parsed.error || text;
+    const parsed = JSON.parse(text) as {
+      message?: unknown;
+      error?: unknown;
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const message =
+      trimTextOrNull(parsed.message) || trimTextOrNull(parsed.error) || text;
+    return {
+      message,
+      code: trimTextOrNull(parsed.code),
+      details: trimTextOrNull(parsed.details),
+      hint: trimTextOrNull(parsed.hint),
+    };
   } catch {
-    return text;
+    return {
+      message: text,
+      code: null,
+      details: null,
+      hint: null,
+    };
   }
+}
+
+async function parseError(response: Response): Promise<string> {
+  const parsed = await parseErrorPayload(response);
+  return parsed.message;
 }
 
 const REPORT_INDEX_SELECT =
@@ -128,7 +210,7 @@ export async function fetchRuntimeStateEntry(
     limit: "1",
   });
   const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     headers: buildAuthHeaders({
       Accept: "application/json",
     }),
@@ -152,7 +234,7 @@ export async function upsertRuntimeStateEntry(
 ): Promise<void> {
   const env = getSupabaseEnv();
   const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?on_conflict=state_key`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -182,7 +264,7 @@ export async function deleteRuntimeStateEntry(key: string): Promise<void> {
     state_key: `eq.${key}`,
   });
   const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "DELETE",
     headers: buildAuthHeaders({
       Accept: "application/json",
@@ -255,7 +337,7 @@ export async function consumeLoginThrottleAttempt(
 ): Promise<ConsumeLoginThrottleAttemptResult> {
   const env = getSupabaseEnv();
   const url = `${env.SUPABASE_URL}/rest/v1/rpc/consume_login_throttle_attempt`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -491,7 +573,7 @@ export async function fetchReportIndexPage(
   }
 
   const url = `${env.SUPABASE_URL}/rest/v1/report_index?${query.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     headers: buildAuthHeaders({
       Accept: "application/json",
       ...(includeTotal ? { Prefer: "count=exact" } : {}),
@@ -546,7 +628,7 @@ export async function upsertReportIndexEntry(
     tickers_hydrated: input.tickersHydrated === true,
   };
 
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -572,7 +654,7 @@ export async function downloadStorageJson(
   const encodedKey = encodeStorageKey(key);
   const url = `${env.SUPABASE_URL}/storage/v1/object/${encodeURIComponent(bucket)}/${encodedKey}`;
 
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     headers: buildAuthHeaders({
       Accept: "application/json",
     }),
@@ -631,7 +713,7 @@ export async function fetchHoldingsPage(
   }
 
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     headers: buildAuthHeaders({
       Accept: "application/json",
     }),
@@ -676,7 +758,7 @@ async function fetchHoldingByExactTicker(
     limit: "1",
   });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     headers: buildAuthHeaders({
       Accept: "application/json",
     }),
@@ -709,7 +791,7 @@ async function patchHoldingByExactTicker(
   });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
 
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "PATCH",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -743,7 +825,7 @@ async function deleteHoldingByExactTicker(ticker: string): Promise<boolean> {
   });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
 
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "DELETE",
     headers: buildAuthHeaders({
       Accept: "application/json",
@@ -783,7 +865,7 @@ export async function createHolding(
   const query = new URLSearchParams({ select: HOLDINGS_SELECT });
   const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
 
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -836,10 +918,11 @@ export async function deleteHolding(ticker: string): Promise<boolean> {
 export async function addBuyToHolding(
   ticker: string,
   input: HoldingAddBuyInput,
+  idempotencyKey: string,
 ): Promise<HoldingRecord | null> {
   const env = getSupabaseEnv();
   const url = `${env.SUPABASE_URL}/rest/v1/rpc/holdings_add_buy_v1`;
-  const response = await fetch(url, {
+  const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
@@ -850,14 +933,27 @@ export async function addBuyToHolding(
       p_buy_quantity: input.buy_quantity,
       p_buy_price: input.buy_price,
       p_buy_date: input.buy_date ?? null,
+      p_idempotency_key: idempotencyKey,
     }),
     cache: "no-store",
   });
 
   if (!response.ok) {
+    const parsedError = await parseErrorPayload(response);
+    const isIdempotencyPayloadMismatch =
+      response.status === 409 &&
+      parsedError.details === ADD_BUY_IDEMPOTENCY_MISMATCH_DETAIL;
     throw new SupabaseApiError(
-      `Failed to add buy to holding '${ticker}': ${await parseError(response)}`,
+      `Failed to add buy to holding '${ticker}': ${parsedError.message}`,
       response.status,
+      {
+        code: isIdempotencyPayloadMismatch
+          ? ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
+          : null,
+        upstreamCode: parsedError.code,
+        details: parsedError.details,
+        hint: parsedError.hint,
+      },
     );
   }
 

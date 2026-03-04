@@ -110,6 +110,8 @@
     - `Holdings`: Supabase `holdings` CRUD
       - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증 + same-origin 검증을 필수로 요구
       - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
+      - 추가매수(`POST /api/holdings/[ticker]/add-buy`): `Idempotency-Key`(UUID) 헤더 필수, 동일 키 재시도 시 기존 결과 반환, 동일 키-다른 payload는 `409` 충돌 처리
+      - `sell` 평가는 `quantity > 0` 활성 보유분만 대상으로 처리
     - `Run`: `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
       - 기능 플래그: `RUN_DISPATCH_ENABLED=1`에서 활성화(하위 호환: 플래그 미설정 + `GITHUB_OWNER/GITHUB_REPO/GITHUB_PAT` 모두 설정 시 자동 활성)
       - 보호 경계: `/api/run`은 관리자 세션 인증 + same-origin 검증을 필수로 요구, 실행 ref는 `main`으로 고정
@@ -117,6 +119,7 @@
       - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
       - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
       - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
+      - 운영 가정: 당분간 웹은 `localhost/127.0.0.1` 단일 사용자 노출만 지원
 
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD(-n).buy.json`

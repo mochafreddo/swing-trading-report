@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
+import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import { holdingAddBuySchema, holdingTickerSchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
@@ -10,6 +12,28 @@ export const runtime = "nodejs";
 type RouteContext = {
   params: { ticker: string } | Promise<{ ticker: string }>;
 };
+
+type ParsedIdempotencyKeyHeader = {
+  key: string | null;
+  invalid: boolean;
+};
+
+function parseIdempotencyKeyHeader(
+  request: NextRequest,
+): ParsedIdempotencyKeyHeader {
+  const raw = request.headers.get("idempotency-key");
+  if (!raw) {
+    return { key: null, invalid: false };
+  }
+  const key = raw.trim();
+  if (!key) {
+    return { key: null, invalid: false };
+  }
+  if (!isValidIdempotencyKey(key)) {
+    return { key: null, invalid: true };
+  }
+  return { key, invalid: false };
+}
 
 function parseTickerParam(rawTicker: string): string | null {
   const candidate = (() => {
@@ -56,14 +80,42 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  const idempotencyKeyHeader = parseIdempotencyKeyHeader(request);
+  if (!idempotencyKeyHeader.key) {
+    return NextResponse.json(
+      {
+        error: idempotencyKeyHeader.invalid
+          ? "Invalid Idempotency-Key header"
+          : "Missing Idempotency-Key header",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
-    const updated = await addBuyToHolding(ticker, parsed.data);
+    const updated = await addBuyToHolding(
+      ticker,
+      parsed.data,
+      idempotencyKeyHeader.key,
+    );
     if (!updated) {
       return NextResponse.json({ error: "Holding not found" }, { status: 404 });
     }
     return NextResponse.json(updated);
   } catch (error) {
     if (error instanceof SupabaseApiError) {
+      if (
+        error.status === 409 &&
+        error.code === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
+      ) {
+        return NextResponse.json(
+          {
+            error: error.message,
+            code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+          },
+          { status: error.status },
+        );
+      }
       return NextResponse.json(
         { error: error.message },
         { status: error.status },

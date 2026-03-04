@@ -70,7 +70,12 @@ vi.mock("@/lib/supabase-admin", () => {
 import { POST } from "@/app/api/holdings/add-buy/[...ticker]/route";
 import { addBuyToHolding } from "@/lib/supabase-admin";
 
-function makeRequest(payload: object): NextRequest {
+function makeRequest(
+  payload: object,
+  options?: { idempotencyKey?: string },
+): NextRequest {
+  const idempotencyKey =
+    options?.idempotencyKey ?? "33333333-3333-4333-8333-333333333333";
   return new NextRequest(
     "http://localhost:55300/api/holdings/add-buy/BRK/B.NYS",
     {
@@ -78,6 +83,7 @@ function makeRequest(payload: object): NextRequest {
       headers: {
         "content-type": "application/json",
         origin: "http://localhost:55300",
+        "idempotency-key": idempotencyKey,
       },
       body: JSON.stringify(payload),
     },
@@ -117,10 +123,14 @@ describe("/api/holdings/add-buy/[...ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ticker).toBe("BRK.B.NYS");
-    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
-      buy_quantity: 1,
-      buy_price: 455,
-    });
+    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith(
+      "BRK.B.NYS",
+      {
+        buy_quantity: 1,
+        buy_price: 455,
+      },
+      "33333333-3333-4333-8333-333333333333",
+    );
   });
 
   it("decodes percent-encoded slash ticker for add-buy", async () => {
@@ -147,9 +157,13 @@ describe("/api/holdings/add-buy/[...ticker] route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
-      buy_quantity: 1,
-      buy_price: 455,
-    });
+    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith(
+      "BRK.B.NYS",
+      {
+        buy_quantity: 1,
+        buy_price: 455,
+      },
+      "33333333-3333-4333-8333-333333333333",
+    );
   });
 });

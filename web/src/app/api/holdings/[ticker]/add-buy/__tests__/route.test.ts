@@ -54,10 +54,18 @@ vi.mock("@/lib/local-request-guard", () => {
 vi.mock("@/lib/supabase-admin", () => {
   class SupabaseApiError extends Error {
     status: number;
+    code: string | null;
 
-    constructor(message: string, status: number) {
+    constructor(
+      message: string,
+      status: number,
+      options?: {
+        code?: string | null;
+      },
+    ) {
       super(message);
       this.status = status;
+      this.code = options?.code ?? null;
     }
   }
 
@@ -68,6 +76,7 @@ vi.mock("@/lib/supabase-admin", () => {
 });
 
 import { POST } from "@/app/api/holdings/[ticker]/add-buy/route";
+import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import {
   assertLocalRequest,
@@ -80,13 +89,19 @@ type RouteContext = {
   params: { ticker: string } | Promise<{ ticker: string }>;
 };
 
-function makeRequest(payload: object | string): NextRequest {
+function makeRequest(
+  payload: object | string,
+  options?: { idempotencyKey?: string },
+): NextRequest {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+  const idempotencyKey =
+    options?.idempotencyKey ?? "11111111-1111-4111-8111-111111111111";
   return new NextRequest("http://localhost:55300/api/holdings/005930/add-buy", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: "http://localhost:55300",
+      "idempotency-key": idempotencyKey,
     },
     body,
   });
@@ -191,6 +206,33 @@ describe("POST /api/holdings/[ticker]/add-buy route", () => {
     expect(vi.mocked(addBuyToHolding)).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when idempotency key header is missing", async () => {
+    const response = await POST(
+      makeRequest({ buy_quantity: 1, buy_price: 10 }, { idempotencyKey: "" }),
+      makeContext("005930"),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Missing Idempotency-Key header");
+    expect(vi.mocked(addBuyToHolding)).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when idempotency key header format is invalid", async () => {
+    const response = await POST(
+      makeRequest(
+        { buy_quantity: 1, buy_price: 10 },
+        { idempotencyKey: "not-a-uuid" },
+      ),
+      makeContext("005930"),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid Idempotency-Key header");
+    expect(vi.mocked(addBuyToHolding)).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when holding is not found", async () => {
     vi.mocked(addBuyToHolding).mockResolvedValueOnce(null);
 
@@ -217,6 +259,24 @@ describe("POST /api/holdings/[ticker]/add-buy route", () => {
 
     expect(response.status).toBe(409);
     expect(payload.error).toBe("currency mismatch");
+  });
+
+  it("returns structured code for idempotency payload mismatch conflicts", async () => {
+    vi.mocked(addBuyToHolding).mockRejectedValueOnce(
+      new SupabaseApiError("conflict", 409, {
+        code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+      }),
+    );
+
+    const response = await POST(
+      makeRequest({ buy_quantity: 1, buy_price: 10 }),
+      makeContext("AAPL.NAS"),
+    );
+    const payload = (await response.json()) as { error: string; code?: string };
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe("conflict");
+    expect(payload.code).toBe(ADD_BUY_IDEMPOTENCY_MISMATCH_CODE);
   });
 
   it("adds buy and normalizes ticker to uppercase canonical form", async () => {
@@ -255,10 +315,14 @@ describe("POST /api/holdings/[ticker]/add-buy route", () => {
       quantity: 2,
       entry_price: 101,
     });
-    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith("AAPL.NAS", {
-      buy_quantity: 1,
-      buy_price: 102.5,
-      buy_date: "2026-03-03",
-    });
+    expect(vi.mocked(addBuyToHolding)).toHaveBeenCalledWith(
+      "AAPL.NAS",
+      {
+        buy_quantity: 1,
+        buy_price: 102.5,
+        buy_date: "2026-03-03",
+      },
+      "11111111-1111-4111-8111-111111111111",
+    );
   });
 });

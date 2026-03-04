@@ -28,6 +28,7 @@ web/.next/
 web/.turbo/
 web/coverage/
 web/tsconfig.tsbuildinfo
+web/next-env.d.ts
 
 # mise
 mise.local.toml

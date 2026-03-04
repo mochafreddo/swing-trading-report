@@ -154,6 +154,7 @@ Supabase 스키마(현재):
 Auth/guard:
 
 - 기존 holdings CRUD와 동일: `requireAdminAuth` + `same-origin` + `local-request`
+- `Idempotency-Key` 헤더 필수: UUID 형식만 허용, 동일 키 재시도는 기존 결과를 반환(중복 반영 방지)
 
 ### 5.2 Request/Response (예시)
 
@@ -169,11 +170,17 @@ Request:
 
 Response: 기존 `HoldingRecord`(갱신된 row) 반환.
 
+Header:
+
+- `Idempotency-Key: <uuid>`
+- 최대 길이: 128자
+
 ### 5.3 Error 정책(권장)
 
-- `400`: payload 검증 실패(음수/0, 날짜 포맷, ticker invalid)
+- `400`: payload 검증 실패(음수/0, 날짜 포맷, ticker invalid), `Idempotency-Key` 누락/형식 오류
 - `404`: holding 없음
-- `409`: 통화 불일치, 동시성 충돌(옵션), 또는 정책 위반
+- `409`: 통화 불일치, 동일 `Idempotency-Key`의 payload 불일치, 동시성 충돌(옵션), 또는 정책 위반  
+  - payload 불일치 응답은 `code=IDEMPOTENCY_KEY_PAYLOAD_MISMATCH`를 함께 반환(클라이언트 자동 키 재발급 트리거용)
 - `500`: 알 수 없는 서버 오류
 
 ## 6) 구현 옵션(권장안 포함)
@@ -195,8 +202,17 @@ Supabase에 RPC 함수를 추가해 **단일 트랜잭션**으로 처리한다.
 
 RPC 시그니처 예:
 
-- `public.holdings_add_buy_v1(p_ticker text, p_buy_quantity numeric, p_buy_price numeric, p_buy_date date default null)`
+- `public.holdings_add_buy_v1(p_ticker text, p_buy_quantity numeric, p_buy_price numeric, p_buy_date date default null, p_idempotency_key text default null)`
 - 반환: `public.holdings` row (업데이트 후)
+
+멱등 이벤트 로그:
+
+- `holdings_add_buy_events` 테이블에 `(canonical_ticker, idempotency_key)` PK + `request_fingerprint`를 저장합니다.
+- 동일 키 재요청 시 fingerprint가 같으면 기존 결과를 반환하고, 다르면 `409` 충돌로 차단합니다.
+- `processed=true` + `created_at` 90일 초과 이벤트와 `processed=false` + `updated_at` 90일 초과 이벤트를 `cleanup_holdings_add_buy_events()`로 배치 정리합니다.
+- 스케줄 작업(`holdings-add-buy-events-cleanup`, `30 3 * * *`)은 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
+- `pg_cron`이 비활성인 환경에서는 스케줄 보강 마이그레이션이 실패하도록 하여(무음 skip 금지) 운영자가 확장 활성화를 명시적으로 수행하게 합니다.
+- 운영 점검 SQL(등록/수동 실행/실행 이력)은 `docs/runbook.md`의 “보유 목록(holdings)” 섹션을 기준으로 사용합니다.
 
 라우팅/티커 별칭 정책:
 

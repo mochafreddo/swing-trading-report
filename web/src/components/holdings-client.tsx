@@ -22,9 +22,13 @@ import {
   getAddBuyPrecheckError,
   inferRequiredCurrency,
 } from "@/components/holdings/add-buy-precheck";
+import {
+  createAddBuyIdempotencyKey,
+  resolveAddBuySubmitError,
+} from "@/components/holdings/add-buy-idempotency";
 import { HoldingsFormPanel } from "@/components/holdings/holdings-form-panel";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
-import { readApiError } from "@/components/holdings/helpers";
+import { readApiError, readApiErrorCode } from "@/components/holdings/helpers";
 import { useHoldingsForm } from "@/components/holdings/use-holdings-form";
 import {
   type HoldingsInitialState,
@@ -181,6 +185,9 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const [addBuyTicker, setAddBuyTicker] = useState<string | null>(null);
   const [addBuyForm, setAddBuyForm] = useState<AddBuyFormState>(() =>
     createEmptyAddBuyForm(),
+  );
+  const [addBuyIdempotencyKey, setAddBuyIdempotencyKey] = useState<string>(() =>
+    createAddBuyIdempotencyKey(),
   );
   const [addBuySubmitting, setAddBuySubmitting] = useState(false);
   const [addBuyError, setAddBuyError] = useState<string | null>(null);
@@ -372,6 +379,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         if (addBuyTicker === ticker) {
           setAddBuyTicker(null);
           setAddBuyForm(createEmptyAddBuyForm());
+          setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
           setAddBuyError(null);
         }
         await refresh();
@@ -388,6 +396,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     (row: HoldingRecord) => {
       setAddBuyTicker(row.ticker);
       setAddBuyForm(createEmptyAddBuyForm());
+      setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
       setAddBuyError(null);
       setError(null);
     },
@@ -397,6 +406,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const updateAddBuyField = useCallback(
     (field: keyof AddBuyFormState, value: string) => {
       setAddBuyForm((prev) => ({ ...prev, [field]: value }));
+      setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
     },
     [],
   );
@@ -404,6 +414,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const cancelAddBuy = useCallback(() => {
     setAddBuyTicker(null);
     setAddBuyForm(createEmptyAddBuyForm());
+    setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
     setAddBuyError(null);
   }, []);
 
@@ -422,6 +433,11 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
       const buyPrice = parsePositiveNumber(addBuyForm.buy_price);
       if (buyQuantity == null || buyPrice == null) {
         setAddBuyError("Buy Quantity/Price는 0보다 큰 숫자여야 합니다.");
+        return;
+      }
+      const idempotencyKey = addBuyIdempotencyKey.trim();
+      if (!idempotencyKey) {
+        setAddBuyError("Idempotency key 생성에 실패했습니다. 다시 시도하세요.");
         return;
       }
 
@@ -448,29 +464,42 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Idempotency-Key": idempotencyKey,
             },
             body: JSON.stringify(payload),
           },
         );
         const responsePayload = (await response.json()) as unknown;
         if (!response.ok) {
-          throw new Error(readApiError(responsePayload) || "Add buy failed");
+          const message = readApiError(responsePayload) || "Add buy failed";
+          const code = readApiErrorCode(responsePayload);
+          throw Object.assign(new Error(message), {
+            code,
+          });
         }
 
         setAddBuyTicker(null);
         setAddBuyForm(createEmptyAddBuyForm());
+        setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
         await refresh();
       } catch (addBuySubmitError) {
-        setAddBuyError(
-          addBuySubmitError instanceof Error
-            ? addBuySubmitError.message
-            : "Add buy failed",
-        );
+        const resolvedError = resolveAddBuySubmitError(addBuySubmitError);
+        if (resolvedError.shouldRotateIdempotencyKey) {
+          setAddBuyIdempotencyKey(createAddBuyIdempotencyKey());
+        }
+        setAddBuyError(resolvedError.message);
       } finally {
         setAddBuySubmitting(false);
       }
     },
-    [addBuyForm, addBuyPrecheckError, addBuyTicker, refresh, setError],
+    [
+      addBuyForm,
+      addBuyIdempotencyKey,
+      addBuyPrecheckError,
+      addBuyTicker,
+      refresh,
+      setError,
+    ],
   );
 
   return (

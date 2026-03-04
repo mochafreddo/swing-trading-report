@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getGitHubEnv } from "@/lib/env.server";
+import { FetchTimeoutError, fetchWithTimeout } from "@/lib/fetch-timeout";
 import type {
   WorkflowDispatchInput,
   WorkflowDispatchResult,
@@ -100,17 +101,28 @@ export async function dispatchWorkflow(
   const request = buildWorkflowDispatchRequest(input);
   const env = getGitHubEnv();
 
-  const response = await fetch(request.dispatchUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request.body),
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(request.dispatchUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${env.GITHUB_PAT}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request.body),
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof FetchTimeoutError) {
+      throw new GitHubDispatchError(
+        `GitHub workflow dispatch timed out after ${error.timeoutMs}ms`,
+        504,
+      );
+    }
+    throw error;
+  }
 
   if (response.status !== 204) {
     let message = `GitHub workflow dispatch failed (${response.status})`;

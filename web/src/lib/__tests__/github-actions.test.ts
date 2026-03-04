@@ -152,4 +152,21 @@ describe("dispatchWorkflow", () => {
       }),
     ).rejects.toBeInstanceOf(GitHubDispatchError);
   });
+
+  it("maps upstream timeout failures to 504", async () => {
+    const timeoutError = Object.assign(new Error("request timed out"), {
+      name: "TimeoutError",
+    });
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(timeoutError);
+
+    await expect(
+      dispatchWorkflow({
+        workflow: "scan",
+        provider: "kis",
+        universe: "both",
+      }),
+    ).rejects.toMatchObject({
+      status: 504,
+    });
+  });
 });

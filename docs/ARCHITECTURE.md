@@ -61,6 +61,7 @@ flowchart LR
 ### 4.2 `sell` 플로우
 
 1. 보유 종목을 로드해 런타임을 구성합니다(로컬 기본: `holdings.yaml`).
+   - `quantity > 0`인 활성 보유분만 sell 평가 대상으로 사용합니다.
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다.
 4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
@@ -82,6 +83,8 @@ flowchart LR
 1. `/api/holdings`가 cursor 기반 페이지네이션으로 목록을 제공합니다.
 2. `/api/holdings` `POST`, `/api/holdings/[ticker]` `PATCH`/`DELETE`로 PostgREST를 통해 `holdings`를 수정합니다.
 3. `/api/holdings/[ticker]/add-buy` `POST`는 Supabase RPC(`holdings_add_buy_v1`)를 호출해 추가매수(수량/평단/진입일/통화)를 원자적으로 갱신합니다.
+   - `Idempotency-Key`(UUID) 헤더를 필수로 받아 중복 요청 시 기존 결과를 반환합니다(멱등 처리).
+   - 동일 키에 서로 다른 payload가 들어오면 `409` 충돌로 차단하며, 멱등 이벤트 로그는 별도 cleanup 함수/스케줄 작업으로 90일 경과 항목(`processed=true` 기준 + 장기 미처리 항목)을 정리합니다.
 4. (구현, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
    - 검색/후보 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용합니다.
    - 캐시는 Supabase `runtime_state`에 저장되며 stale 시 증분 갱신합니다.
@@ -142,6 +145,7 @@ flowchart LR
   - KIS 재시도/백오프/토큰 재발급 처리
   - KR 심볼은 KIS 실패 시 PyKRX 폴백 가능(US는 폴백 없음)
   - 캐시가 있으면 API 실패 시 캐시 데이터로 계속 진행
+  - 부분 수집 누락 시 coverage(`수집성공/평가대상`)가 `0.70` 이상이면 경고로 계속 진행, `0.70` 미만이면 실패 처리
 - 산출물 안정성
   - 리포트는 파일 락 + 원자적 쓰기로 기록
   - 중복 파일명은 suffix(`-1`, `-2`, ...)로 충돌 회피

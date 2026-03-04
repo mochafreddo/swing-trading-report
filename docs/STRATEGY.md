@@ -274,6 +274,8 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
 
 Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
 
+- 평가 대상은 `quantity > 0`인 활성 보유분으로 한정합니다(`quantity <= 0`은 평가에서 제외).
+
 ### 6.1 `sell_mode=generic` (EMA/RSI/ATR 트레일 중심)
 
 근거 코드: `sab/signals/sell_rules.py`

@@ -90,6 +90,14 @@ export function readApiError(payload: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+export function readApiErrorCode(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const value = (payload as { code?: unknown }).code;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 export function mergeHoldingsByTicker(
   current: HoldingRecord[],
   incoming: HoldingRecord[],

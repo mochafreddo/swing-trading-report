@@ -41,6 +41,7 @@
 
 - 기본 운영 기준:
   - `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
+  - 당분간 운영 범위는 `localhost/127.0.0.1` 단일 사용자 노출만 지원합니다(외부 공개 배포 비대상).
 - 전환 직후 1회 정리:
   - `docker compose down --remove-orphans && docker compose up -d --build web`
 - 일반 재기동:
@@ -78,6 +79,37 @@
 
 - 보유 목록은 **웹 UI(Next.js)에서 CRUD**로 관리합니다(단일 사용자 기준).
 - `quantity<=0` 항목은 Holdings UI에서 비활성으로 취급되며, 기본은 숨김이고 토글로 표시할 수 있습니다.
+- 추가매수 API(`POST /api/holdings/[ticker]/add-buy`)는 UUID 형식 `Idempotency-Key` 헤더를 필수로 요구하며, 동일 키-다른 payload는 `409`(`code=IDEMPOTENCY_KEY_PAYLOAD_MISMATCH`)로 차단합니다.
+- `sab sell`/`sell.yml`은 `quantity>0` 활성 보유분만 평가합니다.
+- 멱등 이벤트 정리 스케줄: `holdings-add-buy-events-cleanup` (`30 3 * * *`, UTC)에서 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
+  - 정리 대상: `processed=true AND created_at < now()-90d` 또는 `processed=false AND updated_at < now()-90d`
+  - fail-closed 정책: `pg_cron` 미활성 환경에서는 스케줄 보강 마이그레이션이 실패하도록 강제합니다(무음 누락 방지).
+- 스케줄 점검 SQL(Supabase SQL Editor):
+  - cron 확장 확인: `select to_regnamespace('cron') as cron_schema;`
+  - 등록 확인: `select jobid, jobname, schedule, command, active from cron.job where jobname = 'holdings-add-buy-events-cleanup';`
+  - 수동 실행: `select public.cleanup_holdings_add_buy_events(interval '90 days', 500);`
+  - 적체 점검(미처리): `select count(*) from public.holdings_add_buy_events where processed = false and updated_at < now() - interval '90 days';`
+  - 최근 실행 이력: `select runid, jobid, status, return_message, start_time, end_time from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'holdings-add-buy-events-cleanup' limit 1) order by start_time desc limit 20;`
+- Supabase 반영 체크리스트(원격 프로젝트):
+  1. 백업/복구 경로 확인
+     - `supabase db dump --linked --schema public --file backup-before-add-buy-cleanup.sql`
+  2. 링크 상태 확인(최초 1회 또는 프로젝트 변경 시)
+     - `supabase link --project-ref <PROJECT_REF>`
+  3. 마이그레이션 차이 점검
+     - `supabase migration list`
+     - 이번 릴리스에 포함되는 파일:
+       - `supabase/migrations/20260304002000_add_holdings_add_buy_idempotency.sql`
+       - `supabase/migrations/20260304003000_schedule_add_buy_event_cleanup_cron.sql`
+       - `supabase/migrations/20260304004000_expand_add_buy_cleanup_to_stale_unprocessed.sql`
+       - `supabase/migrations/20260304005000_require_add_buy_cleanup_cron.sql`
+  4. 적용 전 dry-run
+     - `supabase db push --dry-run`
+  5. 원격 적용
+     - `supabase db push`
+  6. 적용 후 즉시 검증(SQL Editor)
+     - 함수 정의 확인: `select pg_get_functiondef('public.cleanup_holdings_add_buy_events(interval, integer)'::regprocedure);`
+     - 정리 대상 건수 확인: `select count(*) from public.holdings_add_buy_events where (processed = true and created_at < now() - interval '90 days') or (processed = false and updated_at < now() - interval '90 days');`
+     - 크론 등록/활성 확인: `select jobid, jobname, schedule, command, active from cron.job where jobname = 'holdings-add-buy-events-cleanup';`
 - (선택) `holdings.yaml` import/export는 **v1.1 미구현**이며, v1.2에서 초기 이관/백업 용도로 도입 예정입니다.
 
 ## 자주 쓰는 실행

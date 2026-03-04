@@ -25,7 +25,7 @@ permissions:
 env:
   UV_CACHE_DIR: .uv-cache
   PYTHONUNBUFFERED: "1"
-  PYTHON_VERSION: "3.14"
+  PYTHON_VERSION: "3.13"
 
 jobs:
   sell:
@@ -101,7 +101,7 @@ jobs:
           fi
 
           base_url="${SUPABASE_URL%/}"
-          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override&order=ticker.asc"
+          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override&quantity=gt.0&order=ticker.asc"
 
           curl -fsS "${base_url}/rest/v1/holdings?${query}" \
             -H "apikey: ${supabase_key}" \

@@ -17,6 +17,7 @@ import {
   updateHolding,
   upsertReportIndexEntry,
 } from "@/lib/supabase-admin";
+import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 
 const REPORT_KEY_A = "2026/02/2026-02-14.buy.json";
 
@@ -350,11 +351,15 @@ describe("addBuyToHolding", () => {
       }),
     );
 
-    const updated = await addBuyToHolding("AAPL.NAS", {
-      buy_quantity: 2,
-      buy_price: 170.25,
-      buy_date: "2026-03-03",
-    });
+    const updated = await addBuyToHolding(
+      "AAPL.NAS",
+      {
+        buy_quantity: 2,
+        buy_price: 170.25,
+        buy_date: "2026-03-03",
+      },
+      "supabase-admin-idempotency-key",
+    );
 
     expect(updated?.ticker).toBe("AAPL.NAS");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -373,6 +378,7 @@ describe("addBuyToHolding", () => {
       p_buy_quantity: 2,
       p_buy_price: 170.25,
       p_buy_date: "2026-03-03",
+      p_idempotency_key: "supabase-admin-idempotency-key",
     });
   });
 
@@ -384,10 +390,14 @@ describe("addBuyToHolding", () => {
       }),
     );
 
-    const updated = await addBuyToHolding("AAPL.NAS", {
-      buy_quantity: 2,
-      buy_price: 170.25,
-    });
+    const updated = await addBuyToHolding(
+      "AAPL.NAS",
+      {
+        buy_quantity: 2,
+        buy_price: 170.25,
+      },
+      "supabase-admin-idempotency-key",
+    );
 
     expect(updated).toBeNull();
   });
@@ -401,13 +411,71 @@ describe("addBuyToHolding", () => {
     );
 
     await expect(
-      addBuyToHolding("AAPL.NAS", {
-        buy_quantity: 1,
-        buy_price: 100,
-      }),
+      addBuyToHolding(
+        "AAPL.NAS",
+        {
+          buy_quantity: 1,
+          buy_price: 100,
+        },
+        "supabase-admin-idempotency-key",
+      ),
     ).rejects.toMatchObject({
       status: 409,
       message: "Failed to add buy to holding 'AAPL.NAS': currency mismatch",
+    } satisfies Partial<SupabaseApiError>);
+  });
+
+  it("propagates idempotency payload mismatch as conflict", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "23505",
+          details: "holdings_add_buy_idempotency_payload_mismatch",
+          message: "duplicate key value violates unique constraint",
+        }),
+        {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(
+      addBuyToHolding(
+        "AAPL.NAS",
+        {
+          buy_quantity: 1,
+          buy_price: 100,
+        },
+        "supabase-admin-idempotency-key",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message:
+        "Failed to add buy to holding 'AAPL.NAS': duplicate key value violates unique constraint",
+      code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+      upstreamCode: "23505",
+      details: "holdings_add_buy_idempotency_payload_mismatch",
+    } satisfies Partial<SupabaseApiError>);
+  });
+
+  it("maps Supabase timeout failures to SupabaseApiError(504)", async () => {
+    const timeoutError = Object.assign(new Error("request timed out"), {
+      name: "TimeoutError",
+    });
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(timeoutError);
+
+    await expect(
+      addBuyToHolding(
+        "AAPL.NAS",
+        {
+          buy_quantity: 1,
+          buy_price: 100,
+        },
+        "supabase-admin-idempotency-key",
+      ),
+    ).rejects.toMatchObject({
+      status: 504,
     } satisfies Partial<SupabaseApiError>);
   });
 });

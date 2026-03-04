@@ -21,7 +21,13 @@ vi.mock("@/lib/admin-auth", () => {
 
 import { POST } from "@/app/api/holdings/[ticker]/add-buy/route";
 
-function makeRequest(payload: unknown, tickerPath = "aapl.nas"): NextRequest {
+function makeRequest(
+  payload: unknown,
+  tickerPath = "aapl.nas",
+  options?: { idempotencyKey?: string },
+): NextRequest {
+  const idempotencyKey =
+    options?.idempotencyKey ?? "22222222-2222-4222-8222-222222222222";
   return new NextRequest(
     `http://localhost:55300/api/holdings/${tickerPath}/add-buy`,
     {
@@ -30,6 +36,7 @@ function makeRequest(payload: unknown, tickerPath = "aapl.nas"): NextRequest {
         "content-type": "application/json",
         host: "localhost:55300",
         origin: "http://localhost:55300",
+        "idempotency-key": idempotencyKey,
       },
       body: JSON.stringify(payload),
     },
@@ -103,12 +110,14 @@ describe("POST /api/holdings/[ticker]/add-buy integration", () => {
       p_buy_quantity: number;
       p_buy_price: number;
       p_buy_date: string;
+      p_idempotency_key: string;
     };
     expect(requestBody).toEqual({
       p_ticker: "AAPL.NAS",
       p_buy_quantity: 1,
       p_buy_price: 100,
       p_buy_date: "2026-03-03",
+      p_idempotency_key: "22222222-2222-4222-8222-222222222222",
     });
   });
 
