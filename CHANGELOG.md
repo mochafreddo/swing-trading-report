@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.4](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.3...v1.7.4) (2026-03-04)
+
+
+### Bug Fixes
+
+* **web:** 리포트 새로고침 라벨 테스트 기대값 수정 ([6902892](https://github.com/mochafreddo/swing-trading-report/commit/69028920dd87c5470e608208ed4d7d2cffdc3bbc))
+
 ## [1.7.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.2...v1.7.3) (2026-03-04)
 
 
