@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.2...v1.7.3) (2026-03-04)
+
+
+### Bug Fixes
+
+* **web:** UX 개선 — 삭제 확인, 입력 보조, 말줄임표 통일 ([fcaec29](https://github.com/mochafreddo/swing-trading-report/commit/fcaec29ef8d38192b880eb984202af78d3b04c12))
+
 ## [1.7.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.1...v1.7.2) (2026-03-03)
 
 
