@@ -51,7 +51,7 @@ describe("ReportsList component", () => {
       }),
     );
 
-    expect(html).toContain("새로고침 중...");
+    expect(html).toContain("새로고침 중…");
     expect(html).toContain("disabled");
   });
 });
