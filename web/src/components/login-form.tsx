@@ -102,6 +102,10 @@ export function LoginForm() {
           />
         </label>
 
+        <p className="visuallyHidden" role="status" aria-live="polite">
+          {submitting ? "로그인 중" : ""}
+        </p>
+
         {error ? (
           <p className={styles.error} role="alert">
             {error}

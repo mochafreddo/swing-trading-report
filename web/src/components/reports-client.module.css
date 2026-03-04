@@ -42,6 +42,12 @@
   font-family: var(--font-mono), monospace;
 }
 
+.controls input:focus-visible,
+.controls select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .list {
   margin: var(--space-3) 0 0;
   list-style: none;
@@ -66,6 +72,11 @@
 
 .itemButton:hover {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+}
+
+.itemButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .itemPrimary {
@@ -118,6 +129,11 @@
   cursor: not-allowed;
 }
 
+.toggleButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .metaGrid {
   margin-top: var(--space-3);
   display: grid;
@@ -142,6 +158,7 @@
   margin: var(--space-1) 0 0;
   font-family: var(--font-mono), monospace;
   font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .summaryBoxes {
@@ -213,6 +230,7 @@
   text-align: left;
   padding: var(--space-2) var(--space-1);
   font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .tableWrap th {
@@ -230,7 +248,7 @@
 .chipRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .reasonChip {
@@ -285,6 +303,11 @@
 
 .rowDetailToggle:hover {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.rowDetailToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .expandedRow td {
@@ -361,7 +384,7 @@
   margin-top: var(--space-3);
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  background: #0b101d;
+  background: var(--panel-strong);
   padding: var(--space-3);
   font-size: 0.875rem;
   line-height: 1.45;

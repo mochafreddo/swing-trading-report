@@ -113,19 +113,21 @@ export function HoldingsTable({
                       showInactive && inactive ? styles.inactiveRow : undefined
                     }
                   >
-                    <td>{row.ticker}</td>
-                    <td>
+                    <td data-label="Ticker">{row.ticker}</td>
+                    <td data-label="Qty">
                       {row.quantity}
                       {showInactive && inactive && (
                         <span className={styles.inactiveBadge}>비활성</span>
                       )}
                     </td>
-                    <td>{row.entry_price}</td>
-                    <td>{row.entry_date ?? "-"}</td>
-                    <td className={styles.notesCell}>{row.notes ?? "-"}</td>
-                    <td>{row.tags.join(", ") || "-"}</td>
-                    <td>{row.updated_at}</td>
-                    <td>
+                    <td data-label="Entry">{row.entry_price}</td>
+                    <td data-label="Date">{row.entry_date ?? "-"}</td>
+                    <td data-label="Notes" className={styles.notesCell}>
+                      {row.notes ?? "-"}
+                    </td>
+                    <td data-label="Tags">{row.tags.join(", ") || "-"}</td>
+                    <td data-label="Updated">{row.updated_at}</td>
+                    <td data-label="Action">
                       <div className={styles.inlineActions}>
                         <button type="button" onClick={() => onEdit(row)}>
                           Edit

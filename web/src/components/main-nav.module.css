@@ -38,6 +38,11 @@
   border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
 }
 
+.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .active {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--accent) 66%, var(--line));
@@ -53,4 +58,10 @@
   margin: 0;
   color: var(--danger);
   font-size: 0.82rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link {
+    transition: none;
+  }
 }
