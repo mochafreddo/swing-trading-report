@@ -6,6 +6,7 @@
 
 - uv 설치: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv lock -U && UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+- toolchain 동기화: `mise install` (도구 버전 변경 시 `mise lock --platform linux-x64,macos-arm64 && mise install`)
   - 설정:
     - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
     - `.env`에는 v1.1 필수 키를 작성:
@@ -22,7 +23,9 @@
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
   - Python 3.13+
-  - Node.js 20+
+  - Node.js + pnpm (버전 기준: `web/Dockerfile`, `web/package.json`)
+  - 권장: `mise install`로 toolchain 동기화(`mise.lock` 기준)
+  - 권장: `eval "$(mise activate zsh)"` 또는 `mise x -- <cmd>`로 mise 환경에서 실행
   - Docker Desktop + Docker Compose
 - Supabase(권장):
   - 보유 목록/리포트/실행 이력은 Supabase(Postgres/Storage)를 단일 소스로 사용합니다.

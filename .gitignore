@@ -27,6 +27,10 @@ web/.next/
 web/.turbo/
 web/tsconfig.tsbuildinfo
 
+# mise
+mise.local.toml
+mise.local.lock
+
 # Env
 .env
 .env.*

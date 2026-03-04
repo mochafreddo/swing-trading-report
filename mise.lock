@@ -1,0 +1,11 @@
+[[tools.node]]
+version = "24.13.1"
+backend = "core:node"
+"platforms.linux-x64" = { checksum = "sha256:7ad28fb172a9ab0593f86c1a39e5c268d0d8fc3d6cb0167f455b5655a7a6e2fd", url = "https://nodejs.org/dist/v24.13.1/node-v24.13.1-linux-x64.tar.gz"}
+"platforms.macos-arm64" = { checksum = "sha256:8c039d59f2fec6195e4281ad5b0d02b9a940897b4df7b849c6fb48be6787bba6", url = "https://nodejs.org/dist/v24.13.1/node-v24.13.1-darwin-arm64.tar.gz"}
+
+[[tools.pnpm]]
+version = "10.29.3"
+backend = "aqua:pnpm/pnpm"
+"platforms.linux-x64" = { checksum = "sha256:2fc98db127c611be0c110af11b5b72759f7d736893dddc81df73b7b59b30f15a", url = "https://github.com/pnpm/pnpm/releases/download/v10.29.3/pnpm-linux-x64"}
+"platforms.macos-arm64" = { checksum = "sha256:a248c56b0ab20443e18d0c8ee3207c6c564ee342bd3fc8694b3569a060cecece", url = "https://github.com/pnpm/pnpm/releases/download/v10.29.3/pnpm-macos-arm64"}

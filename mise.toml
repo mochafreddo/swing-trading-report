@@ -1,0 +1,9 @@
+[settings]
+lockfile = true
+
+[tools]
+# Keep in sync with:
+# - web/Dockerfile (Node.js version)
+# - web/package.json#packageManager (pnpm version)
+node = "24.13.1"
+pnpm = "10.29.3"

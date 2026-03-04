@@ -16,7 +16,9 @@
 
 - Python 3.13+
 - uv
-- (선택: 웹 UI를 호스트에서 직접 실행할 때) Node.js (버전 기준: `web/Dockerfile`)
+- (선택: 웹 UI를 호스트에서 직접 실행할 때) Node.js + pnpm (버전 기준: `web/Dockerfile`, `web/package.json`)
+  - 권장: `mise` 설치 후 `mise install` (`mise.toml`/`mise.lock` 기준)
+  - 권장: 셸 활성화(`eval "$(mise activate zsh)"`) 또는 명령 실행 시 `mise x -- <cmd>` 사용
 - (로컬 배포) Docker Desktop
 
 ## Quickstart (uv 기반)
@@ -28,6 +30,8 @@
 - 의존성/프로젝트 준비
   - 기본(슬림) 프로파일: `UV_CACHE_DIR=.uv-cache uv sync`
   - 개발 의존성 포함: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+  - 도구체인(Node/pnpm) 동기화: `mise install` (`mise.lock`이 함께 커밋되어 있어야 재현성 보장)
+  - lockfile 갱신(도구 버전 변경 시): `mise lock --platform linux-x64,macos-arm64 && mise install`
   - `.env` 자동 로딩은 기본 내장 파서로 동작(추가 의존성 불필요)
   - (선택) `python-dotenv` 고급 파싱 사용: `UV_CACHE_DIR=.uv-cache uv sync --extra dotenv`
   - (선택) 거래소 휴장일 자동 캘린더: `UV_CACHE_DIR=.uv-cache uv sync --extra calendar`
