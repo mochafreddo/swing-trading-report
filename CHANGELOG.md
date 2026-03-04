@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.4...v1.8.0) (2026-03-04)
+
+
+### Features
+
+* **holdings:** add-buy 멱등성 및 sell 평가 하드닝 ([46aee09](https://github.com/mochafreddo/swing-trading-report/commit/46aee09d6ff8aa3e00dc712ae70e2a559490b44f))
+
 ## [1.7.4](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.3...v1.7.4) (2026-03-04)
 
 
