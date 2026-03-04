@@ -4,6 +4,7 @@ Thumbs.db
 
 # Editor
 .cursor/
+.claude/settings.local.json
 
 # Python
 __pycache__/
