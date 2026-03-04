@@ -76,6 +76,7 @@ export function HoldingsFormPanel({
           <input
             name="ticker"
             autoComplete="off"
+            spellCheck={false}
             value={form.ticker}
             onChange={(event) =>
               onFieldChange("ticker", event.target.value.toUpperCase())
@@ -89,6 +90,7 @@ export function HoldingsFormPanel({
           <input
             name="tickerLookup"
             autoComplete="off"
+            spellCheck={false}
             value={tickerLookupQuery}
             onChange={(event) => onTickerLookupQueryChange(event.target.value)}
             placeholder="코스트코 / COST / 애브비"

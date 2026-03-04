@@ -113,7 +113,7 @@ export function LoginForm() {
         ) : null}
 
         <button className={styles.button} type="submit" disabled={submitting}>
-          {submitting ? "Signing in..." : "Sign In"}
+          {submitting ? "Signing in…" : "Sign In"}
         </button>
       </form>
     </section>

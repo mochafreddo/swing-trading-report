@@ -62,7 +62,7 @@ export function MainNav() {
           onClick={() => void onLogout()}
           disabled={loggingOut}
         >
-          {loggingOut ? "Signing out..." : "Sign Out"}
+          {loggingOut ? "Signing out…" : "Sign Out"}
         </button>
       </nav>
       {logoutError ? (

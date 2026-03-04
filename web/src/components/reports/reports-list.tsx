@@ -53,7 +53,7 @@ export function ReportsList({
             onClick={onRefresh}
             disabled={refreshing}
           >
-            {refreshing ? "새로고침 중..." : "새로고침"}
+            {refreshing ? "새로고침 중…" : "새로고침"}
           </button>
         </div>
         <p className="subtle">Supabase Storage 리포트 탐색</p>
