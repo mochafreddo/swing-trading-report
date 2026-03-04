@@ -19,12 +19,14 @@ htmlcov/
 .ruff_cache/
 .uv-cache/
 .venv/
+.direnv/
 
 # Node
 .pnpm-store/
 web/node_modules/
 web/.next/
 web/.turbo/
+web/coverage/
 web/tsconfig.tsbuildinfo
 
 # mise
@@ -35,6 +37,7 @@ mise.local.lock
 .env
 .env.*
 !.env.example
+.envrc.local
 
 # Local docs
 /PLAN.md

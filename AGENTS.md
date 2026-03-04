@@ -1,11 +1,29 @@
 # AGENTS.md
 
-## 명령어
+## 실행 우선순위
 
-- `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
-- `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
-- `UV_CACHE_DIR=.uv-cache uv lock --upgrade`
+- 도구체인 동기화: `mise install`
+- 도구 버전 변경 시 lock 갱신: `mise lock --platform linux-x64,macos-arm64 && mise install`
+- direnv zsh 훅(1회): `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc`
+- direnv 프로젝트 허용(최초 1회): `direnv allow .`
+- direnv는 `.env`를 자동 로드하지 않습니다(`.envrc.local`만 로드).
+- 시크릿/개인 오버라이드는 `.envrc.local`에만 저장하고 커밋하지 않습니다.
+
+## 권장 명령 (just)
+
+- 레시피 목록: `just --list`
+- 의존성/락: `just sync`, `just lock-upgrade`
+- 트레이딩 실행: `just scan`, `just sell`, `just entry`
+- 품질 게이트: `just quality` (`just check`는 동일 동작 alias)
+- pre-commit: `just precommit-all`
+- CI 대응 실행: `just ci-python`, `just ci-web` (`ci-web`는 비밀 없는 고정 CI placeholder env로만 실행)
+
+## 직접 실행 (uv fallback)
+
 - `UV_CACHE_DIR=.uv-cache uv sync --all-extras --dev`
+- `UV_CACHE_DIR=.uv-cache uv lock --upgrade`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
@@ -18,10 +36,9 @@
 - Green: 테스트를 통과시키는 최소한의 코드만 작성합니다.
 - Refactor: 테스트가 통과한 상태에서만 중복 제거와 구조 개선을 수행합니다.
 - 버그 수정 시 재현 테스트(회귀 테스트) 없이 코드부터 수정하지 않습니다.
-- 사이클 완료 전 아래 품질 게이트를 모두 통과합니다.
-- `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
-- `UV_CACHE_DIR=.uv-cache uv run ruff check .`
-- `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
+- 사이클 완료 전 품질 게이트를 모두 통과합니다.
+- 권장: `just quality`
+- fallback: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`, `UV_CACHE_DIR=.uv-cache uv run ruff check .`, `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 
 ## 문서(설계 로직)
 
@@ -30,6 +47,9 @@
 
 ## Pre-commit (샌드박스)
 
+- 권장: `just precommit-all`
+- 단일 훅 실행(권장): `just precommit mypy --all-files`
+- 설정 검사(권장): `just precommit-validate`
 - 전체 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
 - 단일 훅 실행: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run mypy --all-files`
 - 훅 업데이트: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit autoupdate`

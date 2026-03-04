@@ -7,3 +7,5 @@ lockfile = true
 # - web/package.json#packageManager (pnpm version)
 node = "24.13.1"
 pnpm = "10.29.3"
+just = "1.46.0"
+direnv = "2.37.1"

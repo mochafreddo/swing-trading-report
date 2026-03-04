@@ -6,7 +6,13 @@
 
 - uv 설치: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv lock -U && UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+- (선택) 반복 명령 실행기: `just --list`
 - toolchain 동기화: `mise install` (도구 버전 변경 시 `mise lock --platform linux-x64,macos-arm64 && mise install`)
+  - (선택) direnv 사용:
+    - zsh 훅: `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc`
+    - 프로젝트 최초 1회: `direnv allow .`
+    - 기본값은 `.envrc`에서 관리, 개인 오버라이드는 `.envrc.local` 사용(`.envrc.local.example` 참고)
+    - `.env`는 direnv가 아니라 애플리케이션(`sab`)이 로드
   - 설정:
     - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
     - `.env`에는 v1.1 필수 키를 작성:
@@ -82,6 +88,14 @@
   - `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe screener --screener-limit 20`
 - 보유 매도/보류 평가
   - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
+- just 레시피(동일 동작)
+  - `just scan --universe both`
+  - `just sell`
+  - `just quality`
+  - `just check`
+  - `just precommit-all`
+  - `just ci-python`
+  - `just ci-web` (비밀 없는 고정 CI placeholder env 사용)
 - 웹 UI(Next.js)
   - `docker compose up -d --build web`
   - 접속(prod): `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)

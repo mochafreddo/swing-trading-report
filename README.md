@@ -16,6 +16,8 @@
 
 - Python 3.13+
 - uv
+- (선택) just (`justfile` 레시피 실행)
+- (선택) direnv (프로젝트 진입 시 로컬 환경변수 자동 적용)
 - (선택: 웹 UI를 호스트에서 직접 실행할 때) Node.js + pnpm (버전 기준: `web/Dockerfile`, `web/package.json`)
   - 권장: `mise` 설치 후 `mise install` (`mise.toml`/`mise.lock` 기준)
   - 권장: 셸 활성화(`eval "$(mise activate zsh)"`) 또는 명령 실행 시 `mise x -- <cmd>` 사용
@@ -30,9 +32,15 @@
 - 의존성/프로젝트 준비
   - 기본(슬림) 프로파일: `UV_CACHE_DIR=.uv-cache uv sync`
   - 개발 의존성 포함: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+  - (선택) 반복 실행은 `justfile` 사용: `just --list`
   - 도구체인(Node/pnpm) 동기화: `mise install` (`mise.lock`이 함께 커밋되어 있어야 재현성 보장)
   - lockfile 갱신(도구 버전 변경 시): `mise lock --platform linux-x64,macos-arm64 && mise install`
   - `.env` 자동 로딩은 기본 내장 파서로 동작(추가 의존성 불필요)
+  - (선택) direnv 사용 시:
+    - zsh 훅 추가: `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc`
+    - 프로젝트 최초 1회: `direnv allow .`
+    - 기본값은 `.envrc`에서 관리(`UV_CACHE_DIR`, `PRE_COMMIT_HOME`), 머신별 오버라이드는 `.envrc.local` 사용(`.envrc.local.example` 참고)
+    - `.env`는 direnv가 아니라 애플리케이션(`sab`)이 로드합니다.
   - (선택) `python-dotenv` 고급 파싱 사용: `UV_CACHE_DIR=.uv-cache uv sync --extra dotenv`
   - (선택) 거래소 휴장일 자동 캘린더: `UV_CACHE_DIR=.uv-cache uv sync --extra calendar`
   - (선택) PyKRX 데이터 제공자/폴백: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
@@ -229,12 +237,24 @@ Per‑market 임계치(권장)
 - `supabase/` … Supabase 마이그레이션/설정
 - `holdings.yaml` … 선택 백업 파일(import/export 용도)
 
-## 스크립트화 권장
+## 작업 자동화 (just + direnv)
 
-반복 명령은 스크립트/Makefile로 캡슐화하면 편합니다(필요 시 직접 추가).
-
-- 예시: `bin/scan` → `UV_CACHE_DIR=.uv-cache uv run -m sab scan "$@"`
-- 예시: `Makefile` → `scan`, `scan-limit`, `scan-watchlist`, `lock`, `sync` 등 타깃 정의
+- 기본 레시피 목록: `just --list`
+- 대표 명령:
+  - `just scan`
+  - `just sell`
+  - `just entry`
+  - `just quality` (ruff + format-check + mypy + pytest)
+  - `just check` (`just quality` 별칭 호환)
+  - `just precommit-all`
+  - `just ci-python`
+  - `just ci-web` (web install + lint + format-check + typecheck + test:coverage + build, 비밀 없는 고정 CI placeholder env 사용)
+- 레시피에 CLI 인자 전달:
+  - 예시: `just scan --universe both --screener-limit 20`
+- direnv 사용 시:
+  - `.envrc`는 비시크릿 기본값/도구 캐시 변수만 관리
+  - 시크릿/개인 오버라이드는 `.envrc.local`(git ignore)로 분리
+  - `.envrc` 변경 시 `direnv allow .`를 다시 실행
 
 ## 상태
 

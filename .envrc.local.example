@@ -1,0 +1,7 @@
+# Copy this file to `.envrc.local` for machine-local direnv overrides.
+# `.envrc.local` is ignored by git and sourced by `.envrc`.
+#
+# Example:
+# export KIS_APP_KEY="..."
+# export KIS_APP_SECRET="..."
+# export WEB_HOST_PORT="55300"
