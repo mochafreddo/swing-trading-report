@@ -822,11 +822,13 @@ def test_run_scan_returns_1_when_partial_market_data_missing(tmp_path: Path) -> 
 def test_run_scan_allows_partial_market_data_when_coverage_meets_threshold(
     tmp_path: Path,
 ) -> None:
+    watchlist_file = tmp_path / "watchlist.txt"
     cfg = replace(
         Config(),
         data_provider="pykrx",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
         universe_markets=["US"],
@@ -843,6 +845,7 @@ def test_run_scan_allows_partial_market_data_when_coverage_meets_threshold(
         "INTC.NAS",
         "AMD.NAS",
     ]
+    watchlist_file.write_text("\n".join(tickers) + "\n", encoding="utf-8")
 
     def _collect_runtime(
         runtime: Any,
