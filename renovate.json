@@ -81,6 +81,12 @@
       "groupName": "docker dependencies"
     },
     {
+      "description": "Node.js는 mise.toml이 단일 소스 — Dockerfile/mise 업데이트를 원자적으로 묶음",
+      "matchDepNames": ["node"],
+      "groupName": "node version",
+      "minimumGroupSize": 3
+    },
+    {
       "matchUpdateTypes": [
         "patch"
       ],
