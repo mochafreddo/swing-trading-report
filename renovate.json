@@ -3,18 +3,18 @@
   "extends": [
     "config:best-practices"
   ],
-  "timezone": "Etc/UTC",
+  "timezone": "Asia/Seoul",
   "schedule": [
-    "after 9am and before 10am on monday"
+    "before 9am on monday"
   ],
-  "updateNotScheduled": false,
+  "updateNotScheduled": true,
   "labels": [
     "dependencies"
   ],
   "dependencyDashboard": true,
   "commitMessagePrefix": "chore(deps): ",
   "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
+  "prHourlyLimit": 4,
   "separateMinorPatch": true,
   "enabledManagers": [
     "pep621",
@@ -45,7 +45,7 @@
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
-      "after 9am and before 10am on monday"
+      "before 9am on monday"
     ],
     "automerge": false
   },
