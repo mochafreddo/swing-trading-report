@@ -17,6 +17,8 @@ type LoginAttemptState = {
 };
 
 type RuntimeStateStore = "memory" | "supabase";
+type LoginThrottleFailMode = "strict" | "degrade";
+type LoginThrottleOperation = "assert" | "record" | "clear";
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_WINDOW_SECONDS = 15 * 60;
@@ -42,6 +44,14 @@ function resolveRuntimeStateStore(): RuntimeStateStore {
     return "supabase";
   }
   return process.env.NODE_ENV === "test" ? "memory" : "supabase";
+}
+
+function resolveLoginThrottleFailMode(): LoginThrottleFailMode {
+  const raw = process.env.SAB_LOGIN_THROTTLE_FAIL_MODE?.trim().toLowerCase();
+  if (raw === "strict") {
+    return "strict";
+  }
+  return "degrade";
 }
 
 function buildRuntimeStateKey(key: string): string {
@@ -314,6 +324,30 @@ async function clearLoginAttemptFailuresInSupabase(key: string): Promise<void> {
   await deleteRuntimeStateEntry(buildRuntimeStateKey(key));
 }
 
+function logLoginThrottleDegraded(
+  op: LoginThrottleOperation,
+  key: string,
+  error: unknown,
+): void {
+  const errorType =
+    error instanceof Error && error.name
+      ? error.name
+      : typeof error === "object"
+        ? "UnknownError"
+        : typeof error;
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  console.warn(
+    JSON.stringify({
+      event: "login_throttle_degraded",
+      mode: "degrade",
+      op,
+      throttle_key_type: isGlobalThrottleKey(key) ? "global" : "user",
+      error_type: errorType,
+      error_message: errorMessage,
+    }),
+  );
+}
+
 export class LoginThrottleError extends Error {
   readonly status = 429;
   readonly retryAfterSeconds: number;
@@ -341,7 +375,18 @@ export async function assertLoginAttemptAllowed(
     assertLoginAttemptAllowedInMemory(key, now);
     return;
   }
-  await assertLoginAttemptAllowedInSupabase(key, now);
+  try {
+    await assertLoginAttemptAllowedInSupabase(key, now);
+  } catch (error) {
+    if (error instanceof LoginThrottleError) {
+      throw error;
+    }
+    if (resolveLoginThrottleFailMode() === "strict") {
+      throw error;
+    }
+    logLoginThrottleDegraded("assert", key, error);
+    assertLoginAttemptAllowedInMemory(key, now);
+  }
 }
 
 export async function recordLoginAttemptFailure(
@@ -352,7 +397,18 @@ export async function recordLoginAttemptFailure(
     recordLoginAttemptFailureInMemory(key, now);
     return;
   }
-  await recordLoginAttemptFailureInSupabase(key, now);
+  try {
+    await recordLoginAttemptFailureInSupabase(key, now);
+  } catch (error) {
+    if (error instanceof LoginThrottleError) {
+      throw error;
+    }
+    if (resolveLoginThrottleFailMode() === "strict") {
+      throw error;
+    }
+    logLoginThrottleDegraded("record", key, error);
+    recordLoginAttemptFailureInMemory(key, now);
+  }
 }
 
 export async function clearLoginAttemptFailures(key: string): Promise<void> {
@@ -360,7 +416,15 @@ export async function clearLoginAttemptFailures(key: string): Promise<void> {
     clearLoginAttemptFailuresInMemory(key);
     return;
   }
-  await clearLoginAttemptFailuresInSupabase(key);
+  try {
+    await clearLoginAttemptFailuresInSupabase(key);
+  } catch (error) {
+    if (resolveLoginThrottleFailMode() === "strict") {
+      throw error;
+    }
+    logLoginThrottleDegraded("clear", key, error);
+    clearLoginAttemptFailuresInMemory(key);
+  }
 }
 
 export function __resetLoginThrottleForTests(): void {

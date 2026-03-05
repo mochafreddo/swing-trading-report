@@ -69,6 +69,7 @@ vi.mock("@/lib/supabase-admin", () => {
 });
 
 import { DELETE, PATCH } from "@/app/api/holdings/[...ticker]/route";
+import { requireAdminAuth } from "@/lib/admin-auth";
 import { deleteHolding, updateHolding } from "@/lib/supabase-admin";
 
 function makePatchRequest(payload: object): NextRequest {
@@ -175,5 +176,29 @@ describe("/api/holdings/[...ticker] route", () => {
 
     expect(response.status).toBe(200);
     expect(vi.mocked(deleteHolding)).toHaveBeenCalledWith("BRK.B.NYS");
+  });
+
+  it("applies admin guard once for patch passthrough", async () => {
+    vi.mocked(updateHolding).mockResolvedValueOnce({
+      ticker: "BRK.B.NYS",
+      quantity: 3,
+      entry_price: 450,
+      entry_currency: null,
+      entry_date: null,
+      strategy: null,
+      notes: null,
+      tags: [],
+      stop_override: null,
+      target_override: null,
+      created_at: "2026-02-24T00:00:00Z",
+      updated_at: "2026-02-24T00:00:00Z",
+    });
+
+    const response = await PATCH(makePatchRequest({ quantity: 3 }), {
+      params: { ticker: ["BRK", "B.NYS"] },
+    });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(requireAdminAuth)).toHaveBeenCalledTimes(1);
   });
 });

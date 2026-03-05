@@ -301,4 +301,56 @@ describe("login-throttle", () => {
       assertLoginAttemptAllowed(key, 1_700_000_000_000),
     ).resolves.toBeUndefined();
   });
+
+  it("degrades to memory throttle when supabase is unavailable", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+    vi.stubEnv("SAB_LOGIN_THROTTLE_FAIL_MODE", "degrade");
+    vi.stubEnv("SAB_LOGIN_MAX_ATTEMPTS", "1");
+    vi.stubEnv("SAB_LOGIN_WINDOW_SECONDS", "900");
+    vi.stubEnv("SAB_LOGIN_BLOCK_SECONDS", "60");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "supabase unavailable" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const key = buildLoginThrottleKey("sab");
+    const now = 1_700_000_000_000;
+
+    await expect(assertLoginAttemptAllowed(key, now)).resolves.toBeUndefined();
+    await expect(
+      recordLoginAttemptFailure(key, now + 1_000),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertLoginAttemptAllowed(key, now + 2_000),
+    ).rejects.toBeInstanceOf(LoginThrottleError);
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it("keeps strict failure mode when supabase is unavailable", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+    vi.stubEnv("SAB_LOGIN_THROTTLE_FAIL_MODE", "strict");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "supabase unavailable" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const key = buildLoginThrottleKey("sab");
+
+    await expect(
+      assertLoginAttemptAllowed(key, 1_700_000_000_000),
+    ).rejects.toThrow("Failed to fetch runtime state");
+  });
 });

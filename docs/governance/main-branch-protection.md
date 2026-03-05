@@ -28,7 +28,7 @@ PR 기반 운영으로 복귀할 때는 아래 stage1 정책을 적용합니다.
 
 - `required_status_checks.strict=true`
 - Required status checks:
-  - `Ruff + Mypy + Pytest (Python 3.13)`
+  - `Ruff + Mypy + Pytest (Python 3.14)`
   - `Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`

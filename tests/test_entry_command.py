@@ -230,14 +230,27 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
         gap_atr_multiplier=1.0,
         min_history_bars=50,
         data_dir=tmp_path.as_posix(),
-        kis_app_key=None,
-        kis_app_secret=None,
-        kis_base_url=None,
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
         kis_min_interval_ms=None,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
     )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
     exit_code = run_entry(
         buy_report_path=buy_report_path.as_posix(),
@@ -254,8 +267,135 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
     assert payload["source_buy_report"] == "source.buy.json"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", payload["entry_session_date"])
     assert payload["entries"][0]["ticker"] == "AAPL.NASD"
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][0]["entry_price"] == 101.0
+
+
+def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    {
+                        "ticker": "AAPL.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 1
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
     assert payload["entries"][0]["action"] == "REVIEW"
     assert payload["entries"][0]["entry_price"] is None
+    assert any(
+        "provider not configured" in issue.lower() for issue in payload["system_issues"]
+    )
+
+
+def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    {
+                        "ticker": "AAPL.NASD",
+                        "close_value": 100.0,
+                        "gap_guard_pct_value": 0.03,
+                        "strategy_mode": "ema_cross",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "0.0")
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][0]["entry_price"] == 101.0
 
 
 def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
@@ -297,14 +437,26 @@ def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
         gap_atr_multiplier=1.0,
         min_history_bars=50,
         data_dir=tmp_path.as_posix(),
-        kis_app_key=None,
-        kis_app_secret=None,
-        kis_base_url=None,
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
         kis_min_interval_ms=None,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
     )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0" if symbol == "AAPL" else "101.2"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
     exit_code = run_entry(
         buy_report_path=buy_report_path.as_posix(),
@@ -359,14 +511,26 @@ def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
         gap_atr_multiplier=1.0,
         min_history_bars=50,
         data_dir=tmp_path.as_posix(),
-        kis_app_key=None,
-        kis_app_secret=None,
-        kis_base_url=None,
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
         kis_min_interval_ms=None,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
     )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0" if symbol == "AAPL" else "101.2"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
     exit_code = run_entry(
         buy_report_path=buy_report_path.as_posix(),
@@ -698,7 +862,7 @@ def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
         market="KR",
     )
 
-    assert exit_code == 0
+    assert exit_code == 1
     out_files = sorted(report_dir.glob("*.entry.json"))
     assert len(out_files) == 1
     payload = json.loads(out_files[0].read_text(encoding="utf-8"))

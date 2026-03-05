@@ -14,7 +14,7 @@
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.14+
 - uv
 - (선택) just (`justfile` 레시피 실행)
 - (선택) direnv (프로젝트 진입 시 로컬 환경변수 자동 적용)
@@ -80,6 +80,9 @@
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 진입 평가(Entry): `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
+    - 치명 열화 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (기본 `1.0`)
+      - `entry_price`가 비어 있는 행 비율이 임계치 이상이면 `sab entry`는 `exit 1`로 종료
+      - `0.0`은 “누락이 1건이라도 있으면 실패” 정책으로 해석
   - 웹 UI(Next.js): `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web` → `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
   - 로컬 CLI 실행 결과도 웹에서 보고 싶다면: `.env`에 `SAB_UPLOAD_REPORTS=true` (Supabase 설정 필요)
 
@@ -105,6 +108,7 @@
     - `Reports`: 리포트 목록/상세/타입 필터/ticker substring 검색
       - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
       - 런타임 상태 저장소: `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
+      - 로그인 스로틀 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `degrade`)
       - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
       - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`) + same-origin 검증을 필수로 요구
     - `Holdings`: Supabase `holdings` CRUD
@@ -174,7 +178,7 @@
   - 각 항목에 만료일/사유 주석 필수
   - 만료 시 즉시 삭제
 - PR 차단(브랜치 보호) 필수 체크:
-  - `CI / Ruff + Mypy + Pytest (Python 3.13)`
+  - `CI / Ruff + Mypy + Pytest (Python 3.14)`
   - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`

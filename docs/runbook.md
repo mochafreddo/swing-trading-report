@@ -22,13 +22,16 @@
       - Run 트리거(선택): `RUN_DISPATCH_ENABLED`(기본 `0`), `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT` (`RUN_DISPATCH_ENABLED=1`일 때 필수)
         - 하위 호환: `RUN_DISPATCH_ENABLED`가 비어 있고 `GITHUB_*` 3종이 모두 설정된 기존 환경은 자동 활성
       - Web 로그인 제한(선택): `SAB_LOGIN_MAX_ATTEMPTS`, `SAB_LOGIN_WINDOW_SECONDS`, `SAB_LOGIN_BLOCK_SECONDS`
+      - 로그인 스로틀 장애 정책(선택): `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `degrade`)
       - 런타임 상태 저장소(선택): `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
+      - Entry 종료 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (0.0~1.0, 기본 `1.0`)
+        - `0.0`은 누락이 1건이라도 있으면 실패로 해석
       - Web 로컬 실행(선택): `WEB_HOST_PORT`(prod, 기본 `55300`), `WEB_DEV_HOST_PORT`(dev, 기본 `55301`)
       - Notify(자동 실행): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
     - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
-  - Python 3.13+
+  - Python 3.14+
   - Node.js + pnpm (버전 기준: `web/Dockerfile`, `web/package.json`)
   - 권장: `mise install`로 toolchain 동기화(`mise.lock` 기준)
   - 권장: `eval "$(mise activate zsh)"` 또는 `mise x -- <cmd>`로 mise 환경에서 실행
@@ -172,7 +175,7 @@
 - `allow_force_pushes=false`, `allow_deletions=false`는 유지합니다.
 - PR 기반 운영으로 복귀 시 `docs/governance/main-branch-protection.stage1.payload.json`을 적용하고,
 - 아래 4개 Required status checks를 복원합니다:
-  - `Ruff + Mypy + Pytest (Python 3.13)`
+  - `Ruff + Mypy + Pytest (Python 3.14)`
   - `Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`

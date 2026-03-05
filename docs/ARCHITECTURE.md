@@ -39,7 +39,7 @@ flowchart LR
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/supabase_storage.py` |
-| 웹 API 경계 | 인증, same-origin, localhost 가드, API 라우트 | `web/middleware.ts`, `web/src/app/api/**/route.ts` |
+| 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
@@ -118,6 +118,7 @@ flowchart LR
 - `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers)
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
+- 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=degrade`(기본)에서는 Supabase 장애 시 메모리 스로틀로 폴백하고, `strict`에서는 즉시 실패합니다.
 
 ## 6. 보안 경계
 
@@ -125,8 +126,9 @@ flowchart LR
   - 로그인 시 `SAB_BASIC_AUTH_USER/PASS` 검증
   - `SAB_SESSION_SECRET` 기반 HMAC 서명 세션 쿠키(`sab_admin_session`) 발급/검증
 - 요청 무결성
-  - 미들웨어에서 API unsafe 메서드에 `same-origin` 선검증
-  - 보호 API 라우트에서 메서드와 무관하게 `same-origin` + 로컬 요청 검증(`host`, `x-forwarded-host`, unsafe의 `origin/referer` 또는 `sec-fetch-site=same-origin`)을 재적용
+  - 보호 API 라우트는 `enforceAdminApiGuard()` 단일 진입점에서 인증 + `same-origin` + 로컬 요청 검증(`host`, `x-forwarded-host`, unsafe의 `origin/referer` 또는 `sec-fetch-site=same-origin`)을 수행
+  - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
+  - `middleware.ts`는 페이지 라우트 접근 제어/리다이렉트 전용으로 유지
   - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
 - 비밀키 보호
   - Supabase/GitHub 키는 서버 코드(`server-only`)에서만 사용

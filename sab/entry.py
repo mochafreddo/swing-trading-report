@@ -38,6 +38,7 @@ _SUPPORTED_MARKETS = {"KR", "US"}
 _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
 _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
+_DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO = 1.0
 
 
 def _to_finite_float(value: Any) -> float | None:
@@ -128,6 +129,36 @@ def _normalize_provider(provider: str | None) -> str:
     if normalized not in _SUPPORTED_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(_SUPPORTED_PROVIDERS)}")
     return normalized
+
+
+def _resolve_entry_fatal_missing_price_ratio() -> float:
+    raw = str(
+        os.getenv(
+            "ENTRY_FATAL_MISSING_PRICE_RATIO",
+            str(_DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO),
+        )
+        or ""
+    ).strip()
+    try:
+        parsed = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid ENTRY_FATAL_MISSING_PRICE_RATIO=%r; fallback to %.2f",
+            raw,
+            _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO,
+        )
+        return _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO
+
+    if not math.isfinite(parsed) or parsed < 0 or parsed > 1:
+        logger.warning(
+            "ENTRY_FATAL_MISSING_PRICE_RATIO must be between 0.0 and 1.0; got %r. "
+            "fallback to %.2f",
+            raw,
+            _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO,
+        )
+        return _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO
+
+    return parsed
 
 
 def _parse_guard_percent_text(value: Any) -> float | None:
@@ -431,7 +462,9 @@ def _make_price_lookup(
     provider: str,
     mode: str,
     market: str,
-) -> Callable[[str], float | None]:
+) -> tuple[Callable[[str], float | None], list[str]]:
+    provider_issues: list[str] = []
+
     if provider == "pykrx":
         if mode != "AFTER_CLOSE":
             raise ValueError("pykrx provider is only allowed in AFTER_CLOSE mode")
@@ -439,8 +472,14 @@ def _make_price_lookup(
             raise ValueError("pykrx provider only supports KR market for entry")
         try:
             pykrx_client = PykrxClient(cache_dir=cfg.data_dir)
-        except PykrxNotInstalledError, PykrxClientError:
-            return lambda _ticker: None
+        except PykrxNotInstalledError:
+            provider_issues.append(
+                "provider init failed (pykrx): pykrx package is not installed"
+            )
+            return (lambda _ticker: None), provider_issues
+        except PykrxClientError as exc:
+            provider_issues.append(f"provider init failed (pykrx): {exc}")
+            return (lambda _ticker: None), provider_issues
 
         def _lookup_pykrx(ticker: str) -> float | None:
             try:
@@ -451,11 +490,15 @@ def _make_price_lookup(
                 return None
             return _to_finite_float(rows[-1].get("close"))
 
-        return _lookup_pykrx
+        return _lookup_pykrx, provider_issues
 
     # provider == "kis"
     if not (cfg.kis_app_key and cfg.kis_app_secret and cfg.kis_base_url):
-        return lambda _ticker: None
+        provider_issues.append(
+            "provider not configured (kis): missing KIS_APP_KEY/KIS_APP_SECRET/"
+            "KIS_BASE_URL"
+        )
+        return (lambda _ticker: None), provider_issues
 
     creds = KISCredentials(
         app_key=cfg.kis_app_key,
@@ -468,7 +511,11 @@ def _make_price_lookup(
         if cfg.kis_min_interval_ms is not None
         else None
     )
-    kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
+    try:
+        kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
+    except KISClientError as exc:
+        provider_issues.append(f"provider init failed (kis): {exc}")
+        return (lambda _ticker: None), provider_issues
 
     def _lookup_kis(ticker: str) -> float | None:
         try:
@@ -513,18 +560,32 @@ def _make_price_lookup(
         except KISClientError:
             return None
 
-    return _lookup_kis
+    return _lookup_kis, provider_issues
 
 
 def _build_entry_summary(
     rows: list[EntryReportRow], system_issues: list[str]
 ) -> dict[str, Any]:
     counts = Counter(row.action for row in rows)
+    missing_entry_price_count = sum(1 for row in rows if row.entry_price is None)
+    missing_entry_price_ratio = missing_entry_price_count / len(rows) if rows else 0.0
     return {
         "entry_count": len(rows),
         "action_counts": dict(sorted(counts.items())),
         "system_issue_count": len(system_issues),
+        "missing_entry_price_count": missing_entry_price_count,
+        "missing_entry_price_ratio": missing_entry_price_ratio,
     }
+
+
+def _is_missing_price_ratio_fatal(
+    *,
+    missing_price_ratio: float,
+    fatal_missing_price_ratio: float,
+) -> bool:
+    if fatal_missing_price_ratio <= 0:
+        return missing_price_ratio > 0
+    return missing_price_ratio >= fatal_missing_price_ratio
 
 
 def _build_config_snapshot(cfg: Config, *, provider: str, mode: str) -> dict[str, Any]:
@@ -616,18 +677,19 @@ def run_entry(
         logger.error("pykrx provider only supports KR market for entry")
         return 1
 
-    price_lookup_fn = _make_price_lookup(
+    price_lookup_fn, provider_issues = _make_price_lookup(
         cfg=cfg,
         provider=normalized_provider,
         mode=normalized_mode,
         market=resolved_market,
     )
-    rows, system_issues = evaluate_entry_candidates(
+    rows, candidate_system_issues = evaluate_entry_candidates(
         candidates=candidates,
         price_lookup_fn=price_lookup_fn,
         gap_breach_action="SKIP",
         default_strategy_mode=_resolve_report_strategy_mode(source_report),
     )
+    system_issues = list(dict.fromkeys([*provider_issues, *candidate_system_issues]))
     rows.sort(key=lambda row: (row.action, row.ticker))
 
     signal_eval_date = _resolve_signal_eval_date(
@@ -643,6 +705,7 @@ def run_entry(
         mixed_issue = f"Mixed candidate eval_date values: {preview}"
         system_issues.append(mixed_issue)
 
+    entry_summary = _build_entry_summary(rows, system_issues)
     artifact = {
         "provider": normalized_provider,
         "mode": normalized_mode,
@@ -651,7 +714,7 @@ def run_entry(
         "signal_eval_date": signal_eval_date,
         "entry_session_date": _entry_session_date(resolved_market),
         "tickers": sorted({row.ticker for row in rows}),
-        "summary": _build_entry_summary(rows, system_issues),
+        "summary": entry_summary,
         "system_issues": system_issues,
         "eval_index_policy": "entry_snapshot:v1",
     }
@@ -670,11 +733,31 @@ def run_entry(
         entries=rows,
         run_meta=run_meta,
     )
+    missing_price_ratio = float(entry_summary["missing_entry_price_ratio"])
+    fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()
+    logger.info(
+        "Entry evaluation summary: candidates=%s, missing_price_ratio=%.4f, "
+        "fatal_threshold=%.4f, system_issue_count=%s",
+        len(rows),
+        missing_price_ratio,
+        fatal_missing_price_ratio,
+        len(system_issues),
+    )
     logger.info("Entry report written to: %s", out_path)
     if system_issues:
         logger.warning(
             "Entry completed with system issues (%s rows)", len(system_issues)
         )
+    if _is_missing_price_ratio_fatal(
+        missing_price_ratio=missing_price_ratio,
+        fatal_missing_price_ratio=fatal_missing_price_ratio,
+    ):
+        logger.error(
+            "Entry failed: missing_price_ratio %.4f exceeded threshold %.4f",
+            missing_price_ratio,
+            fatal_missing_price_ratio,
+        )
+        return 1
     return 0
 
 

@@ -68,6 +68,7 @@ vi.mock("@/lib/supabase-admin", () => {
 });
 
 import { POST } from "@/app/api/holdings/add-buy/[...ticker]/route";
+import { requireAdminAuth } from "@/lib/admin-auth";
 import { addBuyToHolding } from "@/lib/supabase-admin";
 
 function makeRequest(
@@ -165,5 +166,32 @@ describe("/api/holdings/add-buy/[...ticker] route", () => {
       },
       "33333333-3333-4333-8333-333333333333",
     );
+  });
+
+  it("applies admin guard once for add-buy passthrough", async () => {
+    vi.mocked(addBuyToHolding).mockResolvedValueOnce({
+      ticker: "BRK.B.NYS",
+      quantity: 3,
+      entry_price: 452.5,
+      entry_currency: "USD",
+      entry_date: "2026-03-03",
+      strategy: null,
+      notes: null,
+      tags: [],
+      stop_override: null,
+      target_override: null,
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+    });
+
+    const response = await POST(
+      makeRequest({ buy_quantity: 1, buy_price: 455 }),
+      {
+        params: { ticker: ["BRK", "B.NYS"] },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(requireAdminAuth)).toHaveBeenCalledTimes(1);
   });
 });
