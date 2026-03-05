@@ -72,6 +72,11 @@
 - 워크플로 문법/쉘 린트는 로컬에서 다음 명령으로 재현합니다: `docker run --rm -v "$PWD":/work -w /work rhysd/actionlint:latest`
 - 로컬에서 `python` 실행이 불안정할 수 있으므로, 저장소 작업 스크립트는 `uv run python ...`을 우선 사용합니다.
 
+## Context7 MCP
+
+- 라이브러리/API 문서, 코드 생성, 설정/구성 단계가 필요할 때 사용자가 명시적으로 요청하지 않아도 항상 Context7 MCP를 사용합니다.
+- `resolve-library-id`로 라이브러리 ID를 먼저 조회한 뒤 `query-docs`로 최신 문서를 가져옵니다.
+
 ## 커밋
 
 - Conventional Commits 형식을 사용합니다.
