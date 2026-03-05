@@ -2,7 +2,7 @@
   "name": "sab-web",
   "version": "1.8.0",
   "private": true,
-  "packageManager": "pnpm@10.29.3",
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "node scripts/validate-env.mjs && node scripts/run-next.mjs dev",
     "build": "node scripts/validate-env.mjs && node scripts/run-next.mjs build",
@@ -21,14 +21,14 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
-    "@types/node": "25.2.3",
+    "@types/node": "25.3.3",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.3",
     "eslint-config-next": "16.1.6",
     "@vitest/coverage-v8": "4.0.18",
-    "jsdom": "^28.1.0",
-    "prettier": "^3.8.1",
+    "jsdom": "28.1.0",
+    "prettier": "3.8.1",
     "typescript": "5.9.3",
     "vitest": "4.0.18"
   }
