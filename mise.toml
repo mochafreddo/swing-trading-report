@@ -9,6 +9,6 @@ lockfile = true
 python = "3.14"
 uv = "0.10.8"
 node = "24.13.1"
-pnpm = "10.29.3"
+pnpm = "10.30.3"
 just = "1.46.0"
 direnv = "2.37.1"
