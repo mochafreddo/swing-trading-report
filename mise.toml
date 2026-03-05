@@ -3,8 +3,11 @@ lockfile = true
 
 [tools]
 # Keep in sync with:
+# - pyproject.toml (requires-python, ruff target-version, mypy python_version)
 # - web/Dockerfile (Node.js version)
 # - web/package.json#packageManager (pnpm version)
+python = "3.14"
+uv = "0.10.8"
 node = "24.13.1"
 pnpm = "10.29.3"
 just = "1.46.0"
