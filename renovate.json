@@ -48,7 +48,8 @@
     "schedule": [
       "before 9am on monday"
     ],
-    "automerge": false
+    "automerge": true,
+    "automergeType": "pr"
   },
   "packageRules": [
     {
@@ -87,18 +88,33 @@
       "minimumGroupSize": 3
     },
     {
-      "matchUpdateTypes": [
-        "patch"
-      ],
+      "description": "pin/digest 자동 머지 — 버전 변경 없이 고정만 강화",
+      "matchUpdateTypes": ["pin", "digest"],
       "automerge": true,
       "automergeType": "pr"
     },
     {
-      "matchUpdateTypes": [
-        "minor",
-        "major"
-      ],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchUpdateTypes": ["minor", "major"],
       "automerge": false
+    },
+    {
+      "description": "GitHub Actions minor 자동 머지 — SHA pinning으로 보호됨",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "devDependencies minor 자동 머지 — 런타임 영향 없음",
+      "matchDepTypes": ["devDependencies", "dependency-groups"],
+      "matchUpdateTypes": ["minor"],
+      "automerge": true,
+      "automergeType": "pr"
     },
     {
       "matchUpdateTypes": [
