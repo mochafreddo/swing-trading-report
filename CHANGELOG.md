@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.8.1...v1.9.0) (2026-03-05)
+
+
+### Features
+
+* **renovate:** 저위험 업데이트 자동 머지 확대 ([681aa16](https://github.com/mochafreddo/swing-trading-report/commit/681aa1663fe239c16bf96e6e2c77b02c5baa71e6))
+
 ## [1.8.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.8.0...v1.8.1) (2026-03-05)
 
 
