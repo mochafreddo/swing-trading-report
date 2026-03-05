@@ -68,7 +68,7 @@ def _compute_pnl_pct(
 def _to_finite_float(value: Any) -> float | None:
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(parsed):
         return None
@@ -407,7 +407,7 @@ def evaluate_sell_signals_hybrid(
 
 
 __all__ = [
-    "HybridSellSettings",
     "HybridSellEvaluation",
+    "HybridSellSettings",
     "evaluate_sell_signals_hybrid",
 ]

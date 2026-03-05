@@ -254,7 +254,7 @@ def _resolve_market_stale_limit(cfg: _CollectionConfig, *, market: str) -> int:
     )
     try:
         return max(0, int(raw))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 

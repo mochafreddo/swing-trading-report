@@ -43,7 +43,7 @@ _DEFAULT_US_EXCHANGE = "NAS"
 def _to_finite_float(value: Any) -> float | None:
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(parsed):
         return None
@@ -439,7 +439,7 @@ def _make_price_lookup(
             raise ValueError("pykrx provider only supports KR market for entry")
         try:
             pykrx_client = PykrxClient(cache_dir=cfg.data_dir)
-        except (PykrxNotInstalledError, PykrxClientError):
+        except PykrxNotInstalledError, PykrxClientError:
             return lambda _ticker: None
 
         def _lookup_pykrx(ticker: str) -> float | None:
@@ -678,4 +678,4 @@ def run_entry(
     return 0
 
 
-__all__ = ["evaluate_entry_candidates", "run_entry", "_select_latest_buy_report"]
+__all__ = ["_select_latest_buy_report", "evaluate_entry_candidates", "run_entry"]

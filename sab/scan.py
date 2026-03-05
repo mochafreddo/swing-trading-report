@@ -124,7 +124,7 @@ def _collect_scan_runtime(
 
     _resolve_scan_fx(runtime)
     if runtime.fatal_failure:
-        return
+        return  # type: ignore[unreachable]
     market_data_service.collect_market_data(runtime)
 
 

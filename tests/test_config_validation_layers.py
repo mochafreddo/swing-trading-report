@@ -281,7 +281,7 @@ def test_load_config_rejects_invalid_us_screener_defaults_ticker(
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
-    with pytest.raises(ConfigLoadError, match="screener.us_defaults"):
+    with pytest.raises(ConfigLoadError, match=r"screener\.us_defaults"):
         load_config()
 
 

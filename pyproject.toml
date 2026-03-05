@@ -1,9 +1,9 @@
 [project]
 name = "swing-trading-report"
 version = "1.2.0"
-description = "Add your description here"
+description = "Swing-trading signal scanner and report generator for KR/US markets"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6.0.3,<7",
     "requests>=2.32.5,<3",
@@ -39,7 +39,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 88
 src = ["sab", "tests"]
 extend-exclude = [
@@ -56,11 +56,18 @@ select = [
     "I",
     "B",
     "UP",
-    "SIM"
+    "SIM",
+    "C4",
+    "RUF",
 ]
 ignore = [
     "E501",
+    "RUF001",
+    "RUF003",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["RUF012"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -69,11 +76,13 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 pretty = true
 show_error_codes = true
 ignore_missing_imports = false
 warn_unused_configs = true
+warn_return_any = true
+warn_unreachable = true
 files = [
     "sab",
     "tests/**/*.py",

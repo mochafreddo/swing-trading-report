@@ -12,7 +12,7 @@ def _is_active_holding_quantity(quantity: float | int | str | None) -> bool:
         return False
     try:
         return float(quantity) > 0
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 

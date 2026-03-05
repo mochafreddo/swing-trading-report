@@ -66,7 +66,7 @@ def _load_us_holidays(data_dir: str | None = None) -> dict[str, bool]:
                     if not isinstance(key, str) or not isinstance(value, dict):
                         continue
                     holidays[key] = not bool(value.get("is_open", True))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         pass
 
     _US_HOLIDAYS_CACHE[resolved_data_dir] = holidays

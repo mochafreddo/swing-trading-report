@@ -210,7 +210,7 @@ def _evaluate_holdings(
             eval_price = ticker_candles[-1].get("close")
         try:
             last_price = float(eval_price) if eval_price is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             last_price = None
         if (
             last_price is not None
@@ -345,7 +345,7 @@ def _write_sell_report(
         config_snapshot=config_snapshot,
     )
 
-    return write_sell_report_fn(
+    return write_sell_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
         evaluated=results,

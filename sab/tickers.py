@@ -162,11 +162,11 @@ def validate_strict_us_ticker(ticker: str) -> str | None:
 
 
 __all__ = [
-    "ParsedTicker",
-    "SUPPORTED_ENTRY_CURRENCIES",
     "SUFFIX_TO_EXCHANGE",
+    "SUPPORTED_ENTRY_CURRENCIES",
     "US_EXCHANGE_CODES",
     "US_SUFFIXES",
+    "ParsedTicker",
     "canonical_exchange_from_suffix",
     "infer_currency_from_ticker",
     "infer_market_from_ticker",

@@ -530,7 +530,7 @@ def test_load_holdings_raises_when_default_currency_is_not_supported_code(
     )
 
     with pytest.raises(
-        HoldingsLoadError, match="unsupported settings.default_currency"
+        HoldingsLoadError, match=r"unsupported settings\.default_currency"
     ):
         load_holdings(str(path))
 
@@ -579,7 +579,7 @@ def test_load_holdings_raises_when_mixed_markets_with_default_currency(
 
     with pytest.raises(
         HoldingsLoadError,
-        match="Mixed KR/US holdings cannot use settings.default_currency",
+        match=r"Mixed KR/US holdings cannot use settings\.default_currency",
     ):
         load_holdings(str(path))
 
@@ -625,6 +625,6 @@ def test_load_holdings_raises_when_kr_only_default_currency_is_usd(tmp_path) -> 
 
     with pytest.raises(
         HoldingsLoadError,
-        match="KR-only holdings cannot set settings.default_currency=USD",
+        match=r"KR-only holdings cannot set settings\.default_currency=USD",
     ):
         load_holdings(str(path))

@@ -864,7 +864,7 @@ def test_run_scan_allows_partial_market_data_when_coverage_meets_threshold(
             evaluation_limit,
         )
         runtime.market_data = {ticker: _build_candles() for ticker in tickers[:7]}
-        runtime.ticker_currency = {ticker: "USD" for ticker in tickers}
+        runtime.ticker_currency = dict.fromkeys(tickers, "USD")
 
     with (
         patch("sab.scan.load_config", return_value=cfg),

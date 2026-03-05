@@ -41,7 +41,7 @@ class KISScreener:
     def screen(self, request: ScreenRequest) -> ScreenResult:
         try:
             limit = int(request.limit)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             limit = 0
         limit = max(0, limit)
         if limit <= 0:
@@ -137,7 +137,7 @@ class KISScreener:
             return None
         try:
             parsed = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if parsed <= 0:
             return None

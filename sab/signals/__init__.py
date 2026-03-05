@@ -4,8 +4,8 @@ from .sell_rules import SellEvaluation, SellSettings, evaluate_sell_signals
 __all__ = [
     "EvaluationResult",
     "EvaluationSettings",
-    "evaluate_ticker",
     "SellEvaluation",
     "SellSettings",
     "evaluate_sell_signals",
+    "evaluate_ticker",
 ]

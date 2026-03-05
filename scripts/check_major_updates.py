@@ -57,7 +57,7 @@ def _fetch_pypi_latest_version(package: str) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+    except urllib.error.URLError, TimeoutError, json.JSONDecodeError:
         return None
     return payload.get("info", {}).get("version")
 

@@ -315,7 +315,7 @@ class _ConfigParser:
             provided = self.has_yaml_path(path)
 
         if allow_none and raw is None:
-            return None
+            return None  # type: ignore[unreachable]
 
         try:
             return parser(raw)

@@ -285,7 +285,7 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
             "universe_markets": runtime.cfg.universe_markets,
         },
     )
-    return write_report_fn(
+    return write_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
         universe_count=len(runtime.tickers),

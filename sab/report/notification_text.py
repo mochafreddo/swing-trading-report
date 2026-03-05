@@ -21,7 +21,7 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return value
     try:
         return int(float(str(value).strip()))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -32,7 +32,7 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     try:
         return float(str(value).strip())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -300,7 +300,7 @@ def build_sell_telegram_report_text(
 
 __all__ = [
     "build_scan_slack_summary_text",
-    "build_sell_slack_summary_text",
     "build_scan_telegram_report_text",
+    "build_sell_slack_summary_text",
     "build_sell_telegram_report_text",
 ]

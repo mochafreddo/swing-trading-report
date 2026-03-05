@@ -29,7 +29,7 @@ def _load_scan_tickers(
     load_watchlist_fn: Any,
 ) -> list[str]:
     resolved_watchlist_path = watchlist_path or cfg.watchlist_path or "watchlist.txt"
-    return load_watchlist_fn(resolved_watchlist_path)
+    return load_watchlist_fn(resolved_watchlist_path)  # type: ignore[no-any-return]
 
 
 def _enforce_ticker_limit(
@@ -170,7 +170,7 @@ def _run_us_screener(
     fallback_ndays = (
         [n for n in range(1, 6) if n != preferred_nday]
         if preferred_nday != 0
-        else [n for n in range(1, 6)]
+        else list(range(1, 6))
     )
     ny_now_str = format_ny_now_for_log_fn(session_info)
     runtime.logger.info(

@@ -107,7 +107,7 @@ def load_holdings(path: str | None) -> HoldingsData:
     )
     if settings.default_currency is not None:
         raw_default_currency = settings.default_currency
-        if isinstance(raw_default_currency, bool):
+        if isinstance(raw_default_currency, bool):  # type: ignore[unreachable]
             raise HoldingsLoadError(
                 "Invalid holdings value in "
                 f"'{p}' (field='settings.default_currency'): "

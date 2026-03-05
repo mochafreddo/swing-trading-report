@@ -163,7 +163,7 @@ def test_hybrid_sell_target_override_prioritizes_display_target(monkeypatch):
 def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
     class _FixedDate(dt.date):
         @classmethod
-        def today(cls) -> "_FixedDate":
+        def today(cls) -> _FixedDate:
             return cls(2025, 1, 15)
 
     monkeypatch.setattr("sab.signals.hybrid_sell.dt.date", _FixedDate)
@@ -203,7 +203,7 @@ def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
 def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
     class _FixedDate(dt.date):
         @classmethod
-        def today(cls) -> "_FixedDate":
+        def today(cls) -> _FixedDate:
             return cls(2025, 1, 15)
 
     monkeypatch.setattr("sab.signals.hybrid_sell.dt.date", _FixedDate)

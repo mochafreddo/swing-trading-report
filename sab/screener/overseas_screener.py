@@ -39,4 +39,4 @@ class USSimpleScreener:
         )
 
 
-__all__ = ["USSimpleScreener", "ScreenRequest", "ScreenResult"]
+__all__ = ["ScreenRequest", "ScreenResult", "USSimpleScreener"]

@@ -98,7 +98,7 @@ def _decode_jwt_payload(token: str) -> dict[str, object] | None:
     try:
         payload_bytes = base64.urlsafe_b64decode(payload_part + padding)
         payload = json.loads(payload_bytes.decode("utf-8"))
-    except (ValueError, json.JSONDecodeError):
+    except ValueError, json.JSONDecodeError:
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -319,7 +319,7 @@ def _storage_delete_request(
 def _safe_json_dict(payload: bytes) -> dict[str, object]:
     try:
         decoded = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
 
@@ -657,10 +657,10 @@ def maybe_upload_report_artifact(
 
 
 __all__ = [
+    "SupabaseReportIndexError",
     "SupabaseStorageConfig",
     "SupabaseStorageConfigError",
     "SupabaseStorageError",
-    "SupabaseReportIndexError",
     "maybe_upload_report_artifact",
     "upload_report_artifact",
 ]

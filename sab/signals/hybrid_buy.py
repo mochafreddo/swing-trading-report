@@ -93,7 +93,7 @@ def _pattern_reason_id_label(reason: str) -> tuple[str, str]:
 def _to_finite_float(value: Any) -> float | None:
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(parsed):
         return None
@@ -266,7 +266,7 @@ def _detect_trend_pullback_bounce(
     if not (settings.rsi_zone_low <= rsi_val <= settings.rsi_zone_high):
         return False, ["RSI not in swing zone"], None, {}
 
-    prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
+    _, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
 
     # Pullback region: bars immediately before today's signal bar where
     # close stayed at/below EMA short.
@@ -432,7 +432,7 @@ def _detect_rsi_oversold_reversal(
         return False, ["RSI did not rebound from oversold band"], None, {}
 
     today = candles[-1]
-    prev_vol, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
+    _, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
     o = _to_finite_or_default(today.get("open"))
     c = _to_finite_or_default(today.get("close"))
     v, _ = _to_volume_and_invalid(today.get("volume"))
@@ -829,8 +829,8 @@ def evaluate_ticker_hybrid(
 
 
 __all__ = [
-    "HybridPattern",
-    "HybridEvaluationSettings",
     "HybridEvaluationResult",
+    "HybridEvaluationSettings",
+    "HybridPattern",
     "evaluate_ticker_hybrid",
 ]

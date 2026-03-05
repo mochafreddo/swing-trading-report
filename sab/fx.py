@@ -199,5 +199,5 @@ def _to_float(val: object | None) -> float | None:
         return None
     try:
         return float(str(val).replace(",", ""))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None

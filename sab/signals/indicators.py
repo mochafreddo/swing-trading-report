@@ -13,7 +13,7 @@ def ema(values: Iterable[float], period: int) -> list[float]:
     ema_prev = None
     for v in vals:
         if v is None:
-            v = float("nan")
+            v = float("nan")  # type: ignore[unreachable]
         ema_prev = v if ema_prev is None else (v * k) + (ema_prev * (1 - k))
         out.append(ema_prev)
     return out

@@ -49,18 +49,18 @@ class KISOverseasScreener:
         by_ticker: dict[str, Any] = {}
         try:
             limit = max(0, int(request.limit))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             limit = 0
         ndays: list[int] = []
         if request.nday is not None:
             try:
                 ndays.append(max(0, int(request.nday)))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 ndays.append(0)
         for nd in request.fallback_ndays or []:
             try:
                 candidate = max(0, int(nd))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if candidate not in ndays:
                 ndays.append(candidate)
@@ -221,7 +221,7 @@ class KISOverseasScreener:
     ) -> tuple[list[str], dict[str, dict[str, Any]]]:
         tickers: list[str] = []
         by_ticker: dict[str, dict[str, Any]] = {}
-        cursors = {exchange: 0 for exchange in exchanges}
+        cursors = dict.fromkeys(exchanges, 0)
         selected: set[str] = set()
         while len(tickers) < limit:
             progressed = False

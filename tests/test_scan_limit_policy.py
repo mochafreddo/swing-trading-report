@@ -61,7 +61,7 @@ def test_run_scan_applies_limit_after_screener_merge(tmp_path: Path) -> None:
     fake_market_data_service = _FakeMarketDataService()
 
     def fake_run_screeners(runtime: Any, **_kwargs: Any) -> None:
-        runtime.tickers = list(dict.fromkeys(runtime.tickers + ["000660", "035420"]))
+        runtime.tickers = list(dict.fromkeys([*runtime.tickers, "000660", "035420"]))
 
     with (
         patch("sab.scan.load_config", return_value=cfg),

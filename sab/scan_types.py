@@ -63,7 +63,7 @@ def _to_float(value: Any) -> float | None:
         if math.isnan(val):
             return None
         return val
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
