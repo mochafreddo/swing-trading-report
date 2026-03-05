@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.8.0...v1.8.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* **renovate:** Node 버전 원자적 그룹핑 및 mise.lock 자동 동기화 ([e13a510](https://github.com/mochafreddo/swing-trading-report/commit/e13a510b70e38dc9c60b57dfd0ec619f552f715f))
+
 ## [1.8.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.7.4...v1.8.0) (2026-03-04)
 
 
