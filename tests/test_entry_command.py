@@ -14,6 +14,29 @@ from sab.entry import (
 )
 
 
+def _entry_candidate(
+    ticker: str,
+    *,
+    raw_close: float = 100.0,
+    gap_guard_value: float = 0.03,
+    strategy_mode: str = "ema_cross",
+    eval_date: str = "20260225",
+    **extra: object,
+) -> dict[str, object]:
+    candidate = {
+        "ticker": ticker,
+        "signal_price_basis": "adjusted",
+        "signal_close_adjusted_value": 100.0,
+        "entry_reference_close_raw_value": raw_close,
+        "entry_reference_eval_date": eval_date,
+        "eval_date": eval_date,
+        "gap_guard_pct_value": gap_guard_value,
+        "strategy_mode": strategy_mode,
+    }
+    candidate.update(extra)
+    return candidate
+
+
 def test_select_latest_buy_report_prefers_latest_date_and_duplicate(
     tmp_path: Path,
 ) -> None:
@@ -33,25 +56,15 @@ def test_select_latest_buy_report_prefers_latest_date_and_duplicate(
 
 def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
     candidates = [
-        {
-            "ticker": "AAPL.NASD",
-            "close_value": 100.0,
-            "gap_guard_pct_value": 0.03,
-            "strategy_mode": "ema_cross",
-        },
-        {
-            "ticker": "MSFT.NASD",
-            "close_value": 100.0,
-            "gap_guard_pct_value": 0.02,
-            "strategy_mode": "ema_cross",
-        },
-        {
-            "ticker": "NVDA.NASD",
-            "close_value": 100.0,
-            "gap_guard_pct_value": 0.02,
-            "strategy_mode": "sma_ema_hybrid",
-            "entry_state": "WATCH",
-        },
+        _entry_candidate("AAPL.NASD", raw_close=100.0, gap_guard_value=0.03),
+        _entry_candidate("MSFT.NASD", raw_close=100.0, gap_guard_value=0.02),
+        _entry_candidate(
+            "NVDA.NASD",
+            raw_close=100.0,
+            gap_guard_value=0.02,
+            strategy_mode="sma_ema_hybrid",
+            entry_state="WATCH",
+        ),
     ]
     prices = {
         "AAPL.NASD": 101.0,  # +1% -> ENTER
@@ -74,15 +87,20 @@ def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
 
 def test_evaluate_entry_candidates_marks_review_on_missing_data() -> None:
     candidates = [
-        {
-            "ticker": "AAPL.NASD",
-            "price_value": 100.0,
-            "gap_guard_pct": "±2.0%",
-            "strategy_mode": "ema_cross",
-        },
+        _entry_candidate(
+            "AAPL.NASD",
+            raw_close=100.0,
+            gap_guard_value=0.02,
+            gap_guard_pct_value=None,
+            gap_guard_pct="±2.0%",
+        ),
         {
             "ticker": "MSFT.NASD",
-            "price_value": 100.0,
+            "signal_price_basis": "adjusted",
+            "signal_close_adjusted_value": 100.0,
+            "entry_reference_close_raw_value": 100.0,
+            "entry_reference_eval_date": "20260225",
+            "eval_date": "20260225",
             "strategy_mode": "ema_cross",
         },
     ]
@@ -101,14 +119,15 @@ def test_evaluate_entry_candidates_marks_review_on_missing_data() -> None:
 
 def test_evaluate_entry_candidates_handles_legacy_guard_strings() -> None:
     candidates = [
-        {
-            "ticker": "AAPL.NASD",
-            "price_value": 100.0,
-            "gap_guard_pct": "±2.5%",
-            "gap_guard_up_price": "102.50",
-            "gap_guard_down_price": "97.50",
-            "strategy_mode": "ema_cross",
-        }
+        _entry_candidate(
+            "AAPL.NASD",
+            raw_close=100.0,
+            gap_guard_value=0.025,
+            gap_guard_pct_value=None,
+            gap_guard_pct="±2.5%",
+            gap_guard_up_price="102.50",
+            gap_guard_down_price="97.50",
+        )
     ]
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
@@ -122,6 +141,46 @@ def test_evaluate_entry_candidates_handles_legacy_guard_strings() -> None:
     assert rows[0].gap_guard_up_price == 102.5
     assert rows[0].gap_guard_down_price == 97.5
     assert issues == []
+
+
+def test_evaluate_entry_candidates_marks_legacy_basis_as_review() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            {
+                "ticker": "AAPL.NASD",
+                "close_value": 100.0,
+                "gap_guard_pct_value": 0.03,
+                "strategy_mode": "ema_cross",
+            }
+        ],
+        price_lookup_fn=lambda _ticker: 101.0,
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "REVIEW"
+    assert "signal price basis unavailable" in rows[0].reasons
+    assert issues == ["AAPL.NASD: signal price basis unavailable"]
+
+
+def test_evaluate_entry_candidates_marks_basis_date_mismatch_as_review() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate(
+                "AAPL.NASD",
+                raw_close=100.0,
+                eval_date="20260225",
+                entry_reference_eval_date="20260224",
+            )
+        ],
+        price_lookup_fn=lambda _ticker: 101.0,
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "REVIEW"
+    assert "entry reference eval_date mismatch" in rows[0].reasons[0]
+    assert any("entry reference eval_date mismatch" in issue for issue in issues)
 
 
 def test_select_latest_buy_report_raises_when_missing(tmp_path: Path) -> None:
@@ -211,14 +270,7 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "report_date": "2026-02-26",
                 "eval_context": {"market": "US"},
-                "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("AAPL.NASD")],
             }
         ),
         encoding="utf-8",
@@ -283,14 +335,7 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "report_date": "2026-02-26",
                 "eval_context": {"market": "US"},
-                "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("AAPL.NASD")],
             }
         ),
         encoding="utf-8",
@@ -341,14 +386,7 @@ def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "report_date": "2026-02-26",
                 "eval_context": {"market": "US"},
-                "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("AAPL.NASD")],
             }
         ),
         encoding="utf-8",
@@ -411,20 +449,8 @@ def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
                 "report_date": "2026-02-26",
                 "eval_context": {"market": "US"},
                 "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                        "eval_date": "20260224",
-                    },
-                    {
-                        "ticker": "MSFT.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                        "eval_date": "20260224",
-                    },
+                    _entry_candidate("AAPL.NASD", eval_date="20260224"),
+                    _entry_candidate("MSFT.NASD", eval_date="20260224"),
                 ],
             }
         ),
@@ -485,20 +511,8 @@ def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
                 "report_date": "2026-02-26",
                 "eval_context": {"market": "US"},
                 "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                        "eval_date": "20260224",
-                    },
-                    {
-                        "ticker": "MSFT.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.03,
-                        "strategy_mode": "ema_cross",
-                        "eval_date": "20260225",
-                    },
+                    _entry_candidate("AAPL.NASD", eval_date="20260224"),
+                    _entry_candidate("MSFT.NASD", eval_date="20260225"),
                 ],
             }
         ),
@@ -563,12 +577,12 @@ def test_run_entry_e2e_uses_report_level_strategy_mode_for_legacy_candidates(
                 "eval_context": {"market": "KR"},
                 "strategy_mode": "sma_ema_hybrid",
                 "candidates": [
-                    {
-                        "ticker": "005930",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "entry_state": "WATCH",
-                    }
+                    _entry_candidate(
+                        "005930",
+                        eval_date="20260225",
+                        strategy_mode="sma_ema_hybrid",
+                        entry_state="WATCH",
+                    )
                 ],
             }
         ),
@@ -630,14 +644,7 @@ def test_run_entry_e2e_rejects_ambiguous_us_suffix_immediately(
             {
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "eval_context": {"market": "US"},
-                "candidates": [
-                    {
-                        "ticker": "AAPL.US",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("AAPL.US", gap_guard_value=0.05)],
             }
         ),
         encoding="utf-8",
@@ -683,14 +690,7 @@ def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -
             {
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "eval_context": {"market": "US"},
-                "candidates": [
-                    {
-                        "ticker": "AAPL.NASD",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
             }
         ),
         encoding="utf-8",
@@ -750,14 +750,7 @@ def test_run_entry_e2e_uses_kis_kr_snapshot_price_intraday(
             {
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "eval_context": {"market": "KR"},
-                "candidates": [
-                    {
-                        "ticker": "005930",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("005930", gap_guard_value=0.05)],
             }
         ),
         encoding="utf-8",
@@ -814,14 +807,7 @@ def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
             {
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "eval_context": {"market": "KR"},
-                "candidates": [
-                    {
-                        "ticker": "005930",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("005930", gap_guard_value=0.05)],
             }
         ),
         encoding="utf-8",
@@ -881,14 +867,7 @@ def test_run_entry_e2e_uses_pykrx_after_close_price(
             {
                 "run_ts_utc": "2026-02-26T01:30:00Z",
                 "eval_context": {"market": "KR"},
-                "candidates": [
-                    {
-                        "ticker": "005930",
-                        "close_value": 100.0,
-                        "gap_guard_pct_value": 0.05,
-                        "strategy_mode": "ema_cross",
-                    }
-                ],
+                "candidates": [_entry_candidate("005930", gap_guard_value=0.05)],
             }
         ),
         encoding="utf-8",

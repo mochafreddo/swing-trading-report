@@ -73,6 +73,7 @@ def test_ema_cross_excludes_optional_filters_when_disabled(
             use_sma200_filter=False,
             require_slope_up=False,
             gap_atr_multiplier=1.0,
+            rs_lookback_days=1,
         ),
         {"currency": "USD"},
     )
@@ -117,6 +118,7 @@ def test_ema_cross_candidate_exposes_entry_numeric_fields(
             use_sma200_filter=False,
             require_slope_up=False,
             gap_atr_multiplier=1.0,
+            rs_lookback_days=1,
         ),
         {"currency": "USD"},
     )
@@ -124,6 +126,10 @@ def test_ema_cross_candidate_exposes_entry_numeric_fields(
     assert result.candidate is not None
     candidate = result.candidate
     assert candidate["close_value"] == pytest.approx(candidate["price_value"])
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["signal_close_adjusted_value"] == pytest.approx(
+        candidate["close_value"]
+    )
     assert candidate["atr14_value"] == pytest.approx(1.0)
     assert candidate["gap_guard_pct_value"] == pytest.approx(1.0 / 11.0)
     assert candidate["gap_guard_up_price_value"] == pytest.approx(
@@ -165,3 +171,116 @@ def test_ema_cross_candidate_exposes_structured_reasons(
     }.issubset(ids)
     statuses = {str(item.get("status")) for item in reasons}
     assert statuses.issubset({"pass", "warn"})
+
+
+def test_ema_cross_uses_market_benchmark_from_meta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=False,
+            require_slope_up=False,
+            gap_atr_multiplier=1.0,
+            rs_lookback_days=2,
+            rs_benchmark_return=None,
+        ),
+        {
+            "currency": "USD",
+            "rs_benchmark_return": 0.05,
+            "rs_benchmark_ticker": "SPY.AMS",
+        },
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["rs_return_value"] == pytest.approx(0.1)
+    assert candidate["rs_diff_value"] == pytest.approx(0.05)
+    assert candidate["rs_benchmark_value"] == pytest.approx(0.05)
+    assert candidate["rs_benchmark_ticker"] == "SPY.AMS"
+    assert "rs" in candidate["score_notes"]
+
+
+def test_ema_cross_disables_rs_score_when_benchmark_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=False,
+            require_slope_up=False,
+            gap_atr_multiplier=1.0,
+            rs_lookback_days=2,
+            rs_benchmark_return=None,
+        ),
+        {"currency": "USD"},
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["rs_return_value"] == pytest.approx(0.1)
+    assert candidate["rs_diff_value"] is None
+    assert candidate["rs_benchmark_value"] is None
+    reason_ids = {str(item.get("id")) for item in candidate["reasons"]}
+    assert "rs_above_benchmark" not in reason_ids
+    assert "rs_below_benchmark" not in reason_ids
+
+
+def test_ema_cross_uses_market_benchmark_return_from_meta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=False,
+            require_slope_up=False,
+            gap_atr_multiplier=1.0,
+            rs_lookback_days=1,
+        ),
+        {
+            "currency": "USD",
+            "rs_benchmark_return": 0.05,
+            "rs_benchmark_ticker": "SPY.AMS",
+        },
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["rs_return_value"] == pytest.approx((11.0 - 10.5) / 10.5)
+    assert candidate["rs_diff_value"] == pytest.approx(((11.0 - 10.5) / 10.5) - 0.05)
+    assert candidate["rs_benchmark_value"] == pytest.approx(0.05)
+    assert candidate["rs_benchmark_ticker"] == "SPY.AMS"
+
+
+def test_ema_cross_does_not_award_rs_without_benchmark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=False,
+            require_slope_up=False,
+            gap_atr_multiplier=1.0,
+            rs_lookback_days=1,
+        ),
+        {"currency": "USD"},
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["rs_return_value"] == pytest.approx((11.0 - 10.5) / 10.5)
+    assert candidate["rs_diff_value"] is None
+    assert candidate["rs_benchmark"] == "-"
+    assert "rs" not in candidate["score_notes"].split(", ")

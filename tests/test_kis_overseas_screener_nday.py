@@ -64,6 +64,8 @@ def test_kis_overseas_screener_deeper_fallback_succeeds() -> None:
     client = MagicMock()
 
     def market_cap_rank(**kwargs):
+        if kwargs.get("exchange") != "NAS":
+            return []
         if kwargs.get("nday") in {"1", "2"}:
             return []
         return [{"SYMB": "NVDA"}]
@@ -85,12 +87,16 @@ def test_kis_overseas_screener_fills_across_exchanges_until_limit() -> None:
 
     def value_rank(**kwargs):
         exchange = kwargs.get("exchange")
-        limit = int(kwargs.get("limit") or 0)
         if exchange == "NAS":
-            # KIS ranking endpoints return up to 100 rows per exchange.
-            return [{"SYMB": f"NAS{i:03d}"} for i in range(1, 101)]
+            return [
+                {"SYMB": f"NAS{i:03d}", "ACC_TRDVAL": str(10_000 - i)}
+                for i in range(1, 101)
+            ]
         if exchange == "NYS":
-            return [{"SYMB": f"NYS{i:03d}"} for i in range(1, limit + 1)]
+            return [
+                {"SYMB": f"NYS{i:03d}", "ACC_TRDVAL": str(9_000 - i)}
+                for i in range(1, 111)
+            ]
         return []
 
     client.overseas_trade_value_rank.side_effect = value_rank
@@ -99,29 +105,24 @@ def test_kis_overseas_screener_fills_across_exchanges_until_limit() -> None:
     result = screener.screen(ScreenRequest(limit=110, metric="value", nday=1))
 
     assert len(result.tickers) == 110
-    assert result.tickers[:6] == [
-        "NAS001.NAS",
-        "NYS001.NYS",
-        "NAS002.NAS",
-        "NYS002.NYS",
-        "NAS003.NAS",
-        "NYS003.NYS",
-    ]
-    assert result.tickers[-1] == "NAS073.NAS"
-    assert result.metadata["selection_mode"] == "round_robin_exchange"
+    assert result.tickers[:3] == ["NAS001.NAS", "NAS002.NAS", "NAS003.NAS"]
+    assert result.tickers[99] == "NAS100.NAS"
+    assert result.tickers[100] == "NYS001.NYS"
+    assert result.tickers[-1] == "NYS010.NYS"
+    assert result.metadata["selection_mode"] == "global_metric_merge"
 
     assert client.overseas_trade_value_rank.call_count == 3
     first_call = client.overseas_trade_value_rank.call_args_list[0].kwargs
     second_call = client.overseas_trade_value_rank.call_args_list[1].kwargs
     third_call = client.overseas_trade_value_rank.call_args_list[2].kwargs
     assert first_call["exchange"] == "NAS"
-    assert first_call["limit"] == 37
+    assert first_call["limit"] == 110
     assert first_call["nday"] == "1"
     assert second_call["exchange"] == "NYS"
-    assert second_call["limit"] == 37
+    assert second_call["limit"] == 110
     assert second_call["nday"] == "1"
     assert third_call["exchange"] == "AMS"
-    assert third_call["limit"] == 37
+    assert third_call["limit"] == 110
     assert third_call["nday"] == "1"
 
 
@@ -132,74 +133,64 @@ def test_kis_overseas_screener_non_positive_limit_skips_api_calls() -> None:
     result = screener.screen(ScreenRequest(limit=0, metric="value", nday=1))
 
     assert result.tickers == []
-    assert result.metadata["selection_mode"] == "round_robin_exchange"
+    assert result.metadata["selection_mode"] == "global_metric_merge"
     assert client.overseas_trade_value_rank.call_count == 0
 
 
-def test_kis_overseas_screener_backfills_when_initial_round_robin_is_short() -> None:
+def test_kis_overseas_screener_merges_by_global_metric_value() -> None:
     client = MagicMock()
 
     def value_rank(**kwargs):
         exchange = kwargs.get("exchange")
-        limit = int(kwargs.get("limit") or 0)
         if exchange == "NAS":
-            if limit <= 4:
-                return [{"SYMB": f"NAS{i:03d}"} for i in range(1, 5)]
-            return [{"SYMB": f"NAS{i:03d}"} for i in range(1, limit + 1)]
-        return []
-
-    client.overseas_trade_value_rank.side_effect = value_rank
-    screener = KISOverseasScreener(client)
-
-    result = screener.screen(ScreenRequest(limit=10, metric="value", nday=1))
-
-    assert len(result.tickers) == 10
-    assert result.tickers[0] == "NAS001.NAS"
-    assert result.tickers[-1] == "NAS010.NAS"
-    assert client.overseas_trade_value_rank.call_count == 4
-    first_call = client.overseas_trade_value_rank.call_args_list[0].kwargs
-    second_call = client.overseas_trade_value_rank.call_args_list[1].kwargs
-    third_call = client.overseas_trade_value_rank.call_args_list[2].kwargs
-    fourth_call = client.overseas_trade_value_rank.call_args_list[3].kwargs
-    assert first_call["exchange"] == "NAS" and first_call["limit"] == 4
-    assert second_call["exchange"] == "NYS" and second_call["limit"] == 4
-    assert third_call["exchange"] == "AMS" and third_call["limit"] == 4
-    assert fourth_call["exchange"] == "NAS" and fourth_call["limit"] == 10
-
-
-def test_kis_overseas_screener_stops_refill_after_limit_is_met() -> None:
-    client = MagicMock()
-
-    def value_rank(**kwargs):
-        exchange = kwargs.get("exchange")
-        limit = int(kwargs.get("limit") or 0)
-        if exchange == "NAS":
-            if limit <= 2:
-                return [{"SYMB": "NAS001"}, {"SYMB": "NAS002"}]
-            return [{"SYMB": f"NAS{i:03d}"} for i in range(1, limit + 1)]
+            return [
+                {"SYMB": "NAS001", "ACC_TRDVAL": "90"},
+                {"SYMB": "NAS002", "ACC_TRDVAL": "80"},
+            ]
         if exchange == "NYS":
-            if limit <= 2:
-                return [{"SYMB": "NYS001"}, {"SYMB": "NYS002"}]
-            return [{"SYMB": f"NYS{i:03d}"} for i in range(1, limit + 1)]
+            return [
+                {"SYMB": "NYS001", "ACC_TRDVAL": "95"},
+                {"SYMB": "NYS002", "ACC_TRDVAL": "70"},
+            ]
         return []
 
     client.overseas_trade_value_rank.side_effect = value_rank
     screener = KISOverseasScreener(client)
 
-    result = screener.screen(ScreenRequest(limit=6, metric="value", nday=1))
+    result = screener.screen(ScreenRequest(limit=3, metric="value", nday=1))
 
-    assert len(result.tickers) == 6
-    assert result.tickers[:4] == [
-        "NAS001.NAS",
-        "NYS001.NYS",
-        "NAS002.NAS",
-        "NYS002.NYS",
-    ]
-    assert client.overseas_trade_value_rank.call_count == 4
-    assert not any(
-        call.kwargs.get("exchange") == "NYS" and call.kwargs.get("limit") == 4
-        for call in client.overseas_trade_value_rank.call_args_list
+    assert result.tickers == ["NYS001.NYS", "NAS001.NAS", "NAS002.NAS"]
+    assert result.metadata["by_ticker"]["NYS001.NYS"]["metric_value"] == pytest.approx(
+        95.0
     )
+    assert result.metadata["by_ticker"]["NAS001.NAS"]["provider_rank"] == 1
+
+
+def test_kis_overseas_screener_stable_tie_breaks_use_provider_rank_then_ticker() -> (
+    None
+):
+    client = MagicMock()
+
+    def value_rank(**kwargs):
+        exchange = kwargs.get("exchange")
+        if exchange == "NAS":
+            return [
+                {"SYMB": "NAS001", "ACC_TRDVAL": "100"},
+                {"SYMB": "NAS002", "ACC_TRDVAL": "95"},
+            ]
+        if exchange == "NYS":
+            return [
+                {"SYMB": "NYS001", "ACC_TRDVAL": "100"},
+                {"SYMB": "NYS002", "ACC_TRDVAL": "95"},
+            ]
+        return []
+
+    client.overseas_trade_value_rank.side_effect = value_rank
+    screener = KISOverseasScreener(client)
+
+    result = screener.screen(ScreenRequest(limit=4, metric="value", nday=1))
+
+    assert result.tickers == ["NAS001.NAS", "NYS001.NYS", "NAS002.NAS", "NYS002.NYS"]
 
 
 def test_kis_overseas_screener_appends_exchange_for_dot_symbol_without_suffix() -> None:

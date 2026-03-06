@@ -61,11 +61,15 @@
 - scan(`sab scan`)
   - 캔들 수집은 기본 `adjusted=true`로 동작합니다.
   - 의도: 분할/배당 등 corporate action이 가격 시계열에 반영된(조정된) 데이터로 지표를 계산해, 신호가 “가격 스케일 변화”에 과민하게 흔들리지 않도록 합니다.
+  - buy candidate에는 `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 함께 기록합니다.
+  - `entry_reference_close_raw_value`는 동일 `eval_date`의 raw 종가를 후처리로 붙여, 이후 entry 판단이 adjusted/raw 혼용 없이 raw 기준으로만 비교되도록 합니다.
 - sell(`sab sell`)
   - 캔들 수집은 기본 `adjusted=false`로 동작합니다.
   - 의도: 보유(진입단가/손절/타깃) 판단을 **원시 가격 기준**으로 해석하고, corporate action은 “자동 결론”이 아닌 `REVIEW`로 올려 수동 확인을 유도합니다(6장 참고).
 - 운영 유의:
   - 같은 티커라도 scan vs sell에서 adjusted 정책이 다르므로, 지표/가격 레벨의 절대값이 일치하지 않을 수 있습니다.
+  - `sab entry`는 adjusted 신호 종가를 직접 쓰지 않고, buy report에 저장된 raw reference close와 entry 시점 raw/live price만 비교합니다.
+  - raw reference close가 없거나 basis가 명시되지 않은 레거시 buy report는 `REVIEW`로 fail-closed 처리합니다.
   - adjusted/raw 캔들은 캐시 키가 분리되어 서로 섞이지 않습니다(ADR-0011).
   - 분할/권리락/특이 이벤트가 의심되면 sell 리포트의 corporate action 사유를 최우선으로 확인합니다.
 
@@ -113,6 +117,7 @@
   - 레이트리밋/토큰/서버 오류에서는 class 표기 대체를 시도하지 않고 즉시 실패합니다(호출 폭증 방지).
 - US 스크리너(`screener.us_mode=kis`):
   - 기본값 리스트(`screener.us_defaults`) 자동 폴백을 사용하지 않습니다.
+  - 거래소별 균등 버킷이 아니라, KIS rank metric을 정규화해 **미국 전체 top-N**을 단일 랭킹으로 병합합니다.
   - `--universe screener`에서 검증 실패/빈 결과가 발생하면 즉시 실패합니다.
   - `--universe both`에서는 watchlist는 유지하고 US 스크리너만 건너뜁니다.
 - watchlist 경계:
@@ -151,7 +156,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 1. 티커 소스(워치리스트 + 스크리너)를 결합하고, 시장 필터 후 중복 제거합니다.
 2. 캔들 데이터를 수집합니다(캐시 우선 + provider 조회).
 3. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
-4. 후보(candidate)를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식합니다.
+4. 후보(candidate)를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식하며 entry용 raw reference close를 보강합니다.
 5. buy 리포트(JSON)를 생성합니다.
 
 ### 5.2 `strategy_mode=ema_cross` (EMA/RSI/ATR 기반)
@@ -200,6 +205,10 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - 점수는 “조건 통과 여부” 기반 가산점(정수형)에 가깝습니다.
   - 예: ema_cross, rsi, gap, liquidity, (선택) rs 등.
   - `sma200`/`slope` 점수 항목은 각각 옵션(`use_sma200_filter`, `require_slope_up`)이 켜진 경우에만 반영됩니다.
+- `rs_diff_value`는 “종목 룩백 수익률 - 시장 benchmark 룩백 수익률”입니다.
+  - benchmark는 `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 지정합니다.
+  - benchmark 수익률은 종목과 동일하게 adjusted 시계열 + `choose_eval_index()` + `rs_lookback_days` 기준으로 계산합니다.
+  - benchmark를 구하지 못하면 RS 점수는 부여하지 않고, scan report `system_issues`에 경고를 남깁니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
 
@@ -296,25 +305,28 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - `time_stop_days`는 달력일이 아닌 **trading sessions** 기준으로 계산합니다.
   - `time_stop_days` 경과 시 `REVIEW`(단, 이미 `SELL`이면 유지)
 - corporate action 의심(분할 유사 급변) 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다.
-  - corporate action 플래그는 action을 덮어쓰지 않습니다(`SELL` 유지).
+  - 감지 시 최종 action은 `REVIEW`로 강등/승격되어 자동 `SELL/HOLD`를 막고 수동 확인을 우선합니다.
 
-### 6.2 `sell_mode=sma_ema_hybrid` (이익실현 티어 + 하드스탑)
+### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 
 근거 코드: `sab/signals/hybrid_sell.py`
 
 #### 6.2.1 주요 규칙(요약)
 
 - 이익실현 티어:
-  - partial/target zone 도달 시 `REVIEW`, high target 도달 시 `SELL`
+  - partial profit zone 도달 시 break-even 보호 stop을 제안하고 기본 action은 `HOLD`
+  - low target 도달 시 보호 stop을 추가로 강화하고 기본 action은 `HOLD`
+  - high target 도달 시 더 강한 보호 stop을 제안하되, 즉시 `SELL`하지는 않습니다
 - 추세 붕괴:
   - EMA/SMA 이탈, EMA short<EMA mid 교차, RSI<50/40 등으로 `REVIEW/SELL`
+  - 보호 stop 이탈이나 강한 reversal evidence가 있을 때만 강한 청산으로 이어집니다
 - failed breakout:
   - holdings의 `strategy` 태그에 `breakout`이 포함된 경우 손실 임계로 `SELL`
 - 하드 스탑 밴드(기본 3–5%):
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
-- corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다(action 유지).
+- corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가하고 최종 action은 `REVIEW`로 조정합니다.
 
 ### 6.3 corporate action(분할/역분할 등) 감지 계약
 
@@ -322,7 +334,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 - 최근 N봉(기본 5) 내에 **전일 대비 비정상 급변(기본 ±45% 이상)** 이 발생했고,
   - 그 비율이 split-like ratio(2:1, 3:1, 1:2 등)로 보이면 corporate action 가능성을 기록합니다.
-- 이 경우 action은 변경하지 않고 `CORPORATE_ACTION_SUSPECT` 플래그로 기록해,
+- 이 경우 `CORPORATE_ACTION_SUSPECT` 플래그를 기록하고 최종 action을 `REVIEW`로 조정해,
   - “단가/수량/데이터 조정 여부”를 먼저 확인하도록 합니다.
 
 ### 6.4 sell의 히스토리 길이(target_bars) 정책(요약)
@@ -342,6 +354,9 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `strategy_mode`: 각 candidate는 평가에 사용된 전략 모드(`ema_cross` 또는 `sma_ema_hybrid`)를 포함합니다.
 - `sab entry`는 candidate의 `strategy_mode`를 우선 사용하며, 레거시 리포트처럼 candidate 필드가 없는 경우 buy report top-level `strategy_mode`(또는 `config_snapshot.strategy_mode`)를 폴백으로 사용합니다.
 - `eval_date`(YYYYMMDD): 해당 candidate가 실제로 평가된 완성 일봉 날짜를 포함합니다(`choose_eval_index()` 결과 기준).
+- `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 포함합니다.
+  - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
+  - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
 - `sab entry`의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
 - candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
@@ -360,6 +375,5 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 ## 9. Open decisions / Backlog
 
-- RS(상대강도) 벤치마크를 “상수”가 아닌 시장별 지수 시계열로 정의
 - volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
 - 다음 구현 스펙: `docs/spec-v1.3.md`

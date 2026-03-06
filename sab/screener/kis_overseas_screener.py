@@ -15,6 +15,46 @@ from ..tickers import (
 )
 
 _CLASS_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:[/.][ABC])$")
+_METRIC_NAME_ALIASES: dict[str, str] = {
+    "amount": "value",
+    "market_cap": "market_cap",
+    "marketcap": "market_cap",
+    "trade_value": "value",
+    "value": "value",
+    "volume": "volume",
+}
+_METRIC_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "volume": (
+        "ACC_TRDVOL",
+        "ACML_VOL",
+        "OVRS_TRDVOL",
+        "TRDVOL",
+        "trade_volume",
+        "volume",
+    ),
+    "value": (
+        "ACC_TRDVAL",
+        "ACML_AMT",
+        "ACML_TR_AMT",
+        "ACML_TR_PBMN",
+        "OVRS_TR_PBMN",
+        "TRDVAL",
+        "trade_value",
+        "value",
+    ),
+    "market_cap": (
+        "MKTCAP",
+        "OVRS_MKTCAP",
+        "marketCap",
+        "market_cap",
+    ),
+}
+_METRIC_FIELD_PATTERNS: dict[str, tuple[str, ...]] = {
+    "volume": ("vol",),
+    "value": ("amt", "pbmn", "trdval", "value"),
+    "market_cap": ("cap", "mktc"),
+}
+_METRIC_FIELD_IGNORE_PATTERNS = ("rank", "ratio", "rate", "pct", "prdy", "change")
 
 
 @dataclass
@@ -43,7 +83,7 @@ class KISOverseasScreener:
         self._client = client
 
     def screen(self, request: ScreenRequest) -> ScreenResult:
-        metric = (request.metric or "volume").lower()
+        metric = self._normalize_metric_name(request.metric)
         exchanges = self._resolve_exchanges(request.exchange)
         tickers: list[str] = []
         by_ticker: dict[str, Any] = {}
@@ -69,7 +109,7 @@ class KISOverseasScreener:
 
         nday_used: int | None = None
         tried_ndays: list[int] = []
-        selection_mode = "round_robin_exchange"
+        selection_mode = "global_metric_merge"
         exchange_bucket_sizes: dict[str, int] = {}
 
         if limit <= 0:
@@ -93,48 +133,26 @@ class KISOverseasScreener:
             tried_ndays.append(nd)
             exchange_rows: dict[str, list[tuple[str, dict[str, Any]]]] = {}
             current_exchange_bucket_sizes: dict[str, int] = {}
-            base_fetch_limit = max(1, (limit + len(exchanges) - 1) // len(exchanges))
+            fetch_limit = max(1, limit)
             for exch in exchanges:
-                rows = self._fetch_rank(metric, exch, base_fetch_limit, nday=nd)
+                rows = self._fetch_rank(metric, exch, fetch_limit, nday=nd)
                 if not rows:
                     continue
-                normalized_rows = self._normalize_rows(rows, exchange=exch)
+                normalized_rows = self._normalize_rows(
+                    rows,
+                    exchange=exch,
+                    metric=metric,
+                )
                 if normalized_rows:
                     exchange_rows[exch] = normalized_rows
                     current_exchange_bucket_sizes[exch] = len(normalized_rows)
             if exchange_rows:
-                tickers, by_ticker = self._round_robin_select(
+                tickers, by_ticker = self._global_metric_select(
                     exchanges=exchanges,
                     exchange_rows=exchange_rows,
+                    metric=metric,
                     limit=limit,
                 )
-                remaining = limit - len(tickers)
-                if remaining > 0:
-                    for exch in exchanges:
-                        if remaining <= 0:
-                            break
-                        existing_rows = exchange_rows.get(exch, [])
-                        if not existing_rows:
-                            continue
-                        target_limit = min(limit, len(existing_rows) + remaining)
-                        if target_limit <= len(existing_rows):
-                            continue
-                        refill_rows = self._fetch_rank(
-                            metric, exch, target_limit, nday=nd
-                        )
-                        normalized_refill = self._normalize_rows(
-                            refill_rows, exchange=exch
-                        )
-                        if not normalized_refill:
-                            continue
-                        exchange_rows[exch] = normalized_refill
-                        current_exchange_bucket_sizes[exch] = len(normalized_refill)
-                        tickers, by_ticker = self._round_robin_select(
-                            exchanges=exchanges,
-                            exchange_rows=exchange_rows,
-                            limit=limit,
-                        )
-                        remaining = limit - len(tickers)
             if tickers:
                 # Prefer a single session's ranks; stop once we have results.
                 nday_used = nd
@@ -158,7 +176,11 @@ class KISOverseasScreener:
         )
 
     def _normalize_rows(
-        self, rows: list[dict[str, Any]], *, exchange: str
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        exchange: str,
+        metric: str,
     ) -> list[tuple[str, dict[str, Any]]]:
         normalized_rows: list[tuple[str, dict[str, Any]]] = []
         bucket_exchange = self._normalize_exchange(exchange)
@@ -205,6 +227,10 @@ class KISOverseasScreener:
                 )
             enriched = dict(row)
             enriched.setdefault("exchange", ticker_exchange)
+            enriched["bucket_exchange"] = bucket_exchange
+            enriched["provider_rank"] = idx + 1
+            enriched["metric_name"] = metric
+            enriched["metric_value"] = self._extract_metric_value(row, metric=metric)
             normalized_rows.append((ticker, enriched))
         return normalized_rows
 
@@ -213,37 +239,85 @@ class KISOverseasScreener:
         return _CLASS_SYMBOL_PATTERN.fullmatch(symbol) is not None
 
     @staticmethod
-    def _round_robin_select(
+    def _global_metric_select(
         *,
         exchanges: list[str],
         exchange_rows: dict[str, list[tuple[str, dict[str, Any]]]],
+        metric: str,
         limit: int,
     ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        combined_rows: list[tuple[str, dict[str, Any]]] = []
+        for exchange in exchanges:
+            combined_rows.extend(exchange_rows.get(exchange, []))
+
+        def _sort_key(item: tuple[str, dict[str, Any]]) -> tuple[int, float, int, str]:
+            ticker, row = item
+            metric_value = KISOverseasScreener._to_numeric(row.get("metric_value"))
+            provider_rank = row.get("provider_rank")
+            try:
+                normalized_rank = (
+                    int(provider_rank) if provider_rank is not None else 10**9
+                )
+            except TypeError, ValueError:
+                normalized_rank = 10**9
+            if metric_value is None:
+                return (1, 0.0, normalized_rank, ticker)
+            return (0, -metric_value, normalized_rank, ticker)
+
+        combined_rows.sort(key=_sort_key)
+
         tickers: list[str] = []
         by_ticker: dict[str, dict[str, Any]] = {}
-        cursors = dict.fromkeys(exchanges, 0)
         selected: set[str] = set()
-        while len(tickers) < limit:
-            progressed = False
-            for exchange in exchanges:
-                rows = exchange_rows.get(exchange, [])
-                cursor = cursors.get(exchange, 0)
-                while cursor < len(rows):
-                    ticker, row = rows[cursor]
-                    cursor += 1
-                    cursors[exchange] = cursor
-                    if ticker in selected:
-                        continue
-                    tickers.append(ticker)
-                    by_ticker[ticker] = row
-                    selected.add(ticker)
-                    progressed = True
-                    break
-                if len(tickers) >= limit:
-                    break
-            if not progressed:
+        for ticker, row in combined_rows:
+            if ticker in selected:
+                continue
+            by_ticker[ticker] = dict(row)
+            by_ticker[ticker].setdefault("metric_name", metric)
+            tickers.append(ticker)
+            selected.add(ticker)
+            if len(tickers) >= limit:
                 break
         return tickers, by_ticker
+
+    @staticmethod
+    def _normalize_metric_name(metric: str | None) -> str:
+        normalized = str(metric or "volume").strip().lower()
+        return _METRIC_NAME_ALIASES.get(normalized, "volume")
+
+    @staticmethod
+    def _to_numeric(value: Any) -> float | None:
+        try:
+            parsed = float(str(value).replace(",", ""))
+        except TypeError, ValueError:
+            return None
+        if parsed != parsed:
+            return None
+        return parsed
+
+    @classmethod
+    def _extract_metric_value(cls, row: dict[str, Any], *, metric: str) -> float | None:
+        aliases = _METRIC_FIELD_ALIASES.get(metric, ())
+        for field_name in aliases:
+            if field_name not in row:
+                continue
+            parsed = cls._to_numeric(row.get(field_name))
+            if parsed is not None:
+                return parsed
+
+        patterns = _METRIC_FIELD_PATTERNS.get(metric, ())
+        for key, value in row.items():
+            lowered = str(key).strip().lower()
+            if not lowered:
+                continue
+            if any(ignore in lowered for ignore in _METRIC_FIELD_IGNORE_PATTERNS):
+                continue
+            if not any(pattern in lowered for pattern in patterns):
+                continue
+            parsed = cls._to_numeric(value)
+            if parsed is not None:
+                return parsed
+        return None
 
     def _resolve_exchanges(self, exchange: str | None) -> list[str]:
         if exchange:

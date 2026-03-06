@@ -27,7 +27,7 @@ class EvaluationSettings:
     exclude_etf_etn: bool = False
     require_slope_up: bool = False
     rs_lookback_days: int = 20
-    rs_benchmark_return: float = 0.0
+    rs_benchmark_return: float | None = None
     min_price: float = 0.0
     us_min_price: float | None = None
 
@@ -249,11 +249,16 @@ def evaluate_ticker(
 
     rs_return = None
     rs_diff = None
+    benchmark_return = _to_finite_float(meta.get("rs_benchmark_return"))
+    if benchmark_return is None:
+        benchmark_return = settings.rs_benchmark_return
+    benchmark_ticker = str(meta.get("rs_benchmark_ticker") or "").strip() or None
     if settings.rs_lookback_days > 0 and len(closes) > settings.rs_lookback_days:
         base_close = closes[-settings.rs_lookback_days - 1]
         if base_close:
             rs_return = (latest_close - base_close) / base_close
-            rs_diff = rs_return - settings.rs_benchmark_return
+            if benchmark_return is not None:
+                rs_diff = rs_return - benchmark_return
 
     pct_change = 0.0
     if previous_close:
@@ -366,8 +371,8 @@ def evaluate_ticker(
             threshold=eff_min_dv if eff_min_dv > 0 else 0.0,
         )
 
-    if rs_return is not None:
-        if rs_diff is None or rs_diff >= 0:
+    if rs_diff is not None:
+        if rs_diff >= 0:
             score += 1
             breakdown.append("rs")
             add_reason(
@@ -422,7 +427,11 @@ def evaluate_ticker(
         "rs_return_value": rs_return,
         "rs_diff": f"{rs_diff * 100:.1f}%" if rs_diff is not None else "-",
         "rs_diff_value": rs_diff,
-        "rs_benchmark": f"{settings.rs_benchmark_return * 100:.1f}%",
+        "rs_benchmark": (
+            f"{benchmark_return * 100:.1f}%" if benchmark_return is not None else "-"
+        ),
+        "rs_benchmark_value": benchmark_return,
+        "rs_benchmark_ticker": benchmark_ticker,
         "score": score_display,
         "score_value": score,
         "score_notes": score_notes,
@@ -433,6 +442,8 @@ def evaluate_ticker(
         "eval_date": eval_date,
         "price_value": latest_close,
         "close_value": latest_close,
+        "signal_price_basis": "adjusted",
+        "signal_close_adjusted_value": latest_close,
         "pct_change_value": pct_change,
     }
 

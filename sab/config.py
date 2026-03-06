@@ -65,6 +65,8 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("MIN_PRICE", "screener.min_price"),
     ("RS_LOOKBACK_DAYS", "strategy.rs_lookback_days"),
     ("RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return"),
+    ("RS_BENCHMARK_TICKER_KR", "strategy.rs_benchmark_ticker_kr"),
+    ("RS_BENCHMARK_TICKER_US", "strategy.rs_benchmark_ticker_us"),
     ("HYBRID_SMA_TREND_PERIOD", "strategy.hybrid.sma_trend_period"),
     ("HYBRID_EMA_SHORT_PERIOD", "strategy.hybrid.ema_short_period"),
     ("HYBRID_EMA_MID_PERIOD", "strategy.hybrid.ema_mid_period"),
@@ -196,7 +198,9 @@ class Config:
     screener_cache_ttl_minutes: float = 5.0
     min_price: float = 0.0
     rs_lookback_days: int = 20
-    rs_benchmark_return: float = 0.0
+    rs_benchmark_return: float | None = None
+    rs_benchmark_ticker_kr: str | None = None
+    rs_benchmark_ticker_us: str | None = None
     holdings_path: str | None = None
     holdings: HoldingsData = field(default_factory=lambda: load_holdings(None))
     sell_mode: str = "generic"
@@ -449,7 +453,9 @@ class _StrategySection:
     screener_cache_ttl_minutes: float
     min_price: float
     rs_lookback_days: int
-    rs_benchmark_return: float
+    rs_benchmark_return: float | None
+    rs_benchmark_ticker_kr: str | None
+    rs_benchmark_ticker_us: str | None
     us_min_price: float | None
     us_min_dollar_volume: float | None
     hybrid: HybridStrategyConfig
@@ -665,6 +671,24 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         strategy_mode_raw = "ema_cross"
     us_min_price = parser.yaml_optional_float("screener.us.min_price")
     us_min_dollar_volume = parser.yaml_optional_float("screener.us.min_dollar_volume")
+    rs_benchmark_ticker_kr = _normalize_strategy_benchmark_ticker(
+        parser.env_str(
+            "RS_BENCHMARK_TICKER_KR",
+            "strategy.rs_benchmark_ticker_kr",
+            None,
+        ),
+        market="KR",
+        path="strategy.rs_benchmark_ticker_kr",
+    )
+    rs_benchmark_ticker_us = _normalize_strategy_benchmark_ticker(
+        parser.env_str(
+            "RS_BENCHMARK_TICKER_US",
+            "strategy.rs_benchmark_ticker_us",
+            None,
+        ),
+        market="US",
+        path="strategy.rs_benchmark_ticker_us",
+    )
 
     return _StrategySection(
         strategy_mode=str(strategy_mode_raw).strip().lower(),
@@ -693,9 +717,11 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         rs_lookback_days=parser.env_int(
             "RS_LOOKBACK_DAYS", "strategy.rs_lookback_days", 20
         ),
-        rs_benchmark_return=parser.env_float(
-            "RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return", 0.0
+        rs_benchmark_return=parser.env_optional_float(
+            "RS_BENCHMARK_RETURN", "strategy.rs_benchmark_return"
         ),
+        rs_benchmark_ticker_kr=rs_benchmark_ticker_kr,
+        rs_benchmark_ticker_us=rs_benchmark_ticker_us,
         us_min_price=us_min_price,
         us_min_dollar_volume=us_min_dollar_volume,
         hybrid=_build_hybrid_strategy_config(parser),
@@ -832,6 +858,38 @@ def _validate_non_negative(path: str, value: float) -> None:
 def _validate_int_min(path: str, value: int, minimum: int = 1) -> None:
     if value < minimum:
         _raise_range_error(path, f"must be >= {minimum} (got {value!r})")
+
+
+def _normalize_strategy_benchmark_ticker(
+    value: str | None,
+    *,
+    market: str,
+    path: str,
+) -> str | None:
+    text = str(value or "").strip().upper()
+    if not text:
+        return None
+
+    if market == "US":
+        ticker_issue = validate_strict_us_ticker(text)
+        if ticker_issue is not None:
+            raise ConfigLoadError(
+                f"Invalid config value '{path}': {ticker_issue} (got {value!r})."
+            )
+        return parse_ticker(text).ticker
+
+    ticker_issue = validate_strict_holdings_ticker(text)
+    if ticker_issue is not None:
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': {ticker_issue} (got {value!r})."
+        )
+    parsed = parse_ticker(text)
+    if parsed.market != "KR":
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': KR benchmark must be a KR ticker "
+            f"(got {value!r})."
+        )
+    return parsed.ticker
 
 
 def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> None:
@@ -1020,6 +1078,8 @@ def _compose_config(
         min_price=strategy.min_price,
         rs_lookback_days=strategy.rs_lookback_days,
         rs_benchmark_return=strategy.rs_benchmark_return,
+        rs_benchmark_ticker_kr=strategy.rs_benchmark_ticker_kr,
+        rs_benchmark_ticker_us=strategy.rs_benchmark_ticker_us,
         holdings_path=data.holdings_path,
         sell_mode=sell.sell_mode,
         sell_atr_multiplier=sell.sell_atr_multiplier,

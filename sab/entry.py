@@ -173,13 +173,62 @@ def _parse_guard_percent_text(value: Any) -> float | None:
 
 
 def _extract_signal_close(candidate: dict[str, Any]) -> float | None:
-    close_value = _to_finite_float(candidate.get("close_value"))
-    if close_value is not None and close_value > 0:
-        return close_value
-    price_value = _to_finite_float(candidate.get("price_value"))
-    if price_value is not None and price_value > 0:
-        return price_value
+    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
+    reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
+    raw_reference_close = _to_positive_price(
+        candidate.get("entry_reference_close_raw_value")
+    )
+    if raw_reference_close is not None:
+        if candidate_eval_date is not None:
+            if reference_eval_date is None:
+                return None
+            if reference_eval_date != candidate_eval_date:
+                return None
+        return raw_reference_close
+
+    if signal_basis == "raw":
+        close_value = _to_finite_float(candidate.get("close_value"))
+        if close_value is not None and close_value > 0:
+            return close_value
+        price_value = _to_finite_float(candidate.get("price_value"))
+        if price_value is not None and price_value > 0:
+            return price_value
+        return None
+
+    if signal_basis:
+        return None
+
     return None
+
+
+def _signal_close_issue(candidate: dict[str, Any]) -> str:
+    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
+    reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
+    raw_reference_close = _to_positive_price(
+        candidate.get("entry_reference_close_raw_value")
+    )
+
+    if raw_reference_close is not None:
+        if candidate_eval_date is not None and reference_eval_date is None:
+            return "entry reference eval_date unavailable"
+        if (
+            candidate_eval_date is not None
+            and reference_eval_date is not None
+            and reference_eval_date != candidate_eval_date
+        ):
+            return (
+                "entry reference eval_date mismatch "
+                f"({reference_eval_date} vs {candidate_eval_date})"
+            )
+        return "signal close unavailable"
+
+    if signal_basis == "raw":
+        return "signal close unavailable"
+    if signal_basis:
+        return "raw entry reference unavailable"
+    return "signal price basis unavailable"
 
 
 def _extract_gap_guard(
@@ -255,8 +304,9 @@ def evaluate_entry_candidates(
         pattern = str(candidate.get("pattern") or "").strip() or None
 
         if signal_close is None:
-            issue = f"{ticker}: signal close unavailable"
-            reasons.append("signal close unavailable")
+            signal_issue = _signal_close_issue(candidate)
+            issue = f"{ticker}: {signal_issue}"
+            reasons.append(signal_issue)
             system_issues.append(issue)
 
         entry_price = price_lookup_fn(ticker)
@@ -270,6 +320,9 @@ def evaluate_entry_candidates(
         gap_pct: float | None = None
         if signal_close is not None and signal_close > 0 and entry_price is not None:
             gap_pct = (entry_price - signal_close) / signal_close
+        if signal_close is not None and signal_close > 0 and gap_guard_pct is not None:
+            gap_guard_up_price = round(signal_close * (1.0 + gap_guard_pct), 10)
+            gap_guard_down_price = round(signal_close * (1.0 - gap_guard_pct), 10)
 
         if gap_guard_pct is None:
             reasons.append("gap guard unavailable")

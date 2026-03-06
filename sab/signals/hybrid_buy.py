@@ -780,6 +780,8 @@ def evaluate_ticker_hybrid(
         "price": fmt(last_close, price_digits),
         "price_value": last_close,
         "close_value": last_close,
+        "signal_price_basis": "adjusted",
+        "signal_close_adjusted_value": last_close,
         "currency": currency,
         "eval_date": eval_date,
         "pct_change": f"{pct_change * 100:.1f}%",

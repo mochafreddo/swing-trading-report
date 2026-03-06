@@ -24,6 +24,9 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GITHUB_ACTIONS",
         "CI",
         "MIN_DOLLAR_VOLUME",
+        "RS_BENCHMARK_RETURN",
+        "RS_BENCHMARK_TICKER_KR",
+        "RS_BENCHMARK_TICKER_US",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -177,6 +180,55 @@ data:
     assert cfg.screen_limit == 12
 
 
+def test_load_config_parses_market_benchmark_tickers(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+strategy:
+  rs_benchmark_ticker_kr: 069500
+  rs_benchmark_ticker_us: spy.ams
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg.rs_benchmark_ticker_kr == "069500"
+    assert cfg.rs_benchmark_ticker_us == "SPY.AMS"
+
+
+def test_load_config_rejects_invalid_us_benchmark_ticker(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+strategy:
+  rs_benchmark_ticker_us: SPY.US
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=r"strategy\.rs_benchmark_ticker_us"):
+        load_config()
+
+
 def test_load_config_applies_holdings_and_markets_overrides(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -308,6 +360,62 @@ def test_load_config_normalizes_us_screener_defaults_to_canonical_exchange(
 
     cfg = load_config()
     assert cfg.us_screener_defaults == ["AAPL.NAS", "IBM.NYS", "SPY.AMS"]
+
+
+def test_load_config_normalizes_rs_benchmark_tickers(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        (
+            "strategy:\n"
+            "  rs_benchmark_ticker_kr: 069500\n"
+            "  rs_benchmark_ticker_us: spy.amex\n"
+        ),
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.rs_benchmark_ticker_kr == "069500"
+    assert cfg.rs_benchmark_ticker_us == "SPY.AMS"
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "error_path"),
+    [
+        (
+            "strategy:\n  rs_benchmark_ticker_us: SPY.US\n",
+            "strategy.rs_benchmark_ticker_us",
+        ),
+        (
+            "strategy:\n  rs_benchmark_ticker_kr: SPY.AMS\n",
+            "strategy.rs_benchmark_ticker_kr",
+        ),
+    ],
+)
+def test_load_config_rejects_invalid_rs_benchmark_tickers(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    yaml_text: str,
+    error_path: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=error_path):
+        load_config()
 
 
 @pytest.mark.parametrize(

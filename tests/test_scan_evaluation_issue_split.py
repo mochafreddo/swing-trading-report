@@ -4,8 +4,9 @@ import logging
 import math
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
+import pytest
 from sab.config import Config
 from sab.scan_evaluation import (
     _decorate_candidates,
@@ -20,9 +21,9 @@ from sab.signals.hybrid_buy import HybridEvaluationSettings, evaluate_ticker_hyb
 def _build_runtime() -> _ScanRuntime:
     cfg = replace(Config(), data_dir="data", report_dir="reports")
     runtime = _ScanRuntime(
-        cfg=cfg, logger=logging.getLogger(__name__), tickers=["AAPL.US"]
+        cfg=cfg, logger=logging.getLogger(__name__), tickers=["AAPL.NAS"]
     )
-    runtime.market_data["AAPL.US"] = [
+    runtime.market_data["AAPL.NAS"] = [
         {
             "date": "20250110",
             "open": 100.0,
@@ -32,7 +33,7 @@ def _build_runtime() -> _ScanRuntime:
             "volume": 1_000_000.0,
         }
     ]
-    runtime.ticker_currency["AAPL.US"] = "USD"
+    runtime.ticker_currency["AAPL.NAS"] = "USD"
     return runtime
 
 
@@ -57,7 +58,7 @@ def test_evaluate_candidates_routes_reason_to_screen_outs() -> None:
     )
 
     assert runtime.failures == []
-    assert runtime.screen_outs == ["AAPL.US: EMA(20/50) cross not satisfied"]
+    assert runtime.screen_outs == ["AAPL.NAS: EMA(20/50) cross not satisfied"]
 
 
 def test_evaluate_candidates_routes_generic_hybrid_miss_to_screen_outs() -> None:
@@ -85,7 +86,7 @@ def test_evaluate_candidates_routes_generic_hybrid_miss_to_screen_outs() -> None
 
     assert runtime.failures == []
     assert runtime.system_issues == []
-    assert runtime.screen_outs == ["AAPL.US: Did not meet hybrid signal criteria"]
+    assert runtime.screen_outs == ["AAPL.NAS: Did not meet hybrid signal criteria"]
 
 
 def test_evaluate_candidates_routes_data_quality_to_system_issues() -> None:
@@ -109,8 +110,8 @@ def test_evaluate_candidates_routes_data_quality_to_system_issues() -> None:
     )
 
     assert runtime.screen_outs == []
-    assert runtime.system_issues == ["AAPL.US: Insufficient price data"]
-    assert runtime.failures == ["AAPL.US: Insufficient price data"]
+    assert runtime.system_issues == ["AAPL.NAS: Insufficient price data"]
+    assert runtime.failures == ["AAPL.NAS: Insufficient price data"]
 
 
 def test_evaluate_candidates_injects_strategy_mode_into_ema_candidate() -> None:
@@ -121,7 +122,7 @@ def test_evaluate_candidates_injects_strategy_mode_into_ema_candidate() -> None:
         EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate={"ticker": "AAPL.US", "score_value": 1.0},
+            candidate={"ticker": "AAPL.NAS", "score_value": 1.0},
             reason=None,
         ),
         evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
@@ -134,13 +135,14 @@ def test_evaluate_candidates_injects_strategy_mode_into_ema_candidate() -> None:
         excd_from_suffix_fn=lambda suffix: suffix,
     )
 
-    assert runtime.candidates == [
-        {
-            "ticker": "AAPL.US",
-            "score_value": 1.0,
-            "strategy_mode": "ema_cross",
-        }
-    ]
+    assert len(runtime.candidates) == 1
+    candidate = runtime.candidates[0]
+    assert candidate["ticker"] == "AAPL.NAS"
+    assert candidate["score_value"] == 1.0
+    assert candidate["strategy_mode"] == "ema_cross"
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["entry_reference_close_raw_value"] is None
+    assert candidate["entry_reference_eval_date"] is None
 
 
 def test_evaluate_candidates_injects_strategy_mode_into_hybrid_candidate() -> None:
@@ -155,7 +157,7 @@ def test_evaluate_candidates_injects_strategy_mode_into_hybrid_candidate() -> No
             candidate=None, reason=None
         ),
         evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate={"ticker": "AAPL.US", "score_value": 2.0},
+            candidate={"ticker": "AAPL.NAS", "score_value": 2.0},
             reason=None,
         ),
         split_overseas_fn=lambda ticker: (
@@ -165,12 +167,209 @@ def test_evaluate_candidates_injects_strategy_mode_into_hybrid_candidate() -> No
         excd_from_suffix_fn=lambda suffix: suffix,
     )
 
-    assert runtime.candidates == [
-        {
-            "ticker": "AAPL.US",
-            "score_value": 2.0,
-            "strategy_mode": "sma_ema_hybrid",
-        }
+    assert len(runtime.candidates) == 1
+    candidate = runtime.candidates[0]
+    assert candidate["ticker"] == "AAPL.NAS"
+    assert candidate["score_value"] == 2.0
+    assert candidate["strategy_mode"] == "sma_ema_hybrid"
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["entry_reference_close_raw_value"] is None
+    assert candidate["entry_reference_eval_date"] is None
+
+
+def test_evaluate_candidates_enriches_raw_entry_reference_close_from_kis() -> None:
+    runtime = _build_runtime()
+    runtime.tickers = ["AAPL.NAS"]
+    runtime.market_data["AAPL.NAS"] = runtime.market_data.pop("AAPL.NAS")
+    runtime.ticker_currency["AAPL.NAS"] = runtime.ticker_currency.pop("AAPL.NAS")
+
+    class _FakeKISClient:
+        def overseas_daily_candles(
+            self,
+            *,
+            symbol: str,
+            exchange: str,
+            count: int,
+            adjusted: bool,
+        ) -> list[dict[str, Any]]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            assert count == 10
+            assert adjusted is False
+            return [
+                {"date": "20250109", "close": 99.0},
+                {"date": "20250110", "close": 100.0},
+            ]
+
+    runtime.kis_client = cast(Any, _FakeKISClient())
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        ),
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert len(runtime.candidates) == 1
+    candidate = runtime.candidates[0]
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["signal_close_adjusted_value"] == 105.0
+    assert candidate["entry_reference_close_raw_value"] == 100.0
+    assert candidate["entry_reference_eval_date"] == "20250110"
+    assert runtime.system_issues == []
+
+
+def test_evaluate_candidates_injects_market_benchmark_context() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(
+        runtime.cfg,
+        rs_lookback_days=2,
+        min_history_bars=2,
+        rs_benchmark_return=None,
+        rs_benchmark_ticker_us="SPY.AMS",
+    )
+
+    class _FakeKISClient:
+        def overseas_daily_candles(
+            self,
+            *,
+            symbol: str,
+            exchange: str,
+            count: int,
+            adjusted: bool,
+        ) -> list[dict[str, Any]]:
+            if symbol == "SPY" and exchange == "AMS" and adjusted is True:
+                return [
+                    {"date": "20250108", "close": 100.0},
+                    {"date": "20250109", "close": 105.0},
+                    {"date": "20250110", "close": 110.0},
+                ]
+            if symbol == "AAPL" and exchange == "NAS" and adjusted is False:
+                return [{"date": "20250110", "close": 100.0}]
+            raise AssertionError((symbol, exchange, count, adjusted))
+
+    runtime.kis_client = cast(Any, _FakeKISClient())
+    captured: dict[str, Any] = {}
+
+    def _evaluate(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        captured.update(meta or {})
+        return SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=_evaluate,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert captured["rs_benchmark_ticker"] == "SPY.AMS"
+    assert captured["rs_benchmark_return"] == pytest.approx(0.1)
+    assert runtime.system_issues == []
+
+
+def test_evaluate_candidates_disables_rs_when_benchmark_unavailable() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(
+        runtime.cfg,
+        rs_lookback_days=2,
+        min_history_bars=2,
+        rs_benchmark_return=None,
+        rs_benchmark_ticker_us="SPY.AMS",
+    )
+
+    class _FakeKISClient:
+        def overseas_daily_candles(
+            self,
+            *,
+            symbol: str,
+            exchange: str,
+            count: int,
+            adjusted: bool,
+        ) -> list[dict[str, Any]]:
+            if symbol == "SPY" and exchange == "AMS" and adjusted is True:
+                return []
+            if symbol == "AAPL" and exchange == "NAS" and adjusted is False:
+                return [{"date": "20250110", "close": 100.0}]
+            raise AssertionError((symbol, exchange, count, adjusted))
+
+    runtime.kis_client = cast(Any, _FakeKISClient())
+    captured: dict[str, Any] = {}
+
+    def _evaluate(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        captured.update(meta or {})
+        return SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=_evaluate,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert "rs_benchmark_return" not in captured
+    assert runtime.system_issues == [
+        "RS benchmark disabled: SPY.AMS: RS benchmark unavailable (insufficient completed history)"
     ]
 
 
@@ -198,13 +397,13 @@ def test_evaluate_candidates_prefers_reason_kind_over_text_prefix() -> None:
 
     assert runtime.failures == []
     assert runtime.system_issues == []
-    assert runtime.screen_outs == ["AAPL.US: Insufficient price data"]
+    assert runtime.screen_outs == ["AAPL.NAS: Insufficient price data"]
 
 
 def test_evaluate_candidates_routes_non_finite_ohlc_to_system_issues() -> None:
     runtime = _build_runtime()
     runtime.cfg = replace(runtime.cfg, min_history_bars=2)
-    runtime.market_data["AAPL.US"] = [
+    runtime.market_data["AAPL.NAS"] = [
         {
             "date": "20250108",
             "open": 100.0,
@@ -248,9 +447,9 @@ def test_evaluate_candidates_routes_non_finite_ohlc_to_system_issues() -> None:
 
     assert runtime.screen_outs == []
     assert runtime.system_issues == [
-        "AAPL.US: Invalid candle data: non-finite OHLC values"
+        "AAPL.NAS: Invalid candle data: non-finite OHLC values"
     ]
-    assert runtime.failures == ["AAPL.US: Invalid candle data: non-finite OHLC values"]
+    assert runtime.failures == ["AAPL.NAS: Invalid candle data: non-finite OHLC values"]
 
 
 def test_evaluate_candidates_routes_hybrid_non_finite_ohlc_to_system_issues(
@@ -262,7 +461,7 @@ def test_evaluate_candidates_routes_hybrid_non_finite_ohlc_to_system_issues(
         strategy_mode="sma_ema_hybrid",
         min_history_bars=2,
     )
-    runtime.market_data["AAPL.US"] = [
+    runtime.market_data["AAPL.NAS"] = [
         {
             "date": "20250108",
             "open": 100.0,
@@ -308,16 +507,16 @@ def test_evaluate_candidates_routes_hybrid_non_finite_ohlc_to_system_issues(
 
     assert runtime.screen_outs == []
     assert runtime.system_issues == [
-        "AAPL.US: Invalid candle data: non-finite OHLC values"
+        "AAPL.NAS: Invalid candle data: non-finite OHLC values"
     ]
-    assert runtime.failures == ["AAPL.US: Invalid candle data: non-finite OHLC values"]
+    assert runtime.failures == ["AAPL.NAS: Invalid candle data: non-finite OHLC values"]
 
 
 def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None:
     runtime = _build_runtime()
     runtime.failures = ["system-failure-1"]
     runtime.system_issues = ["system-failure-2"]
-    runtime.screen_outs = ["AAPL.US: RSI signal not satisfied"]
+    runtime.screen_outs = ["AAPL.NAS: RSI signal not satisfied"]
 
     captured: dict[str, Any] = {}
 
@@ -328,11 +527,11 @@ def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None
     _write_scan_report(runtime, write_report_fn=_fake_write_report)
 
     assert captured["system_issues"] == ["system-failure-2", "system-failure-1"]
-    assert captured["screen_outs"] == ["AAPL.US: RSI signal not satisfied"]
+    assert captured["screen_outs"] == ["AAPL.NAS: RSI signal not satisfied"]
     assert captured["failures"] == [
         "system-failure-2",
         "system-failure-1",
-        "AAPL.US: RSI signal not satisfied",
+        "AAPL.NAS: RSI signal not satisfied",
     ]
 
 
@@ -400,8 +599,8 @@ def test_write_scan_report_emits_session_state_by_market_for_mixed_run(
 
 def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
     runtime = _build_runtime()
-    runtime.tickers = ["AAPL.US", "MSFT.US"]
-    runtime.market_data["MSFT.US"] = [
+    runtime.tickers = ["AAPL.NAS", "MSFT.NAS"]
+    runtime.market_data["MSFT.NAS"] = [
         {
             "date": "20250110",
             "open": 200.0,
@@ -411,7 +610,7 @@ def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
             "volume": 1_000_000.0,
         }
     ]
-    runtime.ticker_currency["MSFT.US"] = "USD"
+    runtime.ticker_currency["MSFT.NAS"] = "USD"
 
     def _evaluate_ticker(
         ticker: str,
@@ -419,7 +618,7 @@ def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
         _settings: Any,
         _meta: dict[str, Any] | None = None,
     ) -> SimpleNamespace:
-        if ticker == "AAPL.US":
+        if ticker == "AAPL.NAS":
             raise RuntimeError("evaluation exploded")
         return SimpleNamespace(
             candidate={"ticker": ticker, "score_value": 1.0},
@@ -441,15 +640,19 @@ def test_evaluate_candidates_isolates_unexpected_ticker_exceptions() -> None:
         excd_from_suffix_fn=lambda suffix: suffix,
     )
 
-    assert runtime.candidates == [
-        {"ticker": "MSFT.US", "score_value": 1.0, "strategy_mode": "ema_cross"}
-    ]
+    assert len(runtime.candidates) == 1
+    candidate = runtime.candidates[0]
+    assert candidate["ticker"] == "MSFT.NAS"
+    assert candidate["score_value"] == 1.0
+    assert candidate["strategy_mode"] == "ema_cross"
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["entry_reference_close_raw_value"] is None
     assert runtime.screen_outs == []
     assert runtime.system_issues == [
-        "AAPL.US: Unexpected evaluation error (RuntimeError: evaluation exploded)"
+        "AAPL.NAS: Unexpected evaluation error (RuntimeError: evaluation exploded)"
     ]
     assert runtime.failures == [
-        "AAPL.US: Unexpected evaluation error (RuntimeError: evaluation exploded)"
+        "AAPL.NAS: Unexpected evaluation error (RuntimeError: evaluation exploded)"
     ]
 
 
@@ -458,7 +661,7 @@ def test_decorate_candidates_passes_data_dir_to_market_status_fallback() -> None
     runtime.cfg = replace(runtime.cfg, data_dir="custom-data-dir")
     runtime.candidates = [
         {
-            "ticker": "AAPL.US",
+            "ticker": "AAPL.NAS",
             "currency": "USD",
             "price_value": 100.0,
             "score_value": 1.0,
@@ -515,4 +718,39 @@ def test_decorate_candidates_breaks_score_ties_with_quality_metrics() -> None:
     assert [candidate["ticker"] for candidate in runtime.candidates] == [
         "HIGH.KR",
         "LOW.KR",
+    ]
+
+
+def test_decorate_candidates_treats_missing_rs_as_neutral() -> None:
+    runtime = _build_runtime()
+    runtime.candidates = [
+        {
+            "ticker": "MISSING.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "avg_dollar_volume_value": 100_000.0,
+            "pct_change_value": 0.01,
+        },
+        {
+            "ticker": "NEGATIVE.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "rs_diff_value": -0.2,
+            "avg_dollar_volume_value": 100_000.0,
+            "pct_change_value": 0.01,
+        },
+    ]
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=lambda **_kwargs: "closed",
+    )
+
+    assert [candidate["ticker"] for candidate in runtime.candidates] == [
+        "MISSING.KR",
+        "NEGATIVE.KR",
     ]

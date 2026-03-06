@@ -42,7 +42,8 @@ strategy:
   min_history_bars: 200
   exclude_etf_etn: true
   rs_lookback_days: 40
-  rs_benchmark_return: 0.0
+  rs_benchmark_ticker_kr: 069500
+  rs_benchmark_ticker_us: SPY.AMS
   hybrid:
     sma_trend_period: 20
     ema_short_period: 10

@@ -50,7 +50,7 @@ def _patch_indicators(monkeypatch):
     )
 
 
-def test_hybrid_sell_profit_high_triggers_sell(monkeypatch):
+def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -60,11 +60,12 @@ def test_hybrid_sell_profit_high_triggers_sell(monkeypatch):
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(110.0), holding, settings
     )
-    assert result.action == "SELL"
-    assert any("Reached high profit target" in r for r in result.reasons)
+    assert result.action == "HOLD"
+    assert result.stop_price == 105.0
+    assert any("High-target profit protection activated" in r for r in result.reasons)
 
 
-def test_hybrid_sell_profit_target_zone_sets_review(monkeypatch):
+def test_hybrid_sell_profit_target_zone_tightens_stop_without_review(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -74,12 +75,12 @@ def test_hybrid_sell_profit_target_zone_sets_review(monkeypatch):
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(105.0), holding, settings
     )
-    assert result.action == "REVIEW"
-    assert any("Reached profit target zone" in r for r in result.reasons)
-    assert not any("Reached partial profit zone" in r for r in result.reasons)
+    assert result.action == "HOLD"
+    assert result.stop_price == 103.0
+    assert any("Profit protection tightened above entry" in r for r in result.reasons)
 
 
-def test_hybrid_sell_partial_profit_zone_sets_review(monkeypatch):
+def test_hybrid_sell_partial_profit_zone_sets_break_even_stop(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -89,9 +90,12 @@ def test_hybrid_sell_partial_profit_zone_sets_review(monkeypatch):
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(103.0), holding, settings
     )
-    assert result.action == "REVIEW"
-    assert any("Reached partial profit zone" in r for r in result.reasons)
-    assert not any("Reached profit target zone" in r for r in result.reasons)
+    assert result.action == "HOLD"
+    assert result.stop_price == 100.0
+    assert any("Profit protection armed at break-even" in r for r in result.reasons)
+    assert not any(
+        "Profit protection tightened above entry" in r for r in result.reasons
+    )
 
 
 def test_hybrid_sell_profit_below_partial_keeps_hold(monkeypatch):
@@ -260,7 +264,7 @@ def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
     assert result.time_stop_triggered is False
 
 
-def test_hybrid_sell_corporate_action_guard_adds_flag_without_action_override(
+def test_hybrid_sell_corporate_action_guard_promotes_hold_to_review(
     monkeypatch,
 ):
     _patch_indicators(monkeypatch)
@@ -299,12 +303,16 @@ def test_hybrid_sell_corporate_action_guard_adds_flag_without_action_override(
         "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
     )
 
-    assert result.action == "HOLD"
+    assert result.action == "REVIEW"
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)
+    assert any(
+        "manual review required before sell decision" in reason
+        for reason in result.reasons
+    )
 
 
-def test_hybrid_sell_corporate_action_guard_keeps_sell_with_flag(
+def test_hybrid_sell_corporate_action_guard_downgrades_sell_to_review(
     monkeypatch,
 ):
     _patch_indicators(monkeypatch)
@@ -347,7 +355,7 @@ def test_hybrid_sell_corporate_action_guard_keeps_sell_with_flag(
         "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
     )
 
-    assert result.action == "SELL"
+    assert result.action == "REVIEW"
     assert "Price hit custom stop override" in result.reasons
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)

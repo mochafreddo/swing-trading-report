@@ -211,5 +211,5 @@
 
 ## 확장
 
-- RS 벤치마크: 지수 클라이언트를 추가해 시장별 `rs_benchmark_return`을 동적으로 주입
-- Entry 체크: 시초/1–15분 데이터를 받아 OK/Wait/Avoid 규칙을 `sab/entry.py`에 구현
+- RS 벤치마크: `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 시장별 benchmark ticker를 지정하면, scan이 adjusted benchmark 시계열을 직접 조회해 `rs_benchmark_return`을 동적으로 계산합니다.
+- Entry 체크: buy report의 `entry_reference_close_raw_value`가 있으면 raw/live 가격 기준으로 자동 gap guard를 적용하고, reference close가 없거나 basis가 없는 레거시 candidate는 `REVIEW`로 처리합니다.

@@ -456,7 +456,7 @@ def test_time_stop_skips_when_eval_date_is_invalid(
     assert result.time_stop_triggered is False
 
 
-def test_corporate_action_guard_adds_flag_without_overriding_action(
+def test_corporate_action_guard_promotes_hold_to_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_atr_only(monkeypatch)
@@ -495,12 +495,16 @@ def test_corporate_action_guard_adds_flag_without_overriding_action(
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
-    assert result.action == "HOLD"
+    assert result.action == "REVIEW"
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)
+    assert any(
+        "manual review required before sell decision" in reason
+        for reason in result.reasons
+    )
 
 
-def test_corporate_action_guard_keeps_sell_action_with_flag(
+def test_corporate_action_guard_downgrades_sell_action_to_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_atr_only(monkeypatch)
@@ -539,7 +543,7 @@ def test_corporate_action_guard_keeps_sell_action_with_flag(
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
-    assert result.action == "SELL"
+    assert result.action == "REVIEW"
     assert "Price hit custom stop override" in result.reasons
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)

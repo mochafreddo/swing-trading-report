@@ -309,6 +309,11 @@ def evaluate_sell_signals(
             f"{corporate_action_move * 100:.1f}%"
         )
         flags.append("CORPORATE_ACTION_SUSPECT")
+        if action != "REVIEW":
+            reasons.append(
+                "Corporate action suspect: manual review required before sell decision"
+            )
+        action = "REVIEW"
 
     if not reasons:
         reasons.append("No sell criteria triggered")

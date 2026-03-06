@@ -106,6 +106,11 @@ def test_pullback_bounce_watch(monkeypatch):
     assert "wait" in result.candidate["entry_state_reason"].lower()
     assert result.candidate["gap_guard_pct"].startswith("±")
     assert result.candidate["close_value"] == result.candidate["price_value"]
+    assert result.candidate["signal_price_basis"] == "adjusted"
+    assert (
+        result.candidate["signal_close_adjusted_value"]
+        == result.candidate["close_value"]
+    )
     assert result.candidate["atr14_value"] == 2.0
     assert result.candidate["gap_guard_pct_value"] is not None
     assert result.candidate["gap_guard_up_price_value"] is not None

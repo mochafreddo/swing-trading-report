@@ -204,23 +204,42 @@ def evaluate_sell_signals_hybrid(
         # Suggest a notional target price (can be surfaced in report)
         target_price = entry_price * (1.0 + settings.profit_target_high)
 
-    if pnl_pct is not None and pnl_pct >= settings.profit_target_high:
-        reasons.append(
-            f"Reached high profit target ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.1f}%)"
-        )
-        action = "SELL"
-    elif pnl_pct is not None and pnl_pct >= settings.profit_target_low:
-        reasons.append(
-            f"Reached profit target zone ({pnl_pct * 100:.1f}% ≥ {settings.profit_target_low * 100:.1f}%)"
-        )
-        if action != "SELL":
-            action = "REVIEW"
-    elif pnl_pct is not None and pnl_pct >= settings.partial_profit_floor:
-        reasons.append(
-            f"Reached partial profit zone ({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.1f}%)"
-        )
-        if action != "SELL":
-            action = "REVIEW"
+    profit_protection_stop: float | None = None
+    if entry_price is not None and pnl_pct is not None:
+        if pnl_pct >= settings.partial_profit_floor:
+            profit_protection_stop = entry_price
+            reasons.append(
+                "Profit protection armed at break-even "
+                f"({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.1f}%)"
+            )
+        if pnl_pct >= settings.profit_target_low:
+            tightened_stop = entry_price * (1.0 + settings.partial_profit_floor)
+            profit_protection_stop = max(
+                profit_protection_stop or tightened_stop,
+                tightened_stop,
+            )
+            reasons.append(
+                "Profit protection tightened above entry "
+                f"({pnl_pct * 100:.1f}% ≥ {settings.profit_target_low * 100:.1f}%)"
+            )
+        if pnl_pct >= settings.profit_target_high:
+            extended_stop = entry_price * (1.0 + settings.profit_target_low)
+            profit_protection_stop = max(
+                profit_protection_stop or extended_stop,
+                extended_stop,
+            )
+            reasons.append(
+                "High-target profit protection activated "
+                f"({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.1f}%)"
+            )
+    if profit_protection_stop is not None and stop_override is None:
+        stop_price = max(stop_price or profit_protection_stop, profit_protection_stop)
+        if last_close <= stop_price:
+            reasons.append("Price closed below profit protection stop")
+            if pnl_pct is not None and pnl_pct >= settings.profit_target_high:
+                action = "SELL"
+            elif action != "SELL":
+                action = "REVIEW"
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
     ema_s = ema_short[-1]
@@ -388,6 +407,11 @@ def evaluate_sell_signals_hybrid(
             f"{corporate_action_move * 100:.1f}%"
         )
         flags.append("CORPORATE_ACTION_SUSPECT")
+        if action != "REVIEW":
+            reasons.append(
+                "Corporate action suspect: manual review required before sell decision"
+            )
+        action = "REVIEW"
 
     if not reasons:
         reasons.append("No hybrid sell criteria triggered")
