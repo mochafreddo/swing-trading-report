@@ -62,6 +62,7 @@ def write_entry_report(
         session_state=str(artifact.get("mode") or "AFTER_CLOSE").upper(),
         eval_index_policy=str(artifact.get("eval_index_policy") or "entry_snapshot:v1"),
         config_snapshot=None,
+        markets=artifact.get("markets") if market == "MIXED" else None,
     )
     resolved_meta = run_meta or default_meta
 

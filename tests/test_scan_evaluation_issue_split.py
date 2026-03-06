@@ -754,3 +754,101 @@ def test_decorate_candidates_treats_missing_rs_as_neutral() -> None:
         "MISSING.KR",
         "NEGATIVE.KR",
     ]
+
+
+def test_evaluate_candidates_keeps_available_rs_benchmark_for_other_market(
+    monkeypatch: Any,
+) -> None:
+    runtime = _build_runtime()
+    runtime.tickers = ["005930", "AAPL.NAS"]
+    runtime.market_data = {
+        "005930": runtime.market_data["AAPL.NAS"],
+        "AAPL.NAS": runtime.market_data["AAPL.NAS"],
+    }
+    runtime.ticker_currency = {"005930": "KRW", "AAPL.NAS": "USD"}
+    runtime.cfg = replace(
+        runtime.cfg,
+        rs_lookback_days=20,
+        rs_benchmark_ticker_kr=None,
+        rs_benchmark_ticker_us="SPY.AMS",
+    )
+    monkeypatch.setattr(
+        "sab.scan_evaluation._compute_rs_benchmark_return",
+        lambda runtime_obj, *, ticker, market: (
+            (0.12, None)
+            if market == "US"
+            else (None, "KR: benchmark ticker not configured")
+        ),
+    )
+
+    captured_meta: dict[str, dict[str, Any]] = {}
+
+    def _evaluate_ticker(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        captured_meta[ticker] = dict(meta or {})
+        return SimpleNamespace(
+            candidate={"ticker": ticker, "score_value": 1.0}, reason=None
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=_evaluate_ticker,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert "rs_benchmark_return" not in captured_meta["005930"]
+    assert captured_meta["AAPL.NAS"]["rs_benchmark_return"] == pytest.approx(0.12)
+    assert any(
+        issue.startswith("RS benchmark partially disabled:")
+        for issue in runtime.system_issues
+    )
+
+
+def test_decorate_candidates_converts_us_liquidity_for_mixed_market_sort() -> None:
+    runtime = _build_runtime()
+    runtime.fx_rate = 1500.0
+    runtime.candidates = [
+        {
+            "ticker": "KR1",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "rs_diff_value": 0.1,
+            "avg_dollar_volume_value": 1_000_000_000.0,
+            "pct_change_value": 0.01,
+        },
+        {
+            "ticker": "US1",
+            "currency": "USD",
+            "price_value": 100.0,
+            "score_value": 5.0,
+            "rs_diff_value": 0.1,
+            "avg_dollar_volume_value": 2_000_000.0,
+            "pct_change_value": 0.01,
+        },
+    ]
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=lambda **_kwargs: "closed",
+    )
+
+    assert [candidate["ticker"] for candidate in runtime.candidates] == [
+        "US1",
+        "KR1",
+    ]

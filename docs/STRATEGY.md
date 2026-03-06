@@ -211,6 +211,8 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - benchmark를 구하지 못하면 RS 점수는 부여하지 않고, scan report `system_issues`에 경고를 남깁니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
+  - KR/US mixed run에서는 USD 후보의 거래대금을 FX로 환산해 유동성 tie-breaker를 비교합니다.
+  - mixed run에서 FX를 구하지 못하면, 유동성 tie-breaker는 비활성화하고 다음 키(`pct_change_value`, ticker)로만 정렬합니다.
 
 ### 5.3 `strategy_mode=sma_ema_hybrid` (패턴 + 상태 머신)
 
@@ -358,8 +360,10 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
-- `sab entry`의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
-- candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
+- `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
+  - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
+- 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
+- 같은 시장 안에서 candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
 
 ### 7.2 Sell report (row)
 

@@ -172,6 +172,72 @@ def test_evaluate_holdings_collects_time_stop_market_warning_into_failures() -> 
     ]
 
 
+def test_evaluate_holdings_collects_invalid_candle_data_into_failures() -> None:
+    runtime = _runtime_with_single_holding()
+
+    def _evaluate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            action="REVIEW",
+            reasons=["Invalid candle data: non-finite OHLC values"],
+            stop_price=None,
+            target_price=None,
+            eval_price=None,
+            eval_date="20250113",
+            flags=None,
+            days_in_trade_sessions=None,
+            time_stop_triggered=False,
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert runtime.failures == [
+        "AAPL.NASD: Invalid candle data: non-finite OHLC values"
+    ]
+
+
+def test_evaluate_holdings_collects_insufficient_history_into_failures() -> None:
+    runtime = _runtime_with_single_holding()
+
+    def _evaluate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            action="REVIEW",
+            reasons=["Insufficient completed candles for hybrid sell"],
+            stop_price=None,
+            target_price=None,
+            eval_price=None,
+            eval_date="20250113",
+            flags=None,
+            days_in_trade_sessions=None,
+            time_stop_triggered=False,
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert runtime.failures == [
+        "AAPL.NASD: Insufficient completed candles for hybrid sell"
+    ]
+
+
 def test_write_sell_report_counts_collected_time_stop_market_warning(tmp_path) -> None:
     row = SellReportRow(
         ticker="AAPL.NASD",

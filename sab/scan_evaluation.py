@@ -291,11 +291,16 @@ def _resolve_rs_benchmark_context(
         benchmark_tickers[market] = benchmark_ticker
 
     if issues:
+        issue_label = (
+            "RS benchmark partially disabled"
+            if benchmark_returns
+            else "RS benchmark disabled"
+        )
         _record_rs_benchmark_issue(
             runtime,
-            "RS benchmark disabled: " + "; ".join(issues),
+            issue_label + ": " + "; ".join(issues),
         )
-        return {}, {}, True
+        return benchmark_returns, benchmark_tickers, True
 
     return benchmark_returns, benchmark_tickers, True
 
@@ -510,11 +515,36 @@ def _decorate_candidates(
                 return fallback
         return default
 
+    currencies = {
+        str(candidate.get("currency", "KRW")).strip().upper()
+        for candidate in runtime.candidates
+        if candidate
+    }
+    has_mixed_currencies = len(currencies) > 1
+    can_compare_cross_currency_liquidity = not has_mixed_currencies or (
+        runtime.fx_rate is not None and runtime.fx_rate > 0
+    )
+
+    def _liquidity_metric(candidate: dict[str, Any]) -> float:
+        if not can_compare_cross_currency_liquidity:
+            return 0.0
+        liquidity = _metric(candidate, "avg_dollar_volume_value")
+        currency = str(candidate.get("currency", "KRW")).strip().upper()
+        if (
+            has_mixed_currencies
+            and currency == "USD"
+            and runtime.fx_rate is not None
+            and runtime.fx_rate > 0
+            and liquidity != float("-inf")
+        ):
+            return liquidity * runtime.fx_rate
+        return liquidity
+
     runtime.candidates.sort(
         key=lambda candidate: (
             -_metric(candidate, "score_value", fallback_key="score", default=0.0),
             -_metric(candidate, "rs_diff_value", default=0.0),
-            -_metric(candidate, "avg_dollar_volume_value"),
+            -_liquidity_metric(candidate),
             -_metric(candidate, "pct_change_value"),
             str(candidate.get("ticker", "")),
         )

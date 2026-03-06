@@ -10,7 +10,16 @@ from .report.session_state import (
 )
 from .sell_types import _SellRuntime
 
-_SYSTEM_REASON_PREFIXES = ("time stop skipped: unable to resolve holding market",)
+_SYSTEM_REASON_PREFIXES = (
+    "insufficient data for sell evaluation",
+    "insufficient completed candles for sell evaluation",
+    "insufficient data for hybrid sell evaluation",
+    "insufficient completed candles for hybrid sell",
+    "not enough completed candles",
+    "not enough completed candles for hybrid sell",
+    "invalid candle data:",
+    "time stop skipped: unable to resolve holding market",
+)
 
 
 def _extract_system_issues_from_reasons(

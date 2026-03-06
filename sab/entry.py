@@ -35,6 +35,7 @@ _BUY_REPORT_PATTERN = re.compile(
 )
 _SUPPORTED_MODES = {"PRE_OPEN", "INTRADAY", "AFTER_CLOSE"}
 _SUPPORTED_MARKETS = {"KR", "US"}
+_REPORT_LEVEL_MARKETS = {"KR", "US", "MIXED"}
 _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
 _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
@@ -391,34 +392,56 @@ def _resolve_buy_report_path(*, report_dir: str, buy_report_path: str | None) ->
     return _select_latest_buy_report(report_dir)
 
 
-def _infer_single_market(
+def _resolve_report_market_hint(report: dict[str, Any]) -> str | None:
+    eval_context = report.get("eval_context")
+    if isinstance(eval_context, dict):
+        market = str(eval_context.get("market") or "").strip().upper()
+        if market in _REPORT_LEVEL_MARKETS:
+            return market
+
+    report_market = str(report.get("market") or "").strip().upper()
+    if report_market in _REPORT_LEVEL_MARKETS:
+        return report_market
+    return None
+
+
+def _group_candidates_by_market(
     *,
     report: dict[str, Any],
     candidates: list[dict[str, Any]],
     market_override: str | None,
-) -> str:
+) -> dict[str, list[dict[str, Any]]]:
+    grouped_candidates: dict[str, list[dict[str, Any]]] = {}
+
+    for candidate in candidates:
+        ticker = _normalize_ticker(candidate.get("ticker"))
+        inferred_market = _infer_market_from_ticker(ticker)
+        if market_override is not None and inferred_market != market_override:
+            continue
+        grouped_candidates.setdefault(inferred_market, []).append(candidate)
+
     if market_override is not None:
-        return market_override
+        selected = grouped_candidates.get(market_override, [])
+        if not selected:
+            raise ValueError(
+                f"Buy report has no {market_override} candidates for entry evaluation"
+            )
+        _validate_candidates_for_market(candidates=selected, market=market_override)
+        return {market_override: selected}
 
-    eval_context = report.get("eval_context")
-    if isinstance(eval_context, dict):
-        market = str(eval_context.get("market") or "").strip().upper()
-        if market in _SUPPORTED_MARKETS:
-            return market
+    for market, market_candidates in grouped_candidates.items():
+        _validate_candidates_for_market(candidates=market_candidates, market=market)
 
-    report_market = str(report.get("market") or "").strip().upper()
+    if grouped_candidates:
+        return grouped_candidates
+
+    report_market = _resolve_report_market_hint(report)
     if report_market in _SUPPORTED_MARKETS:
-        return report_market
-
-    markets = {
-        _infer_market_from_ticker(_normalize_ticker(c.get("ticker")))
-        for c in candidates
-    }
-    markets.discard("")
-    if len(markets) == 1:
-        return next(iter(markets))
+        raise ValueError(
+            f"Buy report has no {report_market} candidates for entry evaluation"
+        )
     raise ValueError(
-        "Unable to infer a single market from buy report. "
+        "Unable to infer candidate markets from buy report. "
         "Provide --market KR or --market US."
     )
 
@@ -458,15 +481,23 @@ def _parse_report_date(value: Any) -> str | None:
     return parsed.isoformat()
 
 
-def _collect_candidate_eval_dates(report: dict[str, Any]) -> list[str]:
-    candidates = report.get("candidates")
-    if not isinstance(candidates, list):
+def _collect_candidate_eval_dates(
+    report: dict[str, Any],
+    *,
+    candidates: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    candidate_rows = candidates
+    if candidate_rows is None:
+        raw_candidates = report.get("candidates")
+        if not isinstance(raw_candidates, list):
+            return []
+        candidate_rows = [row for row in raw_candidates if isinstance(row, dict)]
+
+    if not candidate_rows:
         return []
 
     normalized_dates: list[str] = []
-    for row in candidates:
-        if not isinstance(row, dict):
-            continue
+    for row in candidate_rows:
         parsed = _parse_report_date(row.get("eval_date"))
         if parsed is not None:
             normalized_dates.append(parsed)
@@ -474,8 +505,12 @@ def _collect_candidate_eval_dates(report: dict[str, Any]) -> list[str]:
     return normalized_dates
 
 
-def _resolve_candidate_eval_date(report: dict[str, Any]) -> str | None:
-    normalized_dates = _collect_candidate_eval_dates(report)
+def _resolve_candidate_eval_date(
+    report: dict[str, Any],
+    *,
+    candidates: list[dict[str, Any]] | None = None,
+) -> str | None:
+    normalized_dates = _collect_candidate_eval_dates(report, candidates=candidates)
     if not normalized_dates:
         return None
 
@@ -485,12 +520,18 @@ def _resolve_candidate_eval_date(report: dict[str, Any]) -> str | None:
     return max(top_dates)
 
 
-def _resolve_signal_eval_date(*, report: dict[str, Any], market: str) -> str:
+def _resolve_signal_eval_date(
+    *,
+    report: dict[str, Any],
+    market: str,
+    candidates: list[dict[str, Any]] | None = None,
+) -> str:
     direct = _parse_report_date(report.get("signal_eval_date"))
-    if direct is not None:
+    report_market = _resolve_report_market_hint(report)
+    if direct is not None and (candidates is None or report_market == market):
         return direct
 
-    candidate_eval_date = _resolve_candidate_eval_date(report)
+    candidate_eval_date = _resolve_candidate_eval_date(report, candidates=candidates)
     if candidate_eval_date is not None:
         return candidate_eval_date
 
@@ -711,7 +752,7 @@ def run_entry(
         return 1
 
     try:
-        resolved_market = _infer_single_market(
+        candidates_by_market = _group_candidates_by_market(
             report=source_report,
             candidates=candidates,
             market_override=normalized_market,
@@ -720,59 +761,107 @@ def run_entry(
         logger.error("%s", exc)
         return 1
 
-    try:
-        _validate_candidates_for_market(candidates=candidates, market=resolved_market)
-    except ValueError as exc:
-        logger.error("Buy report ticker validation failed: %s", exc)
-        return 1
-
-    if normalized_provider == "pykrx" and resolved_market != "KR":
+    resolved_markets = sorted(candidates_by_market)
+    if normalized_provider == "pykrx" and resolved_markets != ["KR"]:
         logger.error("pykrx provider only supports KR market for entry")
         return 1
 
-    price_lookup_fn, provider_issues = _make_price_lookup(
-        cfg=cfg,
-        provider=normalized_provider,
-        mode=normalized_mode,
-        market=resolved_market,
-    )
-    rows, candidate_system_issues = evaluate_entry_candidates(
-        candidates=candidates,
-        price_lookup_fn=price_lookup_fn,
-        gap_breach_action="SKIP",
-        default_strategy_mode=_resolve_report_strategy_mode(source_report),
-    )
-    system_issues = list(dict.fromkeys([*provider_issues, *candidate_system_issues]))
+    rows: list[EntryReportRow] = []
+    system_issues: list[str] = []
+    report_strategy_mode = _resolve_report_strategy_mode(source_report)
+    for candidate_market in resolved_markets:
+        price_lookup_fn, provider_issues = _make_price_lookup(
+            cfg=cfg,
+            provider=normalized_provider,
+            mode=normalized_mode,
+            market=candidate_market,
+        )
+        market_rows, candidate_system_issues = evaluate_entry_candidates(
+            candidates=candidates_by_market[candidate_market],
+            price_lookup_fn=price_lookup_fn,
+            gap_breach_action="SKIP",
+            default_strategy_mode=report_strategy_mode,
+        )
+        rows.extend(market_rows)
+        system_issues.extend(provider_issues)
+        system_issues.extend(candidate_system_issues)
+    system_issues = list(dict.fromkeys(system_issues))
     rows.sort(key=lambda row: (row.action, row.ticker))
 
-    signal_eval_date = _resolve_signal_eval_date(
-        report=source_report,
-        market=resolved_market,
-    )
-    candidate_eval_dates = sorted(set(_collect_candidate_eval_dates(source_report)))
-    if len(candidate_eval_dates) > 1:
+    if len(resolved_markets) == 1:
+        artifact_market = resolved_markets[0]
+        artifact_markets = None
+        signal_eval_date = _resolve_signal_eval_date(
+            report=source_report,
+            market=artifact_market,
+            candidates=candidates_by_market[artifact_market],
+        )
+        entry_session_date = _entry_session_date(artifact_market)
+        signal_eval_date_by_market = None
+        entry_session_date_by_market = None
+    else:
+        artifact_market = "MIXED"
+        artifact_markets = resolved_markets
+        signal_eval_date = None
+        entry_session_date = None
+        signal_eval_date_by_market = {
+            market: _resolve_signal_eval_date(
+                report=source_report,
+                market=market,
+                candidates=candidates_by_market[market],
+            )
+            for market in resolved_markets
+        }
+        entry_session_date_by_market = {
+            market: _entry_session_date(market) for market in resolved_markets
+        }
+
+    for candidate_market in resolved_markets:
+        candidate_eval_dates = sorted(
+            set(
+                _collect_candidate_eval_dates(
+                    source_report,
+                    candidates=candidates_by_market[candidate_market],
+                )
+            )
+        )
+        if len(candidate_eval_dates) <= 1:
+            continue
         max_preview = 5
         preview = ", ".join(candidate_eval_dates[:max_preview])
         if len(candidate_eval_dates) > max_preview:
             preview = f"{preview}, +{len(candidate_eval_dates) - max_preview} more"
-        mixed_issue = f"Mixed candidate eval_date values: {preview}"
+        if len(resolved_markets) == 1:
+            mixed_issue = f"Mixed candidate eval_date values: {preview}"
+        else:
+            mixed_issue = (
+                f"Mixed candidate eval_date values for {candidate_market}: {preview}"
+            )
         system_issues.append(mixed_issue)
+    system_issues = list(dict.fromkeys(system_issues))
 
     entry_summary = _build_entry_summary(rows, system_issues)
     artifact = {
         "provider": normalized_provider,
         "mode": normalized_mode,
-        "market": resolved_market,
+        "market": artifact_market,
         "source_buy_report": os.path.basename(resolved_report_path),
         "signal_eval_date": signal_eval_date,
-        "entry_session_date": _entry_session_date(resolved_market),
+        "entry_session_date": entry_session_date,
         "tickers": sorted({row.ticker for row in rows}),
         "summary": entry_summary,
         "system_issues": system_issues,
         "eval_index_policy": "entry_snapshot:v1",
     }
+    if artifact_markets is not None:
+        artifact["markets"] = artifact_markets
+    if signal_eval_date_by_market is not None:
+        artifact["signal_eval_date_by_market"] = signal_eval_date_by_market
+    if entry_session_date_by_market is not None:
+        artifact["entry_session_date_by_market"] = entry_session_date_by_market
     run_meta = build_run_meta(
-        market=resolved_market,
+        market=artifact_market,
+        markets=artifact_markets,
         session_state=normalized_mode,
         eval_index_policy="entry_snapshot:v1",
         config_snapshot=_build_config_snapshot(

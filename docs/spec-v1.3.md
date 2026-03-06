@@ -76,10 +76,13 @@
   - `config_snapshot`: `object|null` (6.2 표준, 민감정보 제외)
   - `provider`: `kis|pykrx`
   - `mode`: `PRE_OPEN|INTRADAY|AFTER_CLOSE`
-  - `market`: `KR|US` (단일 시장)
+  - `market`: `KR|US|MIXED`
+  - (선택) `markets`: `market="MIXED"`일 때 상세 시장 목록(예: `["KR","US"]`)
   - `source_buy_report`: 입력 buy 리포트의 파일명 또는 storage key
-  - `signal_eval_date`: `YYYY-MM-DD` (신호일; `market`의 세션 날짜 기준 — `KR: KST(Asia/Seoul)`, `US: ET(America/New_York)`)
-  - `entry_session_date`: `YYYY-MM-DD` (실행일; `market`의 세션 날짜 기준 — `KR: KST(Asia/Seoul)`, `US: ET(America/New_York)`)
+  - `signal_eval_date`: `YYYY-MM-DD|null` (단일 시장일 때 신호일)
+  - `entry_session_date`: `YYYY-MM-DD|null` (단일 시장일 때 실행일)
+  - (선택) `signal_eval_date_by_market`: `{KR?: YYYY-MM-DD, US?: YYYY-MM-DD}` (`market="MIXED"`일 때 시장별 신호일)
+  - (선택) `entry_session_date_by_market`: `{KR?: YYYY-MM-DD, US?: YYYY-MM-DD}` (`market="MIXED"`일 때 시장별 실행일)
   - `entries`: 배열
   - `system_issues`: `string[]` (가격 조회 실패, 데이터 부족 등)
 

@@ -183,6 +183,7 @@ flowchart LR
 - Entry 파이프라인(`entry`)은 구현되어 로컬 JSON 리포트(`*.entry.json`)를 생성합니다.
   - 현재 범위는 로컬 파일 생성(MVP)이며, Storage/Index/UI 연동은 후속 단계로 분리되어 있습니다.
   - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, `entry`는 이 raw reference와 실시간/raw snapshot만 비교합니다.
+  - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
 
 ## 10. 관련 문서
 

@@ -81,6 +81,8 @@
   - (선택) KIS 장애 시 PyKRX 폴백을 원하면 `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
   - 진입 평가(Entry): `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
+    - mixed KR/US buy 리포트도 시장별로 나눠 한 번에 평가합니다.
+    - 특정 시장만 평가하려면 `UV_CACHE_DIR=.uv-cache uv run -m sab entry --market US`처럼 지정합니다.
     - 치명 열화 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (기본 `1.0`)
       - `entry_price`가 비어 있는 행 비율이 임계치 이상이면 `sab entry`는 `exit 1`로 종료
       - `0.0`은 “누락이 1건이라도 있으면 실패” 정책으로 해석
