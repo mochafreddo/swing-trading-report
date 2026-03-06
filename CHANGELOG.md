@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.2...v1.10.3) (2026-03-06)
+
+
+### Bug Fixes
+
+* **strategy:** 엔트리·평가 로직을 mixed market 계약에 맞춘다 ([3e84070](https://github.com/mochafreddo/swing-trading-report/commit/3e84070fff44652d563e2d15a351b6efa3868056))
+
 ## [1.10.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.1...v1.10.2) (2026-03-06)
 
 
