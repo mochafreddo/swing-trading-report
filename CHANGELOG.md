@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.1...v1.10.2) (2026-03-06)
+
+
+### Bug Fixes
+
+* **strategy:** 핵심 로직 계약 정합성 반영 ([268074c](https://github.com/mochafreddo/swing-trading-report/commit/268074c3bfb1322954059386260c63f44fdd1aec))
+
 ## [1.10.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.0...v1.10.1) (2026-03-06)
 
 
