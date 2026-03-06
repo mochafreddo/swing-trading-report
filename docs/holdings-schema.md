@@ -71,6 +71,7 @@ settings:
 - KR 숫자 코드는 6자리만 허용됩니다(예: `005930`).
 - `AAPL`처럼 suffix 없는 영문 티커는 즉시 실패합니다.
 - `.US` suffix는 모호성 방지를 위해 허용되지 않으며, `.NAS/.NYS/.AMS`처럼 거래소를 명시해야 합니다.
+- Supabase `holdings` 테이블도 동일 계약을 강제하며, 기존 `.US` row는 자동 변환하지 않고 수동 정리 대상으로 취급합니다.
 - US 클래스 티커는 `BASE.CLASS.EXCH`를 캐노니컬로 사용합니다(예: `BRK.B.NYS`).
 - `BRK/B.NYS` 입력은 허용되지만 내부 저장/평가 시 `BRK.B.NYS`로 정규화됩니다.
 - `AAPL.XNAS`처럼 지원되지 않은 suffix는 즉시 실패합니다.

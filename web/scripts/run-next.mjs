@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
+import { enforceStartupBindGuard } from "./startup-bind-guard.mjs";
+
 const require = createRequire(import.meta.url);
 
 function resolveCommand(argv) {
@@ -51,6 +53,15 @@ if (!command) {
 }
 
 const extraArgs = process.argv.slice(3);
+
+if (command !== "build") {
+  try {
+    enforceStartupBindGuard(process.env, console);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
 
 const child = spawn(process.execPath, buildArgs(command, extraArgs), {
   stdio: "inherit",

@@ -751,6 +751,103 @@ def test_collect_market_data_from_kis_drops_intraday_incomplete_candle_on_save()
     ]
 
 
+def test_collect_market_data_from_kis_sanitizes_cached_candles_before_reuse() -> None:
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            raise AssertionError(f"unexpected provider fetch for {symbol} ({count})")
+
+    saved_payloads: dict[str, list[dict[str, Any]]] = {}
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+    cached_candles = [
+        {
+            "date": "20250106",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "date": "20250106",
+            "open": 101.0,
+            "high": 102.0,
+            "low": 100.0,
+            "close": float("nan"),
+            "volume": 1_100_000.0,
+        },
+    ]
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda _dir, key, payload: saved_payloads.setdefault(key, payload),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 7, 5, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == [_candles_with_last_date("20250106")[0]]
+    assert saved_payloads[_cache_key("005930")] == [
+        _candles_with_last_date("20250106")[0]
+    ]
+
+
+def test_collect_market_data_from_kis_does_not_persist_fully_invalid_provider_candles() -> (
+    None
+):
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            del symbol
+            del count
+            return [
+                {
+                    "date": "20250106",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": float("nan"),
+                    "volume": 1_000_000.0,
+                },
+                {
+                    "date": "invalid-date",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.0,
+                    "volume": float("inf"),
+                },
+            ]
+
+    saved_payloads: dict[str, list[dict[str, Any]]] = {}
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda _dir, key, payload: saved_payloads.setdefault(key, payload),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 7, 5, 0, tzinfo=dt.UTC),
+    )
+
+    assert "005930" not in runtime.market_data
+    assert saved_payloads == {}
+    assert any(
+        "No complete and finite candle data returned" in message
+        for message in runtime.failures
+    )
+
+
 def test_collect_market_data_from_kis_passes_adjusted_flag_to_provider() -> None:
     class _KisClient:
         def __init__(self) -> None:
@@ -805,6 +902,43 @@ def test_collect_market_data_from_pykrx_passes_adjusted_flag_to_provider() -> No
     collect_market_data_from_pykrx(runtime, request=request)
 
     assert pykrx_client.adjusted_flags == [False]
+
+
+def test_collect_market_data_from_pykrx_rejects_invalid_candles() -> None:
+    class _PykrxClient:
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            del ticker
+            del count
+            del adjusted
+            return [
+                {
+                    "date": "20250106",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": float("nan"),
+                    "volume": 1_000_000.0,
+                }
+            ]
+
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    runtime.pykrx_client = _PykrxClient()
+
+    request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
+        tickers=["005930"],
+        target_bars=220,
+        adjusted=True,
+        PykrxClientErrorCls=RuntimeError,
+    )
+    collect_market_data_from_pykrx(runtime, request=request)
+
+    assert "005930" not in runtime.market_data
+    assert any(
+        "PyKRX returned no complete and finite candle data" in message
+        for message in runtime.failures
+    )
 
 
 def test_collect_market_data_from_kis_does_not_suppress_non_kwarg_type_error() -> None:

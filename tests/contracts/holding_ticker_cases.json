@@ -1,0 +1,37 @@
+[
+  {
+    "input": "005930",
+    "valid": true,
+    "canonical": "005930"
+  },
+  {
+    "input": "aapl.nasdaq",
+    "valid": true,
+    "canonical": "AAPL.NAS"
+  },
+  {
+    "input": "brk/b.nys",
+    "valid": true,
+    "canonical": "BRK.B.NYS"
+  },
+  {
+    "input": "AAPL",
+    "valid": false
+  },
+  {
+    "input": "AAPL.US",
+    "valid": false
+  },
+  {
+    "input": "AAPL.XNAS",
+    "valid": false
+  },
+  {
+    "input": "005930.NAS",
+    "valid": false
+  },
+  {
+    "input": "AAPL.O.NAS",
+    "valid": false
+  }
+]

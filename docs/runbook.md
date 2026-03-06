@@ -45,6 +45,8 @@
 - 기본 운영 기준:
   - `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
   - 당분간 운영 범위는 `localhost/127.0.0.1` 단일 사용자 노출만 지원합니다(외부 공개 배포 비대상).
+  - direct 실행에서 `SAB_ENFORCE_LOCAL_REQUEST=0`와 non-loopback bind를 함께 쓰면 시작 단계에서 차단됩니다.
+  - Docker Compose의 `WEB_BIND_HOST=0.0.0.0`는 컨테이너 내부 바인딩일 뿐이며, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`이면 지원 경로입니다.
 - 전환 직후 1회 정리:
   - `docker compose down --remove-orphans && docker compose up -d --build web`
 - 일반 재기동:
@@ -82,6 +84,7 @@
 
 - 보유 목록은 **웹 UI(Next.js)에서 CRUD**로 관리합니다(단일 사용자 기준).
 - `quantity<=0` 항목은 Holdings UI에서 비활성으로 취급되며, 기본은 숨김이고 토글로 표시할 수 있습니다.
+- `holdings` ticker 계약은 앱/DB 모두 동일하며, `.US` 같은 모호 suffix는 허용되지 않습니다. 기존 `.US` row가 있으면 관련 Supabase migration은 수동 정리 전까지 실패합니다.
 - 추가매수 API(`POST /api/holdings/[ticker]/add-buy`)는 UUID 형식 `Idempotency-Key` 헤더를 필수로 요구하며, 동일 키-다른 payload는 `409`(`code=IDEMPOTENCY_KEY_PAYLOAD_MISMATCH`)로 차단합니다.
 - `sab sell`/`sell.yml`은 `quantity>0` 활성 보유분만 평가합니다.
 - 멱등 이벤트 정리 스케줄: `holdings-add-buy-events-cleanup` (`30 3 * * *`, UTC)에서 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
@@ -202,7 +205,9 @@
 - US 스크리너: `screener.us_mode=kis`는 자동 폴백 없이 fail-closed. `--universe screener`에서는 즉시 실패, `--universe both`에서는 watchlist는 유지하고 US 스크리너만 건너뜀
 - watchlist 로딩: `--universe watchlist|both`에서 watchlist 파일이 없으면 즉시 실패합니다. `--universe screener`에서는 watchlist를 로드하지 않습니다.
 - 환율/통화: `FX_MODE=kis`(기본)로 설정하면 KIS 해외 현재가상세에서 `t_rate`를 받아 자동 환율을 적용하고, `FX_CACHE_TTL`분 동안 캐시합니다. 실패 시 `USD_KRW_RATE` 값으로 폴백하거나, 값이 없으면 리포트 Appendix에 경고를 남깁니다.
-- 휴장일: 미국 휴일 정보는 KIS `countries-holiday` API를 조회해 `data/holidays_us.json`에 캐시합니다. 파일을 삭제하면 다음 실행 시 자동 갱신됩니다.
+- 휴장일: 미국 휴일 정보는 KIS `countries-holiday` API를 조회해 `data/holidays_us.json`에 캐시합니다.
+  - 파일이 없거나 12시간 TTL을 넘긴 경우에만 재조회하며, 기본 refresh 구간은 10일입니다.
+  - 파일을 삭제하면 다음 실행 시 자동 갱신됩니다.
 
 ## 확장
 

@@ -115,6 +115,8 @@ flowchart LR
 ### 5.3 Supabase Postgres
 
 - `holdings`: 보유 종목 단일 소스(웹 CRUD 대상)
+  - 앱과 동일한 ticker 계약을 DB 제약으로 강제합니다(`KR 6자리` 또는 명시 거래소 suffix `.NAS/.NYS/.AMS`).
+  - 모호한 `.US` suffix는 DB에서도 허용하지 않으며, 기존 row는 migration 시 수동 정리 대상으로 남깁니다.
 - `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers)
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
@@ -130,6 +132,7 @@ flowchart LR
   - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
   - `middleware.ts`는 페이지 라우트 접근 제어/리다이렉트 전용으로 유지
   - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
+  - 시작 가드는 `SAB_ENFORCE_LOCAL_REQUEST=0` 상태의 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다.
 - 비밀키 보호
   - Supabase/GitHub 키는 서버 코드(`server-only`)에서만 사용
   - publishable key(`sb_publishable_*`)는 서버 경로에서 거부
@@ -147,6 +150,8 @@ flowchart LR
   - KIS 재시도/백오프/토큰 재발급 처리
   - KR 심볼은 KIS 실패 시 PyKRX 폴백 가능(US는 폴백 없음)
   - 캐시가 있으면 API 실패 시 캐시 데이터로 계속 진행
+  - 캔들 캐시는 저장 전/재사용 전 `date/open/high/low/close/volume` finite 검증을 거쳐 오염 row를 제거합니다.
+  - `holidays_us.json`은 파일 `mtime` 기준 12시간 TTL 내에는 재호출하지 않고 재사용합니다.
   - 부분 수집 누락 시 coverage(`수집성공/평가대상`)가 `0.70` 이상이면 경고로 계속 진행, `0.70` 미만이면 실패 처리
 - 산출물 안정성
   - 리포트는 파일 락 + 원자적 쓰기로 기록

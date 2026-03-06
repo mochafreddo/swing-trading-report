@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -111,6 +112,7 @@ _NORMALIZED_SUFFIX_TO_EXCD = {
 _KR_ZONE = ZoneInfo("Asia/Seoul")
 _US_ZONE = ZoneInfo("America/New_York")
 _MAX_SESSION_LOOKBACK_DAYS = 3700
+_REQUIRED_CANDLE_FIELDS = ("open", "high", "low", "close", "volume")
 
 
 def _canonical_split_symbol_and_suffix(ticker: str) -> tuple[str, str | None]:
@@ -374,6 +376,50 @@ def _trim_incomplete_candle_tail(
     return trimmed, removed_count
 
 
+def _parse_finite_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        parsed = float(value)
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _sanitize_finite_candles(candles: list[Candle]) -> tuple[list[Candle], int]:
+    sanitized: list[Candle] = []
+    removed_count = 0
+
+    for candle in candles:
+        parsed_date = _parse_session_date(candle.get("date"))
+        if parsed_date is None:
+            removed_count += 1
+            continue
+
+        normalized_candle = dict(candle)
+        normalized_candle["date"] = parsed_date.strftime("%Y%m%d")
+
+        valid = True
+        for field in _REQUIRED_CANDLE_FIELDS:
+            parsed_value = _parse_finite_float(candle.get(field))
+            if parsed_value is None:
+                valid = False
+                break
+            normalized_candle[field] = parsed_value
+
+        if not valid:
+            removed_count += 1
+            continue
+
+        sanitized.append(normalized_candle)
+
+    return sanitized, removed_count
+
+
 def _apply_cached_candles[TRuntime: _CollectionRuntime](
     runtime: TRuntime,
     *,
@@ -553,6 +599,9 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                     closed_dates=closed_dates,
                     data_dir=runtime.cfg.data_dir,
                 )
+                normalized_candidate, dropped_invalid = _sanitize_finite_candles(
+                    normalized_candidate
+                )
                 if dropped_tail > 0:
                     runtime.logger.info(
                         "%s: Trimmed %s incomplete candle(s) from cache '%s'",
@@ -560,6 +609,14 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                         dropped_tail,
                         cache_key,
                     )
+                if dropped_invalid > 0:
+                    runtime.logger.warning(
+                        "%s: Dropped %s invalid candle(s) from cache '%s'",
+                        ticker,
+                        dropped_invalid,
+                        cache_key,
+                    )
+                if dropped_tail > 0 or dropped_invalid > 0:
                     try:
                         request.save_json_fn(
                             runtime.cfg.data_dir,
@@ -653,11 +710,20 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                     closed_dates=closed_dates,
                     data_dir=runtime.cfg.data_dir,
                 )
+                normalized_candles, dropped_invalid = _sanitize_finite_candles(
+                    normalized_candles
+                )
                 if dropped_tail > 0:
                     runtime.logger.info(
                         "%s: Trimmed %s incomplete candle(s) from provider response",
                         ticker,
                         dropped_tail,
+                    )
+                if dropped_invalid > 0:
+                    runtime.logger.warning(
+                        "%s: Dropped %s invalid candle(s) from provider response",
+                        ticker,
+                        dropped_invalid,
                     )
 
                 if not normalized_candles:
@@ -674,12 +740,12 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                             max_stale_sessions=max_stale_sessions,
                         )
                         runtime.logger.warning(
-                            "%s: Provider returned only incomplete candles; "
+                            "%s: Provider returned only incomplete or invalid candles; "
                             "used stale cache fallback",
                             ticker,
                         )
                         continue
-                    msg = f"{ticker}: No complete candle data returned"
+                    msg = f"{ticker}: No complete and finite candle data returned"
                     if cache_rejection_reason:
                         msg += f" (cache unavailable: {cache_rejection_reason})"
                     runtime.failures.append(msg)
@@ -769,26 +835,37 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                     fallback_error = str(py_exc)
                 else:
                     if candles:
-                        runtime.market_data[ticker] = candles
-                        runtime.ticker_data_source[ticker] = "pykrx"
-                        if request.on_candles_applied_fn:
-                            request.on_candles_applied_fn(runtime, ticker, candles)
-                        runtime.logger.warning(
-                            "%s: KIS error (%s); used PyKRX fallback (%s candles)",
-                            ticker,
-                            exc,
-                            len(candles),
-                        )
-                        runtime.failures.append(
-                            f"{ticker}: KIS error ({exc}); used PyKRX fallback"
-                        )
-                        _append_pykrx_warning_once(
-                            runtime,
-                            "Warning: PyKRX fallback data is end-of-day and may differ from KIS.",
-                        )
-                        continue
-                    fallback_error = "No data from PyKRX"
-                    fallback_client = None
+                        candles, dropped_invalid = _sanitize_finite_candles(candles)
+                        if dropped_invalid > 0:
+                            runtime.logger.warning(
+                                "%s: Dropped %s invalid candle(s) from PyKRX fallback",
+                                ticker,
+                                dropped_invalid,
+                            )
+                        if candles:
+                            runtime.market_data[ticker] = candles
+                            runtime.ticker_data_source[ticker] = "pykrx"
+                            if request.on_candles_applied_fn:
+                                request.on_candles_applied_fn(runtime, ticker, candles)
+                            runtime.logger.warning(
+                                "%s: KIS error (%s); used PyKRX fallback (%s candles)",
+                                ticker,
+                                exc,
+                                len(candles),
+                            )
+                            runtime.failures.append(
+                                f"{ticker}: KIS error ({exc}); used PyKRX fallback"
+                            )
+                            _append_pykrx_warning_once(
+                                runtime,
+                                "Warning: PyKRX fallback data is end-of-day and may differ from KIS.",
+                            )
+                            continue
+                        fallback_error = "No complete and finite candle data from PyKRX"
+                        fallback_client = None
+                    else:
+                        fallback_error = "No data from PyKRX"
+                        fallback_client = None
             elif target.exchange:
                 fallback_error = "Overseas symbol; no PyKRX fallback"
 
@@ -833,6 +910,18 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
             continue
 
         if candles:
+            candles, dropped_invalid = _sanitize_finite_candles(candles)
+            if dropped_invalid > 0:
+                runtime.logger.warning(
+                    "%s: Dropped %s invalid candle(s) from PyKRX provider response",
+                    ticker,
+                    dropped_invalid,
+                )
+            if not candles:
+                msg = f"{ticker}: PyKRX returned no complete and finite candle data"
+                runtime.failures.append(msg)
+                runtime.logger.warning(msg)
+                continue
             runtime.market_data[ticker] = candles
             runtime.ticker_data_source[ticker] = "pykrx"
             if request.on_candles_applied_fn:

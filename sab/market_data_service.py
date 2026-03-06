@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from collections.abc import Callable
 
 from . import market_data_pipeline
-from .data.holiday_cache import HolidayEntry, merge_holidays
+from .data.holiday_cache import HolidayEntry, load_cached_holidays, merge_holidays
 from .data.kis_client import KISClientError
 from .data.pykrx_client import PykrxClient
 from .market_data_common import Candle, MarketDataDependencies
@@ -15,6 +16,37 @@ type _LegacyCacheKeysFn = Callable[[str, str, str | None], list[str]]
 type _OnCandlesAppliedFn[TRuntime] = Callable[[TRuntime, str, list[Candle]], None]
 type _BeforeKisCollectionFn[TRuntime] = Callable[[TRuntime], None]
 type _PykrxClientKwargsFn[TRuntime] = Callable[[TRuntime], dict[str, str | None]]
+
+_US_HOLIDAY_REFRESH_TTL = dt.timedelta(hours=12)
+_US_HOLIDAY_REFRESH_WINDOW_DAYS = 10
+
+
+def _current_utc_time() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+def _holiday_cache_path(data_dir: str, market: str) -> str:
+    return os.path.join(data_dir, f"holidays_{market.lower()}.json")
+
+
+def _holiday_cache_age_hours(
+    data_dir: str,
+    market: str,
+    *,
+    now: dt.datetime,
+) -> float | None:
+    path = _holiday_cache_path(data_dir, market)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    return max(0.0, now.timestamp() - mtime) / 3600.0
+
+
+def _format_cache_age_hours(age_hours: float | None) -> str:
+    if age_hours is None:
+        return "missing"
+    return f"{age_hours:.2f}"
 
 
 def scan_legacy_cache_keys(
@@ -226,14 +258,23 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
     def _refresh_us_holidays(self, runtime: _ScanRuntime) -> dict[str, HolidayEntry]:
         if runtime.kis_client is None:
             return {}
+        now = _current_utc_time()
+        age_hours = _holiday_cache_age_hours(runtime.cfg.data_dir, "US", now=now)
         try:
-            now = dt.datetime.now()
             start = now.strftime("%Y%m%d")
-            end = (now + dt.timedelta(days=30)).strftime("%Y%m%d")
+            end = (now + dt.timedelta(days=_US_HOLIDAY_REFRESH_WINDOW_DAYS)).strftime(
+                "%Y%m%d"
+            )
         except Exception:
             start = end = dt.date.today().strftime("%Y%m%d")
 
-        runtime.logger.info("Refreshing US holidays via KIS: %s -> %s", start, end)
+        runtime.logger.info(
+            "Refreshing US holidays via KIS: %s -> %s (holiday_refresh_age_hours=%s, holiday_refresh_window_days=%s)",
+            start,
+            end,
+            _format_cache_age_hours(age_hours),
+            _US_HOLIDAY_REFRESH_WINDOW_DAYS,
+        )
         try:
             items = runtime.kis_client.overseas_holidays(
                 country_code="US",
@@ -265,7 +306,22 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
         if "US" in runtime.cfg.universe_markets or any(
             currency.upper() == "USD" for currency in runtime.ticker_currency.values()
         ):
+            now = _current_utc_time()
+            age_hours = _holiday_cache_age_hours(runtime.cfg.data_dir, "US", now=now)
+            ttl_hours = _US_HOLIDAY_REFRESH_TTL.total_seconds() / 3600.0
+            cached_holidays = load_cached_holidays(runtime.cfg.data_dir, "US")
+            if age_hours is not None and age_hours <= ttl_hours and cached_holidays:
+                runtime.us_holidays_cache = cached_holidays
+                runtime.logger.info(
+                    "Skipping US holiday refresh (holiday_refresh_skipped=true, holiday_refresh_age_hours=%s, holiday_refresh_window_days=%s)",
+                    _format_cache_age_hours(age_hours),
+                    _US_HOLIDAY_REFRESH_WINDOW_DAYS,
+                )
+                return
+
             runtime.us_holidays_cache = self._refresh_us_holidays(runtime)
+            if not runtime.us_holidays_cache:
+                runtime.us_holidays_cache = cached_holidays
 
     @staticmethod
     def _update_latest_date(

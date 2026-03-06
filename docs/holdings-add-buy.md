@@ -216,8 +216,9 @@ RPC 시그니처 예:
 
 라우팅/티커 별칭 정책:
 
-- DB에는 class ticker가 `BRK/B.NYS` 형태로 저장될 수 있으므로, RPC는 `canonical_holdings_ticker()` 기준으로 row를 찾아야 한다.
-  - 예: 입력 `BRK.B.NYS` → canonical 비교로 `BRK/B.NYS` row를 업데이트
+- 신규/정상화 후 DB 저장 형식은 `BRK.B.NYS`처럼 dot-class + canonical exchange suffix(`NAS/NYS/AMS`)를 사용한다.
+- RPC는 legacy slash/synonym row가 남아 있어도 안전하게 찾을 수 있도록 `canonical_holdings_ticker()` 기준으로 row를 찾는다.
+  - 예: 입력 `BRK/B.NYS`, `BRK.B.NYS`, `BRK.B.NYSE`는 모두 canonical 비교로 동일 holding을 찾는다.
 
 
 ## 7) (선택) 이벤트 로그/되돌리기(Phase 2)
