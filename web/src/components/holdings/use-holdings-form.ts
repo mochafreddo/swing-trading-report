@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
+import type {
+  HoldingsActionResult,
+  SaveHoldingActionInput,
+} from "@/app/actions/holdings";
 import type { HoldingRecord } from "@/lib/types";
 
 import { createEmptyHoldingForm, type HoldingFormState } from "./form-state";
-import {
-  buildCreatePayload,
-  buildPatchPayload,
-  readApiError,
-  recordToForm,
-} from "./helpers";
+import { buildCreatePayload, buildPatchPayload, recordToForm } from "./helpers";
 
 interface UseHoldingsFormOptions {
   refresh: () => Promise<void>;
+  saveHolding: (input: SaveHoldingActionInput) => Promise<HoldingsActionResult>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
-export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
+export function useHoldingsForm({
+  refresh,
+  saveHolding,
+  setError,
+}: UseHoldingsFormOptions) {
   const [submitting, setSubmitting] = useState(false);
   const [editingTicker, setEditingTicker] = useState<string | null>(null);
   const [form, setForm] = useState<HoldingFormState>(() =>
@@ -103,25 +107,15 @@ export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
       setError(null);
 
       try {
-        const method = editingTicker ? "PATCH" : "POST";
-        const endpoint = editingTicker
-          ? `/api/holdings/${encodeURIComponent(editingTicker)}`
-          : "/api/holdings";
         const payload = editingTicker
           ? buildPatchPayload(form)
           : buildCreatePayload(form);
-
-        const response = await fetch(endpoint, {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
+        const result = await saveHolding({
+          editingTicker,
+          payload,
         });
-
-        const responseJson = (await response.json()) as unknown;
-        if (!response.ok) {
-          throw new Error(readApiError(responseJson) || "Save failed");
+        if (!result.ok) {
+          throw new Error(result.error || "Save failed");
         }
 
         setEditingTicker(null);
@@ -137,7 +131,7 @@ export function useHoldingsForm({ refresh, setError }: UseHoldingsFormOptions) {
         setSubmitting(false);
       }
     },
-    [editingTicker, form, refresh, setError],
+    [editingTicker, form, refresh, saveHolding, setError],
   );
 
   const beginEdit = useCallback((row: HoldingRecord) => {

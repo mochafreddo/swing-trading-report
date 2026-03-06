@@ -8,6 +8,12 @@ import {
   useState,
 } from "react";
 
+import {
+  addBuyToHoldingAction,
+  deleteHoldingAction,
+  saveHoldingAction,
+} from "@/app/actions/holdings";
+
 import styles from "./holdings-client.module.css";
 
 import { partitionHoldingsByActivity } from "@/lib/holding-activity";
@@ -28,7 +34,7 @@ import {
 } from "@/components/holdings/add-buy-idempotency";
 import { HoldingsFormPanel } from "@/components/holdings/holdings-form-panel";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
-import { readApiError, readApiErrorCode } from "@/components/holdings/helpers";
+import { readApiError } from "@/components/holdings/helpers";
 import { useHoldingsForm } from "@/components/holdings/use-holdings-form";
 import {
   type HoldingsInitialState,
@@ -211,7 +217,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     onSubmit,
     beginEdit,
     cancelEdit,
-  } = useHoldingsForm({ refresh, setError });
+  } = useHoldingsForm({ refresh, saveHolding: saveHoldingAction, setError });
   const partitioned = useMemo(
     () => partitionHoldingsByActivity(items),
     [items],
@@ -363,15 +369,9 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
 
       setError(null);
       try {
-        const response = await fetch(
-          `/api/holdings/${encodeURIComponent(ticker)}`,
-          {
-            method: "DELETE",
-          },
-        );
-        const payload = (await response.json()) as unknown;
-        if (!response.ok) {
-          throw new Error(readApiError(payload) || "Delete failed");
+        const result = await deleteHoldingAction(ticker);
+        if (!result.ok) {
+          throw new Error(result.error || "Delete failed");
         }
         if (editingTicker === ticker) {
           cancelEdit();
@@ -458,21 +458,14 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           payload.buy_date = buyDate;
         }
 
-        const response = await fetch(
-          `/api/holdings/add-buy/${encodeURIComponent(addBuyTicker)}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Idempotency-Key": idempotencyKey,
-            },
-            body: JSON.stringify(payload),
-          },
-        );
-        const responsePayload = (await response.json()) as unknown;
-        if (!response.ok) {
-          const message = readApiError(responsePayload) || "Add buy failed";
-          const code = readApiErrorCode(responsePayload);
+        const result = await addBuyToHoldingAction({
+          ticker: addBuyTicker,
+          idempotencyKey,
+          payload,
+        });
+        if (!result.ok) {
+          const message = result.error || "Add buy failed";
+          const code = result.code;
           throw Object.assign(new Error(message), {
             code,
           });

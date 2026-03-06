@@ -1,22 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  getAdminCredentialVersion,
-  validateAdminCredentials,
-} from "@/lib/admin-auth";
+import { performAdminLogin } from "@/lib/admin-login";
 import {
   ADMIN_SESSION_COOKIE_NAME,
-  createAdminSessionToken,
   getAdminSessionCookieOptions,
 } from "@/lib/admin-session";
-import {
-  assertLoginAttemptAllowed,
-  buildGlobalLoginThrottleKey,
-  buildLoginThrottleKey,
-  clearLoginAttemptFailures,
-  LoginThrottleError,
-  recordLoginAttemptFailure,
-} from "@/lib/login-throttle";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
@@ -44,21 +32,6 @@ function parseLoginPayload(payload: unknown): LoginPayload | null {
     return null;
   }
   return normalized;
-}
-
-async function clearLoginThrottleKeysBestEffort(
-  throttleKeys: string[],
-): Promise<void> {
-  for (const throttleKey of throttleKeys) {
-    try {
-      await clearLoginAttemptFailures(throttleKey);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      console.warn(
-        `Failed to clear login throttle state after successful login: ${message}`,
-      );
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -100,67 +73,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const throttleKeys = Array.from(
-    new Set([
-      buildGlobalLoginThrottleKey(),
-      buildLoginThrottleKey(parsed.username),
-    ]),
-  );
   try {
-    for (const throttleKey of throttleKeys) {
-      await assertLoginAttemptAllowed(throttleKey);
-    }
-  } catch (error) {
-    if (error instanceof LoginThrottleError) {
+    const result = await performAdminLogin(parsed.username, parsed.password);
+    if (!result.ok) {
       return NextResponse.json(
-        { error: error.message },
+        { error: result.error },
         {
-          status: error.status,
-          headers: { "Retry-After": String(error.retryAfterSeconds) },
+          status: result.status,
+          headers: result.retryAfterSeconds
+            ? { "Retry-After": String(result.retryAfterSeconds) }
+            : undefined,
         },
       );
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
 
-  if (!validateAdminCredentials(parsed.username, parsed.password)) {
-    try {
-      for (const throttleKey of throttleKeys) {
-        await recordLoginAttemptFailure(throttleKey);
-      }
-    } catch (error) {
-      if (error instanceof LoginThrottleError) {
-        return NextResponse.json(
-          { error: error.message },
-          {
-            status: error.status,
-            headers: { "Retry-After": String(error.retryAfterSeconds) },
-          },
-        );
-      }
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return NextResponse.json({ error: message }, { status: 500 });
-    }
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let token: string;
-  try {
-    const credentialVersion = await getAdminCredentialVersion();
-    token = await createAdminSessionToken({ credentialVersion });
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set(
+      ADMIN_SESSION_COOKIE_NAME,
+      result.token,
+      getAdminSessionCookieOptions(),
+    );
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  await clearLoginThrottleKeysBestEffort(throttleKeys);
-
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(
-    ADMIN_SESSION_COOKIE_NAME,
-    token,
-    getAdminSessionCookieOptions(),
-  );
-  return response;
 }

@@ -6,25 +6,20 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RunClient } from "@/components/run-client";
+import { dispatchRunAction } from "@/app/actions/run";
 
-function createDispatchResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      dispatched: true,
-      workflow: "scan",
-      workflowFile: "scan.yml",
-      workflowUrl: "https://github.com/owner/repo/actions/workflows/scan.yml",
-      actionsUrl: "https://github.com/owner/repo/actions",
-      ref: "main",
-    }),
-    {
-      status: 202,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    },
-  );
-}
+vi.mock("@/app/actions/run", () => ({
+  dispatchRunAction: vi.fn(),
+}));
+
+const DISPATCH_RESULT = {
+  dispatched: true,
+  workflow: "scan" as const,
+  workflowFile: "scan.yml" as const,
+  workflowUrl: "https://github.com/owner/repo/actions/workflows/scan.yml",
+  actionsUrl: "https://github.com/owner/repo/actions",
+  ref: "main",
+};
 
 function findSelect(container: HTMLElement, name: string): HTMLSelectElement {
   const element = container.querySelector(
@@ -62,7 +57,6 @@ function findOption(
 describe("RunClient", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let fetchMock: ReturnType<typeof vi.fn>;
   let previousActEnvironment: boolean | undefined;
 
   beforeEach(() => {
@@ -76,9 +70,10 @@ describe("RunClient", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-
-    fetchMock = vi.fn().mockResolvedValue(createDispatchResponse());
-    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(dispatchRunAction).mockResolvedValue({
+      ok: true,
+      result: DISPATCH_RESULT,
+    });
 
     act(() => {
       root.render(React.createElement(RunClient));
@@ -90,7 +85,6 @@ describe("RunClient", () => {
       root.unmount();
     });
     container.remove();
-    vi.unstubAllGlobals();
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
@@ -138,11 +132,8 @@ describe("RunClient", () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/run");
-    expect(options.method).toBe("POST");
-    expect(JSON.parse(String(options.body))).toEqual({
+    expect(dispatchRunAction).toHaveBeenCalledTimes(1);
+    expect(dispatchRunAction).toHaveBeenCalledWith({
       workflow: "scan",
       provider: "pykrx",
       universe: "KR",

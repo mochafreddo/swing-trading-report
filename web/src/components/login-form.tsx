@@ -3,15 +3,9 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import styles from "./login-form.module.css";
+import { loginAction } from "@/app/actions/auth";
 
-function readApiError(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { error?: unknown }).error;
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
+import styles from "./login-form.module.css";
 
 function sanitizeNextPath(rawNext: string | null): string {
   if (!rawNext) {
@@ -45,21 +39,12 @@ export function LoginForm() {
     setSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+      const result = await loginAction({
+        username,
+        password,
       });
-
-      let payload: unknown = null;
-      try {
-        payload = (await response.json()) as unknown;
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok) {
-        throw new Error(readApiError(payload) || "Login failed");
+      if (!result.ok) {
+        throw new Error(result.error);
       }
 
       router.replace(redirectPath);

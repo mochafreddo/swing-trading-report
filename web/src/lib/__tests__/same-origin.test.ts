@@ -9,6 +9,12 @@ function makeRequest(
   return { headers: new Headers(headers), nextUrl: new URL(requestUrl) };
 }
 
+function makeHeadersOnlyRequest(headers: Record<string, string>): {
+  headers: Headers;
+} {
+  return { headers: new Headers(headers) };
+}
+
 describe("same-origin", () => {
   it("allows matching Origin", () => {
     expect(() =>
@@ -47,6 +53,39 @@ describe("same-origin", () => {
           origin: "http://localhost:55300",
           host: "localhost:55300",
           "x-forwarded-proto": "http",
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows matching Origin when only headers are available", () => {
+    expect(() =>
+      assertSameOrigin(
+        makeHeadersOnlyRequest({
+          host: "localhost:55300",
+          origin: "http://localhost:55300",
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects mismatched Origin when only headers are available", () => {
+    expect(() =>
+      assertSameOrigin(
+        makeHeadersOnlyRequest({
+          host: "localhost:55300",
+          origin: "https://evil.example",
+        }),
+      ),
+    ).toThrow(SameOriginError);
+  });
+
+  it("allows same-origin fetch metadata when only headers are available", () => {
+    expect(() =>
+      assertSameOrigin(
+        makeHeadersOnlyRequest({
+          host: "localhost:55300",
+          "sec-fetch-site": "same-origin",
         }),
       ),
     ).not.toThrow();

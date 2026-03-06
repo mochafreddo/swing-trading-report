@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { dispatchRunAction } from "@/app/actions/run";
+
 import styles from "./run-client.module.css";
 
 import { coerceScanUniverseForProvider } from "@/lib/run-dispatch-policy";
@@ -10,14 +12,6 @@ import type {
   ScanUniverse,
   WorkflowDispatchResult,
 } from "@/lib/types";
-
-function readApiError(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { error?: unknown }).error;
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
 
 export function RunClient() {
   const [provider, setProvider] = useState<Provider>("kis");
@@ -36,20 +30,12 @@ export function RunClient() {
         : { workflow, provider };
 
     try {
-      const response = await fetch("/api/run", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const body = (await response.json()) as unknown;
-      if (!response.ok) {
-        throw new Error(readApiError(body) || `${workflow} dispatch failed`);
+      const resultPayload = await dispatchRunAction(payload);
+      if (!resultPayload.ok) {
+        throw new Error(resultPayload.error || `${workflow} dispatch failed`);
       }
 
-      setResult(body as WorkflowDispatchResult);
+      setResult(resultPayload.result as WorkflowDispatchResult);
     } catch (dispatchError) {
       setResult(null);
       setError(

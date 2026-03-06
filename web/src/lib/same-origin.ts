@@ -24,11 +24,13 @@ function normalizeOrigin(value: string): string | null {
 
 function resolveExpectedOrigins(request: {
   headers: Pick<Headers, "get">;
-  nextUrl: URL;
+  nextUrl?: URL;
 }): Set<string> {
   const expectedOrigins = new Set<string>();
 
-  const nextUrlOrigin = normalizeOrigin(request.nextUrl.origin);
+  const nextUrlOrigin = request.nextUrl
+    ? normalizeOrigin(request.nextUrl.origin)
+    : null;
   if (nextUrlOrigin) {
     expectedOrigins.add(nextUrlOrigin);
   }
@@ -44,10 +46,21 @@ function resolveExpectedOrigins(request: {
   const protocol =
     forwardedProto === "http" || forwardedProto === "https"
       ? forwardedProto
-      : request.nextUrl.protocol.replace(/:$/, "");
-  const hostOrigin = normalizeOrigin(`${protocol}://${host}`);
-  if (hostOrigin) {
-    expectedOrigins.add(hostOrigin);
+      : request.nextUrl?.protocol.replace(/:$/, "");
+
+  if (protocol) {
+    const hostOrigin = normalizeOrigin(`${protocol}://${host}`);
+    if (hostOrigin) {
+      expectedOrigins.add(hostOrigin);
+    }
+    return expectedOrigins;
+  }
+
+  for (const fallbackProtocol of ["http", "https"] as const) {
+    const hostOrigin = normalizeOrigin(`${fallbackProtocol}://${host}`);
+    if (hostOrigin) {
+      expectedOrigins.add(hostOrigin);
+    }
   }
 
   return expectedOrigins;
@@ -55,7 +68,7 @@ function resolveExpectedOrigins(request: {
 
 export function assertSameOrigin(request: {
   headers: Pick<Headers, "get">;
-  nextUrl: URL;
+  nextUrl?: URL;
 }): void {
   const expectedOrigins = resolveExpectedOrigins(request);
 

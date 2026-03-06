@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { requestLogout } from "@/lib/logout-client";
+import { logoutAction } from "@/app/actions/auth";
 
 import styles from "./main-nav.module.css";
 
@@ -28,7 +28,10 @@ export function MainNav() {
     setLoggingOut(true);
     setLogoutError(null);
     try {
-      await requestLogout();
+      const result = await logoutAction();
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
       router.replace("/login");
       router.refresh();
     } catch (error) {
