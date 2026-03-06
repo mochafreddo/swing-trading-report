@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.0...v1.10.1) (2026-03-06)
+
+
+### Bug Fixes
+
+* **review:** 2026-03-06 리뷰 이슈 후속 조치 반영 ([e422905](https://github.com/mochafreddo/swing-trading-report/commit/e4229050effa7e52a90c683e893b0d4961b322bf))
+
 ## [1.10.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.9.0...v1.10.0) (2026-03-05)
 
 
