@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.4](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.3...v1.10.4) (2026-03-06)
+
+
+### Bug Fixes
+
+* **reports:** URL 선택 상태 동기화를 안정화 ([0c7d309](https://github.com/mochafreddo/swing-trading-report/commit/0c7d309cf22b91752fc0cc502b3ef1cc66c67b90))
+* **web:** 콘솔 초기 로딩 오류를 숨기지 않는다 ([b30739d](https://github.com/mochafreddo/swing-trading-report/commit/b30739da87cdf266684c57fd89a57b6bccefaecc))
+
 ## [1.10.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.2...v1.10.3) (2026-03-06)
 
 
