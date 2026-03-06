@@ -242,13 +242,14 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [reportType, setReportType] = useState<ReportsFilterType>(
+  const initialUrlKey = (searchParams.get("key") ?? "").trim() || null;
+  const [reportType, setReportTypeState] = useState<ReportsFilterType>(
     () => initialState?.reportType ?? parseReportType(searchParams.get("type")),
   );
-  const [query, setQuery] = useState(
+  const [query, setQueryState] = useState(
     () => initialState?.query ?? searchParams.get("q") ?? "",
   );
-  const [appliedQuery, setAppliedQuery] = useState(
+  const [appliedQuery, setAppliedQueryState] = useState(
     () => initialState?.appliedQuery ?? (searchParams.get("q") ?? "").trim(),
   );
   const [items, setItems] = useState<ReportListItem[]>(
@@ -265,7 +266,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [warnings, setWarnings] = useState<ReportSearchWarning[]>(
     () => initialState?.warnings ?? [],
   );
-  const [selectedKey, setSelectedKey] = useState<string | null>(
+  const [selectedKey, setSelectedKeyState] = useState<string | null>(
     () => initialState?.selectedKey ?? searchParams.get("key"),
   );
   const [detail, setDetail] = useState<ReportJson | null>(
@@ -274,10 +275,20 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showRaw, setShowRaw] = useState(
+  const [showRaw, setShowRawState] = useState(
     () => initialState?.showRaw ?? searchParams.get("raw") === "1",
   );
   const [refreshToken, setRefreshToken] = useState(0);
+  const pendingUrlSync = useRef(
+    Boolean(initialState) &&
+      (initialState?.reportType !== parseReportType(searchParams.get("type")) ||
+        initialState?.appliedQuery !== (searchParams.get("q") ?? "").trim() ||
+        initialState?.selectedKey !== initialUrlKey ||
+        initialState?.showRaw !== (searchParams.get("raw") === "1")),
+  );
+  const preserveSelectionWhenUrlKeyMissing = useRef(
+    Boolean(initialState?.selectedKey && !searchParams.get("key")),
+  );
   const skipInitialListFetch = useRef(Boolean(initialState));
   const consumedListRefreshToken = useRef(0);
   const consumedDetailRefreshToken = useRef(0);
@@ -333,20 +344,31 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const nextAppliedQuery = nextQuery.trim();
     const nextKeyRaw = searchParams.get("key");
     const nextShowRaw = searchParams.get("raw") === "1";
+    const preserveWhenKeyMissing = preserveSelectionWhenUrlKeyMissing.current;
+    const nextKey = nextKeyRaw?.trim() || null;
+    const hasInvalidUrlKey =
+      Boolean(nextKey) &&
+      items.length > 0 &&
+      !items.some((item) => item.key === nextKey);
 
-    setReportType((prev) => (prev === nextType ? prev : nextType));
-    setQuery((prev) => (prev === nextQuery ? prev : nextQuery));
-    setAppliedQuery((prev) =>
+    preserveSelectionWhenUrlKeyMissing.current = false;
+    pendingUrlSync.current = preserveWhenKeyMissing || hasInvalidUrlKey;
+
+    setReportTypeState((prev) => (prev === nextType ? prev : nextType));
+    setQueryState((prev) => (prev === nextQuery ? prev : nextQuery));
+    setAppliedQueryState((prev) =>
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
     );
-    setSelectedKey((prev) =>
+    setSelectedKeyState((prev) =>
       resolveSelectedKeyFromUrl({
         previousSelectedKey: prev,
         nextKeyRaw,
+        availableKeys: items.map((item) => item.key),
+        preserveSelectionWhenKeyMissing: preserveWhenKeyMissing,
       }),
     );
-    setShowRaw((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [searchParams]);
+    setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
+  }, [items, searchParams]);
 
   useEffect(() => {
     const nextAppliedQuery = query.trim();
@@ -354,7 +376,8 @@ export function useReportsState(initialState?: ReportsInitialState) {
       return;
     }
     const timerId = window.setTimeout(() => {
-      setAppliedQuery(nextAppliedQuery);
+      pendingUrlSync.current = true;
+      setAppliedQueryState(nextAppliedQuery);
     }, 300);
     return () => {
       window.clearTimeout(timerId);
@@ -363,6 +386,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
   useEffect(() => {
     if (desiredQueryString === currentQueryString) {
+      pendingUrlSync.current = false;
+      return;
+    }
+    if (!pendingUrlSync.current) {
       return;
     }
     const targetUrl = desiredQueryString
@@ -405,9 +432,12 @@ export function useReportsState(initialState?: ReportsInitialState) {
         setWarnings(typed.warnings);
 
         const firstKey = typed.items[0]?.key ?? null;
-        setSelectedKey((prev) => {
+        setSelectedKeyState((prev) => {
           if (prev && typed.items.some((item) => item.key === prev)) {
             return prev;
+          }
+          if (prev !== firstKey) {
+            pendingUrlSync.current = true;
           }
           return firstKey;
         });
@@ -496,11 +526,26 @@ export function useReportsState(initialState?: ReportsInitialState) {
   );
 
   const toggleShowRaw = useCallback(() => {
-    setShowRaw((prev) => !prev);
+    pendingUrlSync.current = true;
+    setShowRawState((prev) => !prev);
   }, []);
 
   const refreshReports = useCallback(() => {
     setRefreshToken((prev) => prev + 1);
+  }, []);
+
+  const setReportType = useCallback((value: ReportsFilterType) => {
+    pendingUrlSync.current = true;
+    setReportTypeState(value);
+  }, []);
+
+  const setQuery = useCallback((value: string) => {
+    setQueryState(value);
+  }, []);
+
+  const setSelectedKey = useCallback((value: string) => {
+    pendingUrlSync.current = true;
+    setSelectedKeyState(value);
   }, []);
 
   return {
