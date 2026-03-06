@@ -26,7 +26,9 @@ interface ReportsPageProps {
   searchParams?: SearchParamsRecord | Promise<SearchParamsRecord>;
 }
 
-export default async function ReportsPage({ searchParams }: ReportsPageProps) {
+export async function loadReportsInitialState(
+  searchParams?: SearchParamsRecord | Promise<SearchParamsRecord>,
+): Promise<ReportsInitialState | undefined> {
   const params = await Promise.resolve(searchParams ?? {});
   const reportType = parseReportType(readFirstValue(params.type));
   const query = readFirstValue(params.q) ?? "";
@@ -36,63 +38,68 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const searchWindow = resolveReportSearchWindow(
     process.env.REPORT_SEARCH_WINDOW,
   );
-  let initialState: ReportsInitialState | undefined;
 
   if (await hasValidAdminSession()) {
-    try {
-      const list = await listReports({
-        type: reportType,
-        q: appliedQuery,
-        limit: REPORT_PAGE_LIMIT,
-        searchWindow,
-      });
-      const selectedKey =
-        requestedKey && list.items.some((item) => item.key === requestedKey)
-          ? requestedKey
-          : (list.items[0]?.key ?? null);
+    const list = await listReports({
+      type: reportType,
+      q: appliedQuery,
+      limit: REPORT_PAGE_LIMIT,
+      searchWindow,
+    });
+    const selectedKey =
+      requestedKey && list.items.some((item) => item.key === requestedKey)
+        ? requestedKey
+        : (list.items[0]?.key ?? null);
 
-      let detail: ReportsInitialState["detail"] = null;
-      let detailKey: string | null = null;
-      if (selectedKey) {
-        try {
-          const detailPayload = await readReportDetail(selectedKey);
-          detail = detailPayload.report;
-          detailKey = detailPayload.key;
-        } catch {
-          detail = null;
-          detailKey = null;
-        }
+    let detail: ReportsInitialState["detail"] = null;
+    let detailKey: string | null = null;
+    if (selectedKey) {
+      try {
+        const detailPayload = await readReportDetail(selectedKey);
+        detail = detailPayload.report;
+        detailKey = detailPayload.key;
+      } catch {
+        // Leave detail empty so the client can retry without failing the page.
       }
-
-      initialState = {
-        reportType,
-        query,
-        appliedQuery,
-        items: list.items,
-        total: list.total,
-        searched: list.searched,
-        truncated: list.truncated,
-        searchWindow: list.searchWindow,
-        warnings: list.warnings,
-        selectedKey,
-        detail,
-        detailKey,
-        showRaw,
-      };
-    } catch {
-      initialState = undefined;
     }
+
+    return {
+      reportType,
+      query,
+      appliedQuery,
+      items: list.items,
+      total: list.total,
+      searched: list.searched,
+      truncated: list.truncated,
+      searchWindow: list.searchWindow,
+      warnings: list.warnings,
+      selectedKey,
+      detail,
+      detailKey,
+      showRaw,
+    };
   }
 
+  return undefined;
+}
+
+function ReportsPageFallback() {
   return (
-    <Suspense
-      fallback={
-        <section className="panel">
-          <p className="subtle">Loading reports...</p>
-        </section>
-      }
-    >
-      <ReportsClient initialState={initialState} />
+    <section className="panel">
+      <p className="subtle">Loading reports...</p>
+    </section>
+  );
+}
+
+async function ReportsPageContent({ searchParams }: ReportsPageProps) {
+  const initialState = await loadReportsInitialState(searchParams);
+  return <ReportsClient initialState={initialState} />;
+}
+
+export default function ReportsPage({ searchParams }: ReportsPageProps) {
+  return (
+    <Suspense fallback={<ReportsPageFallback />}>
+      <ReportsPageContent searchParams={searchParams} />
     </Suspense>
   );
 }
