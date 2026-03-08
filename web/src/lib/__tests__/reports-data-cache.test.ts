@@ -49,7 +49,7 @@ describe("reports-data cache", () => {
           tickers_hydrated: true,
         },
       ],
-      total: null,
+      total: 1,
       fetchedCount: 1,
       hasMore: false,
       nextCursor: null,
@@ -74,7 +74,7 @@ describe("reports-data cache", () => {
   it("bypasses list cache when refresh=true", async () => {
     vi.mocked(fetchReportIndexPage).mockResolvedValue({
       items: [],
-      total: null,
+      total: 0,
       fetchedCount: 0,
       hasMore: false,
       nextCursor: null,
