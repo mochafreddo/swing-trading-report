@@ -165,6 +165,23 @@ export interface ConsumeLoginThrottleAttemptResult {
   retryAfterSeconds: number;
 }
 
+export interface ClaimRuntimeStateLockInput {
+  key: string;
+  now: number;
+  ttlSeconds: number;
+  payload?: Record<string, unknown>;
+}
+
+export interface ClaimRuntimeStateLockResult {
+  acquired: boolean;
+  expiresAt: string;
+}
+
+export interface ReleaseRuntimeStateLockInput {
+  key: string;
+  ownerToken: string;
+}
+
 function parseRuntimeStateEntry(payload: unknown): RuntimeStateEntry | null {
   if (!Array.isArray(payload) || payload.length === 0) {
     return null;
@@ -330,6 +347,102 @@ function parseConsumeLoginThrottleAttemptResult(
     isBlocked: raw.is_blocked,
     retryAfterSeconds: raw.retry_after_seconds,
   };
+}
+
+function parseClaimRuntimeStateLockResult(
+  payload: unknown,
+): ClaimRuntimeStateLockResult | null {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+  const raw = payload[0] as
+    | {
+        acquired?: unknown;
+        expires_at?: unknown;
+      }
+    | undefined;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  if (typeof raw.acquired !== "boolean" || typeof raw.expires_at !== "string") {
+    return null;
+  }
+  return {
+    acquired: raw.acquired,
+    expiresAt: raw.expires_at,
+  };
+}
+
+export async function claimRuntimeStateLock(
+  input: ClaimRuntimeStateLockInput,
+): Promise<ClaimRuntimeStateLockResult> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/claim_runtime_state_lock`;
+  const response = await fetchSupabase(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_state_key: input.key,
+      p_now: new Date(input.now).toISOString(),
+      p_ttl_seconds: Math.max(1, Math.floor(input.ttlSeconds)),
+      p_state_payload: input.payload ?? {},
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to claim runtime state lock '${input.key}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const parsed = parseClaimRuntimeStateLockResult(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      `Failed to parse runtime state lock claim result for '${input.key}'`,
+      500,
+    );
+  }
+  return parsed;
+}
+
+export async function releaseRuntimeStateLock(
+  input: ReleaseRuntimeStateLockInput,
+): Promise<boolean> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/release_runtime_state_lock`;
+  const response = await fetchSupabase(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_state_key: input.key,
+      p_owner_token: input.ownerToken,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to release runtime state lock '${input.key}': ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (typeof payload !== "boolean") {
+    throw new SupabaseApiError(
+      `Failed to parse runtime state lock release result for '${input.key}'`,
+      500,
+    );
+  }
+  return payload;
 }
 
 export async function consumeLoginThrottleAttempt(

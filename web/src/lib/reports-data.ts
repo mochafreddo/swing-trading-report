@@ -111,16 +111,18 @@ async function listReportsUncached(
   const { type, q, limit, searchWindow } = options;
 
   if (!q) {
-    const { items, total } = await fetchReportIndexPage({
+    const { items, hasMore } = await fetchReportIndexPage({
       type,
       limit,
+      includeTotal: false,
+      lookahead: true,
     });
     return {
       items: items.map((row) => toReportListItem(row)),
-      total,
+      total: null,
       searched: 0,
       searchWindow,
-      truncated: false,
+      truncated: hasMore,
       warnings: [],
     };
   }

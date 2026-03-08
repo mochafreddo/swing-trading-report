@@ -48,10 +48,7 @@ function resolveRuntimeStateStore(): RuntimeStateStore {
 
 function resolveLoginThrottleFailMode(): LoginThrottleFailMode {
   const raw = process.env.SAB_LOGIN_THROTTLE_FAIL_MODE?.trim().toLowerCase();
-  if (raw === "strict") {
-    return "strict";
-  }
-  return "degrade";
+  return raw === "degrade" ? "degrade" : "strict";
 }
 
 function buildRuntimeStateKey(key: string): string {

@@ -79,9 +79,10 @@ def write_report(
     report_type: str = "buy",
     strategy_mode: str | None = None,
     run_meta: dict[str, Any] | None = None,
+    artifact_date: str | None = None,
 ) -> str:
     _ensure_dir(report_dir)
-    today, now_str, tz_label = resolve_report_timestamp()
+    today, now_str, tz_label = resolve_report_timestamp(artifact_date=artifact_date)
     normalized_report_type = _normalize_report_type(report_type)
 
     cand_list = list(candidates)

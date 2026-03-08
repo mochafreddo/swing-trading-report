@@ -10,9 +10,11 @@ import {
 
 import {
   addBuyToHolding,
+  claimRuntimeStateLock,
   fetchReportIndexPage,
   createHolding,
   deleteHolding,
+  releaseRuntimeStateLock,
   SupabaseApiError,
   updateHolding,
   upsertReportIndexEntry,
@@ -213,6 +215,67 @@ describe("upsertReportIndexEntry", () => {
     expect(body).toContain('"report_key":"2026/02/2026-02-14.buy.json"');
     expect(body).toContain('"tickers":["AAPL.US"]');
     expect(body).toContain('"tickers_hydrated":true');
+  });
+});
+
+describe("claimRuntimeStateLock", () => {
+  it("claims runtime_state lock through RPC", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            acquired: true,
+            expires_at: "2026-03-08T10:00:30.000Z",
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await claimRuntimeStateLock({
+      key: "run_dispatch:scan:kis:both",
+      now: Date.parse("2026-03-08T10:00:00.000Z"),
+      ttlSeconds: 30,
+      payload: {
+        input: { workflow: "scan", provider: "kis", universe: "both" },
+      },
+    });
+
+    expect(result).toEqual({
+      acquired: true,
+      expiresAt: "2026-03-08T10:00:30.000Z",
+    });
+    const [requestUrl, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(requestUrl)).toContain(
+      "/rest/v1/rpc/claim_runtime_state_lock",
+    );
+    expect(init?.method).toBe("POST");
+  });
+});
+
+describe("releaseRuntimeStateLock", () => {
+  it("releases runtime_state lock through RPC", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(true), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const result = await releaseRuntimeStateLock({
+      key: "run_dispatch:scan:kis:both",
+      ownerToken: "owner-token",
+    });
+
+    expect(result).toBe(true);
+    const [requestUrl, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(requestUrl)).toContain(
+      "/rest/v1/rpc/release_runtime_state_lock",
+    );
+    expect(init?.method).toBe("POST");
   });
 });
 

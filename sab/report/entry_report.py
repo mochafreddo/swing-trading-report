@@ -51,9 +51,10 @@ def write_entry_report(
     artifact: dict[str, Any],
     entries: Iterable[EntryReportRow],
     run_meta: dict[str, Any] | None = None,
+    artifact_date: str | None = None,
 ) -> str:
     _ensure_dir(report_dir)
-    today, now_str, tz_label = resolve_report_timestamp()
+    today, now_str, tz_label = resolve_report_timestamp(artifact_date=artifact_date)
     rows = [asdict(row) for row in entries]
 
     market = str(artifact.get("market") or "MIXED").upper()

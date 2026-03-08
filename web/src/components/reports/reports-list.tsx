@@ -10,7 +10,7 @@ interface ReportsListProps {
   query: string;
   appliedQuery: string;
   items: ReportListItem[];
-  total: number;
+  total: number | null;
   searched: number;
   truncated: boolean;
   searchWindow: number;
@@ -89,7 +89,7 @@ export function ReportsList({
         </div>
 
         <p className="subtle">
-          total={total}
+          {total === null ? `shown=${items.length}` : `total=${total}`}
           {appliedQuery && (
             <>
               {" · "}searched={searched}

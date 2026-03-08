@@ -255,7 +255,9 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [items, setItems] = useState<ReportListItem[]>(
     () => initialState?.items ?? [],
   );
-  const [total, setTotal] = useState(() => initialState?.total ?? 0);
+  const [total, setTotal] = useState<number | null>(
+    () => initialState?.total ?? null,
+  );
   const [searched, setSearched] = useState(() => initialState?.searched ?? 0);
   const [truncated, setTruncated] = useState(
     () => initialState?.truncated ?? false,

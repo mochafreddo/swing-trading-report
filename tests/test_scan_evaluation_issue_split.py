@@ -23,6 +23,7 @@ def _build_runtime() -> _ScanRuntime:
     runtime = _ScanRuntime(
         cfg=cfg, logger=logging.getLogger(__name__), tickers=["AAPL.NAS"]
     )
+    runtime.raw_market_data["AAPL.NAS"] = [{"date": "20250110", "close": 100.0}]
     runtime.market_data["AAPL.NAS"] = [
         {
             "date": "20250110",
@@ -202,6 +203,7 @@ def test_evaluate_candidates_enriches_raw_entry_reference_close_from_kis() -> No
             ]
 
     runtime.kis_client = cast(Any, _FakeKISClient())
+    runtime.raw_market_data.clear()
 
     _evaluate_candidates(
         runtime,
@@ -234,6 +236,7 @@ def test_evaluate_candidates_enriches_raw_entry_reference_close_from_kis() -> No
     assert candidate["entry_reference_close_raw_value"] == 100.0
     assert candidate["entry_reference_eval_date"] == "20250110"
     assert runtime.system_issues == []
+    assert runtime.raw_market_data["AAPL.NAS"][-1]["close"] == 100.0
 
 
 def test_evaluate_candidates_injects_market_benchmark_context() -> None:
@@ -559,6 +562,25 @@ def test_write_scan_report_uses_resolved_session_state(monkeypatch: Any) -> None
         captured["run_meta"]["eval_context"]["session_state"]  # type: ignore[index]
         == "PRE_OPEN"
     )
+
+
+def test_write_scan_report_uses_latest_market_date_when_candidates_are_empty() -> None:
+    runtime = _build_runtime()
+    runtime.candidates = []
+    runtime.latest_dates = {
+        "005930": "20250226",
+        "AAPL.NAS": "20250225",
+    }
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_scan_report(runtime, write_report_fn=_fake_write_report)
+
+    assert captured["artifact_date"] == "20250226"
 
 
 def test_write_scan_report_emits_session_state_by_market_for_mixed_run(

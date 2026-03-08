@@ -8,11 +8,20 @@ import {
   vi,
 } from "vitest";
 
+vi.mock("@/lib/supabase-admin", () => ({
+  claimRuntimeStateLock: vi.fn(),
+  releaseRuntimeStateLock: vi.fn(),
+}));
+
 import {
   buildWorkflowDispatchRequest,
   dispatchWorkflow,
   GitHubDispatchError,
 } from "@/lib/github-actions";
+import {
+  claimRuntimeStateLock,
+  releaseRuntimeStateLock,
+} from "@/lib/supabase-admin";
 
 beforeAll(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
@@ -29,6 +38,12 @@ afterEach(() => {
 
 beforeEach(() => {
   process.env.RUN_DISPATCH_ENABLED = "1";
+  vi.clearAllMocks();
+  vi.mocked(claimRuntimeStateLock).mockResolvedValue({
+    acquired: true,
+    expiresAt: "2026-03-08T00:00:30.000Z",
+  });
+  vi.mocked(releaseRuntimeStateLock).mockResolvedValue(true);
 });
 
 describe("buildWorkflowDispatchRequest", () => {
@@ -116,6 +131,30 @@ describe("dispatchWorkflow", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("fails before claiming a lock when github env is missing", async () => {
+    delete process.env.GITHUB_PAT;
+    vi.resetModules();
+    vi.doMock("@/lib/supabase-admin", () => ({
+      claimRuntimeStateLock: vi.fn(),
+      releaseRuntimeStateLock: vi.fn(),
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const githubActionsModule = await import("@/lib/github-actions");
+    const supabaseAdminModule = await import("@/lib/supabase-admin");
+
+    await expect(
+      githubActionsModule.dispatchWorkflow({
+        workflow: "scan",
+        provider: "kis",
+        universe: "both",
+      }),
+    ).rejects.toThrow();
+
+    expect(supabaseAdminModule.claimRuntimeStateLock).not.toHaveBeenCalled();
+    expect(supabaseAdminModule.releaseRuntimeStateLock).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("treats 204 as success", async () => {
     const mockFetch = vi
       .spyOn(globalThis, "fetch")
@@ -151,6 +190,7 @@ describe("dispatchWorkflow", () => {
         provider: "kis",
       }),
     ).rejects.toBeInstanceOf(GitHubDispatchError);
+    expect(releaseRuntimeStateLock).toHaveBeenCalledTimes(1);
   });
 
   it("maps upstream timeout failures to 504", async () => {
@@ -167,6 +207,24 @@ describe("dispatchWorkflow", () => {
       }),
     ).rejects.toMatchObject({
       status: 504,
+    });
+    expect(releaseRuntimeStateLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects duplicate dispatches while the runtime-state lock is active", async () => {
+    vi.mocked(claimRuntimeStateLock).mockResolvedValueOnce({
+      acquired: false,
+      expiresAt: "2099-03-08T00:00:30.000Z",
+    });
+
+    await expect(
+      dispatchWorkflow({
+        workflow: "scan",
+        provider: "kis",
+        universe: "both",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
     });
   });
 });

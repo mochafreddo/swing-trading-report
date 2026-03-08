@@ -2,6 +2,10 @@ import "server-only";
 
 import { getGitHubEnv } from "@/lib/env.server";
 import { FetchTimeoutError, fetchWithTimeout } from "@/lib/fetch-timeout";
+import {
+  claimRuntimeStateLock,
+  releaseRuntimeStateLock,
+} from "@/lib/supabase-admin";
 import type {
   WorkflowDispatchInput,
   WorkflowDispatchResult,
@@ -32,6 +36,13 @@ const GITHUB_DISPATCH_ENV_KEYS = [
   "GITHUB_REPO",
   "GITHUB_PAT",
 ] as const;
+const RUN_DISPATCH_LOCK_PREFIX = "run_dispatch:";
+const DEFAULT_RUN_DISPATCH_LOCK_TTL_SECONDS = 30;
+
+interface DispatchLockHandle {
+  key: string;
+  ownerToken: string;
+}
 
 function hasNonEmptyEnv(name: string): boolean {
   const raw = process.env[name];
@@ -57,6 +68,61 @@ function isRunDispatchEnabled(): boolean {
     return false;
   }
   throw new GitHubDispatchError('RUN_DISPATCH_ENABLED must be "0" or "1"', 500);
+}
+
+function resolveDispatchLockTtlSeconds(): number {
+  const raw = process.env.SAB_RUN_DISPATCH_LOCK_TTL_SECONDS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_RUN_DISPATCH_LOCK_TTL_SECONDS;
+}
+
+function buildDispatchLockKey(input: WorkflowDispatchInput): string {
+  if (input.workflow === "sell") {
+    return `${RUN_DISPATCH_LOCK_PREFIX}sell:${input.provider}`;
+  }
+  return `${RUN_DISPATCH_LOCK_PREFIX}scan:${input.provider}:${input.universe}`;
+}
+
+async function assertRunDispatchNotDuplicate(
+  input: WorkflowDispatchInput,
+): Promise<DispatchLockHandle> {
+  const key = buildDispatchLockKey(input);
+  const ownerToken = crypto.randomUUID();
+  const claimed = await claimRuntimeStateLock({
+    key,
+    now: Date.now(),
+    ttlSeconds: resolveDispatchLockTtlSeconds(),
+    payload: {
+      input,
+      ownerToken,
+      queuedAt: new Date().toISOString(),
+    },
+  });
+  if (!claimed.acquired) {
+    throw new GitHubDispatchError(
+      "An identical workflow dispatch is already queued. Wait a moment and retry.",
+      409,
+    );
+  }
+  return { key, ownerToken };
+}
+
+async function releaseRunDispatchLock(lock: DispatchLockHandle): Promise<void> {
+  try {
+    await releaseRuntimeStateLock(lock);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      JSON.stringify({
+        event: "run_dispatch_lock_release_failed",
+        lock_key: lock.key,
+        error_message: message,
+      }),
+    );
+  }
 }
 
 export function buildWorkflowDispatchRequest(
@@ -98,8 +164,9 @@ export async function dispatchWorkflow(
     );
   }
 
-  const request = buildWorkflowDispatchRequest(input);
   const env = getGitHubEnv();
+  const request = buildWorkflowDispatchRequest(input);
+  const lock = await assertRunDispatchNotDuplicate(input);
 
   let response: Response;
   try {
@@ -116,11 +183,13 @@ export async function dispatchWorkflow(
     });
   } catch (error) {
     if (error instanceof FetchTimeoutError) {
+      await releaseRunDispatchLock(lock);
       throw new GitHubDispatchError(
         `GitHub workflow dispatch timed out after ${error.timeoutMs}ms`,
         504,
       );
     }
+    await releaseRunDispatchLock(lock);
     throw error;
   }
 
@@ -139,6 +208,7 @@ export async function dispatchWorkflow(
         message = `${message}: ${text}`;
       }
     }
+    await releaseRunDispatchLock(lock);
     throw new GitHubDispatchError(message, response.status);
   }
 

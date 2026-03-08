@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from sab.report.entry_report import EntryReportRow, write_entry_report
 
 
@@ -95,3 +96,42 @@ def test_write_entry_report_emits_mixed_market_eval_context(tmp_path: Path) -> N
     }
     assert payload["eval_context"]["market"] == "MIXED"
     assert payload["eval_context"]["markets"] == ["KR", "US"]
+
+
+def test_write_entry_report_uses_artifact_date_for_filename_and_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sab.report import entry_report as entry_reports
+
+    monkeypatch.setattr(
+        entry_reports,
+        "resolve_report_timestamp",
+        lambda artifact_date=None: (
+            "2026-02-26" if artifact_date == "2026-02-26" else "2026-02-27",
+            "2026-02-27 08:00",
+            "KST",
+        ),
+    )
+    rows = [
+        EntryReportRow(
+            ticker="AAPL.NASD",
+            action="ENTER",
+            reasons=["Gap within guard"],
+            signal_close=100.0,
+            entry_price=101.0,
+            gap_pct=0.01,
+            gap_guard_pct=0.02,
+            gap_guard_up_price=102.0,
+            gap_guard_down_price=98.0,
+        )
+    ]
+    out_path = write_entry_report(
+        report_dir=tmp_path.as_posix(),
+        artifact={"provider": "kis", "mode": "PRE_OPEN", "market": "US"},
+        entries=rows,
+        artifact_date="2026-02-26",
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert Path(out_path).name == "2026-02-26.entry.json"
+    assert payload["report_date"] == "2026-02-26"

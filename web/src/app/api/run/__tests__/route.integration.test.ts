@@ -45,6 +45,8 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_OWNER", "octo");
   vi.stubEnv("GITHUB_REPO", "swing-trading-report");
   vi.stubEnv("GITHUB_PAT", "ghp_test_token");
+  vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+  vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
 });
 
 afterEach(() => {
@@ -56,7 +58,30 @@ describe("/api/run integration", () => {
   it("validates payload and dispatches GitHub workflow with expected body", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockImplementation(async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/rest/v1/runtime_state")) {
+          return new Response("", { status: 201 });
+        }
+        if (url.pathname.endsWith("/rest/v1/rpc/claim_runtime_state_lock")) {
+          return new Response(
+            JSON.stringify([
+              {
+                acquired: true,
+                expires_at: "2026-03-08T10:00:30.000Z",
+              },
+            ]),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        if (url.hostname === "api.github.com") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      });
 
     const response = await POST(
       makeRequest({
@@ -78,8 +103,12 @@ describe("/api/run integration", () => {
     expect(payload.workflowFile).toBe("scan.yml");
     expect(payload.ref).toBe("main");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [requestUrlRaw, requestInit] = fetchSpy.mock.calls[0] ?? [];
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const githubCall = fetchSpy.mock.calls.find(([requestUrlRaw]) => {
+      const requestUrl = new URL(String(requestUrlRaw));
+      return requestUrl.hostname === "api.github.com";
+    });
+    const [requestUrlRaw, requestInit] = githubCall ?? [];
     const requestUrl = new URL(String(requestUrlRaw));
     expect(requestUrl.hostname).toBe("api.github.com");
     expect(requestUrl.pathname).toBe(
@@ -119,7 +148,30 @@ describe("/api/run integration", () => {
   it("accepts unsafe request with sec-fetch-site same-origin and no origin", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockImplementation(async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/rest/v1/runtime_state")) {
+          return new Response("", { status: 201 });
+        }
+        if (url.pathname.endsWith("/rest/v1/rpc/claim_runtime_state_lock")) {
+          return new Response(
+            JSON.stringify([
+              {
+                acquired: true,
+                expires_at: "2026-03-08T10:00:30.000Z",
+              },
+            ]),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        if (url.hostname === "api.github.com") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      });
 
     const response = await POST(
       makeRequest(
@@ -136,6 +188,6 @@ describe("/api/run integration", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });

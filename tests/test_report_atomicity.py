@@ -167,7 +167,7 @@ def test_write_report_uses_runtime_timezone_label(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(
         buy_reports,
         "resolve_report_timestamp",
-        lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
+        lambda artifact_date=None: ("2026-02-06", "2026-02-06 09:30", "EST"),
     )
     out_path = write_report(
         report_dir=tmp_path.as_posix(),
@@ -178,6 +178,32 @@ def test_write_report_uses_runtime_timezone_label(tmp_path: Path, monkeypatch) -
     )
     payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
     assert payload["generated_at"] == "2026-02-06 09:30 EST"
+    assert payload["report_date"] == "2026-02-06"
+
+
+def test_write_report_uses_artifact_date_for_filename_and_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        buy_reports,
+        "resolve_report_timestamp",
+        lambda artifact_date=None: (
+            "2026-02-25" if artifact_date == "20260225" else "2026-02-26",
+            "2026-02-26 09:30",
+            "KST",
+        ),
+    )
+    out_path = write_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        universe_count=1,
+        candidates=[{"ticker": "AAPL", "name": "Apple", "price": "190"}],
+        report_type="buy",
+        artifact_date="20260225",
+    )
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert Path(out_path).name == "2026-02-25.buy.json"
+    assert payload["report_date"] == "2026-02-25"
 
 
 def test_write_sell_report_uses_runtime_timezone_label(
@@ -186,7 +212,7 @@ def test_write_sell_report_uses_runtime_timezone_label(
     monkeypatch.setattr(
         sell_reports,
         "resolve_report_timestamp",
-        lambda: ("2026-02-06", "2026-02-06 09:30", "EST"),
+        lambda artifact_date=None: ("2026-02-06", "2026-02-06 09:30", "EST"),
     )
     row = SellReportRow(
         ticker="AAPL.NAS",
@@ -209,6 +235,43 @@ def test_write_sell_report_uses_runtime_timezone_label(
     )
     payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
     assert payload["generated_at"] == "2026-02-06 09:30 EST"
+
+
+def test_write_sell_report_uses_artifact_date_for_filename_and_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        sell_reports,
+        "resolve_report_timestamp",
+        lambda artifact_date=None: (
+            "2026-02-25" if artifact_date == "20260225" else "2026-02-26",
+            "2026-02-26 09:30",
+            "KST",
+        ),
+    )
+    row = SellReportRow(
+        ticker="AAPL.NAS",
+        name="Apple",
+        quantity=1.0,
+        entry_price=150.0,
+        entry_date="2026-01-02",
+        last_price=190.0,
+        pnl_pct=0.2,
+        action="HOLD",
+        reasons=["test"],
+        stop_price=170.0,
+        target_price=210.0,
+        currency="USD",
+    )
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=[row],
+        artifact_date="20260225",
+    )
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert Path(out_path).name == "2026-02-25.sell.json"
+    assert payload["report_date"] == "2026-02-25"
 
 
 def test_write_report_emits_issue_split_fields(tmp_path: Path) -> None:

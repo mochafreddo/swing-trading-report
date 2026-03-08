@@ -8,7 +8,7 @@ export interface ReportsInitialState {
   query: string;
   appliedQuery: string;
   items: ReportListItem[];
-  total: number;
+  total: number | null;
   searched: number;
   truncated: boolean;
   searchWindow: number;

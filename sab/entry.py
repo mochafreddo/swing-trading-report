@@ -868,12 +868,21 @@ def run_entry(
             cfg, provider=normalized_provider, mode=normalized_mode
         ),
     )
+    artifact_dates = [
+        value
+        for value in [
+            entry_session_date,
+            *(entry_session_date_by_market or {}).values(),
+        ]
+        if value
+    ]
 
     out_path = write_entry_report(
         report_dir=cfg.report_dir,
         artifact=artifact,
         entries=rows,
         run_meta=run_meta,
+        artifact_date=max(artifact_dates) if artifact_dates else None,
     )
     missing_price_ratio = float(entry_summary["missing_entry_price_ratio"])
     fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()

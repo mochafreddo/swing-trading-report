@@ -79,7 +79,7 @@ describe("/api/reports integration", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload.total).toBe(1);
+    expect(payload.total).toBeNull();
     expect(payload.items[0]).toEqual({
       key: "2026/02/2026-02-20.buy.json",
       type: "buy",
@@ -96,7 +96,7 @@ describe("/api/reports integration", () => {
     expect(requestUrl.searchParams.get("order")).toBe(
       "report_date.desc,duplicate_index.desc,report_key.desc",
     );
-    expect(requestUrl.searchParams.get("limit")).toBe("2");
+    expect(requestUrl.searchParams.get("limit")).toBe("3");
   });
 
   it("returns 400 before hitting Supabase when query validation fails", async () => {

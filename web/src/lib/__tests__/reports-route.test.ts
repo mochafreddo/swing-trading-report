@@ -123,8 +123,12 @@ describe("GET /api/reports", () => {
       ],
       total: 3,
       fetchedCount: 2,
-      hasMore: false,
-      nextCursor: null,
+      hasMore: true,
+      nextCursor: {
+        report_date: "2026-02-13",
+        duplicate_index: 0,
+        report_key: BUY_KEY_13,
+      },
     });
 
     const response = await GET(makeRequest("type=buy&limit=2"));
@@ -143,16 +147,18 @@ describe("GET /api/reports", () => {
     expect(listMock).toHaveBeenCalledWith({
       type: "buy",
       limit: 2,
+      includeTotal: false,
+      lookahead: true,
     });
     expect(payload.items.map((item) => item.key)).toEqual([
       BUY_KEY_14,
       BUY_KEY_13,
     ]);
     expect(payload.items[0].generatedAt).toBeUndefined();
-    expect(payload.total).toBe(3);
+    expect(payload.total).toBeNull();
     expect(payload.searched).toBe(0);
     expect(payload.searchWindow).toBe(100);
-    expect(payload.truncated).toBe(false);
+    expect(payload.truncated).toBe(true);
     expect(payload.warnings).toEqual([]);
   });
 

@@ -101,6 +101,7 @@ class _ScanRuntime:
     system_issues: list[str] = field(default_factory=list)
     screen_outs: list[str] = field(default_factory=list)
     market_data: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    raw_market_data: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     ticker_data_source: dict[str, str] = field(default_factory=dict)
     cache_hint: str | None = None
     fatal_failure: bool = False

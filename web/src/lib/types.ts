@@ -20,7 +20,7 @@ export interface ReportSearchWarning {
 
 export interface ReportsListResponse {
   items: ReportListItem[];
-  total: number;
+  total: number | null;
   searched: number;
   searchWindow: number;
   truncated: boolean;

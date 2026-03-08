@@ -115,11 +115,12 @@ def write_sell_report(
     sell_mode_note: str | None = None,
     quantity_digits: int = 6,
     run_meta: dict[str, Any] | None = None,
+    artifact_date: str | None = None,
 ) -> str:
     del quantity_digits  # Legacy formatting option kept for API compatibility.
 
     _ensure_dir(report_dir)
-    today, now_str, tz_label = resolve_report_timestamp()
+    today, now_str, tz_label = resolve_report_timestamp(artifact_date=artifact_date)
 
     rows = [asdict(row) for row in evaluated]
     failures_list = list(failures or [])

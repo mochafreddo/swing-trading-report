@@ -333,6 +333,26 @@ describe("login-throttle", () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 
+  it("defaults to strict failure mode when env is unset", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "supabase unavailable" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const key = buildLoginThrottleKey("sab");
+
+    await expect(
+      assertLoginAttemptAllowed(key, 1_700_000_000_000),
+    ).rejects.toThrow("Failed to fetch runtime state");
+  });
+
   it("keeps strict failure mode when supabase is unavailable", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");

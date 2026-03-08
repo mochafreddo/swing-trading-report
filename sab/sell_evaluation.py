@@ -353,6 +353,14 @@ def _write_sell_report(
         eval_index_policy="choose_eval_index:v1",
         config_snapshot=config_snapshot,
     )
+    artifact_dates = sorted(
+        {
+            str(result.eval_date).strip()
+            for result in results
+            if getattr(result, "eval_date", None)
+        }
+    )
+    artifact_date = artifact_dates[-1] if artifact_dates else None
 
     return write_sell_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,
@@ -367,4 +375,5 @@ def _write_sell_report(
         sell_mode=runtime.cfg.sell_mode,
         sell_mode_note=_build_sell_mode_note(runtime.cfg),
         run_meta=run_meta,
+        artifact_date=artifact_date,
     )
