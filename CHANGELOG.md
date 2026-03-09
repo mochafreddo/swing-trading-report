@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.6](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.5...v1.10.6) (2026-03-09)
+
+
+### Bug Fixes
+
+* **renovate:** 자동 머지 경로를 Renovate로 고정 ([97605c3](https://github.com/mochafreddo/swing-trading-report/commit/97605c34f787dc98275a00b6cee24f26b6ea673a))
+
 ## [1.10.5](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.4...v1.10.5) (2026-03-08)
 
 
