@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.6...v1.11.0) (2026-03-10)
+
+
+### Features
+
+* **web:** 운영 콘솔 UI를 개편한다 ([032e97c](https://github.com/mochafreddo/swing-trading-report/commit/032e97c5bf6c1d8dbe02b90e0486c9fe18c1a238))
+
 ## [1.10.6](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.5...v1.10.6) (2026-03-09)
 
 
