@@ -26,32 +26,67 @@
   display: grid;
   gap: var(--space-1);
   font-size: 0.875rem;
-  color: var(--ink-muted);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .form input,
 .form textarea,
 .form button,
 .wrapper section button {
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel) 74%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
   color: var(--ink);
-  padding: var(--space-2) var(--space-3);
-  min-height: 44px;
-  font-family: var(--font-body), sans-serif;
+  padding: 0 var(--space-3);
+  min-height: 48px;
+  font: inherit;
+  font-size: 1rem;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.1s ease;
 }
 
 .form input:focus-visible,
 .form textarea:focus-visible,
 .form button:focus-visible,
 .wrapper section button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  border-color: var(--line-focus);
+}
+
+.form button,
+.wrapper section button {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.form button:hover:not(:disabled),
+.wrapper section button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.form button:active:not(:disabled),
+.wrapper section button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.form button:disabled,
+.wrapper section button:disabled {
+  opacity: 0.65;
+  cursor: progress;
 }
 
 .form textarea {
-  min-height: calc(44px * 2);
+  min-height: calc(48px * 2);
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
 }
 
 .rowTwo {
