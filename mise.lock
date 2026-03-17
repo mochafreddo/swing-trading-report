@@ -81,3 +81,9 @@ version = "0.10.10"
 backend = "aqua:astral-sh/uv"
 "platforms.linux-x64" = { checksum = "sha256:74544e8755fbc27559e22e29fd561bdc48f91b8bd8323e760a1130f32433bea4", url = "https://github.com/astral-sh/uv/releases/download/0.10.10/uv-x86_64-unknown-linux-musl.tar.gz"}
 "platforms.macos-arm64" = { checksum = "sha256:8a09f0ef51ee7f7170731b4cb8bde5bf9ba6da5304f49a7df6cdab42a1f37b5d", url = "https://github.com/astral-sh/uv/releases/download/0.10.10/uv-aarch64-apple-darwin.tar.gz"}
+
+[[tools.uv]]
+version = "0.10.11"
+backend = "aqua:astral-sh/uv"
+"platforms.linux-x64" = { checksum = "sha256:d78246139dc6cf3ed6d03c84da762686bced7ad1de67977ee372a45b95a1f6d0", url = "https://github.com/astral-sh/uv/releases/download/0.10.11/uv-x86_64-unknown-linux-musl.tar.gz"}
+"platforms.macos-arm64" = { checksum = "sha256:437a7d498dd6564d5bf986074249ba1fc600e73da55ae04d7bd4c24d5f149b95", url = "https://github.com/astral-sh/uv/releases/download/0.10.11/uv-aarch64-apple-darwin.tar.gz"}
