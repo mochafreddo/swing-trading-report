@@ -7,7 +7,7 @@ lockfile = true
 # - web/Dockerfile (Node.js version)
 # - web/package.json#packageManager (pnpm version)
 python = "3.14"
-uv = "0.10.10"
+uv = "0.10.11"
 node = "24.14.0"
 pnpm = "10.32.1"
 just = "1.47.1"
