@@ -34,7 +34,6 @@ permissions:
 env:
   UV_CACHE_DIR: .uv-cache
   PYTHONUNBUFFERED: "1"
-  MISE_PYTHON_PRECOMPILED_FLAVOR: install_only_stripped
 
 jobs:
   scan:

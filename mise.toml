@@ -1,6 +1,9 @@
 [settings]
 lockfile = true
 
+[settings.python]
+precompiled_flavor = "install_only_stripped"
+
 [tools]
 # Keep in sync with:
 # - pyproject.toml (requires-python, ruff target-version, mypy python_version)

@@ -24,9 +24,6 @@ on:
 permissions:
   contents: read
 
-env:
-  MISE_PYTHON_PRECOMPILED_FLAVOR: install_only_stripped
-
 jobs:
   cleanup:
     runs-on: ubuntu-latest
