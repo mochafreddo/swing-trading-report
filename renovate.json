@@ -143,6 +143,14 @@
       ],
       "enabled": true,
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "mise toolchain updates require manual review",
+      "matchManagers": [
+        "mise"
+      ],
+      "automerge": false,
+      "dependencyDashboardApproval": true
     }
   ]
 }
