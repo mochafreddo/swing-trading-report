@@ -11,7 +11,7 @@ precompiled_flavor = "install_only_stripped"
 # - web/package.json#packageManager (pnpm version)
 python = "3.14"
 uv = "0.11.1"
-node = "24.14.1"
+node = "24.14.0"
 pnpm = "10.32.1"
 just = "1.48.0"
 direnv = "2.37.1"
