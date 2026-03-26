@@ -39,6 +39,8 @@
 - Supabase(권장):
   - 보유 목록/리포트/실행 이력은 Supabase(Postgres/Storage)를 단일 소스로 사용합니다.
   - GitHub Actions 런너가 자동 실행할 때도 동일한 Supabase를 사용합니다.
+  - 로컬 `supabase/config.toml`은 idle Docker 사용량 절감을 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화합니다.
+  - 기본 앱 경로는 Postgres/Storage/runtime_state만 사용합니다. Studio/Realtime/메일 테스트가 필요한 경우에만 해당 서비스를 임시로 다시 켭니다.
 
 ## 웹 UI 로컬 실행(Next.js + Docker)
 
@@ -47,6 +49,7 @@
   - 당분간 운영 범위는 `localhost/127.0.0.1` 단일 사용자 노출만 지원합니다(외부 공개 배포 비대상).
   - direct 실행에서 `SAB_ENFORCE_LOCAL_REQUEST=0`와 non-loopback bind를 함께 쓰면 시작 단계에서 차단됩니다.
   - Docker Compose의 `WEB_BIND_HOST=0.0.0.0`는 컨테이너 내부 바인딩일 뿐이며, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`이면 지원 경로입니다.
+  - 로컬 Supabase는 idle 리소스 절감을 위해 최소 프로필(`realtime`, `studio`, `inbucket`, `analytics` 비활성화)을 기본값으로 둡니다.
 - 전환 직후 1회 정리:
   - `docker compose down --remove-orphans && docker compose up -d --build web`
 - 일반 재기동:

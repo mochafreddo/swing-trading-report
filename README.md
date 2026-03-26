@@ -10,6 +10,12 @@
   - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보) 전송
   - 슬랙: 기존 요약 포맷 유지
 
+로컬 Supabase 기본 프로필:
+
+- 이 저장소의 `supabase/config.toml`은 idle Docker CPU/메모리를 줄이기 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화합니다.
+- 앱 경로는 Postgres/Storage/runtime_state 중심이며, 위 서비스는 이 저장소의 기본 로컬 개발 흐름에 필요하지 않습니다.
+- Studio/Realtime/메일 테스트가 필요한 디버깅 세션에서만 `supabase/config.toml`의 해당 `enabled` 값을 일시적으로 `true`로 바꿔 사용하세요.
+
 상세 문서 인덱스는 `docs/README.md`, 배경/요구사항은 `docs/PRD.md`를 참고하세요.
 
 ## Requirements
@@ -91,6 +97,7 @@
 
 - 웹 UI 로컬 실행(Next.js + Docker)
   - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
+  - 로컬 Supabase는 idle 리소스 절감을 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화한 최소 프로필을 사용합니다.
   - 전환 직후 1회 정리: `docker compose down --remove-orphans && docker compose up -d --build web`
   - 일반 재기동: `docker compose up -d --build web`
   - 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
