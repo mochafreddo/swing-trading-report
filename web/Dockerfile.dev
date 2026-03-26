@@ -1,4 +1,4 @@
-FROM node:24.14.0-alpine3.22@sha256:76db75ca7e7da9148ae42c92d9be12d12a8d7b03e171f18339355d8078d644a0 AS base
+FROM node:24.14.1-alpine3.22@sha256:eb37f58646a901dc7727cf448cae36daaefaba79de33b5058dab79aa4c04aefb AS base
 WORKDIR /app
 
 RUN corepack enable
