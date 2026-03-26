@@ -151,6 +151,14 @@
       ],
       "automerge": false,
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Node 런타임 버전은 Docker base image까지 함께 바뀌므로 자동 머지 금지",
+      "matchDepNames": [
+        "node"
+      ],
+      "automerge": false,
+      "dependencyDashboardApproval": true
     }
   ]
 }
