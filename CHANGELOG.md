@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.0...v1.11.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* **ci:** mise 파이썬 lock 설정을 정합화 ([7670aa7](https://github.com/mochafreddo/swing-trading-report/commit/7670aa75f0d6db551c9fd1c86e4b084ee2d0aef7))
+* **ci:** mise 파이썬 프리컴파일 flavor를 고정 ([d913574](https://github.com/mochafreddo/swing-trading-report/commit/d913574a5cfb77ae293347ddd7596b9c5154c04c))
+
 ## [1.11.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.10.6...v1.11.0) (2026-03-10)
 
 
