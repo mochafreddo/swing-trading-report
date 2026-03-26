@@ -19,10 +19,10 @@ Make the smallest safe change that fully solves the problem.
 
 ### Understand Before Changing
 
-- 변경 전 짧은 problem brief를 남깁니다.
+- 비사소한 변경, 다중 파일 변경, 위험도가 있는 변경 전에는 짧은 problem brief를 남깁니다.
 - problem brief에는 최소한 **Context**, **Problem**, **Goal**, **Non-Goals**, **Constraints**를 포함합니다.
 - 다중 파일, 위험도가 높은 변경, 아키텍처 변경은 더 자세한 1-pager로 확장합니다.
-- 수정 전에 1-3줄 impact note를 남깁니다.
+- 비사소한 변경 전에는 1-3줄 impact note를 남깁니다.
 - impact note에는 무엇이 바뀌는지, 무엇이 깨질 수 있는지, 어떤 테스트/문서를 함께 바꿔야 하는지를 포함합니다.
 - 영향을 받는 파일은 수정 전에 처음부터 끝까지 읽습니다.
 - 관련 정의, 참조, 호출 경로, 테스트, 설정, feature flag, 문서를 추적합니다.
@@ -75,7 +75,7 @@ Make the smallest safe change that fully solves the problem.
 
 ### Decision-Making
 
-- 비사소한 변경은 최소 두 가지 이상 실행 가능한 옵션을 비교합니다.
+- 복잡하거나 위험도가 있는 변경은 가능하면 최소 두 가지 이상 실행 가능한 옵션을 비교합니다.
 - 각 옵션에 대해 **pros**, **cons**, **risks**를 한 줄씩 남깁니다.
 - 목표를 안전하게 만족하는 가장 단순한 해법을 선택합니다.
 
@@ -157,8 +157,7 @@ Make the smallest safe change that fully solves the problem.
 
 - 도구체인 동기화: `mise install`
 - 도구 버전 변경 시 lock 갱신: `mise lock --platform linux-x64,macos-arm64 && mise install`
-- direnv zsh 훅(1회): `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc`
-- direnv 프로젝트 허용(최초 1회): `direnv allow .`
+- `direnv allow .` 는 로컬 신뢰 결정이므로 자동화 에이전트가 임의로 실행하지 않습니다. 필요하면 사용자 승인 후 1회 수행합니다.
 - direnv는 `.env`를 자동 로드하지 않습니다(`.envrc.local`만 로드).
 - 시크릿/개인 오버라이드는 `.envrc.local`에만 저장하고 커밋하지 않습니다.
 
@@ -216,8 +215,9 @@ Make the smallest safe change that fully solves the problem.
 
 ### Context7 MCP
 
-- 라이브러리/API 문서, 코드 생성, 설정/구성 단계가 필요할 때 사용자가 명시적으로 요청하지 않아도 항상 Context7 MCP를 사용합니다.
-- `resolve-library-id`로 라이브러리 ID를 먼저 조회한 뒤 `query-docs`로 최신 문서를 가져옵니다.
+- 외부 라이브러리/API 문서, 코드 생성, 설정/구성 단계가 필요할 때는 Context7 MCP를 우선 검토합니다.
+- 단, 공식 문서나 다른 primary source가 더 적합하거나 상위 지침에 별도 소스 규칙이 있으면 그 규칙을 우선합니다.
+- Context7을 사용할 때는 `resolve-library-id`로 라이브러리 ID를 먼저 조회한 뒤 `query-docs`로 최신 문서를 가져옵니다.
 
 ### 커밋
 
@@ -234,6 +234,6 @@ Make the smallest safe change that fully solves the problem.
 - 본문 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 않습니다(문자 그대로 `\n`이 저장될 수 있음).
 - 줄바꿈 권장 방식: zsh의 `$'...'` 인용 사용. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
 - 줄바꿈 대안: `git commit`으로 편집기를 열어 작성합니다.
-- 이미 푸시한 커밋 메시지를 고칠 때는 `git rebase -i`로 `reword` 후 `git push --force-with-lease`를 사용합니다(브랜치 정책/협업 상황 확인).
+- 이미 푸시한 커밋 메시지 정정이나 히스토리 재작성은 사람 주도 작업으로 간주합니다. 브랜치 정책/협업 상황을 먼저 확인하고, 자동화 에이전트는 interactive git 대신 비대화식 방법을 우선하며 force push 계열은 사용자 요청이 있을 때만 수행합니다.
 - `git status`, `git add`, `git commit` 같은 git 명령은 `/bin/zsh -lc` 같은 셸 래퍼 없이 직접 실행합니다.
 - `git push`는 권한 상승(`sandbox_permissions="require_escalated"`)으로 실행합니다.
