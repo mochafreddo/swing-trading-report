@@ -21,9 +21,9 @@ Make the smallest safe change that fully solves the problem.
 
 - 비사소한 변경, 다중 파일 변경, 위험도가 있는 변경 전에는 짧은 problem brief를 남깁니다.
 - problem brief에는 최소한 **Context**, **Problem**, **Goal**, **Non-Goals**, **Constraints**를 포함합니다.
-- 다중 파일, 위험도가 높은 변경, 아키텍처 변경은 더 자세한 1-pager로 확장합니다.
+- 다중 파일, 고위험 변경, 아키텍처 변경은 더 자세한 1-pager로 확장합니다.
 - 비사소한 변경 전에는 1-3줄 impact note를 남깁니다.
-- impact note에는 무엇이 바뀌는지, 무엇이 깨질 수 있는지, 어떤 테스트/문서를 함께 바꿔야 하는지를 포함합니다.
+- impact note에는 무엇이 바뀌는지, 무엇이 깨질 수 있는지, 함께 바꿔야 할 테스트/문서를 포함합니다.
 - 영향을 받는 파일은 수정 전에 처음부터 끝까지 읽습니다.
 - 관련 정의, 참조, 호출 경로, 테스트, 설정, feature flag, 문서를 추적합니다.
 - 심볼의 입력, 출력, 불변식, 부작용을 이해하기 전에는 수정하지 않습니다.
@@ -59,18 +59,16 @@ Make the smallest safe change that fully solves the problem.
 
 - 런타임 동작, 공개 계약, 리스크 판단, 데이터 처리 결과를 바꾸는 새 코드는 테스트를 동반해야 합니다.
 - 버그 수정에는 회귀 테스트가 필요하며, 가능하면 먼저 실패하도록 작성합니다.
-- 테스트는 결정적이고 서로 독립적이어야 합니다.
-- 외부 시스템은 fake, mock, contract test로 대체합니다.
+- 테스트는 결정적이고 서로 독립적이어야 하며, 외부 시스템은 fake, mock, contract test로 대체합니다.
 - 동작이 바뀌면 테스트와 관련 문서를 같은 변경에 포함합니다.
 - 기능 추가/버그 수정은 기본적으로 Red/Green/Refactor 사이클을 따릅니다.
 - Red: 먼저 실패하는 테스트를 작성하고 실패를 확인한 뒤 구현을 시작합니다.
 - Green: 테스트를 통과시키는 최소한의 코드만 작성합니다.
 - Refactor: 테스트가 통과한 상태에서만 중복 제거와 구조 개선을 수행합니다.
-- 버그 수정 시 재현 테스트 없이 코드부터 수정하지 않습니다.
-- 문서, 설정 설명, skill/plugin metadata, 정적 manifest 같은 비런타임 변경은 실행 테스트가 항상 필요한 것은 아니며, 링크/구조/스키마/정적 검증처럼 변경 범위에 맞는 검증을 우선합니다.
-- 위 비런타임 변경이더라도 실제 로딩 경로, 계약 파일, 자동화 입력으로 사용된다면 최소한의 구조 검증 테스트 추가를 우선 검토합니다.
-- 품질 게이트는 변경 범위에 비례하게 적용합니다.
-- 전략 로직, API, 스키마, 리스크 경계, 빌드/배포 경로 변경은 사이클 완료 전 관련 품질 게이트를 모두 통과합니다.
+- 버그 수정 시 재현 테스트 없이 코드부터 수정하지 않습니다. 불가피하면 이유를 남깁니다.
+- 문서, 설정 설명, skill/plugin metadata, 정적 manifest 같은 비런타임 변경은 실행 테스트가 항상 필요한 것은 아니며, 링크/구조/스키마 검증처럼 변경 범위에 맞는 정적 검증을 우선합니다.
+- 비런타임 변경이라도 실제 로딩 경로, 계약 파일, 자동화 입력으로 사용된다면 최소한의 구조 검증 테스트 추가를 우선 검토합니다.
+- 품질 게이트는 변경 범위에 비례하게 적용합니다. 전략 로직, API, 스키마, 리스크 경계, 빌드/배포 경로 변경은 사이클 완료 전 관련 게이트를 모두 통과합니다.
 - 문서/metadata 전용 변경은 관련 정적 검증 또는 타깃 테스트로 충분할 수 있으며, 전체 게이트를 생략했다면 이유를 남깁니다.
 - 권장: `just quality`
 - fallback: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`, `UV_CACHE_DIR=.uv-cache uv run ruff check .`, `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
@@ -214,8 +212,8 @@ Make the smallest safe change that fully solves the problem.
 - `workflow_audit`의 `actionlint`는 `shellcheck` 스타일 경고(`SC2129`)도 실패로 처리될 수 있습니다.
 - GitHub Actions `run: |`에서 heredoc(`cat <<'EOF'`) 사용 시 종료 토큰(`EOF`)은 줄 맨 앞(무들여쓰기)이어야 합니다. 들여쓰기가 들어가면 `SC1039`, `SC1072`, `SC1073`로 실패할 수 있습니다.
 - 단순 문자열 파일 생성은 heredoc 대신 `printf`를 우선 사용합니다.
-- 워크플로 문법/쉘 린트는 로컬에서 다음 명령으로 재현합니다: `docker run --rm -v "$PWD":/work -w /work rhysd/actionlint:latest`
 - 로컬에서 `python` 실행이 불안정할 수 있으므로, 저장소 작업 스크립트는 `uv run python ...`을 우선 사용합니다.
+- 워크플로 문법/쉘 린트는 로컬에서 다음 명령으로 재현합니다: `docker run --rm -v "$PWD":/work -w /work rhysd/actionlint:latest`
 
 ### Context7 MCP
 
@@ -225,19 +223,12 @@ Make the smallest safe change that fully solves the problem.
 
 ### 커밋
 
-- Conventional Commits 형식을 사용합니다.
-- 의미 단위로 커밋합니다.
-- 하나의 커밋에는 하나의 의도만 담습니다.
-- 서로 다른 관심사가 섞여 있으면 커밋을 분리합니다.
-- 모호한 커밋 메시지는 피합니다.
+- Conventional Commits 형식을 사용하고, 하나의 커밋에는 하나의 의도만 담습니다.
+- 서로 다른 관심사가 섞여 있으면 커밋을 분리하고, 모호한 커밋 메시지는 피합니다.
 - 커밋 메시지의 제목과 본문은 한글로 작성합니다.
-- 커밋 메시지 기본 형식은 제목 1줄(`type(scope): 요약`) + 빈 줄 1줄 + 본문(필요한 경우)입니다.
-- 본문은 문장마다 줄을 띄우지 않고 문단 단위로 작성합니다.
-- CLI에서 `-m`를 문장별로 여러 번 쓰지 않습니다.
-- 권장 형식: `git commit -m "제목" -m "본문 전체"`
-- 본문 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 않습니다(문자 그대로 `\n`이 저장될 수 있음).
-- 줄바꿈 권장 방식: zsh의 `$'...'` 인용 사용. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
-- 줄바꿈 대안: `git commit`으로 편집기를 열어 작성합니다.
+- 기본 형식은 제목 1줄(`type(scope): 요약`) + 빈 줄 1줄 + 본문(필요한 경우)이며, 본문은 문장마다 줄을 띄우지 않고 문단 단위로 작성합니다.
+- CLI에서 `-m`를 문장별로 여러 번 쓰지 않습니다. 권장 형식은 `git commit -m "제목" -m "본문 전체"`입니다.
+- 본문 줄바꿈이 필요하면 `"\n"`을 더블쿼트 안에 넣지 말고 zsh의 `$'...'` 인용이나 편집기를 사용합니다. 예: `git commit -m "chore(ci): ..." -m $'- 항목1\n- 항목2'`
 - 이미 푸시한 커밋 메시지 정정이나 히스토리 재작성은 사람 주도 작업으로 간주합니다. 브랜치 정책/협업 상황을 먼저 확인하고, 자동화 에이전트는 interactive git 대신 비대화식 방법을 우선하며 force push 계열은 사용자 요청이 있을 때만 수행합니다.
 - `git status`, `git add`, `git commit` 같은 git 명령은 `/bin/zsh -lc` 같은 셸 래퍼 없이 직접 실행합니다.
 - `git push`는 권한 상승(`sandbox_permissions="require_escalated"`)으로 실행합니다.
