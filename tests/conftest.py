@@ -5,6 +5,21 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
+_ISOLATED_REPORT_UPLOAD_ENV_VARS = (
+    "GITHUB_ACTIONS",
+    "SAB_UPLOAD_REPORTS",
+    "SUPABASE_URL",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_report_upload_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests deterministic regardless of ambient CI/upload environment."""
+    for name in _ISOLATED_REPORT_UPLOAD_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
 
 @pytest.fixture
 def isolated_root_logger() -> Iterator[logging.Logger]:
