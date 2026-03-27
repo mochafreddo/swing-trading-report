@@ -90,7 +90,7 @@
 - `holdings` ticker 계약은 앱/DB 모두 동일하며, `.US` 같은 모호 suffix는 허용되지 않습니다. 기존 `.US` row가 있으면 관련 Supabase migration은 수동 정리 전까지 실패합니다.
 - 추가매수 API(`POST /api/holdings/[ticker]/add-buy`)는 UUID 형식 `Idempotency-Key` 헤더를 필수로 요구하며, 동일 키-다른 payload는 `409`(`code=IDEMPOTENCY_KEY_PAYLOAD_MISMATCH`)로 차단합니다.
 - `sab sell`/`sell.yml`은 `quantity>0` 활성 보유분만 평가합니다.
-- 멱등 이벤트 정리 스케줄: `holdings-add-buy-events-cleanup` (`30 3 * * *`, UTC)에서 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
+- 멱등 이벤트 정리 스케줄: `holdings-add-buy-events-cleanup` (`30 3 * * `*, UTC)에서 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
   - 정리 대상: `processed=true AND created_at < now()-90d` 또는 `processed=false AND updated_at < now()-90d`
   - fail-closed 정책: `pg_cron` 미활성 환경에서는 스케줄 보강 마이그레이션이 실패하도록 강제합니다(무음 누락 방지).
 - 스케줄 점검 SQL(Supabase SQL Editor):
@@ -101,24 +101,24 @@
   - 최근 실행 이력: `select runid, jobid, status, return_message, start_time, end_time from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'holdings-add-buy-events-cleanup' limit 1) order by start_time desc limit 20;`
 - Supabase 반영 체크리스트(원격 프로젝트):
   1. 백업/복구 경로 확인
-     - `supabase db dump --linked --schema public --file backup-before-add-buy-cleanup.sql`
+    - `supabase db dump --linked --schema public --file backup-before-add-buy-cleanup.sql`
   2. 링크 상태 확인(최초 1회 또는 프로젝트 변경 시)
-     - `supabase link --project-ref <PROJECT_REF>`
+    - `supabase link --project-ref <PROJECT_REF>`
   3. 마이그레이션 차이 점검
-     - `supabase migration list`
-     - 이번 릴리스에 포함되는 파일:
-       - `supabase/migrations/20260304002000_add_holdings_add_buy_idempotency.sql`
-       - `supabase/migrations/20260304003000_schedule_add_buy_event_cleanup_cron.sql`
-       - `supabase/migrations/20260304004000_expand_add_buy_cleanup_to_stale_unprocessed.sql`
-       - `supabase/migrations/20260304005000_require_add_buy_cleanup_cron.sql`
+    - `supabase migration list`
+    - 이번 릴리스에 포함되는 파일:
+      - `supabase/migrations/20260304002000_add_holdings_add_buy_idempotency.sql`
+      - `supabase/migrations/20260304003000_schedule_add_buy_event_cleanup_cron.sql`
+      - `supabase/migrations/20260304004000_expand_add_buy_cleanup_to_stale_unprocessed.sql`
+      - `supabase/migrations/20260304005000_require_add_buy_cleanup_cron.sql`
   4. 적용 전 dry-run
-     - `supabase db push --dry-run`
+    - `supabase db push --dry-run`
   5. 원격 적용
-     - `supabase db push`
+    - `supabase db push`
   6. 적용 후 즉시 검증(SQL Editor)
-     - 함수 정의 확인: `select pg_get_functiondef('public.cleanup_holdings_add_buy_events(interval, integer)'::regprocedure);`
-     - 정리 대상 건수 확인: `select count(*) from public.holdings_add_buy_events where (processed = true and created_at < now() - interval '90 days') or (processed = false and updated_at < now() - interval '90 days');`
-     - 크론 등록/활성 확인: `select jobid, jobname, schedule, command, active from cron.job where jobname = 'holdings-add-buy-events-cleanup';`
+    - 함수 정의 확인: `select pg_get_functiondef('public.cleanup_holdings_add_buy_events(interval, integer)'::regprocedure);`
+    - 정리 대상 건수 확인: `select count(*) from public.holdings_add_buy_events where (processed = true and created_at < now() - interval '90 days') or (processed = false and updated_at < now() - interval '90 days');`
+    - 크론 등록/활성 확인: `select jobid, jobname, schedule, command, active from cron.job where jobname = 'holdings-add-buy-events-cleanup';`
 - (선택) `holdings.yaml` import/export는 **v1.1 미구현**이며, v1.2에서 초기 이관/백업 용도로 도입 예정입니다.
 
 ## 자주 쓰는 실행
@@ -143,7 +143,6 @@
   - 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
   - 접속(dev): `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
   - 또는 웹 디렉터리에서 직접 실행: `pnpm install && pnpm run dev`
-
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
   - 알림은 자동 실행일 때만 전송합니다.
@@ -199,7 +198,7 @@
 
 ## 문제 해결
 
-- 토큰 오류/401: `KIS_APP_KEY/SECRET/BASE_URL` 확인, `data/kis_token_*` 삭제로 강제 갱신(24시간 정책 유의)
+- 토큰 오류/401: `KIS_APP_KEY/SECRET/BASE_URL` 확인, `data/kis_token_`* 삭제로 강제 갱신(24시간 정책 유의)
 - 레이트리밋 `EGW00201`: `KIS_MIN_INTERVAL_MS`(예: 500–1000) 증가 후 재시도. 스크리너 TTL도 호출 수 절감에 도움
 - 히스토리 부족: `MIN_HISTORY_BARS=200+` 권장, 누적 수집으로 보완. 신규상장 등은 기준 미달 가능
 - US 심볼: `SYMBOL.NAS/NYS/AMS`(또는 동의어 `NASDAQ/NYSE/AMEX`)처럼 거래소를 명시해 사용. `.US`는 입력에서 허용되지 않음. US에는 PyKRX 폴백이 적용되지 않음
@@ -216,3 +215,4 @@
 
 - RS 벤치마크: `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 시장별 benchmark ticker를 지정하면, scan이 adjusted benchmark 시계열을 직접 조회해 `rs_benchmark_return`을 동적으로 계산합니다.
 - Entry 체크: buy report의 `entry_reference_close_raw_value`가 있으면 raw/live 가격 기준으로 자동 gap guard를 적용하고, reference close가 없거나 basis가 없는 레거시 candidate는 `REVIEW`로 처리합니다.
+
