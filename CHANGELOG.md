@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.1...v1.11.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* **renovate:** Node 런타임 자동 머지 차단 ([9e58923](https://github.com/mochafreddo/swing-trading-report/commit/9e58923392ceff4248722613cce5283f17d7e331))
+* **web:** 깨진 Node Alpine 다이제스트 롤백 ([c5199f3](https://github.com/mochafreddo/swing-trading-report/commit/c5199f3edfb4a8b2342fd90ba8eac605147b72be))
+
 ## [1.11.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.0...v1.11.1) (2026-03-26)
 
 
