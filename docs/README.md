@@ -5,7 +5,11 @@
 ## 제품/요구사항
 
 - [PRD](PRD.md)
+
+## 기능 설계
+
 - [Holdings 추가매수 입력 설계](holdings-add-buy.md)
+- [Holdings 티커 검색/선택 UX 설계](holdings-ticker-lookup.md)
 
 ## 운영/설정
 
@@ -16,18 +20,21 @@
 ## 아키텍처
 
 - [시스템 아키텍처 개요](ARCHITECTURE.md)
+- [ADR 인덱스](adr/README.md)
 
 ## 전략/로직
 
 - [Swing 핵심 로직 설계(신호/리스크)](STRATEGY.md)
 
+## 버전 스펙/계약
+
+- [Spec v1.1 계약 초안](spec-v1.1.md)
+- [Spec v1.3 다음 단계 초안](spec-v1.3.md)
+
 ## 거버넌스
 
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)
-
-## 아키텍처 결정
-
-- [ADR 인덱스](adr/README.md)
+- `governance/*.json` 파일은 적용 payload/snapshot 성격의 운영 아티팩트입니다.
 
 ## 리뷰
 
