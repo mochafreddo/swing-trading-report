@@ -44,7 +44,7 @@ export function ReportsList({
 }: ReportsListProps) {
   return (
     <>
-      <header className="panel">
+      <header className={`panel ${styles.sidebarPanel}`}>
         <div className={styles.listHeaderRow}>
           <h2 className="panelTitle">Reports</h2>
           <button
@@ -111,12 +111,20 @@ export function ReportsList({
 
       <ul className={styles.list} aria-busy={loadingList}>
         {loadingList && (
-          <li className="panel subtle" role="status" aria-live="polite">
+          <li
+            className={`panel subtle ${styles.listMessage}`}
+            role="status"
+            aria-live="polite"
+          >
             목록 로딩 중…
           </li>
         )}
         {!loadingList && items.length === 0 && (
-          <li className="panel subtle" role="status" aria-live="polite">
+          <li
+            className={`panel subtle ${styles.listMessage}`}
+            role="status"
+            aria-live="polite"
+          >
             조건에 맞는 리포트가 없습니다.
           </li>
         )}

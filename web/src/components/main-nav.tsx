@@ -45,23 +45,25 @@ export function MainNav() {
 
   return (
     <div className={styles.container}>
-      <nav className={styles.nav} aria-label="Main navigation">
-        {NAV_ITEMS.map((item) => {
-          const active = isActivePath(pathname, item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`${styles.link} ${active ? styles.active : ""}`.trim()}
-              aria-current={active ? "page" : undefined}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
+      <div className={styles.row}>
+        <nav className={styles.nav} aria-label="Main navigation">
+          {NAV_ITEMS.map((item) => {
+            const active = isActivePath(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${styles.link} ${active ? styles.active : ""}`.trim()}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
         <button
           type="button"
-          className={styles.link}
+          className={styles.action}
           onClick={() => void onLogout()}
           disabled={loggingOut}
         >
@@ -94,7 +96,7 @@ export function MainNav() {
             "Sign Out"
           )}
         </button>
-      </nav>
+      </div>
       {logoutError ? (
         <p className={styles.error} role="alert">
           {logoutError}

@@ -1,7 +1,7 @@
 .wrapper {
   display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: var(--space-4);
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: var(--space-8);
 }
 
 .left,
@@ -9,42 +9,67 @@
   min-width: 0;
 }
 
+.left {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.right {
+  display: grid;
+}
+
+.sidebarPanel {
+  position: sticky;
+  top: clamp(1rem, 2vw, 1.5rem);
+  z-index: 2;
+}
+
+.detailPanel {
+  min-height: min(60svh, 52rem);
+}
+
 .controls {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
 .listHeaderRow {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-3);
 }
 
 .controls label {
   display: grid;
-  gap: var(--space-1);
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--ink);
+  gap: 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
 }
 
 .controls input,
 .controls select {
   width: 100%;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line-strong);
-  background: var(--bg);
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 95%, transparent);
+  background: color-mix(in srgb, var(--bg-deep) 72%, transparent);
   color: var(--ink);
-  padding: 0 var(--space-3);
-  min-height: 48px;
-  font-family: var(--font-mono), monospace;
-  font-size: 1rem;
+  padding: 0 var(--space-4);
+  min-height: 52px;
+  font-family: var(--font-body);
+  font-size: 0.98rem;
   transition:
     border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .controls select {
@@ -58,90 +83,144 @@
 .controls input:focus-visible,
 .controls select:focus-visible {
   border-color: var(--line-focus);
+  background: color-mix(in srgb, var(--bg-deep) 84%, transparent);
 }
 
 .list {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   list-style: none;
   padding: 0;
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.list li + li {
+  border-top: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
 }
 
 .itemButton {
+  position: relative;
   width: 100%;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  border-radius: var(--radius);
+  border: 0;
+  background: transparent;
+  border-radius: 0;
   color: var(--ink);
-  padding: var(--space-3);
+  padding: 1rem 0.25rem 1rem 1.1rem;
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: var(--space-1);
-  min-height: 48px;
+  gap: 0.45rem;
+  min-height: 92px;
   transition:
-    transform 0.1s ease,
-    background 0.2s ease,
-    border-color 0.2s ease;
+    transform 0.12s ease,
+    background 0.2s ease;
+}
+
+.itemButton::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  opacity: 0.35;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .itemButton:hover {
-  background: var(--panel-strong);
-  border-color: var(--line-focus);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    transparent 76%
+  );
+}
+
+.itemButton:hover::before {
+  transform: translateX(2px);
+  opacity: 0.72;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .itemButton:active {
-  transform: scale(0.98);
+  transform: translateX(2px);
 }
 
 .itemButton:focus-visible {
-  border-color: var(--line-focus);
+  box-shadow: var(--focus-ring);
+  border-radius: 16px;
 }
 
 .itemPrimary {
   font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
 }
 
 .badge {
-  display: inline-block;
+  display: inline-flex;
   width: fit-content;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: transparent;
   color: var(--accent-soft);
-  font-size: 0.875rem;
-  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  padding: 0.14rem 0.45rem;
+  padding: 0;
 }
 
 .itemKey {
   color: var(--ink-muted);
-  font-size: 0.875rem;
+  font-size: 0.78rem;
   word-break: break-all;
   font-family: var(--font-mono), monospace;
 }
 
 .active {
-  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent 80%
+  );
+}
+
+.active::before {
+  background: var(--accent);
+  opacity: 1;
 }
 
 .detailHeaderRow {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
 }
 
 .toggleButton {
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--ink);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
   min-height: 44px;
   cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.toggleButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .toggleButton:disabled {
@@ -155,52 +234,51 @@
 }
 
 .metaGrid {
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 
 .metaGrid div {
-  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
-  border-radius: 10px;
-  padding: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  padding: var(--space-3) 0 0;
 }
 
 .metaGrid dt {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   color: var(--ink-muted);
 }
 
 .metaGrid dd {
   margin: var(--space-1) 0 0;
-  font-family: var(--font-mono), monospace;
-  font-size: 0.875rem;
+  font-family: var(--font-body);
+  font-size: 0.94rem;
   font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
 }
 
 .summaryBoxes {
-  margin-top: var(--space-3);
+  margin-top: var(--space-6);
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
 }
 
 .summaryBox {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
-  border-radius: 10px;
-  padding: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  padding: var(--space-3) 0 0;
   min-width: 0;
 }
 
 .summaryBox h3 {
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.875rem;
+  letter-spacing: 0.12em;
+  font-size: 0.76rem;
   color: var(--ink-muted);
 }
 
@@ -211,7 +289,7 @@
 
 .summaryBox p {
   margin: var(--space-2) 0 0;
-  font-size: 0.88rem;
+  font-size: 0.92rem;
   font-family: var(--font-mono), monospace;
 }
 
@@ -222,20 +300,22 @@
 }
 
 .infoNote {
-  margin: var(--space-3) 0 0;
+  margin: var(--space-5) 0 0;
   color: var(--ink-muted);
   font-size: 0.875rem;
 }
 
 .tableWrap {
-  margin-top: var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
 .sectionTitle {
   margin: 0 0 var(--space-2);
   color: var(--accent-soft);
-  font-size: 0.875rem;
-  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -248,7 +328,7 @@
 .tableWrap td {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   text-align: left;
-  padding: var(--space-2) var(--space-1);
+  padding: var(--space-2) 0.35rem;
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
@@ -256,8 +336,8 @@
 .tableWrap th {
   color: var(--ink-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.875rem;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
 }
 
 .reasonCell {
@@ -311,13 +391,14 @@
 .rowDetailToggle {
   width: fit-content;
   margin-top: 2px;
-  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  background: transparent;
   color: var(--ink);
-  border-radius: 8px;
+  border-radius: 999px;
   min-height: 32px;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.75rem;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
   cursor: pointer;
 }
 
@@ -336,9 +417,9 @@
 
 .expandedPanel {
   border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 10px;
-  padding: var(--space-2);
-  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  border-radius: 18px;
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
   display: grid;
   gap: var(--space-2);
 }
@@ -375,9 +456,9 @@
 
 .issueSection {
   border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
-  border-radius: 10px;
-  padding: var(--space-2);
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
+  border-radius: 18px;
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
 }
 
 .issueSection summary {
@@ -402,7 +483,7 @@
 
 .raw {
   margin-top: var(--space-3);
-  border-radius: 10px;
+  border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
   background: var(--panel-strong);
   padding: var(--space-3);
@@ -416,9 +497,17 @@
   color: var(--danger);
 }
 
+.listMessage {
+  margin-top: var(--space-4);
+}
+
 @media (max-width: 960px) {
   .wrapper {
     grid-template-columns: 1fr;
+  }
+
+  .sidebarPanel {
+    position: static;
   }
 
   .metaGrid {

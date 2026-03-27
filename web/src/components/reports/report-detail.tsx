@@ -129,7 +129,10 @@ export function ReportDetail({
   };
 
   return (
-    <section className="panel" aria-busy={loadingDetail}>
+    <section
+      className={`panel ${styles.detailPanel}`}
+      aria-busy={loadingDetail}
+    >
       <div className={styles.detailHeaderRow}>
         <div>
           <h2 className="panelTitle">Report Detail</h2>
