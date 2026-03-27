@@ -282,6 +282,7 @@ def evaluate_entry_candidates(
     price_lookup_fn: Callable[[str], float | None],
     gap_breach_action: str = "SKIP",
     default_strategy_mode: str | None = None,
+    allow_missing_gap_guard: bool = False,
 ) -> tuple[list[EntryReportRow], list[str]]:
     rows: list[EntryReportRow] = []
     system_issues: list[str] = []
@@ -325,13 +326,13 @@ def evaluate_entry_candidates(
             gap_guard_up_price = round(signal_close * (1.0 + gap_guard_pct), 10)
             gap_guard_down_price = round(signal_close * (1.0 - gap_guard_pct), 10)
 
-        if gap_guard_pct is None:
+        if gap_guard_pct is None and not allow_missing_gap_guard:
             reasons.append("gap guard unavailable")
             system_issues.append(f"{ticker}: gap guard unavailable")
             action = "REVIEW"
         elif gap_pct is None:
             action = "REVIEW"
-        elif abs(gap_pct) > gap_guard_pct:
+        elif gap_guard_pct is not None and abs(gap_pct) > gap_guard_pct:
             action = gap_breach_action
             reasons.append(
                 "gap guard exceeded "
@@ -769,6 +770,8 @@ def run_entry(
     rows: list[EntryReportRow] = []
     system_issues: list[str] = []
     report_strategy_mode = _resolve_report_strategy_mode(source_report)
+    gap_atr_multiplier = _to_finite_float(getattr(cfg, "gap_atr_multiplier", None))
+    allow_missing_gap_guard = gap_atr_multiplier is not None and gap_atr_multiplier <= 0
     for candidate_market in resolved_markets:
         price_lookup_fn, provider_issues = _make_price_lookup(
             cfg=cfg,
@@ -781,6 +784,7 @@ def run_entry(
             price_lookup_fn=price_lookup_fn,
             gap_breach_action="SKIP",
             default_strategy_mode=report_strategy_mode,
+            allow_missing_gap_guard=allow_missing_gap_guard,
         )
         rows.extend(market_rows)
         system_issues.extend(provider_issues)

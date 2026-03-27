@@ -146,13 +146,21 @@ class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
         tickers: list[str],
         target_bars: int,
         adjusted: bool = True,
+        split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
+        exchange_from_suffix_fn: Callable[[str | None], str | None],
+        legacy_cache_keys_fn: _LegacyCacheKeysFn | None = None,
         on_candles_applied_fn: _OnCandlesAppliedFn[TRuntime] | None = None,
     ) -> None:
         request = market_data_pipeline.PykrxCollectionRequest(
             tickers=tickers,
             target_bars=target_bars,
+            load_json_fn=self._deps.load_json_fn,
+            save_json_fn=self._deps.save_json_fn,
+            split_symbol_and_suffix_fn=split_symbol_and_suffix_fn,
+            exchange_from_suffix_fn=exchange_from_suffix_fn,
             PykrxClientErrorCls=self._deps.PykrxClientErrorCls,
             adjusted=adjusted,
+            legacy_cache_keys_fn=legacy_cache_keys_fn,
             on_candles_applied_fn=on_candles_applied_fn,
         )
         market_data_pipeline.collect_market_data_from_pykrx(
@@ -239,6 +247,9 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
             tickers=tickers,
             target_bars=target_bars,
             adjusted=True,
+            split_symbol_and_suffix_fn=_split_overseas,
+            exchange_from_suffix_fn=_excd_from_suffix,
+            legacy_cache_keys_fn=scan_legacy_cache_keys,
             on_candles_applied_fn=self._update_latest_date,
         )
 
@@ -403,6 +414,8 @@ class SellMarketData(_BaseMarketDataService[_SellRuntime]):
             tickers=tickers,
             target_bars=target_bars,
             adjusted=False,
+            split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+            exchange_from_suffix_fn=_exchange_from_suffix,
         )
 
     def _ensure_sell_pykrx_client(

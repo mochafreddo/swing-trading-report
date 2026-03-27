@@ -96,7 +96,8 @@
   - KR/US 각각 `market_cache_stale_sessions_kr/us`가 허용 최대치입니다.
 - `stale_sessions == 0`이면 **캐시를 사용**하고 provider 재수집을 생략합니다.
 - `stale_sessions > 0`이면 provider 재수집을 **우선 시도**합니다.
-  - 재수집 성공: 최신 캔들을 저장하고 사용합니다.
+  - 재수집 성공: 응답을 완성 세션 기준으로 다시 검증했을 때 `stale_sessions == 0`인 최신 캔들만 저장하고 사용합니다.
+  - 재수집 응답이 여전히 stale하면 “재수집 실패”와 동일하게 취급합니다.
   - 재수집 실패: `stale_sessions <= max`이면 캐시로 폴백합니다(=fail-soft).
   - `stale_sessions > max`이면 폴백하지 않고 실패합니다(=fail-closed).
 - 운영 가이드:
@@ -193,6 +194,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - 여기서 `ATR(t-1)`은 신호봉을 제외한 직전 완성봉 기준 ATR입니다(신호봉 갭으로 ATR 임계가 자기완화되는 문제 방지).
   - `gap_atr_multiplier > 0`인데 `ATR(t-1)`/전일종가 입력이 유효하지 않으면 **system 이슈(fail-closed)** 로 처리합니다.
   - `gap_atr_multiplier = 0`이면 갭 필터를 비활성화합니다.
+    - 이 경우 `sab entry`는 gap guard 비교를 생략하고, raw 기준가/실시간 가격/strategy mode 기준으로만 `ENTER|REVIEW`를 판단합니다.
   - 다음 거래일 시초 갭을 직접 제어하는 규칙은 아닙니다(4.2 참고).
 - 유동성(거래대금) 필터:
   - 최근 20봉 평균 거래대금이 `min_dollar_volume`(KRW) 또는 `us_min_dollar_volume`(USD) 이상이어야 합니다.
@@ -357,8 +359,9 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `sab entry`는 candidate의 `strategy_mode`를 우선 사용하며, 레거시 리포트처럼 candidate 필드가 없는 경우 buy report top-level `strategy_mode`(또는 `config_snapshot.strategy_mode`)를 폴백으로 사용합니다.
 - `eval_date`(YYYYMMDD): 해당 candidate가 실제로 평가된 완성 일봉 날짜를 포함합니다(`choose_eval_index()` 결과 기준).
 - `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 포함합니다.
-  - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
+- `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
+- `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
   - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.

@@ -320,7 +320,7 @@ def test_run_sell_returns_1_when_resolved_holdings_file_is_missing(
 
 def _build_candles(count: int = 220) -> list[dict[str, float | str]]:
     candles: list[dict[str, float | str]] = []
-    base_date = dt.date(2025, 1, 1)
+    base_date = dt.date.today() - dt.timedelta(days=count - 1)
     for idx in range(count):
         day = base_date + dt.timedelta(days=idx)
         close = 100.0 + (idx * 0.1)

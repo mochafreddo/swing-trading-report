@@ -4,17 +4,24 @@ import datetime as dt
 import logging
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sab.data.kis_client import KISClientError
+from sab.market_data_common import build_market_data_dependencies
 from sab.market_data_pipeline import (
     KisCollectionRequest,
     PykrxCollectionRequest,
     collect_market_data_from_kis,
     collect_market_data_from_pykrx,
 )
-from sab.market_data_service import scan_legacy_cache_keys as _scan_legacy_cache_keys
+from sab.market_data_service import (
+    ScanMarketData,
+    SellMarketData,
+)
+from sab.market_data_service import (
+    scan_legacy_cache_keys as _scan_legacy_cache_keys,
+)
 
 
 def _build_runtime(
@@ -127,7 +134,43 @@ def _collect_market_data_from_kis(
         legacy_cache_keys_fn=legacy_cache_keys_fn,
         on_candles_applied_fn=on_candles_applied_fn,
     )
-    collect_market_data_from_kis(runtime, request=request, now_fn=now_fn)
+    collect_market_data_from_kis(
+        runtime,
+        request=request,
+        now_fn=now_fn or (lambda: dt.datetime(2025, 1, 10, 22, 0, tzinfo=dt.UTC)),
+    )
+
+
+def _collect_market_data_from_pykrx(
+    runtime: Any,
+    *,
+    tickers: list[str],
+    target_bars: int,
+    load_json_fn: Callable[[str, str], Any],
+    save_json_fn: Callable[[str, str, Any], Any],
+    split_symbol_and_suffix_fn: Callable[[str], tuple[str, str | None]],
+    exchange_from_suffix_fn: Callable[[str | None], str | None],
+    on_candles_applied_fn: Callable[[Any, str, list[dict[str, Any]]], None]
+    | None = None,
+    now_fn: Callable[[], dt.datetime] | None = None,
+    adjusted: bool = True,
+) -> None:
+    request = PykrxCollectionRequest(
+        tickers=tickers,
+        target_bars=target_bars,
+        load_json_fn=load_json_fn,
+        save_json_fn=save_json_fn,
+        split_symbol_and_suffix_fn=split_symbol_and_suffix_fn,
+        exchange_from_suffix_fn=exchange_from_suffix_fn,
+        PykrxClientErrorCls=RuntimeError,
+        adjusted=adjusted,
+        on_candles_applied_fn=on_candles_applied_fn,
+    )
+    collect_market_data_from_pykrx(
+        runtime,
+        request=request,
+        now_fn=now_fn or (lambda: dt.datetime(2025, 1, 10, 22, 0, tzinfo=dt.UTC)),
+    )
 
 
 def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
@@ -174,7 +217,7 @@ def test_collect_market_data_from_kis_reads_legacy_cache_and_migrates() -> None:
     assert runtime.ticker_data_source["AAPL.UNKNOWN"] == "kis"
     assert load_keys[:2] == [_cache_key("AAPL"), "candles_AAPL.UNKNOWN"]
     assert _cache_key("AAPL") in saved_keys
-    assert kis_client.calls == 1
+    assert kis_client.calls == 0
     assert runtime.failures == []
 
 
@@ -370,7 +413,7 @@ def test_collect_market_data_from_kis_reads_scan_legacy_overseas_cache() -> None
 
     assert runtime.market_data["AAPL.NAS-DAQ"] == legacy_candles
     assert load_keys[:2] == [_cache_key("AAPL", exchange="NAS"), "candles_AAPL.NAS-DAQ"]
-    assert kis_client.calls == 1
+    assert kis_client.calls == 0
     assert runtime.failures == []
 
 
@@ -441,6 +484,150 @@ def test_collect_market_data_from_kis_refreshes_api_when_cache_is_stale() -> Non
     assert kis_client.calls == 1
     assert runtime.market_data["005930"] == fresh_candles
     assert runtime.failures == []
+
+
+def test_collect_market_data_from_kis_rejects_stale_provider_response() -> None:
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            assert count == 220
+            return _candles_with_last_date("20250107")
+
+    saved_keys: list[str] = []
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=0)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda _dir, key, payload: saved_keys.append(key),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert "005930" not in runtime.market_data
+    assert saved_keys == []
+    assert any(
+        "Provider returned stale candles" in msg
+        and "stale by 1 KR sessions (max 0)" in msg
+        for msg in runtime.failures
+    )
+
+
+def test_collect_market_data_from_kis_uses_cache_when_provider_refresh_is_stale() -> (
+    None
+):
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            assert count == 220
+            return [
+                {
+                    "date": "20250107",
+                    "open": 200.0,
+                    "high": 201.0,
+                    "low": 199.0,
+                    "close": 200.0,
+                    "volume": 2_000_000.0,
+                }
+            ]
+
+    cached_candles = _candles_with_last_date("20250107")
+    saved_keys: list[str] = []
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda _dir, key, payload: saved_keys.append(key),
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == cached_candles
+    assert saved_keys == []
+
+
+def test_collect_market_data_from_kis_uses_cache_when_pykrx_fallback_is_stale() -> None:
+    class _FailingKisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            raise KISClientError(f"KIS down for {symbol}")
+
+    class _PykrxClient:
+        def daily_candles(self, ticker: str, *, count: int) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            return _candles_with_last_date("20250107")
+
+    cached_candles = _candles_with_last_date("20250107")
+    runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: _PykrxClient(),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == cached_candles
+    assert runtime.ticker_data_source["005930"] == "kis"
+    assert runtime.pykrx_warning_added is False
+    assert runtime.failures == []
+
+
+def test_collect_market_data_from_kis_rejects_stale_pykrx_fallback_without_cache() -> (
+    None
+):
+    class _FailingKisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            raise KISClientError(f"KIS down for {symbol}")
+
+    class _PykrxClient:
+        def daily_candles(self, ticker: str, *, count: int) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            return _candles_with_last_date("20250107")
+
+    runtime = _build_runtime(kis_client=_FailingKisClient(), stale_sessions_kr=0)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: _PykrxClient(),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert "005930" not in runtime.market_data
+    assert runtime.pykrx_warning_added is False
+    assert any(
+        "PyKRX fallback unavailable: PyKRX returned stale candles" in msg
+        for msg in runtime.failures
+    )
 
 
 def test_collect_market_data_from_kis_uses_cache_without_refresh_when_fresh() -> None:
@@ -896,6 +1083,10 @@ def test_collect_market_data_from_pykrx_passes_adjusted_flag_to_provider() -> No
     request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
         tickers=["005930"],
         target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
         adjusted=False,
         PykrxClientErrorCls=RuntimeError,
     )
@@ -929,6 +1120,10 @@ def test_collect_market_data_from_pykrx_rejects_invalid_candles() -> None:
     request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
         tickers=["005930"],
         target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
         adjusted=True,
         PykrxClientErrorCls=RuntimeError,
     )
@@ -937,6 +1132,162 @@ def test_collect_market_data_from_pykrx_rejects_invalid_candles() -> None:
     assert "005930" not in runtime.market_data
     assert any(
         "PyKRX returned no complete and finite candle data" in message
+        for message in runtime.failures
+    )
+
+
+def test_collect_market_data_from_pykrx_uses_fresh_cache_before_provider() -> None:
+    class _PykrxClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            del ticker
+            del count
+            del adjusted
+            self.calls += 1
+            raise AssertionError("provider fetch should be skipped for fresh cache")
+
+    cached_candles = _candles_with_last_date("20250107")
+    queried_keys: list[str] = []
+    runtime = _build_runtime(
+        kis_client=None, data_provider="pykrx", stale_sessions_kr=0
+    )
+    runtime.pykrx_client = _PykrxClient()
+
+    def load_json_fn(_: str, key: str) -> Any:
+        queried_keys.append(key)
+        if key == _cache_key("005930", adjusted=False):
+            return cached_candles
+        return None
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        adjusted=False,
+        load_json_fn=load_json_fn,
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 5, 0, tzinfo=dt.UTC),
+    )
+
+    assert queried_keys[0] == _cache_key("005930", adjusted=False)
+    assert runtime.pykrx_client.calls == 0
+    assert runtime.market_data["005930"] == cached_candles
+
+
+def test_collect_market_data_from_pykrx_refreshes_stale_cache_with_fresh_provider() -> (
+    None
+):
+    class _PykrxClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            assert adjusted is True
+            self.calls += 1
+            return _candles_with_last_date("20250108")
+
+    cached_candles = _candles_with_last_date("20250107")
+    saved_payloads: dict[str, list[dict[str, Any]]] = {}
+    runtime = _build_runtime(
+        kis_client=None, data_provider="pykrx", stale_sessions_kr=1
+    )
+    runtime.pykrx_client = _PykrxClient()
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda _dir, key, payload: saved_payloads.setdefault(key, payload),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.pykrx_client.calls == 1
+    assert runtime.market_data["005930"] == _candles_with_last_date("20250108")
+    assert saved_payloads[_cache_key("005930")] == _candles_with_last_date("20250108")
+
+
+def test_collect_market_data_from_pykrx_rejects_stale_provider_response() -> None:
+    class _PykrxClient:
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            assert adjusted is True
+            return _candles_with_last_date("20250107")
+
+    saved_keys: list[str] = []
+    runtime = _build_runtime(
+        kis_client=None, data_provider="pykrx", stale_sessions_kr=0
+    )
+    runtime.pykrx_client = _PykrxClient()
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda _dir, key, payload: saved_keys.append(key),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert "005930" not in runtime.market_data
+    assert saved_keys == []
+    assert any(
+        "PyKRX returned stale candles" in message
+        and "stale by 1 KR sessions (max 0)" in message
+        for message in runtime.failures
+    )
+
+
+def test_collect_market_data_from_pykrx_rejects_us_ticker_immediately() -> None:
+    class _PykrxClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            del ticker
+            del count
+            del adjusted
+            self.calls += 1
+            raise AssertionError("US ticker should fail before provider fetch")
+
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    runtime.pykrx_client = _PykrxClient()
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["AAPL.NASD"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+    )
+
+    assert "AAPL.NASD" not in runtime.market_data
+    assert runtime.pykrx_client.calls == 0
+    assert any(
+        "PyKRX provider supports KR tickers only" in message
         for message in runtime.failures
     )
 
@@ -986,9 +1337,92 @@ def test_collect_market_data_from_pykrx_does_not_suppress_non_kwarg_type_error()
     request: PykrxCollectionRequest[Any] = PykrxCollectionRequest(
         tickers=["005930"],
         target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
         adjusted=False,
         PykrxClientErrorCls=RuntimeError,
     )
 
     with pytest.raises(TypeError, match="vectorization failed"):
         collect_market_data_from_pykrx(runtime, request=request)
+
+
+def test_scan_market_data_wires_pykrx_cache_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    deps = build_market_data_dependencies(
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+    )
+    service = ScanMarketData(deps=deps)
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(data_provider="pykrx", min_history_bars=50),
+        tickers=["005930"],
+        pykrx_client=object(),
+        failures=[],
+        fatal_failure=False,
+        latest_dates={},
+        logger=logging.getLogger(__name__),
+    )
+
+    def _fake_collect(runtime_arg: Any, *, request: Any) -> None:
+        captured["runtime"] = runtime_arg
+        captured["request"] = request
+
+    monkeypatch.setattr(
+        "sab.market_data_service.market_data_pipeline.collect_market_data_from_pykrx",
+        _fake_collect,
+    )
+
+    service.collect_market_data(cast(Any, runtime))
+
+    request = captured["request"]
+    assert captured["runtime"] is runtime
+    assert request.load_json_fn is deps.load_json_fn
+    assert request.save_json_fn is deps.save_json_fn
+    assert request.adjusted is True
+    assert request.legacy_cache_keys_fn is _scan_legacy_cache_keys
+    assert request.split_symbol_and_suffix_fn("AAPL.NASD") == ("AAPL", "NASD")
+    assert request.exchange_from_suffix_fn("NASD") == "NAS"
+
+
+def test_sell_market_data_wires_pykrx_cache_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    deps = build_market_data_dependencies(
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+    )
+    service = SellMarketData(deps=deps)
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(data_provider="pykrx"),
+        unique_tickers=["005930"],
+        pykrx_client=object(),
+        failures=[],
+        fatal_failure=False,
+        logger=logging.getLogger(__name__),
+    )
+
+    def _fake_collect(runtime_arg: Any, *, request: Any) -> None:
+        captured["runtime"] = runtime_arg
+        captured["request"] = request
+
+    monkeypatch.setattr(
+        "sab.market_data_service.market_data_pipeline.collect_market_data_from_pykrx",
+        _fake_collect,
+    )
+
+    service.collect_market_data(cast(Any, runtime), target_bars=220)
+
+    request = captured["request"]
+    assert captured["runtime"] is runtime
+    assert request.load_json_fn is deps.load_json_fn
+    assert request.save_json_fn is deps.save_json_fn
+    assert request.adjusted is False
+    assert request.legacy_cache_keys_fn is None
+    assert request.split_symbol_and_suffix_fn("AAPL.NASD") == ("AAPL", "NASD")
+    assert request.exchange_from_suffix_fn("NASD") == "NAS"

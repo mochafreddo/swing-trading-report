@@ -14,7 +14,7 @@ from sab.screener.kis_overseas_screener import ScreenResult as OverseasScreenRes
 
 def _build_us_candles(n: int = 200) -> list[dict[str, float | str]]:
     candles: list[dict[str, float | str]] = []
-    base_date = dt.date(2025, 1, 1)
+    base_date = dt.date.today() - dt.timedelta(days=n - 1)
     for i in range(n):
         d = base_date + dt.timedelta(days=i)
         close = 100.0 + i * 0.5
