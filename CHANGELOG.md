@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.12.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.2...v1.12.0) (2026-03-27)
+
+
+### Features
+
+* **reports:** entry 리포트 웹 통합 ([702958a](https://github.com/mochafreddo/swing-trading-report/commit/702958a0858e42f67d3474bc4eb25cfcc5d8915b))
+* **scan:** raw 기준가 보강을 후보 배치화 ([da75694](https://github.com/mochafreddo/swing-trading-report/commit/da756945e160e044002230b79ff2441d4b1bbef9))
+* **web:** 운영 콘솔 UI 디자인 개선 ([cd19536](https://github.com/mochafreddo/swing-trading-report/commit/cd19536615b7c5349e4a004ab06493d2e9438a89))
+
+
+### Bug Fixes
+
+* **scan:** fail-closed 테스트 호환성을 복원 ([9c6c484](https://github.com/mochafreddo/swing-trading-report/commit/9c6c484a86861b961305df592070d7288d79f482))
+* **strategy:** 스윙 데이터 신선도와 엔트리 가드 계약 정렬 ([4573f3c](https://github.com/mochafreddo/swing-trading-report/commit/4573f3c3c3081f12ad0b01aa9cbc51df3f47930d))
+
 ## [1.11.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.1...v1.11.2) (2026-03-27)
 
 
