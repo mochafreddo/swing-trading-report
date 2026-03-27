@@ -178,32 +178,13 @@ def test_evaluate_candidates_injects_strategy_mode_into_hybrid_candidate() -> No
     assert candidate["entry_reference_eval_date"] is None
 
 
-def test_evaluate_candidates_enriches_raw_entry_reference_close_from_kis() -> None:
+def test_evaluate_candidates_enriches_raw_entry_reference_close_from_prefetched_market_data() -> (
+    None
+):
     runtime = _build_runtime()
     runtime.tickers = ["AAPL.NAS"]
     runtime.market_data["AAPL.NAS"] = runtime.market_data.pop("AAPL.NAS")
     runtime.ticker_currency["AAPL.NAS"] = runtime.ticker_currency.pop("AAPL.NAS")
-
-    class _FakeKISClient:
-        def overseas_daily_candles(
-            self,
-            *,
-            symbol: str,
-            exchange: str,
-            count: int,
-            adjusted: bool,
-        ) -> list[dict[str, Any]]:
-            assert symbol == "AAPL"
-            assert exchange == "NAS"
-            assert count == 10
-            assert adjusted is False
-            return [
-                {"date": "20250109", "close": 99.0},
-                {"date": "20250110", "close": 100.0},
-            ]
-
-    runtime.kis_client = cast(Any, _FakeKISClient())
-    runtime.raw_market_data.clear()
 
     _evaluate_candidates(
         runtime,
@@ -237,6 +218,44 @@ def test_evaluate_candidates_enriches_raw_entry_reference_close_from_kis() -> No
     assert candidate["entry_reference_eval_date"] == "20250110"
     assert runtime.system_issues == []
     assert runtime.raw_market_data["AAPL.NAS"][-1]["close"] == 100.0
+
+
+def test_evaluate_candidates_records_raw_entry_reference_miss_without_provider_fetch() -> (
+    None
+):
+    runtime = _build_runtime()
+    runtime.raw_market_data.clear()
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        ),
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    candidate = runtime.candidates[0]
+    assert candidate["entry_reference_close_raw_value"] is None
+    assert candidate["entry_reference_eval_date"] == "20250110"
+    assert runtime.system_issues == [
+        "AAPL.NAS: raw entry reference close unavailable from batched market data"
+    ]
 
 
 def test_evaluate_candidates_injects_market_benchmark_context() -> None:

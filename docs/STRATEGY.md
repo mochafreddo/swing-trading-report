@@ -62,7 +62,7 @@
   - 캔들 수집은 기본 `adjusted=true`로 동작합니다.
   - 의도: 분할/배당 등 corporate action이 가격 시계열에 반영된(조정된) 데이터로 지표를 계산해, 신호가 “가격 스케일 변화”에 과민하게 흔들리지 않도록 합니다.
   - buy candidate에는 `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 함께 기록합니다.
-  - `entry_reference_close_raw_value`는 동일 `eval_date`의 raw 종가를 후처리로 붙여, 이후 entry 판단이 adjusted/raw 혼용 없이 raw 기준으로만 비교되도록 합니다.
+  - `entry_reference_close_raw_value`는 시그널 평가 후 후보 티커만 raw 캔들을 배치 warmup한 다음, 동일 `eval_date`의 raw 종가를 후처리로 붙여 이후 entry 판단이 adjusted/raw 혼용 없이 raw 기준으로만 비교되도록 합니다.
 - sell(`sab sell`)
   - 캔들 수집은 기본 `adjusted=false`로 동작합니다.
   - 의도: 보유(진입단가/손절/타깃) 판단을 **원시 가격 기준**으로 해석하고, corporate action은 “자동 결론”이 아닌 `REVIEW`로 올려 수동 확인을 유도합니다(6장 참고).
@@ -157,8 +157,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 1. 티커 소스(워치리스트 + 스크리너)를 결합하고, 시장 필터 후 중복 제거합니다.
 2. 캔들 데이터를 수집합니다(캐시 우선 + provider 조회).
 3. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
-4. 후보(candidate)를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식하며 entry용 raw reference close를 보강합니다.
-5. buy 리포트(JSON)를 생성합니다.
+4. 후보(candidate) 티커만 raw 캔들을 추가 warmup한 뒤, cache hit 기반으로 entry용 raw reference close를 보강합니다.
+5. 후보를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식합니다.
+6. buy 리포트(JSON)를 생성합니다.
 
 ### 5.2 `strategy_mode=ema_cross` (EMA/RSI/ATR 기반)
 

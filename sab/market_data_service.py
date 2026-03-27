@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 from collections.abc import Callable
+from contextlib import contextmanager
 
 from . import market_data_pipeline
 from .data.holiday_cache import HolidayEntry, load_cached_holidays, merge_holidays
@@ -19,6 +20,7 @@ type _PykrxClientKwargsFn[TRuntime] = Callable[[TRuntime], dict[str, str | None]
 
 _US_HOLIDAY_REFRESH_TTL = dt.timedelta(hours=12)
 _US_HOLIDAY_REFRESH_WINDOW_DAYS = 10
+_ENTRY_REFERENCE_RAW_LOOKBACK_BARS = 10
 
 
 def _current_utc_time() -> dt.datetime:
@@ -61,6 +63,21 @@ def scan_legacy_cache_keys(
     if legacy_key == canonical_key:
         return []
     return [legacy_key]
+
+
+@contextmanager
+def _route_raw_market_data(
+    runtime: _ScanRuntime,
+):
+    original_market_data = runtime.market_data
+    original_ticker_data_source = runtime.ticker_data_source
+    runtime.market_data = runtime.raw_market_data
+    runtime.ticker_data_source = {}
+    try:
+        yield
+    finally:
+        runtime.market_data = original_market_data
+        runtime.ticker_data_source = original_ticker_data_source
 
 
 class _BaseMarketDataService[TRuntime: market_data_pipeline._CollectionRuntime]:
@@ -205,6 +222,55 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
                 runtime.fatal_failure = True
             return
         collector(runtime, tickers, target_bars)
+
+    def collect_entry_reference_raw_market_data(
+        self,
+        runtime: _ScanRuntime,
+        *,
+        tickers: list[str],
+        target_bars: int = _ENTRY_REFERENCE_RAW_LOOKBACK_BARS,
+    ) -> None:
+        pending_tickers = [
+            ticker
+            for ticker in dict.fromkeys(
+                str(ticker or "").strip().upper() for ticker in tickers
+            )
+            if ticker and ticker not in runtime.raw_market_data
+        ]
+        if not pending_tickers:
+            return
+
+        runtime.logger.info(
+            "Batch warming raw entry reference candles for %s ticker(s)",
+            len(pending_tickers),
+        )
+
+        with _route_raw_market_data(runtime):
+            provider = runtime.cfg.data_provider
+            if provider == "kis":
+                self._collect_from_kis(
+                    runtime,
+                    tickers=pending_tickers,
+                    target_bars=target_bars,
+                    adjusted=False,
+                    split_symbol_and_suffix_fn=_split_overseas,
+                    exchange_from_suffix_fn=_excd_from_suffix,
+                    get_pykrx_error_fn=lambda state: state.pykrx_import_error,
+                    ensure_pykrx_client_fn=self._ensure_scan_pykrx_client,
+                    legacy_cache_keys_fn=scan_legacy_cache_keys,
+                )
+                return
+
+            if provider == "pykrx":
+                self._collect_from_pykrx(
+                    runtime,
+                    tickers=pending_tickers,
+                    target_bars=target_bars,
+                    adjusted=False,
+                    split_symbol_and_suffix_fn=_split_overseas,
+                    exchange_from_suffix_fn=_excd_from_suffix,
+                    legacy_cache_keys_fn=scan_legacy_cache_keys,
+                )
 
     def _collect_with_kis_provider(
         self,

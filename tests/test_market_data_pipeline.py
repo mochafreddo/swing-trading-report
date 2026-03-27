@@ -41,6 +41,7 @@ def _build_runtime(
         logger=logging.getLogger(__name__),
         failures=[],
         market_data={},
+        raw_market_data={},
         ticker_data_source={},
         pykrx_client=None,
         pykrx_warning_added=False,
@@ -1387,6 +1388,126 @@ def test_scan_market_data_wires_pykrx_cache_hooks(
     assert request.legacy_cache_keys_fn is _scan_legacy_cache_keys
     assert request.split_symbol_and_suffix_fn("AAPL.NASD") == ("AAPL", "NASD")
     assert request.exchange_from_suffix_fn("NASD") == "NAS"
+
+
+def test_scan_market_data_collects_candidate_raw_data_without_overwriting_adjusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    deps = build_market_data_dependencies(
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+    )
+    service = ScanMarketData(deps=deps)
+    adjusted_payload = {
+        "005930": cast(
+            Any,
+            [
+                {
+                    "date": "20250110",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.0,
+                    "volume": 1_000_000.0,
+                }
+            ],
+        )
+    }
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(data_provider="kis"),
+        raw_market_data={},
+        market_data=adjusted_payload,
+        ticker_data_source={"005930": "kis"},
+        kis_client=object(),
+        pykrx_client=None,
+        failures=[],
+        fatal_failure=False,
+        pykrx_warning_added=False,
+        pykrx_import_error=None,
+        cache_hint=None,
+        logger=logging.getLogger(__name__),
+    )
+
+    def _fake_collect(runtime_arg: Any, *, request: Any) -> None:
+        captured["runtime_market_data"] = runtime_arg.market_data
+        captured["runtime_ticker_data_source"] = runtime_arg.ticker_data_source
+        captured["request"] = request
+        runtime_arg.market_data["005930"] = [
+            {
+                "date": "20250110",
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+                "close": 100.0,
+                "volume": 1_000_000.0,
+            }
+        ]
+        runtime_arg.ticker_data_source["005930"] = "pykrx"
+
+    monkeypatch.setattr(
+        "sab.market_data_service.market_data_pipeline.collect_market_data_from_kis",
+        _fake_collect,
+    )
+
+    service.collect_entry_reference_raw_market_data(
+        cast(Any, runtime),
+        tickers=["005930", "005930"],
+    )
+
+    request = captured["request"]
+    assert request.adjusted is False
+    assert request.tickers == ["005930"]
+    assert captured["runtime_market_data"] is runtime.raw_market_data
+    assert captured["runtime_ticker_data_source"] == {"005930": "pykrx"}
+    assert runtime.market_data is adjusted_payload
+    assert runtime.market_data["005930"][0]["open"] == 100.0
+    assert runtime.raw_market_data["005930"][0]["close"] == 100.0
+    assert runtime.ticker_data_source == {"005930": "kis"}
+
+
+def test_scan_market_data_skips_prefetched_raw_candidate_tickers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    deps = build_market_data_dependencies(
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+    )
+    service = ScanMarketData(deps=deps)
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(data_provider="pykrx"),
+        raw_market_data={"005930": [_candles_with_last_date("20250110")[0]]},
+        market_data={},
+        ticker_data_source={},
+        kis_client=None,
+        pykrx_client=object(),
+        failures=[],
+        fatal_failure=False,
+        pykrx_warning_added=False,
+        pykrx_import_error=None,
+        cache_hint=None,
+        logger=logging.getLogger(__name__),
+    )
+
+    def _fake_collect(runtime_arg: Any, *, request: Any) -> None:
+        captured["runtime_market_data"] = runtime_arg.market_data
+        captured["request"] = request
+
+    monkeypatch.setattr(
+        "sab.market_data_service.market_data_pipeline.collect_market_data_from_pykrx",
+        _fake_collect,
+    )
+
+    service.collect_entry_reference_raw_market_data(
+        cast(Any, runtime),
+        tickers=["005930", "000660", "000660"],
+    )
+
+    request = captured["request"]
+    assert request.adjusted is False
+    assert request.tickers == ["000660"]
+    assert captured["runtime_market_data"] is runtime.raw_market_data
 
 
 def test_sell_market_data_wires_pykrx_cache_hooks(

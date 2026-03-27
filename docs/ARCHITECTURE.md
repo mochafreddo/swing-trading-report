@@ -51,9 +51,9 @@ flowchart LR
 
 1. `load_config()`로 설정 로드 후 티커 소스를 결합합니다(워치리스트 + 선택적 스크리너).
 2. 데이터 제공자(`kis` 또는 `pykrx`)를 초기화하고 환율/휴일 메타를 준비합니다.
-3. 캔들 데이터는 캐시를 먼저 로드해 초기값으로 사용한 뒤, 선택한 provider 경로(`kis` 또는 `pykrx`)로 최신 조회를 시도합니다.
+3. adjusted 캔들 데이터는 캐시를 먼저 로드해 초기값으로 사용한 뒤, 선택한 provider 경로(`kis` 또는 `pykrx`)로 최신 조회를 시도합니다.
 4. `kis` 경로에서는 호출 실패 시 캐시 유지 또는 KR 종목에 한해 PyKRX 폴백을 적용합니다.
-5. 시그널 평가 후 후보를 점수순 정렬하고 통화/시장 상태 표시를 덧붙입니다.
+5. 시그널 평가 후 후보 티커에 대해서만 raw 캔들을 배치 warmup하고, cache hit 기반으로 `entry_reference_close_raw_value`를 보강한 뒤 후보를 점수순 정렬하고 통화/시장 상태 표시를 덧붙입니다.
 6. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다.
 7. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다.
 8. `scan`/`entry`는 holdings 파일을 읽지 않습니다.
@@ -191,7 +191,8 @@ flowchart LR
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
 - Entry 파이프라인(`entry`)은 로컬 JSON 리포트(`*.entry.json`)를 생성하고, Storage/`report_index`/웹 Reports UI와 연동됩니다.
   - 단, 웹 `Run` 탭과 GitHub Actions workflow는 여전히 `scan`/`sell`만 지원합니다.
-  - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, `entry`는 이 raw reference와 실시간/raw snapshot만 비교합니다.
+  - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, 이 raw 기준가는 `scan`의 후보 전용 배치 warmup으로 준비됩니다.
+  - `entry`는 이 raw reference와 실시간/raw snapshot만 비교합니다.
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
 
 ## 10. 관련 문서

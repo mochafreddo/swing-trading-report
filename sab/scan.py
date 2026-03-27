@@ -90,13 +90,13 @@ def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
 def _collect_scan_runtime(
     runtime: _ScanRuntime,
     *,
+    market_data_service: ScanMarketData,
     screener_enabled: bool,
     screener_only: bool,
     screener_limit: int,
     screener_limit_from_cli: bool,
     evaluation_limit: int | None,
 ) -> None:
-    market_data_service = _build_market_data_service()
     market_data_service.initialize_provider(
         runtime,
         screener_enabled=screener_enabled,
@@ -128,7 +128,11 @@ def _collect_scan_runtime(
     market_data_service.collect_market_data(runtime)
 
 
-def _evaluate_scan_runtime(runtime: _ScanRuntime) -> None:
+def _evaluate_scan_runtime(
+    runtime: _ScanRuntime,
+    *,
+    market_data_service: ScanMarketData,
+) -> None:
     scan_evaluation._evaluate_candidates(
         runtime,
         EvaluationSettingsCls=EvaluationSettings,
@@ -137,7 +141,15 @@ def _evaluate_scan_runtime(runtime: _ScanRuntime) -> None:
         evaluate_ticker_hybrid_fn=evaluate_ticker_hybrid,
         split_overseas_fn=_split_overseas,
         excd_from_suffix_fn=_excd_from_suffix,
+        enrich_entry_reference_prices=False,
     )
+    market_data_service.collect_entry_reference_raw_market_data(
+        runtime,
+        tickers=[
+            str(candidate.get("ticker") or "") for candidate in runtime.candidates
+        ],
+    )
+    scan_evaluation._enrich_entry_reference_prices(runtime)
     scan_evaluation._decorate_candidates(
         runtime,
         apply_currency_display_fn=scan_evaluation._apply_currency_display,
@@ -221,6 +233,7 @@ def run_scan(
         logger=logger,
         tickers=deduped_tickers,
     )
+    market_data_service = _build_market_data_service()
     screener_limit_from_cli = screener_limit is not None
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
@@ -228,6 +241,7 @@ def run_scan(
 
     _collect_scan_runtime(
         runtime,
+        market_data_service=market_data_service,
         screener_enabled=screener_enabled,
         screener_only=screener_only,
         screener_limit=effective_screener_limit,
@@ -242,7 +256,7 @@ def run_scan(
         runtime.fatal_failure = True
 
     if not runtime.fatal_failure:
-        _evaluate_scan_runtime(runtime)
+        _evaluate_scan_runtime(runtime, market_data_service=market_data_service)
         _mark_missing_scan_market_data(runtime)
 
     out_path = _render_scan_report(runtime)

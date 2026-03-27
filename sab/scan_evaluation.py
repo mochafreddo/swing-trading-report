@@ -21,7 +21,6 @@ _SYSTEM_REASON_PREFIXES = (
     "Insufficient price data",
     "No candle data",
 )
-_ENTRY_REFERENCE_RAW_LOOKBACK_BARS = 10
 _RS_BENCHMARK_LOOKBACK_BUFFER_BARS = 2
 
 
@@ -67,10 +66,10 @@ def _resolve_raw_entry_reference_close(
 ) -> tuple[float | None, str | None]:
     rows = runtime.raw_market_data.get(ticker)
     if rows is None:
-        rows, issue = _fetch_raw_entry_reference_candles(runtime, ticker=ticker)
-        if rows is None:
-            return None, issue
-        runtime.raw_market_data[ticker] = rows
+        return (
+            None,
+            f"{ticker}: raw entry reference close unavailable from batched market data",
+        )
 
     return _resolve_raw_entry_reference_close_from_rows(
         ticker=ticker,
@@ -102,71 +101,6 @@ def _resolve_raw_entry_reference_close_from_rows(
     return (
         None,
         f"{ticker}: raw entry reference close unavailable for eval_date {eval_date_key} from cached market data",
-    )
-
-
-def _fetch_raw_entry_reference_candles(
-    runtime: _ScanRuntime,
-    *,
-    ticker: str,
-) -> tuple[list[dict[str, Any]] | None, str | None]:
-    market = infer_market_from_ticker(ticker)
-    provider = runtime.cfg.data_provider
-
-    if provider == "kis":
-        if runtime.kis_client is None:
-            return (
-                None,
-                f"{ticker}: raw entry reference close unavailable (KIS client not initialized)",
-            )
-        parsed = parse_ticker(ticker)
-        try:
-            if market == "US":
-                if parsed.exchange is None:
-                    return (
-                        None,
-                        f"{ticker}: raw entry reference close unavailable (exchange unresolved)",
-                    )
-                rows = runtime.kis_client.overseas_daily_candles(
-                    symbol=parsed.symbol,
-                    exchange=parsed.exchange,
-                    count=_ENTRY_REFERENCE_RAW_LOOKBACK_BARS,
-                    adjusted=False,
-                )
-            else:
-                rows = runtime.kis_client.daily_candles(
-                    parsed.symbol,
-                    count=_ENTRY_REFERENCE_RAW_LOOKBACK_BARS,
-                    adjusted=False,
-                )
-        except KISClientError as exc:
-            return None, f"{ticker}: raw entry reference close unavailable ({exc})"
-        return rows, None
-
-    if provider == "pykrx":
-        if market == "US":
-            return (
-                None,
-                f"{ticker}: raw entry reference close unavailable (pykrx does not support US)",
-            )
-        if runtime.pykrx_client is None:
-            return (
-                None,
-                f"{ticker}: raw entry reference close unavailable (PyKRX client not initialized)",
-            )
-        try:
-            rows = runtime.pykrx_client.daily_candles(
-                parse_ticker(ticker).symbol,
-                count=_ENTRY_REFERENCE_RAW_LOOKBACK_BARS,
-                adjusted=False,
-            )
-        except PykrxClientError as exc:
-            return None, f"{ticker}: raw entry reference close unavailable ({exc})"
-        return rows, None
-
-    return (
-        None,
-        f"{ticker}: raw entry reference close unavailable (provider {provider!r} unsupported)",
     )
 
 
@@ -397,6 +331,7 @@ def _evaluate_candidates(
     evaluate_ticker_hybrid_fn: Any,
     split_overseas_fn: Any,
     excd_from_suffix_fn: Any,
+    enrich_entry_reference_prices: bool = True,
 ) -> None:
     cfg = runtime.cfg
     (
@@ -512,7 +447,8 @@ def _evaluate_candidates(
             runtime.fatal_failure = True
             runtime.logger.exception("%s", detail)
 
-    _enrich_entry_reference_prices(runtime)
+    if enrich_entry_reference_prices:
+        _enrich_entry_reference_prices(runtime)
 
 
 def _decorate_candidates(
