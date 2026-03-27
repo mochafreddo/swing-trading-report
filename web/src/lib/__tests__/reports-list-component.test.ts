@@ -54,4 +54,29 @@ describe("ReportsList component", () => {
     expect(html).toContain("새로고침 중…");
     expect(html).toContain("disabled");
   });
+
+  it("renders entry filter option", () => {
+    const html = renderToStaticMarkup(
+      ReportsList({
+        reportType: "entry",
+        query: "",
+        appliedQuery: "",
+        items: [],
+        total: null,
+        searched: 0,
+        truncated: false,
+        searchWindow: 100,
+        warnings: [],
+        selectedKey: null,
+        loadingList: false,
+        refreshing: false,
+        onReportTypeChange: vi.fn(),
+        onQueryChange: vi.fn(),
+        onSelectKey: vi.fn(),
+        onRefresh: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain(">Entry</option>");
+  });
 });

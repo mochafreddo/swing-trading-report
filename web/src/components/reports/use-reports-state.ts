@@ -522,6 +522,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const summary = useMemo(() => asRecord(detail?.summary), [detail]);
   const buyRows = useMemo(() => asRecordArray(detail?.candidates), [detail]);
   const sellRows = useMemo(() => asRecordArray(detail?.evaluated), [detail]);
+  const entryRows = useMemo(() => asRecordArray(detail?.entries), [detail]);
   const rawDetailJson = useMemo(
     () => (showRaw && detail ? JSON.stringify(detail, null, 2) : ""),
     [detail, showRaw],
@@ -569,6 +570,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     summary,
     buyRows,
     sellRows,
+    entryRows,
     rawDetailJson,
     setReportType,
     setQuery,

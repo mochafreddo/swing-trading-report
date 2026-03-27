@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable
 
 _REPORT_KEY_PATTERN = re.compile(
-    r"^\d{4}/\d{2}/(?P<report_date>\d{4}-\d{2}-\d{2})(?:-\d+)?\.(buy|sell)\.json$"
+    r"^\d{4}/\d{2}/(?P<report_date>\d{4}-\d{2}-\d{2})(?:-\d+)?\.(buy|sell|entry)\.json$"
 )
 
 

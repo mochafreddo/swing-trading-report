@@ -91,6 +91,7 @@
 - `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web`
 - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 - 로컬 CLI 실행 결과도 웹에서 보고 싶다면 `.env`에 `SAB_UPLOAD_REPORTS=true`를 설정하세요(Supabase 설정 필요).
+- `sab entry`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run -m sab entry --upload`를 사용할 수 있습니다.
 
 ### 5. 리포트 아티팩트
 
@@ -98,7 +99,8 @@
 - Sell/Review: `reports/YYYY-MM-DD(-n).sell.json`
 - Entry: `reports/YYYY-MM-DD(-n).entry.json`
 - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
-  - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때만 수행합니다.
+  - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
+  - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
 
 ## 실행/입력 정책
 
@@ -150,7 +152,7 @@
 ### 기능 및 보호 경계
 
 - `Reports`
-  - 리포트 목록/상세/타입 필터/ticker substring 검색
+  - 리포트 목록/상세/타입 필터(`buy`/`sell`/`entry`)/ticker substring 검색
   - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
   - 런타임 상태 저장소: `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
   - 로그인 스로틀 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `strict`)
@@ -245,6 +247,7 @@
 ## 장 오픈 진입 체크(개요, 확장 예정)
 
 - 기본 Entry 평가는 이미 `sab entry`로 제공되며, `reports/YYYY-MM-DD(-n).entry.json` 아티팩트를 생성합니다.
+- Entry 리포트를 웹에서 보려면 Supabase 업로드가 필요하며, `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload` 경로를 사용합니다.
 - 향후 확장으로 전일 buy 후보 기준의 "시초 갭 + 5-15분 재확인(ORH 돌파/첫 눌림 재상승)" 가이드 텍스트를 추가할 계획입니다.
 
 ## 데이터 수집(히스토리 누적)

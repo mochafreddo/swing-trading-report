@@ -5,7 +5,7 @@
 
 ## 1. 시스템 목적
 
-- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell` JSON 리포트를 생성합니다.
+- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성합니다.
 - Next.js 웹(`web`)은 리포트 열람, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
 - GitHub Actions는 스케줄/수동 실행 시 파이프라인(`scan`/`sell`/`cleanup`)을 담당합니다.
@@ -33,12 +33,12 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
-| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/supabase_storage.py` |
+| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/supabase_storage.py` |
 | 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
@@ -66,7 +66,14 @@ flowchart LR
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다.
 4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
 
-### 4.3 웹 리포트 조회 플로우
+### 4.3 `entry` 플로우
+
+1. 입력 buy 리포트를 읽고 후보(`candidates[]`)를 시장별로 정규화합니다.
+2. 현재 세션 가격 스냅샷을 조회해 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다.
+3. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
+4. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+
+### 4.4 웹 리포트 조회 플로우
 
 1. `/api/reports`는 `report_index`에서 목록을 조회합니다.
 2. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
@@ -77,8 +84,9 @@ flowchart LR
 5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
 7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다.
+8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다.
 
-### 4.4 웹 보유종목 CRUD 플로우
+### 4.5 웹 보유종목 CRUD 플로우
 
 1. `/api/holdings`가 cursor 기반 페이지네이션으로 목록을 제공합니다.
 2. `/api/holdings` `POST`, `/api/holdings/[ticker]` `PATCH`/`DELETE`로 PostgREST를 통해 `holdings`를 수정합니다.
@@ -89,7 +97,7 @@ flowchart LR
    - 검색/후보 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용합니다.
    - 캐시는 Supabase `runtime_state`에 저장되며 stale 시 증분 갱신합니다.
 
-### 4.5 웹 실행 트리거 플로우
+### 4.6 웹 실행 트리거 플로우
 
 1. `/api/run`은 Zod 스키마와 provider-universe 정책(`pykrx`는 `KR`만 허용)을 검증합니다.
 2. GitHub Actions `scan.yml`/`sell.yml`에 `workflow_dispatch`를 발행합니다.
@@ -106,18 +114,19 @@ flowchart LR
 - `reports/`
   - `YYYY-MM-DD(.n).buy.json`
   - `YYYY-MM-DD(.n).sell.json`
+  - `YYYY-MM-DD(.n).entry.json`
 
 ### 5.2 Supabase Storage
 
 - 버킷: `reports` (private, JSON MIME 제한)
-- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell}.json`
+- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
 
 ### 5.3 Supabase Postgres
 
 - `holdings`: 보유 종목 단일 소스(웹 CRUD 대상)
   - 앱과 동일한 ticker 계약을 DB 제약으로 강제합니다(`KR 6자리` 또는 명시 거래소 suffix `.NAS/.NYS/.AMS`).
   - 모호한 `.US` suffix는 DB에서도 허용하지 않으며, 기존 row는 migration 시 수동 정리 대상으로 남깁니다.
-- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers)
+- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry`)
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 - 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=degrade`(기본)에서는 Supabase 장애 시 메모리 스로틀로 폴백하고, `strict`에서는 즉시 실패합니다.
@@ -180,8 +189,8 @@ flowchart LR
   - `scan`/`entry`는 holdings 비의존 경로를 유지합니다.
   - `sell`만 holdings 파일 입력을 요구합니다.
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
-- Entry 파이프라인(`entry`)은 구현되어 로컬 JSON 리포트(`*.entry.json`)를 생성합니다.
-  - 현재 범위는 로컬 파일 생성(MVP)이며, Storage/Index/UI 연동은 후속 단계로 분리되어 있습니다.
+- Entry 파이프라인(`entry`)은 로컬 JSON 리포트(`*.entry.json`)를 생성하고, Storage/`report_index`/웹 Reports UI와 연동됩니다.
+  - 단, 웹 `Run` 탭과 GitHub Actions workflow는 여전히 `scan`/`sell`만 지원합니다.
   - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, `entry`는 이 raw reference와 실시간/raw snapshot만 비교합니다.
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
 

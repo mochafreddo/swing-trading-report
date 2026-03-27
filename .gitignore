@@ -47,6 +47,7 @@ mise.local.lock
 # Local project data
 /data/
 /reports/
+/tmp/
 /output/
 /watchlist.txt
 /config.local.yaml

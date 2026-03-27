@@ -6,17 +6,17 @@ import {
 } from "@/lib/report-key";
 
 describe("parseReportStorageKey", () => {
-  it("parses valid buy/sell keys", () => {
-    const parsed = parseReportStorageKey("2026/02/2026-02-14-2.sell.json");
+  it("parses valid buy/sell/entry keys", () => {
+    const parsed = parseReportStorageKey("2026/02/2026-02-14-2.entry.json");
     expect(parsed).not.toBeNull();
-    expect(parsed?.type).toBe("sell");
+    expect(parsed?.type).toBe("entry");
     expect(parsed?.reportDate).toBe("2026-02-14");
     expect(parsed?.duplicateIndex).toBe(2);
   });
 
   it("rejects invalid keys", () => {
     expect(parseReportStorageKey("reports/2026-02-14.buy.json")).toBeNull();
-    expect(parseReportStorageKey("2026/02/2026-02-14.entry.json")).toBeNull();
+    expect(parseReportStorageKey("2026/02/2026-02-14.scan.json")).toBeNull();
   });
 
   it("rejects impossible calendar dates", () => {

@@ -190,7 +190,7 @@ describe("GET /api/reports/detail route", () => {
       tickers: ["AAPL.US"],
     };
     vi.mocked(downloadStorageJson).mockResolvedValueOnce(report);
-    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
+    const key = encodeURIComponent("2026/02/2026-02-14.entry.json");
 
     const response = await GET(makeRequest(`key=${key}`));
     const payload = (await response.json()) as {
@@ -200,7 +200,7 @@ describe("GET /api/reports/detail route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
-    expect(payload.key).toBe("2026/02/2026-02-14.buy.json");
+    expect(payload.key).toBe("2026/02/2026-02-14.entry.json");
     expect(payload.report).toEqual(report);
   });
 

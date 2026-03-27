@@ -72,6 +72,7 @@ export function ReportsList({
               <option value="all">All</option>
               <option value="buy">Buy</option>
               <option value="sell">Sell</option>
+              <option value="entry">Entry</option>
             </select>
           </label>
 

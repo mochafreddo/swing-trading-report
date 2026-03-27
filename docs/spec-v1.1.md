@@ -12,7 +12,7 @@
 
 ## 2. 용어
 
-- **report**: Python 엔진(`sab scan`/`sab sell`)이 생성하는 JSON 산출물.
+- **report**: Python 엔진(`sab scan`/`sab sell`/`sab entry`)이 생성하는 JSON 산출물.
 - **report_key**: Supabase Storage `reports` 버킷에 저장되는 오브젝트 키(=경로).
 - **duplicate_index**: 같은 날짜/타입 리포트가 여러 번 생성될 때 충돌 회피용 인덱스(`-1`, `-2`, ...).
 - **report_index**: 웹 목록/검색 성능을 위한 Postgres 인덱스 테이블.
@@ -26,9 +26,10 @@
 
 ### 3.2 report_key 형식
 
-- 키 규칙(필수): `YYYY/MM/YYYY-MM-DD(.n).{buy|sell}.json`
+- 키 규칙(필수): `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
   - 예: `2026/02/2026-02-25.buy.json`
   - 예: `2026/02/2026-02-25-1.sell.json`
+  - 예: `2026/02/2026-02-26.entry.json`
 - `duplicate_index` 매핑 규칙
   - suffix가 없으면 `duplicate_index=0`
   - `-1`이면 `duplicate_index=1`
@@ -52,7 +53,7 @@
 #### 4.3.1 스키마 (요약/필수 필드)
 
 - `report_key` TEXT PRIMARY KEY
-- `report_type` TEXT NOT NULL (`buy`, `sell`만 허용)
+- `report_type` TEXT NOT NULL (`buy`, `sell`, `entry` 허용)
 - `report_date` DATE NOT NULL
 - `duplicate_index` INTEGER NOT NULL DEFAULT 0 (`>= 0`)
 - `tickers` TEXT[] NOT NULL DEFAULT `'{}'`
@@ -106,4 +107,3 @@
 
 - 로그인 시도 제한은 DB 원자성을 위해 RPC를 사용합니다.
   - `POST /rest/v1/rpc/consume_login_throttle_attempt`
-

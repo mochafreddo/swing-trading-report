@@ -1,0 +1,18 @@
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+_MIGRATION_PATH = (
+    _ROOT
+    / "supabase"
+    / "migrations"
+    / "20260327110000_allow_entry_reports_in_report_index.sql"
+)
+
+
+def test_entry_report_index_migration_expands_constraint_and_backfill() -> None:
+    sql = _MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert "check (report_type in ('buy', 'sell', 'entry'))" in sql
+    assert r"\.(buy|sell|entry)\.json$" in sql
+    assert "from storage.objects as objects" in sql
+    assert "on conflict (report_key) do update" in sql

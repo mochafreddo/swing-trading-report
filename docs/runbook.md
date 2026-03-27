@@ -158,7 +158,8 @@
   - 산출물: `trivy-results.json` 아티팩트(성공/실패와 무관하게 업로드)
 - 로컬 CLI 업로드(선택)
   - 기본은 로컬 파일 생성만 수행합니다.
-  - 로컬 실행에서도 Supabase 업로드가 필요하면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
+  - `scan`/`sell`을 로컬에서 Supabase로 올리려면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
+  - `entry`는 `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload`로 Storage/`report_index` 업로드를 수행할 수 있습니다.
 
 ## Audit 수동 점검
 
@@ -188,8 +189,8 @@
 
 ## 파일/경로
 
-- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`)
-- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`(중복 시 `-1`, `-2`, ...)
+- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`(중복 시 `-1`)
+- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`(중복 시 `-1`, `-2`, ...)
 - Storage 업로드 MIME: `contentType=application/json`으로 고정(`reports` 버킷 정책)
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
@@ -215,4 +216,3 @@
 
 - RS 벤치마크: `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 시장별 benchmark ticker를 지정하면, scan이 adjusted benchmark 시계열을 직접 조회해 `rs_benchmark_return`을 동적으로 계산합니다.
 - Entry 체크: buy report의 `entry_reference_close_raw_value`가 있으면 raw/live 가격 기준으로 자동 gap guard를 적용하고, reference close가 없거나 basis가 없는 레거시 candidate는 `REVIEW`로 처리합니다.
-

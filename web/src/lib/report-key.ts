@@ -1,7 +1,7 @@
 import type { ReportListItem, ReportType } from "@/lib/types";
 
 const REPORT_KEY_PATTERN =
-  /^(?<year>\d{4})\/(?<month>\d{2})\/(?<date>\d{4}-\d{2}-\d{2})(?:-(?<dup>\d+))?\.(?<type>buy|sell)\.json$/;
+  /^(?<year>\d{4})\/(?<month>\d{2})\/(?<date>\d{4}-\d{2}-\d{2})(?:-(?<dup>\d+))?\.(?<type>buy|sell|entry)\.json$/;
 
 export interface ParsedReportStorageKey {
   key: string;

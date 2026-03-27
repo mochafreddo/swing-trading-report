@@ -27,6 +27,16 @@ describe("reports request path builders", () => {
     expect(path).toBe("/api/reports?type=sell&limit=30&refresh=1");
   });
 
+  it("builds entry list path", () => {
+    const path = buildReportsListRequestPath({
+      type: "entry",
+      limit: 30,
+      query: "",
+    });
+
+    expect(path).toBe("/api/reports?type=entry&limit=30");
+  });
+
   it("builds detail path without refresh by default", () => {
     const path = buildReportDetailRequestPath({
       key: "2026/02/2026-02-14.buy.json",

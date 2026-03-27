@@ -14,6 +14,7 @@ from sab.report.retention import (
     [
         ("2026/02/2026-02-14.buy.json", date(2026, 2, 14)),
         ("2026/02/2026-02-14.sell.json", date(2026, 2, 14)),
+        ("2026/02/2026-02-14.entry.json", date(2026, 2, 14)),
         ("2026/02/2026-02-14-1.buy.json", date(2026, 2, 14)),
         ("2026/02/2026-02-14-22.sell.json", date(2026, 2, 14)),
     ],
@@ -27,7 +28,6 @@ def test_extract_report_date_from_key_parses_valid_patterns(
 @pytest.mark.parametrize(
     "key",
     [
-        "2026/02/2026-02-14.entry.json",
         "2026/02/2026-02-14.buy.txt",
         "2026/02/2026-0214.buy.json",
         "2026/2/2026-02-14.buy.json",

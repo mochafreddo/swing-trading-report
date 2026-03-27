@@ -19,6 +19,7 @@ interface ReportDetailProps {
   summary: ReportJson | null;
   buyRows: ReportJson[];
   sellRows: ReportJson[];
+  entryRows: ReportJson[];
   rawDetailJson: string;
   onToggleRaw: () => void;
 }
@@ -63,6 +64,24 @@ function asStringArray(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+function formatNullableNumber(value: unknown): string {
+  const parsed = readNumberLike(value);
+  if (parsed === null) {
+    return "-";
+  }
+  return String(parsed);
+}
+
+function formatRatioPercent(value: unknown): string {
+  const parsed = readNumberLike(value);
+  if (parsed === null) {
+    return "-";
+  }
+  const pct = parsed * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
 function formatScoreValue(row: ReportJson): string {
   const scoreValue = readNumberLike(row.score_value);
   if (scoreValue !== null) {
@@ -93,16 +112,26 @@ export function ReportDetail({
   summary,
   buyRows,
   sellRows,
+  entryRows,
   rawDetailJson,
   onToggleRaw,
 }: ReportDetailProps) {
   const [expandedBuyRowKey, setExpandedBuyRowKey] = useState<string | null>(
     null,
   );
+  const reportType = readString(detail?.type);
+  const isEntryReport = reportType === "entry";
   const strategyMode = readString(detail?.strategy_mode);
   const evalContext = asRecord(detail?.eval_context);
   const evalMarket = readString(evalContext?.market);
   const evalSessionState = readString(evalContext?.session_state);
+  const sourceBuyReport = readString(detail?.source_buy_report);
+  const signalEvalDate = readString(detail?.signal_eval_date);
+  const entrySessionDate = readString(detail?.entry_session_date);
+  const signalEvalDateByMarket = asRecord(detail?.signal_eval_date_by_market);
+  const entrySessionDateByMarket = asRecord(
+    detail?.entry_session_date_by_market,
+  );
   const systemIssues = asStringArray(detail?.system_issues);
   const screenOuts = asStringArray(detail?.screen_outs);
   const combinedIssues = asStringArray(detail?.issues);
@@ -202,6 +231,30 @@ export function ReportDetail({
               <dt>session_state</dt>
               <dd>{evalSessionState ?? "-"}</dd>
             </div>
+            {isEntryReport && (
+              <div>
+                <dt>source_buy_report</dt>
+                <dd>{sourceBuyReport ?? "-"}</dd>
+              </div>
+            )}
+            {isEntryReport && (
+              <div>
+                <dt>signal_eval_date</dt>
+                <dd>
+                  {signalEvalDate ??
+                    formatSummaryValue(signalEvalDateByMarket ?? "-")}
+                </dd>
+              </div>
+            )}
+            {isEntryReport && (
+              <div>
+                <dt>entry_session_date</dt>
+                <dd>
+                  {entrySessionDate ??
+                    formatSummaryValue(entrySessionDateByMarket ?? "-")}
+                </dd>
+              </div>
+            )}
           </dl>
 
           {summary && (
@@ -218,10 +271,18 @@ export function ReportDetail({
               ))}
             </div>
           )}
-          <p className={styles.infoNote}>
-            후보는 평가 캔들(EOD) 기준 발굴 결과이며, 다음 세션 체결을 보장하지
-            않습니다.
-          </p>
+          {reportType === "buy" && (
+            <p className={styles.infoNote}>
+              후보는 평가 캔들(EOD) 기준 발굴 결과이며, 다음 세션 체결을
+              보장하지 않습니다.
+            </p>
+          )}
+          {isEntryReport && (
+            <p className={styles.infoNote}>
+              Entry 리포트는 이전 buy 후보를 다음 세션 진입 관점으로 재평가한
+              결과입니다.
+            </p>
+          )}
 
           {buyRows.length > 0 && (
             <div className={styles.tableWrap}>
@@ -348,6 +409,46 @@ export function ReportDetail({
                         {readNumber(row.last_price) ?? "-"}
                       </td>
                       <td data-label="PnL%">{formatPnlPercent(row.pnl_pct)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {entryRows.length > 0 && (
+            <div className={styles.tableWrap}>
+              <h3 className={styles.sectionTitle}>
+                Entries ({entryRows.length})
+              </h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Signal Close</th>
+                    <th>Entry Price</th>
+                    <th>Gap%</th>
+                    <th>Reasons</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entryRows.map((row, idx) => (
+                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Action">{String(row.action ?? "-")}</td>
+                      <td data-label="Signal Close">
+                        {formatNullableNumber(row.signal_close)}
+                      </td>
+                      <td data-label="Entry Price">
+                        {formatNullableNumber(row.entry_price)}
+                      </td>
+                      <td data-label="Gap%">
+                        {formatRatioPercent(row.gap_pct)}
+                      </td>
+                      <td data-label="Reasons">
+                        {asStringArray(row.reasons).join(" · ") || "-"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -613,7 +613,9 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     const reportKey =
       typeof raw.report_key === "string" ? raw.report_key.trim() : "";
     const reportType =
-      raw.report_type === "buy" || raw.report_type === "sell"
+      raw.report_type === "buy" ||
+      raw.report_type === "sell" ||
+      raw.report_type === "entry"
         ? raw.report_type
         : null;
     const reportDate =

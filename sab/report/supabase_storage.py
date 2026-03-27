@@ -22,7 +22,7 @@ _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS = 3
 _REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS = 0.2
 _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _REPORT_KEY_PATTERN = re.compile(
-    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell)\.json$"
+    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell|entry)\.json$"
 )
 
 
@@ -107,8 +107,9 @@ def _resolve_upload_mode(
     *,
     github_actions: bool,
     upload_flag: bool,
+    force: bool = False,
 ) -> tuple[bool, bool]:
-    required = github_actions
+    required = github_actions or force
     enabled = required or upload_flag
     return required, enabled
 
@@ -617,10 +618,12 @@ def maybe_upload_report_artifact(
     artifact_path: str,
     run_type: str,
     logger: logging.Logger,
+    force: bool = False,
 ) -> str | None:
     required, enabled = _resolve_upload_mode(
         github_actions=_is_github_actions(),
         upload_flag=_env_flag("SAB_UPLOAD_REPORTS", default=False),
+        force=force,
     )
     if not enabled:
         return None

@@ -138,7 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
     entry.add_argument(
         "--upload",
         action="store_true",
-        help="Reserved for future remote upload support (M4 scope)",
+        help="Upload entry report to Supabase Storage/report_index",
     )
     return p
 

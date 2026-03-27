@@ -52,7 +52,7 @@
   - `--market` (optional): `KR|US`. 미지정 시 입력 buy 리포트에서 단일 시장을 추론(혼합이면 오류).
   - `--provider` (optional): `kis|pykrx`. entry는 실시간/당일 가격이 필요하므로 기본 `kis`를 권장(단, `pykrx`는 “EOD 이후(AFTER_CLOSE)” 모드로 제한).
   - `--mode` (optional): `PRE_OPEN|INTRADAY|AFTER_CLOSE` (기본 `PRE_OPEN`)
-  - `--upload` (optional): (확장) Storage 업로드/인덱싱 수행 여부. `report_index`가 `entry`를 허용(5.3)하기 전에는 로컬 파일만 생성하는 것을 권장합니다.
+  - `--upload` (optional): Storage 업로드/인덱싱을 강제합니다. 로컬에서 `SAB_UPLOAD_REPORTS` 없이도 이 플래그로 `entry` report를 Storage/`report_index`에 게시할 수 있습니다.
 
 #### 4.1.3 출력 아티팩트
 
@@ -60,8 +60,8 @@
 - (선택) Supabase Storage: `YYYY/MM/YYYY-MM-DD(.n).entry.json`
 
 > **DB/웹 UI 연동 여부**
-> - v1.3에서 entry 리포트를 웹에서 조회하려면 `report_index.report_type` 허용값에 `entry`를 추가해야 합니다(5.3 참고).
-> - “우선 로컬 파일만 생성”으로 MVP를 먼저 내고, 후속으로 Storage/Index/UI를 붙이는 단계적 구현도 허용합니다.
+> - 현재 구현은 `report_index.report_type='entry'`, Storage key `.entry.json`, 웹 Reports 목록/상세 렌더링을 모두 지원합니다.
+> - 단, 웹 `Run` 탭과 GitHub Actions workflow는 아직 `entry` 실행 트리거를 제공하지 않습니다.
 
 ### 4.2 Entry 리포트 JSON 스키마(초안)
 
@@ -142,15 +142,13 @@ v1.3 계약:
 - `require_slope_up=false`이면 `slope` 점수 항목은 **N/A**로 취급하며, `score_notes`에 포함하지 않는다.
 - 반대로 옵션이 켜져 있을 때만 `pass/fail`이 점수/노트에 반영된다.
 
-### 5.3 Supabase `report_index`에 entry를 넣을 경우(확장)
-
-v1.3에서 entry 리포트를 Storage/웹에 올릴 경우 아래 변경이 필요합니다.
+### 5.3 Supabase `report_index`와 entry 연동 계약
 
 - `report_index.report_type` 허용값 확장: `buy|sell|entry`
 - Storage key 정규식/파서 확장: `.entry.json`을 허용
 - key 생성기 확장: `build_report_storage_key(run_type="entry")` 지원
 
-> 이 변경은 DB check constraint 및 Python/web 경로 모두에 영향을 줍니다. 구현 시점에 `docs/spec-v1.3.md`를 “정답”으로 두고, `docs/spec-v1.1.md` 및 테스트를 함께 갱신합니다.
+> 이 변경은 DB check constraint, Python 업로드 경로, 웹 목록/상세 경로 모두에 적용됩니다. `docs/spec-v1.1.md`와 테스트는 동일 계약으로 동기화되어야 합니다.
 
 ### 5.4 Sell: corporate action 의심 우선순위(필수)
 
@@ -221,4 +219,4 @@ buy/sell/entry 공통으로 아래 메타를 포함합니다.
   - sell: corporate action 플래그가 `SELL`을 덮지 않는지.
   - time stop: 세션 수 계산(주말/휴일/미국 조기마감은 “휴일 여부”만 반영, 조기마감은 세션 수 동일 처리).
 - 통합 테스트(선택)
-  - Storage 업로드/`report_index` upsert (entry를 포함할 경우).
+  - Storage 업로드/`report_index` upsert (`entry` 포함).

@@ -31,6 +31,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
     summary,
     buyRows,
     sellRows,
+    entryRows,
     rawDetailJson,
     setReportType,
     setQuery,
@@ -71,6 +72,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
           summary={summary}
           buyRows={buyRows}
           sellRows={sellRows}
+          entryRows={entryRows}
           rawDetailJson={rawDetailJson}
           onToggleRaw={toggleShowRaw}
         />

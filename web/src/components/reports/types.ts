@@ -1,6 +1,6 @@
 import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
 
-export type ReportsFilterType = "all" | "buy" | "sell";
+export type ReportsFilterType = "all" | "buy" | "sell" | "entry";
 export type ReportJson = Record<string, unknown>;
 
 export interface ReportsInitialState {
