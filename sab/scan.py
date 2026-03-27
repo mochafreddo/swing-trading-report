@@ -90,13 +90,13 @@ def _resolve_scan_fx(runtime: _ScanRuntime) -> None:
 def _collect_scan_runtime(
     runtime: _ScanRuntime,
     *,
-    market_data_service: ScanMarketData,
     screener_enabled: bool,
     screener_only: bool,
     screener_limit: int,
     screener_limit_from_cli: bool,
     evaluation_limit: int | None,
-) -> None:
+) -> ScanMarketData:
+    market_data_service = _build_market_data_service()
     market_data_service.initialize_provider(
         runtime,
         screener_enabled=screener_enabled,
@@ -119,13 +119,14 @@ def _collect_scan_runtime(
         format_ny_now_for_log_fn=_format_ny_now_for_log,
     )
     if runtime.fatal_failure:
-        return
+        return market_data_service
     scan_screener._enforce_ticker_limit(runtime, ticker_limit=evaluation_limit)
 
     _resolve_scan_fx(runtime)
-    if runtime.fatal_failure:
-        return  # type: ignore[unreachable]
+    if getattr(runtime, "fatal_failure", False):
+        return market_data_service
     market_data_service.collect_market_data(runtime)
+    return market_data_service
 
 
 def _evaluate_scan_runtime(
@@ -233,15 +234,13 @@ def run_scan(
         logger=logger,
         tickers=deduped_tickers,
     )
-    market_data_service = _build_market_data_service()
     screener_limit_from_cli = screener_limit is not None
     effective_screener_limit: int = (
         cfg.screener_limit if screener_limit is None else screener_limit
     )
 
-    _collect_scan_runtime(
+    collected_market_data_service = _collect_scan_runtime(
         runtime,
-        market_data_service=market_data_service,
         screener_enabled=screener_enabled,
         screener_only=screener_only,
         screener_limit=effective_screener_limit,
@@ -256,7 +255,12 @@ def run_scan(
         runtime.fatal_failure = True
 
     if not runtime.fatal_failure:
-        _evaluate_scan_runtime(runtime, market_data_service=market_data_service)
+        _evaluate_scan_runtime(
+            runtime,
+            market_data_service=collected_market_data_service
+            if isinstance(collected_market_data_service, ScanMarketData)
+            else _build_market_data_service(),
+        )
         _mark_missing_scan_market_data(runtime)
 
     out_path = _render_scan_report(runtime)
