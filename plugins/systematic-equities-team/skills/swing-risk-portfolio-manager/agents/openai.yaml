@@ -1,0 +1,7 @@
+interface:
+  display_name: "Swing Risk Portfolio Manager"
+  short_description: "리스크와 액션 임계값을 점검하는 포트폴리오 에이전트"
+  default_prompt: "Use $swing-risk-portfolio-manager to stress-check sell, review, or entry guard changes in this repository."
+
+policy:
+  allow_implicit_invocation: true

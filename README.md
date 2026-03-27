@@ -34,7 +34,6 @@
 - uv 설치(macOS)
   - `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - 확인: `uv --version`
-
 - 의존성/프로젝트 준비
   - 기본(슬림) 프로파일: `UV_CACHE_DIR=.uv-cache uv sync`
   - 개발 의존성 포함: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
@@ -52,7 +51,6 @@
   - (선택) PyKRX 데이터 제공자/폴백: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
   - (선택) 전체 기능: `UV_CACHE_DIR=.uv-cache uv sync --all-extras --all-groups`
   - 잠금 갱신이 필요하면: `UV_CACHE_DIR=.uv-cache uv lock` (업그레이드: `UV_CACHE_DIR=.uv-cache uv lock --upgrade`)
-
 - .env 설정(예시)
   - 원칙:
     - `.env`는 **시크릿/환경별 값만** 둡니다(커밋 금지).
@@ -68,7 +66,6 @@
   - 선택(로컬 운영 편의):
     - `LOG_LEVEL=INFO`
   - 전체 키 목록/설명은 `.env.example`을 참고하세요.
-
 - 실행 예시
   - 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
   - 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
@@ -94,7 +91,6 @@
       - `0.0`은 “누락이 1건이라도 있으면 실패” 정책으로 해석
   - 웹 UI(Next.js): `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web` → `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
   - 로컬 CLI 실행 결과도 웹에서 보고 싶다면: `.env`에 `SAB_UPLOAD_REPORTS=true` (Supabase 설정 필요)
-
 - 웹 UI 로컬 실행(Next.js + Docker)
   - 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
   - 로컬 Supabase는 idle 리소스 절감을 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화한 최소 프로필을 사용합니다.
@@ -134,10 +130,9 @@
       - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
       - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
       - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
-      - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/*`, `/api/holdings*`, `/api/reports*`, `/api/run`)
+      - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/`*, `/api/holdings*`, `/api/reports*`, `/api/run`)
       - 시작 가드: direct bind가 loopback 밖으로 열려 있고 동시에 `SAB_ENFORCE_LOCAL_REQUEST=0`이면 서버는 시작하지 않습니다.
       - 운영 가정: 당분간 웹은 `localhost/127.0.0.1` 단일 사용자 노출만 지원하며, local-request 가드는 원격 노출의 완전한 보안 경계로 간주하지 않습니다.
-
 - 결과(리포트 분리 설계)
   - Buy: `reports/YYYY-MM-DD(-n).buy.json`
   - Sell/Review: `reports/YYYY-MM-DD(-n).sell.json`
@@ -149,15 +144,17 @@
 
 `python -m sab` CLI는 아래 서브커맨드를 제공합니다.
 
-<!-- CLI_SUBCOMMANDS_START -->
-| 실행 예 | 설명 |
-|---|---|
-| `UV_CACHE_DIR=.uv-cache uv run -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
-<!-- CLI_SUBCOMMANDS_END -->
 
-문서-구현 동기화 검증: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q tests/test_readme_cli_commands_sync.py`
+
+
+| 실행 예                                         | 설명                           |
+| -------------------------------------------- | ---------------------------- |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab scan`  | 후보 수집/평가 후 JSON 리포트 생성       |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab sell`  | 보유 종목을 매도/점검 규칙으로 평가         |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
+
+
+
 
 ## 개발 운영(1인 사이드 프로젝트)
 
@@ -324,3 +321,4 @@ Per‑market 임계치(권장)
   - 시크릿(`KIS_APP_KEY`, `KIS_APP_SECRET`)은 `.env`/환경변수로만 관리합니다.
   - `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패).
   - 로컬 전용 설정이 필요하면 `config.local.yaml`을 만들고 `SAB_CONFIG=config.local.yaml`로 지정하세요(파일은 커밋하지 않기).
+

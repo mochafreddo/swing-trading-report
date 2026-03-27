@@ -1,0 +1,7 @@
+interface:
+  display_name: "Swing Quant Researcher"
+  short_description: "신호 로직과 레짐 적합성을 검토하는 퀀트 에이전트"
+  default_prompt: "Use $swing-quant-researcher to review or design swing-trading signal logic in this repository."
+
+policy:
+  allow_implicit_invocation: true

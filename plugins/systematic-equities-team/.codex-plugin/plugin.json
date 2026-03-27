@@ -1,0 +1,32 @@
+{
+  "name": "systematic-equities-team",
+  "version": "0.1.0",
+  "description": "Buy-side systematic equities role skills for the swing-trading-report repository.",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "skills",
+    "swing-trading",
+    "systematic-equities",
+    "quant"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Systematic Equities Team",
+    "shortDescription": "Buy-side swing trading role skills for Codex",
+    "longDescription": "Repo-local Codex team with quant research, risk and portfolio review, and data and backtest engineering roles for swing-trading-report.",
+    "developerName": "swing-trading-report",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/mochafreddo/swing-trading-report",
+    "defaultPrompt": [
+      "Review a signal change with the quant researcher.",
+      "Stress-check sell and entry rules with the risk PM.",
+      "Validate data and backtest integrity with the data engineer."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

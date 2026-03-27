@@ -26,6 +26,10 @@
 
 - [Swing 핵심 로직 설계(신호/리스크)](STRATEGY.md)
 
+## Codex 운영
+
+- [Codex Systematic Equities Team](codex-systematic-equities-team.md)
+
 ## 버전 스펙/계약
 
 - [Spec v1.1 계약 초안](spec-v1.1.md)

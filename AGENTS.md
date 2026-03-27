@@ -57,7 +57,7 @@ Make the smallest safe change that fully solves the problem.
 
 ### Testing
 
-- 새 코드는 테스트를 동반해야 합니다.
+- 런타임 동작, 공개 계약, 리스크 판단, 데이터 처리 결과를 바꾸는 새 코드는 테스트를 동반해야 합니다.
 - 버그 수정에는 회귀 테스트가 필요하며, 가능하면 먼저 실패하도록 작성합니다.
 - 테스트는 결정적이고 서로 독립적이어야 합니다.
 - 외부 시스템은 fake, mock, contract test로 대체합니다.
@@ -67,7 +67,11 @@ Make the smallest safe change that fully solves the problem.
 - Green: 테스트를 통과시키는 최소한의 코드만 작성합니다.
 - Refactor: 테스트가 통과한 상태에서만 중복 제거와 구조 개선을 수행합니다.
 - 버그 수정 시 재현 테스트 없이 코드부터 수정하지 않습니다.
-- 사이클 완료 전 품질 게이트를 모두 통과합니다.
+- 문서, 설정 설명, skill/plugin metadata, 정적 manifest 같은 비런타임 변경은 실행 테스트가 항상 필요한 것은 아니며, 링크/구조/스키마/정적 검증처럼 변경 범위에 맞는 검증을 우선합니다.
+- 위 비런타임 변경이더라도 실제 로딩 경로, 계약 파일, 자동화 입력으로 사용된다면 최소한의 구조 검증 테스트 추가를 우선 검토합니다.
+- 품질 게이트는 변경 범위에 비례하게 적용합니다.
+- 전략 로직, API, 스키마, 리스크 경계, 빌드/배포 경로 변경은 사이클 완료 전 관련 품질 게이트를 모두 통과합니다.
+- 문서/metadata 전용 변경은 관련 정적 검증 또는 타깃 테스트로 충분할 수 있으며, 전체 게이트를 생략했다면 이유를 남깁니다.
 - 권장: `just quality`
 - fallback: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`, `UV_CACHE_DIR=.uv-cache uv run ruff check .`, `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Swing Data Backtest Engineer"
+  short_description: "데이터 정합성과 재현성을 검증하는 백테스트 에이전트"
+  default_prompt: "Use $swing-data-backtest-engineer to validate data integrity or backtest assumptions in this repository."
+
+policy:
+  allow_implicit_invocation: true
