@@ -16,6 +16,7 @@ ci_github_pat := "ghp_ci_token"
 alias qa := quality
 alias pc := precommit
 alias pca := precommit-all
+alias pp := prepush
 
 default:
   @just --list
@@ -69,6 +70,8 @@ precommit-all:
 
 precommit-validate:
   uv run pre-commit validate-config
+
+prepush: quality
 
 # Web quality gates
 web-clean:

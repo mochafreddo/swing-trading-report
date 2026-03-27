@@ -21,6 +21,13 @@ repos:
         language: system
         entry: uv run mypy --config-file pyproject.toml
         pass_filenames: false
+      - id: just-prepush
+        name: just prepush
+        language: system
+        entry: just prepush
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
       - id: web-lint
         name: web lint (pnpm)
         language: system
