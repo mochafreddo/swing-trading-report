@@ -1,0 +1,206 @@
+{
+  "report_date": "2024-01-30",
+  "eval_context": {
+    "market": "KR",
+    "session_state": "AFTER_CLOSE",
+    "eval_index_policy": "choose_eval_index:v1"
+  },
+  "config_snapshot": {
+    "strategy_mode": "ema_cross",
+    "use_sma200_filter": false,
+    "require_slope_up": false,
+    "gap_atr_multiplier": 1.0,
+    "min_history_bars": 30,
+    "rs_lookback_days": 5,
+    "rs_benchmark_ticker_kr": null,
+    "rs_benchmark_ticker_us": null,
+    "min_price": 0.0,
+    "us_min_price": null,
+    "min_dollar_volume": 0.0,
+    "us_min_dollar_volume": null,
+    "exclude_etf_etn": false,
+    "universe_markets": [
+      "KR"
+    ]
+  },
+  "summary": {
+    "universe_count": 3,
+    "candidate_count": 2,
+    "issue_count": 1,
+    "system_issue_count": 0,
+    "screen_out_count": 1
+  },
+  "tickers": [
+    "005930",
+    "000660"
+  ],
+  "candidates": [
+    {
+      "ticker": "005930",
+      "name": "005930",
+      "price": "₩166",
+      "ema20": "130.70",
+      "ema50": "130.45",
+      "rsi14": "68.23",
+      "atr14": "9.58",
+      "atr14_value": 9.579570448484958,
+      "gap": "0.0%",
+      "gap_threshold": "5.3%",
+      "gap_guard_pct_value": 0.05755839584218053,
+      "gap_guard_up_price_value": 176.01177044848495,
+      "gap_guard_down_price_value": 156.85262955151504,
+      "pct_change": "53.6%",
+      "high": "167",
+      "low": "107",
+      "risk_guide": "Stop 157 / Target 186 (~1:2)",
+      "sma200": "-",
+      "avg_dollar_volume": "130,300,390",
+      "avg_dollar_volume_value": 130300390.0,
+      "rs_return": "27.1%",
+      "rs_return_value": 0.2706746251700649,
+      "rs_diff": "-",
+      "rs_diff_value": null,
+      "rs_benchmark": "-",
+      "rs_benchmark_value": null,
+      "rs_benchmark_ticker": null,
+      "score": "4.0",
+      "score_value": 4.0,
+      "score_notes": "ema_cross, rsi, gap, liquidity",
+      "reasons": [
+        {
+          "id": "ema_cross",
+          "label": "EMA20/50 골든크로스",
+          "kind": "signal",
+          "status": "pass",
+          "points": 1
+        },
+        {
+          "id": "rsi_rebound",
+          "label": "RSI 반등",
+          "kind": "signal",
+          "status": "pass",
+          "points": 1,
+          "value": 68.2266742116218,
+          "threshold": 30.0
+        },
+        {
+          "id": "gap_within_limit",
+          "label": "갭 허용 범위",
+          "kind": "filter",
+          "status": "pass",
+          "points": 1,
+          "value": 0.0,
+          "threshold": 0.05255609669422515
+        },
+        {
+          "id": "liquidity",
+          "label": "유동성 확보",
+          "kind": "filter",
+          "status": "pass",
+          "points": 1,
+          "value": 130300390.0,
+          "threshold": 0.0
+        }
+      ],
+      "trend_pass": "Yes",
+      "slope_pass": "Yes",
+      "currency": "KRW",
+      "eval_date": "20240130",
+      "price_value": 166.4322,
+      "close_value": 166.4322,
+      "signal_price_basis": "adjusted",
+      "signal_close_adjusted_value": 166.4322,
+      "pct_change_value": 0.5362353086690967,
+      "strategy_mode": "ema_cross",
+      "entry_reference_close_raw_value": 165.4322,
+      "entry_reference_eval_date": "20240130"
+    },
+    {
+      "ticker": "000660",
+      "name": "000660",
+      "price": "₩166",
+      "ema20": "130.70",
+      "ema50": "130.45",
+      "rsi14": "68.23",
+      "atr14": "9.58",
+      "atr14_value": 9.579570448484958,
+      "gap": "0.0%",
+      "gap_threshold": "5.3%",
+      "gap_guard_pct_value": 0.05755839584218053,
+      "gap_guard_up_price_value": 176.01177044848495,
+      "gap_guard_down_price_value": 156.85262955151504,
+      "pct_change": "53.6%",
+      "high": "167",
+      "low": "107",
+      "risk_guide": "Stop 157 / Target 186 (~1:2)",
+      "sma200": "-",
+      "avg_dollar_volume": "65,150,195",
+      "avg_dollar_volume_value": 65150195.0,
+      "rs_return": "27.1%",
+      "rs_return_value": 0.2706746251700649,
+      "rs_diff": "-",
+      "rs_diff_value": null,
+      "rs_benchmark": "-",
+      "rs_benchmark_value": null,
+      "rs_benchmark_ticker": null,
+      "score": "4.0",
+      "score_value": 4.0,
+      "score_notes": "ema_cross, rsi, gap, liquidity",
+      "reasons": [
+        {
+          "id": "ema_cross",
+          "label": "EMA20/50 골든크로스",
+          "kind": "signal",
+          "status": "pass",
+          "points": 1
+        },
+        {
+          "id": "rsi_rebound",
+          "label": "RSI 반등",
+          "kind": "signal",
+          "status": "pass",
+          "points": 1,
+          "value": 68.2266742116218,
+          "threshold": 30.0
+        },
+        {
+          "id": "gap_within_limit",
+          "label": "갭 허용 범위",
+          "kind": "filter",
+          "status": "pass",
+          "points": 1,
+          "value": 0.0,
+          "threshold": 0.05255609669422515
+        },
+        {
+          "id": "liquidity",
+          "label": "유동성 확보",
+          "kind": "filter",
+          "status": "pass",
+          "points": 1,
+          "value": 65150195.0,
+          "threshold": 0.0
+        }
+      ],
+      "trend_pass": "Yes",
+      "slope_pass": "Yes",
+      "currency": "KRW",
+      "eval_date": "20240130",
+      "price_value": 166.4322,
+      "close_value": 166.4322,
+      "signal_price_basis": "adjusted",
+      "signal_close_adjusted_value": 166.4322,
+      "pct_change_value": 0.5362353086690967,
+      "strategy_mode": "ema_cross",
+      "entry_reference_close_raw_value": 164.4322,
+      "entry_reference_eval_date": "20240130"
+    }
+  ],
+  "issues": [
+    "035420: EMA(20/50) cross not satisfied"
+  ],
+  "system_issues": [],
+  "screen_outs": [
+    "035420: EMA(20/50) cross not satisfied"
+  ]
+}

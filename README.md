@@ -300,6 +300,12 @@
   - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
   - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 
+## EOD Replay Harness
+
+- `tests/fixtures/replay_eod/scan/*`는 fixture 기반 `scan` replay baseline입니다. 전략 변경이 buy artifact를 어떻게 바꾸는지 CI에서 고정 비교합니다.
+- 실행 예시: `just test tests/test_replay_eod_scan.py -q`
+- 새 replay case를 추가할 때는 각 case 디렉터리에 `config.yaml`, `watchlist.txt`, `adjusted_market_data.json`, `raw_market_data.json`, `expected.buy.json` 다섯 파일만 포함해야 합니다.
+
 ## Audit 자동화 (GitHub Actions)
 
 - 보안/워크플로 감사 전용 파이프라인은 `.github/workflows/audit.yml`로 운영합니다.
