@@ -113,6 +113,7 @@ def write_sell_report(
     fx_note: str | None = None,
     sell_mode: str | None = None,
     sell_mode_note: str | None = None,
+    summary_fields: dict[str, Any] | None = None,
     quantity_digits: int = 6,
     run_meta: dict[str, Any] | None = None,
     artifact_date: str | None = None,
@@ -134,6 +135,8 @@ def write_sell_report(
         "issue_count": len(failures_list),
         "action_counts": dict(sorted(action_counts.items())),
     }
+    if summary_fields:
+        summary.update(summary_fields)
 
     inferred_market, inferred_markets = _infer_market(rows)
     default_run_meta = build_run_meta(

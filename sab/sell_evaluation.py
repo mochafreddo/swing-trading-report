@@ -8,6 +8,10 @@ from .report.session_state import (
     resolve_run_session_state,
     resolve_run_session_state_map,
 )
+from .report.summary_metrics import (
+    build_market_data_summary,
+    count_provider_fallbacks,
+)
 from .sell_types import _SellRuntime
 
 _SYSTEM_REASON_PREFIXES = (
@@ -361,6 +365,15 @@ def _write_sell_report(
         }
     )
     artifact_date = artifact_dates[-1] if artifact_dates else None
+    summary_fields = build_market_data_summary(
+        requested_count=len(runtime.unique_tickers),
+        covered_count=len(runtime.market_data),
+        fallback_count=count_provider_fallbacks(
+            tickers=runtime.unique_tickers,
+            ticker_data_source=runtime.ticker_data_source,
+            primary_provider=runtime.cfg.data_provider,
+        ),
+    )
 
     return write_sell_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,
@@ -374,6 +387,7 @@ def _write_sell_report(
         fx_note=runtime.fx_note,
         sell_mode=runtime.cfg.sell_mode,
         sell_mode_note=_build_sell_mode_note(runtime.cfg),
+        summary_fields=summary_fields,
         run_meta=run_meta,
         artifact_date=artifact_date,
     )

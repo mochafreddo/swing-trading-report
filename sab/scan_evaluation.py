@@ -13,6 +13,11 @@ from .report.session_state import (
     resolve_run_session_state,
     resolve_run_session_state_map,
 )
+from .report.summary_metrics import (
+    build_market_data_summary,
+    compute_ratio,
+    count_provider_fallbacks,
+)
 from .scan_types import _ScanRuntime, _to_float
 from .signals.eval_index import choose_eval_index
 from .signals.indicators import sma
@@ -234,6 +239,8 @@ def _compute_rs_benchmark_return(
 def _resolve_rs_benchmark_context(
     runtime: _ScanRuntime,
 ) -> tuple[dict[str, float], dict[str, str], bool]:
+    runtime.rs_benchmark_requested_count = 0
+    runtime.rs_benchmark_unavailable_count = 0
     if runtime.cfg.rs_lookback_days <= 0:
         return {}, {}, False
 
@@ -247,6 +254,14 @@ def _resolve_rs_benchmark_context(
         "KR": runtime.cfg.rs_benchmark_ticker_kr,
         "US": runtime.cfg.rs_benchmark_ticker_us,
     }
+    requested_markets = {
+        market for market in active_markets if configured_benchmarks.get(market)
+    }
+    runtime.rs_benchmark_requested_count = sum(
+        1
+        for ticker in runtime.tickers
+        if infer_market_from_ticker(ticker) in requested_markets
+    )
     dynamic_requested = any(
         configured_benchmarks.get(market) for market in active_markets
     )
@@ -255,6 +270,7 @@ def _resolve_rs_benchmark_context(
 
     benchmark_returns: dict[str, float] = {}
     benchmark_tickers: dict[str, str] = {}
+    unavailable_markets: set[str] = set()
     issues: list[str] = []
     for market in active_markets:
         benchmark_ticker = configured_benchmarks.get(market)
@@ -267,10 +283,17 @@ def _resolve_rs_benchmark_context(
             market=market,
         )
         if benchmark_return is None:
+            unavailable_markets.add(market)
             issues.append(issue or f"{market}: benchmark return unavailable")
             continue
         benchmark_returns[market] = benchmark_return
         benchmark_tickers[market] = benchmark_ticker
+
+    runtime.rs_benchmark_unavailable_count = sum(
+        1
+        for ticker in runtime.tickers
+        if infer_market_from_ticker(ticker) in unavailable_markets
+    )
 
     if issues:
         issue_label = (
@@ -735,6 +758,23 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         }
     )
     artifact_date = artifact_dates[-1] if artifact_dates else None
+    summary_fields = {
+        **build_market_data_summary(
+            requested_count=len(runtime.tickers),
+            covered_count=len(runtime.market_data),
+            fallback_count=count_provider_fallbacks(
+                tickers=runtime.tickers,
+                ticker_data_source=runtime.ticker_data_source,
+                primary_provider=runtime.cfg.data_provider,
+            ),
+        ),
+        "rs_benchmark_requested_count": runtime.rs_benchmark_requested_count,
+        "rs_benchmark_unavailable_count": runtime.rs_benchmark_unavailable_count,
+        "rs_benchmark_unavailable_ratio": compute_ratio(
+            numerator=runtime.rs_benchmark_unavailable_count,
+            denominator=runtime.rs_benchmark_requested_count,
+        ),
+    }
     return write_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,
         provider=runtime.cfg.data_provider,
@@ -746,6 +786,7 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         cache_hint=runtime.cache_hint,
         report_type="buy",
         strategy_mode=runtime.cfg.strategy_mode,
+        summary_fields=summary_fields,
         run_meta=run_meta,
         artifact_date=artifact_date,
     )

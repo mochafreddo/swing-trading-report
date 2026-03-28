@@ -292,3 +292,71 @@ def test_write_report_emits_issue_split_fields(tmp_path: Path) -> None:
     assert payload["summary"]["issue_count"] == 2
     assert payload["summary"]["system_issue_count"] == 1
     assert payload["summary"]["screen_out_count"] == 1
+
+
+def test_write_report_merges_summary_fields(tmp_path: Path) -> None:
+    out_path = write_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        universe_count=3,
+        candidates=[{"ticker": "AAPL.US", "name": "Apple", "price": "190"}],
+        report_type="buy",
+        summary_fields={
+            "data_requested_count": 3,
+            "data_covered_count": 2,
+            "data_missing_count": 1,
+            "data_coverage_ratio": 2 / 3,
+            "provider_fallback_count": 1,
+            "provider_fallback_ratio": 0.5,
+            "rs_benchmark_requested_count": 2,
+            "rs_benchmark_unavailable_count": 1,
+            "rs_benchmark_unavailable_ratio": 0.5,
+        },
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["summary"]["candidate_count"] == 1
+    assert payload["summary"]["data_requested_count"] == 3
+    assert payload["summary"]["data_covered_count"] == 2
+    assert payload["summary"]["data_missing_count"] == 1
+    assert payload["summary"]["provider_fallback_count"] == 1
+    assert payload["summary"]["rs_benchmark_requested_count"] == 2
+    assert payload["summary"]["rs_benchmark_unavailable_count"] == 1
+
+
+def test_write_sell_report_merges_summary_fields(tmp_path: Path) -> None:
+    row = SellReportRow(
+        ticker="AAPL.NAS",
+        name="Apple",
+        quantity=1.0,
+        entry_price=150.0,
+        entry_date="2026-01-02",
+        last_price=190.0,
+        pnl_pct=0.2,
+        action="HOLD",
+        reasons=["test"],
+        stop_price=170.0,
+        target_price=210.0,
+        currency="USD",
+    )
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=[row],
+        summary_fields={
+            "data_requested_count": 2,
+            "data_covered_count": 1,
+            "data_missing_count": 1,
+            "data_coverage_ratio": 0.5,
+            "provider_fallback_count": 1,
+            "provider_fallback_ratio": 1.0,
+        },
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["summary"]["evaluated_count"] == 1
+    assert payload["summary"]["data_requested_count"] == 2
+    assert payload["summary"]["data_covered_count"] == 1
+    assert payload["summary"]["data_missing_count"] == 1
+    assert payload["summary"]["provider_fallback_count"] == 1
+    assert payload["summary"]["provider_fallback_ratio"] == 1.0

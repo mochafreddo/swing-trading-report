@@ -48,6 +48,7 @@ def test_write_entry_report_writes_schema_and_entries(tmp_path: Path) -> None:
     assert payload["source_buy_report"] == "2026-02-25.buy.json"
     assert payload["entries"][0]["ticker"] == "AAPL.NASD"
     assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["summary"] == artifact["summary"]
     assert "generated_at" in payload
 
 

@@ -13,6 +13,7 @@ describe("middleware auth response shape", () => {
       "/",
       "/holdings/:path*",
       "/reports/:path*",
+      "/metrics/:path*",
       "/run/:path*",
     ]);
   });

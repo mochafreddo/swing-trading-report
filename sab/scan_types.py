@@ -117,3 +117,5 @@ class _ScanRuntime:
     us_holidays_cache: dict[str, HolidayEntry] = field(default_factory=dict)
     latest_dates: dict[str, str] = field(default_factory=dict)
     candidates: list[dict[str, Any]] = field(default_factory=list)
+    rs_benchmark_requested_count: int = 0
+    rs_benchmark_unavailable_count: int = 0

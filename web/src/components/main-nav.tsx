@@ -10,6 +10,7 @@ import styles from "./main-nav.module.css";
 
 const NAV_ITEMS = [
   { href: "/reports", label: "Reports" },
+  { href: "/metrics", label: "Metrics" },
   { href: "/holdings", label: "Holdings" },
   { href: "/run", label: "Run" },
 ] as const;

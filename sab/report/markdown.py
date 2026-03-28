@@ -78,6 +78,7 @@ def write_report(
     cache_hint: str | None = None,
     report_type: str = "buy",
     strategy_mode: str | None = None,
+    summary_fields: dict[str, Any] | None = None,
     run_meta: dict[str, Any] | None = None,
     artifact_date: str | None = None,
 ) -> str:
@@ -89,6 +90,15 @@ def write_report(
     failures_list = list(failures or [])
     system_issues_list = list(system_issues or [])
     screen_outs_list = list(screen_outs or [])
+    summary: dict[str, Any] = {
+        "universe_count": universe_count,
+        "candidate_count": len(cand_list),
+        "issue_count": len(failures_list),
+        "system_issue_count": len(system_issues_list),
+        "screen_out_count": len(screen_outs_list),
+    }
+    if summary_fields:
+        summary.update(summary_fields)
     inferred_market, inferred_markets = _infer_market(cand_list)
     default_run_meta = build_run_meta(
         market=inferred_market,
@@ -112,13 +122,7 @@ def write_report(
         "universe": {
             "count": universe_count,
         },
-        "summary": {
-            "universe_count": universe_count,
-            "candidate_count": len(cand_list),
-            "issue_count": len(failures_list),
-            "system_issue_count": len(system_issues_list),
-            "screen_out_count": len(screen_outs_list),
-        },
+        "summary": summary,
         "tickers": _collect_tickers(cand_list),
         "candidates": cand_list,
         "issues": failures_list,

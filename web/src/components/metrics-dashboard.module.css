@@ -1,0 +1,246 @@
+.shell {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.hero {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.heroCopy {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 48rem;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent-soft);
+}
+
+.heroTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  letter-spacing: -0.05em;
+  line-height: 0.95;
+}
+
+.heroMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.metaItem {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-bg) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+}
+
+.metaLabel {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.metaValue {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.panels {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-5);
+  animation: rise-in 0.48s ease-out both;
+}
+
+.panelHeader {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.panelHeaderCopy {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.panelMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+  background: color-mix(in srgb, var(--accent-bg) 30%, transparent);
+  color: var(--ink);
+  font-size: 0.79rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    transform 0.12s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.link:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--line));
+  background: color-mix(in srgb, var(--accent-bg) 48%, transparent);
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.metricCard {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-strong) 82%, transparent),
+      color-mix(in srgb, var(--panel) 96%, transparent)
+    ),
+    radial-gradient(
+      circle at 100% 0%,
+      rgba(107, 163, 255, 0.16),
+      transparent 28%
+    );
+}
+
+.metricHeader {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.metricLabel {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.metricCurrent {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+
+.metricAverage {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.sparklineWrap {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.sparkline {
+  width: 100%;
+  height: 68px;
+  overflow: visible;
+}
+
+.sparklineTrack {
+  fill: none;
+  stroke: color-mix(in srgb, var(--line) 90%, transparent);
+  stroke-width: 1;
+}
+
+.sparklineStroke {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sparklineArea {
+  fill: url(#metricsArea);
+}
+
+.sparklineFallback {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink-muted) 70%, transparent);
+  stroke-width: 1.6;
+  stroke-dasharray: 4 4;
+}
+
+.sparklineCaption {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.errorPanel {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.errorText {
+  margin: 0;
+  color: color-mix(in srgb, var(--danger) 82%, white);
+  line-height: 1.6;
+}
+
+@media (max-width: 840px) {
+  .heroMeta {
+    grid-template-columns: 1fr;
+  }
+
+  .panelHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}

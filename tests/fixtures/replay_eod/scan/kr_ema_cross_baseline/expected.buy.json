@@ -29,7 +29,16 @@
     "candidate_count": 2,
     "issue_count": 1,
     "system_issue_count": 0,
-    "screen_out_count": 1
+    "screen_out_count": 1,
+    "data_requested_count": 3,
+    "data_covered_count": 3,
+    "data_missing_count": 0,
+    "data_coverage_ratio": 1.0,
+    "provider_fallback_count": 3,
+    "provider_fallback_ratio": 1.0,
+    "rs_benchmark_requested_count": 0,
+    "rs_benchmark_unavailable_count": 0,
+    "rs_benchmark_unavailable_ratio": null
   },
   "tickers": [
     "005930",
