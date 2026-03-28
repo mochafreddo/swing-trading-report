@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.13.0...v1.14.0) (2026-03-28)
+
+
+### Features
+
+* **scan:** 시장 레짐 SMA200 필터를 추가 ([aadf215](https://github.com/mochafreddo/swing-trading-report/commit/aadf2153fe2aaa741d3008639631e860048ddaef))
+
 ## [1.13.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.12.0...v1.13.0) (2026-03-28)
 
 
