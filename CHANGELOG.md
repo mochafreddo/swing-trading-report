@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.12.0...v1.13.0) (2026-03-28)
+
+
+### Features
+
+* **holdings:** holdings.yaml import/export 마무리 ([f602fa3](https://github.com/mochafreddo/swing-trading-report/commit/f602fa33cabe8c87512e1d43f77ecaa50dd7ed15))
+
 ## [1.12.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.11.2...v1.12.0) (2026-03-27)
 
 
