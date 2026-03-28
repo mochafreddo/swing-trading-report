@@ -127,6 +127,7 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("FX_MODE", "fx.mode"),
     ("FX_CACHE_TTL", "fx.cache_ttl_minutes"),
     ("FX_KIS_SYMBOL", "fx.kis_symbol"),
+    ("PORTFOLIO_MAX_ACTIVE_HOLDINGS", "portfolio.max_active_holdings"),
 )
 
 
@@ -171,6 +172,13 @@ class HybridSellConfig:
     time_stop_days: int = 0
     time_stop_grace_days: int = 0
     time_stop_profit_floor: float = 0.0
+
+
+@dataclass(frozen=True)
+class PortfolioConfig:
+    max_active_holdings: int | None = None
+    max_new_entries_kr: int | None = None
+    max_new_entries_us: int | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +239,7 @@ class Config:
     us_min_dollar_volume: float | None = None
     hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
     hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
+    portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
 
 
 def _normalize_kis_base(url: str | None) -> str | None:
@@ -485,6 +494,13 @@ class _FxSection:
     fx_mode: str
     fx_cache_ttl_minutes: float
     fx_kis_symbol: str | None
+
+
+@dataclass(frozen=True)
+class _PortfolioSection:
+    max_active_holdings: int | None
+    max_new_entries_kr: int | None
+    max_new_entries_us: int | None
 
 
 def _create_config_parser() -> _ConfigParser:
@@ -829,6 +845,88 @@ def _parse_fx_section(parser: _ConfigParser) -> _FxSection:
     )
 
 
+def _parse_optional_int(
+    parser: _ConfigParser, *, path: str, env_key: str | None = None
+) -> int | None:
+    raw: Any
+    source = f"config.yaml '{path}'"
+    if env_key is not None and os.getenv(env_key) is not None:
+        raw = os.getenv(env_key)
+        source = f"environment variable '{env_key}'"
+    else:
+        raw = parser.from_yaml(path)
+
+    if raw is None:
+        return None
+
+    if isinstance(raw, bool):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': {source} must be an integer or null, got {raw!r}."
+        )
+
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as err:
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': {source} must be an integer or null, got {raw!r}."
+        ) from err
+
+
+def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
+    max_new_entries_per_market = parser.from_yaml(
+        "portfolio.max_new_entries_per_market"
+    )
+    if max_new_entries_per_market is None:
+        market_caps: dict[str, Any] = {}
+    elif isinstance(max_new_entries_per_market, dict):
+        market_caps = max_new_entries_per_market
+    else:
+        raise ConfigLoadError(
+            "Invalid config value 'portfolio.max_new_entries_per_market': "
+            "must be a mapping/object when provided."
+        )
+
+    unknown_market_keys = sorted(
+        str(key) for key in market_caps if str(key).strip().upper() not in {"KR", "US"}
+    )
+    if unknown_market_keys:
+        raise ConfigLoadError(
+            "Invalid config value 'portfolio.max_new_entries_per_market': "
+            f"unsupported market keys {unknown_market_keys!r}; expected only 'KR' and/or 'US'."
+        )
+
+    def _market_cap_value(market: str) -> int | None:
+        for key, value in market_caps.items():
+            if str(key).strip().upper() == market:
+                if value is None:
+                    return None
+                if isinstance(value, bool):
+                    raise ConfigLoadError(
+                        "Invalid config value "
+                        f"'portfolio.max_new_entries_per_market.{market}': "
+                        f"must be an integer or null, got {value!r}."
+                    )
+                try:
+                    return int(value)
+                except (TypeError, ValueError) as err:
+                    raise ConfigLoadError(
+                        "Invalid config value "
+                        f"'portfolio.max_new_entries_per_market.{market}': "
+                        f"must be an integer or null, got {value!r}."
+                    ) from err
+        return None
+
+    return _PortfolioSection(
+        max_active_holdings=_parse_optional_int(
+            parser,
+            path="portfolio.max_active_holdings",
+            env_key="PORTFOLIO_MAX_ACTIVE_HOLDINGS",
+        ),
+        max_new_entries_kr=_market_cap_value("KR"),
+        max_new_entries_us=_market_cap_value("US"),
+    )
+
+
 def _normalize_choice(
     value: str,
     *,
@@ -1009,14 +1107,32 @@ def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> 
     )
 
 
+def _validate_portfolio_ranges(portfolio: _PortfolioSection) -> None:
+    if portfolio.max_active_holdings is not None:
+        _validate_non_negative(
+            "portfolio.max_active_holdings", float(portfolio.max_active_holdings)
+        )
+    if portfolio.max_new_entries_kr is not None:
+        _validate_non_negative(
+            "portfolio.max_new_entries_per_market.KR",
+            float(portfolio.max_new_entries_kr),
+        )
+    if portfolio.max_new_entries_us is not None:
+        _validate_non_negative(
+            "portfolio.max_new_entries_per_market.US",
+            float(portfolio.max_new_entries_us),
+        )
+
+
 def _validate_sections(
     *,
     data: _DataSection,
     strategy: _StrategySection,
     sell: _SellSection,
     fx: _FxSection,
+    portfolio: _PortfolioSection,
     strict: bool,
-) -> tuple[_DataSection, _StrategySection, _SellSection, _FxSection]:
+) -> tuple[_DataSection, _StrategySection, _SellSection, _FxSection, _PortfolioSection]:
     validated_strategy = replace(
         strategy,
         strategy_mode=_normalize_choice(
@@ -1048,7 +1164,8 @@ def _validate_sections(
         ),
     )
     _validate_risk_ranges(strategy=validated_strategy, sell=validated_sell)
-    return data, validated_strategy, validated_sell, validated_fx
+    _validate_portfolio_ranges(portfolio)
+    return data, validated_strategy, validated_sell, validated_fx, portfolio
 
 
 def _compose_config(
@@ -1057,6 +1174,7 @@ def _compose_config(
     strategy: _StrategySection,
     sell: _SellSection,
     fx: _FxSection,
+    portfolio: _PortfolioSection,
 ) -> Config:
     return Config(
         data_provider=data.provider,
@@ -1111,6 +1229,11 @@ def _compose_config(
         us_min_dollar_volume=strategy.us_min_dollar_volume,
         hybrid=strategy.hybrid,
         hybrid_sell=sell.hybrid_sell,
+        portfolio=PortfolioConfig(
+            max_active_holdings=portfolio.max_active_holdings,
+            max_new_entries_kr=portfolio.max_new_entries_kr,
+            max_new_entries_us=portfolio.max_new_entries_us,
+        ),
     )
 
 
@@ -1135,17 +1258,20 @@ def load_config(
     strategy_section = _parse_strategy_section(parser)
     sell_section = _parse_sell_section(parser)
     fx_section = _parse_fx_section(parser)
+    portfolio_section = _parse_portfolio_section(parser)
 
     (
         validated_data,
         validated_strategy,
         validated_sell,
         validated_fx,
+        validated_portfolio,
     ) = _validate_sections(
         data=data_section,
         strategy=strategy_section,
         sell=sell_section,
         fx=fx_section,
+        portfolio=portfolio_section,
         strict=parser.strict,
     )
     return _compose_config(
@@ -1153,6 +1279,7 @@ def load_config(
         strategy=validated_strategy,
         sell=validated_sell,
         fx=validated_fx,
+        portfolio=validated_portfolio,
     )
 
 

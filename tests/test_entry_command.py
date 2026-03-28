@@ -12,6 +12,28 @@ from sab.entry import (
     evaluate_entry_candidates,
     run_entry,
 )
+from sab.holdings_loader import Holding, HoldingsData, HoldingSettings
+
+
+def _portfolio_config(
+    *,
+    max_active_holdings: int | None = None,
+    max_new_entries_kr: int | None = None,
+    max_new_entries_us: int | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        max_active_holdings=max_active_holdings,
+        max_new_entries_kr=max_new_entries_kr,
+        max_new_entries_us=max_new_entries_us,
+    )
+
+
+def _holdings_data(rows: list[Holding]) -> HoldingsData:
+    return HoldingsData(
+        path=None,
+        settings=HoldingSettings(),
+        holdings=rows,
+    )
 
 
 def _entry_candidate(
@@ -325,6 +347,8 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -390,6 +414,8 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -441,6 +467,8 @@ def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -505,6 +533,8 @@ def test_run_entry_e2e_skips_gap_guard_when_filter_disabled(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1185,3 +1215,362 @@ def test_run_entry_e2e_uses_pykrx_after_close_price(
     payload = json.loads(out_files[0].read_text(encoding="utf-8"))
     assert payload["entries"][0]["action"] == "ENTER"
     assert payload["entries"][0]["entry_price"] == 101.0
+
+
+def test_run_entry_e2e_applies_max_active_holdings_portfolio_guard(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data(
+            [Holding(ticker="MSFT.NASD", quantity=1, entry_price=100.0)]
+        ),
+        portfolio=_portfolio_config(max_active_holdings=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["action"] == "SKIP"
+    assert "portfolio max active holdings reached" in payload["entries"][0]["reasons"]
+    assert payload["summary"]["portfolio_blocked_count"] == 1
+    assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}
+
+
+def test_run_entry_e2e_loads_holdings_from_holdings_path_for_portfolio_guard(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    holdings_path = tmp_path / "holdings.yaml"
+    holdings_path.write_text(
+        """
+holdings:
+  - ticker: MSFT.NASD
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings_path=holdings_path.as_posix(),
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(max_active_holdings=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["action"] == "SKIP"
+    assert "portfolio max active holdings reached" in payload["entries"][0]["reasons"]
+    assert payload["summary"]["portfolio_blocked_count"] == 1
+
+
+def test_run_entry_e2e_applies_market_portfolio_guard_without_touching_review_rows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "MIXED", "markets": ["KR", "US"]},
+                "candidates": [
+                    _entry_candidate("AAPL.NASD", gap_guard_value=0.05),
+                    _entry_candidate(
+                        "NVDA.NASD",
+                        gap_guard_value=0.05,
+                        strategy_mode="sma_ema_hybrid",
+                        entry_state="WATCH",
+                    ),
+                    _entry_candidate("005930", gap_guard_value=0.05),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(max_new_entries_us=1, max_new_entries_kr=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+            assert ticker == "005930"
+            return {"stck_prpr": "101.0"}
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    by_ticker = {row["ticker"]: row for row in payload["entries"]}
+    assert by_ticker["AAPL.NASD"]["action"] == "ENTER"
+    assert by_ticker["NVDA.NASD"]["action"] == "REVIEW"
+    assert by_ticker["005930"]["action"] == "ENTER"
+    assert payload["summary"]["portfolio_blocked_count"] == 0
+    assert payload["summary"]["portfolio_blocked_by_market"] == {}
+
+
+def test_run_entry_e2e_preserves_buy_report_order_for_mixed_portfolio_guard(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "MIXED", "markets": ["KR", "US"]},
+                "candidates": [
+                    _entry_candidate("AAPL.NASD", gap_guard_value=0.05),
+                    _entry_candidate("005930", gap_guard_value=0.05),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(max_active_holdings=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+            assert ticker == "005930"
+            return {"stck_prpr": "101.0"}
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert [row["ticker"] for row in payload["entries"]] == ["AAPL.NASD", "005930"]
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][1]["action"] == "SKIP"
+    assert "portfolio max active holdings reached" in payload["entries"][1]["reasons"]
+    assert payload["summary"]["portfolio_blocked_by_market"] == {"KR": 1}
+
+
+def test_run_entry_e2e_blocks_second_us_entry_when_market_cap_reached(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    _entry_candidate("AAPL.NASD", gap_guard_value=0.05),
+                    _entry_candidate("MSFT.NASD", gap_guard_value=0.05),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(max_new_entries_us=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][1]["action"] == "SKIP"
+    assert "portfolio market cap reached (US)" in payload["entries"][1]["reasons"]
+    assert payload["summary"]["portfolio_blocked_count"] == 1
+    assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}

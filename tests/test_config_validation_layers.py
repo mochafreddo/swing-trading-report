@@ -496,3 +496,76 @@ def test_load_config_defaults_market_cache_staleness_to_zero_sessions(
     cfg = load_config()
     assert cfg.market_cache_stale_sessions_kr == 0
     assert cfg.market_cache_stale_sessions_us == 0
+
+
+def test_load_config_parses_portfolio_caps(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+portfolio:
+  max_active_holdings: 5
+  max_new_entries_per_market:
+    KR: 2
+    US: 1
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.portfolio.max_active_holdings == 5
+    assert cfg.portfolio.max_new_entries_kr == 2
+    assert cfg.portfolio.max_new_entries_us == 1
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "error_path"),
+    [
+        ("portfolio:\n  max_active_holdings: -1\n", "portfolio.max_active_holdings"),
+        (
+            "portfolio:\n  max_active_holdings: true\n",
+            "portfolio.max_active_holdings",
+        ),
+        (
+            "portfolio:\n  max_new_entries_per_market:\n    KR: -1\n",
+            "portfolio.max_new_entries_per_market.KR",
+        ),
+        (
+            "portfolio:\n  max_new_entries_per_market:\n    KR: true\n",
+            "portfolio.max_new_entries_per_market.KR",
+        ),
+        (
+            "portfolio:\n  max_new_entries_per_market:\n    JP: 1\n",
+            "portfolio.max_new_entries_per_market",
+        ),
+        (
+            "portfolio:\n  max_new_entries_per_market: 3\n",
+            "portfolio.max_new_entries_per_market",
+        ),
+    ],
+)
+def test_load_config_rejects_invalid_portfolio_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    yaml_text: str,
+    error_path: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=error_path):
+        load_config()

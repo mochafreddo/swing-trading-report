@@ -6,16 +6,23 @@ import logging
 import math
 import os
 import re
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.kis_client import KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError, PykrxNotInstalledError
+from .holdings_loader import (
+    Holding,
+    HoldingsData,
+    HoldingSettings,
+    HoldingsLoadError,
+    load_holdings,
+)
 from .market_data_common import infer_env_from_base_url
 from .report.entry_report import EntryReportRow, write_entry_report
 from .report.run_meta import build_run_meta
@@ -41,6 +48,7 @@ _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
 _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
 _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO = 1.0
+_PORTFOLIO_BLOCK_REASON_TOTAL = "portfolio max active holdings reached"
 
 
 def _to_finite_float(value: Any) -> float | None:
@@ -660,17 +668,27 @@ def _make_price_lookup(
 
 
 def _build_entry_summary(
-    rows: list[EntryReportRow], system_issues: list[str]
+    rows: list[EntryReportRow],
+    system_issues: list[str],
+    *,
+    portfolio_blocked_by_market: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     counts = Counter(row.action for row in rows)
     missing_entry_price_count = sum(1 for row in rows if row.entry_price is None)
     missing_entry_price_ratio = missing_entry_price_count / len(rows) if rows else 0.0
+    portfolio_counts = {
+        market: count
+        for market, count in sorted((portfolio_blocked_by_market or {}).items())
+        if count > 0
+    }
     return {
         "entry_count": len(rows),
         "action_counts": dict(sorted(counts.items())),
         "system_issue_count": len(system_issues),
         "missing_entry_price_count": missing_entry_price_count,
         "missing_entry_price_ratio": missing_entry_price_ratio,
+        "portfolio_blocked_count": sum(portfolio_counts.values()),
+        "portfolio_blocked_by_market": portfolio_counts,
     }
 
 
@@ -685,13 +703,140 @@ def _is_missing_price_ratio_fatal(
 
 
 def _build_config_snapshot(cfg: Config, *, provider: str, mode: str) -> dict[str, Any]:
+    portfolio = getattr(cfg, "portfolio", None)
     return {
         "provider": provider,
         "mode": mode,
         "strategy_mode": cfg.strategy_mode,
         "gap_atr_multiplier": cfg.gap_atr_multiplier,
         "min_history_bars": cfg.min_history_bars,
+        "portfolio": {
+            "max_active_holdings": getattr(portfolio, "max_active_holdings", None),
+            "max_new_entries_per_market": {
+                "KR": getattr(portfolio, "max_new_entries_kr", None),
+                "US": getattr(portfolio, "max_new_entries_us", None),
+            },
+        },
     }
+
+
+def _is_default_empty_holdings_data(value: Any) -> bool:
+    return (
+        isinstance(value, HoldingsData)
+        and value.path is None
+        and value.settings == HoldingSettings()
+        and value.holdings == []
+    )
+
+
+def _resolve_entry_holdings(cfg: Config) -> HoldingsData:
+    configured_holdings = getattr(cfg, "holdings", None)
+    holdings_path = getattr(cfg, "holdings_path", None)
+
+    if holdings_path and _is_default_empty_holdings_data(configured_holdings):
+        return load_holdings(holdings_path)
+
+    if isinstance(configured_holdings, HoldingsData):
+        return configured_holdings
+    if configured_holdings is not None and hasattr(configured_holdings, "holdings"):
+        return cast(HoldingsData, configured_holdings)
+
+    if holdings_path:
+        return load_holdings(holdings_path)
+    return HoldingsData(path=None, settings=HoldingSettings(), holdings=[])
+
+
+def _is_active_holding(holding: Holding | Any) -> bool:
+    quantity = _to_finite_float(getattr(holding, "quantity", None))
+    return quantity is not None and quantity > 0
+
+
+def _build_active_holding_counts(
+    holdings_data: HoldingsData | Any,
+) -> tuple[int, dict[str, int]]:
+    active_total = 0
+    active_by_market = {"KR": 0, "US": 0}
+
+    for holding in getattr(holdings_data, "holdings", []):
+        if not _is_active_holding(holding):
+            continue
+        market = _infer_market_from_ticker(
+            _normalize_ticker(getattr(holding, "ticker", ""))
+        )
+        active_total += 1
+        active_by_market[market] = active_by_market.get(market, 0) + 1
+
+    return active_total, active_by_market
+
+
+def _apply_portfolio_guards(
+    rows: list[EntryReportRow],
+    *,
+    active_total: int,
+    active_by_market: dict[str, int],
+    max_active_holdings: int | None,
+    max_new_entries_per_market: dict[str, int | None],
+) -> dict[str, int]:
+    accepted_new_entries_by_market = {"KR": 0, "US": 0}
+    blocked_by_market = {"KR": 0, "US": 0}
+    current_active_total = active_total
+
+    for row in rows:
+        if row.action != "ENTER":
+            continue
+
+        market = _infer_market_from_ticker(row.ticker)
+        if (
+            max_active_holdings is not None
+            and current_active_total >= max_active_holdings
+        ):
+            row.action = "SKIP"
+            row.reasons.append(_PORTFOLIO_BLOCK_REASON_TOTAL)
+            blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
+            continue
+
+        market_cap = max_new_entries_per_market.get(market)
+        current_market_total = active_by_market.get(
+            market, 0
+        ) + accepted_new_entries_by_market.get(market, 0)
+        if market_cap is not None and current_market_total >= market_cap:
+            row.action = "SKIP"
+            row.reasons.append(f"portfolio market cap reached ({market})")
+            blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
+            continue
+
+        accepted_new_entries_by_market[market] = (
+            accepted_new_entries_by_market.get(market, 0) + 1
+        )
+        current_active_total += 1
+
+    return blocked_by_market
+
+
+def _ordered_entry_rows(
+    *,
+    source_candidates: list[dict[str, Any]],
+    market_rows_by_market: dict[str, list[EntryReportRow]],
+    market_override: str | None,
+) -> list[EntryReportRow]:
+    queued_rows_by_market = {
+        market: deque(rows) for market, rows in market_rows_by_market.items()
+    }
+    ordered_rows: list[EntryReportRow] = []
+
+    for candidate in source_candidates:
+        market = _infer_market_from_ticker(_normalize_ticker(candidate.get("ticker")))
+        if market_override is not None and market != market_override:
+            continue
+        market_queue = queued_rows_by_market.get(market)
+        if not market_queue:
+            continue
+        ordered_rows.append(market_queue.popleft())
+
+    for market_queue in queued_rows_by_market.values():
+        ordered_rows.extend(list(market_queue))
+
+    return ordered_rows
 
 
 def run_entry(
@@ -718,6 +863,11 @@ def run_entry(
         cfg = load_config(provider_override=normalized_provider)
     except ConfigLoadError as exc:
         logger.error("Configuration loading failed: %s", exc)
+        return 1
+    try:
+        holdings_data = _resolve_entry_holdings(cfg)
+    except HoldingsLoadError as exc:
+        logger.error("Holdings loading failed: %s", exc)
         return 1
 
     try:
@@ -764,6 +914,7 @@ def run_entry(
 
     rows: list[EntryReportRow] = []
     system_issues: list[str] = []
+    market_rows_by_market: dict[str, list[EntryReportRow]] = {}
     report_strategy_mode = _resolve_report_strategy_mode(source_report)
     gap_atr_multiplier = _to_finite_float(getattr(cfg, "gap_atr_multiplier", None))
     allow_missing_gap_guard = gap_atr_multiplier is not None and gap_atr_multiplier <= 0
@@ -781,11 +932,28 @@ def run_entry(
             default_strategy_mode=report_strategy_mode,
             allow_missing_gap_guard=allow_missing_gap_guard,
         )
-        rows.extend(market_rows)
+        market_rows_by_market[candidate_market] = market_rows
         system_issues.extend(provider_issues)
         system_issues.extend(candidate_system_issues)
+    rows = _ordered_entry_rows(
+        source_candidates=candidates,
+        market_rows_by_market=market_rows_by_market,
+        market_override=normalized_market,
+    )
     system_issues = list(dict.fromkeys(system_issues))
-    rows.sort(key=lambda row: (row.action, row.ticker))
+
+    active_total, active_by_market = _build_active_holding_counts(holdings_data)
+    portfolio_settings = getattr(cfg, "portfolio", None)
+    portfolio_blocked_by_market = _apply_portfolio_guards(
+        rows,
+        active_total=active_total,
+        active_by_market=active_by_market,
+        max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
+        max_new_entries_per_market={
+            "KR": getattr(portfolio_settings, "max_new_entries_kr", None),
+            "US": getattr(portfolio_settings, "max_new_entries_us", None),
+        },
+    )
 
     if len(resolved_markets) == 1:
         artifact_market = resolved_markets[0]
@@ -839,7 +1007,11 @@ def run_entry(
         system_issues.append(mixed_issue)
     system_issues = list(dict.fromkeys(system_issues))
 
-    entry_summary = _build_entry_summary(rows, system_issues)
+    entry_summary = _build_entry_summary(
+        rows,
+        system_issues,
+        portfolio_blocked_by_market=portfolio_blocked_by_market,
+    )
     artifact = {
         "provider": normalized_provider,
         "mode": normalized_mode,

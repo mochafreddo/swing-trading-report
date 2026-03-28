@@ -369,7 +369,10 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
-  - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
+- `sab entry`는 종목별 판정이 끝난 뒤 포트폴리오 가드(`portfolio.max_active_holdings`, `portfolio.max_new_entries_per_market`)를 최종 `ENTER` 후보에만 적용합니다.
+  - 포트폴리오 차단은 system issue가 아니라 정책 결과로 취급하며, `entries[].reasons`와 `summary.portfolio_blocked_*`에만 반영합니다.
+  - `REVIEW`/`SKIP` 후보는 포트폴리오 규율로 승격하지 않습니다.
+- mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
 - 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
 - 같은 시장 안에서 candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
 

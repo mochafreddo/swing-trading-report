@@ -70,9 +70,10 @@ flowchart LR
 ### 4.3 `entry` 플로우
 
 1. 입력 buy 리포트를 읽고 후보(`candidates[]`)를 시장별로 정규화합니다.
-2. 현재 세션 가격 스냅샷을 조회해 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다.
-3. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
-4. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다.
+3. holdings를 읽어 활성 보유 수(`quantity > 0`)와 시장별 보유 수를 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다.
+4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
+5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -190,13 +191,14 @@ flowchart LR
 
 - 단일 사용자/로컬 중심 설계이며 멀티유저 권한 모델은 범위 밖입니다.
 - Python 엔진은 직접 Supabase `holdings`를 읽지 않고, 워크플로우 단계에서 파일 입력으로 브리지합니다.
-  - `scan`/`entry`는 holdings 비의존 경로를 유지합니다.
-  - `sell`만 holdings 파일 입력을 요구합니다.
+  - `scan`은 holdings 비의존 경로를 유지합니다.
+  - `entry`는 포트폴리오 가드 적용을 위해 holdings 파일 입력을 읽을 수 있지만, 종목 신호 계산은 buy report 기준을 유지합니다.
+  - `sell`은 holdings 파일 입력을 요구합니다.
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
 - Entry 파이프라인(`entry`)은 로컬 JSON 리포트(`*.entry.json`)를 생성하고, Storage/`report_index`/웹 Reports UI와 연동됩니다.
   - 단, 웹 `Run` 탭과 GitHub Actions workflow는 여전히 `scan`/`sell`만 지원합니다.
   - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, 이 raw 기준가는 `scan`의 후보 전용 배치 warmup으로 준비됩니다.
-  - `entry`는 이 raw reference와 실시간/raw snapshot만 비교합니다.
+  - `entry`는 이 raw reference와 실시간/raw snapshot만 비교한 뒤, 필요 시 포트폴리오 가드를 후속 적용합니다.
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
 
 ## 10. 관련 문서

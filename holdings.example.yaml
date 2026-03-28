@@ -36,3 +36,10 @@ settings:
   default_strategy: swing
   default_tags:
     - watch
+
+# Optional config.yaml example for entry-stage portfolio guards
+# portfolio:
+#   max_active_holdings: 8
+#   max_new_entries_per_market:
+#     KR: 3
+#     US: 2
