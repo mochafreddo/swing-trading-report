@@ -12,8 +12,10 @@ import {
   addBuyToHolding,
   claimRuntimeStateLock,
   fetchReportIndexPage,
+  fetchAllHoldings,
   createHolding,
   deleteHolding,
+  replaceAllHoldings,
   releaseRuntimeStateLock,
   SupabaseApiError,
   updateHolding,
@@ -302,6 +304,38 @@ function holdingRow(
   };
 }
 
+describe("fetchAllHoldings", () => {
+  it("reads holdings snapshots until the final short page", async () => {
+    const firstPage = Array.from({ length: 500 }, (_, index) =>
+      holdingRow({ ticker: `A${String(index).padStart(3, "0")}.NAS` }),
+    );
+    const secondPage = [holdingRow({ ticker: "TSLA.NAS" })];
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(firstPage), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(secondPage), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    const rows = await fetchAllHoldings();
+
+    expect(rows).toHaveLength(501);
+    const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(firstUrl.searchParams.get("offset")).toBe("0");
+    expect(secondUrl.searchParams.get("offset")).toBe("500");
+  });
+});
+
 describe("holding mutations alias handling", () => {
   it("createHolding blocks alias duplicates before insert", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -402,6 +436,72 @@ describe("holding mutations alias handling", () => {
 
     expect(deleted).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("replaceAllHoldings", () => {
+  it("calls replace_holdings_v1 RPC with sanitized holdings snapshot", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            inserted_count: 1,
+            updated_count: 2,
+            deleted_count: 3,
+            unchanged_count: 4,
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await replaceAllHoldings([
+      {
+        ticker: "TSLA.NAS",
+        quantity: 1,
+        entry_price: 250.5,
+        entry_currency: "USD",
+        entry_date: "2026-03-28",
+        strategy: "swing",
+        notes: "leader",
+        tags: ["us"],
+        stop_override: 220,
+        target_override: 300,
+      },
+    ]);
+
+    expect(result).toEqual({
+      insertedCount: 1,
+      updatedCount: 2,
+      deletedCount: 3,
+      unchangedCount: 4,
+    });
+
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.pathname).toBe("/rest/v1/rpc/replace_holdings_v1");
+    expect(requestInit?.method).toBe("POST");
+    expect(requestInit?.body).toBe(
+      JSON.stringify({
+        p_holdings: [
+          {
+            ticker: "TSLA.NAS",
+            quantity: 1,
+            entry_price: 250.5,
+            entry_currency: "USD",
+            entry_date: "2026-03-28",
+            strategy: "swing",
+            notes: "leader",
+            tags: ["us"],
+            stop_override: 220,
+            target_override: 300,
+          },
+        ],
+      }),
+    );
   });
 });
 

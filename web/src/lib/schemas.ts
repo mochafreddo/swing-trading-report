@@ -234,6 +234,13 @@ export const holdingAddBuySchema = z
   })
   .strict();
 
+export const holdingYamlImportRequestSchema = z
+  .object({
+    document: z.string().min(1),
+    apply: z.boolean().default(false),
+  })
+  .strict();
+
 export const runDispatchSchema = z.union([
   z
     .object({

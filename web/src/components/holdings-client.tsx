@@ -17,7 +17,7 @@ import {
 import styles from "./holdings-client.module.css";
 
 import { partitionHoldingsByActivity } from "@/lib/holding-activity";
-import type { HoldingRecord } from "@/lib/types";
+import type { HoldingRecord, HoldingsYamlImportSummary } from "@/lib/types";
 
 import {
   type AddBuyFormState,
@@ -40,6 +40,12 @@ import {
   type HoldingsInitialState,
   useHoldingsQuery,
 } from "@/components/holdings/use-holdings-query";
+import { HoldingsImportPanel } from "@/components/holdings/holdings-import-panel";
+import {
+  requestHoldingsYamlExport,
+  requestHoldingsYamlImport,
+  triggerTextDownload,
+} from "@/components/holdings/import-export";
 
 interface HoldingsClientProps {
   initialState?: HoldingsInitialState;
@@ -165,8 +171,23 @@ function parseTickerLookupResults(payload: unknown): TickerLookupResult[] {
   return results;
 }
 
+function formatImportSuccessMessage(
+  summary: HoldingsYamlImportSummary,
+): string {
+  if (
+    summary.createCount === 0 &&
+    summary.updateCount === 0 &&
+    summary.deleteCount === 0
+  ) {
+    return "변경 사항이 없어 holdings import를 적용하지 않았습니다.";
+  }
+
+  return `적용 완료: create ${summary.createCount}, update ${summary.updateCount}, delete ${summary.deleteCount}`;
+}
+
 export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const [showInactive, setShowInactive] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [tickerLookupQuery, setTickerLookupQuery] = useState("");
   const [tickerLookupResults, setTickerLookupResults] = useState<
     TickerLookupResult[]
@@ -197,6 +218,14 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   );
   const [addBuySubmitting, setAddBuySubmitting] = useState(false);
   const [addBuyError, setAddBuyError] = useState<string | null>(null);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
+  const [importDocument, setImportDocument] = useState<string | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [importSummary, setImportSummary] =
+    useState<HoldingsYamlImportSummary | null>(null);
   const {
     items,
     loading,
@@ -418,6 +447,106 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     setAddBuyError(null);
   }, []);
 
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const payload = await requestHoldingsYamlExport();
+      triggerTextDownload(payload.filename, payload.document);
+    } catch (exportError) {
+      setImportError(
+        exportError instanceof Error
+          ? exportError.message
+          : "Failed to export holdings.yaml",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
+  const handleImportFileSelected = useCallback(async (file: File | null) => {
+    if (!file) {
+      setImportFileName(null);
+      setImportDocument(null);
+      setImportSummary(null);
+      setImportError(null);
+      setImportSuccess(null);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      setImportFileName(file.name);
+      setImportDocument(text);
+      setImportSummary(null);
+      setImportError(null);
+      setImportSuccess(null);
+    } catch (error) {
+      setImportFileName(null);
+      setImportDocument(null);
+      setImportSummary(null);
+      setImportSuccess(null);
+      setImportError(
+        error instanceof Error ? error.message : "Failed to read selected file",
+      );
+    }
+  }, []);
+
+  const runImport = useCallback(
+    async (apply: boolean) => {
+      if (!importDocument) {
+        setImportError("Import할 holdings.yaml 파일을 먼저 선택하세요.");
+        return;
+      }
+      if (apply && !importSummary) {
+        setImportError("먼저 dry-run을 실행하세요.");
+        return;
+      }
+      if (
+        apply &&
+        !window.confirm(
+          "현재 holdings DB를 업로드한 파일 내용으로 교체합니다. 계속하시겠습니까?",
+        )
+      ) {
+        return;
+      }
+
+      if (apply) {
+        setImportApplying(true);
+      } else {
+        setImportLoading(true);
+      }
+      setImportError(null);
+      setImportSuccess(null);
+      try {
+        const response = await requestHoldingsYamlImport(importDocument, apply);
+        setImportSummary(response.summary);
+        if (apply) {
+          cancelEdit();
+          cancelAddBuy();
+          setImportSuccess(formatImportSuccessMessage(response.summary));
+          setImportDocument(null);
+          setImportFileName(null);
+          await refresh();
+        }
+      } catch (error) {
+        setImportError(
+          error instanceof Error
+            ? error.message
+            : "Failed to import holdings.yaml",
+        );
+      } finally {
+        if (apply) {
+          setImportApplying(false);
+        } else {
+          setImportLoading(false);
+        }
+      }
+    },
+    [cancelAddBuy, cancelEdit, importDocument, importSummary, refresh],
+  );
+
   const submitAddBuy = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -530,6 +659,19 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           onSubmit={submitAddBuy}
           onCancel={cancelAddBuy}
         />
+        <HoldingsImportPanel
+          fileName={importFileName}
+          loading={importLoading}
+          applying={importApplying}
+          error={importError}
+          success={importSuccess}
+          summary={importSummary}
+          canDryRun={Boolean(importDocument)}
+          canApply={Boolean(importDocument && importSummary)}
+          onFileSelected={handleImportFileSelected}
+          onDryRun={() => void runImport(false)}
+          onApply={() => void runImport(true)}
+        />
       </div>
       <HoldingsTable
         items={items}
@@ -539,9 +681,11 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
         showInactive={showInactive}
         loading={loading}
         loadingMore={loadingMore}
+        exporting={exporting}
         hasMore={hasMore}
         error={error}
         onRefresh={refresh}
+        onExport={handleExport}
         onToggleShowInactive={setShowInactive}
         onEdit={beginEdit}
         onAddBuy={beginAddBuy}

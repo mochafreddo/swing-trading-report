@@ -218,7 +218,7 @@
   - `docs/adr/README.md` - ADR 인덱스
   - `docs/reviews/README.md` - 리뷰 인덱스
 - `supabase/` - Supabase 마이그레이션/설정
-- `holdings.yaml` - 선택 백업 파일(import/export 용도)
+- `holdings.yaml` - 선택 백업 파일(import/export 용도, 웹 UI에서 내보내기/가져오기 가능)
 
 ## 전략(요약)
 
@@ -240,6 +240,9 @@
 ## 보유/매도 평가(개요)
 
 - (권장) 보유 목록은 Supabase `holdings`를 단일 소스로 사용합니다(웹 UI에서 CRUD).
+- 웹 Holdings 화면에서 `Export YAML`로 전체 holdings snapshot을 `holdings.yaml`로 내보낼 수 있습니다.
+- 같은 화면의 import 패널은 `holdings.yaml`을 dry-run으로 먼저 검증하고, 확인 후 **Replace All** 방식으로 현재 DB를 파일 내용으로 교체합니다.
+- export는 `quantity=0` 비활성 row까지 포함하며, 로컬 `sab sell`은 그중 `quantity > 0` row만 평가 대상으로 사용합니다.
 - 로컬에서 `sab sell`을 직접 실행할 때는 `holdings.yaml`(백업 파일) 또는 `--holdings <path>`로 지정한 파일을 입력으로 사용합니다.
 - `--holdings <path>` 또는 `files.holdings`가 지정된 경우, 파일이 존재하지 않으면 즉시 실패합니다.
 - 스키마와 예시는 `docs/holdings-schema.md` 및 `holdings.example.yaml`을 참고하세요.

@@ -40,7 +40,7 @@ flowchart LR
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/supabase_storage.py` |
 | 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
-| Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy RPC 브리지 | `web/src/lib/supabase-admin.ts` |
+| Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
 | 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml` |
@@ -93,7 +93,10 @@ flowchart LR
 3. `/api/holdings/[ticker]/add-buy` `POST`는 Supabase RPC(`holdings_add_buy_v1`)를 호출해 추가매수(수량/평단/진입일/통화)를 원자적으로 갱신합니다.
    - `Idempotency-Key`(UUID) 헤더를 필수로 받아 중복 요청 시 기존 결과를 반환합니다(멱등 처리).
    - 동일 키에 서로 다른 payload가 들어오면 `409` 충돌로 차단하며, 멱등 이벤트 로그는 별도 cleanup 함수/스케줄 작업으로 90일 경과 항목(`processed=true` 기준 + 장기 미처리 항목)을 정리합니다.
-4. (구현, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
+4. `/api/holdings/yaml` `GET`은 전체 holdings snapshot을 `holdings.yaml`로 export하고, `POST`는 YAML 파싱/검증 후 dry-run 또는 apply를 수행합니다.
+   - import apply는 Supabase RPC(`replace_holdings_v1`)로 원자적 replace-all을 수행합니다.
+   - export는 `quantity=0` row를 포함한 전체 snapshot을 내보내고, import는 파일에 없는 ticker를 삭제합니다.
+5. (구현, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
    - 검색/후보 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용합니다.
    - 캐시는 Supabase `runtime_state`에 저장되며 stale 시 증분 갱신합니다.
 

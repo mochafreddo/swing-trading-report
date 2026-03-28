@@ -11,9 +11,11 @@ interface HoldingsTableProps {
   showInactive: boolean;
   loading: boolean;
   loadingMore: boolean;
+  exporting: boolean;
   hasMore: boolean;
   error: string | null;
   onRefresh: () => void | Promise<void>;
+  onExport: () => void | Promise<void>;
   onToggleShowInactive: (nextValue: boolean) => void;
   onEdit: (row: HoldingRecord) => void;
   onAddBuy: (row: HoldingRecord) => void;
@@ -29,9 +31,11 @@ export function HoldingsTable({
   showInactive,
   loading,
   loadingMore,
+  exporting,
   hasMore,
   error,
   onRefresh,
+  onExport,
   onToggleShowInactive,
   onEdit,
   onAddBuy,
@@ -48,13 +52,22 @@ export function HoldingsTable({
             · 로드 {items.length}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void onRefresh()}
-          disabled={loading || loadingMore}
-        >
-          Refresh
-        </button>
+        <div className={styles.inlineActions}>
+          <button
+            type="button"
+            onClick={() => void onExport()}
+            disabled={loading || loadingMore || exporting}
+          >
+            {exporting ? "Exporting…" : "Export YAML"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={loading || loadingMore || exporting}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
       <div className={styles.filterRow}>
         <label className={styles.toggleLabel}>

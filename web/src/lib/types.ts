@@ -42,6 +42,8 @@ export interface HoldingRecord {
   updated_at: string;
 }
 
+export type HoldingSnapshot = Omit<HoldingRecord, "created_at" | "updated_at">;
+
 export interface HoldingCursor {
   updated_at: string;
   ticker: string;
@@ -64,6 +66,22 @@ export interface HoldingMutationInput {
   tags?: string[];
   stop_override?: number | null;
   target_override?: number | null;
+}
+
+export interface HoldingsYamlImportSummary {
+  incomingCount: number;
+  createCount: number;
+  updateCount: number;
+  deleteCount: number;
+  unchangedCount: number;
+  createTickers: string[];
+  updateTickers: string[];
+  deleteTickers: string[];
+}
+
+export interface HoldingsYamlImportResponse {
+  mode: "dry-run" | "apply";
+  summary: HoldingsYamlImportSummary;
 }
 
 export type RunWorkflow = "scan" | "sell";

@@ -16,6 +16,7 @@ import type {
   HoldingCursor,
   HoldingMutationInput,
   HoldingRecord,
+  HoldingSnapshot,
 } from "@/lib/types";
 
 const HOLDINGS_SELECT =
@@ -813,6 +814,13 @@ export interface HoldingAddBuyInput {
   buy_date?: string;
 }
 
+export interface ReplaceAllHoldingsResult {
+  insertedCount: number;
+  updatedCount: number;
+  deletedCount: number;
+  unchangedCount: number;
+}
+
 export async function fetchHoldingsPage(
   options: FetchHoldingsPageOptions = {},
 ): Promise<FetchHoldingsPageResult> {
@@ -861,6 +869,144 @@ export async function fetchHoldingsPage(
     nextCursor,
     hasMore,
   };
+}
+
+export async function fetchAllHoldings(): Promise<HoldingRecord[]> {
+  const env = getSupabaseEnv();
+  const pageSize = 500;
+  const items: HoldingRecord[] = [];
+
+  for (let offset = 0; ; offset += pageSize) {
+    const query = new URLSearchParams({
+      select: HOLDINGS_SELECT,
+      order: "ticker.asc",
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    const url = `${env.SUPABASE_URL}/rest/v1/holdings?${query.toString()}`;
+    const response = await fetchSupabase(url, {
+      headers: buildAuthHeaders({
+        Accept: "application/json",
+      }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new SupabaseApiError(
+        `Failed to fetch holdings snapshot: ${await parseError(response)}`,
+        response.status,
+      );
+    }
+
+    const payload = (await response.json()) as unknown;
+    const rows = Array.isArray(payload) ? (payload as HoldingRecord[]) : [];
+    items.push(...rows);
+
+    if (rows.length < pageSize) {
+      return items;
+    }
+  }
+}
+
+function parseReplaceAllHoldingsResult(
+  payload: unknown,
+): ReplaceAllHoldingsResult | null {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+
+  const raw = payload[0] as
+    | {
+        inserted_count?: unknown;
+        updated_count?: unknown;
+        deleted_count?: unknown;
+        unchanged_count?: unknown;
+      }
+    | undefined;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const insertedCount =
+    typeof raw.inserted_count === "number" &&
+    Number.isFinite(raw.inserted_count)
+      ? raw.inserted_count
+      : null;
+  const updatedCount =
+    typeof raw.updated_count === "number" && Number.isFinite(raw.updated_count)
+      ? raw.updated_count
+      : null;
+  const deletedCount =
+    typeof raw.deleted_count === "number" && Number.isFinite(raw.deleted_count)
+      ? raw.deleted_count
+      : null;
+  const unchangedCount =
+    typeof raw.unchanged_count === "number" &&
+    Number.isFinite(raw.unchanged_count)
+      ? raw.unchanged_count
+      : null;
+
+  if (
+    insertedCount === null ||
+    updatedCount === null ||
+    deletedCount === null ||
+    unchangedCount === null
+  ) {
+    return null;
+  }
+
+  return {
+    insertedCount,
+    updatedCount,
+    deletedCount,
+    unchangedCount,
+  };
+}
+
+export async function replaceAllHoldings(
+  input: HoldingSnapshot[],
+): Promise<ReplaceAllHoldingsResult> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/replace_holdings_v1`;
+  const response = await fetchSupabase(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_holdings: input.map((row) => ({
+        ticker: row.ticker,
+        quantity: row.quantity,
+        entry_price: row.entry_price,
+        entry_currency: row.entry_currency,
+        entry_date: row.entry_date,
+        strategy: row.strategy,
+        notes: row.notes,
+        tags: row.tags,
+        stop_override: row.stop_override,
+        target_override: row.target_override,
+      })),
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to replace holdings: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const parsed = parseReplaceAllHoldingsResult(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      "Supabase did not return a valid replace_holdings_v1 result",
+      500,
+    );
+  }
+
+  return parsed;
 }
 
 async function fetchHoldingByExactTicker(

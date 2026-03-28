@@ -119,8 +119,6 @@
     - 함수 정의 확인: `select pg_get_functiondef('public.cleanup_holdings_add_buy_events(interval, integer)'::regprocedure);`
     - 정리 대상 건수 확인: `select count(*) from public.holdings_add_buy_events where (processed = true and created_at < now() - interval '90 days') or (processed = false and updated_at < now() - interval '90 days');`
     - 크론 등록/활성 확인: `select jobid, jobname, schedule, command, active from cron.job where jobname = 'holdings-add-buy-events-cleanup';`
-- (선택) `holdings.yaml` import/export는 **v1.1 미구현**이며, v1.2에서 초기 이관/백업 용도로 도입 예정입니다.
-
 ## 자주 쓰는 실행
 
 - Buy 스캔(KR+US 스크리너 + 워치리스트)
@@ -143,6 +141,9 @@
   - 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
   - 접속(dev): `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
   - 또는 웹 디렉터리에서 직접 실행: `pnpm install && pnpm run dev`
+  - Holdings 화면의 `Export YAML` 버튼으로 전체 holdings를 `holdings.yaml`로 다운로드할 수 있습니다.
+  - Holdings 사이드바 import 패널은 선택한 `holdings.yaml`에 대해 dry-run diff(create/update/delete/unchanged)를 먼저 보여준 뒤, `Apply Import`로 **Replace All** 적용을 수행합니다.
+  - import는 파일에 없는 ticker를 삭제합니다. 백업 복구 용도이므로 apply 전 dry-run 결과를 반드시 확인하세요.
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
   - 알림은 자동 실행일 때만 전송합니다.
@@ -195,7 +196,7 @@
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)
 - 보유 목록(공식 소스): Supabase Postgres `holdings` 테이블
-- 선택 백업 파일: `holdings.yaml`(import/export 용도, v1.2 예정)
+- 선택 백업 파일: `holdings.yaml`(웹 UI import/export 용도, export는 inactive row까지 포함)
 
 ## 문제 해결
 

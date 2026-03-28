@@ -117,6 +117,23 @@
   font-weight: 700;
 }
 
+.fileInputLabel {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.fileInputLabel input {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+}
+
 .lookupPanelLink {
   font-size: 0.8rem;
 }
@@ -248,6 +265,45 @@
   color: color-mix(in srgb, var(--danger) 80%, #fff 20%);
   border-color: color-mix(in srgb, var(--danger) 70%, var(--line));
   background: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+.success {
+  color: color-mix(in srgb, var(--ok, #1f7a1f) 85%, #000 15%);
+}
+
+.summaryPanel {
+  margin-top: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 12px;
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: var(--space-2);
+}
+
+.summaryLabel {
+  margin: 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+.summaryValue {
+  margin: var(--space-1) 0 0;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryListTitle {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .error {
