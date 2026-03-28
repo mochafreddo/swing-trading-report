@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.15.0...v1.16.0) (2026-03-28)
+
+
+### Features
+
+* **metrics:** 운영 메트릭 대시보드 추가 ([65c08de](https://github.com/mochafreddo/swing-trading-report/commit/65c08de31fcf1f1a3c9c09e198baf37d4a5e47ad))
+
 ## [1.15.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.14.0...v1.15.0) (2026-03-28)
 
 
