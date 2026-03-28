@@ -12,6 +12,7 @@ strategy:
   min_history_bars: 30
   gap_atr_multiplier: 1.0
   use_sma200_filter: false
+  use_market_regime_filter: false
   require_slope_up: false
   rs_lookback_days: 5
 screener:

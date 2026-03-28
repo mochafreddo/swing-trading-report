@@ -156,10 +156,14 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 
 1. 티커 소스(워치리스트 + 스크리너)를 결합하고, 시장 필터 후 중복 제거합니다.
 2. 캔들 데이터를 수집합니다(캐시 우선 + provider 조회).
-3. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
-4. 후보(candidate) 티커만 raw 캔들을 추가 warmup한 뒤, cache hit 기반으로 entry용 raw reference close를 보강합니다.
-5. 후보를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식합니다.
-6. buy 리포트(JSON)를 생성합니다.
+3. `use_market_regime_filter=true`이면, 시장별 benchmark(`rs_benchmark_ticker_kr/us`)의 완료 일봉 종가가 SMA200 위인지 먼저 확인합니다.
+   - benchmark 종가가 SMA200 이하이면 그 시장의 ticker는 `Market regime filter blocked (...)` 사유로 scan에서 제외합니다.
+   - benchmark를 구하지 못하거나 완료 히스토리/SMA200이 부족하면, 해당 시장의 레짐 필터는 비활성화하고 buy report `system_issues`에 경고를 남긴 뒤 scan은 계속 진행합니다.
+   - 이 레짐 게이트는 **scan 전용**이며 sell/entry에는 적용하지 않습니다.
+4. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
+5. 후보(candidate) 티커만 raw 캔들을 추가 warmup한 뒤, cache hit 기반으로 entry용 raw reference close를 보강합니다.
+6. 후보를 정렬하고(점수/RS/유동성 등), 통화 표시/미국장 상태를 장식합니다.
+7. buy 리포트(JSON)를 생성합니다.
 
 ### 5.2 `strategy_mode=ema_cross` (EMA/RSI/ATR 기반)
 

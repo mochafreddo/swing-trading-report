@@ -47,6 +47,7 @@ strategy:
   # Buy strategy mode: 'ema_cross' (current EMA20/50) or 'sma_ema_hybrid' (SMA20 + EMA10/21 hybrid, planned)
   mode: ema_cross
   use_sma200_filter: true
+  use_market_regime_filter: false  # benchmark가 SMA200 아래면 해당 시장 scan 후보를 차단
   require_slope_up: true
   gap_atr_multiplier: 1.0
   min_history_bars: 200

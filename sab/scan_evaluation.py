@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
+from dataclasses import dataclass
 from typing import Any
 
 from .data.holiday_cache import HolidayEntry
@@ -13,6 +15,7 @@ from .report.session_state import (
 )
 from .scan_types import _ScanRuntime, _to_float
 from .signals.eval_index import choose_eval_index
+from .signals.indicators import sma
 from .tickers import infer_market_from_ticker, parse_ticker
 
 _SYSTEM_REASON_PREFIXES = (
@@ -21,7 +24,16 @@ _SYSTEM_REASON_PREFIXES = (
     "Insufficient price data",
     "No candle data",
 )
+_MARKET_REGIME_SMA_PERIOD = 200
 _RS_BENCHMARK_LOOKBACK_BUFFER_BARS = 2
+
+
+@dataclass(frozen=True)
+class MarketRegimeContext:
+    benchmark_ticker: str
+    benchmark_close: float
+    benchmark_sma200: float
+    is_bullish: bool
 
 
 def _is_system_issue_reason(reason: str) -> bool:
@@ -53,6 +65,12 @@ def _record_entry_reference_issue(runtime: _ScanRuntime, message: str) -> None:
 
 
 def _record_rs_benchmark_issue(runtime: _ScanRuntime, message: str) -> None:
+    if message not in runtime.system_issues:
+        runtime.system_issues.append(message)
+        runtime.logger.warning("%s", message)
+
+
+def _record_market_regime_issue(runtime: _ScanRuntime, message: str) -> None:
     if message not in runtime.system_issues:
         runtime.system_issues.append(message)
         runtime.logger.warning("%s", message)
@@ -110,6 +128,7 @@ def _resolve_adjusted_benchmark_candles(
     ticker: str,
     market: str,
     count: int,
+    unavailable_label: str = "RS benchmark",
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
     provider = runtime.cfg.data_provider
     parsed = parse_ticker(ticker)
@@ -118,14 +137,14 @@ def _resolve_adjusted_benchmark_candles(
         if runtime.kis_client is None:
             return (
                 None,
-                f"{ticker}: RS benchmark unavailable (KIS client not initialized)",
+                f"{ticker}: {unavailable_label} unavailable (KIS client not initialized)",
             )
         try:
             if market == "US":
                 if parsed.exchange is None:
                     return (
                         None,
-                        f"{ticker}: RS benchmark unavailable (exchange unresolved)",
+                        f"{ticker}: {unavailable_label} unavailable (exchange unresolved)",
                     )
                 rows = runtime.kis_client.overseas_daily_candles(
                     symbol=parsed.symbol,
@@ -140,19 +159,19 @@ def _resolve_adjusted_benchmark_candles(
                     adjusted=True,
                 )
         except KISClientError as exc:
-            return None, f"{ticker}: RS benchmark unavailable ({exc})"
+            return None, f"{ticker}: {unavailable_label} unavailable ({exc})"
         return rows, None
 
     if provider == "pykrx":
         if market == "US":
             return (
                 None,
-                f"{ticker}: RS benchmark unavailable (pykrx does not support US)",
+                f"{ticker}: {unavailable_label} unavailable (pykrx does not support US)",
             )
         if runtime.pykrx_client is None:
             return (
                 None,
-                f"{ticker}: RS benchmark unavailable (PyKRX client not initialized)",
+                f"{ticker}: {unavailable_label} unavailable (PyKRX client not initialized)",
             )
         try:
             rows = runtime.pykrx_client.daily_candles(
@@ -161,12 +180,12 @@ def _resolve_adjusted_benchmark_candles(
                 adjusted=True,
             )
         except PykrxClientError as exc:
-            return None, f"{ticker}: RS benchmark unavailable ({exc})"
+            return None, f"{ticker}: {unavailable_label} unavailable ({exc})"
         return rows, None
 
     return (
         None,
-        f"{ticker}: RS benchmark unavailable (provider {provider!r} unsupported)",
+        f"{ticker}: {unavailable_label} unavailable (provider {provider!r} unsupported)",
     )
 
 
@@ -268,6 +287,104 @@ def _resolve_rs_benchmark_context(
     return benchmark_returns, benchmark_tickers, True
 
 
+def _compute_market_regime_context(
+    runtime: _ScanRuntime,
+    *,
+    ticker: str,
+    market: str,
+) -> tuple[MarketRegimeContext | None, str | None]:
+    target_bars = max(runtime.cfg.min_history_bars, _MARKET_REGIME_SMA_PERIOD)
+    rows, issue = _resolve_adjusted_benchmark_candles(
+        runtime,
+        ticker=ticker,
+        market=market,
+        count=target_bars,
+        unavailable_label="Market regime benchmark",
+    )
+    if rows is None:
+        return None, issue
+
+    currency = "USD" if market == "US" else "KRW"
+    idx_eval, _ = choose_eval_index(
+        rows,
+        meta={"currency": currency, "data_dir": runtime.cfg.data_dir},
+    )
+    completed_rows = rows[: idx_eval + 1]
+    if len(completed_rows) < _MARKET_REGIME_SMA_PERIOD:
+        return (
+            None,
+            f"{ticker}: Market regime unavailable (insufficient completed history for SMA200)",
+        )
+
+    closes = [_to_float(candle.get("close")) for candle in completed_rows]
+    if any(close is None for close in closes):
+        return None, f"{ticker}: Market regime unavailable (invalid close series)"
+
+    close_values = [float(close) for close in closes if close is not None]
+    sma200_series = sma(close_values, _MARKET_REGIME_SMA_PERIOD)
+    sma200_value = sma200_series[-1] if sma200_series else float("nan")
+    if math.isnan(sma200_value):
+        return None, f"{ticker}: Market regime unavailable (SMA200 unavailable)"
+
+    latest_close = close_values[-1]
+    return (
+        MarketRegimeContext(
+            benchmark_ticker=ticker,
+            benchmark_close=latest_close,
+            benchmark_sma200=sma200_value,
+            is_bullish=latest_close > sma200_value,
+        ),
+        None,
+    )
+
+
+def _resolve_market_regime_context(
+    runtime: _ScanRuntime,
+) -> dict[str, MarketRegimeContext]:
+    if not runtime.cfg.use_market_regime_filter:
+        return {}
+
+    active_markets = sorted(
+        {infer_market_from_ticker(ticker) for ticker in runtime.tickers if ticker}
+    )
+    if not active_markets:
+        return {}
+
+    configured_benchmarks = {
+        "KR": runtime.cfg.rs_benchmark_ticker_kr,
+        "US": runtime.cfg.rs_benchmark_ticker_us,
+    }
+    regime_by_market: dict[str, MarketRegimeContext] = {}
+    issues: list[str] = []
+    for market in active_markets:
+        benchmark_ticker = configured_benchmarks.get(market)
+        if not benchmark_ticker:
+            issues.append(f"{market}: market regime benchmark ticker not configured")
+            continue
+        context, issue = _compute_market_regime_context(
+            runtime,
+            ticker=benchmark_ticker,
+            market=market,
+        )
+        if context is None:
+            issues.append(issue or f"{market}: market regime unavailable")
+            continue
+        regime_by_market[market] = context
+
+    if issues:
+        issue_label = (
+            "Market regime filter partially disabled"
+            if regime_by_market
+            else "Market regime filter disabled"
+        )
+        _record_market_regime_issue(
+            runtime,
+            issue_label + ": " + "; ".join(issues),
+        )
+
+    return regime_by_market
+
+
 def _enrich_entry_reference_prices(runtime: _ScanRuntime) -> None:
     for candidate in runtime.candidates:
         ticker = str(candidate.get("ticker") or "").strip().upper()
@@ -334,6 +451,7 @@ def _evaluate_candidates(
     enrich_entry_reference_prices: bool = True,
 ) -> None:
     cfg = runtime.cfg
+    market_regimes_by_market = _resolve_market_regime_context(runtime)
     (
         benchmark_returns_by_market,
         benchmark_tickers_by_market,
@@ -401,6 +519,17 @@ def _evaluate_candidates(
         if runtime.fx_rate is not None:
             meta["usd_krw_rate"] = runtime.fx_rate
         ticker_market = "US" if meta["currency"].upper() == "USD" else "KR"
+        regime_context = market_regimes_by_market.get(ticker_market)
+        if regime_context is not None and not regime_context.is_bullish:
+            detail = (
+                f"{ticker}: Market regime filter blocked "
+                f"(benchmark {regime_context.benchmark_ticker} close "
+                f"{regime_context.benchmark_close:.2f} <= SMA200 "
+                f"{regime_context.benchmark_sma200:.2f})"
+            )
+            runtime.screen_outs.append(detail)
+            runtime.logger.info("%s", detail)
+            continue
         benchmark_return = benchmark_returns_by_market.get(ticker_market)
         if benchmark_return is not None:
             meta["rs_benchmark_return"] = benchmark_return
@@ -574,6 +703,7 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         config_snapshot={
             "strategy_mode": runtime.cfg.strategy_mode,
             "use_sma200_filter": runtime.cfg.use_sma200_filter,
+            "use_market_regime_filter": runtime.cfg.use_market_regime_filter,
             "require_slope_up": runtime.cfg.require_slope_up,
             "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
             "min_history_bars": runtime.cfg.min_history_bars,

@@ -56,6 +56,7 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ),
     ("STRATEGY_MODE", "strategy.mode"),
     ("USE_SMA200_FILTER", "strategy.use_sma200_filter"),
+    ("USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter"),
     ("GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier"),
     ("MIN_DOLLAR_VOLUME", "screener.min_dollar_volume"),
     ("MIN_HISTORY_BARS", "strategy.min_history_bars"),
@@ -187,6 +188,7 @@ class Config:
     screener_only: bool = False
     strategy_mode: str = "ema_cross"
     use_sma200_filter: bool = False
+    use_market_regime_filter: bool = False
     gap_atr_multiplier: float = 1.0
     min_dollar_volume: float = 0.0
     min_history_bars: int = 120
@@ -445,6 +447,7 @@ class _DataSection:
 class _StrategySection:
     strategy_mode: str
     use_sma200_filter: bool
+    use_market_regime_filter: bool
     gap_atr_multiplier: float
     min_dollar_volume: float
     min_history_bars: int
@@ -694,6 +697,9 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         strategy_mode=str(strategy_mode_raw).strip().lower(),
         use_sma200_filter=parser.env_bool(
             "USE_SMA200_FILTER", "strategy.use_sma200_filter", False
+        ),
+        use_market_regime_filter=parser.env_bool(
+            "USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter", False
         ),
         gap_atr_multiplier=parser.env_float(
             "GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier", 1.0
@@ -1066,6 +1072,7 @@ def _compose_config(
         screener_only=data.screener_only,
         strategy_mode=strategy.strategy_mode,
         use_sma200_filter=strategy.use_sma200_filter,
+        use_market_regime_filter=strategy.use_market_regime_filter,
         gap_atr_multiplier=strategy.gap_atr_multiplier,
         min_dollar_volume=strategy.min_dollar_volume,
         min_history_bars=strategy.min_history_bars,

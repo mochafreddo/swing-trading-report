@@ -8,6 +8,7 @@
   "config_snapshot": {
     "strategy_mode": "ema_cross",
     "use_sma200_filter": false,
+    "use_market_regime_filter": false,
     "require_slope_up": false,
     "gap_atr_multiplier": 1.0,
     "min_history_bars": 30,
