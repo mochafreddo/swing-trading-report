@@ -1,8 +1,27 @@
 # main 브랜치 보호 운영 가이드
 
-- 상태: Accepted
-- 최종 갱신: 2026-02-21
-- 범위: `mochafreddo/swing-trading-report` 저장소의 `main` 브랜치
+상태: Accepted
+최종 갱신: 2026-03-28
+범위: `mochafreddo/swing-trading-report` 저장소의 `main` 브랜치
+
+## 문서 상태
+
+### 현재 제공
+
+- 현재 활성 정책은 `solo-dev` classic branch protection이며, 직접 push 허용과 force-push 금지 조합을 사용합니다.
+- `stage1` 복귀 payload와 drift 확인 절차는 이미 문서화되어 있고 관련 JSON artifact가 저장소에 있습니다.
+
+### 실험
+
+- 별도 실험 정책은 운영하지 않습니다. 브랜치 보호 변경은 `solo-dev` 또는 `stage1` 기준으로만 관리합니다.
+
+### 백로그
+
+- PR 기반 `stage1` 복귀와 `required_signatures=true` 2단계 적용은 backlog 운영 절차입니다.
+
+### 폐기 후보
+
+- 예전 정책값을 수동으로 기억해 적용하는 방식은 유지하지 않고, 저장소의 payload/current artifact를 기준으로만 관리합니다.
 
 ## 1) 현재 활성 정책(임시 solo-dev)
 

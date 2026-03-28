@@ -3,6 +3,25 @@
 상태: Accepted  
 대상: 저장소 로컬 Codex plugin/skill 운영
 
+## 문서 상태
+
+### 현재 제공
+
+- `plugins/systematic-equities-team` plugin과 세 개의 역할 skill은 저장소 안에 배포되어 있습니다.
+- docs 인덱스와 plugin marketplace manifest가 현재 연결된 상태를 유지합니다.
+
+### 실험
+
+- 별도 experimental role은 운영 기준에 포함하지 않습니다.
+
+### 백로그
+
+- 새 역할 추가는 실제 반복 작업과 소유 파일 경계가 분명해질 때만 검토합니다.
+
+### 폐기 후보
+
+- 기존 역할과 책임이 겹치는 일반론 skill을 추가로 늘리는 방향은 채택하지 않습니다.
+
 ## 목적
 
 이 문서는 `swing-trading-report` 안에서 바이사이드 systematic equities 팀처럼
@@ -57,4 +76,3 @@
 - skill은 자동 호출되거나 명시적으로 `$skill-name`으로 호출할 수 있습니다.
 - 각 skill은 영향 파일을 끝까지 읽고, 작은 안전 변경과 회귀 테스트를 우선하도록 설계했습니다.
 - 외부 라이브러리나 Codex 동작 규약 확인이 필요하면 Context7을 먼저 사용합니다.
-

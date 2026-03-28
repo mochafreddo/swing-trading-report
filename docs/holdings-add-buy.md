@@ -1,8 +1,27 @@
 # Holdings 추가매수 입력 설계 (Web Console)
 
-상태: Draft (2026-03-03)  
+상태: Accepted (설계 기록)  
 대상: `web`의 Holdings CRUD + Supabase `public.holdings` (단일 사용자)  
 관련: `docs/holdings-schema.md`, `docs/ARCHITECTURE.md` (Holdings CRUD), `.github/workflows/sell.yml` (holdings → sell 입력 브리지)
+
+## 문서 상태
+
+### 현재 제공
+
+- Add Buy 패널, preview 계산, `Idempotency-Key` 헤더 검증, Supabase RPC 원자 업데이트는 현재 구현되어 있습니다.
+- cleanup cron과 운영 점검 SQL까지 포함한 멱등 이벤트 정리 경로도 현재 제공됩니다.
+
+### 실험
+
+- 별도 experimental event-log UX나 undo 기능은 현재 제공 범위에 포함하지 않습니다.
+
+### 백로그
+
+- `holding_events` 기반 이벤트 로그/Undo와 holdings YAML 복수 랏 모델 확장은 backlog입니다.
+
+### 폐기 후보
+
+- 브라우저에서 평단/수량을 수동 계산해 직접 수정하는 예전 흐름은 재도입하지 않습니다.
 
 ## 0) 결정(확정)
 
@@ -256,12 +275,12 @@ RPC 시그니처 예:
 
 ## 9) 단계적 롤아웃(제안)
 
-1. Phase 1 (MVP): `Add Buy` UX + API(+ RPC 또는 서버 계산) + 미리보기
-2. Phase 1.1: holdings create/edit에도 currency 정책 적용(자동 채움/검증)
-3. Phase 2: `holding_events` 이벤트 로그 + UI 표시 + (선택) Undo
-4. Phase 3: holdings.yaml import/export에 이벤트(복수 랏) 모델 확장(버전 bump)
+1. Phase 1 (MVP): `Add Buy` UX + API + RPC + 미리보기 완료
+2. Phase 1.1: holdings create/edit currency 정책 정렬 완료
+3. Phase 2: `holding_events` 이벤트 로그 + UI 표시 + (선택) Undo는 backlog
+4. Phase 3: holdings.yaml import/export 이벤트(복수 랏) 모델 확장은 backlog
 
-## 10) 오픈 질문(결정 필요)
+## 10) 확정된 결정
 
 - Q1. `entry_date` 정책: `MIN(existing, buy_date)`로 고정(확정).
 - Q2. 구현 경로: Supabase RPC로 바로 진행(확정).

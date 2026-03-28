@@ -1,8 +1,27 @@
-# Spec — Swing Trading Report v1.1 (Contracts)
+# Spec — Swing Trading Report v1.1 (Current Contracts)
 
-상태: Draft (2026-02-25)  
-목적: v1.1 기준 “운영에 필요한 계약(Contract)”을 한 문서에 고정합니다.  
+상태: Accepted (2026-03-28)  
+목적: 현재 운영에 필요한 계약(Contract)을 한 문서에 고정합니다.  
 범위: Supabase(저장/인덱스/런타임), 리포트 키 규칙, 웹 API가 의존하는 조회/업서트 규칙.
+
+## 문서 상태
+
+### 현재 제공
+
+- `buy|sell|entry` 리포트 키 규칙과 `report_index`/`runtime_state` 계약은 현재 구현과 테스트가 따르는 기준입니다.
+- 웹 Reports 목록/상세와 Python 업로드 경로는 이 문서의 storage/report_index 계약을 기준으로 동작합니다.
+
+### 실험
+
+- 별도 실험 계약은 이 문서에서 관리하지 않습니다. 실험 범위는 feature doc 또는 backlog spec으로 분리합니다.
+
+### 백로그
+
+- 새 계약 변경은 이 문서에 바로 추가하지 않고, 먼저 [Spec v1.3 backlog 스펙](spec-v1.3.md) 또는 해당 설계 문서에서 검토합니다.
+
+### 폐기 후보
+
+- 현재 계약과 별도로 `v1.1 draft` 사본을 유지하는 방식은 재도입하지 않습니다.
 
 ## 1. 비목표(Non-Goals)
 

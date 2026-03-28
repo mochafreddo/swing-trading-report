@@ -1,7 +1,26 @@
 # Holdings Ticker Lookup 설계 (Web Console)
 
-상태: Draft (2026-02-28)  
+상태: Accepted (설계 기록)  
 대상: `web`의 Holdings CRUD UX 개선 (기능 1, 2, 4 채택분)
+
+## 문서 상태
+
+### 현재 제공
+
+- Holdings 입력 UX의 회사명/별칭 검색, 최근 buy 후보 패널, 티커 디렉토리 캐시 기반 검색 API는 현재 구현되어 있습니다.
+- 관련 현재 동작은 `web/src/lib/ticker-directory.ts`, `/api/tickers/search`, `/api/tickers/recent-candidates`가 담당합니다.
+
+### 실험
+
+- 별도 experimental refresh UI는 현재 제공 범위에 포함하지 않습니다.
+
+### 백로그
+
+- 명시적 directory refresh 버튼과 추가 최적화는 backlog로 남아 있습니다.
+
+### 폐기 후보
+
+- 외부 전종목 심볼 검색 API를 붙여 ticker 규칙을 완화하는 방향은 채택하지 않습니다.
 
 ## 1) 문제
 
@@ -184,8 +203,7 @@ export interface TickerDirectoryPayloadV1 {
 
 ## 8) 단계적 롤아웃
 
-1. 서버 디렉토리 + `/api/tickers/search` 구현
-2. Holdings Form에 “티커 찾기” 입력 + 자동완성 UI 연결
-3. `/api/tickers/recent-candidates` 구현 + “최근 buy 후보” 패널 추가
-4. 디렉토리 갱신 최적화(incremental, stale 감지) + “최근 선택” 반영
-
+1. 서버 디렉토리 + `/api/tickers/search` 구현 완료
+2. Holdings Form “티커 찾기” 입력 + 자동완성 UI 연결 완료
+3. `/api/tickers/recent-candidates` + “최근 buy 후보” 패널 추가 완료
+4. 디렉토리 갱신 최적화(incremental, stale 감지) + “최근 선택” 반영은 backlog

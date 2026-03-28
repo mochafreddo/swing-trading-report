@@ -1,6 +1,28 @@
 # 런북 — CLI + Web 운영 가이드
 
+상태: Accepted (운영 runbook)
+
 로컬에서 CLI와 웹 UI를 실행/디버그/운영하기 위한 실무 지침입니다.
+
+## 문서 상태
+
+### 현재 제공
+
+- CLI `scan`/`sell`/`entry` 실행, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
+- schedule 기반 알림과 branch protection 운영 절차도 현재 runbook 범위에 포함합니다.
+
+### 실험
+
+- 별도 운영 실험 절차는 두지 않습니다. 파라미터 실험은 replay fixture와 회귀 테스트로 검증합니다.
+
+### 백로그
+
+- `entry` workflow_dispatch와 웹 `Run` 탭 연결
+- branch protection stage1 복귀와 stage2 signed commit 적용
+
+### 폐기 후보
+
+- 구식 기본값(`SAB_LOGIN_THROTTLE_FAIL_MODE=degrade`) 기준 설명은 유지하지 않습니다.
 
 ## 설치/준비
 
@@ -22,7 +44,7 @@
       - Run 트리거(선택): `RUN_DISPATCH_ENABLED`(기본 `0`), `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT` (`RUN_DISPATCH_ENABLED=1`일 때 필수)
         - 하위 호환: `RUN_DISPATCH_ENABLED`가 비어 있고 `GITHUB_*` 3종이 모두 설정된 기존 환경은 자동 활성
       - Web 로그인 제한(선택): `SAB_LOGIN_MAX_ATTEMPTS`, `SAB_LOGIN_WINDOW_SECONDS`, `SAB_LOGIN_BLOCK_SECONDS`
-      - 로그인 스로틀 장애 정책(선택): `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `degrade`)
+      - 로그인 스로틀 장애 정책(선택): `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `strict`)
       - 런타임 상태 저장소(선택): `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
       - Entry 종료 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (0.0~1.0, 기본 `1.0`)
         - `0.0`은 누락이 1건이라도 있으면 실패로 해석

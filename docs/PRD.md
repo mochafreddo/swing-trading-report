@@ -1,5 +1,30 @@
 # 📄 PRD — Swing Trading Report (Multi‑Market: KR/US, Local + Scheduled)
 
+상태: Backlog (제품 비전/로드맵)
+
+이 문서는 현재 계약 문서가 아니라 제품 비전과 backlog를 정리합니다. 현재 동작 기준은 `README`, `docs/runbook.md`, `docs/spec-v1.1.md`, `docs/ARCHITECTURE.md`를 우선합니다.
+
+## 문서 상태
+
+### 현재 제공
+
+- 로컬 `scan`/`sell`/`entry` JSON 리포트 생성과 웹 Reports/Holdings/Metrics는 현재 제공됩니다.
+- GitHub Actions `scan`/`sell` schedule 실행과 텔레그램/슬랙 요약 알림도 현재 제공됩니다.
+
+### 실험
+
+- 별도 experimental 제품 문서는 운영하지 않습니다. 실험은 전략/리스크 문서와 테스트에서 추적합니다.
+
+### 백로그
+
+- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
+- 원격 노출/클라우드 상시 운영 같은 운영 모델 확장
+
+### 폐기 후보
+
+- `watchlist.yaml` 메모형 입력 포맷
+- `uv init` 기준의 초기화 설명처럼 현재 저장소 구조와 맞지 않는 부트스트랩 절차
+
 ## 1. 목적
 
 - 문제: 차트를 계속 보지 않고도 스윙 신호를 간단히 파악하고 싶다.
@@ -116,7 +141,7 @@
 - 예시 파일:
   - `.env.example` (시크릿/환경별)
   - `config.example.yaml` (비시크릿)
-- 워치리스트: `watchlist.txt`(줄당 1티커) 또는 `watchlist.yaml`(메모 포함) 지원.
+- 워치리스트: 현재는 `watchlist.txt`(줄당 1티커)만 운영 기준으로 지원한다. `watchlist.yaml` 메모형 포맷은 폐기 후보로 둔다.
 
 6) 자동 실행/알림(요약 전송, 선택)
 
@@ -208,16 +233,14 @@
 
 ---
 
-## 9. 사용 방법(초안, uv + KIS)
+## 9. 사용 방법(현재 참고, uv + KIS)
 
 - 의존성: uv(패키지/프로젝트 매니저). Python은 uv가 자동 관리 가능.
   - 설치(macOS): `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - 버전 확인: `uv --version`
 - 초기화(최초 1회)
-  - 프로젝트 생성/전환: 리포지토리 루트에서 실행
-  - 프로젝트 설정 생성: `uv init` (기존 repo면 `pyproject.toml`만 수동 추가 예정)
-  - 필요한 라이브러리 추가 예: `uv add pandas numpy requests python-dotenv`
-  - 잠금파일/동기화: `uv lock && uv sync`
+  - 리포지토리 루트에서 `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+  - 선택 extras가 필요하면 `uv sync --extra <name>` 또는 `uv sync --all-extras --all-groups`
 - 환경설정:
   - `.env`에 시크릿 입력(예: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) 알림 토큰 등)
   - `config.yaml`에 비시크릿 설정 입력(샘플은 `config.example.yaml` 참고). `.env`/`config.yaml`에 동일 키를 중복 정의하지 않는다.
@@ -240,8 +263,8 @@
 - AC5: `uv run -m sab sell` 실행 시 보유 평가 아티팩트(`YYYY-MM-DD.sell.json`)를 생성한다.
 - AC6: 로컬 웹(Next.js)에서 생성된 JSON 리포트를 열람/필터할 수 있다.
 - AC7: 설정 파일만으로 대상 시장(KR/US), 대상 종목 수, 출력 경로, 데이터 제공자(kis/pykrx)를 변경할 수 있다.
-- (예정) AC8: 스케줄러로 비대화형 실행해도 동일하게 리포트를 생성한다.
-- (예정) AC9: 알림을 활성화하면 리포트 요약본이 텔레그램/슬랙으로 전송된다.
+- AC8: GitHub Actions `schedule` 실행으로 비대화형 리포트 생성을 수행한다.
+- AC9: 알림을 활성화하면 schedule 실행 결과 요약본이 텔레그램/슬랙으로 전송된다.
 
 ---
 
@@ -251,4 +274,4 @@
 - 비용: 개인 개발·모의투자 데이터 조회는 무료(정책 변동 가능, KIS 문서 확인). 실거래/실시간은 별도 제약 가능.
 - 티커 포맷(숫자코드 vs 종목명) 표준 결정 및 맵핑.
 - 캐시 저장 포맷(JSON vs SQLite) 선택.
-- uv 설정: `pyproject.toml`의 최소 Python 버전(예: `>=3.11`), 프로젝트 스크립트 엔트리 정의 여부.
+- uv 설정: `pyproject.toml`의 최소 Python 버전은 현재 `>=3.14`로 고정되어 있으며, 추가 스크립트 엔트리 정의 여부만 backlog 검토 대상이다.

@@ -3,6 +3,26 @@
 상태: Accepted (v1.1 기준)  
 대상: 로컬 단일 사용자 운영 + GitHub Actions 자동 실행
 
+## 문서 상태
+
+### 현재 제공
+
+- `scan`/`sell`/`entry` 파이프라인, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup` 연결이 현재 제공 범위입니다.
+
+### 실험
+
+- 별도 experimental runtime topology는 두지 않습니다. 구현되지 않은 운영 흐름은 backlog로 분리합니다.
+
+### 백로그
+
+- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
+- branch protection stage1/stage2 적용은 별도 governance backlog
+
+### 폐기 후보
+
+- `ADR-0006` 시절 가정(Storage listing 직접 조회, 인증 미도입)으로 되돌리는 방향은 채택하지 않습니다.
+
 ## 1. 시스템 목적
 
 - Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성합니다.
@@ -150,7 +170,7 @@ flowchart LR
   - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
-- 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=degrade`(기본)에서는 Supabase 장애 시 메모리 스로틀로 폴백하고, `strict`에서는 즉시 실패합니다.
+- 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=strict`(기본)에서는 Supabase 장애 시 즉시 실패하고, `degrade`에서만 메모리 스로틀로 폴백합니다.
 
 ## 6. 보안 경계
 

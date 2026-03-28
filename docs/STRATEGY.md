@@ -1,8 +1,28 @@
 # 전략/로직 설계 — Swing Core Logic (v1.1)
 
-상태: Draft (2026-02-25)  
+상태: Accepted (2026-03-28)  
 대상: `sab scan`/`sab sell`의 **신호 평가 및 리스크 가이드 산출 로직**  
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
+
+## 문서 상태
+
+### 현재 제공
+
+- `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
+- corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기고 최종 action을 `REVIEW`로 보정합니다.
+
+### 실험
+
+- 별도 experimental 전략 계약은 두지 않습니다. 파라미터 튜닝은 설정과 replay fixture에서 검증합니다.
+
+### 백로그
+
+- hybrid buy의 volume 누락/0 처리 일관화
+- corporate action을 `flags`만 승격하고 자동 `REVIEW` 강등을 제거하는 계약은 [Spec v1.3](spec-v1.3.md)의 backlog로 남아 있습니다.
+
+### 폐기 후보
+
+- adjusted/raw 캐시를 다시 혼합하거나 `.US` 같은 모호한 티커 규칙을 되돌리는 방향은 채택하지 않습니다.
 
 ## 1. 목적
 
@@ -388,7 +408,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - 리포트에 `system_issues/failures`가 있으면 신호 해석보다 **데이터 정합성 확인**을 우선합니다.
 - 데이터 제공자 경고(예: PyKRX 폴백/지연)는 결과 해석 전에 반드시 확인합니다(3.5 참고).
 
-## 9. Open decisions / Backlog
+## 9. 백로그 메모
 
 - volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
-- 다음 구현 스펙: `docs/spec-v1.3.md`
+- corporate action `flags` 전용 승격 계약 검토: `docs/spec-v1.3.md`

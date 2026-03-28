@@ -1,5 +1,7 @@
 # Swing Trading Report (KR, On-Demand)
 
+상태: Accepted (프로젝트 진입점)
+
 간단한 스윙 스크리닝을 원할 때만 실행하고, 결과를 **JSON 리포트**로 저장한 뒤 **로컬 웹(Next.js)** 에서 열람하는 개인용 프로젝트입니다. 데이터 소스는 기본적으로 한국투자증권 KIS Developers(Open API)를 사용하며, 국내(KR) 기본 + (선택) 해외(US)까지 확장 가능합니다. 프로젝트/의존성 관리는 uv를 사용합니다.
 
 권장 구성(개인용):
@@ -247,11 +249,11 @@
 - `--holdings <path>` 또는 `files.holdings`가 지정된 경우, 파일이 존재하지 않으면 즉시 실패합니다.
 - 스키마와 예시는 `docs/holdings-schema.md` 및 `holdings.example.yaml`을 참고하세요.
 
-## 장 오픈 진입 체크(개요, 확장 예정)
+## 장 오픈 진입 체크(현재 제공)
 
 - 기본 Entry 평가는 이미 `sab entry`로 제공되며, `reports/YYYY-MM-DD(-n).entry.json` 아티팩트를 생성합니다.
 - Entry 리포트를 웹에서 보려면 Supabase 업로드가 필요하며, `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload` 경로를 사용합니다.
-- 향후 확장으로 전일 buy 후보 기준의 "시초 갭 + 5-15분 재확인(ORH 돌파/첫 눌림 재상승)" 가이드 텍스트를 추가할 계획입니다.
+- 웹 `Run` 탭과 GitHub Actions workflow는 아직 `entry` 실행을 직접 트리거하지 않습니다.
 
 ## 데이터 수집(히스토리 누적)
 
@@ -350,9 +352,28 @@
 
 설정 파일은 `renovate.json`을 참고하세요.
 
-## 상태
+## 문서 상태
 
-- Buy/Sell/Entry 파이프라인이 로컬 JSON 리포트 생성까지 동작.
+### 현재 제공
+
+- Buy/Sell/Entry 파이프라인은 로컬 JSON 리포트 생성까지 동작합니다.
+- 웹 콘솔은 Reports, Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
+- GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
+
+### 실험
+
+- 별도 실험 전용 사용자 기능은 현재 운영 기준에 포함하지 않습니다.
+- 전략/파라미터 실험은 `tests/fixtures/replay_eod`와 설정 오버라이드로 검증합니다.
+
+### 백로그
+
+- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
+- 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
+
+### 폐기 후보
+
+- `watchlist.yaml` 같은 추가 입력 포맷 확장은 현재 근거가 부족해 채택 후보로 올리지 않습니다.
+- 긴 작업 분리 설계 없이 웹을 원격/Vercel에 직접 노출하는 방향은 재추진하지 않습니다.
 
 ## 라이선스
 

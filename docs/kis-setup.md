@@ -1,6 +1,28 @@
 # KIS Developers 설정 가이드 (요약)
 
+상태: Accepted (설정 가이드)
+
 이 문서는 한국투자증권 KIS Developers(Open API)를 본 프로젝트에서 사용하기 위한 최소 설정 절차를 요약합니다. 최신 정책/엔드포인트는 반드시 KIS 공식 문서를 확인하세요.
+
+## 문서 상태
+
+### 현재 제공
+
+- KIS AppKey/AppSecret 기반 토큰 발급, 로컬 토큰 캐시, 국내/해외 일봉 조회, 해외 휴일 캐시를 현재 구현이 사용합니다.
+- 해외 휴일/조기폐장 정보는 `holidays_us.json`과 `market_status`/session-state 경로에 반영됩니다.
+- 시크릿은 `.env`, 비시크릿은 `config.yaml`에 두는 분리 원칙이 현재 계약입니다.
+
+### 실험
+
+- 별도 실험용 KIS 연동 문서는 운영하지 않습니다. API drift 확인은 공식 문서와 회귀 테스트를 우선합니다.
+
+### 백로그
+
+- GitHub Actions 등 비로컬 환경에서의 IP allowlist 운영 자동화는 backlog로 남아 있습니다.
+
+### 폐기 후보
+
+- 저장소 문서를 KIS 공식 정책의 단일 source of truth로 취급하는 방식은 채택하지 않습니다.
 
 ## 1) 계정/앱 등록
 
@@ -36,7 +58,7 @@
   - 거래대금순위: `trade_pbmn`
   - 구성/쿼리 파라미터(EXCD=거래소, LIMIT 등)는 KIS 문서 기준에 맞춰 조정
 - 휴일/휴장일: KIS 해외 결제/휴일 조회 API 참고(`countries_holiday`)
-  - 메타데이터에 “US Holiday: true/false, name” 등 표기 예정
+  - 현재 구현은 캐시/세션 상태/후보 `market_status`에 휴일·조기폐장 정보를 반영합니다.
 
 ## 3) 인증/토큰 흐름 (개요)
 

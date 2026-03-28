@@ -1,7 +1,30 @@
-# Spec — Swing Trading Report v1.3 (Next)
+# Spec — Swing Trading Report v1.3 (Backlog)
 
-상태: Draft (2026-02-25)  
+상태: Backlog (2026-03-28)  
 목적: `docs/STRATEGY.md`의 개선 여지를 “다음 구현” 가능한 단위로 쪼개 **명확한 인터페이스/계약/수용 기준(acceptance)** 으로 정의합니다.
+
+현재 계약 source of truth는 [Spec v1.1](spec-v1.1.md), [전략 문서](STRATEGY.md), [아키텍처 문서](ARCHITECTURE.md)입니다. 이 문서는 남은 backlog와 작성 당시 원안을 함께 보존합니다.
+
+## 문서 상태
+
+### 현재 제공
+
+- D1 `sab entry` 서브커맨드, entry JSON 아티팩트, Storage/`report_index` 연동은 현재 구현되었습니다.
+- D2 buy candidate numeric 필드(`close_value`, `gap_guard_*`, `entry_reference_close_raw_value`)와 D3 `ema_cross` 점수 계약은 현재 구현되었습니다.
+- D5 sell time stop의 trading sessions 계산과 D6 리포트 재현 메타(`run_ts_utc`, `git_sha`, `eval_context`, `config_snapshot`)는 현재 구현되었습니다.
+
+### 실험
+
+- 별도 실험 항목은 없습니다. 현재 구현된 deliverable은 운영 문서에서 관리하고, 이 문서에는 잔여 backlog만 남깁니다.
+
+### 백로그
+
+- D4 corporate action 의심 시 `flags`만 승격하고 자동 `REVIEW` 강등을 제거하는 계약은 아직 구현되지 않았습니다.
+- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로를 추가하는 작업은 이 문서의 인접 backlog로 유지합니다.
+
+### 폐기 후보
+
+- 이미 구현된 D1/D2/D3/D5/D6를 별도 “v1.3 대기 작업”으로 계속 추적하는 방식은 유지하지 않습니다.
 
 ## 1. 배경/문제
 
@@ -30,12 +53,12 @@
 
 ## 3. 범위 요약(Deliverables)
 
-- D1. `sab entry` 서브커맨드 추가(“다음 거래일 진입 판단 보조” 리포트 생성)
-- D2. buy candidate 공통 필드 확장(갭/가드/핵심 지표의 numeric 값 포함)
-- D3. ema_cross 점수/노트의 “옵션 필터” 의미 정합성 수정(스코어 계약 고정)
-- D4. sell: corporate action 의심은 **action을 덮지 않고 flag로 승격**(우선순위 계약)
-- D5. sell: time stop의 단위를 명시(거래일 세션 기준 권장) + 리포트에 계산값 노출
-- D6. 리포트 메타데이터(재현성) 표준 필드 추가
+- D1. `sab entry` 서브커맨드 추가(현재 제공)
+- D2. buy candidate 공통 필드 확장(현재 제공)
+- D3. ema_cross 점수/노트 계약 정합성 수정(현재 제공)
+- D4. sell: corporate action 의심은 **action을 덮지 않고 flag로 승격**(백로그)
+- D5. sell: time stop의 단위를 명시 + 리포트에 계산값 노출(현재 제공)
+- D6. 리포트 메타데이터(재현성) 표준 필드 추가(현재 제공)
 
 ## 4. 인터페이스 스펙
 

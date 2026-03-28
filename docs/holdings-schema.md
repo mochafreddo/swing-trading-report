@@ -1,9 +1,31 @@
 # holdings.yaml Schema
 
+상태: Accepted (참조 문서)
+
 이 문서는 `holdings.yaml` 파일 구조를 정의합니다.
 
 - 권장: 보유 목록은 Supabase(Postgres)에서 관리하고, `holdings.yaml`은 import/export 용도로 사용합니다.
 - 단, 초기에는 `holdings.yaml`만으로도 Sell/Review 평가가 가능합니다(자동 실행은 DB가 더 안전).
+
+## 문서 상태
+
+### 현재 제공
+
+- 보유 목록의 단일 운영 소스는 Supabase `holdings`이며, `holdings.yaml`은 백업/import-export 입력으로 지원합니다.
+- YAML import는 dry-run + replace-all semantics, export는 전체 snapshot(`quantity=0` 포함) 기준으로 동작합니다.
+- 통화/티커 fail-closed 계약은 앱과 CLI 로더 양쪽에서 강제됩니다.
+
+### 실험
+
+- 별도 실험 스키마 버전은 현재 운영 기준에 포함하지 않습니다.
+
+### 백로그
+
+- `settings` 블록 확장과 복수 랏/이벤트 모델 연동은 backlog로 남아 있습니다.
+
+### 폐기 후보
+
+- `holdings.yaml`을 다시 주 저장소로 되돌리는 방향은 채택하지 않습니다.
 
 ## 관리 방식(권장)
 
@@ -102,6 +124,6 @@ settings:
 - `sab sell` 서브커맨드는 `holdings.yaml`을 로드하여 보유 종목의 Sell/Review 리포트를 생성합니다.
 - `holdings.example.yaml`을 복사해 개인 보유 목록을 작성한 뒤, `HOLDINGS_FILE` 또는 `config.yaml`의 `files.holdings` 경로를 지정하세요.
 
-## 향후 확장 아이디어
+## 백로그 메모
 
 - `settings` 블록에 전략별 기본 임계치(`defaults.strategy` 등)를 추가해 자동 평가 가중치를 조절할 수 있도록 확장 가능.

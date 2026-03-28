@@ -1,6 +1,8 @@
 # ADR Index
 
-아키텍처 의사결정 기록(ADR) 인덱스입니다.
+상태: Archive
+
+아키텍처 의사결정 기록(ADR) 인덱스입니다. 현재 기능 설명서가 아니라 의사결정 아카이브이므로, 최신 운영 계약은 [Spec v1.1](../spec-v1.1.md), [아키텍처](../ARCHITECTURE.md), [전략](../STRATEGY.md), [프로젝트 README](../../README.md)를 우선합니다.
 
 - [ADR-0001 설정 우선순위: config.yaml → .env → CLI](ADR-0001-config-precedence.md) - 상태: Accepted (2025-11-06)
 - [ADR-0002 리포트 아티팩트: JSON 단일 출력 + 로컬 대시보드](ADR-0002-report-artifacts-dashboard.md) - 상태: Accepted (2026-02-08)
