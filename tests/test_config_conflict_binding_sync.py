@@ -44,6 +44,24 @@ def _collect_env_keys_from_usage(module_path: Path) -> set[str]:
         ):
             keys.add(node.args[0].value)
 
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "_parse_optional_int"
+            and any(
+                isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+                for keyword in node.keywords
+                if keyword.arg == "env_key"
+            )
+        ):
+            for keyword in node.keywords:
+                if (
+                    keyword.arg == "env_key"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    keys.add(keyword.value.value)
+
     return keys
 
 
