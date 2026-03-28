@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.14.0...v1.15.0) (2026-03-28)
+
+
+### Features
+
+* **entry:** 엔트리 포트폴리오 가드 추가 ([0d0fcd1](https://github.com/mochafreddo/swing-trading-report/commit/0d0fcd19f523a4cfffd050b5445f1ed0d71338db))
+
 ## [1.14.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.13.0...v1.14.0) (2026-03-28)
 
 
