@@ -24,14 +24,17 @@
     "docker-compose",
     "github-actions",
     "mise",
+    "pre-commit",
     "custom.regex"
   ],
+  "pre-commit": {
+    "enabled": true
+  },
   "ignorePaths": [
     "data/**",
     "reports/**",
     "output/**",
-    "dist/**",
-    ".pre-commit-config.yaml"
+    "dist/**"
   ],
   "customManagers": [
     {
@@ -49,7 +52,7 @@
     "schedule": [
       "before 9am on monday"
     ],
-    "automerge": true,
+    "automerge": false,
     "automergeType": "pr"
   },
   "packageRules": [
@@ -90,11 +93,32 @@
     },
     {
       "description": "pin/digest 자동 머지 — 버전 변경 없이 고정만 강화",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
       "matchUpdateTypes": ["pin", "digest"],
       "automerge": true,
       "automergeType": "pr"
     },
     {
+      "description": "Python runtime pin/digest 자동 머지",
+      "matchManagers": ["pep621"],
+      "matchDepTypes": ["project.dependencies", "project.optional-dependencies"],
+      "matchUpdateTypes": ["pin", "digest"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "npm 런타임 patch 자동 머지",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Python dependency patch 자동 머지",
+      "matchManagers": ["pep621"],
+      "matchDepTypes": ["project.dependencies", "project.optional-dependencies"],
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "automergeType": "pr"
@@ -104,18 +128,17 @@
       "automerge": false
     },
     {
-      "description": "GitHub Actions minor 자동 머지 — SHA pinning으로 보호됨",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor"],
-      "automerge": true,
-      "automergeType": "pr"
-    },
-    {
-      "description": "devDependencies minor 자동 머지 — 런타임 영향 없음",
-      "matchDepTypes": ["devDependencies", "dependency-groups"],
-      "matchUpdateTypes": ["minor"],
-      "automerge": true,
-      "automergeType": "pr"
+      "description": "CI/control-plane updates require manual review",
+      "matchManagers": [
+        "github-actions",
+        "dockerfile",
+        "docker-compose",
+        "mise",
+        "pre-commit",
+        "custom.regex"
+      ],
+      "automerge": false,
+      "dependencyDashboardApproval": true
     },
     {
       "matchUpdateTypes": [

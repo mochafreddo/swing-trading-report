@@ -27,6 +27,7 @@ jobs:
       - name: Checkout PR branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          persist-credentials: false
           ref: ${{ github.head_ref }}
 
       - name: Set up mise
@@ -40,6 +41,9 @@ jobs:
 
       - name: Commit and push
         id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if git diff --quiet -- mise.lock; then
             echo "changes=false" >> "$GITHUB_OUTPUT"
@@ -50,7 +54,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add mise.lock
           git commit -m "chore(toolchain): mise.lock 자동 동기화"
-          git push
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:${HEAD_REF}"
           echo "changes=true" >> "$GITHUB_OUTPUT"
 
       - name: Re-trigger CI
