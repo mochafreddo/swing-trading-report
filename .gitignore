@@ -22,6 +22,7 @@ htmlcov/
 .direnv/
 
 # Node
+.npm-cache/
 .pnpm-store/
 web/node_modules/
 web/.next/
@@ -48,6 +49,7 @@ mise.local.lock
 /data/
 /reports/
 /tmp/
+/tmp-replay/
 /output/
 /watchlist.txt
 /config.local.yaml
