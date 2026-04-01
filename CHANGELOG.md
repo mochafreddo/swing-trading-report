@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.0...v1.16.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* **ci:** 공급망 방어를 강화한다 ([1f92829](https://github.com/mochafreddo/swing-trading-report/commit/1f928295e713fe217b31f4cadf97adcdcc91785b))
+* **deps:** 감사 취약 의존성을 상향한다 ([119f682](https://github.com/mochafreddo/swing-trading-report/commit/119f682b2b8292590de5885b1a1c829bb638f20e))
+
 ## [1.16.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.15.0...v1.16.0) (2026-03-28)
 
 
