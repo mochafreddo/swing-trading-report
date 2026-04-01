@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.1...v1.16.2) (2026-04-01)
+
+
+### Bug Fixes
+
+* **quality:** mypy dotenv 의존성을 개발 환경에 포함한다 ([e39fe40](https://github.com/mochafreddo/swing-trading-report/commit/e39fe406d96276ab3c85978a7e44efb3ff47ff3b))
+* **web:** 제목 가시성과 감소 모션 대응을 보강한다 ([3636b79](https://github.com/mochafreddo/swing-trading-report/commit/3636b79b851102e51bec0dbed197906906268bb0))
+
 ## [1.16.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.0...v1.16.1) (2026-03-31)
 
 
