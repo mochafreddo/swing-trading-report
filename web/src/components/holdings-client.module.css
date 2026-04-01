@@ -219,6 +219,14 @@
   border-collapse: collapse;
 }
 
+.tableWrap tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+.tableWrap tbody tr:hover {
+  background-color: color-mix(in srgb, var(--violet) 8%, transparent);
+}
+
 .tableWrap th,
 .tableWrap td {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
@@ -308,6 +316,12 @@
 
 .error {
   color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tableWrap tbody tr {
+    transition: none;
+  }
 }
 
 @media (max-width: 1100px) {

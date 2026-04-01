@@ -136,15 +136,15 @@
 .itemButton:hover {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--accent) 12%, transparent),
+    color-mix(in srgb, var(--violet) 14%, transparent),
     transparent 76%
   );
 }
 
 .itemButton:hover::before {
   transform: translateX(2px);
-  opacity: 0.72;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0.85;
+  background: linear-gradient(180deg, var(--accent), var(--violet));
 }
 
 .itemButton:active {
@@ -184,14 +184,15 @@
 .active {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--accent) 16%, transparent),
+    color-mix(in srgb, var(--violet) 22%, transparent),
     transparent 80%
   );
 }
 
 .active::before {
-  background: var(--accent);
+  background: linear-gradient(180deg, var(--accent), var(--violet));
   opacity: 1;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--violet) 60%, transparent);
 }
 
 .detailHeaderRow {
@@ -363,13 +364,15 @@
 }
 
 .chipPositive {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent-soft);
+  background: color-mix(in srgb, var(--teal) 14%, transparent);
+  color: var(--teal);
+  border-color: color-mix(in srgb, var(--teal) 30%, transparent);
 }
 
 .chipWarning {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: color-mix(in srgb, var(--danger) 80%, #fff 20%);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 .chipNeutral {
@@ -562,5 +565,22 @@
 
   .expandedRow td {
     margin: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .itemButton {
+    transition: background 0.2s ease;
+  }
+
+  .itemButton::before {
+    transition:
+      opacity 0.2s ease,
+      background-color 0.2s ease;
+  }
+
+  .itemButton:hover::before,
+  .itemButton:active {
+    transform: none;
   }
 }
