@@ -340,6 +340,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     return params.toString();
   }, [searchParams]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- URL search params are an external source; this reconciles browser navigation with optimistic local report state. */
   useEffect(() => {
     const nextType = parseReportType(searchParams.get("type"));
     const nextQuery = searchParams.get("q") ?? "";
@@ -371,6 +372,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     );
     setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
   }, [items, searchParams]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const nextAppliedQuery = query.trim();
@@ -468,7 +470,6 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
   useEffect(() => {
     if (!selectedKey) {
-      setDetail(null);
       return;
     }
 
@@ -519,13 +520,27 @@ export function useReportsState(initialState?: ReportsInitialState) {
     };
   }, [refreshToken, selectedKey]);
 
-  const summary = useMemo(() => asRecord(detail?.summary), [detail]);
-  const buyRows = useMemo(() => asRecordArray(detail?.candidates), [detail]);
-  const sellRows = useMemo(() => asRecordArray(detail?.evaluated), [detail]);
-  const entryRows = useMemo(() => asRecordArray(detail?.entries), [detail]);
+  const selectedDetail = selectedKey ? detail : null;
+  const summary = useMemo(
+    () => asRecord(selectedDetail?.summary),
+    [selectedDetail],
+  );
+  const buyRows = useMemo(
+    () => asRecordArray(selectedDetail?.candidates),
+    [selectedDetail],
+  );
+  const sellRows = useMemo(
+    () => asRecordArray(selectedDetail?.evaluated),
+    [selectedDetail],
+  );
+  const entryRows = useMemo(
+    () => asRecordArray(selectedDetail?.entries),
+    [selectedDetail],
+  );
   const rawDetailJson = useMemo(
-    () => (showRaw && detail ? JSON.stringify(detail, null, 2) : ""),
-    [detail, showRaw],
+    () =>
+      showRaw && selectedDetail ? JSON.stringify(selectedDetail, null, 2) : "",
+    [selectedDetail, showRaw],
   );
 
   const toggleShowRaw = useCallback(() => {
@@ -562,7 +577,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     searchWindow,
     warnings,
     selectedKey,
-    detail,
+    detail: selectedDetail,
     loadingList,
     loadingDetail,
     error,
