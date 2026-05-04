@@ -90,11 +90,11 @@ def test_pullback_bounce_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     result = evaluate_ticker_hybrid(
@@ -143,11 +143,11 @@ def test_pullback_bounce_ready(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     result = evaluate_ticker_hybrid(
@@ -182,11 +182,11 @@ def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     result = evaluate_ticker_hybrid(
@@ -215,11 +215,11 @@ def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
@@ -243,7 +243,7 @@ def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):
 
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
@@ -293,7 +293,7 @@ def test_breakout_extended_sets_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
@@ -306,7 +306,7 @@ def test_breakout_extended_sets_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     result = evaluate_ticker_hybrid(
@@ -329,11 +329,11 @@ def test_rsi_oversold_ready(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
@@ -364,11 +364,11 @@ def test_rsi_oversold_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
@@ -518,11 +518,11 @@ def test_hybrid_respects_max_gap_pct(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     settings = _settings()
@@ -580,11 +580,11 @@ def test_hybrid_respects_sma60_filter(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     settings = _settings(min_history=3)
@@ -612,7 +612,7 @@ def test_hybrid_kr_breakout_confirmation_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
@@ -625,7 +625,7 @@ def test_hybrid_kr_breakout_confirmation_watch(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     settings = _settings(min_history=3)
@@ -652,7 +652,7 @@ def test_hybrid_kr_breakout_confirmation_disabled_allows_ready(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
@@ -665,7 +665,7 @@ def test_hybrid_kr_breakout_confirmation_disabled_allows_ready(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     settings = _settings(min_history=3)
@@ -772,11 +772,11 @@ def test_hybrid_candidate_exposes_configured_indicator_period_keys(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     settings = _settings(min_history=2)
@@ -949,11 +949,11 @@ def test_hybrid_candidate_formats_usd_price_with_decimals(monkeypatch):
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_swing_high_breakout",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
     monkeypatch.setattr(
         "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
-        lambda *a, **k: (False, [], None, {}),
+        lambda *_args, **_kwargs: (False, [], None, {}),
     )
 
     result = evaluate_ticker_hybrid(

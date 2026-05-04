@@ -57,6 +57,9 @@ mypy:
 test *args:
   uv run python -m pytest -q {{args}}
 
+deadcode-python:
+  uv run python scripts/run_vulture.py
+
 quality: ruff format-check mypy test
 
 check: quality
@@ -91,6 +94,11 @@ web-typecheck:
 
 web-test:
   pnpm --dir web run test:coverage
+
+deadcode-web:
+  pnpm --dir web run deadcode
+
+deadcode: deadcode-python deadcode-web
 
 web-build:
   @SAB_BASIC_AUTH_USER='{{ci_sab_basic_auth_user}}' SAB_BASIC_AUTH_PASS='{{ci_sab_basic_auth_pass}}' SAB_SESSION_SECRET='{{ci_sab_session_secret}}' SUPABASE_URL='{{ci_supabase_url}}' SUPABASE_SECRET_KEY='{{ci_supabase_secret_key}}' GITHUB_OWNER='{{ci_github_owner}}' GITHUB_REPO='{{ci_github_repo}}' GITHUB_PAT='{{ci_github_pat}}' pnpm --dir web run build

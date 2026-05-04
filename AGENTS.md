@@ -169,6 +169,7 @@ Make the smallest safe change that fully solves the problem.
 - 의존성/락: `just sync`, `just lock-upgrade`
 - 트레이딩 실행: `just scan`, `just sell`, `just entry`
 - 품질 게이트: `just quality` (`just check`는 동일 동작 alias)
+- 데드 코드 검사: `just deadcode`
 - pre-commit: `just precommit-all`
 - CI 대응 실행: `just ci-python`, `just ci-web` (`ci-web`는 비밀 없는 고정 CI placeholder env로만 실행)
 
@@ -182,6 +183,22 @@ Make the smallest safe change that fully solves the problem.
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
+- `UV_CACHE_DIR=.uv-cache uv run python scripts/run_vulture.py`
+- `pnpm --dir web run deadcode`
+
+## Health Stack
+
+- typecheck: just mypy
+- typecheck-web: just web-typecheck
+- lint: just ruff
+- format: just format-check
+- lint-web: just web-lint
+- format-web: just web-format-check
+- test: just test
+- test-web: pnpm --dir web run test
+- deadcode: just deadcode-python
+- deadcode-web: just deadcode-web
+- shell: shellcheck scripts/upgrade_deps.sh
 
 ### 문서(설계 로직)
 
