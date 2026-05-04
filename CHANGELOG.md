@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.2...v1.16.3) (2026-05-04)
+
+
+### Bug Fixes
+
+* **audit:** Trivy 보안 감사 실패 해결 ([05f6478](https://github.com/mochafreddo/swing-trading-report/commit/05f647888b4d50b876d1473d61f8126a52ea2c44))
+
 ## [1.16.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.1...v1.16.2) (2026-04-01)
 
 
