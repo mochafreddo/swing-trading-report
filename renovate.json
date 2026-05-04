@@ -13,6 +13,7 @@
   ],
   "platformAutomerge": false,
   "dependencyDashboard": true,
+  "internalChecksFilter": "strict",
   "commitMessagePrefix": "chore(deps): ",
   "prConcurrentLimit": 5,
   "prHourlyLimit": 4,
@@ -56,6 +57,12 @@
     "automergeType": "pr"
   },
   "packageRules": [
+    {
+      "description": "npm 업데이트는 Age 녹색 기준에 맞춰 14일 이상 지난 릴리스만 반영",
+      "matchDatasources": ["npm"],
+      "matchUpdateTypes": ["patch", "minor", "major"],
+      "minimumReleaseAge": "14 days"
+    },
     {
       "matchManagers": [
         "pep621"
@@ -114,6 +121,13 @@
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "automergeType": "pr"
+    },
+    {
+      "description": "Next/React 런타임 patch는 빌드·렌더링 영향이 커서 수동 검토",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["next", "react", "react-dom"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": false
     },
     {
       "description": "Python dependency patch 자동 머지",
