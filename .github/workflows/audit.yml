@@ -63,7 +63,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret
-          severity: MODERATE,HIGH,CRITICAL
+          severity: MEDIUM,HIGH,CRITICAL
           ignore-unfixed: false
           format: json
           output: trivy-report-results.json
