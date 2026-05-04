@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.4](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.3...v1.16.4) (2026-05-04)
+
+
+### Bug Fixes
+
+* **web:** React Hooks lint 실패를 해결한다 ([1668b8c](https://github.com/mochafreddo/swing-trading-report/commit/1668b8cd74c917c40fb78140db2eeff7f7db179e))
+
 ## [1.16.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.2...v1.16.3) (2026-05-04)
 
 
