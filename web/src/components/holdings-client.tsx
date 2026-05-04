@@ -56,6 +56,13 @@ interface TickerLookupResult {
   name: string | null;
 }
 
+interface TickerLookupState {
+  query: string;
+  results: TickerLookupResult[];
+  loading: boolean;
+  error: string | null;
+}
+
 interface TickerSearchApiPayload {
   results?: unknown;
 }
@@ -67,6 +74,13 @@ interface RecentCandidatesApiPayload {
   } | null;
   candidates?: unknown;
 }
+
+const EMPTY_TICKER_LOOKUP_STATE: TickerLookupState = {
+  query: "",
+  results: [],
+  loading: false,
+  error: null,
+};
 
 function formatTodayLocalDate(): string {
   const now = new Date();
@@ -189,13 +203,17 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
   const [showInactive, setShowInactive] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [tickerLookupQuery, setTickerLookupQuery] = useState("");
-  const [tickerLookupResults, setTickerLookupResults] = useState<
-    TickerLookupResult[]
-  >([]);
-  const [tickerLookupLoading, setTickerLookupLoading] = useState(false);
-  const [tickerLookupError, setTickerLookupError] = useState<string | null>(
-    null,
+  const [tickerLookupState, setTickerLookupState] = useState<TickerLookupState>(
+    () => EMPTY_TICKER_LOOKUP_STATE,
   );
+  const trimmedTickerLookupQuery = tickerLookupQuery.trim();
+  const activeTickerLookupState =
+    tickerLookupState.query === trimmedTickerLookupQuery
+      ? tickerLookupState
+      : EMPTY_TICKER_LOOKUP_STATE;
+  const tickerLookupResults = activeTickerLookupState.results;
+  const tickerLookupLoading = activeTickerLookupState.loading;
+  const tickerLookupError = activeTickerLookupState.error;
   const [recentCandidates, setRecentCandidates] = useState<
     TickerLookupResult[]
   >([]);
@@ -270,26 +288,26 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     (ticker: string) => {
       updateField("ticker", ticker);
       setTickerLookupQuery("");
-      setTickerLookupResults([]);
-      setTickerLookupError(null);
+      setTickerLookupState(EMPTY_TICKER_LOOKUP_STATE);
     },
     [updateField],
   );
 
   useEffect(() => {
-    const query = tickerLookupQuery.trim();
+    const query = trimmedTickerLookupQuery;
     if (!query) {
-      setTickerLookupResults([]);
-      setTickerLookupLoading(false);
-      setTickerLookupError(null);
       return;
     }
 
     const controller = new AbortController();
     const timerId = window.setTimeout(() => {
       void (async () => {
-        setTickerLookupLoading(true);
-        setTickerLookupError(null);
+        setTickerLookupState({
+          query,
+          results: [],
+          loading: true,
+          error: null,
+        });
         try {
           const params = new URLSearchParams({
             q: query,
@@ -306,21 +324,27 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           if (!response.ok) {
             throw new Error(readApiError(payload) || "Ticker search failed");
           }
-          setTickerLookupResults(parseTickerLookupResults(payload.results));
+          if (!controller.signal.aborted) {
+            setTickerLookupState({
+              query,
+              results: parseTickerLookupResults(payload.results),
+              loading: false,
+              error: null,
+            });
+          }
         } catch (searchError) {
           if (controller.signal.aborted) {
             return;
           }
-          setTickerLookupResults([]);
-          setTickerLookupError(
-            searchError instanceof Error
-              ? searchError.message
-              : "Ticker search failed",
-          );
-        } finally {
-          if (!controller.signal.aborted) {
-            setTickerLookupLoading(false);
-          }
+          setTickerLookupState({
+            query,
+            results: [],
+            loading: false,
+            error:
+              searchError instanceof Error
+                ? searchError.message
+                : "Ticker search failed",
+          });
         }
       })();
     }, 220);
@@ -329,7 +353,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
       controller.abort();
       window.clearTimeout(timerId);
     };
-  }, [tickerLookupQuery]);
+  }, [trimmedTickerLookupQuery]);
 
   useEffect(() => {
     const controller = new AbortController();
