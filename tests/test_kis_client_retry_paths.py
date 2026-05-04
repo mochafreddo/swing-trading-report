@@ -71,8 +71,9 @@ def test_ensure_token_refreshes_when_cached_token_is_stale(tmp_path: Path) -> No
     )
 
     client = KISClient(_build_creds(), session=MagicMock(), cache_dir=str(tmp_path))
+    initial_access_token = client._access_token
     assert client.cache_status == "expired"
-    assert client._access_token is None
+    assert initial_access_token is None
 
     fresh_resp = _response(
         status_code=200,
