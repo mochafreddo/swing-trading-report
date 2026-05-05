@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 로컬/수동 workflow `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry` 파이프라인, 로컬/수동 workflow `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup`/`ai-brief` 연결이 현재 제공 범위입니다.
 
 ### 실험
@@ -47,7 +47,7 @@ flowchart LR
   P -->|업로드 + 인덱스 upsert| SST
   P -->|report_index / runtime_state| SDB
 
-  GHA --> TG["Telegram / Slack (schedule only)"]
+  GHA --> TG["Telegram / Slack (schedule + ai-brief opt-in)"]
 ```
 
 ## 3. 런타임 컴포넌트
@@ -66,7 +66,7 @@ flowchart LR
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
-| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동 AI brief artifact 생성 | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
+| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동 AI brief artifact 생성과 opt-in 알림 발송 | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
 
 ## 4. 핵심 플로우
 
@@ -114,6 +114,7 @@ flowchart LR
 7. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.
 8. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 9. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch` 전용입니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief`를 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
+10. `send_notifications=true`를 명시한 수동 실행에서만 생성된 Telegram/Slack preview 텍스트를 실제로 발송합니다. 기본값은 `false`이며, 관련 secret이 없으면 발송 단계는 skip합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -263,8 +264,8 @@ flowchart LR
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
   - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
   - 외부 news/API source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
-  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림 발송/schedule과 연결하지 않습니다.
-  - 단, 로컬 `notification_text` builder와 수동 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링할 수 있습니다.
+  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, schedule과 연결하지 않습니다.
+  - 단, 로컬 `notification_text` builder와 수동 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하며, `send_notifications=true`일 때 실제 발송까지 수행할 수 있습니다.
 
 ## 10. 관련 문서
 

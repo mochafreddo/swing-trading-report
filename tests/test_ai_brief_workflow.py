@@ -38,9 +38,12 @@ def test_ai_brief_workflow_is_manual_only() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
 
     triggers = _workflow_triggers(workflow)
+    dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
 
     assert "workflow_dispatch" in triggers
     assert "schedule" not in triggers
+    assert dispatch_inputs["send_notifications"]["default"] == "false"
+    assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
 
 
 def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
@@ -61,7 +64,7 @@ def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
     assert "ai_brief_report_path" in str(steps[run_ai_brief_idx].get("run") or "")
 
 
-def test_ai_brief_workflow_uploads_artifacts_without_delivery() -> None:
+def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)
 
@@ -71,8 +74,21 @@ def test_ai_brief_workflow_uploads_artifacts_without_delivery() -> None:
     assert "steps.run_scan.outputs.buy_report_path" in upload_path
     assert "steps.run_entry.outputs.entry_report_path" in upload_path
     assert "steps.run_ai_brief.outputs.ai_brief_report_path" in upload_path
-    assert not any("Send Telegram" in str(step.get("name") or "") for step in steps)
-    assert not any("Send Slack" in str(step.get("name") or "") for step in steps)
+    assert "ai-brief.slack.txt" in upload_path
+    assert "ai-brief.telegram.txt" in upload_path
+
+    telegram_step = _find_step_by_name(
+        steps, "Send Telegram notification (manual opt-in)"
+    )
+    slack_step = _find_step_by_name(steps, "Send Slack notification (manual opt-in)")
+    expected_condition = "steps.params.outputs.send_notifications == 'true'"
+
+    assert expected_condition in str(telegram_step.get("if") or "")
+    assert expected_condition in str(slack_step.get("if") or "")
+    assert telegram_step.get("continue-on-error") is True
+    assert slack_step.get("continue-on-error") is True
+    assert "TELEGRAM_BOT_TOKEN" in str(telegram_step.get("env") or {})
+    assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 
 def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> None:
@@ -90,9 +106,14 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         params_env.get("RAW_SOURCE_REPORT_PATH")
         == "${{ github.event.inputs.source_report_path }}"
     )
+    assert (
+        params_env.get("RAW_SEND_NOTIFICATIONS")
+        == "${{ github.event.inputs.send_notifications }}"
+    )
     assert "model_name must be a single-line value" in params_script
     assert "model_timeout_seconds must be a single-line value" in params_script
     assert "source_report_path must be a single-line value" in params_script
+    assert "Unsupported send_notifications" in params_script
 
     ai_brief_step = _find_step_by_name(steps, "Run AI brief")
     ai_brief_script = str(ai_brief_step.get("run") or "")

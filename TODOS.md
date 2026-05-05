@@ -16,11 +16,11 @@
 
 ### Notification and scheduled workflow
 
-**What:** Wire Telegram/Slack delivery for `ai-brief`, then add KR/US scheduled runs with runtime guards. Manual workflow dispatch and text preview artifacts now exist, but delivery is not wired yet.
+**What:** Add KR/US scheduled runs for `ai-brief` with runtime guards. Manual workflow dispatch, text preview artifacts, and opt-in Telegram/Slack delivery now exist.
 
 **Why:** The product goal is a timely trading assistant that tells the user when entry candidates are worth reviewing, not just a local JSON generator.
 
-**Context:** Phase 1 excludes notification delivery and workflow orchestration. The notification text builder slice is done with tests for recommendation, empty-result, truncation, source issue, and system issue rendering. The manual workflow slice now runs single-market scan -> entry -> ai-brief and uploads JSON plus notification preview artifacts. The remaining safe sequence is delivery wiring and only then KR/US schedules using market/session runtime guards. Avoid scheduled noise until manual artifacts are useful.
+**Context:** Phase 1 excludes notification delivery and workflow orchestration. The notification text builder slice is done with tests for recommendation, empty-result, truncation, source issue, and system issue rendering. The manual workflow slice now runs single-market scan -> entry -> ai-brief, uploads JSON plus notification preview artifacts, and can send Telegram/Slack notifications when `send_notifications=true`. The remaining safe sequence is KR/US schedules using market/session runtime guards. Avoid scheduled noise until manual delivery proves useful.
 
 **Effort:** M
 **Priority:** P1
@@ -40,6 +40,7 @@
 
 ## Completed
 
+- 2026-05-05: AI Brief manual delivery slice - opt-in Telegram/Slack delivery from the manual ai-brief workflow after artifact upload.
 - 2026-05-05: AI Brief manual workflow slice - manual GitHub Actions workflow_dispatch for single-market scan -> entry -> ai-brief, Actions artifact upload, and notification preview artifacts.
 - 2026-05-05: AI Brief notification text slice - Telegram/Slack text builders for ai-brief artifacts, recommendation/empty-result/issue rendering, and notification text tests.
 - 2026-05-05: Phase 2 first slice - OpenAI Responses model provider, CLI timeout option, provider failure artifacts, source-disclosure guardrails, and prompt-safety validator coverage.
