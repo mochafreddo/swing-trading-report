@@ -8,7 +8,7 @@
 
 ### 현재 제공
 
-- `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
+- `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기고 최종 action을 `REVIEW`로 보정합니다.
 
 ### 실험
@@ -395,6 +395,16 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
 - 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
 - 같은 시장 안에서 candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
+
+### 7.1.1 AI Brief report (entry 후속 요약)
+
+- `sab ai-brief`는 전략 신호 생성기가 아니라 `sab entry` 결과의 후속 요약/판단 레이어입니다.
+- 입력은 `*.entry.json`이며, `entries[].action == "ENTER"` 행만 추천 후보가 됩니다.
+- `REVIEW`/`SKIP` 행은 추천으로 승격하지 않고 `excluded_candidates[]`에 남깁니다.
+- provider 호출 전 후보는 최대 5개로 제한하며, 최종 `recommendations[]`는 최대 3개입니다.
+- Phase 1의 `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
+- `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
+- mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 
 ### 7.2 Sell report (row)
 
