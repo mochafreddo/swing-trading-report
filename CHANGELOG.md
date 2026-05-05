@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.17.0...v1.17.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **cli:** JSON 로그 포맷 초기화 실패를 고친다 ([#101](https://github.com/mochafreddo/swing-trading-report/issues/101)) ([e1b0e0c](https://github.com/mochafreddo/swing-trading-report/commit/e1b0e0c441ac5b03dc87a17a170700c3f51a4c67))
+
 ## [1.17.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.4...v1.17.0) (2026-05-05)
 
 
