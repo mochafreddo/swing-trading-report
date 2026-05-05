@@ -14,18 +14,6 @@
 **Priority:** P1
 **Depends on:** Phase 1 `ai-brief` artifact contract and validator tests merged.
 
-### Notification and scheduled workflow
-
-**What:** Add KR/US scheduled runs for `ai-brief` with runtime guards. Manual workflow dispatch, text preview artifacts, and opt-in Telegram/Slack delivery now exist.
-
-**Why:** The product goal is a timely trading assistant that tells the user when entry candidates are worth reviewing, not just a local JSON generator.
-
-**Context:** Phase 1 excludes notification delivery and workflow orchestration. The notification text builder slice is done with tests for recommendation, empty-result, truncation, source issue, and system issue rendering. The manual workflow slice now runs single-market scan -> entry -> ai-brief, uploads JSON plus notification preview artifacts, and can send Telegram/Slack notifications when `send_notifications=true`. The remaining safe sequence is KR/US schedules using market/session runtime guards. Avoid scheduled noise until manual delivery proves useful.
-
-**Effort:** M
-**Priority:** P1
-**Depends on:** Phase 1 artifact contract, one useful manual artifact sample, and notification text tests.
-
 ### Supabase and web `ai_brief` support
 
 **What:** Extend Supabase Storage/report_index and web report parsing/list/detail paths to support `ai_brief` artifacts.
@@ -40,6 +28,7 @@
 
 ## Completed
 
+- 2026-05-05: AI Brief scheduled workflow slice - KR/US pre-open schedules with trading-session runtime guard and automatic notification delivery.
 - 2026-05-05: AI Brief manual delivery slice - opt-in Telegram/Slack delivery from the manual ai-brief workflow after artifact upload.
 - 2026-05-05: AI Brief manual workflow slice - manual GitHub Actions workflow_dispatch for single-market scan -> entry -> ai-brief, Actions artifact upload, and notification preview artifacts.
 - 2026-05-05: AI Brief notification text slice - Telegram/Slack text builders for ai-brief artifacts, recommendation/empty-result/issue rendering, and notification text tests.

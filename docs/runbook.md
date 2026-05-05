@@ -9,7 +9,7 @@
 ### 현재 제공
 
 - CLI `scan`/`sell`/`entry`/`ai-brief` 실행, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
-- schedule 기반 알림, 수동 AI brief workflow와 opt-in 알림 발송, branch protection 운영 절차도 현재 runbook 범위에 포함합니다.
+- schedule 기반 알림, 수동/scheduled AI brief workflow와 알림 발송, branch protection 운영 절차도 현재 runbook 범위에 포함합니다.
 
 ### 실험
 
@@ -18,7 +18,6 @@
 ### 백로그
 
 - `entry` workflow_dispatch와 웹 `Run` 탭 연결
-- `ai-brief` schedule 연결
 - branch protection stage1 복귀와 stage2 signed commit 적용
 
 ### 폐기 후보
@@ -50,8 +49,8 @@
       - Entry 종료 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (0.0~1.0, 기본 `1.0`)
         - `0.0`은 누락이 1건이라도 있으면 실패로 해석
       - Web 로컬 실행(선택): `WEB_HOST_PORT`(prod, 기본 `55300`), `WEB_DEV_HOST_PORT`(dev, 기본 `55301`)
-      - Notify(자동 실행/AI Brief opt-in): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`
-      - AI Brief OpenAI provider(선택): `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `AI_BRIEF_MODEL_TIMEOUT_SECONDS`
+      - Notify(자동 실행/AI Brief 수동 opt-in 및 schedule): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`
+      - AI Brief OpenAI provider(scheduled AI Brief는 필요): `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `AI_BRIEF_MODEL_TIMEOUT_SECONDS`
     - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
@@ -173,13 +172,16 @@
   - 알림은 자동 실행일 때만 전송합니다.
   - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보 상위 5건 + 나머지 개수)을 전송합니다.
   - 슬랙: 기존 key=value 요약 포맷을 유지합니다.
-- AI Brief 수동 실행(GitHub Actions)
-  - `.github/workflows/ai-brief.yml`은 `workflow_dispatch` 전용입니다.
+- AI Brief 수동/scheduled 실행(GitHub Actions)
+  - `.github/workflows/ai-brief.yml`은 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다.
   - 단일 `market=KR|US`에 대해 scan → Supabase holdings snapshot → entry → ai-brief를 순서대로 실행합니다.
+  - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작합니다.
+  - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
+  - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남깁니다.
-  - `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
+  - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - 관련 secret이 없으면 발송 단계는 skip하며 workflow 자체는 계속 성공할 수 있습니다.
-  - Supabase/web `ai_brief` 노출과 schedule 실행은 아직 수행하지 않습니다.
+  - Supabase/web `ai_brief` 노출은 아직 수행하지 않습니다.
   - `provider=pykrx`는 `market=KR`, `universe=watchlist`, `entry_mode=AFTER_CLOSE` 조합에서만 허용합니다.
 - Audit 실행(GitHub Actions)
   - 감사 워크플로: `.github/workflows/audit.yml`
