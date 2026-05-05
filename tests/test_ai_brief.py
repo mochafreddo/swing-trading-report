@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,10 @@ from types import SimpleNamespace
 import pytest
 from sab.__main__ import main
 from sab.ai_brief import FakeAiBriefProvider, run_ai_brief
+
+
+def _fresh_published_at() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
 
 def _entry_row(
@@ -81,6 +86,35 @@ def _write_buy_report(tmp_path: Path) -> Path:
     return path
 
 
+def _write_source_report(
+    tmp_path: Path,
+    *,
+    sources: list[dict[str, object]] | None = None,
+) -> Path:
+    path = tmp_path / "source.sources.json"
+    published_at = _fresh_published_at()
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_sources.v1",
+                "type": "ai_brief_sources",
+                "sources": sources
+                if sources is not None
+                else [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "title": "Apple supply chain update",
+                        "url": "https://example.test/aapl",
+                        "published_at": published_at,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_run_ai_brief_writes_recommendations_from_entry_report_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -98,6 +132,8 @@ def test_run_ai_brief_writes_recommendations_from_entry_report_only(
         market=None,
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -135,6 +171,8 @@ def test_run_ai_brief_keeps_running_when_optional_buy_report_is_missing(
         market=None,
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -168,6 +206,8 @@ def test_run_ai_brief_requires_market_for_mixed_entry_report(
         market=None,
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 1
@@ -198,6 +238,8 @@ def test_run_ai_brief_market_override_filters_mixed_report(
         market="US",
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -229,6 +271,8 @@ def test_run_ai_brief_writes_empty_artifact_when_no_enter_candidates(
         market=None,
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -268,6 +312,8 @@ def test_run_ai_brief_applies_provider_boundary_before_output_cap(
         market=None,
         model_provider="fake",
         model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -282,6 +328,108 @@ def test_run_ai_brief_applies_provider_boundary_before_output_cap(
         "TICK5.NAS",
         "TICK6.NAS",
     ]
+
+
+def test_run_ai_brief_local_source_provider_enriches_fake_recommendation_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["title"] == (
+        "Apple supply chain update"
+    )
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://example.test/aapl"
+    )
+    assert payload["source_issues"] == []
+    assert payload["summary"]["source_issue_count"] == 0
+
+
+def test_run_ai_brief_local_source_provider_cannot_add_tickers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(
+        tmp_path,
+        sources=[
+            {
+                "ticker": "NOT-ELIGIBLE.NAS",
+                "title": "Unrelated source",
+                "url": "https://example.test/not-eligible",
+                "published_at": _fresh_published_at(),
+            }
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["eligible_tickers"] == ["AAPL.NAS"]
+    assert [item["ticker"] for item in payload["recommendations"]] == ["AAPL.NAS"]
+    assert "NOT-ELIGIBLE.NAS" not in json.dumps(payload["recommendations"])
+    assert {issue["code"] for issue in payload["source_issues"]} == {
+        "local_source_unknown_ticker",
+        "fake_provider_no_external_sources",
+    }
+
+
+def test_run_ai_brief_local_source_provider_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="local-json",
+        source_report_path=(tmp_path / "missing.sources.json").as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert payload["summary"]["system_issue_count"] == 1
 
 
 class _TimeoutSession:
@@ -377,6 +525,8 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=7.5,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -392,6 +542,117 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
     assert isinstance(request_json, dict)
     assert request_json["model"] == "gpt-test"
     assert request_json["text"]["format"]["type"] == "json_schema"  # type: ignore[index]
+
+
+def test_run_ai_brief_openai_payload_includes_local_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["source-backed context supports manual review"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [
+                        {
+                            "title": "Apple supply chain update",
+                            "url": "https://example.test/aapl",
+                            "published_at": _fresh_published_at(),
+                        }
+                    ],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=7.5,
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    request_json = session.calls[0]["json"]
+    assert isinstance(request_json, dict)
+    user_content = request_json["input"][1]["content"]  # type: ignore[index]
+    candidates = json.loads(user_content)["candidates"]
+    assert candidates[0]["sources"][0]["url"] == "https://example.test/aapl"
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://example.test/aapl"
+    )
+
+
+def test_run_ai_brief_openai_rejects_unprovided_source_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["source-backed context supports manual review"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [
+                        {
+                            "title": "Invented source",
+                            "url": "https://example.test/not-supplied",
+                            "published_at": _fresh_published_at(),
+                        }
+                    ],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=7.5,
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "source url must be supplied" in payload["system_issues"][0]["message"]
 
 
 def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
@@ -415,6 +676,8 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -447,6 +710,8 @@ def test_run_ai_brief_openai_http_error_writes_empty_artifact_with_system_issue(
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -492,6 +757,8 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -543,6 +810,8 @@ def test_run_ai_brief_openai_rejects_stale_sources(
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -594,6 +863,8 @@ def test_run_ai_brief_openai_invalid_source_issue_writes_contract_error_artifact
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -634,6 +905,8 @@ def test_run_ai_brief_openai_rejects_unknown_vetoed_candidate(
         model_provider="openai",
         model_name="gpt-test",
         model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 0
@@ -660,6 +933,8 @@ def test_run_ai_brief_openai_requires_real_model_name(
         model_provider="openai",
         model_name="fake-ai-brief-v1",
         model_timeout_seconds=None,
+        source_provider=None,
+        source_report_path=None,
     )
 
     assert exit_code == 1
@@ -696,6 +971,8 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "model_provider": "fake",
         "model_name": "fake-ai-brief-v1",
         "model_timeout_seconds": None,
+        "source_provider": None,
+        "source_report_path": None,
     }
 
 
@@ -720,6 +997,10 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
             "gpt-test",
             "--model-timeout-seconds",
             "3.5",
+            "--source-provider",
+            "local-json",
+            "--source-report",
+            "reports/source.sources.json",
         ]
     )
 
@@ -731,4 +1012,6 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "model_provider": "openai",
         "model_name": "gpt-test",
         "model_timeout_seconds": 3.5,
+        "source_provider": "local-json",
+        "source_report_path": "reports/source.sources.json",
     }

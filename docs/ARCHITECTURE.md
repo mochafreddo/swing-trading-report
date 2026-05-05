@@ -102,12 +102,15 @@ flowchart LR
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `entries[].action == "ENTER"` 행만 AI 평가 후보로 사용하고, `REVIEW`/`SKIP` 행은 `excluded_candidates[]`로 기록합니다.
 3. provider 호출 전 후보는 entry report 순서를 보존해 최대 5개로 제한하며, 초과 `ENTER` 행은 `cap_excluded_candidates[]`로 기록합니다.
-4. 모델 provider는 `fake`와 `openai`를 지원합니다.
+4. source provider는 `none`과 `local-json`을 지원합니다.
+   - `local-json`은 로컬 source report의 `sources[]`를 preselected `ENTER` 후보에만 붙입니다.
+   - source row의 ticker가 후보 집합에 없거나 source가 stale/invalid하면 source issue로 기록하고 모델 입력에서 제외합니다.
+5. 모델 provider는 `fake`와 `openai`를 지원합니다.
    - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
    - `openai`는 Responses API structured output을 사용하며 timeout/요청 실패/모델 출력 계약 실패 시 추천 없이 `system_issues[]`를 남긴 artifact를 생성합니다.
-   - 별도 news/source 수집 provider는 아직 없으므로, 소스 없는 추천은 ticker별 `source_issues[]`를 요구합니다.
-5. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
-6. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
+   - OpenAI 출력 sources는 candidate에 주입된 source URL만 cite할 수 있고, 소스 없는 추천은 ticker별 `source_issues[]`를 요구합니다.
+6. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
+7. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -255,7 +258,8 @@ flowchart LR
   - 후보를 새로 발굴하지 않고 entry의 `ENTER` 행만 추천 후보로 사용합니다.
   - `fake` provider는 외부 기사/모델 판단을 포함하지 않습니다.
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
-  - news/source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
+  - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
+  - 외부 news/API source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림과 연결하지 않습니다.
 
 ## 10. 관련 문서

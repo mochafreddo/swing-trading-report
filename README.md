@@ -93,6 +93,7 @@
 - 진입 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
 - AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
 - OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
+- 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
 ### 4. 웹 UI 빠른 시작
@@ -136,8 +137,11 @@
   - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
   - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
   - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
+  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, `url`, offset 포함 `published_at`을 포함해야 합니다.
+  - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
-  - Phase 2 첫 구현은 모델 provider까지만 포함하며, 별도 news/source 수집 provider는 아직 없습니다. 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
+  - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있으며, 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
+  - Phase 2의 외부 news/API source provider는 아직 없습니다. 현재 source provider는 로컬 JSON 입력만 지원합니다.
 
 ## 웹 UI 운영 참고
 
@@ -205,6 +209,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
 
 ## 작업 자동화 (just + direnv)
 
@@ -388,7 +393,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- news/source provider 고도화, 알림, Supabase/web `ai-brief` 지원
+- 외부 news/API source provider 고도화, 알림, Supabase/web `ai-brief` 지원
 
 ### 폐기 후보
 
