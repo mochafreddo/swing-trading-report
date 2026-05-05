@@ -424,7 +424,11 @@ def _enforce_env_yaml_conflict_policy(parser: _ConfigParser) -> None:
         "Config conflict policy violation: duplicate keys are defined in both "
         ".env/environment and config.yaml: "
         f"{', '.join(conflicts)}. "
-        "Keep each setting key in a single source."
+        "Keep each setting key in a single source. "
+        "Resolve by removing one side of each duplicate key: keep secrets in "
+        ".env/environment, keep non-secret defaults in config.yaml, or use a "
+        "local YAML override such as config.local.yaml with "
+        "SAB_CONFIG=config.local.yaml."
     )
 
 
