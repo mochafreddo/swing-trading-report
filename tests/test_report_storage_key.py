@@ -12,6 +12,7 @@ from sab.report.storage_key import build_report_storage_key
         ("buy", "2026/02/2026-02-13.buy.json"),
         ("sell", "2026/02/2026-02-13.sell.json"),
         ("entry", "2026/02/2026-02-13.entry.json"),
+        ("ai-brief", "2026/02/2026-02-13.ai-brief.json"),
     ],
 )
 def test_build_report_storage_key_uses_default_pattern(

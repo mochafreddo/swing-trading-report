@@ -104,10 +104,17 @@ def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
     assert run_scan_idx < run_entry_idx < run_ai_brief_idx
     assert "uv run -m sab scan" in str(steps[run_scan_idx].get("run") or "")
     assert "uv run -m sab entry" in str(steps[run_entry_idx].get("run") or "")
-    assert "uv run -m sab ai-brief" in str(steps[run_ai_brief_idx].get("run") or "")
+    ai_brief_script = str(steps[run_ai_brief_idx].get("run") or "")
+    ai_brief_env = steps[run_ai_brief_idx].get("env") or {}
+    assert "uv run -m sab ai-brief" in ai_brief_script
+    assert "--upload" in ai_brief_script
+    assert ai_brief_env.get("SUPABASE_URL") == "${{ secrets.SUPABASE_URL }}"
+    assert (
+        ai_brief_env.get("SUPABASE_SECRET_KEY") == "${{ secrets.SUPABASE_SECRET_KEY }}"
+    )
     assert "buy_report_path" in str(steps[run_scan_idx].get("run") or "")
     assert "entry_report_path" in str(steps[run_entry_idx].get("run") or "")
-    assert "ai_brief_report_path" in str(steps[run_ai_brief_idx].get("run") or "")
+    assert "ai_brief_report_path" in ai_brief_script
 
 
 def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:

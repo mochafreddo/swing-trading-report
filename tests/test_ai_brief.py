@@ -461,6 +461,41 @@ def test_run_ai_brief_local_source_provider_failure_keeps_artifact(
     assert payload["summary"]["system_issue_count"] == 1
 
 
+def test_run_ai_brief_uploads_when_forced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    upload_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    def _fake_upload(**kwargs: object) -> str:
+        upload_calls.append(kwargs)
+        return "2026/05/2026-05-05.ai-brief.json"
+
+    monkeypatch.setattr("sab.ai_brief.maybe_upload_report_artifact", _fake_upload)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+        upload=True,
+    )
+
+    assert exit_code == 0
+    assert len(upload_calls) == 1
+    assert upload_calls[0]["run_type"] == "ai-brief"
+    assert upload_calls[0]["force"] is True
+    assert str(upload_calls[0]["artifact_path"]).endswith(".ai-brief.json")
+
+
 def test_load_ai_brief_sources_rejects_malformed_report(tmp_path: Path) -> None:
     path = tmp_path / "bad.sources.json"
     path.write_text(json.dumps({"sources": {}}), encoding="utf-8")
@@ -1138,6 +1173,7 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "model_timeout_seconds": None,
         "source_provider": None,
         "source_report_path": None,
+        "upload": False,
     }
 
 
@@ -1179,4 +1215,28 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "model_timeout_seconds": 3.5,
         "source_provider": "local-json",
         "source_report_path": "reports/source.sources.json",
+        "upload": False,
     }
+
+
+def test_main_routes_ai_brief_upload_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--upload",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["upload"] is True

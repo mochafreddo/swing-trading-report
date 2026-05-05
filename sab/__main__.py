@@ -226,6 +226,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional local JSON source report path",
     )
+    ai_brief.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload AI brief report to Supabase Storage/report_index",
+    )
     return p
 
 
@@ -268,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             model_timeout_seconds=ns.model_timeout_seconds,
             source_provider=ns.source_provider,
             source_report_path=ns.source_report,
+            upload=ns.upload,
         )
 
     parser.print_help()
