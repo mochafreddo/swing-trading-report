@@ -34,16 +34,62 @@ def _find_step_by_name(steps: list[dict[str, Any]], name: str) -> dict[str, Any]
     raise AssertionError(f"Step not found: {name}")
 
 
-def test_ai_brief_workflow_is_manual_only() -> None:
+def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
 
     triggers = _workflow_triggers(workflow)
     dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
+    schedules = triggers["schedule"]
+    schedule_crons = [item["cron"] for item in schedules]
 
     assert "workflow_dispatch" in triggers
-    assert "schedule" not in triggers
+    assert schedule_crons == ["30 22 * * 0-4", "30 12 * * 1-5"]
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
+
+
+def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = _steps(workflow)
+
+    params_step = _find_step_by_name(steps, "Resolve workflow inputs")
+    params_script = str(params_step.get("run") or "")
+    params_env = params_step.get("env") or {}
+
+    assert params_env.get("EVENT_NAME") == "${{ github.event_name }}"
+    assert params_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
+    assert '"30 22 * * 0-4") scheduled_market="KR"' in params_script
+    assert '"30 12 * * 1-5") scheduled_market="US"' in params_script
+    assert 'model_provider="openai"' in params_script
+    assert 'send_notifications="true"' in params_script
+    assert 'echo "is_schedule=${is_schedule}"' in params_script
+    assert 'echo "scheduled_market=${scheduled_market}"' in params_script
+
+    guard_step = _find_step_by_name(steps, "Check scheduled runtime guard")
+    guard_script = str(guard_step.get("run") or "")
+
+    assert guard_step.get("if") == "github.event_name == 'schedule'"
+    assert "is_trading_session" in guard_script
+    assert "resolve_run_session_state_map" in guard_script
+    assert "Skipping scheduled AI brief" in guard_script
+
+    guarded_steps = [
+        "Install dependencies",
+        "Ensure watchlist file",
+        "Validate pykrx watchlist",
+        "Run scan",
+        "Load holdings from Supabase",
+        "Run entry",
+        "Run AI brief",
+        "Build notification preview",
+        "Upload generated AI brief artifacts",
+        "Send Telegram notification",
+        "Send Slack notification",
+    ]
+    expected_guard = "steps.schedule_guard.outputs.should_run == 'true'"
+    for name in guarded_steps:
+        step = _find_step_by_name(steps, name)
+        assert expected_guard in str(step.get("if") or ""), name
 
 
 def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
@@ -77,14 +123,15 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert "ai-brief.slack.txt" in upload_path
     assert "ai-brief.telegram.txt" in upload_path
 
-    telegram_step = _find_step_by_name(
-        steps, "Send Telegram notification (manual opt-in)"
-    )
-    slack_step = _find_step_by_name(steps, "Send Slack notification (manual opt-in)")
+    telegram_step = _find_step_by_name(steps, "Send Telegram notification")
+    slack_step = _find_step_by_name(steps, "Send Slack notification")
     expected_condition = "steps.params.outputs.send_notifications == 'true'"
+    expected_guard = "steps.schedule_guard.outputs.should_run == 'true'"
 
     assert expected_condition in str(telegram_step.get("if") or "")
     assert expected_condition in str(slack_step.get("if") or "")
+    assert expected_guard in str(telegram_step.get("if") or "")
+    assert expected_guard in str(slack_step.get("if") or "")
     assert telegram_step.get("continue-on-error") is True
     assert slack_step.get("continue-on-error") is True
     assert "TELEGRAM_BOT_TOKEN" in str(telegram_step.get("env") or {})
@@ -101,6 +148,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
 
     assert "${{ github.event.inputs.model_name }}" not in params_script
     assert "${{ github.event.inputs.source_report_path }}" not in params_script
+    assert params_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
     assert params_env.get("RAW_MODEL_NAME") == "${{ github.event.inputs.model_name }}"
     assert (
         params_env.get("RAW_SOURCE_REPORT_PATH")
