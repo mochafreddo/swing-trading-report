@@ -14,8 +14,17 @@ _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _SOURCE_FRESHNESS_HOURS = 72
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
+_ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
 _ALLOWED_ISSUE_SEVERITY = frozenset({"INFO", "WARN", "ERROR"})
+_AUTOMATED_ORDER_PHRASES = (
+    "buy now",
+    "execute order",
+    "place order",
+    "submit order",
+    "automatic order",
+    "automated order",
+)
 
 
 class AiBriefValidationError(ValueError):
@@ -113,7 +122,7 @@ def _validate_sources(
     recommendation: Mapping[str, Any],
     recommendation_index: int,
     now: dt.datetime,
-) -> None:
+) -> int:
     sources = _require_list(
         recommendation.get("sources"),
         field_name=f"recommendations[{recommendation_index}].sources",
@@ -142,6 +151,40 @@ def _validate_sources(
             hours=_SOURCE_FRESHNESS_HOURS
         ):
             raise AiBriefValidationError("source.published_at must be within 72h")
+    return len(sources)
+
+
+def _source_issue_tickers(payload: Mapping[str, Any]) -> set[str | None]:
+    issues = _require_list(payload.get("source_issues"), field_name="source_issues")
+    tickers: set[str | None] = set()
+    for raw_issue in issues:
+        if not isinstance(raw_issue, Mapping):
+            continue
+        raw_ticker = raw_issue.get("ticker")
+        if raw_ticker is None:
+            tickers.add(None)
+            continue
+        ticker = str(raw_ticker).strip()
+        if ticker:
+            tickers.add(ticker)
+    return tickers
+
+
+def _validate_recommendation_language(
+    recommendation: Mapping[str, Any], *, recommendation_index: int
+) -> None:
+    fields = _require_list(
+        recommendation.get("rationale"),
+        field_name=f"recommendations[{recommendation_index}].rationale",
+    ) + _require_list(
+        recommendation.get("checklist"),
+        field_name=f"recommendations[{recommendation_index}].checklist",
+    )
+    text = " ".join(str(item).lower() for item in fields)
+    if any(phrase in text for phrase in _AUTOMATED_ORDER_PHRASES):
+        raise AiBriefValidationError(
+            "recommendations[] must avoid automated-order language"
+        )
 
 
 def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -> None:
@@ -160,6 +203,7 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
         )
         if str(ticker).strip()
     }
+    source_issue_tickers = _source_issue_tickers(payload)
     seen_ranks: set[int] = set()
     for idx, raw_recommendation in enumerate(recommendations):
         recommendation = _require_mapping(
@@ -202,13 +246,31 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
             field_name=f"recommendations[{idx}].checklist",
         ):
             raise AiBriefValidationError("recommendations[].checklist is required")
-        _validate_sources(
+        _validate_recommendation_language(recommendation, recommendation_index=idx)
+        source_count = _validate_sources(
             recommendation=recommendation, recommendation_index=idx, now=now
         )
+        if source_count == 0 and ticker not in source_issue_tickers:
+            raise AiBriefValidationError(
+                "recommendations with no sources must have a source issue"
+            )
+
+
+def _eligible_tickers(payload: Mapping[str, Any]) -> set[str]:
+    return {
+        str(ticker).strip()
+        for ticker in _require_list(
+            payload.get("eligible_tickers"), field_name="eligible_tickers"
+        )
+        if str(ticker).strip()
+    }
 
 
 def _validate_candidate_list(
-    payload: Mapping[str, Any], field_name: str, allowed_actions: set[str]
+    payload: Mapping[str, Any],
+    field_name: str,
+    allowed_actions: set[str],
+    allowed_tickers: set[str] | None = None,
 ) -> None:
     rows = _require_list(payload.get(field_name), field_name=field_name)
     for idx, raw_row in enumerate(rows):
@@ -218,6 +280,8 @@ def _validate_candidate_list(
         reason = str(row.get("reason") or "").strip()
         if not ticker:
             raise AiBriefValidationError(f"{field_name}[{idx}].ticker is required")
+        if allowed_tickers is not None and ticker not in allowed_tickers:
+            raise AiBriefValidationError(f"{field_name}[{idx}].ticker must be eligible")
         if action not in allowed_actions:
             raise AiBriefValidationError(
                 f"{field_name}[{idx}].action must be one of {sorted(allowed_actions)}"
@@ -238,8 +302,10 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         raise AiBriefValidationError(
             f"market must be one of {sorted(_ALLOWED_MARKETS)}"
         )
-    if str(payload.get("model_provider") or "").strip() != "fake":
-        raise AiBriefValidationError("model_provider must be 'fake' in Phase 1")
+    if str(payload.get("model_provider") or "").strip() not in _ALLOWED_MODEL_PROVIDERS:
+        raise AiBriefValidationError(
+            f"model_provider must be one of {sorted(_ALLOWED_MODEL_PROVIDERS)}"
+        )
     if not str(payload.get("model_name") or "").strip():
         raise AiBriefValidationError("model_name is required")
     if not str(payload.get("source_entry_report") or "").strip():
@@ -251,7 +317,10 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         payload, "excluded_candidates", allowed_actions={"REVIEW", "SKIP"}
     )
     _validate_candidate_list(
-        payload, "vetoed_candidates", allowed_actions={"PASS", "SKIP"}
+        payload,
+        "vetoed_candidates",
+        allowed_actions={"PASS", "SKIP"},
+        allowed_tickers=_eligible_tickers(payload),
     )
     _validate_candidate_list(
         payload, "cap_excluded_candidates", allowed_actions={"ENTER"}

@@ -56,7 +56,7 @@ flowchart LR
 | CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
-| AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, fake provider 요약, 로컬 리포트 생성 | `sab/ai_brief.py` |
+| AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `fake`/`openai` 모델 provider 요약, 로컬 리포트 생성 | `sab/ai_brief.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/supabase_storage.py` |
@@ -102,7 +102,10 @@ flowchart LR
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `entries[].action == "ENTER"` 행만 AI 평가 후보로 사용하고, `REVIEW`/`SKIP` 행은 `excluded_candidates[]`로 기록합니다.
 3. provider 호출 전 후보는 entry report 순서를 보존해 최대 5개로 제한하며, 초과 `ENTER` 행은 `cap_excluded_candidates[]`로 기록합니다.
-4. Phase 1 provider는 `fake`만 지원하며 외부 GPT/news/API를 호출하지 않습니다.
+4. 모델 provider는 `fake`와 `openai`를 지원합니다.
+   - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
+   - `openai`는 Responses API structured output을 사용하며 timeout/요청 실패/모델 출력 계약 실패 시 추천 없이 `system_issues[]`를 남긴 artifact를 생성합니다.
+   - 별도 news/source 수집 provider는 아직 없으므로, 소스 없는 추천은 ticker별 `source_issues[]`를 요구합니다.
 5. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
 6. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 
@@ -168,7 +171,7 @@ flowchart LR
 
 - 버킷: `reports` (private, JSON MIME 제한)
 - 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
-- Phase 1 `ai-brief`는 로컬 artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
+- `ai-brief`는 로컬 artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
 
 ### 5.3 Supabase Postgres
 
@@ -250,7 +253,9 @@ flowchart LR
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
 - AI Brief 파이프라인(`ai-brief`)은 entry artifact의 후속 로컬 소비자입니다.
   - 후보를 새로 발굴하지 않고 entry의 `ENTER` 행만 추천 후보로 사용합니다.
-  - Phase 1에서는 fake provider만 지원하므로 외부 기사/모델 판단은 포함하지 않습니다.
+  - `fake` provider는 외부 기사/모델 판단을 포함하지 않습니다.
+  - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
+  - news/source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림과 연결하지 않습니다.
 
 ## 10. 관련 문서

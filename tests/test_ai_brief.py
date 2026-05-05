@@ -252,7 +252,7 @@ def test_run_ai_brief_applies_provider_boundary_before_output_cap(
         self: FakeAiBriefProvider,
         *,
         candidates: list[dict[str, object]],
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    ) -> object:
         seen["tickers"] = [candidate["ticker"] for candidate in candidates]
         return original_build(self, candidates=candidates)
 
@@ -284,6 +284,388 @@ def test_run_ai_brief_applies_provider_boundary_before_output_cap(
     ]
 
 
+class _TimeoutSession:
+    def post(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_providers as ai_brief_providers
+
+        raise ai_brief_providers.requests.Timeout("timed out")
+
+
+class _HttpErrorSession:
+    def post(self, *args: object, **kwargs: object) -> object:
+        return _JsonResponse({"error": "server unavailable"}, status_code=503)
+
+
+class _JsonResponse:
+    def __init__(self, payload: dict[str, object], *, status_code: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload)
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _OpenAiSession:
+    def __init__(self, output: dict[str, object]) -> None:
+        self.output = output
+        self.calls: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        return _JsonResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(self.output),
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+
+def test_run_ai_brief_openai_provider_writes_structured_recommendation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": [
+                        "manually confirm price, cash, and risk before order"
+                    ],
+                    "sources": [],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session",
+        lambda: session,
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=7.5,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["model_provider"] == "openai"
+    assert payload["model_name"] == "gpt-test"
+    assert payload["recommendations"][0]["ticker"] == "AAPL.NAS"
+    assert payload["recommendations"][0]["action"] == "ENTER"
+    assert payload["source_issues"][0]["code"] == "openai_no_external_sources"
+    assert session.calls[0]["url"] == "https://api.openai.com/v1/responses"
+    assert session.calls[0]["timeout"] == 7.5
+    request_json = session.calls[0]["json"]
+    assert isinstance(request_json, dict)
+    assert request_json["model"] == "gpt-test"
+    assert request_json["text"]["format"]["type"] == "json_schema"  # type: ignore[index]
+
+
+def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session", lambda: _TimeoutSession()
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["summary"]["recommendation_count"] == 0
+    assert payload["summary"]["system_issue_count"] == 1
+    assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+    assert payload["system_issues"][0]["severity"] == "ERROR"
+
+
+def test_run_ai_brief_openai_http_error_writes_empty_artifact_with_system_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session", lambda: _HttpErrorSession()
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["summary"]["system_issue_count"] == 1
+    assert payload["system_issues"][0]["code"] == "model_provider_failed"
+    assert "HTTP 503" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["summary"]["recommendation_count"] == 0
+    assert payload["summary"]["system_issue_count"] == 1
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+
+
+def test_run_ai_brief_openai_rejects_stale_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [
+                        {
+                            "title": "Old source",
+                            "url": "https://example.test/old",
+                            "published_at": "2000-01-01T00:00:00+00:00",
+                        }
+                    ],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "within 72h" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_openai_invalid_source_issue_writes_contract_error_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "BAD",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+
+
+def test_run_ai_brief_openai_rejects_unknown_vetoed_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "SKIP",
+                    "reason": "model tried to veto an ineligible ticker",
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["vetoed_candidates"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+
+
+def test_run_ai_brief_openai_requires_real_model_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="fake-ai-brief-v1",
+        model_timeout_seconds=None,
+    )
+
+    assert exit_code == 1
+    assert list(report_dir.glob("*.ai-brief.json")) == []
+
+
 def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.delenv("LOG_FORMAT", raising=False)
@@ -313,4 +695,40 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "market": "US",
         "model_provider": "fake",
         "model_name": "fake-ai-brief-v1",
+        "model_timeout_seconds": None,
+    }
+
+
+def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--model-provider",
+            "openai",
+            "--model-name",
+            "gpt-test",
+            "--model-timeout-seconds",
+            "3.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "entry_report_path": "reports/source.entry.json",
+        "buy_report_path": None,
+        "market": None,
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "model_timeout_seconds": 3.5,
     }

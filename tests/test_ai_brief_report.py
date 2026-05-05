@@ -182,3 +182,57 @@ def test_write_ai_brief_report_rejects_sources_older_than_72_hours(
             artifact=artifact,
             now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
         )
+
+
+def test_write_ai_brief_report_allows_openai_model_provider(tmp_path: Path) -> None:
+    artifact = _artifact()
+    artifact["model_provider"] = "openai"
+    artifact["model_name"] = "gpt-test"
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["model_provider"] == "openai"
+    assert payload["model_name"] == "gpt-test"
+
+
+def test_write_ai_brief_report_rejects_automated_order_language(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["checklist"] = ["buy now without any manual review"]
+    artifact["recommendations"] = [recommendation]
+
+    with pytest.raises(AiBriefValidationError, match="automated-order"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_requires_source_issue_when_sources_are_empty(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    artifact["source_issues"] = []
+
+    with pytest.raises(AiBriefValidationError, match="source issue"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_unknown_vetoed_candidate(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    artifact["vetoed_candidates"] = [
+        {
+            "ticker": "MSFT.NAS",
+            "action": "SKIP",
+            "reason": "model tried to veto an ineligible ticker",
+        }
+    ]
+
+    with pytest.raises(AiBriefValidationError, match="vetoed_candidates"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
