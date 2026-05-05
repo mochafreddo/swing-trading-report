@@ -213,6 +213,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="AI model provider timeout in seconds",
     )
+    ai_brief.add_argument(
+        "--source-provider",
+        type=str,
+        default=None,
+        choices=["none", "local-json"],
+        help="Optional source provider for AI brief candidate context",
+    )
+    ai_brief.add_argument(
+        "--source-report",
+        type=str,
+        default=None,
+        help="Optional local JSON source report path",
+    )
     return p
 
 
@@ -253,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
             model_provider=ns.model_provider,
             model_name=ns.model_name,
             model_timeout_seconds=ns.model_timeout_seconds,
+            source_provider=ns.source_provider,
+            source_report_path=ns.source_report,
         )
 
     parser.print_help()

@@ -4,11 +4,11 @@
 
 ### Phase 2 real provider and eval suite
 
-**What:** Add real model/source providers for `ai-brief` with prompt/eval suites and provider timeout/failure contracts. First slice adds the OpenAI model provider and failure contract; news/source provider work remains.
+**What:** Add real model/source providers for `ai-brief` with prompt/eval suites and provider timeout/failure contracts. First slice adds the OpenAI model provider and failure contract; second slice adds a local JSON source provider contract. External news/API source provider work remains.
 
 **Why:** Fake provider only exercises the artifact contract; it does not validate recommendation quality, source collection quality, or prompt safety.
 
-**Context:** Phase 1 is intentionally scoped to local artifact generation, fake provider output, and validator guardrails. OpenAI model judgment now starts from the Phase 1 fixtures and the `sab.ai_brief.v1` validator contract, with tests for timeout/failure handling, unknown ticker rejection, `SKIP`/`REVIEW` non-promotion, weak source disclosure, and financial-safety language. Real article/news collection is still pending.
+**Context:** Phase 1 is intentionally scoped to local artifact generation, fake provider output, and validator guardrails. OpenAI model judgment now starts from the Phase 1 fixtures and the `sab.ai_brief.v1` validator contract, with tests for timeout/failure handling, unknown ticker rejection, `SKIP`/`REVIEW` non-promotion, weak source disclosure, and financial-safety language. Local JSON source context can now be injected without expanding eligible tickers. Real article/news collection is still pending.
 
 **Effort:** M
 **Priority:** P1
@@ -41,3 +41,4 @@
 ## Completed
 
 - 2026-05-05: Phase 2 first slice - OpenAI Responses model provider, CLI timeout option, provider failure artifacts, source-disclosure guardrails, and prompt-safety validator coverage.
+- 2026-05-05: Phase 2 source contract slice - local JSON source provider, source URL trust-boundary checks, source provider failure artifacts, and CLI/docs coverage.

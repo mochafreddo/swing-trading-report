@@ -17,6 +17,12 @@ from .ai_brief_providers import (
     FakeAiBriefProvider,
     OpenAiBriefProvider,
 )
+from .ai_brief_sources import (
+    SOURCE_PROVIDER_LOCAL_JSON,
+    SOURCE_PROVIDER_NONE,
+    AiBriefSourceProviderError,
+    load_ai_brief_sources,
+)
 from .config import ConfigLoadError, load_config
 from .report.ai_brief_report import AiBriefValidationError, write_ai_brief_report
 from .tickers import infer_market_from_ticker
@@ -30,6 +36,9 @@ _DEFAULT_MODEL_TIMEOUT_SECONDS = DEFAULT_MODEL_TIMEOUT_SECONDS
 _PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
+_ALLOWED_SOURCE_PROVIDERS = frozenset(
+    {SOURCE_PROVIDER_NONE, SOURCE_PROVIDER_LOCAL_JSON}
+)
 
 
 def _normalize_market(value: str | None) -> str | None:
@@ -79,6 +88,21 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
     if value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
+
+
+def _normalize_source_provider(
+    *, value: str | None, source_report_path: str | None
+) -> str:
+    provider = str(value or "").strip().lower()
+    if not provider:
+        return (
+            SOURCE_PROVIDER_LOCAL_JSON if source_report_path else SOURCE_PROVIDER_NONE
+        )
+    if provider not in _ALLOWED_SOURCE_PROVIDERS:
+        raise ValueError(
+            f"source_provider must be one of {sorted(_ALLOWED_SOURCE_PROVIDERS)}"
+        )
+    return provider
 
 
 def _load_json_object(path: str, *, label: str) -> dict[str, Any]:
@@ -196,6 +220,7 @@ def _build_model_candidate(
         "strategy_mode": entry.get("strategy_mode"),
         "pattern": entry.get("pattern"),
         "entry_state": entry.get("entry_state"),
+        "sources": [],
     }
 
 
@@ -290,6 +315,33 @@ def _provider_system_issue(exc: AiBriefProviderError) -> dict[str, object]:
     }
 
 
+def _source_provider_system_issue(exc: AiBriefSourceProviderError) -> dict[str, object]:
+    return {
+        "ticker": None,
+        "code": exc.code,
+        "severity": "WARN",
+        "message": str(exc),
+    }
+
+
+def _attach_candidate_sources(
+    candidates: list[dict[str, object]],
+    sources_by_ticker: Mapping[str, list[dict[str, object]]],
+) -> list[dict[str, object]]:
+    enriched: list[dict[str, object]] = []
+    for candidate in candidates:
+        ticker = str(candidate["ticker"])
+        enriched.append(
+            {
+                **candidate,
+                "sources": [
+                    dict(source) for source in sources_by_ticker.get(ticker, [])
+                ],
+            }
+        )
+    return enriched
+
+
 def run_ai_brief(
     *,
     entry_report_path: str,
@@ -298,6 +350,8 @@ def run_ai_brief(
     model_provider: str | None,
     model_name: str | None,
     model_timeout_seconds: float | None = None,
+    source_provider: str | None = None,
+    source_report_path: str | None = None,
 ) -> int:
     try:
         normalized_market = _normalize_market(market)
@@ -308,6 +362,10 @@ def run_ai_brief(
         )
         normalized_model_timeout_seconds = _normalize_model_timeout_seconds(
             model_timeout_seconds
+        )
+        normalized_source_provider = _normalize_source_provider(
+            value=source_provider,
+            source_report_path=source_report_path,
         )
     except ValueError as exc:
         logger.error("%s", exc)
@@ -356,6 +414,25 @@ def run_ai_brief(
     ]
 
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
+    source_provider_issues: list[dict[str, object]] = []
+    try:
+        source_provider_result = load_ai_brief_sources(
+            source_provider=normalized_source_provider,
+            source_report_path=source_report_path,
+            eligible_tickers={
+                str(candidate["ticker"]) for candidate in preselected_candidates
+            },
+        )
+        preselected_candidates = _attach_candidate_sources(
+            preselected_candidates,
+            source_provider_result.sources_by_ticker,
+        )
+        source_provider_issues = source_provider_result.source_issues
+    except AiBriefSourceProviderError as exc:
+        logger.error("AI brief source provider failed: %s", exc)
+        preselected_candidates = _attach_candidate_sources(preselected_candidates, {})
+        system_issues.append(_source_provider_system_issue(exc))
+
     try:
         provider = _build_provider(
             model_provider=normalized_model_provider,
@@ -366,12 +443,12 @@ def run_ai_brief(
             candidates=preselected_candidates
         )
         recommendations = provider_result.recommendations
-        source_issues = provider_result.source_issues
+        source_issues = [*source_provider_issues, *provider_result.source_issues]
         vetoed_candidates = provider_result.vetoed_candidates
     except AiBriefProviderError as exc:
         logger.error("AI brief provider failed: %s", exc)
         recommendations = []
-        source_issues = []
+        source_issues = source_provider_issues
         vetoed_candidates = []
         system_issues.append(_provider_system_issue(exc))
     except ValueError as exc:

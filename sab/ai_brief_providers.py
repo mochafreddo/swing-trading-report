@@ -60,6 +60,7 @@ class FakeAiBriefProvider:
         source_issues: list[dict[str, object]] = []
         for rank, candidate in enumerate(candidates[:RECOMMENDATION_LIMIT], start=1):
             ticker = str(candidate["ticker"])
+            sources = _candidate_sources(candidate)
             recommendations.append(
                 {
                     "ticker": ticker,
@@ -73,18 +74,19 @@ class FakeAiBriefProvider:
                         "gap guard, position size, and cash availability are acceptable",
                         "manually check for blocking headlines or market-wide shocks",
                     ],
-                    "sources": [],
+                    "sources": sources,
                     "as_of": as_of,
                 }
             )
-            source_issues.append(
-                {
-                    "ticker": ticker,
-                    "code": "fake_provider_no_external_sources",
-                    "severity": "WARN",
-                    "message": "fake provider does not collect external sources",
-                }
-            )
+            if not sources:
+                source_issues.append(
+                    {
+                        "ticker": ticker,
+                        "code": "fake_provider_no_external_sources",
+                        "severity": "WARN",
+                        "message": "fake provider does not collect external sources",
+                    }
+                )
         return AiBriefProviderResult(
             recommendations=recommendations,
             source_issues=source_issues,
@@ -148,6 +150,7 @@ class OpenAiBriefProvider:
         _validate_provider_result_contract(
             result,
             eligible_tickers={str(candidate["ticker"]) for candidate in candidates},
+            source_urls_by_ticker=_source_urls_by_ticker(candidates),
         )
         return result
 
@@ -165,6 +168,7 @@ def _build_openai_request_payload(
                     "review. Return JSON only. Do not create new tickers. Do not "
                     "recommend REVIEW or SKIP rows. Do not use automated-order "
                     "language such as buy now, execute order, or place order. "
+                    "Only cite sources supplied in each candidate's sources list. "
                     "Every checklist item must support a human pre-order check."
                 ),
             },
@@ -174,8 +178,9 @@ def _build_openai_request_payload(
                     {
                         "task": (
                             "Rank up to three ENTER candidates from the supplied "
-                            "entry report candidates. If external news/sources are "
-                            "not available, leave sources empty and add a source "
+                            "entry report candidates. Use only candidate.sources "
+                            "for recommendation sources. If a candidate has no "
+                            "usable sources, leave sources empty and add a source "
                             "issue for the ticker."
                         ),
                         "candidates": candidates,
@@ -396,6 +401,22 @@ def _provider_source_issue_tickers(source_issues: list[dict[str, object]]) -> se
     return tickers
 
 
+def _source_urls_by_ticker(
+    candidates: list[dict[str, object]],
+) -> dict[str, set[str]]:
+    urls_by_ticker: dict[str, set[str]] = {}
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        urls_by_ticker[ticker] = {
+            str(source.get("url") or "").strip()
+            for source in _candidate_sources(candidate)
+            if str(source.get("url") or "").strip()
+        }
+    return urls_by_ticker
+
+
 def _parse_provider_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
     text = str(value or "").strip()
     if not text:
@@ -414,7 +435,11 @@ def _parse_provider_offset_datetime(value: object, *, field_name: str) -> dt.dat
 
 
 def _validate_provider_sources(
-    recommendation: Mapping[str, object], *, recommendation_index: int, now: dt.datetime
+    recommendation: Mapping[str, object],
+    *,
+    recommendation_index: int,
+    now: dt.datetime,
+    allowed_source_urls: set[str],
 ) -> int:
     sources = recommendation.get("sources")
     if not isinstance(sources, list):
@@ -435,7 +460,8 @@ def _validate_provider_sources(
             )
         if not str(raw_source.get("title") or "").strip():
             raise AiBriefProviderContractError("OpenAI output source title is required")
-        if not str(raw_source.get("url") or "").strip():
+        source_url = str(raw_source.get("url") or "").strip()
+        if not source_url:
             raise AiBriefProviderContractError("OpenAI output source url is required")
         published_at = _parse_provider_offset_datetime(
             raw_source.get("published_at"), field_name="source.published_at"
@@ -446,11 +472,18 @@ def _validate_provider_sources(
             raise AiBriefProviderContractError(
                 "OpenAI output source.published_at must be within 72h"
             )
+        if source_url not in allowed_source_urls:
+            raise AiBriefProviderContractError(
+                "OpenAI output source url must be supplied in candidate.sources"
+            )
     return len(sources)
 
 
 def _validate_provider_result_contract(
-    result: AiBriefProviderResult, *, eligible_tickers: set[str]
+    result: AiBriefProviderResult,
+    *,
+    eligible_tickers: set[str],
+    source_urls_by_ticker: dict[str, set[str]] | None = None,
 ) -> None:
     if len(result.recommendations) > RECOMMENDATION_LIMIT:
         raise AiBriefProviderContractError(
@@ -504,6 +537,7 @@ def _validate_provider_result_contract(
             recommendation,
             recommendation_index=idx,
             now=now,
+            allowed_source_urls=(source_urls_by_ticker or {}).get(ticker, set()),
         )
         if source_count == 0 and ticker not in source_issue_tickers:
             raise AiBriefProviderContractError(
@@ -565,6 +599,24 @@ def _string_list(value: object) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _candidate_sources(candidate: Mapping[str, object]) -> list[dict[str, object]]:
+    sources = candidate.get("sources")
+    if not isinstance(sources, list):
+        return []
+    candidate_sources: list[dict[str, object]] = []
+    for raw_source in sources[:_MAX_SOURCES_PER_TICKER]:
+        if not isinstance(raw_source, Mapping):
+            continue
+        source: dict[str, object] = {
+            "title": str(raw_source.get("title") or "").strip(),
+            "url": str(raw_source.get("url") or "").strip(),
+            "published_at": str(raw_source.get("published_at") or "").strip(),
+        }
+        if source["title"] and source["url"] and source["published_at"]:
+            candidate_sources.append(source)
+    return candidate_sources
+
+
 def _build_fake_rationale(candidate: Mapping[str, object]) -> list[str]:
     rationale = ["entry report marked this candidate ENTER"]
     entry_reasons = candidate.get("entry_reasons")
@@ -576,6 +628,8 @@ def _build_fake_rationale(candidate: Mapping[str, object]) -> list[str]:
     gap_pct = candidate.get("gap_pct")
     if isinstance(gap_pct, int | float):
         rationale.append(f"entry gap snapshot: {gap_pct * 100:.2f}%")
+    if _candidate_sources(candidate):
+        rationale.append("local source context is available for manual review")
     return rationale
 
 

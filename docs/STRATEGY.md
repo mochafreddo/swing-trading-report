@@ -404,8 +404,10 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - provider 호출 전 후보는 최대 5개로 제한하며, 최종 `recommendations[]`는 최대 3개입니다.
 - `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
 - `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `REVIEW`/`SKIP` 승격, 자동 주문/체결 언어를 허용하지 않습니다.
+- `local-json` source provider는 로컬 source report를 후보 context로 붙일 수 있지만, entry report의 후보 universe를 확장하지 않습니다.
+- OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있습니다.
 - OpenAI provider timeout/요청 실패/출력 계약 실패는 추천을 비우고 `system_issues[]`로 남깁니다.
-- 별도 news/source provider는 아직 없으므로, 추천에 외부 소스가 없으면 ticker별 `source_issues[]`로 disclose해야 합니다.
+- 외부 news/API source provider는 아직 없으므로, 추천에 소스가 없으면 ticker별 `source_issues[]`로 disclose해야 합니다.
 - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
 - mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 
