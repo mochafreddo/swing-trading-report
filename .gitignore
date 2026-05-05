@@ -46,6 +46,7 @@ mise.local.lock
 /BOILERPLATE.md
 
 # Local project data
+/.gstack/
 /data/
 /reports/
 /tmp/
