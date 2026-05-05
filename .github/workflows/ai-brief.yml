@@ -68,6 +68,14 @@ on:
         required: false
         default: ""
         type: string
+      send_notifications:
+        description: "Send Telegram/Slack notifications after artifact upload"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: ai-brief-${{ github.workflow }}-${{ github.ref }}
@@ -119,6 +127,7 @@ jobs:
           RAW_MODEL_TIMEOUT_SECONDS: ${{ github.event.inputs.model_timeout_seconds }}
           RAW_SOURCE_PROVIDER: ${{ github.event.inputs.source_provider }}
           RAW_SOURCE_REPORT_PATH: ${{ github.event.inputs.source_report_path }}
+          RAW_SEND_NOTIFICATIONS: ${{ github.event.inputs.send_notifications }}
         run: |
           set -euo pipefail
 
@@ -239,6 +248,19 @@ jobs:
             exit 1
           fi
 
+          send_notifications="${RAW_SEND_NOTIFICATIONS}"
+          if [[ -z "${send_notifications}" ]]; then
+            send_notifications="false"
+          fi
+          send_notifications="${send_notifications,,}"
+          case "${send_notifications}" in
+            true|false) ;;
+            *)
+              echo "Unsupported send_notifications: ${send_notifications}" >&2
+              exit 1
+              ;;
+          esac
+
           if [[ "${provider}" == "pykrx" ]]; then
             if [[ "${market}" != "KR" ]]; then
               echo "provider=pykrx supports only market=KR; got market=${market}" >&2
@@ -264,6 +286,7 @@ jobs:
             echo "model_timeout_seconds=${model_timeout_seconds}"
             echo "source_provider=${source_provider}"
             echo "source_report_path=${source_report_path}"
+            echo "send_notifications=${send_notifications}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Install dependencies
@@ -554,3 +577,50 @@ jobs:
             ai-brief.slack.txt
             ai-brief.telegram.txt
           if-no-files-found: error
+
+      - name: Send Telegram notification (manual opt-in)
+        if: steps.params.outputs.send_notifications == 'true' && success()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
+            echo "Telegram secrets not set; skipping."
+            exit 0
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text@ai-brief.telegram.txt" \
+            -d disable_web_page_preview=true
+
+      - name: Send Slack notification (manual opt-in)
+        if: steps.params.outputs.send_notifications == 'true' && success()
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "Slack webhook not set; skipping."
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          payload = json.dumps(
+              {"text": Path("ai-brief.slack.txt").read_text(encoding="utf-8")}
+          ).encode("utf-8")
+          req = urllib.request.Request(
+              os.environ["SLACK_WEBHOOK_URL"],
+              data=payload,
+              headers={"Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(req, timeout=10) as resp:
+              if resp.status >= 300:
+                  raise RuntimeError(f"Slack webhook returned HTTP {resp.status}")
+          PY
