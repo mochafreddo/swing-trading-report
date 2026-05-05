@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.18.0...v1.19.0) (2026-05-05)
+
+
+### Features
+
+* **ai-brief:** 로컬 source provider 추가 ([e9d48db](https://github.com/mochafreddo/swing-trading-report/commit/e9d48db4085b773a7589b42c53ab3568b6034c74))
+
 ## [1.18.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.17.1...v1.18.0) (2026-05-05)
 
 
