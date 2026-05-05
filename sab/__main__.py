@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 
+from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .scan import run_scan
@@ -140,6 +141,43 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upload entry report to Supabase Storage/report_index",
     )
+
+    ai_brief = sub.add_parser(
+        "ai-brief",
+        help="Build a local AI entry brief from an entry report",
+    )
+    ai_brief.add_argument(
+        "--entry-report",
+        type=str,
+        required=True,
+        help="Input entry report path",
+    )
+    ai_brief.add_argument(
+        "--market",
+        type=str,
+        default=None,
+        choices=["KR", "US"],
+        help="Single market to brief; required for MIXED entry reports",
+    )
+    ai_brief.add_argument(
+        "--buy-report",
+        type=str,
+        default=None,
+        help="Optional buy report path for ticker name/reason enrichment",
+    )
+    ai_brief.add_argument(
+        "--model-provider",
+        type=str,
+        default="fake",
+        choices=["fake"],
+        help="AI model provider for the brief",
+    )
+    ai_brief.add_argument(
+        "--model-name",
+        type=str,
+        default="fake-ai-brief-v1",
+        help="AI model name for the brief",
+    )
     return p
 
 
@@ -170,6 +208,15 @@ def main(argv: list[str] | None = None) -> int:
             mode=ns.mode,
             market=ns.market,
             upload=ns.upload,
+        )
+
+    if ns.cmd == "ai-brief":
+        return run_ai_brief(
+            entry_report_path=ns.entry_report,
+            buy_report_path=ns.buy_report,
+            market=ns.market,
+            model_provider=ns.model_provider,
+            model_name=ns.model_name,
         )
 
     parser.print_help()
