@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.17.1...v1.18.0) (2026-05-05)
+
+
+### Features
+
+* **ai-brief:** OpenAI 모델 provider 추가 ([#103](https://github.com/mochafreddo/swing-trading-report/issues/103)) ([8d27cdb](https://github.com/mochafreddo/swing-trading-report/commit/8d27cdb0194aa10ccf986b9292e3b3906c94a812))
+
 ## [1.17.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.17.0...v1.17.1) (2026-05-05)
 
 
