@@ -141,6 +141,48 @@ describe("/api/reports integration", () => {
     expect(requestUrl.searchParams.get("report_type")).toBe("eq.entry");
   });
 
+  it("accepts AI brief type and returns AI brief rows", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            report_key: "2026/05/2026-05-05.ai-brief.json",
+            report_type: "ai-brief",
+            report_date: "2026-05-05",
+            duplicate_index: 0,
+            generated_at: "2026-05-05T00:00:00Z",
+            summary: { recommendation_count: 1 },
+            tickers: ["AAPL.NAS"],
+            tickers_hydrated: true,
+          },
+        ]),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "content-range": "0-0/1",
+          },
+        },
+      ),
+    );
+
+    const response = await GET(makeRequest("type=ai-brief&limit=1"));
+    const payload = (await response.json()) as {
+      items: Array<{ key: string; type: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.items[0]).toEqual({
+      key: "2026/05/2026-05-05.ai-brief.json",
+      type: "ai-brief",
+      reportDate: "2026-05-05",
+      duplicateIndex: 0,
+    });
+
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.get("report_type")).toBe("eq.ai-brief");
+  });
+
   it("returns 400 before hitting Supabase when query validation fails", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 

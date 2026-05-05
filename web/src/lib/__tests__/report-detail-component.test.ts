@@ -50,6 +50,7 @@ describe("ReportDetail component", () => {
         buyRows,
         sellRows: [],
         entryRows: [],
+        aiBriefRows: [],
         rawDetailJson: "",
         onToggleRaw: vi.fn(),
       }),
@@ -105,6 +106,7 @@ describe("ReportDetail component", () => {
         buyRows: [],
         sellRows: [],
         entryRows,
+        aiBriefRows: [],
         rawDetailJson: "",
         onToggleRaw: vi.fn(),
       }),
@@ -116,5 +118,71 @@ describe("ReportDetail component", () => {
     expect(html).toContain("AAPL.NASD");
     expect(html).toContain("ENTER");
     expect(html).toContain("2026-02-25.buy.json");
+  });
+
+  it("renders AI brief recommendations and structured issues", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "US",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_entry_report: "2026-05-05.entry.json",
+      source_buy_report: "2026-05-04.buy.json",
+      summary: {
+        recommendation_count: 1,
+        source_issue_count: 1,
+      },
+      source_issues: [
+        {
+          ticker: "AAPL.NAS",
+          code: "openai_no_external_sources",
+          severity: "WARN",
+          message: "No external source provider was configured.",
+        },
+      ],
+      system_issues: [],
+    };
+    const aiBriefRows: ReportJson[] = [
+      {
+        ticker: "AAPL.NAS",
+        rank: 1,
+        confidence: "LOW",
+        rationale: ["entry setup remains valid"],
+        checklist: ["manually confirm price and risk"],
+        sources: [
+          {
+            title: "Apple supply chain update",
+            url: "https://example.test/aapl",
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(ReportDetail, {
+        detail,
+        loadingDetail: false,
+        error: null,
+        showRaw: false,
+        summary: detail.summary as ReportJson,
+        buyRows: [],
+        sellRows: [],
+        entryRows: [],
+        aiBriefRows,
+        rawDetailJson: "",
+        onToggleRaw: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("model_provider");
+    expect(html).toContain("source_entry_report");
+    expect(html).toContain("Recommendations (1)");
+    expect(html).toContain("AAPL.NAS");
+    expect(html).toContain("entry setup remains valid");
+    expect(html).toContain("Apple supply chain update");
+    expect(html).toContain("Source issues (1)");
+    expect(html).toContain("openai_no_external_sources");
   });
 });

@@ -20,6 +20,7 @@ interface ReportDetailProps {
   buyRows: ReportJson[];
   sellRows: ReportJson[];
   entryRows: ReportJson[];
+  aiBriefRows: ReportJson[];
   rawDetailJson: string;
   onToggleRaw: () => void;
 }
@@ -62,6 +63,57 @@ function asStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0);
+}
+
+function formatIssue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const ticker = readString(record.ticker);
+  const severity = readString(record.severity);
+  const code = readString(record.code);
+  const message = readString(record.message);
+  const prefix = [ticker, severity, code].filter(Boolean).join(" ");
+  if (message && prefix) {
+    return `${prefix}: ${message}`;
+  }
+  return message ?? (prefix || null);
+}
+
+function asIssueArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => formatIssue(item))
+    .filter((item): item is string => Boolean(item));
+}
+
+function formatSources(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return "-";
+  }
+  const sources = value
+    .map((source) => {
+      const record = asRecord(source);
+      if (!record) {
+        return null;
+      }
+      const title = readString(record.title);
+      const url = readString(record.url);
+      if (title && url) {
+        return `${title} (${url})`;
+      }
+      return title ?? url;
+    })
+    .filter((item): item is string => Boolean(item));
+  return sources.join(" · ") || "-";
 }
 
 function formatNullableNumber(value: unknown): string {
@@ -113,6 +165,7 @@ export function ReportDetail({
   buyRows,
   sellRows,
   entryRows,
+  aiBriefRows,
   rawDetailJson,
   onToggleRaw,
 }: ReportDetailProps) {
@@ -121,18 +174,25 @@ export function ReportDetail({
   );
   const reportType = readString(detail?.type);
   const isEntryReport = reportType === "entry";
+  const isAiBriefReport =
+    reportType === "ai_brief" || reportType === "ai-brief";
   const strategyMode = readString(detail?.strategy_mode);
   const evalContext = asRecord(detail?.eval_context);
   const evalMarket = readString(evalContext?.market);
   const evalSessionState = readString(evalContext?.session_state);
   const sourceBuyReport = readString(detail?.source_buy_report);
+  const sourceEntryReport = readString(detail?.source_entry_report);
+  const aiBriefMarket = readString(detail?.market);
+  const modelProvider = readString(detail?.model_provider);
+  const modelName = readString(detail?.model_name);
   const signalEvalDate = readString(detail?.signal_eval_date);
   const entrySessionDate = readString(detail?.entry_session_date);
   const signalEvalDateByMarket = asRecord(detail?.signal_eval_date_by_market);
   const entrySessionDateByMarket = asRecord(
     detail?.entry_session_date_by_market,
   );
-  const systemIssues = asStringArray(detail?.system_issues);
+  const systemIssues = asIssueArray(detail?.system_issues);
+  const sourceIssues = asIssueArray(detail?.source_issues);
   const screenOuts = asStringArray(detail?.screen_outs);
   const combinedIssues = asStringArray(detail?.issues);
   const issueSections = [
@@ -140,6 +200,11 @@ export function ReportDetail({
       key: "system",
       title: `System issues (${systemIssues.length})`,
       items: systemIssues,
+    },
+    {
+      key: "source",
+      title: `Source issues (${sourceIssues.length})`,
+      items: sourceIssues,
     },
     {
       key: "screen-outs",
@@ -219,19 +284,43 @@ export function ReportDetail({
               <dt>provider</dt>
               <dd>{String(detail.provider ?? "-")}</dd>
             </div>
+            {isAiBriefReport && (
+              <div>
+                <dt>model_provider</dt>
+                <dd>{modelProvider ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>model_name</dt>
+                <dd>{modelName ?? "-"}</dd>
+              </div>
+            )}
             <div>
               <dt>strategy_mode</dt>
               <dd>{strategyMode ?? "-"}</dd>
             </div>
             <div>
               <dt>market</dt>
-              <dd>{evalMarket ?? "-"}</dd>
+              <dd>{evalMarket ?? aiBriefMarket ?? "-"}</dd>
             </div>
             <div>
               <dt>session_state</dt>
               <dd>{evalSessionState ?? "-"}</dd>
             </div>
             {isEntryReport && (
+              <div>
+                <dt>source_buy_report</dt>
+                <dd>{sourceBuyReport ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>source_entry_report</dt>
+                <dd>{sourceEntryReport ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
               <div>
                 <dt>source_buy_report</dt>
                 <dd>{sourceBuyReport ?? "-"}</dd>
@@ -281,6 +370,12 @@ export function ReportDetail({
             <p className={styles.infoNote}>
               Entry 리포트는 이전 buy 후보를 다음 세션 진입 관점으로 재평가한
               결과입니다.
+            </p>
+          )}
+          {isAiBriefReport && (
+            <p className={styles.infoNote}>
+              AI Brief는 entry 리포트의 ENTER 후보를 모델 provider로 요약한 수동
+              검토용 결과입니다.
             </p>
           )}
 
@@ -449,6 +544,44 @@ export function ReportDetail({
                       <td data-label="Reasons">
                         {asStringArray(row.reasons).join(" · ") || "-"}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {aiBriefRows.length > 0 && (
+            <div className={styles.tableWrap}>
+              <h3 className={styles.sectionTitle}>
+                Recommendations ({aiBriefRows.length})
+              </h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Rank</th>
+                    <th>Confidence</th>
+                    <th>Rationale</th>
+                    <th>Checklist</th>
+                    <th>Sources</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiBriefRows.map((row, idx) => (
+                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Rank">{String(row.rank ?? "-")}</td>
+                      <td data-label="Confidence">
+                        {String(row.confidence ?? "-")}
+                      </td>
+                      <td data-label="Rationale">
+                        {asStringArray(row.rationale).join(" · ") || "-"}
+                      </td>
+                      <td data-label="Checklist">
+                        {asStringArray(row.checklist).join(" · ") || "-"}
+                      </td>
+                      <td data-label="Sources">{formatSources(row.sources)}</td>
                     </tr>
                   ))}
                 </tbody>

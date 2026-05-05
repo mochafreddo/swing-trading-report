@@ -73,6 +73,7 @@ export function ReportsList({
               <option value="buy">Buy</option>
               <option value="sell">Sell</option>
               <option value="entry">Entry</option>
+              <option value="ai-brief">AI Brief</option>
             </select>
           </label>
 

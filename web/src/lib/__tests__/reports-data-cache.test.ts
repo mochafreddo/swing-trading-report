@@ -109,6 +109,22 @@ describe("reports-data cache", () => {
     expect(downloadStorageJson).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts AI brief detail keys", async () => {
+    vi.mocked(downloadStorageJson).mockResolvedValue({
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      recommendations: [{ ticker: "AAPL.NAS" }],
+    });
+
+    const detail = await readReportDetail("2026/05/2026-05-05.ai-brief.json");
+
+    expect(detail.key).toBe("2026/05/2026-05-05.ai-brief.json");
+    expect(downloadStorageJson).toHaveBeenCalledWith(
+      "reports",
+      "2026/05/2026-05-05.ai-brief.json",
+    );
+  });
+
   it("bypasses detail cache when refresh=true", async () => {
     vi.mocked(downloadStorageJson).mockResolvedValue({
       generated_at: "2026-02-14T00:00:00Z",

@@ -4,11 +4,10 @@ import {
   fetchReportIndexPage,
   type ReportIndexRow,
 } from "@/lib/supabase-admin";
-import type { ReportType } from "@/lib/types";
 
 const METRICS_LOOKBACK_LIMIT = 30;
 
-type MetricsPanelType = ReportType;
+type MetricsPanelType = "buy" | "sell" | "entry";
 type MetricPresentation = "count" | "ratio";
 
 interface MetricsMetricDefinition {

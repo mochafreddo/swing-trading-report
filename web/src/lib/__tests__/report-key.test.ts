@@ -6,10 +6,10 @@ import {
 } from "@/lib/report-key";
 
 describe("parseReportStorageKey", () => {
-  it("parses valid buy/sell/entry keys", () => {
-    const parsed = parseReportStorageKey("2026/02/2026-02-14-2.entry.json");
+  it("parses valid buy/sell/entry/ai-brief keys", () => {
+    const parsed = parseReportStorageKey("2026/02/2026-02-14-2.ai-brief.json");
     expect(parsed).not.toBeNull();
-    expect(parsed?.type).toBe("entry");
+    expect(parsed?.type).toBe("ai-brief");
     expect(parsed?.reportDate).toBe("2026-02-14");
     expect(parsed?.duplicateIndex).toBe(2);
   });

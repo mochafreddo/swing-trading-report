@@ -79,4 +79,29 @@ describe("ReportsList component", () => {
 
     expect(html).toContain(">Entry</option>");
   });
+
+  it("renders AI Brief filter option", () => {
+    const html = renderToStaticMarkup(
+      ReportsList({
+        reportType: "ai-brief",
+        query: "",
+        appliedQuery: "",
+        items: [],
+        total: null,
+        searched: 0,
+        truncated: false,
+        searchWindow: 100,
+        warnings: [],
+        selectedKey: null,
+        loadingList: false,
+        refreshing: false,
+        onReportTypeChange: vi.fn(),
+        onQueryChange: vi.fn(),
+        onSelectKey: vi.fn(),
+        onRefresh: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain(">AI Brief</option>");
+  });
 });
