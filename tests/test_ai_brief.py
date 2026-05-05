@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sab.__main__ import main
 from sab.ai_brief import FakeAiBriefProvider, run_ai_brief
+from sab.ai_brief_sources import AiBriefSourceProviderError, load_ai_brief_sources
 
 
 def _fresh_published_at() -> str:
@@ -363,6 +364,34 @@ def test_run_ai_brief_local_source_provider_enriches_fake_recommendation_sources
     assert payload["summary"]["source_issue_count"] == 0
 
 
+def test_run_ai_brief_source_report_implies_local_json_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://example.test/aapl"
+    )
+
+
 def test_run_ai_brief_local_source_provider_cannot_add_tickers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -430,6 +459,99 @@ def test_run_ai_brief_local_source_provider_failure_keeps_artifact(
     assert payload["recommendations"][0]["sources"] == []
     assert payload["system_issues"][0]["code"] == "source_provider_failed"
     assert payload["summary"]["system_issue_count"] == 1
+
+
+def test_load_ai_brief_sources_rejects_malformed_report(tmp_path: Path) -> None:
+    path = tmp_path / "bad.sources.json"
+    path.write_text(json.dumps({"sources": {}}), encoding="utf-8")
+
+    with pytest.raises(AiBriefSourceProviderError, match="sources must be a list"):
+        load_ai_brief_sources(
+            source_provider="local-json",
+            source_report_path=path.as_posix(),
+            eligible_tickers={"AAPL.NAS"},
+        )
+
+
+def test_load_ai_brief_sources_reports_invalid_stale_and_capped_rows(
+    tmp_path: Path,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    stale = (now - dt.timedelta(hours=73)).isoformat()
+    fresh = (now - dt.timedelta(hours=1)).isoformat()
+    path = _write_source_report(
+        tmp_path,
+        sources=[
+            "not-object",  # type: ignore[list-item]
+            {"ticker": "", "title": "Missing ticker", "url": "https://example.test/a"},
+            {"ticker": "AAPL.NAS", "url": "https://example.test/missing-title"},
+            {"ticker": "AAPL.NAS", "title": "Missing URL", "published_at": fresh},
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Missing date",
+                "url": "https://example.test/missing-date",
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Bad date",
+                "url": "https://example.test/bad-date",
+                "published_at": "2026-05-05T09:00:00",
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Old source",
+                "url": "https://example.test/old",
+                "published_at": stale,
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Fresh 1",
+                "url": "https://example.test/fresh-1",
+                "published_at": fresh,
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Fresh 2",
+                "url": "https://example.test/fresh-2",
+                "published_at": fresh,
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Fresh 3",
+                "url": "https://example.test/fresh-3",
+                "published_at": fresh,
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Fresh 4",
+                "url": "https://example.test/fresh-4",
+                "published_at": fresh,
+            },
+        ],
+    )
+
+    result = load_ai_brief_sources(
+        source_provider="local-json",
+        source_report_path=path.as_posix(),
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert [source["url"] for source in result.sources_by_ticker["AAPL.NAS"]] == [
+        "https://example.test/fresh-1",
+        "https://example.test/fresh-2",
+        "https://example.test/fresh-3",
+    ]
+    assert [issue["code"] for issue in result.source_issues] == [
+        "local_source_invalid_row",
+        "local_source_invalid_row",
+        "local_source_invalid_row",
+        "local_source_invalid_row",
+        "local_source_invalid_row",
+        "local_source_invalid_row",
+        "local_source_stale",
+        "local_source_cap_exceeded",
+    ]
 
 
 class _TimeoutSession:
@@ -653,6 +775,49 @@ def test_run_ai_brief_openai_rejects_unprovided_source_url(
     assert payload["recommendations"] == []
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
     assert "source url must be supplied" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_preserves_source_issues_when_openai_provider_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(
+        tmp_path,
+        sources=[
+            {
+                "ticker": "NOT-ELIGIBLE.NAS",
+                "title": "Unrelated source",
+                "url": "https://example.test/not-eligible",
+                "published_at": _fresh_published_at(),
+            }
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session", lambda: _TimeoutSession()
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["source_issues"][0]["code"] == "local_source_unknown_ticker"
+    assert payload["system_issues"][0]["code"] == "model_provider_timeout"
 
 
 def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
