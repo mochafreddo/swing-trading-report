@@ -1,0 +1,556 @@
+name: AI Brief pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "Single market to scan, entry-check, and brief"
+        required: false
+        default: KR
+        type: choice
+        options:
+          - KR
+          - US
+      provider:
+        description: "Data provider"
+        required: false
+        default: kis
+        type: choice
+        options:
+          - kis
+          - pykrx
+      universe:
+        description: "Scan universe"
+        required: false
+        default: both
+        type: choice
+        options:
+          - watchlist
+          - screener
+          - both
+      entry_mode:
+        description: "Entry evaluation mode"
+        required: false
+        default: PRE_OPEN
+        type: choice
+        options:
+          - PRE_OPEN
+          - INTRADAY
+          - AFTER_CLOSE
+      model_provider:
+        description: "AI brief model provider"
+        required: false
+        default: fake
+        type: choice
+        options:
+          - fake
+          - openai
+      model_name:
+        description: "AI model name; openai can also use OPENAI_AI_BRIEF_MODEL"
+        required: false
+        default: fake-ai-brief-v1
+        type: string
+      model_timeout_seconds:
+        description: "Optional AI model timeout in seconds"
+        required: false
+        default: ""
+        type: string
+      source_provider:
+        description: "Optional source provider"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - local-json
+      source_report_path:
+        description: "Local source JSON path when source_provider=local-json"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: ai-brief-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: .uv-cache
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  ai_brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up mise toolchain
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          version: 2026.3.1
+          cache: true
+          install_args: --locked
+          working_directory: .
+
+      - name: Restore uv cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-${{ runner.os }}-${{ hashFiles('mise.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Resolve workflow inputs
+        id: params
+        env:
+          RAW_PROVIDER: ${{ github.event.inputs.provider }}
+          RAW_MARKET: ${{ github.event.inputs.market }}
+          RAW_UNIVERSE: ${{ github.event.inputs.universe }}
+          RAW_ENTRY_MODE: ${{ github.event.inputs.entry_mode }}
+          RAW_MODEL_PROVIDER: ${{ github.event.inputs.model_provider }}
+          RAW_MODEL_NAME: ${{ github.event.inputs.model_name }}
+          RAW_MODEL_TIMEOUT_SECONDS: ${{ github.event.inputs.model_timeout_seconds }}
+          RAW_SOURCE_PROVIDER: ${{ github.event.inputs.source_provider }}
+          RAW_SOURCE_REPORT_PATH: ${{ github.event.inputs.source_report_path }}
+        run: |
+          set -euo pipefail
+
+          provider="${RAW_PROVIDER}"
+          if [[ -z "${provider}" ]]; then
+            provider="kis"
+          fi
+          provider="${provider,,}"
+          case "${provider}" in
+            kis|pykrx) ;;
+            *)
+              echo "Unsupported provider: ${provider}" >&2
+              exit 1
+              ;;
+          esac
+
+          market="${RAW_MARKET}"
+          if [[ -z "${market}" ]]; then
+            market="KR"
+          fi
+          market="${market^^}"
+          case "${market}" in
+            KR|US) ;;
+            *)
+              echo "Unsupported market: ${market}" >&2
+              exit 1
+              ;;
+          esac
+
+          universe="${RAW_UNIVERSE}"
+          if [[ -z "${universe}" ]]; then
+            universe="both"
+          fi
+          universe="${universe,,}"
+          case "${universe}" in
+            watchlist|screener|both) ;;
+            *)
+              echo "Unsupported universe: ${universe}" >&2
+              exit 1
+              ;;
+          esac
+
+          entry_mode="${RAW_ENTRY_MODE}"
+          if [[ -z "${entry_mode}" ]]; then
+            entry_mode="PRE_OPEN"
+          fi
+          entry_mode="${entry_mode^^}"
+          case "${entry_mode}" in
+            PRE_OPEN|INTRADAY|AFTER_CLOSE) ;;
+            *)
+              echo "Unsupported entry_mode: ${entry_mode}" >&2
+              exit 1
+              ;;
+          esac
+
+          model_provider="${RAW_MODEL_PROVIDER}"
+          if [[ -z "${model_provider}" ]]; then
+            model_provider="fake"
+          fi
+          model_provider="${model_provider,,}"
+          case "${model_provider}" in
+            fake|openai) ;;
+            *)
+              echo "Unsupported model_provider: ${model_provider}" >&2
+              exit 1
+              ;;
+          esac
+
+          model_name="${RAW_MODEL_NAME}"
+          if [[ -z "${model_name}" ]]; then
+            model_name="fake-ai-brief-v1"
+          fi
+          if [[ "${model_name}" == *$'\n'* || "${model_name}" == *$'\r'* ]]; then
+            echo "model_name must be a single-line value" >&2
+            exit 1
+          fi
+
+          model_timeout_seconds="${RAW_MODEL_TIMEOUT_SECONDS}"
+          if [[ "${model_timeout_seconds}" == *$'\n'* || "${model_timeout_seconds}" == *$'\r'* ]]; then
+            echo "model_timeout_seconds must be a single-line value" >&2
+            exit 1
+          fi
+          if [[ -n "${model_timeout_seconds}" ]]; then
+            MODEL_TIMEOUT_SECONDS="${model_timeout_seconds}" python - <<'PY'
+          import math
+          import os
+
+          value = os.environ["MODEL_TIMEOUT_SECONDS"]
+          try:
+              parsed = float(value)
+          except ValueError as exc:
+              raise SystemExit(f"model_timeout_seconds must be numeric: {value!r}") from exc
+          if not math.isfinite(parsed) or parsed <= 0:
+              raise SystemExit("model_timeout_seconds must be positive")
+          PY
+          fi
+
+          source_provider="${RAW_SOURCE_PROVIDER}"
+          if [[ -z "${source_provider}" ]]; then
+            source_provider="none"
+          fi
+          source_provider="${source_provider,,}"
+          case "${source_provider}" in
+            none|local-json) ;;
+            *)
+              echo "Unsupported source_provider: ${source_provider}" >&2
+              exit 1
+              ;;
+          esac
+
+          source_report_path="${RAW_SOURCE_REPORT_PATH}"
+          if [[ "${source_report_path}" == *$'\n'* || "${source_report_path}" == *$'\r'* ]]; then
+            echo "source_report_path must be a single-line value" >&2
+            exit 1
+          fi
+          if [[ "${source_provider}" == "local-json" && -z "${source_report_path}" ]]; then
+            echo "source_provider=local-json requires source_report_path" >&2
+            exit 1
+          fi
+
+          if [[ "${provider}" == "pykrx" ]]; then
+            if [[ "${market}" != "KR" ]]; then
+              echo "provider=pykrx supports only market=KR; got market=${market}" >&2
+              exit 1
+            fi
+            if [[ "${entry_mode}" != "AFTER_CLOSE" ]]; then
+              echo "provider=pykrx requires entry_mode=AFTER_CLOSE" >&2
+              exit 1
+            fi
+            if [[ "${universe}" != "watchlist" ]]; then
+              echo "provider=pykrx requires universe=watchlist" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "provider=${provider}"
+            echo "market=${market}"
+            echo "universe=${universe}"
+            echo "entry_mode=${entry_mode}"
+            echo "model_provider=${model_provider}"
+            echo "model_name=${model_name}"
+            echo "model_timeout_seconds=${model_timeout_seconds}"
+            echo "source_provider=${source_provider}"
+            echo "source_report_path=${source_report_path}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.params.outputs.provider }}" == "pykrx" ]]; then
+            uv sync --locked --all-groups --extra pykrx
+          else
+            uv sync --locked --all-groups
+          fi
+
+      - name: Ensure watchlist file
+        run: |
+          set -euo pipefail
+          if [[ ! -f watchlist.txt ]]; then
+            : > watchlist.txt
+            echo "Created empty watchlist.txt for AI brief workflow baseline."
+          fi
+
+      - name: Validate pykrx watchlist
+        if: steps.params.outputs.provider == 'pykrx'
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          from sab.config import load_config, load_watchlist
+
+          cfg = load_config(provider_override="pykrx")
+          watchlist_path = cfg.watchlist_path or "watchlist.txt"
+          tickers = load_watchlist(watchlist_path)
+          if not tickers:
+              raise SystemExit(
+                  "provider=pykrx requires a non-empty watchlist. "
+                  f"Add at least one ticker to '{watchlist_path}' "
+                  "or set WATCHLIST_FILE/files.watchlist."
+              )
+          print(
+              f"pykrx watchlist preflight passed: {len(tickers)} ticker(s) from {watchlist_path}"
+          )
+          PY
+
+      - name: Run scan
+        id: run_scan
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+
+          uv run -m sab scan \
+            --provider "${{ steps.params.outputs.provider }}" \
+            --markets "${{ steps.params.outputs.market }}" \
+            --universe "${{ steps.params.outputs.universe }}" 2>&1 | tee scan.log
+
+          buy_report_path="$(sed -n 's/.*Buy report written to: //p' scan.log | tail -n 1 | tr -d '\r')"
+          if [[ -z "${buy_report_path}" ]]; then
+            buy_report_path="$(python - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(
+              Path("reports").glob("*.buy.json"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(paths[0] if paths else "")
+          PY
+          )"
+          fi
+
+          if [[ -z "${buy_report_path}" || ! -f "${buy_report_path}" ]]; then
+            echo "Buy report (*.buy.json) not found under reports/" >&2
+            exit 1
+          fi
+
+          echo "buy_report_path=${buy_report_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Load holdings from Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+
+          supabase_key="${SUPABASE_SECRET_KEY:-}"
+          if [[ -z "${supabase_key}" ]]; then
+            echo "SUPABASE_SECRET_KEY must be set." >&2
+            exit 1
+          fi
+          if [[ "${supabase_key}" == sb_publishable_* ]]; then
+            echo "Publishable key is not allowed for server-side workflow jobs." >&2
+            exit 1
+          fi
+
+          base_url="${SUPABASE_URL%/}"
+          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override&quantity=gt.0&order=ticker.asc"
+
+          curl -fsS "${base_url}/rest/v1/holdings?${query}" \
+            -H "apikey: ${supabase_key}" \
+            -H "Authorization: Bearer ${supabase_key}" \
+            -H "Accept: application/json" \
+            > holdings.supabase.json
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          raw = json.loads(Path("holdings.supabase.json").read_text(encoding="utf-8"))
+          if not isinstance(raw, list):
+              raise SystemExit("Supabase holdings response must be a JSON array")
+
+          payload: dict[str, list[dict[str, object]]] = {"holdings": []}
+          keys = (
+              "quantity",
+              "entry_price",
+              "entry_currency",
+              "entry_date",
+              "strategy",
+              "notes",
+              "tags",
+              "stop_override",
+              "target_override",
+          )
+
+          for row in raw:
+              if not isinstance(row, dict):
+                  continue
+              ticker = str(row.get("ticker") or "").strip()
+              if not ticker:
+                  continue
+              item: dict[str, object] = {"ticker": ticker}
+              for key in keys:
+                  value = row.get(key)
+                  if value is None:
+                      continue
+                  item[key] = value
+              payload["holdings"].append(item)
+
+          out_path = Path("holdings.yaml")
+          out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(f"Prepared {len(payload['holdings'])} holdings to {out_path}")
+          PY
+
+      - name: Run entry
+        id: run_entry
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+
+          uv run -m sab entry \
+            --provider "${{ steps.params.outputs.provider }}" \
+            --mode "${{ steps.params.outputs.entry_mode }}" \
+            --market "${{ steps.params.outputs.market }}" \
+            --buy-report "${{ steps.run_scan.outputs.buy_report_path }}" \
+            --upload 2>&1 | tee entry.log
+
+          entry_report_path="$(sed -n 's/.*Entry report written to: //p' entry.log | tail -n 1 | tr -d '\r')"
+          if [[ -z "${entry_report_path}" ]]; then
+            entry_report_path="$(python - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(
+              Path("reports").glob("*.entry.json"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(paths[0] if paths else "")
+          PY
+          )"
+          fi
+
+          if [[ -z "${entry_report_path}" || ! -f "${entry_report_path}" ]]; then
+            echo "Entry report (*.entry.json) not found under reports/" >&2
+            exit 1
+          fi
+
+          echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run AI brief
+        id: run_ai_brief
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
+          AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
+          PARAM_MODEL_TIMEOUT_SECONDS: ${{ steps.params.outputs.model_timeout_seconds }}
+          PARAM_SOURCE_PROVIDER: ${{ steps.params.outputs.source_provider }}
+          PARAM_SOURCE_REPORT_PATH: ${{ steps.params.outputs.source_report_path }}
+        run: |
+          set -euo pipefail
+
+          cmd=(
+            uv run -m sab ai-brief
+            --entry-report "${{ steps.run_entry.outputs.entry_report_path }}"
+            --buy-report "${{ steps.run_scan.outputs.buy_report_path }}"
+            --market "${{ steps.params.outputs.market }}"
+            --model-provider "${{ steps.params.outputs.model_provider }}"
+            --model-name "${PARAM_MODEL_NAME}"
+          )
+          if [[ -n "${PARAM_MODEL_TIMEOUT_SECONDS}" ]]; then
+            cmd+=(--model-timeout-seconds "${PARAM_MODEL_TIMEOUT_SECONDS}")
+          fi
+          if [[ "${PARAM_SOURCE_PROVIDER}" != "none" ]]; then
+            cmd+=(
+              --source-provider "${PARAM_SOURCE_PROVIDER}"
+              --source-report "${PARAM_SOURCE_REPORT_PATH}"
+            )
+          fi
+
+          "${cmd[@]}" 2>&1 | tee ai-brief.log
+
+          ai_brief_report_path="$(sed -n 's/.*AI brief written to: //p' ai-brief.log | tail -n 1 | tr -d '\r')"
+          if [[ -z "${ai_brief_report_path}" ]]; then
+            ai_brief_report_path="$(python - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(
+              Path("reports").glob("*.ai-brief.json"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(paths[0] if paths else "")
+          PY
+          )"
+          fi
+
+          if [[ -z "${ai_brief_report_path}" || ! -f "${ai_brief_report_path}" ]]; then
+            echo "AI brief report (*.ai-brief.json) not found under reports/" >&2
+            exit 1
+          fi
+
+          echo "ai_brief_report_path=${ai_brief_report_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build notification preview
+        env:
+          REPORT_PATH: ${{ steps.run_ai_brief.outputs.ai_brief_report_path }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from sab.report.notification_text import (
+              build_ai_brief_slack_summary_text,
+              build_ai_brief_telegram_report_text,
+          )
+
+          report_path = Path(os.environ["REPORT_PATH"])
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+
+          Path("ai-brief.slack.txt").write_text(
+              build_ai_brief_slack_summary_text(
+                  report=report,
+                  repo=repo,
+                  run_url=run_url,
+              ),
+              encoding="utf-8",
+          )
+          Path("ai-brief.telegram.txt").write_text(
+              build_ai_brief_telegram_report_text(
+                  report=report,
+                  run_url=run_url,
+                  max_items=5,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload generated AI brief artifacts
+        if: success()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ai-brief-report-${{ github.run_id }}
+          path: |
+            ${{ steps.run_scan.outputs.buy_report_path }}
+            ${{ steps.run_entry.outputs.entry_report_path }}
+            ${{ steps.run_ai_brief.outputs.ai_brief_report_path }}
+            ai-brief.slack.txt
+            ai-brief.telegram.txt
+          if-no-files-found: error

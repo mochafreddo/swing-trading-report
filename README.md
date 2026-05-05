@@ -23,6 +23,7 @@
 - `sab entry`: buy 리포트 후보를 다음 세션 진입 관점으로 재평가합니다.
 - `sab ai-brief`: entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약합니다.
 - 결과물: `reports/YYYY-MM-DD(-n).{buy|sell|entry}.json`, `reports/YYYY-MM-DD(-n).ai-brief.json`
+- GitHub Actions: `scan.yml`/`sell.yml` 자동·수동 실행, `ai-brief.yml` 수동 artifact 생성
 - 로컬 UI: `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 
 ## Requirements
@@ -112,8 +113,8 @@
 - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
   - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
   - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief`는 로컬 JSON만 생성하며 Supabase 업로드/웹 렌더링/알림 발송/workflow는 아직 지원하지 않습니다.
-  - 단, `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하는 로컬 builder는 제공합니다.
+  - `ai-brief`는 로컬 JSON을 생성하며, `ai-brief.yml` 수동 workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남깁니다.
+  - `ai-brief`의 Supabase 업로드/웹 렌더링/알림 발송/schedule은 아직 지원하지 않습니다.
 
 ## 실행/입력 정책
 
@@ -234,7 +235,7 @@
 ## 파일/폴더 구조
 
 - `sab/` - Python 애플리케이션 코드
-  - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry`)
+  - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry` / `sab ai-brief`)
   - `data/` - KIS/PyKRX 커넥터, 캐시
   - `signals/` - EMA/RSI/ATR 계산
   - `report/` - 리포트 아티팩트(JSON) 생성
@@ -384,6 +385,7 @@
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
 - 웹 콘솔은 Reports, Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
+- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드합니다.
 
 ### 실험
 
@@ -394,7 +396,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 외부 news/API source provider 고도화, `ai-brief` 알림 발송/workflow, Supabase/web `ai-brief` 지원
+- 외부 news/API source provider 고도화, `ai-brief` 알림 발송/schedule, Supabase/web `ai-brief` 지원
 
 ### 폐기 후보
 
