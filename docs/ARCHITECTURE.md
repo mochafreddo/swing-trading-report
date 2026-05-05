@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry` 파이프라인, 로컬 `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup` 연결이 현재 제공 범위입니다.
 
 ### 실험
@@ -25,7 +25,7 @@
 
 ## 1. 시스템 목적
 
-- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성합니다.
+- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, entry 결과를 로컬 `ai-brief` JSON으로 요약합니다.
 - Next.js 웹(`web`)은 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
 - GitHub Actions는 스케줄/수동 실행 시 파이프라인(`scan`/`sell`/`cleanup`)을 담당합니다.
@@ -53,12 +53,13 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell`/`entry` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
+| AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, fake provider 요약, 로컬 리포트 생성 | `sab/ai_brief.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
-| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/supabase_storage.py` |
+| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/supabase_storage.py` |
 | 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
@@ -95,6 +96,15 @@ flowchart LR
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)와 시장별 보유 수를 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다.
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+
+### 4.3.1 `ai-brief` 로컬 플로우
+
+1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
+2. `entries[].action == "ENTER"` 행만 AI 평가 후보로 사용하고, `REVIEW`/`SKIP` 행은 `excluded_candidates[]`로 기록합니다.
+3. provider 호출 전 후보는 entry report 순서를 보존해 최대 5개로 제한하며, 초과 `ENTER` 행은 `cap_excluded_candidates[]`로 기록합니다.
+4. Phase 1 provider는 `fake`만 지원하며 외부 GPT/news/API를 호출하지 않습니다.
+5. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
+6. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -152,11 +162,13 @@ flowchart LR
   - `YYYY-MM-DD(.n).buy.json`
   - `YYYY-MM-DD(.n).sell.json`
   - `YYYY-MM-DD(.n).entry.json`
+  - `YYYY-MM-DD(.n).ai-brief.json`
 
 ### 5.2 Supabase Storage
 
 - 버킷: `reports` (private, JSON MIME 제한)
 - 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
+- Phase 1 `ai-brief`는 로컬 artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
 
 ### 5.3 Supabase Postgres
 
@@ -236,6 +248,10 @@ flowchart LR
   - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, 이 raw 기준가는 `scan`의 후보 전용 배치 warmup으로 준비됩니다.
   - `entry`는 이 raw reference와 실시간/raw snapshot만 비교한 뒤, 필요 시 포트폴리오 가드를 후속 적용합니다.
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
+- AI Brief 파이프라인(`ai-brief`)은 entry artifact의 후속 로컬 소비자입니다.
+  - 후보를 새로 발굴하지 않고 entry의 `ENTER` 행만 추천 후보로 사용합니다.
+  - Phase 1에서는 fake provider만 지원하므로 외부 기사/모델 판단은 포함하지 않습니다.
+  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림과 연결하지 않습니다.
 
 ## 10. 관련 문서
 

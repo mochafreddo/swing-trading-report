@@ -6,6 +6,7 @@ from pathlib import Path
 
 import sab.report.markdown as buy_reports
 import sab.report.sell_report as sell_reports
+from sab.report.ai_brief_report import write_ai_brief_report
 from sab.report.markdown import write_report
 from sab.report.sell_report import SellReportRow, write_sell_report
 
@@ -38,6 +39,46 @@ def _write_sell_report(report_dir: str, idx: int) -> str:
         report_dir=report_dir,
         provider="test",
         evaluated=[row],
+    )
+
+
+def _write_ai_brief_report(report_dir: str, idx: int) -> str:
+    return write_ai_brief_report(
+        report_dir=report_dir,
+        artifact={
+            "source_entry_report": "2026-05-05.entry.json",
+            "source_buy_report": None,
+            "market": "US",
+            "model_provider": "fake",
+            "model_name": "fake-ai-brief-v1",
+            "summary": {
+                "entry_count": 1,
+                "preselected_count": 1,
+                "recommendation_count": 1,
+                "excluded_count": 0,
+                "vetoed_count": 0,
+                "cap_excluded_count": 0,
+            },
+            "recommendations": [
+                {
+                    "ticker": f"T{idx:03d}.NAS",
+                    "name": "Name",
+                    "rank": 1,
+                    "action": "ENTER",
+                    "confidence": "LOW",
+                    "rationale": ["entry report marked this candidate ENTER"],
+                    "checklist": ["review price, liquidity, and portfolio exposure"],
+                    "sources": [],
+                    "as_of": "2026-05-05T08:40:00+09:00",
+                }
+            ],
+            "excluded_candidates": [],
+            "vetoed_candidates": [],
+            "cap_excluded_candidates": [],
+            "source_issues": [],
+            "system_issues": [],
+            "eligible_tickers": [f"T{idx:03d}.NAS"],
+        },
     )
 
 
@@ -83,6 +124,30 @@ def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -
         assert payload["schema"] == "sab.report.v1"
         assert payload["type"] == "sell"
         assert payload["summary"]["evaluated_count"] == 1
+
+
+def test_write_ai_brief_report_uses_unique_paths_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path.as_posix()
+    jobs = 12
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [
+            executor.submit(_write_ai_brief_report, report_dir, i) for i in range(jobs)
+        ]
+        paths = [future.result() for future in futures]
+
+    assert len(paths) == jobs
+    assert len(set(paths)) == jobs
+    for out_path in paths:
+        report_path = Path(out_path)
+        assert report_path.parent == tmp_path
+        assert report_path.exists()
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["schema"] == "sab.ai_brief.v1"
+        assert payload["type"] == "ai_brief"
+        assert payload["summary"]["recommendation_count"] == 1
 
 
 def test_write_sell_report_preserves_fractional_quantity_in_payload(
