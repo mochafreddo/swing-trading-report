@@ -365,6 +365,45 @@ def test_upload_report_artifact_indexes_tickers_from_candidates_fallback(
     assert b'"tickers_hydrated": true' in index_payload
 
 
+def test_upload_report_artifact_indexes_ai_brief_tickers(tmp_path: Path) -> None:
+    report_path = tmp_path / "2026-05-05.ai-brief.json"
+    report_path.write_text(
+        (
+            '{"schema":"sab.ai_brief.v1","type":"ai_brief",'
+            '"eligible_tickers":["AAPL.NAS","MSFT.NAS"],'
+            '"recommendations":[{"ticker":"AAPL.NAS"}],'
+            '"excluded_candidates":[{"ticker":"MSFT.NAS"}],'
+            '"summary":{"recommendation_count":1}}'
+        ),
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="ai-brief",
+        report_date=date(2026, 5, 5),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/05/2026-05-05.ai-brief.json"
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert b'"report_type": "ai-brief"' in index_payload
+    assert b'"summary": {"recommendation_count": 1}' in index_payload
+    assert b'"tickers": ["AAPL.NAS", "MSFT.NAS"]' in index_payload
+
+
 def test_upload_report_artifact_raises_index_error_when_upsert_fails(
     tmp_path: Path,
 ) -> None:

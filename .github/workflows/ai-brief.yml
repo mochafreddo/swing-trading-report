@@ -575,6 +575,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
           PARAM_MODEL_TIMEOUT_SECONDS: ${{ steps.params.outputs.model_timeout_seconds }}
           PARAM_SOURCE_PROVIDER: ${{ steps.params.outputs.source_provider }}
@@ -589,6 +591,7 @@ jobs:
             --market "${{ steps.params.outputs.market }}"
             --model-provider "${{ steps.params.outputs.model_provider }}"
             --model-name "${PARAM_MODEL_NAME}"
+            --upload
           )
           if [[ -n "${PARAM_MODEL_TIMEOUT_SECONDS}" ]]; then
             cmd+=(--model-timeout-seconds "${PARAM_MODEL_TIMEOUT_SECONDS}")

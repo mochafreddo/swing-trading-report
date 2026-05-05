@@ -32,6 +32,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
     buyRows,
     sellRows,
     entryRows,
+    aiBriefRows,
     rawDetailJson,
     setReportType,
     setQuery,
@@ -73,6 +74,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
           buyRows={buyRows}
           sellRows={sellRows}
           entryRows={entryRows}
+          aiBriefRows={aiBriefRows}
           rawDetailJson={rawDetailJson}
           onToggleRaw={toggleShowRaw}
         />

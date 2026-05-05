@@ -129,6 +129,44 @@ describe("fetchReportIndexPage", () => {
     expect(result.nextCursor).toBeNull();
   });
 
+  it("accepts AI brief report index rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reportIndexResponse(
+        [
+          {
+            report_key: "2026/05/2026-05-05.ai-brief.json",
+            report_type: "ai-brief",
+            report_date: "2026-05-05",
+            duplicate_index: 0,
+            generated_at: "2026-05-05T00:00:00Z",
+            summary: { recommendation_count: 1 },
+            tickers: ["AAPL.NAS"],
+            tickers_hydrated: true,
+          },
+        ],
+        1,
+      ),
+    );
+
+    const result = await fetchReportIndexPage({
+      type: "ai-brief",
+      limit: 10,
+    });
+
+    expect(result.items).toEqual([
+      {
+        report_key: "2026/05/2026-05-05.ai-brief.json",
+        report_type: "ai-brief",
+        report_date: "2026-05-05",
+        duplicate_index: 0,
+        generated_at: "2026-05-05T00:00:00Z",
+        summary: { recommendation_count: 1 },
+        tickers: ["AAPL.NAS"],
+        tickers_hydrated: true,
+      },
+    ]);
+  });
+
   it("uses keyset pagination without exact count when includeTotal is false", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       reportIndexResponse(

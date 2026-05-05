@@ -1,7 +1,7 @@
 export type Provider = "kis" | "pykrx";
 export type ScanUniverse = "KR" | "US" | "both";
 
-export type ReportType = "buy" | "sell" | "entry";
+export type ReportType = "buy" | "sell" | "entry" | "ai-brief";
 
 export interface ReportListItem {
   key: string;

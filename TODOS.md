@@ -14,20 +14,9 @@
 **Priority:** P1
 **Depends on:** Phase 1 `ai-brief` artifact contract and validator tests merged.
 
-### Supabase and web `ai_brief` support
-
-**What:** Extend Supabase Storage/report_index and web report parsing/list/detail paths to support `ai_brief` artifacts.
-
-**Why:** Phase 1 local artifacts will not appear in existing uploaded reports or the web UI because those paths currently accept only `buy`, `sell`, and `entry` report types.
-
-**Context:** This was intentionally deferred from Phase 1 because it touches cross-stack boundaries such as report storage keys, Supabase indexing, web report key parsing, admin report readers, and report detail rendering. Add this only after the local artifact contract is stable and manual/notification usage confirms the web surface is valuable.
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** Phase 1 schema stability and notification/manual usage feedback.
-
 ## Completed
 
+- 2026-05-05: Supabase/web AI Brief support - `ai-brief` Storage/report_index key contract, CLI/workflow upload, web Reports filter/detail rendering, and regression coverage.
 - 2026-05-05: AI Brief scheduled workflow slice - KR/US pre-open schedules with trading-session runtime guard and automatic notification delivery.
 - 2026-05-05: AI Brief manual delivery slice - opt-in Telegram/Slack delivery from the manual ai-brief workflow after artifact upload.
 - 2026-05-05: AI Brief manual workflow slice - manual GitHub Actions workflow_dispatch for single-market scan -> entry -> ai-brief, Actions artifact upload, and notification preview artifacts.

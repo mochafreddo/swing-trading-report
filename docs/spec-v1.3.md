@@ -165,11 +165,11 @@ v1.3 계약:
 - `require_slope_up=false`이면 `slope` 점수 항목은 **N/A**로 취급하며, `score_notes`에 포함하지 않는다.
 - 반대로 옵션이 켜져 있을 때만 `pass/fail`이 점수/노트에 반영된다.
 
-### 5.3 Supabase `report_index`와 entry 연동 계약
+### 5.3 Supabase `report_index`와 entry/AI Brief 연동 계약
 
-- `report_index.report_type` 허용값 확장: `buy|sell|entry`
-- Storage key 정규식/파서 확장: `.entry.json`을 허용
-- key 생성기 확장: `build_report_storage_key(run_type="entry")` 지원
+- `report_index.report_type` 허용값 확장: `buy|sell|entry|ai-brief`
+- Storage key 정규식/파서 확장: `.entry.json`, `.ai-brief.json`을 허용
+- key 생성기 확장: `build_report_storage_key(run_type="entry")`, `build_report_storage_key(run_type="ai-brief")` 지원
 
 > 이 변경은 DB check constraint, Python 업로드 경로, 웹 목록/상세 경로 모두에 적용됩니다. `docs/spec-v1.1.md`와 테스트는 동일 계약으로 동기화되어야 합니다.
 

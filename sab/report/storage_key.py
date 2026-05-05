@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Final
 
-_ALLOWED_RUN_TYPES: Final[frozenset[str]] = frozenset({"buy", "sell", "entry"})
+_ALLOWED_RUN_TYPES: Final[tuple[str, ...]] = ("buy", "sell", "entry", "ai-brief")
+_ALLOWED_RUN_TYPE_SET: Final[frozenset[str]] = frozenset(_ALLOWED_RUN_TYPES)
 
 
 def build_report_storage_key(
@@ -13,8 +14,9 @@ def build_report_storage_key(
     duplicate_index: int = 0,
 ) -> str:
     normalized_run_type = run_type.strip().lower()
-    if normalized_run_type not in _ALLOWED_RUN_TYPES:
-        raise ValueError("run_type must be one of: buy, sell, entry")
+    if normalized_run_type not in _ALLOWED_RUN_TYPE_SET:
+        allowed = ", ".join(_ALLOWED_RUN_TYPES)
+        raise ValueError(f"run_type must be one of: {allowed}")
 
     if isinstance(duplicate_index, bool) or not isinstance(duplicate_index, int):
         raise TypeError("duplicate_index must be an int >= 0")

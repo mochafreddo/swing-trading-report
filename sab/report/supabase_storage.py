@@ -22,7 +22,7 @@ _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS = 3
 _REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS = 0.2
 _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _REPORT_KEY_PATTERN = re.compile(
-    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell|entry)\.json$"
+    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell|entry|ai-brief)\.json$"
 )
 
 
@@ -369,7 +369,30 @@ def _extract_report_tickers(report: dict[str, object]) -> list[str]:
 
     candidates = _extract_tickers_from_rows(report.get("candidates"))
     evaluated = _extract_tickers_from_rows(report.get("evaluated"))
-    return _dedupe_preserve_order(candidates + evaluated)
+    entries = _extract_tickers_from_rows(report.get("entries"))
+    recommendations = _extract_tickers_from_rows(report.get("recommendations"))
+    excluded = _extract_tickers_from_rows(report.get("excluded_candidates"))
+    vetoed = _extract_tickers_from_rows(report.get("vetoed_candidates"))
+    cap_excluded = _extract_tickers_from_rows(report.get("cap_excluded_candidates"))
+
+    eligible_raw = report.get("eligible_tickers")
+    eligible: list[str] = []
+    if isinstance(eligible_raw, list):
+        for value in eligible_raw:
+            ticker = _normalize_ticker(value)
+            if ticker:
+                eligible.append(ticker)
+
+    return _dedupe_preserve_order(
+        candidates
+        + evaluated
+        + entries
+        + recommendations
+        + excluded
+        + vetoed
+        + cap_excluded
+        + eligible
+    )
 
 
 def _extract_duplicate_index(storage_key: str) -> int:

@@ -103,6 +103,7 @@
 - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 - 로컬 CLI 실행 결과도 웹에서 보고 싶다면 `.env`에 `SAB_UPLOAD_REPORTS=true`를 설정하세요(Supabase 설정 필요).
 - `sab entry`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run -m sab entry --upload`를 사용할 수 있습니다.
+- `sab ai-brief`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --upload`를 사용할 수 있습니다.
 
 ### 5. 리포트 아티팩트
 
@@ -113,10 +114,10 @@
 - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
   - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
   - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief`는 로컬 JSON을 생성하며, `ai-brief.yml` workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남깁니다.
+  - `ai-brief`도 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
+  - `ai-brief.yml` workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남기고, AI Brief 리포트도 Supabase Storage/report_index에 업로드합니다.
   - 수동 `ai-brief.yml` 실행은 `send_notifications=true`를 선택했을 때만 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - scheduled `ai-brief.yml` 실행은 KR/US 장전 schedule과 런타임 가드를 사용하며, 장일+PRE_OPEN일 때만 scan/entry/ai-brief와 알림 발송을 진행합니다.
-  - `ai-brief`의 Supabase 업로드/웹 렌더링은 아직 지원하지 않습니다.
 
 ## 실행/입력 정책
 
@@ -179,7 +180,7 @@
 ### 기능 및 보호 경계
 
 - `Reports`
-  - 리포트 목록/상세/타입 필터(`buy`/`sell`/`entry`)/ticker substring 검색
+  - 리포트 목록/상세/타입 필터(`buy`/`sell`/`entry`/`ai-brief`)/ticker substring 검색
   - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
   - 런타임 상태 저장소: `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
   - 로그인 스로틀 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `strict`)
@@ -385,7 +386,7 @@
 ### 현재 제공
 
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
-- 웹 콘솔은 Reports, Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
+- 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
 - GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다.
 
@@ -398,7 +399,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 외부 news/API source provider 고도화, Supabase/web `ai-brief` 지원
+- 외부 news/API source provider 고도화
 
 ### 폐기 후보
 

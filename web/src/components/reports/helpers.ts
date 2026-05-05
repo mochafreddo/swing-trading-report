@@ -3,7 +3,12 @@ import type { ReportListItem } from "@/lib/types";
 import type { ReportJson, ReportsFilterType } from "./types";
 
 export function parseReportType(value: string | null): ReportsFilterType {
-  if (value === "buy" || value === "sell" || value === "entry") {
+  if (
+    value === "buy" ||
+    value === "sell" ||
+    value === "entry" ||
+    value === "ai-brief"
+  ) {
     return value;
   }
   return "all";

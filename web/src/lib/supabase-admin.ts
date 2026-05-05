@@ -616,7 +616,8 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     const reportType =
       raw.report_type === "buy" ||
       raw.report_type === "sell" ||
-      raw.report_type === "entry"
+      raw.report_type === "entry" ||
+      raw.report_type === "ai-brief"
         ? raw.report_type
         : null;
     const reportDate =

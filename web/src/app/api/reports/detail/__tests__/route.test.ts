@@ -204,6 +204,26 @@ describe("GET /api/reports/detail route", () => {
     expect(payload.report).toEqual(report);
   });
 
+  it("returns AI brief detail when key is valid", async () => {
+    const report = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      recommendations: [{ ticker: "AAPL.NAS" }],
+    };
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce(report);
+    const key = encodeURIComponent("2026/05/2026-05-05.ai-brief.json");
+
+    const response = await GET(makeRequest(`key=${key}`));
+    const payload = (await response.json()) as {
+      key: string;
+      report: Record<string, unknown>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.key).toBe("2026/05/2026-05-05.ai-brief.json");
+    expect(payload.report).toEqual(report);
+  });
+
   it("returns 500 for unknown errors", async () => {
     vi.mocked(downloadStorageJson).mockRejectedValueOnce(new Error("boom"));
     const key = encodeURIComponent("2026/02/2026-02-14.buy.json");

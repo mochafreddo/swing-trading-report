@@ -25,6 +25,7 @@ from .ai_brief_sources import (
 )
 from .config import ConfigLoadError, load_config
 from .report.ai_brief_report import AiBriefValidationError, write_ai_brief_report
+from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .tickers import infer_market_from_ticker
 
 logger = logging.getLogger(__name__)
@@ -352,6 +353,7 @@ def run_ai_brief(
     model_timeout_seconds: float | None = None,
     source_provider: str | None = None,
     source_report_path: str | None = None,
+    upload: bool = False,
 ) -> int:
     try:
         normalized_market = _normalize_market(market)
@@ -496,6 +498,19 @@ def run_ai_brief(
         return 1
 
     logger.info("AI brief written to: %s", out_path)
+    try:
+        uploaded_key = maybe_upload_report_artifact(
+            artifact_path=out_path,
+            run_type="ai-brief",
+            logger=logger,
+            force=upload,
+        )
+    except SupabaseStorageError as exc:
+        logger.error("Supabase AI brief upload failed: %s", exc)
+        return 1
+    else:
+        if uploaded_key:
+            logger.info("AI brief uploaded to Supabase: %s", uploaded_key)
     if source_issues:
         logger.warning("AI brief completed with source issues (%s)", len(source_issues))
     return 0

@@ -134,7 +134,7 @@ const entryDateSchema = z.preprocess(
 );
 
 export const reportListQuerySchema = z.object({
-  type: z.enum(["all", "buy", "sell", "entry"]).default("all"),
+  type: z.enum(["all", "buy", "sell", "entry", "ai-brief"]).default("all"),
   q: z.string().trim().default(""),
   limit: z.coerce.number().int().min(1).max(200).default(30),
   refresh: toBooleanRefreshFlag,
