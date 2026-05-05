@@ -112,7 +112,8 @@
 - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
   - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
   - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief`는 로컬 JSON만 생성하며 Supabase 업로드/웹 렌더링/알림은 아직 지원하지 않습니다.
+  - `ai-brief`는 로컬 JSON만 생성하며 Supabase 업로드/웹 렌더링/알림 발송/workflow는 아직 지원하지 않습니다.
+  - 단, `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하는 로컬 builder는 제공합니다.
 
 ## 실행/입력 정책
 
@@ -393,7 +394,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 외부 news/API source provider 고도화, 알림, Supabase/web `ai-brief` 지원
+- 외부 news/API source provider 고도화, `ai-brief` 알림 발송/workflow, Supabase/web `ai-brief` 지원
 
 ### 폐기 후보
 

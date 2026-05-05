@@ -107,6 +107,48 @@ def _sell_counts(
     return evaluated_count, issue_count, action_counts, evaluated
 
 
+def _ai_brief_counts(
+    report: dict[str, Any],
+) -> tuple[
+    int, int, int, int, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+]:
+    summary = _as_dict(report.get("summary"))
+    recommendations_raw = _as_list(report.get("recommendations"))
+    recommendations = [row for row in recommendations_raw if isinstance(row, dict)]
+    source_issues_raw = _as_list(report.get("source_issues"))
+    source_issues = [row for row in source_issues_raw if isinstance(row, dict)]
+    system_issues_raw = _as_list(report.get("system_issues"))
+    system_issues = [row for row in system_issues_raw if isinstance(row, dict)]
+
+    preselected_count = _safe_int(
+        summary.get("preselected_count"),
+        default=_safe_int(report.get("preselected_count"), default=0),
+    )
+    recommendation_count = _safe_int(
+        summary.get("recommendation_count"),
+        default=_safe_int(
+            report.get("recommendation_count"), default=len(recommendations)
+        ),
+    )
+    source_issue_count = _safe_int(
+        summary.get("source_issue_count"),
+        default=_safe_int(report.get("source_issue_count"), default=len(source_issues)),
+    )
+    system_issue_count = _safe_int(
+        summary.get("system_issue_count"),
+        default=_safe_int(report.get("system_issue_count"), default=len(system_issues)),
+    )
+    return (
+        preselected_count,
+        recommendation_count,
+        source_issue_count,
+        system_issue_count,
+        recommendations,
+        source_issues,
+        system_issues,
+    )
+
+
 def _format_action_counts(action_counts: dict[str, int]) -> str:
     if not action_counts:
         return "-"
@@ -122,6 +164,15 @@ def _first_reason(row: dict[str, Any]) -> str:
             if text:
                 return text
     return _safe_str(reasons, default="-")
+
+
+def _first_list_text(value: Any, *, default: str = "-") -> str:
+    if isinstance(value, list):
+        for item in value:
+            text = _safe_str(item)
+            if text:
+                return text
+    return _safe_str(value, default=default)
 
 
 def _format_pnl(value: Any) -> str:
@@ -182,6 +233,42 @@ def build_sell_slack_summary_text(
         f"evaluated_count={evaluated_count}",
         f"issue_count={issue_count}",
         f"action_counts={_format_action_counts(action_counts)}",
+    ]
+    key = _safe_str(storage_key)
+    if key:
+        lines.append(f"storage_key={key}")
+    lines.append(f"run_url={run_url}")
+    return "\n".join(lines)
+
+
+def build_ai_brief_slack_summary_text(
+    *,
+    report: dict[str, Any],
+    repo: str,
+    run_url: str,
+    storage_key: str | None = None,
+) -> str:
+    (
+        preselected_count,
+        recommendation_count,
+        source_issue_count,
+        system_issue_count,
+        _,
+        _source_issues,
+        _system_issues,
+    ) = _ai_brief_counts(report)
+
+    lines = [
+        "[SAB][ai-brief][schedule]",
+        f"repo={repo}",
+        f"market={_safe_str(report.get('market'), default='-')}",
+        f"model_provider={_safe_str(report.get('model_provider'), default='fake')}",
+        f"model_name={_safe_str(report.get('model_name'), default='-')}",
+        f"generated_at={_generated_at(report)}",
+        f"preselected_count={preselected_count}",
+        f"recommendation_count={recommendation_count}",
+        f"source_issue_count={source_issue_count}",
+        f"system_issue_count={system_issue_count}",
     ]
     key = _safe_str(storage_key)
     if key:
@@ -298,7 +385,96 @@ def build_sell_telegram_report_text(
     return "\n".join(lines)
 
 
+def _recommendation_sources(recommendation: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        source
+        for source in _as_list(recommendation.get("sources"))
+        if isinstance(source, dict)
+    ]
+
+
+def _first_source_title(recommendation: dict[str, Any]) -> str:
+    for source in _recommendation_sources(recommendation):
+        title = _safe_str(source.get("title"))
+        if title:
+            return title
+    return ""
+
+
+def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
+    ticker = _safe_str(issue.get("ticker"))
+    code = _safe_str(issue.get("code"), default="-")
+    if ticker:
+        return f"{prefix}: {ticker} {code}"
+    return f"{prefix}: {code}"
+
+
+def build_ai_brief_telegram_report_text(
+    *,
+    report: dict[str, Any],
+    run_url: str,
+    storage_key: str | None = None,
+    max_items: int = 5,
+) -> str:
+    (
+        _preselected_count,
+        _recommendation_count,
+        source_issue_count,
+        system_issue_count,
+        recommendations,
+        source_issues,
+        system_issues,
+    ) = _ai_brief_counts(report)
+    total = len(recommendations)
+    shown = min(total, max(max_items, 0))
+    model_provider = _safe_str(report.get("model_provider"), default="fake")
+    model_name = _safe_str(report.get("model_name"), default="-")
+
+    lines = [
+        "[SAB][ai-brief][schedule]",
+        f"market={_safe_str(report.get('market'), default='-')}",
+        f"model={model_provider}/{model_name}",
+        f"generated_at={_generated_at(report)}",
+        f"추천 후보 {total}건 (표시 {shown}건)",
+        f"issues source={source_issue_count} system={system_issue_count}",
+    ]
+
+    if total == 0:
+        lines.append("추천 후보 없음")
+    else:
+        for idx, row in enumerate(recommendations[:shown], start=1):
+            ticker = _safe_str(row.get("ticker"), default="-")
+            name = _safe_str(row.get("name"))
+            ticker_name = f"{ticker} {name}".strip()
+            confidence = _safe_str(row.get("confidence"), default="-").upper()
+            rationale = _first_list_text(row.get("rationale"))
+            source_count = len(_recommendation_sources(row))
+            lines.append(
+                f"{idx}. {ticker_name} | {confidence} | {rationale} | "
+                f"sources {source_count}"
+            )
+            source_title = _first_source_title(row)
+            if source_title:
+                lines.append(f"   source: {source_title}")
+        extra = total - shown
+        if extra > 0:
+            lines.append(f"외 {extra}건")
+
+    for issue in source_issues[:3]:
+        lines.append(_format_issue("source issue", issue))
+    for issue in system_issues[:3]:
+        lines.append(_format_issue("system issue", issue))
+
+    key = _safe_str(storage_key)
+    if key:
+        lines.append(f"storage_key={key}")
+    lines.append(f"run_url={run_url}")
+    return "\n".join(lines)
+
+
 __all__ = [
+    "build_ai_brief_slack_summary_text",
+    "build_ai_brief_telegram_report_text",
     "build_scan_slack_summary_text",
     "build_scan_telegram_report_text",
     "build_sell_slack_summary_text",
