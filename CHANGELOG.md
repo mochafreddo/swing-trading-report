@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.4...v1.17.0) (2026-05-05)
+
+
+### Features
+
+* **ai-brief:** 로컬 진입 브리프 MVP 추가 ([0f6ae72](https://github.com/mochafreddo/swing-trading-report/commit/0f6ae72c2510afca0ec1f3bda29ad86047bb822c))
+
 ## [1.16.4](https://github.com/mochafreddo/swing-trading-report/compare/v1.16.3...v1.16.4) (2026-05-04)
 
 
