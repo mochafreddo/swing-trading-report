@@ -431,6 +431,28 @@ def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() 
     assert "T005.NAS Name5" not in text
 
 
+def test_build_ai_brief_telegram_report_text_includes_storage_key() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 0},
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/792",
+        storage_key="2026/05/2026-05-05.ai-brief.json",
+    )
+
+    assert "storage_key=2026/05/2026-05-05.ai-brief.json" in text
+    assert text.endswith("run_url=https://github.com/example/repo/actions/runs/792")
+
+
 def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
     report = {
         "generated_at": "2026-05-05T08:40:00+09:00",
@@ -468,4 +490,38 @@ def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
         "system_issue_count=0",
         "storage_key=2026/05/2026-05-05.ai-brief.json",
         "run_url=https://github.com/mocha/swing-trading-report/actions/runs/789",
+    ]
+
+
+def test_build_ai_brief_slack_summary_text_falls_back_to_top_level_counts() -> None:
+    report = {
+        "date": "2026-05-05",
+        "market": "KR",
+        "preselected_count": "4",
+        "recommendation_count": "2",
+        "source_issue_count": "1",
+        "system_issue_count": "3",
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_slack_summary_text(
+        report=report,
+        repo="mocha/swing-trading-report",
+        run_url="https://github.com/mocha/swing-trading-report/actions/runs/793",
+    )
+
+    assert text.splitlines() == [
+        "[SAB][ai-brief][schedule]",
+        "repo=mocha/swing-trading-report",
+        "market=KR",
+        "model_provider=fake",
+        "model_name=-",
+        "generated_at=2026-05-05",
+        "preselected_count=4",
+        "recommendation_count=2",
+        "source_issue_count=1",
+        "system_issue_count=3",
+        "run_url=https://github.com/mocha/swing-trading-report/actions/runs/793",
     ]
