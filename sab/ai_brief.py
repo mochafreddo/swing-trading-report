@@ -1,67 +1,35 @@
 from __future__ import annotations
 
-import datetime as dt
 import json
 import logging
 import os
 from collections.abc import Mapping
 from typing import Any
 
+from .ai_brief_providers import (
+    DEFAULT_MODEL_TIMEOUT_SECONDS,
+    MODEL_PROVIDER_FAKE,
+    MODEL_PROVIDER_OPENAI,
+    PRESELECTION_LIMIT,
+    AiBriefProviderContractError,
+    AiBriefProviderError,
+    AiBriefProviderTimeoutError,
+    FakeAiBriefProvider,
+    OpenAiBriefProvider,
+)
 from .config import ConfigLoadError, load_config
 from .report.ai_brief_report import AiBriefValidationError, write_ai_brief_report
 from .tickers import infer_market_from_ticker
 
 logger = logging.getLogger(__name__)
 
-_MODEL_PROVIDER_FAKE = "fake"
+_MODEL_PROVIDER_FAKE = MODEL_PROVIDER_FAKE
+_MODEL_PROVIDER_OPENAI = MODEL_PROVIDER_OPENAI
 _DEFAULT_MODEL_NAME = "fake-ai-brief-v1"
-_PRESELECTION_LIMIT = 5
-_RECOMMENDATION_LIMIT = 3
+_DEFAULT_MODEL_TIMEOUT_SECONDS = DEFAULT_MODEL_TIMEOUT_SECONDS
+_PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
-
-
-class FakeAiBriefProvider:
-    def __init__(self, *, model_name: str) -> None:
-        self.model_name = model_name
-
-    def build_recommendations(
-        self, *, candidates: list[dict[str, object]]
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-        as_of = _offset_now_iso()
-        recommendations: list[dict[str, object]] = []
-        source_issues: list[dict[str, object]] = []
-        for rank, candidate in enumerate(candidates[:_RECOMMENDATION_LIMIT], start=1):
-            ticker = str(candidate["ticker"])
-            recommendations.append(
-                {
-                    "ticker": ticker,
-                    "name": candidate.get("name"),
-                    "rank": rank,
-                    "action": "ENTER",
-                    "confidence": "LOW",
-                    "rationale": _build_fake_rationale(candidate),
-                    "checklist": [
-                        "entry price is still close to the entry report snapshot",
-                        "gap guard, position size, and cash availability are acceptable",
-                        "manually check for blocking headlines or market-wide shocks",
-                    ],
-                    "sources": [],
-                    "as_of": as_of,
-                }
-            )
-            source_issues.append(
-                {
-                    "ticker": ticker,
-                    "code": "fake_provider_no_external_sources",
-                    "severity": "WARN",
-                    "message": "fake provider does not collect external sources",
-                }
-            )
-        return recommendations, source_issues
-
-
-def _offset_now_iso() -> str:
-    return dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
+_ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
 
 
 def _normalize_market(value: str | None) -> str | None:
@@ -77,16 +45,40 @@ def _normalize_market(value: str | None) -> str | None:
 
 def _normalize_model_provider(value: str | None) -> str:
     provider = str(value or _MODEL_PROVIDER_FAKE).strip().lower()
-    if provider != _MODEL_PROVIDER_FAKE:
-        raise ValueError("Phase 1 only supports --model-provider fake")
+    if provider not in _ALLOWED_MODEL_PROVIDERS:
+        raise ValueError(
+            f"model_provider must be one of {sorted(_ALLOWED_MODEL_PROVIDERS)}"
+        )
     return provider
 
 
-def _normalize_model_name(value: str | None) -> str:
+def _normalize_model_name(*, provider: str, value: str | None) -> str:
     model_name = str(value or _DEFAULT_MODEL_NAME).strip()
+    if provider == _MODEL_PROVIDER_OPENAI:
+        env_model = os.getenv("OPENAI_AI_BRIEF_MODEL")
+        if (not value or model_name == _DEFAULT_MODEL_NAME) and env_model:
+            model_name = env_model.strip()
+        if not model_name or model_name == _DEFAULT_MODEL_NAME:
+            raise ValueError(
+                "--model-provider openai requires --model-name or OPENAI_AI_BRIEF_MODEL"
+            )
     if not model_name:
         raise ValueError("model_name must not be empty")
     return model_name
+
+
+def _normalize_model_timeout_seconds(value: float | None) -> float:
+    if value is None:
+        raw = os.getenv("AI_BRIEF_MODEL_TIMEOUT_SECONDS")
+        if raw is None or not raw.strip():
+            return _DEFAULT_MODEL_TIMEOUT_SECONDS
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise ValueError("AI_BRIEF_MODEL_TIMEOUT_SECONDS must be a number") from exc
+    if value <= 0:
+        raise ValueError("model_timeout_seconds must be positive")
+    return float(value)
 
 
 def _load_json_object(path: str, *, label: str) -> dict[str, Any]:
@@ -207,20 +199,6 @@ def _build_model_candidate(
     }
 
 
-def _build_fake_rationale(candidate: Mapping[str, object]) -> list[str]:
-    rationale = ["entry report marked this candidate ENTER"]
-    entry_reasons = candidate.get("entry_reasons")
-    if isinstance(entry_reasons, list) and entry_reasons:
-        rationale.append(str(entry_reasons[0]))
-    buy_reason_labels = candidate.get("buy_reason_labels")
-    if isinstance(buy_reason_labels, list) and buy_reason_labels:
-        rationale.append(f"buy signal context: {buy_reason_labels[0]}")
-    gap_pct = candidate.get("gap_pct")
-    if isinstance(gap_pct, int | float):
-        rationale.append(f"entry gap snapshot: {gap_pct * 100:.2f}%")
-    return rationale
-
-
 def _build_excluded_candidate(entry: Mapping[str, Any]) -> dict[str, object]:
     ticker = str(entry.get("ticker") or "").strip()
     action = str(entry.get("action") or "").strip().upper()
@@ -282,6 +260,36 @@ def _build_summary(
     }
 
 
+def _build_provider(
+    *,
+    model_provider: str,
+    model_name: str,
+    model_timeout_seconds: float,
+) -> FakeAiBriefProvider | OpenAiBriefProvider:
+    if model_provider == _MODEL_PROVIDER_FAKE:
+        return FakeAiBriefProvider(model_name=model_name)
+
+    api_key = str(os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise ValueError(
+            "--model-provider openai requires OPENAI_API_KEY in the environment"
+        )
+    return OpenAiBriefProvider(
+        model_name=model_name,
+        api_key=api_key,
+        timeout_seconds=model_timeout_seconds,
+    )
+
+
+def _provider_system_issue(exc: AiBriefProviderError) -> dict[str, object]:
+    return {
+        "ticker": None,
+        "code": exc.code,
+        "severity": "ERROR",
+        "message": str(exc),
+    }
+
+
 def run_ai_brief(
     *,
     entry_report_path: str,
@@ -289,11 +297,18 @@ def run_ai_brief(
     market: str | None,
     model_provider: str | None,
     model_name: str | None,
+    model_timeout_seconds: float | None = None,
 ) -> int:
     try:
         normalized_market = _normalize_market(market)
         normalized_model_provider = _normalize_model_provider(model_provider)
-        normalized_model_name = _normalize_model_name(model_name)
+        normalized_model_name = _normalize_model_name(
+            provider=normalized_model_provider,
+            value=model_name,
+        )
+        normalized_model_timeout_seconds = _normalize_model_timeout_seconds(
+            model_timeout_seconds
+        )
     except ValueError as exc:
         logger.error("%s", exc)
         return 1
@@ -340,11 +355,29 @@ def run_ai_brief(
         for candidate in eligible_candidates[_PRESELECTION_LIMIT:]
     ]
 
-    provider = FakeAiBriefProvider(model_name=normalized_model_name)
-    recommendations, source_issues = provider.build_recommendations(
-        candidates=preselected_candidates
-    )
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
+    try:
+        provider = _build_provider(
+            model_provider=normalized_model_provider,
+            model_name=normalized_model_name,
+            model_timeout_seconds=normalized_model_timeout_seconds,
+        )
+        provider_result = provider.build_recommendations(
+            candidates=preselected_candidates
+        )
+        recommendations = provider_result.recommendations
+        source_issues = provider_result.source_issues
+        vetoed_candidates = provider_result.vetoed_candidates
+    except AiBriefProviderError as exc:
+        logger.error("AI brief provider failed: %s", exc)
+        recommendations = []
+        source_issues = []
+        vetoed_candidates = []
+        system_issues.append(_provider_system_issue(exc))
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 1
+
     artifact = {
         "source_entry_report": os.path.basename(entry_report_path),
         "source_buy_report": (
@@ -360,14 +393,14 @@ def run_ai_brief(
             preselected_count=len(preselected_candidates),
             recommendation_count=len(recommendations),
             excluded_count=len(excluded_candidates),
-            vetoed_count=0,
+            vetoed_count=len(vetoed_candidates),
             cap_excluded_count=len(cap_excluded_candidates),
             source_issue_count=len(source_issues),
             system_issue_count=len(system_issues),
         ),
         "recommendations": recommendations,
         "excluded_candidates": excluded_candidates,
-        "vetoed_candidates": [],
+        "vetoed_candidates": vetoed_candidates,
         "cap_excluded_candidates": cap_excluded_candidates,
         "source_issues": source_issues,
         "system_issues": system_issues,
@@ -391,4 +424,11 @@ def run_ai_brief(
     return 0
 
 
-__all__ = ["FakeAiBriefProvider", "run_ai_brief"]
+__all__ = [
+    "AiBriefProviderContractError",
+    "AiBriefProviderError",
+    "AiBriefProviderTimeoutError",
+    "FakeAiBriefProvider",
+    "OpenAiBriefProvider",
+    "run_ai_brief",
+]

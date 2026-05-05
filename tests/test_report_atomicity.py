@@ -58,6 +58,8 @@ def _write_ai_brief_report(report_dir: str, idx: int) -> str:
                 "excluded_count": 0,
                 "vetoed_count": 0,
                 "cap_excluded_count": 0,
+                "source_issue_count": 1,
+                "system_issue_count": 0,
             },
             "recommendations": [
                 {
@@ -75,7 +77,14 @@ def _write_ai_brief_report(report_dir: str, idx: int) -> str:
             "excluded_candidates": [],
             "vetoed_candidates": [],
             "cap_excluded_candidates": [],
-            "source_issues": [],
+            "source_issues": [
+                {
+                    "ticker": f"T{idx:03d}.NAS",
+                    "code": "fake_provider_no_external_sources",
+                    "severity": "WARN",
+                    "message": "fake provider does not collect external sources",
+                }
+            ],
             "system_issues": [],
             "eligible_tickers": [f"T{idx:03d}.NAS"],
         },

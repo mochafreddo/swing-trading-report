@@ -198,7 +198,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model-provider",
         type=str,
         default="fake",
-        choices=["fake"],
+        choices=["fake", "openai"],
         help="AI model provider for the brief",
     )
     ai_brief.add_argument(
@@ -206,6 +206,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default="fake-ai-brief-v1",
         help="AI model name for the brief",
+    )
+    ai_brief.add_argument(
+        "--model-timeout-seconds",
+        type=float,
+        default=None,
+        help="AI model provider timeout in seconds",
     )
     return p
 
@@ -246,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             market=ns.market,
             model_provider=ns.model_provider,
             model_name=ns.model_name,
+            model_timeout_seconds=ns.model_timeout_seconds,
         )
 
     parser.print_help()

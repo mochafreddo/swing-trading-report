@@ -76,6 +76,10 @@
   - `SAB_BASIC_AUTH_USER=...`, `SAB_BASIC_AUTH_PASS=...`, `SAB_SESSION_SECRET=...`
 - 선택(로컬 운영 편의):
   - `LOG_LEVEL=INFO`
+- 선택(AI Brief OpenAI provider):
+  - `OPENAI_API_KEY=...`
+  - `OPENAI_AI_BRIEF_MODEL=...` (또는 CLI `--model-name`)
+  - `AI_BRIEF_MODEL_TIMEOUT_SECONDS=20`
 - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
 ### 3. 핵심 실행
@@ -88,6 +92,7 @@
 - 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
 - 진입 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
 - AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
+- OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
 ### 4. 웹 UI 빠른 시작
@@ -106,7 +111,7 @@
 - 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
   - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
   - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief`는 Phase 1에서 로컬 JSON만 생성하며 Supabase 업로드/웹 렌더링/알림은 아직 지원하지 않습니다.
+  - `ai-brief`는 로컬 JSON만 생성하며 Supabase 업로드/웹 렌더링/알림은 아직 지원하지 않습니다.
 
 ## 실행/입력 정책
 
@@ -129,7 +134,10 @@
   - `--entry-report`는 필수이며, `entries[].action == "ENTER"`인 행만 추천 후보가 됩니다.
   - mixed KR/US entry 리포트에는 `--market KR|US`를 반드시 지정해야 합니다.
   - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
-  - Phase 1의 `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
+  - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
+  - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
+  - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
+  - Phase 2 첫 구현은 모델 provider까지만 포함하며, 별도 news/source 수집 provider는 아직 없습니다. 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
 
 ## 웹 UI 운영 참고
 
@@ -196,6 +204,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
 
 ## 작업 자동화 (just + direnv)
 
@@ -379,7 +388,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 실제 GPT/news provider, 알림, Supabase/web `ai-brief` 지원
+- news/source provider 고도화, 알림, Supabase/web `ai-brief` 지원
 
 ### 폐기 후보
 
