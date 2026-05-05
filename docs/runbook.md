@@ -178,10 +178,9 @@
   - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작합니다.
   - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
-  - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남깁니다.
+  - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남기고, AI Brief 리포트는 Supabase Storage/`report_index`에도 업로드합니다.
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - 관련 secret이 없으면 발송 단계는 skip하며 workflow 자체는 계속 성공할 수 있습니다.
-  - Supabase/web `ai_brief` 노출은 아직 수행하지 않습니다.
   - `provider=pykrx`는 `market=KR`, `universe=watchlist`, `entry_mode=AFTER_CLOSE` 조합에서만 허용합니다.
 - Audit 실행(GitHub Actions)
   - 감사 워크플로: `.github/workflows/audit.yml`
@@ -195,6 +194,7 @@
   - 기본은 로컬 파일 생성만 수행합니다.
   - `scan`/`sell`을 로컬에서 Supabase로 올리려면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
   - `entry`는 `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload`로 Storage/`report_index` 업로드를 수행할 수 있습니다.
+  - `ai-brief`는 `SAB_UPLOAD_REPORTS=true` 또는 `sab ai-brief --upload`로 Storage/`report_index` 업로드를 수행할 수 있습니다.
 
 ## Audit 수동 점검
 
@@ -224,8 +224,8 @@
 
 ## 파일/경로
 
-- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`(중복 시 `-1`)
-- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`(중복 시 `-1`, `-2`, ...)
+- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`(중복 시 `-1`)
+- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`(중복 시 `-1`, `-2`, ...)
 - Storage 업로드 MIME: `contentType=application/json`으로 고정(`reports` 버킷 정책)
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)

@@ -57,7 +57,7 @@ flowchart LR
 | CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
-| AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `fake`/`openai` 모델 provider 요약, 로컬 리포트 생성 | `sab/ai_brief.py` |
+| AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py` |
@@ -113,9 +113,10 @@ flowchart LR
 6. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
 7. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.
 8. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
-9. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief`를 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
-10. scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작하고, 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install 이후 scan/entry/ai-brief/알림 단계를 진행합니다.
-11. scheduled 실행 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다. 수동 실행은 `send_notifications=false`가 기본이며, `true`를 명시했을 때만 Telegram/Slack preview 텍스트를 실제로 발송합니다.
+9. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+10. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload`을 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
+11. scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작하고, 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install 이후 scan/entry/ai-brief/알림 단계를 진행합니다.
+12. scheduled 실행 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다. 수동 실행은 `send_notifications=false`가 기본이며, `true`를 명시했을 때만 Telegram/Slack preview 텍스트를 실제로 발송합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -129,6 +130,7 @@ flowchart LR
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
 7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다.
 8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다.
+9. AI Brief 상세는 `recommendations[]`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다.
 
 ### 4.7 웹 운영 메트릭 대시보드 플로우
 
@@ -178,19 +180,19 @@ flowchart LR
 ### 5.2 Supabase Storage
 
 - 버킷: `reports` (private, JSON MIME 제한)
-- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
-- `ai-brief`는 로컬/Actions artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
+- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry|ai-brief}.json`
 
 ### 5.3 Supabase Postgres
 
 - `holdings`: 보유 종목 단일 소스(웹 CRUD 대상)
   - 앱과 동일한 ticker 계약을 DB 제약으로 강제합니다(`KR 6자리` 또는 명시 거래소 suffix `.NAS/.NYS/.AMS`).
   - 모호한 `.US` suffix는 DB에서도 허용하지 않으며, 기존 row는 migration 시 수동 정리 대상으로 남깁니다.
-- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry`)
+- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry|ai-brief`)
   - `summary`는 Reports 목록 요약과 `/metrics` 운영 대시보드의 단일 집계 소스입니다.
   - `buy.summary`: `candidate_count`, `system_issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`, `rs_benchmark_requested/unavailable_count`, `rs_benchmark_unavailable_ratio`
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
   - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`
+  - `ai-brief.summary`: `entry_count`, `preselected_count`, `recommendation_count`, `source_issue_count`, `system_issue_count`
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 - 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=strict`(기본)에서는 Supabase 장애 시 즉시 실패하고, `degrade`에서만 메모리 스로틀로 폴백합니다.
@@ -265,8 +267,8 @@ flowchart LR
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
   - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
   - 외부 news/API source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
-  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI와 연결하지 않습니다.
-  - 단, 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하며, 수동 opt-in 또는 scheduled 기본값으로 실제 발송까지 수행할 수 있습니다.
+  - 생성된 `*.ai-brief.json`은 Storage, `report_index`, 웹 Reports UI와 연동됩니다.
+  - 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하며, 수동 opt-in 또는 scheduled 기본값으로 실제 발송까지 수행할 수 있습니다.
 
 ## 10. 관련 문서
 
