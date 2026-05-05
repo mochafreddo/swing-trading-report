@@ -16,11 +16,11 @@
 
 ### Notification and scheduled workflow
 
-**What:** Build Telegram/Slack text from `ai-brief` artifacts, add manual workflow dispatch, then add KR/US scheduled runs with runtime guards.
+**What:** Add manual workflow dispatch for `ai-brief`, then add KR/US scheduled runs with runtime guards. Telegram/Slack text builders now exist, but delivery is not wired yet.
 
 **Why:** The product goal is a timely trading assistant that tells the user when entry candidates are worth reviewing, not just a local JSON generator.
 
-**Context:** Phase 1 excludes notification delivery and workflow orchestration. The safe sequence is local artifact stability, notification text builder with tests, manual workflow dispatch, and only then KR/US schedules using market/session runtime guards. Avoid scheduled noise until manual artifacts are useful.
+**Context:** Phase 1 excludes notification delivery and workflow orchestration. The notification text builder slice is done with tests for recommendation, empty-result, truncation, source issue, and system issue rendering. The remaining safe sequence is manual workflow dispatch, delivery wiring, and only then KR/US schedules using market/session runtime guards. Avoid scheduled noise until manual artifacts are useful.
 
 **Effort:** M
 **Priority:** P1
@@ -40,5 +40,6 @@
 
 ## Completed
 
+- 2026-05-05: AI Brief notification text slice - Telegram/Slack text builders for ai-brief artifacts, recommendation/empty-result/issue rendering, and notification text tests.
 - 2026-05-05: Phase 2 first slice - OpenAI Responses model provider, CLI timeout option, provider failure artifacts, source-disclosure guardrails, and prompt-safety validator coverage.
 - 2026-05-05: Phase 2 source contract slice - local JSON source provider, source URL trust-boundary checks, source provider failure artifacts, and CLI/docs coverage.

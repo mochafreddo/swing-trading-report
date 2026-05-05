@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from sab.report.notification_text import (
+    build_ai_brief_slack_summary_text,
+    build_ai_brief_telegram_report_text,
     build_scan_slack_summary_text,
     build_scan_telegram_report_text,
     build_sell_slack_summary_text,
@@ -295,4 +297,175 @@ def test_build_sell_slack_summary_text_keeps_key_value_format() -> None:
         "action_counts=HOLD:1, REVIEW:2, SELL:1",
         "storage_key=2026/02/2026-02-11.sell.json",
         "run_url=https://github.com/mocha/swing-trading-report/actions/runs/456",
+    ]
+
+
+def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "recommendation_count": 2,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "recommendations": [
+            {
+                "ticker": "AAPL.NAS",
+                "name": "Apple",
+                "confidence": "HIGH",
+                "rationale": ["source-backed context supports manual review"],
+                "sources": [
+                    {
+                        "title": "Apple supply chain update",
+                        "url": "https://example.test/aapl",
+                        "published_at": "2026-05-05T07:00:00+09:00",
+                    }
+                ],
+            },
+            {
+                "ticker": "MSFT.NAS",
+                "confidence": "MEDIUM",
+                "rationale": ["entry setup remains valid"],
+                "sources": [],
+            },
+        ],
+        "source_issues": [
+            {
+                "ticker": "MSFT.NAS",
+                "code": "openai_no_external_sources",
+                "severity": "WARN",
+                "message": "No supplied source context.",
+            }
+        ],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+        max_items=5,
+    )
+
+    assert "[SAB][ai-brief][schedule]" in text
+    assert "market=US" in text
+    assert "model=openai/gpt-test" in text
+    assert "추천 후보 2건 (표시 2건)" in text
+    assert "issues source=1 system=0" in text
+    assert (
+        "1. AAPL.NAS Apple | HIGH | source-backed context supports manual review | "
+        "sources 1"
+    ) in text
+    assert "source: Apple supply chain update" in text
+    assert "2. MSFT.NAS | MEDIUM | entry setup remains valid | sources 0" in text
+    assert "source issue: MSFT.NAS openai_no_external_sources" in text
+
+
+def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "KR",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 1,
+        },
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [
+            {
+                "ticker": None,
+                "code": "model_provider_timeout",
+                "severity": "ERROR",
+                "message": "OpenAI request timed out.",
+            }
+        ],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "추천 후보 0건 (표시 0건)" in text
+    assert "추천 후보 없음" in text
+    assert "system issue: model_provider_timeout" in text
+
+
+def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() -> None:
+    recommendations = []
+    for idx in range(7):
+        recommendations.append(
+            {
+                "ticker": f"T{idx:03d}.NAS",
+                "name": f"Name{idx}",
+                "confidence": "LOW",
+                "rationale": [f"Reason {idx}"],
+                "sources": [],
+            }
+        )
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 7},
+        "recommendations": recommendations,
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/791",
+        max_items=5,
+    )
+
+    assert "추천 후보 7건 (표시 5건)" in text
+    assert "외 2건" in text
+    assert "T004.NAS Name4" in text
+    assert "T005.NAS Name5" not in text
+
+
+def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "preselected_count": 5,
+            "recommendation_count": 3,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "recommendations": [{}, {}, {}],
+        "source_issues": [{}],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_slack_summary_text(
+        report=report,
+        repo="mocha/swing-trading-report",
+        run_url="https://github.com/mocha/swing-trading-report/actions/runs/789",
+        storage_key="2026/05/2026-05-05.ai-brief.json",
+    )
+
+    assert text.splitlines() == [
+        "[SAB][ai-brief][schedule]",
+        "repo=mocha/swing-trading-report",
+        "market=US",
+        "model_provider=openai",
+        "model_name=gpt-test",
+        "generated_at=2026-05-05T08:40:00+09:00",
+        "preselected_count=5",
+        "recommendation_count=3",
+        "source_issue_count=1",
+        "system_issue_count=0",
+        "storage_key=2026/05/2026-05-05.ai-brief.json",
+        "run_url=https://github.com/mocha/swing-trading-report/actions/runs/789",
     ]
