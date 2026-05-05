@@ -7,8 +7,8 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 로컬 `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
-- `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup` 연결이 현재 제공 범위입니다.
+- `scan`/`sell`/`entry` 파이프라인, 로컬/수동 workflow `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup`/`ai-brief` 연결이 현재 제공 범위입니다.
 
 ### 실험
 
@@ -38,8 +38,9 @@ flowchart LR
   W -->|CRUD / 조회| SDB["Supabase Postgres"]
   W -->|리포트 목록/상세| SST["Supabase Storage (reports)"]
   W -->|workflow_dispatch| GHA["GitHub Actions (scan/sell/cleanup)"]
+  U -->|manual workflow_dispatch| GHA
 
-  GHA --> P["Python Engine (sab scan/sell)"]
+  GHA --> P["Python Engine (sab scan/sell/entry/ai-brief)"]
   P --> KIS["KIS Open API"]
   P --> PY["PyKRX (KR fallback/provider)"]
   P --> LF["Local Filesystem (data/, reports/)"]
@@ -65,7 +66,7 @@ flowchart LR
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
-| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml` |
+| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동 AI brief artifact 생성 | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
 
 ## 4. 핵심 플로우
 
@@ -97,7 +98,7 @@ flowchart LR
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
 
-### 4.3.1 `ai-brief` 로컬 플로우
+### 4.3.1 `ai-brief` 로컬/수동 workflow 플로우
 
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `entries[].action == "ENTER"` 행만 AI 평가 후보로 사용하고, `REVIEW`/`SKIP` 행은 `excluded_candidates[]`로 기록합니다.
@@ -112,6 +113,7 @@ flowchart LR
 6. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
 7. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.
 8. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
+9. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch` 전용입니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief`를 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -175,7 +177,7 @@ flowchart LR
 
 - 버킷: `reports` (private, JSON MIME 제한)
 - 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry}.json`
-- `ai-brief`는 로컬 artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
+- `ai-brief`는 로컬/Actions artifact만 생성하며 Storage 업로드/`report_index`/웹 Reports 대상이 아닙니다.
 
 ### 5.3 Supabase Postgres
 
@@ -261,8 +263,8 @@ flowchart LR
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
   - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
   - 외부 news/API source provider는 아직 없으며, 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
-  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림 발송/workflow와 연결하지 않습니다.
-  - 단, 로컬 `notification_text` builder는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링할 수 있습니다.
+  - 생성된 `*.ai-brief.json`은 아직 Storage, `report_index`, 웹 UI, 알림 발송/schedule과 연결하지 않습니다.
+  - 단, 로컬 `notification_text` builder와 수동 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링할 수 있습니다.
 
 ## 10. 관련 문서
 
