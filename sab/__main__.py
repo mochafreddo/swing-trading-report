@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import logging
 import os
 import sys
@@ -26,6 +27,18 @@ def _configure_logging() -> None:
     if log_tz not in {"local", "utc"}:
         log_tz = "local"
 
+    def _format_record_time(
+        record: logging.LogRecord, *, datefmt: str | None, tz: str
+    ) -> str:
+        if tz == "utc":
+            ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
+        else:
+            ts = dt.datetime.fromtimestamp(record.created).astimezone()
+
+        if datefmt:
+            return ts.strftime(datefmt)
+        return ts.isoformat(timespec="milliseconds")
+
     class _TZFormatter(logging.Formatter):
         def __init__(self, fmt: str, *, datefmt: str | None, tz: str) -> None:
             super().__init__(fmt=fmt, datefmt=datefmt)
@@ -34,18 +47,34 @@ def _configure_logging() -> None:
         def formatTime(
             self, record: logging.LogRecord, datefmt: str | None = None
         ) -> str:
-            if self._tz == "utc":
-                ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
-            else:
-                ts = dt.datetime.fromtimestamp(record.created).astimezone()
+            return _format_record_time(
+                record, datefmt=datefmt or self.datefmt, tz=self._tz
+            )
 
-            datefmt = datefmt or self.datefmt
-            if datefmt:
-                return ts.strftime(datefmt)
-            return ts.isoformat(timespec="milliseconds")
+    class _JsonFormatter(logging.Formatter):
+        def __init__(self, *, datefmt: str | None, tz: str) -> None:
+            super().__init__(datefmt=datefmt)
+            self._tz = tz
+
+        def format(self, record: logging.LogRecord) -> str:
+            payload = {
+                "timestamp": _format_record_time(
+                    record, datefmt=self.datefmt, tz=self._tz
+                ),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+            if record.exc_info:
+                payload["exception"] = self.formatException(record.exc_info)
+            return json.dumps(payload, ensure_ascii=False)
 
     handler = logging.StreamHandler()
-    handler.setFormatter(_TZFormatter(log_format, datefmt=log_datefmt, tz=log_tz))
+    if log_format.strip().lower() == "json":
+        formatter: logging.Formatter = _JsonFormatter(datefmt=log_datefmt, tz=log_tz)
+    else:
+        formatter = _TZFormatter(log_format, datefmt=log_datefmt, tz=log_tz)
+    handler.setFormatter(formatter)
     logging.basicConfig(level=level, handlers=[handler], force=True)
 
 

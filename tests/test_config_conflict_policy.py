@@ -46,6 +46,9 @@ fx:
     msg = str(exc.value)
     assert "SCREEN_LIMIT (data.screen_limit)" in msg
     assert "FX_MODE (fx.mode)" in msg
+    assert "Resolve by removing one side of each duplicate key" in msg
+    assert "keep secrets in .env/environment" in msg
+    assert "config.local.yaml with SAB_CONFIG=config.local.yaml" in msg
 
 
 def test_load_config_detects_conflicts_before_cli_override(

@@ -1,6 +1,8 @@
 import datetime as dt
+import json
 import logging
 
+import sab.__main__ as sab_main
 from sab.__main__ import _configure_logging
 
 FIXED_CREATED = dt.datetime(2025, 12, 17, 15, 56, 32, 123000, tzinfo=dt.UTC).timestamp()
@@ -114,6 +116,49 @@ def test_configure_logging_respects_log_format(
     line = _format_root(make_log_record(created=FIXED_CREATED))
 
     assert line == "CUSTOM:sab.test:hello"
+
+
+def test_configure_logging_supports_json_format(
+    isolated_root_logger, monkeypatch, make_log_record
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TZ", "utc")
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.delenv("LOG_DATEFMT", raising=False)
+
+    _configure_logging()
+    line = _format_root(make_log_record(created=FIXED_CREATED))
+
+    payload = json.loads(line)
+    expected_ts = dt.datetime.fromtimestamp(FIXED_CREATED, tz=dt.UTC).isoformat(
+        timespec="milliseconds"
+    )
+    assert payload == {
+        "timestamp": expected_ts,
+        "level": "INFO",
+        "logger": "sab.test",
+        "message": "hello",
+    }
+
+
+def test_main_help_accepts_json_log_format(
+    isolated_root_logger, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.setenv("LOG_TZ", "utc")
+    monkeypatch.delenv("LOG_DATEFMT", raising=False)
+    monkeypatch.setattr(
+        sab_main, "load_dotenv_if_available", lambda override=False: None
+    )
+
+    try:
+        sab_main.main(["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:  # pragma: no cover - argparse help normally exits
+        raise AssertionError("expected argparse help to exit")
+
+    assert "usage: sab" in capsys.readouterr().out
 
 
 def test_configure_logging_respects_log_level(
