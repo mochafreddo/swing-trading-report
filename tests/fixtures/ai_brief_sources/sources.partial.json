@@ -1,0 +1,12 @@
+{
+  "schema": "sab.ai_brief_sources.v1",
+  "type": "ai_brief_sources",
+  "sources": [
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple supplier expands AI server capacity",
+      "url": "https://news.example.test/aapl-ai-capacity",
+      "published_at": "2026-05-06T10:00:00+00:00"
+    }
+  ]
+}

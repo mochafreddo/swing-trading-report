@@ -1,0 +1,42 @@
+{
+  "schema": "sab.ai_brief_sources.v1",
+  "type": "ai_brief_sources",
+  "sources": [
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source one",
+      "url": "https://news.example.test/aapl-shared",
+      "published_at": "2026-05-06T10:00:00+00:00"
+    },
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source duplicate",
+      "url": "https://news.example.test/aapl-shared",
+      "published_at": "2026-05-06T09:50:00+00:00"
+    },
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source three",
+      "url": "https://news.example.test/aapl-three",
+      "published_at": "2026-05-06T09:40:00+00:00"
+    },
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source over cap",
+      "url": "https://news.example.test/aapl-over-cap",
+      "published_at": "2026-05-06T09:30:00+00:00"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "title": "Microsoft source one",
+      "url": "https://news.example.test/msft-one",
+      "published_at": "2026-05-06T09:30:00+00:00"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "title": "Nvidia source one",
+      "url": "https://news.example.test/nvda-one",
+      "published_at": "2026-05-06T09:00:00+00:00"
+    }
+  ]
+}

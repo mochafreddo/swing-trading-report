@@ -21,7 +21,7 @@ This project is primarily maintained by a single maintainer.
 로컬에서 동일한 검증 결과를 재현하려면 아래 환경을 맞춰 주세요.  
 Use the same toolchain below to reproduce local and CI behavior.
 
-- Python 3.13+
+- Python 3.14+
 - `uv`
 - (웹 변경 시) Node.js + `pnpm`
 
@@ -142,7 +142,7 @@ CI is the source of truth when local and remote results differ.
 
 PR/푸시에서 확인되는 핵심 체크:
 
-- `CI / Ruff + Mypy + Pytest (Python 3.13)`
+- `CI / Ruff + Mypy + Pytest (Python 3.14)`
 - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
 - `workflow_audit`
 - `security_audit`

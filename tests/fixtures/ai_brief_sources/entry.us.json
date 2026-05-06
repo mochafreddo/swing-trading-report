@@ -1,0 +1,27 @@
+{
+  "schema": "sab.report.v1",
+  "type": "entry",
+  "market": "US",
+  "entries": [
+    {
+      "ticker": "AAPL.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "TSLA.NAS",
+      "action": "REVIEW"
+    }
+  ],
+  "summary": {
+    "entry_count": 4
+  },
+  "system_issues": []
+}

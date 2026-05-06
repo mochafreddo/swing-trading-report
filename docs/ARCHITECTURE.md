@@ -59,6 +59,7 @@ flowchart LR
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `local-json`/`http-json` source context, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_sources.py` |
+| AI Brief source 품질 평가 | 캡처한 `http-json` 호환 source payload를 네트워크/secret 없이 기존 source 정규화 규칙으로 평가 | `sab/ai_brief_source_eval.py`, `scripts/eval_ai_brief_sources.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py` |
@@ -108,6 +109,7 @@ flowchart LR
    - `local-json`은 로컬 source report의 `sources[]`를 preselected `ENTER` 후보에만 붙입니다.
    - `http-json`은 외부 source API에 eligible ticker 목록을 POST하고, 응답의 `sources[]`를 같은 계약으로 정규화해 preselected 후보에만 붙입니다.
    - source row의 ticker가 후보 집합에 없거나 source가 stale/invalid하면 source issue로 기록하고 모델 입력에서 제외합니다.
+   - 캡처한 `http-json` 호환 payload는 `scripts/eval_ai_brief_sources.py`로 오프라인 평가할 수 있으며, production vendor/news 수집은 SAB 내부 SDK가 아니라 `AI_BRIEF_SOURCE_API_URL` 뒤에서 수행합니다.
 5. 모델 provider는 `fake`와 `openai`를 지원합니다.
    - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
    - `openai`는 Responses API structured output을 사용하며 timeout/요청 실패/모델 출력 계약 실패 시 추천 없이 `system_issues[]`를 남긴 artifact를 생성합니다.

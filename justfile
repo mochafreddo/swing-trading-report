@@ -41,6 +41,9 @@ sell *args:
 entry *args:
   uv run python -m sab entry {{args}}
 
+ai-brief-source-eval *args:
+  uv run python scripts/eval_ai_brief_sources.py {{args}}
+
 # Python quality gates
 ruff:
   uv run ruff check .

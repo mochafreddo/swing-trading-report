@@ -1,0 +1,24 @@
+{
+  "schema": "sab.ai_brief_sources.v1",
+  "type": "ai_brief_sources",
+  "sources": [
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple supplier expands AI server capacity",
+      "url": "https://news.example.test/aapl-ai-capacity",
+      "published_at": "2026-05-06T10:00:00+00:00"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "title": "Microsoft cloud bookings remain resilient",
+      "url": "https://news.example.test/msft-cloud-bookings",
+      "published_at": "2026-05-06T09:30:00+00:00"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "title": "Nvidia data center demand update",
+      "url": "https://news.example.test/nvda-data-center",
+      "published_at": "2026-05-06T09:00:00+00:00"
+    }
+  ]
+}

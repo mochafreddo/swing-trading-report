@@ -154,6 +154,7 @@
 - just 레시피(동일 동작)
   - `just scan --universe both`
   - `just sell`
+  - `just ai-brief-source-eval --entry-report reports/example.entry.json --source-report captured.sources.json`
   - `just quality`
   - `just check`
   - `just precommit-all`
@@ -181,6 +182,7 @@
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - `AI_BRIEF_SOURCE_API_URL` 변수가 설정되어 있으면 scheduled 실행은 `source_provider=http-json`로 외부 source API context를 함께 주입합니다. 수동 실행에서는 `source_provider=http-json`과 `source_api_url` 입력을 사용합니다.
   - `http-json` source API는 eligible ticker 목록을 POST로 받고, `sources[]` row(`ticker`, `title`, `url`, offset 포함 `published_at`)를 반환해야 합니다. API token secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
+  - 외부 source 수집은 SAB 내부 vendor SDK가 아니라 `AI_BRIEF_SOURCE_API_URL` 뒤에서 수행합니다. captured `sources[]` payload 품질은 `just ai-brief-source-eval --entry-report <entry.json> --source-report <sources.json>`로 네트워크/secret 없이 점검합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다.
   - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남기고, AI Brief 리포트는 Supabase Storage/`report_index`에도 업로드합니다.
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - 관련 secret이 없으면 발송 단계는 skip하며 workflow 자체는 계속 성공할 수 있습니다.
