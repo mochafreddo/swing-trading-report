@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.20.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.19.0...v1.20.0) (2026-05-06)
+
+
+### Features
+
+* **ai-brief:** Supabase와 웹 Reports 지원 추가 ([#112](https://github.com/mochafreddo/swing-trading-report/issues/112)) ([44cb07a](https://github.com/mochafreddo/swing-trading-report/commit/44cb07a63b8da6ad09add3ccd031f81f79bf8101))
+* **ai-brief:** 수동 워크플로 추가 ([#109](https://github.com/mochafreddo/swing-trading-report/issues/109)) ([6ce6455](https://github.com/mochafreddo/swing-trading-report/commit/6ce64550913affd593ae48dece0d4b3ab2e83c89))
+* **ai-brief:** 수동 워크플로우 알림 발송 지원 ([#110](https://github.com/mochafreddo/swing-trading-report/issues/110)) ([b15146c](https://github.com/mochafreddo/swing-trading-report/commit/b15146c2b74ba5a766e34c3dec3ff1ee77f139a8))
+* **ai-brief:** 알림 텍스트 builder 추가 ([#107](https://github.com/mochafreddo/swing-trading-report/issues/107)) ([3016dc3](https://github.com/mochafreddo/swing-trading-report/commit/3016dc30899ec2dc13de934a64e546b7ac4a6a6d))
+* **ai-brief:** 예약 실행 워크플로 추가 ([7420fbc](https://github.com/mochafreddo/swing-trading-report/commit/7420fbc71b8e77cf3c8c4fe25daf6cdd18cc42b3))
+* **ai-brief:** 오프라인 source eval 추가 ([#114](https://github.com/mochafreddo/swing-trading-report/issues/114)) ([45d30c5](https://github.com/mochafreddo/swing-trading-report/commit/45d30c5972468985b3c3c31ae5f0481a6b6b6407))
+* **ai-brief:** 외부 HTTP JSON 소스 공급자 추가 ([#113](https://github.com/mochafreddo/swing-trading-report/issues/113)) ([9af20d1](https://github.com/mochafreddo/swing-trading-report/commit/9af20d16371a4d81fa2f49a5afe7c4ba46e24591))
+
 ## [1.19.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.18.0...v1.19.0) (2026-05-05)
 
 
