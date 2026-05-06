@@ -589,6 +589,261 @@ def test_load_ai_brief_sources_reports_invalid_stale_and_capped_rows(
     ]
 
 
+class _HttpJsonSourceSession:
+    def __init__(self, payload: dict[str, object], *, status_code: int = 200) -> None:
+        self.payload = payload
+        self.status_code = status_code
+        self.calls: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        return _JsonResponse(self.payload, status_code=self.status_code)
+
+
+class _HttpJsonSourceTimeoutSession:
+    def post(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("timed out")
+
+
+def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    fresh = (now - dt.timedelta(hours=1)).isoformat()
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Apple source",
+                    "url": "https://news.example/aapl",
+                    "published_at": fresh,
+                },
+                {
+                    "ticker": "NOT-ELIGIBLE.NAS",
+                    "title": "Ignored source",
+                    "url": "https://news.example/ignored",
+                    "published_at": fresh,
+                },
+            ]
+        }
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert session.calls[0]["url"] == "https://source.example/api"
+    assert session.calls[0]["timeout"] == 4.5
+    assert session.calls[0]["json"] == {
+        "schema": "sab.ai_brief_source_request.v1",
+        "tickers": ["AAPL.NAS"],
+        "max_sources_per_ticker": 3,
+        "freshness_hours": 72,
+    }
+    assert result.sources_by_ticker["AAPL.NAS"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert [issue["code"] for issue in result.source_issues] == [
+        "http_source_unknown_ticker"
+    ]
+
+
+def test_run_ai_brief_http_json_source_provider_enriches_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Apple source",
+                    "url": "https://news.example/aapl",
+                    "published_at": _fresh_published_at(),
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_source_api_url_implies_http_json_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Apple source",
+                    "url": "https://news.example/aapl",
+                    "published_at": _fresh_published_at(),
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+
+
+def test_run_ai_brief_http_json_source_timeout_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _HttpJsonSourceTimeoutSession(),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=0.1,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_timeout"
+    assert payload["summary"]["system_issue_count"] == 1
+
+
+def test_run_ai_brief_http_json_source_http_error_redacts_response_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _HttpJsonSourceSession(
+        {"error": "internal-token-should-not-be-persisted"},
+        status_code=503,
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=1.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["system_issues"][0]["message"] == (
+        "source API request failed with HTTP 503"
+    )
+    assert "internal-token" not in json.dumps(payload)
+
+
+def test_run_ai_brief_rejects_nonfinite_source_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    session = _HttpJsonSourceSession({"sources": []})
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=float("nan"),
+    )
+
+    assert exit_code == 1
+    assert session.calls == []
+
+
+def test_load_ai_brief_sources_rejects_zero_source_timeout() -> None:
+    with pytest.raises(AiBriefSourceProviderError, match="timeout seconds"):
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example/api",
+            source_timeout_seconds=0,
+            eligible_tickers={"AAPL.NAS"},
+        )
+
+
 class _TimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_providers as ai_brief_providers
@@ -1173,6 +1428,8 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "model_timeout_seconds": None,
         "source_provider": None,
         "source_report_path": None,
+        "source_api_url": None,
+        "source_timeout_seconds": None,
         "upload": False,
     }
 
@@ -1199,9 +1456,11 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
             "--model-timeout-seconds",
             "3.5",
             "--source-provider",
-            "local-json",
-            "--source-report",
-            "reports/source.sources.json",
+            "http-json",
+            "--source-api-url",
+            "https://source.example/api",
+            "--source-timeout-seconds",
+            "2.5",
         ]
     )
 
@@ -1213,8 +1472,10 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "model_provider": "openai",
         "model_name": "gpt-test",
         "model_timeout_seconds": 3.5,
-        "source_provider": "local-json",
-        "source_report_path": "reports/source.sources.json",
+        "source_provider": "http-json",
+        "source_report_path": None,
+        "source_api_url": "https://source.example/api",
+        "source_timeout_seconds": 2.5,
         "upload": False,
     }
 
