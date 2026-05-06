@@ -1,0 +1,30 @@
+{
+  "schema": "sab.ai_brief_sources.v1",
+  "type": "ai_brief_sources",
+  "sources": [
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple supplier expands AI server capacity",
+      "url": "https://news.example.test/aapl-ai-capacity",
+      "published_at": "2026-05-06T10:00:00+00:00"
+    },
+    {
+      "ticker": "NOT-ELIGIBLE.NAS",
+      "title": "Ineligible ticker should not count",
+      "url": "https://news.example.test/not-eligible",
+      "published_at": "2026-05-06T10:00:00+00:00"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "title": "Old Microsoft article should be stale",
+      "url": "https://news.example.test/msft-old",
+      "published_at": "2026-05-02T10:00:00+00:00"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "url": "https://news.example.test/nvda-missing-title",
+      "published_at": "2026-05-06T09:00:00+00:00"
+    },
+    "not an object"
+  ]
+}
