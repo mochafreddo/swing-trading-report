@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -18,6 +19,8 @@ from .ai_brief_providers import (
     OpenAiBriefProvider,
 )
 from .ai_brief_sources import (
+    DEFAULT_SOURCE_TIMEOUT_SECONDS,
+    SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_LOCAL_JSON,
     SOURCE_PROVIDER_NONE,
     AiBriefSourceProviderError,
@@ -38,7 +41,7 @@ _PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
 _ALLOWED_SOURCE_PROVIDERS = frozenset(
-    {SOURCE_PROVIDER_NONE, SOURCE_PROVIDER_LOCAL_JSON}
+    {SOURCE_PROVIDER_NONE, SOURCE_PROVIDER_LOCAL_JSON, SOURCE_PROVIDER_HTTP_JSON}
 )
 
 
@@ -92,18 +95,68 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
 
 
 def _normalize_source_provider(
-    *, value: str | None, source_report_path: str | None
+    *,
+    value: str | None,
+    source_report_path: str | None,
+    source_api_url: str | None,
 ) -> str:
     provider = str(value or "").strip().lower()
     if not provider:
-        return (
-            SOURCE_PROVIDER_LOCAL_JSON if source_report_path else SOURCE_PROVIDER_NONE
-        )
+        if source_report_path and source_api_url:
+            raise ValueError("use either --source-report or --source-api-url, not both")
+        if source_report_path:
+            return SOURCE_PROVIDER_LOCAL_JSON
+        if source_api_url:
+            return SOURCE_PROVIDER_HTTP_JSON
+        return SOURCE_PROVIDER_NONE
     if provider not in _ALLOWED_SOURCE_PROVIDERS:
         raise ValueError(
             f"source_provider must be one of {sorted(_ALLOWED_SOURCE_PROVIDERS)}"
         )
+    if provider == SOURCE_PROVIDER_LOCAL_JSON and source_api_url:
+        raise ValueError("--source-provider local-json does not use --source-api-url")
+    if provider == SOURCE_PROVIDER_HTTP_JSON and source_report_path:
+        raise ValueError("--source-provider http-json does not use --source-report")
     return provider
+
+
+def _normalize_source_api_url(*, provider: str, value: str | None) -> str | None:
+    if provider != SOURCE_PROVIDER_HTTP_JSON:
+        return None
+    api_url = str(value or os.getenv("AI_BRIEF_SOURCE_API_URL") or "").strip()
+    if not api_url:
+        raise ValueError(
+            "--source-provider http-json requires --source-api-url or "
+            "AI_BRIEF_SOURCE_API_URL"
+        )
+    if "\n" in api_url or "\r" in api_url:
+        raise ValueError("source_api_url must be a single-line value")
+    return api_url
+
+
+def _normalize_source_timeout_seconds(
+    *, provider: str, value: float | None
+) -> float | None:
+    if provider != SOURCE_PROVIDER_HTTP_JSON:
+        if value is not None:
+            raise ValueError(
+                "--source-timeout-seconds is only valid with "
+                "--source-provider http-json"
+            )
+        return None
+    if value is None:
+        raw = os.getenv("AI_BRIEF_SOURCE_TIMEOUT_SECONDS")
+        if raw is None or not raw.strip():
+            return DEFAULT_SOURCE_TIMEOUT_SECONDS
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise ValueError(
+                "AI_BRIEF_SOURCE_TIMEOUT_SECONDS must be a number"
+            ) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("source_timeout_seconds must be positive")
+    return float(value)
 
 
 def _load_json_object(path: str, *, label: str) -> dict[str, Any]:
@@ -353,9 +406,12 @@ def run_ai_brief(
     model_timeout_seconds: float | None = None,
     source_provider: str | None = None,
     source_report_path: str | None = None,
+    source_api_url: str | None = None,
+    source_timeout_seconds: float | None = None,
     upload: bool = False,
 ) -> int:
     try:
+        source_api_url_input = str(source_api_url or "").strip() or None
         normalized_market = _normalize_market(market)
         normalized_model_provider = _normalize_model_provider(model_provider)
         normalized_model_name = _normalize_model_name(
@@ -368,6 +424,15 @@ def run_ai_brief(
         normalized_source_provider = _normalize_source_provider(
             value=source_provider,
             source_report_path=source_report_path,
+            source_api_url=source_api_url_input,
+        )
+        normalized_source_api_url = _normalize_source_api_url(
+            provider=normalized_source_provider,
+            value=source_api_url_input,
+        )
+        normalized_source_timeout_seconds = _normalize_source_timeout_seconds(
+            provider=normalized_source_provider,
+            value=source_timeout_seconds,
         )
     except ValueError as exc:
         logger.error("%s", exc)
@@ -421,6 +486,8 @@ def run_ai_brief(
         source_provider_result = load_ai_brief_sources(
             source_provider=normalized_source_provider,
             source_report_path=source_report_path,
+            source_api_url=normalized_source_api_url,
+            source_timeout_seconds=normalized_source_timeout_seconds,
             eligible_tickers={
                 str(candidate["ticker"]) for candidate in preselected_candidates
             },

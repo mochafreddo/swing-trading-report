@@ -68,8 +68,19 @@ on:
         options:
           - none
           - local-json
+          - http-json
       source_report_path:
         description: "Local source JSON path when source_provider=local-json"
+        required: false
+        default: ""
+        type: string
+      source_api_url:
+        description: "External source API URL when source_provider=http-json"
+        required: false
+        default: ""
+        type: string
+      source_timeout_seconds:
+        description: "Optional external source API timeout in seconds"
         required: false
         default: ""
         type: string
@@ -134,6 +145,9 @@ jobs:
           RAW_MODEL_TIMEOUT_SECONDS: ${{ github.event.inputs.model_timeout_seconds }}
           RAW_SOURCE_PROVIDER: ${{ github.event.inputs.source_provider }}
           RAW_SOURCE_REPORT_PATH: ${{ github.event.inputs.source_report_path }}
+          RAW_SOURCE_API_URL: ${{ github.event.inputs.source_api_url }}
+          RAW_SOURCE_TIMEOUT_SECONDS: ${{ github.event.inputs.source_timeout_seconds }}
+          DEFAULT_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
           RAW_SEND_NOTIFICATIONS: ${{ github.event.inputs.send_notifications }}
         run: |
           set -euo pipefail
@@ -258,13 +272,17 @@ jobs:
 
           source_provider="${RAW_SOURCE_PROVIDER}"
           if [[ "${is_schedule}" == "true" ]]; then
-            source_provider="none"
+            if [[ -n "${DEFAULT_SOURCE_API_URL}" ]]; then
+              source_provider="http-json"
+            else
+              source_provider="none"
+            fi
           elif [[ -z "${source_provider}" ]]; then
             source_provider="none"
           fi
           source_provider="${source_provider,,}"
           case "${source_provider}" in
-            none|local-json) ;;
+            none|local-json|http-json) ;;
             *)
               echo "Unsupported source_provider: ${source_provider}" >&2
               exit 1
@@ -282,6 +300,39 @@ jobs:
           if [[ "${source_provider}" == "local-json" && -z "${source_report_path}" ]]; then
             echo "source_provider=local-json requires source_report_path" >&2
             exit 1
+          fi
+
+          source_api_url="${RAW_SOURCE_API_URL}"
+          if [[ "${is_schedule}" == "true" && -z "${source_api_url}" ]]; then
+            source_api_url="${DEFAULT_SOURCE_API_URL}"
+          fi
+          if [[ "${source_api_url}" == *$'\n'* || "${source_api_url}" == *$'\r'* ]]; then
+            echo "source_api_url must be a single-line value" >&2
+            exit 1
+          fi
+          if [[ "${source_provider}" == "http-json" && -z "${source_api_url}" ]]; then
+            echo "source_provider=http-json requires source_api_url" >&2
+            exit 1
+          fi
+
+          source_timeout_seconds="${RAW_SOURCE_TIMEOUT_SECONDS}"
+          if [[ "${source_timeout_seconds}" == *$'\n'* || "${source_timeout_seconds}" == *$'\r'* ]]; then
+            echo "source_timeout_seconds must be a single-line value" >&2
+            exit 1
+          fi
+          if [[ -n "${source_timeout_seconds}" ]]; then
+            SOURCE_TIMEOUT_SECONDS="${source_timeout_seconds}" python - <<'PY'
+          import math
+          import os
+
+          value = os.environ["SOURCE_TIMEOUT_SECONDS"]
+          try:
+              parsed = float(value)
+          except ValueError as exc:
+              raise SystemExit(f"source_timeout_seconds must be numeric: {value!r}") from exc
+          if not math.isfinite(parsed) or parsed <= 0:
+              raise SystemExit("source_timeout_seconds must be positive")
+          PY
           fi
 
           send_notifications="${RAW_SEND_NOTIFICATIONS}"
@@ -326,6 +377,8 @@ jobs:
             echo "model_timeout_seconds=${model_timeout_seconds}"
             echo "source_provider=${source_provider}"
             echo "source_report_path=${source_report_path}"
+            echo "source_api_url=${source_api_url}"
+            echo "source_timeout_seconds=${source_timeout_seconds}"
             echo "send_notifications=${send_notifications}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -575,12 +628,17 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          AI_BRIEF_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
+          AI_BRIEF_SOURCE_API_TOKEN: ${{ secrets.AI_BRIEF_SOURCE_API_TOKEN }}
+          AI_BRIEF_SOURCE_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_SOURCE_TIMEOUT_SECONDS }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
           PARAM_MODEL_TIMEOUT_SECONDS: ${{ steps.params.outputs.model_timeout_seconds }}
           PARAM_SOURCE_PROVIDER: ${{ steps.params.outputs.source_provider }}
           PARAM_SOURCE_REPORT_PATH: ${{ steps.params.outputs.source_report_path }}
+          PARAM_SOURCE_API_URL: ${{ steps.params.outputs.source_api_url }}
+          PARAM_SOURCE_TIMEOUT_SECONDS: ${{ steps.params.outputs.source_timeout_seconds }}
         run: |
           set -euo pipefail
 
@@ -599,11 +657,27 @@ jobs:
           if [[ "${PARAM_SOURCE_PROVIDER}" != "none" ]]; then
             cmd+=(
               --source-provider "${PARAM_SOURCE_PROVIDER}"
-              --source-report "${PARAM_SOURCE_REPORT_PATH}"
             )
+            if [[ "${PARAM_SOURCE_PROVIDER}" == "local-json" ]]; then
+              cmd+=(--source-report "${PARAM_SOURCE_REPORT_PATH}")
+            elif [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" ]]; then
+              cmd+=(--source-api-url "${PARAM_SOURCE_API_URL}")
+              if [[ -n "${PARAM_SOURCE_TIMEOUT_SECONDS}" ]]; then
+                cmd+=(--source-timeout-seconds "${PARAM_SOURCE_TIMEOUT_SECONDS}")
+              fi
+            fi
           fi
 
-          "${cmd[@]}" 2>&1 | tee ai-brief.log
+          source_api_token=""
+          if [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" ]]; then
+            if [[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]; then
+              source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"
+            elif [[ -n "${AI_BRIEF_SOURCE_API_TOKEN:-}" ]]; then
+              echo "Source API token is not forwarded for custom source_api_url." >&2
+            fi
+          fi
+
+          AI_BRIEF_SOURCE_API_TOKEN="${source_api_token}" "${cmd[@]}" 2>&1 | tee ai-brief.log
 
           ai_brief_report_path="$(sed -n 's/.*AI brief written to: //p' ai-brief.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${ai_brief_report_path}" ]]; then

@@ -81,6 +81,10 @@
   - `OPENAI_API_KEY=...`
   - `OPENAI_AI_BRIEF_MODEL=...` (또는 CLI `--model-name`)
   - `AI_BRIEF_MODEL_TIMEOUT_SECONDS=20`
+- 선택(AI Brief 외부 source API provider):
+  - `AI_BRIEF_SOURCE_API_URL=...`
+  - `AI_BRIEF_SOURCE_API_TOKEN=...` (로컬 CLI에서는 Bearer 토큰으로 전송, GitHub Actions에서는 실행 URL이 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전송)
+  - `AI_BRIEF_SOURCE_TIMEOUT_SECONDS=10`
 - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
 ### 3. 핵심 실행
@@ -95,6 +99,7 @@
 - AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
 - OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
 - 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
+- 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
 ### 4. 웹 UI 빠른 시작
@@ -143,10 +148,11 @@
   - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
   - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
   - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, `url`, offset 포함 `published_at`을 포함해야 합니다.
+  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 eligible ticker 목록을 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`이 있으면 Bearer 토큰으로 전송합니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
+  - source provider timeout/HTTP/JSON 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
   - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있으며, 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
-  - Phase 2의 외부 news/API source provider는 아직 없습니다. 현재 source provider는 로컬 JSON 입력만 지원합니다.
 
 ## 웹 UI 운영 참고
 
@@ -215,6 +221,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
 
 ## 작업 자동화 (just + direnv)
 
@@ -388,7 +395,7 @@
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
-- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다.
+- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. `source_provider=http-json`을 선택하거나 scheduled 실행에서 `AI_BRIEF_SOURCE_API_URL` 변수를 설정하면 외부 source API context도 함께 주입합니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
 
 ### 실험
 
@@ -399,7 +406,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 외부 news/API source provider 고도화
+- 벤더별 news/API adapter와 source 품질 eval suite 고도화
 
 ### 폐기 후보
 

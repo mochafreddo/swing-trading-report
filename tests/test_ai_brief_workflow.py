@@ -46,6 +46,13 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     assert schedule_crons == ["30 22 * * 0-4", "30 12 * * 1-5"]
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
+    assert dispatch_inputs["source_provider"]["options"] == [
+        "none",
+        "local-json",
+        "http-json",
+    ]
+    assert "source_api_url" in dispatch_inputs
+    assert "source_timeout_seconds" in dispatch_inputs
 
 
 def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> None:
@@ -162,12 +169,19 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         == "${{ github.event.inputs.source_report_path }}"
     )
     assert (
+        params_env.get("RAW_SOURCE_API_URL")
+        == "${{ github.event.inputs.source_api_url }}"
+    )
+    assert (
         params_env.get("RAW_SEND_NOTIFICATIONS")
         == "${{ github.event.inputs.send_notifications }}"
     )
     assert "model_name must be a single-line value" in params_script
     assert "model_timeout_seconds must be a single-line value" in params_script
     assert "source_report_path must be a single-line value" in params_script
+    assert "source_api_url must be a single-line value" in params_script
+    assert "source_timeout_seconds must be a single-line value" in params_script
+    assert "source_provider=http-json requires source_api_url" in params_script
     assert "Unsupported send_notifications" in params_script
 
     ai_brief_step = _find_step_by_name(steps, "Run AI brief")
@@ -176,10 +190,26 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
 
     assert "${{ steps.params.outputs.model_name }}" not in ai_brief_script
     assert "${{ steps.params.outputs.source_report_path }}" not in ai_brief_script
+    assert "${{ steps.params.outputs.source_api_url }}" not in ai_brief_script
     assert (
         ai_brief_env.get("PARAM_MODEL_NAME") == "${{ steps.params.outputs.model_name }}"
     )
     assert (
         ai_brief_env.get("PARAM_SOURCE_REPORT_PATH")
         == "${{ steps.params.outputs.source_report_path }}"
+    )
+    assert (
+        ai_brief_env.get("PARAM_SOURCE_API_URL")
+        == "${{ steps.params.outputs.source_api_url }}"
+    )
+    assert "--source-api-url" in ai_brief_script
+    assert "--source-timeout-seconds" in ai_brief_script
+    assert 'source_api_token=""' in ai_brief_script
+    assert (
+        '[[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]'
+        in ai_brief_script
+    )
+    assert 'source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"' in ai_brief_script
+    assert (
+        'AI_BRIEF_SOURCE_API_TOKEN="${source_api_token}" "${cmd[@]}"' in ai_brief_script
     )

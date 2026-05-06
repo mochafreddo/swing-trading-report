@@ -217,7 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--source-provider",
         type=str,
         default=None,
-        choices=["none", "local-json"],
+        choices=["none", "local-json", "http-json"],
         help="Optional source provider for AI brief candidate context",
     )
     ai_brief.add_argument(
@@ -225,6 +225,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Optional local JSON source report path",
+    )
+    ai_brief.add_argument(
+        "--source-api-url",
+        type=str,
+        default=None,
+        help="Optional external source API URL when source_provider=http-json",
+    )
+    ai_brief.add_argument(
+        "--source-timeout-seconds",
+        type=float,
+        default=None,
+        help="External source API timeout in seconds",
     )
     ai_brief.add_argument(
         "--upload",
@@ -273,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
             model_timeout_seconds=ns.model_timeout_seconds,
             source_provider=ns.source_provider,
             source_report_path=ns.source_report,
+            source_api_url=ns.source_api_url,
+            source_timeout_seconds=ns.source_timeout_seconds,
             upload=ns.upload,
         )
 
