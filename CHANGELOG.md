@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.20.0...v1.21.0) (2026-05-07)
+
+
+### Features
+
+* **ai-brief:** 캡처 feed 소스 수집기 추가 ([#115](https://github.com/mochafreddo/swing-trading-report/issues/115)) ([5e889ce](https://github.com/mochafreddo/swing-trading-report/commit/5e889ce7911887caace0d23dce2bebed1b73d9a5))
+
 ## [1.20.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.19.0...v1.20.0) (2026-05-06)
 
 
