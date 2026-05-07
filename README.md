@@ -83,7 +83,7 @@
   - `AI_BRIEF_MODEL_TIMEOUT_SECONDS=20`
 - 선택(AI Brief 외부 source API provider):
   - `AI_BRIEF_SOURCE_API_URL=...`
-  - `AI_BRIEF_SOURCE_API_TOKEN=...` (로컬 CLI에서는 Bearer 토큰으로 전송, GitHub Actions에서는 실행 URL이 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전송)
+  - `AI_BRIEF_SOURCE_API_TOKEN=...` (실행 URL이 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송)
   - `AI_BRIEF_SOURCE_TIMEOUT_SECONDS=10`
 - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
@@ -100,6 +100,7 @@
 - OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
 - 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
 - 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
+- RSS/Atom/RDF 캡처 source payload 생성(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
 - 캡처한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
@@ -148,8 +149,9 @@
   - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
   - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
   - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
-  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, `url`, offset 포함 `published_at`을 포함해야 합니다.
-  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 eligible ticker 목록을 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`이 있으면 Bearer 토큰으로 전송합니다.
+  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`을 포함해야 하며, source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다.
+  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. URL은 HTTPS여야 하며 local/private host는 거부합니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`은 실행 URL이 `AI_BRIEF_SOURCE_API_URL`과 정확히 일치할 때만 Bearer 토큰으로 전송합니다.
+  - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 캡처 파일을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. live network 호출이나 벤더 SDK 없이 `sources[]`를 만들고, 생성 결과는 `local-json` 주입 또는 `ai-brief-source-eval` 검증에 사용할 수 있습니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
   - source provider timeout/HTTP/JSON 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
@@ -223,6 +225,8 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 캡처 feed를 AI Brief source payload로 변환 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 캡처한 AI Brief source payload 품질 평가 |
 
 ## 작업 자동화 (just + direnv)
 
@@ -231,6 +235,7 @@
   - `just scan`
   - `just sell`
   - `just entry`
+  - `just ai-brief-source-collect --feed-catalog feeds.json --output captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/YYYY-MM-DD.entry.json --source-report captured.sources.json`
   - `just quality` (ruff + format-check + mypy + pytest)
   - `just check` (`just quality` 별칭 호환)
@@ -253,6 +258,7 @@
   - `report/` - 리포트 아티팩트(JSON) 생성
 - `web/` - Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` - 생성된 JSON 리포트 아티팩트 출력 폴더
+- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`)
 - `data/` - 캐시/상태(현재 JSON, 추후 SQLite 고려)
 - `docs/README.md` - 문서 인덱스(진입점)
   - `docs/adr/README.md` - ADR 인덱스
@@ -398,6 +404,7 @@
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
 - GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. `source_provider=http-json`을 선택하거나 scheduled 실행에서 `AI_BRIEF_SOURCE_API_URL` 변수를 설정하면 외부 source API context도 함께 주입합니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
+- RSS/Atom/RDF 캡처 feed는 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, 기존 `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인할 수 있습니다.
 
 ### 실험
 
@@ -408,7 +415,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 벤더별 news/API adapter와 source 품질 eval suite 고도화
+- live 벤더별 news/API adapter 운영화와 source 품질 eval suite 고도화
 
 ### 폐기 후보
 

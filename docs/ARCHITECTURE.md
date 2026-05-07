@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, AI Brief source payload 수집/평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup`/`ai-brief` 연결이 현재 제공 범위입니다.
 
 ### 실험
@@ -59,6 +59,7 @@ flowchart LR
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `local-json`/`http-json` source context, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_sources.py` |
+| AI Brief source 수집 보조 | RSS/Atom/RDF 캡처 feed를 `http-json`/`local-json` 호환 `sources[]` payload로 변환 | `sab/ai_brief_source_collectors.py`, `scripts/collect_ai_brief_sources.py` |
 | AI Brief source 품질 평가 | 캡처한 `http-json` 호환 source payload를 네트워크/secret 없이 기존 source 정규화 규칙으로 평가 | `sab/ai_brief_source_eval.py`, `scripts/eval_ai_brief_sources.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
@@ -107,8 +108,9 @@ flowchart LR
 3. provider 호출 전 후보는 entry report 순서를 보존해 최대 5개로 제한하며, 초과 `ENTER` 행은 `cap_excluded_candidates[]`로 기록합니다.
 4. source provider는 `none`, `local-json`, `http-json`을 지원합니다.
    - `local-json`은 로컬 source report의 `sources[]`를 preselected `ENTER` 후보에만 붙입니다.
-   - `http-json`은 외부 source API에 eligible ticker 목록을 POST하고, 응답의 `sources[]`를 같은 계약으로 정규화해 preselected 후보에만 붙입니다.
-   - source row의 ticker가 후보 집합에 없거나 source가 stale/invalid하면 source issue로 기록하고 모델 입력에서 제외합니다.
+   - `http-json`은 외부 source API에 `schema`, `tickers`, `max_sources_per_ticker`, `freshness_hours`를 POST하고, 응답의 `sources[]`를 같은 계약으로 정규화해 preselected 후보에만 붙입니다.
+   - source row의 ticker가 후보 집합에 없거나 source가 stale/미래 시간/invalid URL이면 source issue로 기록하고 모델 입력에서 제외합니다.
+   - `scripts/collect_ai_brief_sources.py`는 RSS/Atom/RDF 캡처 feed를 `sab.ai_brief_sources.v1` payload로 변환하는 외부 source API 보조 경로입니다. live network 호출이나 벤더 SDK 없이 생성한 payload를 `local-json`이나 source eval에 넣어 수집 품질을 점검합니다.
    - 캡처한 `http-json` 호환 payload는 `scripts/eval_ai_brief_sources.py`로 오프라인 평가할 수 있으며, production vendor/news 수집은 SAB 내부 SDK가 아니라 `AI_BRIEF_SOURCE_API_URL` 뒤에서 수행합니다.
 5. 모델 provider는 `fake`와 `openai`를 지원합니다.
    - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
@@ -270,7 +272,8 @@ flowchart LR
   - `fake` provider는 외부 기사/모델 판단을 포함하지 않습니다.
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
   - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
-  - `http-json` source provider는 외부 source API를 호출하지만, 반환 row도 동일한 ticker universe/staleness/cap 검증을 통과해야 모델 입력에 들어갑니다.
+  - `http-json` source provider는 외부 source API를 호출하지만, 반환 row도 동일한 ticker universe/freshness/future-time/HTTP(S) URL/cap 검증을 통과해야 모델 입력에 들어갑니다.
+  - RSS/Atom/RDF 캡처 feed 변환 도구는 source API payload 제작/검증을 위한 보조 경로이며, runtime provider 종류를 늘리지 않습니다.
   - 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 Storage, `report_index`, 웹 Reports UI와 연동됩니다.
   - 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하며, 수동 opt-in 또는 scheduled 기본값으로 실제 발송까지 수행할 수 있습니다.

@@ -8,7 +8,7 @@
 
 ### 현재 제공
 
-- CLI `scan`/`sell`/`entry`/`ai-brief` 실행, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
+- CLI `scan`/`sell`/`entry`/`ai-brief` 실행, AI Brief source payload 수집/평가, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
 - schedule 기반 알림, 수동/scheduled AI brief workflow와 알림 발송, branch protection 운영 절차도 현재 runbook 범위에 포함합니다.
 
 ### 실험
@@ -154,6 +154,7 @@
 - just 레시피(동일 동작)
   - `just scan --universe both`
   - `just sell`
+  - `just ai-brief-source-collect --feed-catalog feeds.json --output captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/example.entry.json --source-report captured.sources.json`
   - `just quality`
   - `just check`
@@ -181,7 +182,9 @@
   - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - `AI_BRIEF_SOURCE_API_URL` 변수가 설정되어 있으면 scheduled 실행은 `source_provider=http-json`로 외부 source API context를 함께 주입합니다. 수동 실행에서는 `source_provider=http-json`과 `source_api_url` 입력을 사용합니다.
-  - `http-json` source API는 eligible ticker 목록을 POST로 받고, `sources[]` row(`ticker`, `title`, `url`, offset 포함 `published_at`)를 반환해야 합니다. API token secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
+  - `http-json` source API는 HTTPS URL만 허용하며 local/private host와 redirect 응답은 거부됩니다. API는 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST로 받고, `sources[]` row(`ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`)를 반환해야 합니다. source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다. API token secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
+  - RSS/Atom/RDF 캡처 feed에서 source payload를 만들 때는 `just ai-brief-source-collect --feed-catalog <feeds.json> --output <sources.json>`를 사용합니다. feed catalog는 ticker별 로컬 RSS/Atom/RDF 파일 경로를 담고, 도구는 fresh source만 ticker별 최대 3건까지 `sab.ai_brief_sources.v1` payload로 출력합니다.
+    - catalog 예: `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","path":"aapl.rss"}]}`
   - 외부 source 수집은 SAB 내부 vendor SDK가 아니라 `AI_BRIEF_SOURCE_API_URL` 뒤에서 수행합니다. captured `sources[]` payload 품질은 `just ai-brief-source-eval --entry-report <entry.json> --source-report <sources.json>`로 네트워크/secret 없이 점검합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다.
   - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남기고, AI Brief 리포트는 Supabase Storage/`report_index`에도 업로드합니다.
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
