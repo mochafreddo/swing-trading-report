@@ -1,0 +1,9 @@
+{
+  "schema": "sab.ai_brief_source_feed_catalog.v1",
+  "feeds": [
+    {
+      "ticker": "META.NAS",
+      "path": "meta-rdf-date.rdf"
+    }
+  ]
+}

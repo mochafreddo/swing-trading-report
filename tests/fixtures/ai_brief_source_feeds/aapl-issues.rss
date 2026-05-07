@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Apple Issue Feed</title>
+    <item>
+      <title>Apple newest valid source</title>
+      <link>https://news.example.test/aapl-newest</link>
+      <pubDate>Wed, 06 May 2026 11:45:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Apple second valid source</title>
+      <link>https://news.example.test/aapl-second</link>
+      <pubDate>Wed, 06 May 2026 10:45:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Apple third valid source</title>
+      <link>https://news.example.test/aapl-third</link>
+      <pubDate>Wed, 06 May 2026 09:45:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Apple fourth source over cap</title>
+      <link>https://news.example.test/aapl-fourth</link>
+      <pubDate>Wed, 06 May 2026 08:45:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Apple duplicate URL</title>
+      <link>https://news.example.test/aapl-second</link>
+      <pubDate>Wed, 06 May 2026 08:30:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Apple stale source</title>
+      <link>https://news.example.test/aapl-stale</link>
+      <pubDate>Sat, 02 May 2026 08:45:00 GMT</pubDate>
+    </item>
+    <item>
+      <link>https://news.example.test/aapl-missing-title</link>
+      <pubDate>Wed, 06 May 2026 08:15:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

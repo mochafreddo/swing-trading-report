@@ -1,0 +1,21 @@
+{
+  "schema": "sab.ai_brief_source_feed_catalog.v1",
+  "feeds": [
+    {
+      "ticker": "AAPL.NAS",
+      "path": "aapl-issues.rss"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "path": "msft-bad-date.atom"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "path": "missing.rss"
+    },
+    {
+      "ticker": "",
+      "path": "ignored.rss"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Microsoft News</title>
+  <entry>
+    <title>Microsoft cloud bookings accelerate</title>
+    <link rel="self" href="https://news.example.test/feed/msft-cloud-bookings" />
+    <link href="https://news.example.test/msft-cloud-bookings" />
+    <updated>2026-05-06T10:00:00+00:00</updated>
+  </entry>
+</feed>

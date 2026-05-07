@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Nvidia News</title>
+    <item>
+      <title>Nvidia data center demand remains firm</title>
+      <link>https://news.example.test/nvda-data-center</link>
+      <pubDate>Wed, 06 May 2026 09:15:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
