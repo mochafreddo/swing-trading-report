@@ -439,6 +439,67 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
     )
 
 
+def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["market"] == "US"
+    assert payload["entries"] == []
+    assert payload["tickers"] == []
+    assert payload["summary"] == {
+        "entry_count": 0,
+        "action_counts": {},
+        "system_issue_count": 0,
+        "missing_entry_price_count": 0,
+        "missing_entry_price_ratio": 0.0,
+        "portfolio_blocked_count": 0,
+        "portfolio_blocked_by_market": {},
+    }
+    assert payload["source_buy_report"] == "source.buy.json"
+
+
 def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
     monkeypatch, tmp_path: Path
 ) -> None:

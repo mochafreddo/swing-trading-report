@@ -456,6 +456,23 @@ def _group_candidates_by_market(
     )
 
 
+def _empty_candidates_by_market(
+    *,
+    report: dict[str, Any],
+    market_override: str | None,
+) -> dict[str, list[dict[str, Any]]]:
+    if market_override is not None:
+        return {market_override: []}
+
+    report_market = _resolve_report_market_hint(report)
+    if report_market in _SUPPORTED_MARKETS:
+        return {report_market: []}
+
+    raise ValueError(
+        "Buy report has no candidate rows. Provide --market KR or --market US."
+    )
+
+
 def _entry_session_date(market: str) -> str:
     zone = ZoneInfo("Asia/Seoul") if market == "KR" else ZoneInfo("America/New_York")
     return dt.datetime.now(zone).date().isoformat()
@@ -888,21 +905,30 @@ def run_entry(
 
     candidates = [item for item in candidates_raw if isinstance(item, dict)]
     if not candidates:
-        logger.error("Buy report has no valid candidate rows")
-        return 1
+        if candidates_raw:
+            logger.error("Buy report has no valid candidate rows")
+            return 1
+        logger.info("Buy report has no candidate rows; writing empty entry report")
+
+    if candidates:
+        try:
+            _validate_candidate_tickers(candidates)
+        except ValueError as exc:
+            logger.error("Buy report ticker validation failed: %s", exc)
+            return 1
 
     try:
-        _validate_candidate_tickers(candidates)
-    except ValueError as exc:
-        logger.error("Buy report ticker validation failed: %s", exc)
-        return 1
-
-    try:
-        candidates_by_market = _group_candidates_by_market(
-            report=source_report,
-            candidates=candidates,
-            market_override=normalized_market,
-        )
+        if candidates:
+            candidates_by_market = _group_candidates_by_market(
+                report=source_report,
+                candidates=candidates,
+                market_override=normalized_market,
+            )
+        else:
+            candidates_by_market = _empty_candidates_by_market(
+                report=source_report,
+                market_override=normalized_market,
+            )
     except ValueError as exc:
         logger.error("%s", exc)
         return 1
@@ -919,6 +945,10 @@ def run_entry(
     gap_atr_multiplier = _to_finite_float(getattr(cfg, "gap_atr_multiplier", None))
     allow_missing_gap_guard = gap_atr_multiplier is not None and gap_atr_multiplier <= 0
     for candidate_market in resolved_markets:
+        market_candidates = candidates_by_market[candidate_market]
+        if not market_candidates:
+            market_rows_by_market[candidate_market] = []
+            continue
         price_lookup_fn, provider_issues = _make_price_lookup(
             cfg=cfg,
             provider=normalized_provider,
@@ -926,7 +956,7 @@ def run_entry(
             market=candidate_market,
         )
         market_rows, candidate_system_issues = evaluate_entry_candidates(
-            candidates=candidates_by_market[candidate_market],
+            candidates=market_candidates,
             price_lookup_fn=price_lookup_fn,
             gap_breach_action="SKIP",
             default_strategy_mode=report_strategy_mode,
