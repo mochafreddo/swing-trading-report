@@ -184,6 +184,42 @@ def test_write_ai_brief_report_rejects_sources_older_than_72_hours(
         )
 
 
+def test_write_ai_brief_report_rejects_invalid_source_url(tmp_path: Path) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "bad source",
+            "url": "https://token@example.test/source",
+            "published_at": "2026-05-05T08:00:00+09:00",
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+
+    with pytest.raises(AiBriefValidationError, match="userinfo"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_future_source_dates(tmp_path: Path) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "future source",
+            "url": "https://example.test/future",
+            "published_at": "2026-05-05T09:00:01+00:00",
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+
+    with pytest.raises(AiBriefValidationError, match="15m"):
+        write_ai_brief_report(
+            report_dir=tmp_path.as_posix(),
+            artifact=artifact,
+            now=datetime(2026, 5, 5, 8, 45, tzinfo=UTC),
+        )
+
+
 def test_write_ai_brief_report_allows_openai_model_provider(tmp_path: Path) -> None:
     artifact = _artifact()
     artifact["model_provider"] = "openai"

@@ -10,15 +10,21 @@
     },
     {
       "ticker": "AAPL.NAS",
-      "title": "Apple source duplicate",
-      "url": "https://news.example.test/aapl-shared",
-      "published_at": "2026-05-06T09:50:00+00:00"
-    },
-    {
-      "ticker": "AAPL.NAS",
       "title": "Apple source three",
       "url": "https://news.example.test/aapl-three",
       "published_at": "2026-05-06T09:40:00+00:00"
+    },
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source four",
+      "url": "https://news.example.test/aapl-four",
+      "published_at": "2026-05-06T09:35:00+00:00"
+    },
+    {
+      "ticker": "AAPL.NAS",
+      "title": "Apple source duplicate",
+      "url": "https://news.example.test/aapl-shared",
+      "published_at": "2026-05-06T09:32:00+00:00"
     },
     {
       "ticker": "AAPL.NAS",
