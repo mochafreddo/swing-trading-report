@@ -4,12 +4,15 @@ import datetime as dt
 import email.utils
 import json
 import math
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 from xml.etree import ElementTree as ET
 from xml.parsers import expat
+
+import requests  # type: ignore[import-untyped]
 
 from .ai_brief_sources import (
     MAX_SOURCES_PER_TICKER,
@@ -19,12 +22,14 @@ from .ai_brief_sources import (
     SOURCE_REPORT_TYPE,
     is_ai_brief_source_future,
     is_ai_brief_source_stale,
+    validate_ai_brief_source_api_url,
     validate_ai_brief_source_url,
 )
 
 SOURCE_FEED_CATALOG_SCHEMA = "sab.ai_brief_source_feed_catalog.v1"
 MAX_FEED_CATALOG_BYTES = 1_000_000
 MAX_FEED_BYTES = 1_000_000
+DEFAULT_FEED_TIMEOUT_SECONDS = 10.0
 
 AiBriefSourceCollectStatus = Literal["PASS", "WARN"]
 
@@ -38,6 +43,14 @@ class _UnsafeFeedXmlError(RuntimeError):
 
 
 class _FeedFileTooLargeError(RuntimeError):
+    pass
+
+
+class _FeedUrlFetchError(RuntimeError):
+    pass
+
+
+class _FeedUrlTimeoutError(RuntimeError):
     pass
 
 
@@ -105,6 +118,7 @@ def collect_ai_brief_sources(
     now: dt.datetime | None = None,
     freshness_hours: float = SOURCE_FRESHNESS_HOURS,
     max_sources_per_ticker: int = MAX_SOURCES_PER_TICKER,
+    feed_timeout_seconds: float = DEFAULT_FEED_TIMEOUT_SECONDS,
 ) -> AiBriefSourceCollectResult:
     if not math.isfinite(freshness_hours) or freshness_hours < 0:
         raise ValueError("freshness_hours must be non-negative")
@@ -116,6 +130,8 @@ def collect_ai_brief_sources(
         raise ValueError(
             f"max_sources_per_ticker must be at most {MAX_SOURCES_PER_TICKER}"
         )
+    if not math.isfinite(feed_timeout_seconds) or feed_timeout_seconds <= 0:
+        raise ValueError("feed_timeout_seconds must be positive")
 
     resolved_now = now or dt.datetime.now().astimezone()
     requested_tickers = _normalize_requested_tickers(tickers)
@@ -138,16 +154,22 @@ def collect_ai_brief_sources(
             )
             continue
         ticker = str(raw_feed.get("ticker") or "").strip()
-        feed_path_text = str(
-            raw_feed.get("path") or raw_feed.get("feed_path") or ""
-        ).strip()
-        if not ticker or not feed_path_text:
+        feed_path_text = _first_non_empty_text(
+            raw_feed.get("path"),
+            raw_feed.get("feed_path"),
+        )
+        feed_url_text = _first_non_empty_text(
+            raw_feed.get("url"),
+            raw_feed.get("feed_url"),
+        )
+        if not ticker or bool(feed_path_text) == bool(feed_url_text):
             issues.append(
                 AiBriefSourceCollectIssue(
                     ticker=ticker or None,
                     code="feed_catalog_invalid_row",
                     message=(
-                        f"feeds[{idx}] ignored because ticker and path are required"
+                        f"feeds[{idx}] ignored because ticker and exactly one of "
+                        "path/feed_path or url/feed_url are required"
                     ),
                 )
             )
@@ -156,18 +178,28 @@ def collect_ai_brief_sources(
             continue
         seen_catalog_tickers.add(ticker)
 
-        try:
-            feed_path = _resolve_feed_path(catalog_path, feed_path_text)
-        except ValueError as exc:
-            issues.append(
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_catalog_invalid_row",
-                    message=f"feeds[{idx}] ignored because {exc}",
+        if feed_path_text:
+            try:
+                feed_path = _resolve_feed_path(catalog_path, feed_path_text)
+            except ValueError as exc:
+                issues.append(
+                    AiBriefSourceCollectIssue(
+                        ticker=ticker,
+                        code="feed_catalog_invalid_row",
+                        message=f"feeds[{idx}] ignored because {exc}",
+                    )
                 )
+                continue
+            feed_rows, feed_issues = _load_feed_rows(
+                ticker=ticker,
+                feed_path=feed_path,
             )
-            continue
-        feed_rows, feed_issues = _load_feed_rows(ticker=ticker, feed_path=feed_path)
+        else:
+            feed_rows, feed_issues = _load_feed_url_rows(
+                ticker=ticker,
+                feed_url_text=feed_url_text,
+                feed_timeout_seconds=feed_timeout_seconds,
+            )
         issues.extend(feed_issues)
         rows_by_ticker.setdefault(ticker, []).extend(feed_rows)
     for missing_ticker in sorted(requested_tickers - seen_catalog_tickers):
@@ -221,6 +253,14 @@ def _load_feed_catalog(path: Path) -> Mapping[str, Any]:
     return cast(Mapping[str, Any], payload)
 
 
+def _first_non_empty_text(*values: object) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
 def _resolve_feed_path(catalog_path: Path, feed_path_text: str) -> Path:
     feed_path = Path(feed_path_text)
     if feed_path.is_absolute():
@@ -234,6 +274,13 @@ def _resolve_feed_path(catalog_path: Path, feed_path_text: str) -> Path:
 
 def _display_feed_path(feed_path: Path) -> str:
     return feed_path.name or "<feed>"
+
+
+def _validate_feed_url(value: object) -> str:
+    try:
+        return validate_ai_brief_source_api_url(value)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("source API URL", "feed URL")) from exc
 
 
 def _load_feed_rows(
@@ -278,6 +325,134 @@ def _load_feed_rows(
             )
         ]
 
+    return _rows_from_feed_root(
+        ticker=ticker,
+        root=root,
+        empty_issue_code="feed_file_empty",
+        empty_issue_message="feed ignored because it contains no entries",
+    )
+
+
+def _load_feed_url_rows(
+    *,
+    ticker: str,
+    feed_url_text: str,
+    feed_timeout_seconds: float,
+) -> tuple[list[_FeedSourceRow], list[AiBriefSourceCollectIssue]]:
+    try:
+        feed_url = _validate_feed_url(feed_url_text)
+    except ValueError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_invalid",
+                message=f"feed URL ignored because {exc}",
+            )
+        ]
+
+    deadline = time.monotonic() + feed_timeout_seconds
+    try:
+        response = requests.Session().get(
+            feed_url,
+            timeout=feed_timeout_seconds,
+            stream=True,
+            allow_redirects=False,
+        )
+    except requests.Timeout as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL request timed out: {exc}",
+            )
+        ]
+    except requests.RequestException as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL request failed: {exc}",
+            )
+        ]
+
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    if 300 <= status_code < 400:
+        _close_response(response)
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_redirect",
+                message=f"feed URL redirect was not followed (HTTP {status_code})",
+            )
+        ]
+    if status_code >= 400:
+        _close_response(response)
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL request failed with HTTP {status_code}",
+            )
+        ]
+
+    try:
+        root = _parse_feed_response_root(response, deadline=deadline)
+    except _FeedFileTooLargeError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_too_large",
+                message=f"feed URL ignored because body is too large: {exc}",
+            )
+        ]
+    except _FeedUrlTimeoutError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL response body timed out: {exc}",
+            )
+        ]
+    except _UnsafeFeedXmlError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_unsafe_xml",
+                message=f"feed URL ignored because XML is unsafe: {exc}",
+            )
+        ]
+    except _FeedUrlFetchError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL response body failed: {exc}",
+            )
+        ]
+    except ET.ParseError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"failed to parse feed URL response: {exc}",
+            )
+        ]
+
+    return _rows_from_feed_root(
+        ticker=ticker,
+        root=root,
+        empty_issue_code="feed_url_empty",
+        empty_issue_message="feed URL ignored because it contains no entries",
+    )
+
+
+def _rows_from_feed_root(
+    *,
+    ticker: str,
+    root: ET.Element,
+    empty_issue_code: str,
+    empty_issue_message: str,
+) -> tuple[list[_FeedSourceRow], list[AiBriefSourceCollectIssue]]:
     root_name = _local_name(root.tag).lower()
     if root_name in {"rss", "rdf"}:
         raw_entries = _rss_items(root)
@@ -300,8 +475,8 @@ def _load_feed_rows(
         issues.append(
             AiBriefSourceCollectIssue(
                 ticker=ticker,
-                code="feed_file_empty",
-                message="feed ignored because it contains no entries",
+                code=empty_issue_code,
+                message=empty_issue_message,
             )
         )
     for idx, raw_entry in enumerate(raw_entries):
@@ -320,12 +495,73 @@ def _load_feed_rows(
 def _parse_feed_root(feed_path: Path) -> ET.Element:
     with open(feed_path, "rb") as fp:
         data = fp.read(MAX_FEED_BYTES + 1)
+    return _parse_feed_root_data(data)
+
+
+def _parse_feed_response_root(response: object, *, deadline: float) -> ET.Element:
+    data = _read_bounded_feed_response_body(response, deadline=deadline)
+    return _parse_feed_root_data(data)
+
+
+def _parse_feed_root_data(data: bytes) -> ET.Element:
     if len(data) > MAX_FEED_BYTES:
         raise _FeedFileTooLargeError(
             f"{len(data)} bytes exceeds {MAX_FEED_BYTES} byte limit"
         )
     _reject_unsafe_xml_declarations(data)
     return ET.fromstring(data)
+
+
+def _read_bounded_feed_response_body(response: object, *, deadline: float) -> bytes:
+    iter_content = getattr(response, "iter_content", None)
+    if callable(iter_content):
+        chunks: list[bytes] = []
+        total_size = 0
+        try:
+            for chunk in iter_content(chunk_size=64 * 1024):
+                if time.monotonic() > deadline:
+                    raise _FeedUrlTimeoutError("feed response body timed out")
+                if not chunk:
+                    continue
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8")
+                total_size += len(chunk)
+                if total_size > MAX_FEED_BYTES:
+                    raise _FeedFileTooLargeError(
+                        f"{total_size} bytes exceeds {MAX_FEED_BYTES} byte limit"
+                    )
+                chunks.append(bytes(chunk))
+        except requests.Timeout as exc:
+            raise _FeedUrlTimeoutError("feed response body timed out") from exc
+        except requests.RequestException as exc:
+            raise _FeedUrlFetchError(str(exc)) from exc
+        finally:
+            _close_response(response)
+        return b"".join(chunks)
+
+    try:
+        content = getattr(response, "content", None)
+        if isinstance(content, bytes | bytearray):
+            body = bytes(content)
+        else:
+            text = getattr(response, "text", None)
+            if isinstance(text, str):
+                body = text.encode("utf-8")
+            else:
+                raise _FeedUrlFetchError("feed response body is unavailable")
+        if len(body) > MAX_FEED_BYTES:
+            raise _FeedFileTooLargeError(
+                f"{len(body)} bytes exceeds {MAX_FEED_BYTES} byte limit"
+            )
+        return body
+    finally:
+        _close_response(response)
+
+
+def _close_response(response: object) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
 
 
 def _reject_unsafe_xml_declarations(data: bytes) -> None:
@@ -604,6 +840,7 @@ def parse_collect_now(value: str) -> dt.datetime:
 
 
 __all__ = [
+    "DEFAULT_FEED_TIMEOUT_SECONDS",
     "MAX_FEED_BYTES",
     "MAX_FEED_CATALOG_BYTES",
     "SOURCE_FEED_CATALOG_SCHEMA",

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import types
 from pathlib import Path
 
 import pytest
+import requests  # type: ignore[import-untyped]
 from sab import ai_brief_source_collectors as collectors
 from sab.ai_brief_source_collectors import (
     MAX_FEED_BYTES,
@@ -21,6 +23,63 @@ SOURCE_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "ai_brief_sources"
 COLLECT_NOW = dt.datetime(2026, 5, 6, 12, 0, tzinfo=dt.UTC)
 
 
+class _MockFeedResponse:
+    def __init__(self, body: bytes, *, status_code: int = 200) -> None:
+        self.body = body
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, chunk_size: int):
+        for idx in range(0, len(self.body), chunk_size):
+            yield self.body[idx : idx + chunk_size]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _MockFeedSession:
+    def __init__(self, responses: dict[str, object]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    def get(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        stream: bool,
+        allow_redirects: bool,
+    ) -> object:
+        self.calls.append(
+            {
+                "url": url,
+                "timeout": timeout,
+                "stream": stream,
+                "allow_redirects": allow_redirects,
+            }
+        )
+        response = self.responses[url]
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
+def _install_mock_feed_session(
+    monkeypatch: pytest.MonkeyPatch,
+    session: _MockFeedSession,
+) -> None:
+    monkeypatch.setattr(
+        collectors,
+        "requests",
+        types.SimpleNamespace(
+            Session=lambda: session,
+            Timeout=requests.Timeout,
+            RequestException=requests.RequestException,
+        ),
+        raising=False,
+    )
+
+
 def _feed_fixture(name: str) -> str:
     return (FEED_FIXTURE_DIR / name).as_posix()
 
@@ -31,6 +90,201 @@ def _source_fixture(name: str) -> str:
 
 def _issue_codes(result) -> set[str]:
     return {issue.code for issue in result.issues}
+
+
+@pytest.mark.parametrize("url_field", ["url", "feed_url"])
+def test_collect_fetches_https_feed_url_into_eval_compatible_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    url_field: str,
+) -> None:
+    feed_url = "https://feeds.example.test/aapl.xml"
+    catalog = tmp_path / "feeds.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_source_feed_catalog.v1",
+                "feeds": [{"ticker": "AAPL.NAS", url_field: feed_url}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = _MockFeedSession(
+        {feed_url: _MockFeedResponse(Path(_feed_fixture("aapl.rss")).read_bytes())}
+    )
+    _install_mock_feed_session(monkeypatch, session)
+
+    result = collect_ai_brief_sources(
+        feed_catalog_path=catalog.as_posix(),
+        now=COLLECT_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.sources == [
+        {
+            "ticker": "AAPL.NAS",
+            "title": "Apple expands AI capacity for device roadmap",
+            "url": "https://news.example.test/aapl-ai-capacity",
+            "published_at": "2026-05-06T11:30:00+00:00",
+        }
+    ]
+    assert session.calls == [
+        {
+            "url": feed_url,
+            "timeout": 10.0,
+            "stream": True,
+            "allow_redirects": False,
+        }
+    ]
+
+    source_report = tmp_path / "collected.sources.json"
+    source_report.write_text(json.dumps(result.to_dict()), encoding="utf-8")
+    eval_result = evaluate_ai_brief_source_report(
+        entry_report_path=_source_fixture("entry.us.json"),
+        source_report_path=source_report.as_posix(),
+        minimum_coverage_ratio=0.0,
+        now=COLLECT_NOW,
+    )
+
+    assert eval_result.status == "PASS"
+    assert eval_result.summary["covered_ticker_count"] == 1
+
+
+def test_collect_url_feed_respects_requested_ticker_filter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    aapl_url = "https://feeds.example.test/aapl.xml"
+    msft_url = "https://feeds.example.test/msft.xml"
+    catalog = tmp_path / "feeds.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_source_feed_catalog.v1",
+                "feeds": [
+                    {"ticker": "AAPL.NAS", "url": aapl_url},
+                    {"ticker": "MSFT.NAS", "url": msft_url},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = _MockFeedSession(
+        {
+            aapl_url: _MockFeedResponse(Path(_feed_fixture("aapl.rss")).read_bytes()),
+            msft_url: AssertionError("filtered URL feed should not be fetched"),
+        }
+    )
+    _install_mock_feed_session(monkeypatch, session)
+
+    result = collect_ai_brief_sources(
+        feed_catalog_path=catalog.as_posix(),
+        tickers={"AAPL.NAS"},
+        now=COLLECT_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert [source["ticker"] for source in result.sources] == ["AAPL.NAS"]
+    assert [call["url"] for call in session.calls] == [aapl_url]
+
+
+@pytest.mark.parametrize(
+    ("feed_url", "response", "expected_code", "expected_call_count"),
+    [
+        ("http://feeds.example.test/aapl.xml", None, "feed_url_invalid", 0),
+        ("https://127.0.0.1/aapl.xml", None, "feed_url_invalid", 0),
+        (
+            "https://feeds.example.test/redirect.xml",
+            _MockFeedResponse(b"", status_code=302),
+            "feed_url_redirect",
+            1,
+        ),
+        (
+            "https://feeds.example.test/timeout.xml",
+            requests.Timeout("slow feed"),
+            "feed_url_timeout",
+            1,
+        ),
+        (
+            "https://feeds.example.test/http-503.xml",
+            _MockFeedResponse(b"service unavailable", status_code=503),
+            "feed_url_failed",
+            1,
+        ),
+        (
+            "https://feeds.example.test/invalid.xml",
+            _MockFeedResponse(b"<rss><channel><item>"),
+            "feed_url_failed",
+            1,
+        ),
+        (
+            "https://feeds.example.test/oversized.xml",
+            _MockFeedResponse(b"x" * (MAX_FEED_BYTES + 1)),
+            "feed_url_too_large",
+            1,
+        ),
+    ],
+)
+def test_collect_reports_url_fetch_failures_as_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    feed_url: str,
+    response: object,
+    expected_code: str,
+    expected_call_count: int,
+) -> None:
+    catalog = tmp_path / "feeds.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_source_feed_catalog.v1",
+                "feeds": [{"ticker": "AAPL.NAS", "url": feed_url}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = _MockFeedSession({feed_url: response})
+    _install_mock_feed_session(monkeypatch, session)
+
+    result = collect_ai_brief_sources(
+        feed_catalog_path=catalog.as_posix(),
+        now=COLLECT_NOW,
+    )
+
+    assert result.status == "WARN"
+    assert result.sources == []
+    assert _issue_codes(result) == {expected_code}
+    assert len(session.calls) == expected_call_count
+
+
+def test_collect_rejects_feed_catalog_row_with_both_path_and_url(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "feeds.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_source_feed_catalog.v1",
+                "feeds": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "path": "aapl.rss",
+                        "url": "https://feeds.example.test/aapl.xml",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = collect_ai_brief_sources(
+        feed_catalog_path=catalog.as_posix(),
+        now=COLLECT_NOW,
+    )
+
+    assert result.status == "WARN"
+    assert result.sources == []
+    assert _issue_codes(result) == {"feed_catalog_invalid_row"}
 
 
 def test_collects_rss_and_atom_feeds_into_eval_compatible_payload(
@@ -376,6 +630,45 @@ def test_collect_script_outputs_json(capsys) -> None:
     assert payload["type"] == "ai_brief_sources"
     assert payload["summary"]["covered_tickers"] == ["MSFT.NAS"]
     assert payload["sources"][0]["title"] == "Microsoft cloud bookings accelerate"
+
+
+def test_collect_script_passes_feed_timeout_seconds_to_url_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    feed_url = "https://feeds.example.test/aapl.xml"
+    catalog = tmp_path / "feeds.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_source_feed_catalog.v1",
+                "feeds": [{"ticker": "AAPL.NAS", "url": feed_url}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = _MockFeedSession(
+        {feed_url: _MockFeedResponse(Path(_feed_fixture("aapl.rss")).read_bytes())}
+    )
+    _install_mock_feed_session(monkeypatch, session)
+
+    exit_code = collect_sources_main(
+        [
+            "--feed-catalog",
+            catalog.as_posix(),
+            "--feed-timeout-seconds",
+            "2.5",
+            "--now",
+            "2026-05-06T12:00:00+00:00",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["summary"]["covered_tickers"] == ["AAPL.NAS"]
+    assert session.calls[0]["timeout"] == 2.5
 
 
 def test_collect_script_creates_output_parent(tmp_path: Path) -> None:

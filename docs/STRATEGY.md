@@ -407,7 +407,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `local-json` source provider는 로컬 source report를 후보 context로 붙일 수 있지만, entry report의 후보 universe를 확장하지 않습니다.
 - `http-json` source provider는 HTTPS 외부 source API에 eligible ticker 목록을 POST하고, 응답 `sources[]`를 같은 source row 계약으로 정규화합니다. local/private host와 redirect 응답은 거부하며, 반환 ticker가 후보 universe 밖이거나 stale/future-time/invalid URL/cap 초과이면 모델 입력에서 제외하고 `source_issues[]`로 남깁니다.
 - AI Brief source URL은 HTTP(S)와 hostname이 필요하며, whitespace/control char와 userinfo를 허용하지 않습니다. `published_at`은 offset 포함 ISO 8601이어야 하고 72시간 freshness 및 15분 future skew 정책을 통과해야 합니다.
-- RSS/Atom/RDF 캡처 feed는 `scripts/collect_ai_brief_sources.py`로 `sab.ai_brief_sources.v1` payload를 생성한 뒤 `local-json` 주입이나 source eval에 사용할 수 있습니다. collector의 top-level `issues[]`는 `local-json` provider 주입 시 `source_issues[]`로 보존되며, source eval은 같은 diagnostics를 eval 결과의 `issues[]`로 보고합니다.
+- RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sab.ai_brief_sources.v1` payload를 생성한 뒤 `local-json` 주입이나 source eval에 사용할 수 있습니다. live feed URL은 HTTPS/local-private/redirect/body-size 제한을 통과해야 하며, fetch/timeout/invalid feed 실패는 collector top-level `issues[]` WARN으로 남습니다. collector의 top-level `issues[]`는 `local-json` provider 주입 시 `source_issues[]`로 보존되며, source eval은 같은 diagnostics를 eval 결과의 `issues[]`로 보고합니다.
 - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있습니다.
 - OpenAI provider timeout/요청 실패/출력 계약 실패는 추천을 비우고 `system_issues[]`로 남깁니다.
 - source provider timeout/HTTP/JSON 실패는 추천 생성을 중단하지 않고 `system_issues[]`로 남기며, 추천에 소스가 없으면 ticker별 `source_issues[]`로 disclose해야 합니다.
