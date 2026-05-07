@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.21.0...v1.21.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **ai-brief:** 빈 entry 후보 보고서를 허용한다 ([8d86658](https://github.com/mochafreddo/swing-trading-report/commit/8d8665859c33a2202acb12b30542d609b7c4b0a2))
+
 ## [1.21.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.20.0...v1.21.0) (2026-05-07)
 
 
