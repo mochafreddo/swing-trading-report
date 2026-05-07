@@ -1,0 +1,17 @@
+{
+  "schema": "sab.ai_brief_source_feed_catalog.v1",
+  "feeds": [
+    {
+      "ticker": "AAPL.NAS",
+      "path": "aapl.rss"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "path": "msft.atom"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "path": "nvda.rss"
+    }
+  ]
+}

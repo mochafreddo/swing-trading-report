@@ -44,6 +44,9 @@ entry *args:
 ai-brief-source-eval *args:
   uv run python scripts/eval_ai_brief_sources.py {{args}}
 
+ai-brief-source-collect *args:
+  uv run python scripts/collect_ai_brief_sources.py {{args}}
+
 # Python quality gates
 ruff:
   uv run ruff check .

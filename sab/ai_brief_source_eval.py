@@ -112,6 +112,9 @@ def evaluate_ai_brief_source_report(
             ],
         )
 
+    provider_duplicate_count = _provider_duplicate_url_issue_count(
+        provider_result.source_issues
+    )
     issues.extend(_source_issues(provider_result.source_issues))
     duplicate_issues = _duplicate_url_issues(provider_result.sources_by_ticker)
     issues.extend(duplicate_issues)
@@ -154,7 +157,7 @@ def evaluate_ai_brief_source_report(
         source_count=source_count,
         minimum_coverage_ratio=minimum_coverage_ratio,
         issues=issues,
-        duplicate_url_count=len(duplicate_issues),
+        duplicate_url_count=provider_duplicate_count + len(duplicate_issues),
     )
 
 
@@ -236,7 +239,7 @@ def _source_issues(rows: list[dict[str, object]]) -> list[AiBriefSourceEvalIssue
     for row in rows:
         severity = str(row.get("severity") or "WARN").strip().upper()
         eval_severity: AiBriefSourceEvalSeverity = (
-            "FAIL" if severity == "FAIL" else "WARN"
+            "FAIL" if severity == "ERROR" else "WARN"
         )
         issues.append(
             AiBriefSourceEvalIssue(
@@ -247,6 +250,14 @@ def _source_issues(rows: list[dict[str, object]]) -> list[AiBriefSourceEvalIssue
             )
         )
     return issues
+
+
+def _provider_duplicate_url_issue_count(rows: list[dict[str, object]]) -> int:
+    return sum(
+        1
+        for row in rows
+        if str(row.get("code") or "").strip().endswith("_duplicate_url")
+    )
 
 
 def _duplicate_url_issues(

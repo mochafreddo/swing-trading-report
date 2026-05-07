@@ -5,6 +5,12 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from ..ai_brief_sources import (
+    SOURCE_FUTURE_SKEW_MINUTES,
+    is_ai_brief_source_future,
+    is_ai_brief_source_stale,
+    validate_ai_brief_source_url,
+)
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
 from .time_label import normalize_artifact_date
 
@@ -12,7 +18,6 @@ _ARTIFACT_SCHEMA = "sab.ai_brief.v1"
 _REPORT_TYPE = "ai_brief"
 _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
-_SOURCE_FRESHNESS_HOURS = 72
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
@@ -138,19 +143,23 @@ def _validate_sources(
             field_name=f"recommendations[{recommendation_index}].sources[{source_index}]",
         )
         title = str(source.get("title") or "").strip()
-        url = str(source.get("url") or "").strip()
         if not title:
             raise AiBriefValidationError("source title is required")
-        if not url:
-            raise AiBriefValidationError("source url is required")
+        try:
+            validate_ai_brief_source_url(source.get("url"), field_name="source url")
+        except ValueError as exc:
+            raise AiBriefValidationError(str(exc)) from exc
         published_at = _parse_offset_datetime(
             source.get("published_at"),
             field_name="source.published_at",
         )
-        if now.astimezone(dt.UTC) - published_at.astimezone(dt.UTC) > dt.timedelta(
-            hours=_SOURCE_FRESHNESS_HOURS
-        ):
+        if is_ai_brief_source_stale(published_at, now=now):
             raise AiBriefValidationError("source.published_at must be within 72h")
+        if is_ai_brief_source_future(published_at, now=now):
+            raise AiBriefValidationError(
+                "source.published_at must not be more than "
+                f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
+            )
     return len(sources)
 
 

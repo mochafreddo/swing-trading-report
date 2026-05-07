@@ -79,8 +79,93 @@ def test_source_eval_detects_duplicate_urls_and_cap_exceeded() -> None:
     assert result.summary["duplicate_url_count"] == 1
     assert _issue_codes(result) == {
         "local_source_cap_exceeded",
-        "source_duplicate_url",
+        "local_source_duplicate_url",
     }
+
+
+def test_source_eval_preserves_collector_payload_issues(tmp_path: Path) -> None:
+    source_report = tmp_path / "collector-warning.sources.json"
+    source_report.write_text(
+        json.dumps(
+            {
+                "schema": "sab.ai_brief_sources.v1",
+                "type": "ai_brief_sources",
+                "generated_at": EVAL_NOW.isoformat(),
+                "status": "WARN",
+                "summary": {
+                    "source_count": 3,
+                    "covered_ticker_count": 3,
+                    "covered_tickers": ["AAPL.NAS", "MSFT.NAS", "NVDA.NAS"],
+                    "issue_count": 1,
+                },
+                "sources": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "title": "Apple source",
+                        "url": "https://news.example.test/aapl",
+                        "published_at": "2026-05-06T10:00:00+00:00",
+                    },
+                    {
+                        "ticker": "MSFT.NAS",
+                        "title": "Microsoft source",
+                        "url": "https://news.example.test/msft",
+                        "published_at": "2026-05-06T09:30:00+00:00",
+                    },
+                    {
+                        "ticker": "NVDA.NAS",
+                        "title": "Nvidia source",
+                        "url": "https://news.example.test/nvda",
+                        "published_at": "2026-05-06T09:00:00+00:00",
+                    },
+                ],
+                "issues": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "code": "feed_item_duplicate_url",
+                        "severity": "WARN",
+                        "message": "duplicate feed item URL ignored",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = evaluate_ai_brief_source_report(
+        entry_report_path=_fixture("entry.us.json"),
+        source_report_path=source_report.as_posix(),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "WARN"
+    assert result.summary["covered_ticker_count"] == 3
+    assert _issue_codes(result) == {"feed_item_duplicate_url"}
+
+
+def test_source_eval_treats_error_source_issue_as_failure(tmp_path: Path) -> None:
+    source_report = tmp_path / "collector-error.sources.json"
+    payload = json.loads(
+        Path(_fixture("sources.good.json")).read_text(encoding="utf-8")
+    )
+    payload["issues"] = [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "feed_item_failed",
+            "severity": "ERROR",
+            "message": "collector failed for ticker feed",
+        }
+    ]
+    source_report.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = evaluate_ai_brief_source_report(
+        entry_report_path=_fixture("entry.us.json"),
+        source_report_path=source_report.as_posix(),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert result.issues[0].severity == "FAIL"
+    assert _issue_codes(result) == {"feed_item_failed"}
 
 
 def test_source_eval_fails_when_entry_report_has_no_enter_candidates(
