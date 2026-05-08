@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.21.1...v1.22.0) (2026-05-08)
+
+
+### Features
+
+* **ai-brief:** live RSS feed URL 수집을 지원한다 ([#119](https://github.com/mochafreddo/swing-trading-report/issues/119)) ([73ec98c](https://github.com/mochafreddo/swing-trading-report/commit/73ec98c0fde713271a72fd3b35b880b0dfdede03))
+
 ## [1.21.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.21.0...v1.21.1) (2026-05-07)
 
 
