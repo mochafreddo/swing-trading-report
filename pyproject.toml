@@ -5,6 +5,7 @@ description = "Swing-trading signal scanner and report generator for KR/US marke
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "idna>=3.13,<4",
     "pyyaml>=6.0.3,<7",
     "requests>=2.33.0,<3",
 ]

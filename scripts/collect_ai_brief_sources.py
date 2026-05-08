@@ -11,17 +11,16 @@ if str(ROOT) not in sys.path:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from sab.ai_brief_source_collectors import DEFAULT_FEED_TIMEOUT_SECONDS
     from sab.ai_brief_sources import MAX_SOURCES_PER_TICKER, SOURCE_FRESHNESS_HOURS
 
     parser = argparse.ArgumentParser(
-        description=(
-            "Convert captured RSS/Atom/RDF feeds into an AI Brief source payload."
-        )
+        description=("Convert RSS/Atom/RDF feeds into an AI Brief source payload.")
     )
     parser.add_argument(
         "--feed-catalog",
         required=True,
-        help="JSON feed catalog with ticker/path rows",
+        help="JSON feed catalog with ticker/path or ticker/url rows",
     )
     parser.add_argument(
         "--ticker",
@@ -45,6 +44,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=MAX_SOURCES_PER_TICKER,
         help="Maximum emitted source rows per ticker",
+    )
+    parser.add_argument(
+        "--feed-timeout-seconds",
+        type=float,
+        default=DEFAULT_FEED_TIMEOUT_SECONDS,
+        help="Timeout for each live feed URL request",
     )
     parser.add_argument(
         "--now",
@@ -77,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             now=now,
             freshness_hours=ns.freshness_hours,
             max_sources_per_ticker=ns.max_sources_per_ticker,
+            feed_timeout_seconds=ns.feed_timeout_seconds,
         )
     except (AiBriefSourceCollectorError, ValueError) as exc:
         parser.error(str(exc))

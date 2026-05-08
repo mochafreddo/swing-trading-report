@@ -5,13 +5,17 @@ import ipaddress
 import json
 import math
 import os
+import queue
 import socket
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
+import idna
 import requests  # type: ignore[import-untyped]
 
 SOURCE_PROVIDER_NONE = "none"
@@ -24,8 +28,22 @@ SOURCE_FUTURE_SKEW_MINUTES = 15
 MAX_SOURCES_PER_TICKER = 3
 MAX_SOURCE_API_RESPONSE_BYTES = 1_000_000
 DEFAULT_SOURCE_TIMEOUT_SECONDS = 10.0
+SOURCE_ROW_DNS_TIMEOUT_SECONDS = 1.0
+SOURCE_DNS_RESOLVER_WORKERS = 4
+SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
+SOURCE_DNS_PIN_LOCK = threading.RLock()
+_SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORKERS)
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+_IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
+
+
+@dataclass(frozen=True)
+class _ValidatedSourceApiUrl:
+    url: str
+    hostnames: tuple[str, ...]
+    addrinfos: tuple[Any, ...]
 
 
 @dataclass(frozen=True)
@@ -85,6 +103,9 @@ def _load_http_json_source_report(
     eligible_tickers: set[str],
     now: dt.datetime,
 ) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    deadline = time.monotonic() + source_timeout_seconds
     url = str(source_api_url or "").strip()
     if not url:
         raise AiBriefSourceProviderError(
@@ -92,11 +113,13 @@ def _load_http_json_source_report(
             "AI_BRIEF_SOURCE_API_URL"
         )
     try:
-        url = validate_ai_brief_source_api_url(url)
+        validated_source_api_url = _validate_source_api_request_url(
+            url,
+            deadline=deadline,
+        )
     except ValueError as exc:
         raise AiBriefSourceProviderError(str(exc)) from exc
-    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
-        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    url = validated_source_api_url.url
     request_payload = {
         "schema": "sab.ai_brief_source_request.v1",
         "tickers": sorted(eligible_tickers),
@@ -111,52 +134,69 @@ def _load_http_json_source_report(
     if api_token:
         headers["Authorization"] = f"Bearer {api_token}"
 
-    deadline = time.monotonic() + source_timeout_seconds
+    session = requests.Session()
+    session.trust_env = False
     try:
-        response = requests.Session().post(
-            url,
-            headers=headers,
-            json=request_payload,
-            timeout=source_timeout_seconds,
-            stream=True,
-            allow_redirects=False,
-        )
-    except requests.Timeout as exc:
-        raise AiBriefSourceProviderTimeoutError("source API request timed out") from exc
-    except requests.RequestException as exc:
-        raise AiBriefSourceProviderError(f"source API request failed: {exc}") from exc
+        try:
+            with _pin_source_api_dns(
+                validated_source_api_url.hostnames,
+                validated_source_api_url.addrinfos,
+                deadline=deadline,
+            ):
+                response = session.post(
+                    url,
+                    headers=headers,
+                    json=request_payload,
+                    timeout=_source_request_timeout(deadline),
+                    stream=True,
+                    allow_redirects=False,
+                )
+        except requests.Timeout as exc:
+            raise AiBriefSourceProviderTimeoutError(
+                "source API request timed out"
+            ) from exc
+        except requests.RequestException as exc:
+            raise AiBriefSourceProviderError(
+                f"source API request failed: {_exception_type_name(exc)}"
+            ) from exc
 
-    if 300 <= response.status_code < 400:
-        _close_response(response)
-        raise AiBriefSourceProviderError(
-            f"source API redirect was not followed (HTTP {response.status_code})"
+        if 300 <= response.status_code < 400:
+            _close_response(response)
+            raise AiBriefSourceProviderError(
+                f"source API redirect was not followed (HTTP {response.status_code})"
+            )
+        if response.status_code >= 400:
+            _close_response(response)
+            raise AiBriefSourceProviderError(
+                f"source API request failed with HTTP {response.status_code}"
+            )
+        payload = _parse_source_api_response_payload(response, deadline=deadline)
+        report_issues = _normalize_source_report_issues(
+            payload,
+            issue_prefix="http_source",
+            issue_subject="http source",
+            eligible_tickers=eligible_tickers,
         )
-    if response.status_code >= 400:
-        _close_response(response)
-        raise AiBriefSourceProviderError(
-            f"source API request failed with HTTP {response.status_code}"
+        rows = payload.get("sources")
+        if not isinstance(rows, list):
+            raise AiBriefSourceProviderError(
+                "source API response sources must be a list"
+            )
+        result = _normalize_source_rows(
+            rows=rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="http_source",
+            issue_subject="http source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
         )
-    payload = _parse_source_api_response_payload(response, deadline=deadline)
-    report_issues = _normalize_source_report_issues(
-        payload,
-        issue_prefix="http_source",
-        issue_subject="http source",
-        eligible_tickers=eligible_tickers,
-    )
-    rows = payload.get("sources")
-    if not isinstance(rows, list):
-        raise AiBriefSourceProviderError("source API response sources must be a list")
-    result = _normalize_source_rows(
-        rows=rows,
-        eligible_tickers=eligible_tickers,
-        now=now,
-        issue_prefix="http_source",
-        issue_subject="http source",
-    )
-    return AiBriefSourceProviderResult(
-        sources_by_ticker=result.sources_by_ticker,
-        source_issues=[*report_issues, *result.source_issues],
-    )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=result.sources_by_ticker,
+            source_issues=[*report_issues, *result.source_issues],
+        )
+    finally:
+        _close_session(session)
 
 
 def _parse_source_api_response_payload(
@@ -208,7 +248,7 @@ def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
             ) from exc
         except requests.RequestException as exc:
             raise AiBriefSourceProviderError(
-                f"source API response body failed: {exc}"
+                f"source API response body failed: {_exception_type_name(exc)}"
             ) from exc
         finally:
             _close_response(response)
@@ -240,6 +280,24 @@ def _close_response(response: Any) -> None:
     close = getattr(response, "close", None)
     if callable(close):
         close()
+
+
+def _close_session(session: Any) -> None:
+    close = getattr(session, "close", None)
+    if callable(close):
+        close()
+
+
+def _remaining_source_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise AiBriefSourceProviderTimeoutError("source API request timed out")
+    return remaining
+
+
+def _source_request_timeout(deadline: float) -> tuple[float, float]:
+    remaining = _remaining_source_timeout(deadline)
+    return remaining, min(remaining, SOURCE_RESPONSE_READ_TIMEOUT_SECONDS)
 
 
 def _load_local_json_source_report(
@@ -288,6 +346,8 @@ def _normalize_source_rows(
     now: dt.datetime,
     issue_prefix: str,
     issue_subject: str,
+    source_url_deadline: float | None = None,
+    resolve_source_url_hostnames: bool = False,
 ) -> AiBriefSourceProviderResult:
     sources_by_ticker: dict[str, list[dict[str, object]]] = {}
     source_issues: list[dict[str, object]] = []
@@ -328,6 +388,8 @@ def _normalize_source_rows(
             now=now,
             issue_prefix=issue_prefix,
             issue_subject=issue_subject,
+            source_url_deadline=source_url_deadline,
+            resolve_source_url_hostnames=resolve_source_url_hostnames,
         )
         if issue is None:
             source_url = str(normalized.get("url") or "").strip()
@@ -474,6 +536,8 @@ def _normalize_source_row(
     now: dt.datetime,
     issue_prefix: str,
     issue_subject: str,
+    source_url_deadline: float | None,
+    resolve_source_url_hostnames: bool,
 ) -> tuple[dict[str, object], None] | tuple[dict[str, object], dict[str, object]]:
     title = str(row.get("title") or "").strip()
     url = str(row.get("url") or "").strip()
@@ -484,7 +548,11 @@ def _normalize_source_row(
             message=f"{issue_subject} row ignored because title is required",
         )
     try:
-        url = validate_ai_brief_source_url(url)
+        url = _validate_source_row_url(
+            url,
+            deadline=source_url_deadline,
+            resolve_hostname=resolve_source_url_hostnames,
+        )
     except ValueError as exc:
         return {}, _source_issue(
             ticker=ticker,
@@ -544,29 +612,89 @@ def validate_ai_brief_source_url(value: object, *, field_name: str = "url") -> s
         raise ValueError(f"{field_name} is required")
     if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in text):
         raise ValueError(f"{field_name} must not contain whitespace or control chars")
-    parsed = urlparse(text)
+    if "\\" in text:
+        raise ValueError(f"{field_name} must not contain backslashes")
+    try:
+        parsed = urlparse(text)
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
+    except ValueError as exc:
+        raise ValueError(f"{field_name} is invalid") from exc
     if parsed.scheme.lower() not in _ALLOWED_SOURCE_URL_SCHEMES:
         raise ValueError(f"{field_name} must use http or https")
-    if not parsed.netloc or not parsed.hostname:
+    if not parsed.netloc or not hostname:
         raise ValueError(f"{field_name} must include a hostname")
-    if (
-        "@" in parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
+    if "@" in parsed.netloc or username is not None or password is not None:
         raise ValueError(f"{field_name} must not include userinfo")
+    if "%" in parsed.netloc or "%" in hostname:
+        raise ValueError(f"{field_name} hostname must not contain percent escapes")
     return text
 
 
 def validate_ai_brief_source_api_url(value: object) -> str:
+    return _validate_source_api_request_url(value, deadline=None).url
+
+
+def _validate_source_row_url(
+    value: object,
+    *,
+    field_name: str = "url",
+    deadline: float | None = None,
+    resolve_hostname: bool = False,
+) -> str:
+    text = validate_ai_brief_source_url(value, field_name=field_name)
+    parsed = urlparse(text)
+    hostname = parsed.hostname or ""
+    port = _validated_url_port(parsed, field_name=field_name)
+    hostnames = _source_api_hostname_aliases(hostname)
+    if _is_blocked_source_row_hostname(hostname):
+        raise ValueError(f"{field_name} must not target local or private hosts")
+    if resolve_hostname:
+        hostnames = _source_api_fetch_hostname_aliases(hostname, field_name=field_name)
+        _resolve_public_source_addrinfos(
+            hostnames,
+            port,
+            field_name=field_name,
+            deadline=deadline,
+        )
+    return text
+
+
+def _validate_source_api_request_url(
+    value: object,
+    *,
+    deadline: float | None,
+) -> _ValidatedSourceApiUrl:
     text = validate_ai_brief_source_url(value, field_name="source API URL")
     parsed = urlparse(text)
     if parsed.scheme.lower() != "https":
         raise ValueError("source API URL must use https")
     hostname = parsed.hostname or ""
-    if _is_blocked_source_api_hostname(hostname):
-        raise ValueError("source API URL must not target local or private hosts")
-    return text
+    port = _validated_url_port(parsed, field_name="source API URL")
+    hostnames = _source_api_fetch_hostname_aliases(
+        hostname,
+        field_name="source API URL",
+    )
+    addrinfos = _resolve_source_api_addrinfos(hostnames, port, deadline=deadline)
+    return _ValidatedSourceApiUrl(
+        url=text,
+        hostnames=hostnames,
+        addrinfos=addrinfos,
+    )
+
+
+def _validated_url_port(parsed: Any, *, field_name: str) -> int:
+    try:
+        port_value = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{field_name} port is invalid") from exc
+    if port_value is None:
+        return 443 if parsed.scheme.lower() == "https" else 80
+    port = int(port_value)
+    if port <= 0:
+        raise ValueError(f"{field_name} port is invalid")
+    return port
 
 
 def _source_api_token_for_url(url: str) -> str:
@@ -574,44 +702,393 @@ def _source_api_token_for_url(url: str) -> str:
     configured_url = str(os.getenv("AI_BRIEF_SOURCE_API_URL") or "").strip()
     if not api_token or not configured_url:
         return ""
-    try:
-        configured_url = validate_ai_brief_source_api_url(configured_url)
-    except ValueError:
-        return ""
     return api_token if url == configured_url else ""
 
 
-def _is_blocked_source_api_hostname(hostname: str) -> bool:
-    normalized = hostname.strip().strip("[]").lower().rstrip(".")
-    if normalized in {"localhost", "ip6-localhost"} or normalized.endswith(
-        ".localhost"
+def _is_blocked_source_row_hostname(hostname: str) -> bool:
+    return any(
+        _is_local_source_api_hostname(alias) or _is_blocked_source_api_ip_text(alias)
+        for alias in _source_api_hostname_aliases(hostname)
+    )
+
+
+def _source_api_hostname_aliases(hostname: str) -> tuple[str, ...]:
+    normalized = _normalize_source_api_hostname(hostname)
+    aliases = [normalized]
+    for idna_hostname in (
+        _encode_source_api_idna_hostname(normalized, uts46=False),
+        _encode_source_api_idna_hostname(normalized, uts46=True),
     ):
-        return True
+        if idna_hostname is None:
+            continue
+        idna_hostname = _normalize_source_api_hostname(idna_hostname)
+        if idna_hostname and idna_hostname not in aliases:
+            aliases.append(idna_hostname)
+    return tuple(aliases)
+
+
+def _source_api_fetch_hostname_aliases(
+    hostname: str,
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    aliases = list(_source_api_hostname_aliases(hostname))
+    if any(
+        _is_local_source_api_hostname(alias) or _is_blocked_source_api_ip_text(alias)
+        for alias in aliases
+    ):
+        return tuple(aliases)
+    request_hostname = _encode_source_api_idna_hostname(
+        _normalize_source_api_hostname(hostname),
+        uts46=False,
+    )
+    if request_hostname is None:
+        raise ValueError(f"{field_name} hostname is invalid")
+    request_hostname = _normalize_source_api_hostname(request_hostname)
+    if request_hostname in aliases:
+        aliases.remove(request_hostname)
+    aliases.append(request_hostname)
+    return tuple(aliases)
+
+
+def _encode_source_api_idna_hostname(hostname: str, *, uts46: bool) -> str | None:
+    if hostname.isascii():
+        return hostname.lower()
     try:
-        return _is_blocked_source_api_ip(ipaddress.ip_address(normalized))
+        return idna.encode(
+            hostname.lower(),
+            strict=True,
+            std3_rules=True,
+            uts46=uts46,
+        ).decode("ascii")
+    except idna.IDNAError:
+        return None
+
+
+def _resolve_source_api_addrinfos(
+    hostnames: tuple[str, ...],
+    port: int,
+    *,
+    deadline: float | None,
+) -> tuple[Any, ...]:
+    return _resolve_public_source_addrinfos(
+        hostnames,
+        port,
+        field_name="source API URL",
+        deadline=deadline,
+    )
+
+
+def _resolve_public_source_addrinfos(
+    hostnames: tuple[str, ...],
+    port: int,
+    *,
+    field_name: str,
+    deadline: float | None,
+) -> tuple[Any, ...]:
+    if any(_is_local_source_api_hostname(hostname) for hostname in hostnames):
+        raise ValueError(f"{field_name} must not target local or private hosts")
+    if any(_is_blocked_source_api_ip_text(hostname) for hostname in hostnames):
+        raise ValueError(f"{field_name} must not target local or private hosts")
+    resolution_hostname = hostnames[-1] if hostnames else ""
+    try:
+        with _source_dns_pin_lock(deadline):
+            addrinfos = _getaddrinfo_with_timeout(
+                resolution_hostname,
+                port,
+                timeout=_source_dns_timeout(deadline),
+            )
+    except TimeoutError as exc:
+        raise AiBriefSourceProviderTimeoutError(
+            f"{field_name} DNS resolution timed out"
+        ) from exc
+    except OSError as exc:
+        raise ValueError(f"{field_name} hostname could not be resolved") from exc
+    if not addrinfos:
+        raise ValueError(f"{field_name} hostname could not be resolved")
+    if any(_is_blocked_source_api_addrinfo(addrinfo) for addrinfo in addrinfos):
+        raise ValueError(f"{field_name} must not target local or private hosts")
+    return tuple(addrinfos)
+
+
+def _getaddrinfo_with_timeout(
+    hostname: str,
+    port: int,
+    *,
+    timeout: float,
+) -> list[Any]:
+    if timeout <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    started_at = time.monotonic()
+    slots = _SOURCE_DNS_RESOLVER_SLOTS
+    if not slots.acquire(timeout=timeout):
+        raise TimeoutError("DNS resolver capacity exhausted")
+    resolver = socket.getaddrinfo
+    result_queue: queue.Queue[tuple[float, bool, Any]] = queue.Queue(maxsize=1)
+    remaining_timeout = timeout - (time.monotonic() - started_at)
+    if remaining_timeout <= 0:
+        slots.release()
+        raise TimeoutError("DNS resolution timed out")
+
+    def resolve() -> None:
+        try:
+            try:
+                result: tuple[bool, Any] = (
+                    True,
+                    resolver(
+                        hostname,
+                        port,
+                        type=socket.SOCK_STREAM,
+                    ),
+                )
+            except BaseException as exc:
+                result = (False, exc)
+            completed_at = time.monotonic()
+        finally:
+            slots.release()
+        success, value = result
+        result_queue.put((completed_at, success, value))
+
+    try:
+        thread = threading.Thread(
+            target=resolve,
+            name="ai-brief-source-dns",
+            daemon=True,
+        )
+        thread.start()
+    except BaseException:
+        slots.release()
+        raise
+    remaining_timeout = timeout - (time.monotonic() - started_at)
+    if remaining_timeout <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    try:
+        completed_at, success, value = result_queue.get(timeout=remaining_timeout)
+    except queue.Empty as exc:
+        raise TimeoutError("DNS resolution timed out") from exc
+    if completed_at - started_at > timeout:
+        raise TimeoutError("DNS resolution timed out")
+    if not success:
+        raise value
+    return cast(list[Any], value)
+
+
+def _source_dns_timeout(deadline: float | None) -> float:
+    timeout = SOURCE_ROW_DNS_TIMEOUT_SECONDS
+    if deadline is None:
+        return timeout
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    return min(timeout, remaining)
+
+
+@contextmanager
+def _pin_source_api_dns(
+    hostnames: tuple[str, ...],
+    addrinfos: tuple[Any, ...],
+    *,
+    deadline: float | None = None,
+) -> Iterator[None]:
+    hostname_set = set(hostnames)
+    expected_port = _addrinfo_port(addrinfos)
+
+    with _source_dns_pin_lock(deadline):
+        original_getaddrinfo = socket.getaddrinfo
+
+        def pinned_getaddrinfo(
+            host: bytes | str | None,
+            port: bytes | str | int | None,
+            family: int = 0,
+            type: int = 0,
+            proto: int = 0,
+            flags: int = 0,
+        ) -> list[Any]:
+            host_matches = _normalize_source_api_hostname(host) in hostname_set
+            port_matches = _dns_port_matches(port, expected_port)
+            if host_matches and port_matches:
+                matching_addrinfos = _filter_addrinfos(
+                    addrinfos,
+                    family=family,
+                    socket_type=type,
+                    proto=proto,
+                    flags=flags,
+                )
+                if matching_addrinfos:
+                    return matching_addrinfos
+                raise socket.gaierror(
+                    "pinned DNS result does not match requested parameters"
+                )
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+
+        socket.getaddrinfo = pinned_getaddrinfo  # type: ignore[assignment]
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo  # type: ignore[assignment]
+
+
+@contextmanager
+def _source_dns_pin_lock(deadline: float | None) -> Iterator[None]:
+    lock: Any = SOURCE_DNS_PIN_LOCK
+    if deadline is None or not hasattr(lock, "acquire") or not hasattr(lock, "release"):
+        with lock:
+            yield
+        return
+    timeout = _remaining_source_timeout(deadline)
+    if not lock.acquire(timeout=timeout):
+        raise AiBriefSourceProviderTimeoutError("source API DNS pin lock timed out")
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _is_blocked_source_api_addrinfo(addrinfo: object) -> bool:
+    try:
+        sockaddr = addrinfo[4]  # type: ignore[index]
+        ip_text = str(sockaddr[0])
+    except IndexError:
+        return True
+    except TypeError:
+        return True
+    except KeyError:
+        return True
+    return _is_blocked_source_api_ip_text(ip_text)
+
+
+def _addrinfo_port(addrinfos: tuple[Any, ...]) -> int | None:
+    try:
+        return int(addrinfos[0][4][1])
+    except IndexError:
+        return None
+    except TypeError:
+        return None
+    except KeyError:
+        return None
+    except ValueError:
+        return None
+
+
+def _dns_port_matches(
+    port: bytes | str | int | None, expected_port: int | None
+) -> bool:
+    if expected_port is None:
+        return False
+    if isinstance(port, bytes):
+        port = port.decode("ascii", errors="ignore")
+    try:
+        return int(str(port)) == expected_port
+    except ValueError:
+        return False
+
+
+def _filter_addrinfos(
+    addrinfos: tuple[Any, ...],
+    *,
+    family: int,
+    socket_type: int,
+    proto: int,
+    flags: int,
+) -> list[Any]:
+    if flags != 0:
+        return []
+    return [
+        addrinfo
+        for addrinfo in addrinfos
+        if _addrinfo_matches_request(
+            addrinfo,
+            family=family,
+            socket_type=socket_type,
+            proto=proto,
+        )
+    ]
+
+
+def _addrinfo_matches_request(
+    addrinfo: object,
+    *,
+    family: int,
+    socket_type: int,
+    proto: int,
+) -> bool:
+    addrinfo_any: Any = addrinfo
+    try:
+        addrinfo_family = int(addrinfo_any[0])
+        addrinfo_type = int(addrinfo_any[1])
+        addrinfo_proto = int(addrinfo_any[2])
+    except IndexError:
+        return False
+    except TypeError:
+        return False
+    except KeyError:
+        return False
+    except ValueError:
+        return False
+    return (
+        (family == 0 or addrinfo_family == 0 or int(family) == addrinfo_family)
+        and (
+            socket_type == 0 or addrinfo_type == 0 or int(socket_type) == addrinfo_type
+        )
+        and (proto == 0 or addrinfo_proto == 0 or int(proto) == addrinfo_proto)
+    )
+
+
+def _is_blocked_source_api_ip_text(value: str) -> bool:
+    try:
+        return _is_blocked_source_api_ip(ipaddress.ip_address(value))
     except ValueError:
         pass
     try:
-        addrinfos = socket.getaddrinfo(normalized, None, type=socket.SOCK_STREAM)
+        return _is_blocked_source_api_ip(ipaddress.IPv4Address(socket.inet_aton(value)))
     except OSError:
         return False
-    return any(
-        _is_blocked_source_api_ip(ipaddress.ip_address(addrinfo[4][0]))
-        for addrinfo in addrinfos
+
+
+def _is_local_source_api_hostname(normalized_hostname: str) -> bool:
+    return normalized_hostname in {"localhost", "ip6-localhost"} or (
+        normalized_hostname.endswith(".localhost")
     )
+
+
+def _normalize_source_api_hostname(hostname: object) -> str:
+    if isinstance(hostname, bytes):
+        hostname = hostname.decode("ascii", errors="ignore")
+    return str(hostname or "").strip().strip("[]").lower().rstrip(".")
+
+
+def _exception_type_name(exc: BaseException) -> str:
+    return type(exc).__name__
 
 
 def _is_blocked_source_api_ip(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> bool:
-    return (
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_reserved
-        or address.is_unspecified
-    )
+    if address.is_multicast or not address.is_global:
+        return True
+    if isinstance(address, ipaddress.IPv6Address):
+        return any(
+            _is_blocked_source_api_ip(embedded_address)
+            for embedded_address in _embedded_source_api_ipv4_addresses(address)
+        )
+    return False
+
+
+def _embedded_source_api_ipv4_addresses(
+    address: ipaddress.IPv6Address,
+) -> tuple[ipaddress.IPv4Address, ...]:
+    embedded_addresses: list[ipaddress.IPv4Address] = []
+    if address.ipv4_mapped is not None:
+        embedded_addresses.append(address.ipv4_mapped)
+    if address.sixtofour is not None:
+        embedded_addresses.append(address.sixtofour)
+    if address.teredo is not None:
+        embedded_addresses.extend(address.teredo)
+    if address in _NAT64_WELL_KNOWN_PREFIX:
+        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    if address in _IPV4_COMPATIBLE_IPV6_PREFIX and int(address) > 0xFFFF:
+        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return tuple(embedded_addresses)
 
 
 def is_ai_brief_source_stale(
