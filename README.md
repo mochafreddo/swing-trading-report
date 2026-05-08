@@ -101,7 +101,7 @@
 - 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
 - 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
 - RSS/Atom/RDF source payload 생성(개발용, 로컬 파일 또는 live HTTPS feed URL catalog): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
-- 캡처한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
+- 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
 ### 4. 웹 UI 빠른 시작
@@ -149,9 +149,9 @@
   - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
   - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
   - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
-  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`을 포함해야 하며, source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다.
-  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. URL은 HTTPS여야 하며 local/private host는 거부합니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`은 실행 URL이 `AI_BRIEF_SOURCE_API_URL`과 정확히 일치할 때만 Bearer 토큰으로 전송합니다.
-  - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
+  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`을 포함해야 하며, offline 경로라 DNS 조회 없이 literal local/private IP와 localhost만 거부합니다. source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다.
+  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. API URL은 HTTPS여야 하며 local/private host와 redirect 응답은 거부합니다. 반환된 source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없습니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`은 실행 URL이 `AI_BRIEF_SOURCE_API_URL`과 정확히 일치할 때만 Bearer 토큰으로 전송합니다.
+  - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. 로컬 feed 파일은 offline으로 처리하고 item URL의 literal local/private IP와 localhost만 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, live item URL도 DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
   - source provider timeout/HTTP/JSON 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
@@ -226,7 +226,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 캡처한 AI Brief source payload 품질 평가 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 
 ## 작업 자동화 (just + direnv)
 

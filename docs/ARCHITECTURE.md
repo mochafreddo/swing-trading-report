@@ -109,8 +109,9 @@ flowchart LR
 4. source provider는 `none`, `local-json`, `http-json`을 지원합니다.
    - `local-json`은 로컬 source report의 `sources[]`를 preselected `ENTER` 후보에만 붙입니다.
    - `http-json`은 외부 source API에 `schema`, `tickers`, `max_sources_per_ticker`, `freshness_hours`를 POST하고, 응답의 `sources[]`를 같은 계약으로 정규화해 preselected 후보에만 붙입니다.
+   - `local-json`/`http-json` source row URL은 HTTP(S), hostname, freshness/future-time, cap 검증을 통과해야 합니다. `local-json`과 source eval은 offline 계약을 지키기 위해 DNS 조회 없이 literal local/private IP와 localhost를 거부하고, `http-json` 응답 row는 DNS 검증까지 적용해 local/private host를 거부합니다.
    - source row의 ticker가 후보 집합에 없거나 source가 stale/미래 시간/invalid URL이면 source issue로 기록하고 모델 입력에서 제외합니다.
-   - `scripts/collect_ai_brief_sources.py`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` payload로 변환하는 외부 source API 보조 경로입니다. live URL은 HTTPS, userinfo 금지, local/private host 차단, redirect 거부, 1MB body 제한을 적용하고, HTTP/timeout/invalid feed는 ticker별 WARN issue로 격리합니다.
+   - `scripts/collect_ai_brief_sources.py`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` payload로 변환하는 외부 source API 보조 경로입니다. 로컬 feed 파일은 offline으로 item URL의 literal local/private IP와 localhost만 거부하고, live URL은 HTTPS, userinfo 금지, DNS 기반 local/private host 차단, redirect 거부, 1MB body 제한을 적용합니다. HTTP/timeout/invalid feed는 ticker별 WARN issue로 격리합니다.
    - 수집한 `http-json` 호환 payload는 `scripts/eval_ai_brief_sources.py`로 오프라인 평가할 수 있으며, scheduled production source 주입은 계속 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json` 경로를 사용합니다. 유료/벤더별 JSON API adapter는 SAB 내부 SDK가 아니라 이 외부 API 경계 뒤에서 수행하는 후속 작업입니다.
 5. 모델 provider는 `fake`와 `openai`를 지원합니다.
    - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
@@ -272,7 +273,7 @@ flowchart LR
   - `fake` provider는 외부 기사/모델 판단을 포함하지 않습니다.
   - `openai` provider는 OpenAI Responses API로 모델 판단을 수행하지만, 후보 ticker를 추가하거나 `REVIEW`/`SKIP` 행을 추천으로 승격할 수 없습니다.
   - `local-json` source provider는 로컬 source report를 모델 입력 context로 붙이지만, 후보 ticker를 추가할 수 없습니다.
-  - `http-json` source provider는 외부 source API를 호출하지만, 반환 row도 동일한 ticker universe/freshness/future-time/HTTP(S) URL/cap 검증을 통과해야 모델 입력에 들어갑니다.
+  - `http-json` source provider는 외부 source API를 호출하지만, 반환 row도 동일한 ticker universe/freshness/future-time/HTTP(S) URL/local-private host/cap 검증을 통과해야 모델 입력에 들어갑니다.
   - RSS/Atom/RDF 로컬 파일/live HTTPS feed 변환 도구는 source API payload 제작/검증을 위한 보조 경로이며, runtime provider 종류를 늘리지 않습니다.
   - 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 Storage, `report_index`, 웹 Reports UI와 연동됩니다.
