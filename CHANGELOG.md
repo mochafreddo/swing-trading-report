@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.0...v1.22.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **web:** postcss 취약 버전 해소 ([55ec0a7](https://github.com/mochafreddo/swing-trading-report/commit/55ec0a7f22d0729d24f195d569ee2533cc984f22))
+
 ## [1.22.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.21.1...v1.22.0) (2026-05-08)
 
 
