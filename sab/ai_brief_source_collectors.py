@@ -2,27 +2,34 @@ from __future__ import annotations
 
 import datetime as dt
 import email.utils
+import ipaddress
 import json
 import math
+import queue
+import socket
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.parsers import expat
 
+import idna
 import requests  # type: ignore[import-untyped]
 
 from .ai_brief_sources import (
     MAX_SOURCES_PER_TICKER,
+    SOURCE_DNS_PIN_LOCK,
     SOURCE_FRESHNESS_HOURS,
     SOURCE_FUTURE_SKEW_MINUTES,
     SOURCE_REPORT_SCHEMA,
     SOURCE_REPORT_TYPE,
     is_ai_brief_source_future,
     is_ai_brief_source_stale,
-    validate_ai_brief_source_api_url,
     validate_ai_brief_source_url,
 )
 
@@ -30,6 +37,12 @@ SOURCE_FEED_CATALOG_SCHEMA = "sab.ai_brief_source_feed_catalog.v1"
 MAX_FEED_CATALOG_BYTES = 1_000_000
 MAX_FEED_BYTES = 1_000_000
 DEFAULT_FEED_TIMEOUT_SECONDS = 10.0
+FEED_ITEM_DNS_TIMEOUT_SECONDS = 1.0
+FEED_DNS_RESOLVER_WORKERS = 4
+FEED_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
+_FEED_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(FEED_DNS_RESOLVER_WORKERS)
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+_IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
 
 AiBriefSourceCollectStatus = Literal["PASS", "WARN"]
 
@@ -111,6 +124,13 @@ class _FeedSourceRow:
     published_at: dt.datetime
 
 
+@dataclass(frozen=True)
+class _ValidatedFeedUrl:
+    url: str
+    hostnames: tuple[str, ...]
+    addrinfos: tuple[Any, ...]
+
+
 def collect_ai_brief_sources(
     *,
     feed_catalog_path: str,
@@ -154,6 +174,8 @@ def collect_ai_brief_sources(
             )
             continue
         ticker = str(raw_feed.get("ticker") or "").strip()
+        if requested_tickers and (not ticker or ticker not in requested_tickers):
+            continue
         feed_path_text = _first_non_empty_text(
             raw_feed.get("path"),
             raw_feed.get("feed_path"),
@@ -173,8 +195,6 @@ def collect_ai_brief_sources(
                     ),
                 )
             )
-            continue
-        if requested_tickers and ticker not in requested_tickers:
             continue
         seen_catalog_tickers.add(ticker)
 
@@ -276,11 +296,189 @@ def _display_feed_path(feed_path: Path) -> str:
     return feed_path.name or "<feed>"
 
 
-def _validate_feed_url(value: object) -> str:
+def _validate_feed_url(
+    value: object,
+    *,
+    deadline: float | None = None,
+) -> _ValidatedFeedUrl:
     try:
-        return validate_ai_brief_source_api_url(value)
+        url = validate_ai_brief_source_url(value, field_name="feed URL")
     except ValueError as exc:
-        raise ValueError(str(exc).replace("source API URL", "feed URL")) from exc
+        raise ValueError(str(exc)) from exc
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("feed URL must use https")
+    port = _validated_url_port(parsed, field_name="feed URL")
+    hostname = parsed.hostname or ""
+    hostnames = _feed_url_fetch_hostname_aliases(hostname, field_name="feed URL")
+    addrinfos = _resolve_feed_url_addrinfos(hostnames, port, deadline=deadline)
+    return _ValidatedFeedUrl(
+        url=url,
+        hostnames=hostnames,
+        addrinfos=addrinfos,
+    )
+
+
+def _validated_url_port(parsed: Any, *, field_name: str) -> int:
+    try:
+        port_value = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{field_name} port is invalid") from exc
+    if port_value is None:
+        return 443 if parsed.scheme.lower() == "https" else 80
+    port = int(port_value)
+    if port <= 0:
+        raise ValueError(f"{field_name} port is invalid")
+    return port
+
+
+def _feed_url_hostname_aliases(hostname: str) -> tuple[str, ...]:
+    normalized = _normalize_host_for_local_checks(hostname)
+    aliases = [normalized]
+    for idna_hostname in (
+        _encode_feed_idna_hostname(normalized, uts46=False),
+        _encode_feed_idna_hostname(normalized, uts46=True),
+    ):
+        if idna_hostname is None:
+            continue
+        idna_hostname = _normalize_host_for_local_checks(idna_hostname)
+        if idna_hostname and idna_hostname not in aliases:
+            aliases.append(idna_hostname)
+    return tuple(aliases)
+
+
+def _feed_url_fetch_hostname_aliases(
+    hostname: str,
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    aliases = list(_feed_url_hostname_aliases(hostname))
+    if any(_is_blocked_feed_url_hostname(alias) for alias in aliases):
+        return tuple(aliases)
+    request_hostname = _encode_feed_idna_hostname(
+        _normalize_host_for_local_checks(hostname),
+        uts46=False,
+    )
+    if request_hostname is None:
+        raise ValueError(f"{field_name} hostname is invalid")
+    request_hostname = _normalize_host_for_local_checks(request_hostname)
+    if request_hostname in aliases:
+        aliases.remove(request_hostname)
+    aliases.append(request_hostname)
+    return tuple(aliases)
+
+
+def _encode_feed_idna_hostname(hostname: str, *, uts46: bool) -> str | None:
+    if hostname.isascii():
+        return hostname.lower()
+    try:
+        return idna.encode(
+            hostname.lower(),
+            strict=True,
+            std3_rules=True,
+            uts46=uts46,
+        ).decode("ascii")
+    except idna.IDNAError:
+        return None
+
+
+def _resolve_feed_url_addrinfos(
+    hostnames: tuple[str, ...],
+    port: int,
+    *,
+    deadline: float | None,
+) -> tuple[Any, ...]:
+    if any(_is_blocked_feed_url_hostname(hostname) for hostname in hostnames):
+        raise ValueError("feed URL must not target local or private hosts")
+    resolution_hostname = hostnames[-1] if hostnames else ""
+    try:
+        with _feed_dns_pin_lock(deadline):
+            addrinfos = _getaddrinfo_with_timeout(
+                resolution_hostname,
+                port,
+                timeout=_feed_dns_timeout(deadline),
+            )
+    except TimeoutError as exc:
+        raise _FeedUrlTimeoutError("feed URL DNS resolution timed out") from exc
+    except OSError as exc:
+        raise ValueError("feed URL hostname could not be resolved") from exc
+    if not addrinfos:
+        raise ValueError("feed URL hostname could not be resolved")
+    if any(_is_blocked_feed_addrinfo(addrinfo) for addrinfo in addrinfos):
+        raise ValueError("feed URL must not target local or private hosts")
+    return tuple(addrinfos)
+
+
+def _getaddrinfo_with_timeout(
+    hostname: str,
+    port: int,
+    *,
+    timeout: float,
+) -> list[Any]:
+    if timeout <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    started_at = time.monotonic()
+    slots = _FEED_DNS_RESOLVER_SLOTS
+    if not slots.acquire(timeout=timeout):
+        raise TimeoutError("DNS resolver capacity exhausted")
+    resolver = socket.getaddrinfo
+    result_queue: queue.Queue[tuple[float, bool, Any]] = queue.Queue(maxsize=1)
+    remaining_timeout = timeout - (time.monotonic() - started_at)
+    if remaining_timeout <= 0:
+        slots.release()
+        raise TimeoutError("DNS resolution timed out")
+
+    def resolve() -> None:
+        try:
+            try:
+                result: tuple[bool, Any] = (
+                    True,
+                    resolver(
+                        hostname,
+                        port,
+                        type=socket.SOCK_STREAM,
+                    ),
+                )
+            except BaseException as exc:
+                result = (False, exc)
+            completed_at = time.monotonic()
+        finally:
+            slots.release()
+        success, value = result
+        result_queue.put((completed_at, success, value))
+
+    try:
+        thread = threading.Thread(
+            target=resolve,
+            name="ai-brief-feed-dns",
+            daemon=True,
+        )
+        thread.start()
+    except BaseException:
+        slots.release()
+        raise
+    remaining_timeout = timeout - (time.monotonic() - started_at)
+    if remaining_timeout <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    try:
+        completed_at, success, value = result_queue.get(timeout=remaining_timeout)
+    except queue.Empty as exc:
+        raise TimeoutError("DNS resolution timed out") from exc
+    if completed_at - started_at > timeout:
+        raise TimeoutError("DNS resolution timed out")
+    if not success:
+        raise value
+    return cast(list[Any], value)
+
+
+def _feed_dns_timeout(deadline: float | None) -> float:
+    timeout = FEED_ITEM_DNS_TIMEOUT_SECONDS
+    if deadline is None:
+        return timeout
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("DNS resolution timed out")
+    return min(timeout, remaining)
 
 
 def _load_feed_rows(
@@ -330,6 +528,8 @@ def _load_feed_rows(
         root=root,
         empty_issue_code="feed_file_empty",
         empty_issue_message="feed ignored because it contains no entries",
+        source_url_deadline=None,
+        resolve_source_url_hostnames=False,
     )
 
 
@@ -339,8 +539,17 @@ def _load_feed_url_rows(
     feed_url_text: str,
     feed_timeout_seconds: float,
 ) -> tuple[list[_FeedSourceRow], list[AiBriefSourceCollectIssue]]:
+    deadline = time.monotonic() + feed_timeout_seconds
     try:
-        feed_url = _validate_feed_url(feed_url_text)
+        feed_url = _validate_feed_url(feed_url_text, deadline=deadline)
+    except _FeedUrlTimeoutError as exc:
+        return [], [
+            AiBriefSourceCollectIssue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL request timed out: {exc}",
+            )
+        ]
     except ValueError as exc:
         return [], [
             AiBriefSourceCollectIssue(
@@ -350,100 +559,127 @@ def _load_feed_url_rows(
             )
         ]
 
-    deadline = time.monotonic() + feed_timeout_seconds
+    session = requests.Session()
+    session.trust_env = False
     try:
-        response = requests.Session().get(
-            feed_url,
-            timeout=feed_timeout_seconds,
-            stream=True,
-            allow_redirects=False,
+        try:
+            with _pin_feed_url_dns(
+                feed_url.hostnames,
+                feed_url.addrinfos,
+                deadline=deadline,
+            ):
+                response = session.get(
+                    feed_url.url,
+                    timeout=_feed_request_timeout(deadline),
+                    stream=True,
+                    allow_redirects=False,
+                )
+        except requests.Timeout as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_timeout",
+                    message=f"feed URL request timed out: {_exception_type_name(exc)}",
+                )
+            ]
+        except _FeedUrlTimeoutError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_timeout",
+                    message=f"feed URL request timed out: {exc}",
+                )
+            ]
+        except requests.RequestException as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_failed",
+                    message=f"feed URL request failed: {_exception_type_name(exc)}",
+                )
+            ]
+
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        if 300 <= status_code < 400:
+            _close_response(response)
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_redirect",
+                    message=f"feed URL redirect was not followed (HTTP {status_code})",
+                )
+            ]
+        if status_code >= 400:
+            _close_response(response)
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_failed",
+                    message=f"feed URL request failed with HTTP {status_code}",
+                )
+            ]
+
+        try:
+            root = _parse_feed_response_root(response, deadline=deadline)
+        except _FeedFileTooLargeError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_too_large",
+                    message=f"feed URL ignored because body is too large: {exc}",
+                )
+            ]
+        except _FeedUrlTimeoutError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_timeout",
+                    message=f"feed URL response body timed out: {exc}",
+                )
+            ]
+        except _UnsafeFeedXmlError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_unsafe_xml",
+                    message=f"feed URL ignored because XML is unsafe: {exc}",
+                )
+            ]
+        except _FeedUrlFetchError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_failed",
+                    message=f"feed URL response body failed: {exc}",
+                )
+            ]
+        except ET.ParseError as exc:
+            return [], [
+                AiBriefSourceCollectIssue(
+                    ticker=ticker,
+                    code="feed_url_failed",
+                    message=f"failed to parse feed URL response: {exc}",
+                )
+            ]
+
+        return _rows_from_feed_root(
+            ticker=ticker,
+            root=root,
+            empty_issue_code="feed_url_empty",
+            empty_issue_message="feed URL ignored because it contains no entries",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
         )
-    except requests.Timeout as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_timeout",
-                message=f"feed URL request timed out: {exc}",
-            )
-        ]
-    except requests.RequestException as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_failed",
-                message=f"feed URL request failed: {exc}",
-            )
-        ]
-
-    status_code = int(getattr(response, "status_code", 0) or 0)
-    if 300 <= status_code < 400:
-        _close_response(response)
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_redirect",
-                message=f"feed URL redirect was not followed (HTTP {status_code})",
-            )
-        ]
-    if status_code >= 400:
-        _close_response(response)
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_failed",
-                message=f"feed URL request failed with HTTP {status_code}",
-            )
-        ]
-
-    try:
-        root = _parse_feed_response_root(response, deadline=deadline)
-    except _FeedFileTooLargeError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_too_large",
-                message=f"feed URL ignored because body is too large: {exc}",
-            )
-        ]
     except _FeedUrlTimeoutError as exc:
         return [], [
             AiBriefSourceCollectIssue(
                 ticker=ticker,
                 code="feed_url_timeout",
-                message=f"feed URL response body timed out: {exc}",
+                message=f"feed URL response item URL timed out: {exc}",
             )
         ]
-    except _UnsafeFeedXmlError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_unsafe_xml",
-                message=f"feed URL ignored because XML is unsafe: {exc}",
-            )
-        ]
-    except _FeedUrlFetchError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_failed",
-                message=f"feed URL response body failed: {exc}",
-            )
-        ]
-    except ET.ParseError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_failed",
-                message=f"failed to parse feed URL response: {exc}",
-            )
-        ]
-
-    return _rows_from_feed_root(
-        ticker=ticker,
-        root=root,
-        empty_issue_code="feed_url_empty",
-        empty_issue_message="feed URL ignored because it contains no entries",
-    )
+    finally:
+        _close_session(session)
 
 
 def _rows_from_feed_root(
@@ -452,6 +688,8 @@ def _rows_from_feed_root(
     root: ET.Element,
     empty_issue_code: str,
     empty_issue_message: str,
+    source_url_deadline: float | None,
+    resolve_source_url_hostnames: bool,
 ) -> tuple[list[_FeedSourceRow], list[AiBriefSourceCollectIssue]]:
     root_name = _local_name(root.tag).lower()
     if root_name in {"rss", "rdf"}:
@@ -481,9 +719,21 @@ def _rows_from_feed_root(
         )
     for idx, raw_entry in enumerate(raw_entries):
         if feed_kind == "rss":
-            parsed, issue = _parse_rss_item(ticker, idx, raw_entry)
+            parsed, issue = _parse_rss_item(
+                ticker,
+                idx,
+                raw_entry,
+                source_url_deadline=source_url_deadline,
+                resolve_source_url_hostnames=resolve_source_url_hostnames,
+            )
         else:
-            parsed, issue = _parse_atom_entry(ticker, idx, raw_entry)
+            parsed, issue = _parse_atom_entry(
+                ticker,
+                idx,
+                raw_entry,
+                source_url_deadline=source_url_deadline,
+                resolve_source_url_hostnames=resolve_source_url_hostnames,
+            )
         if issue is not None:
             issues.append(issue)
             continue
@@ -534,7 +784,7 @@ def _read_bounded_feed_response_body(response: object, *, deadline: float) -> by
         except requests.Timeout as exc:
             raise _FeedUrlTimeoutError("feed response body timed out") from exc
         except requests.RequestException as exc:
-            raise _FeedUrlFetchError(str(exc)) from exc
+            raise _FeedUrlFetchError(_exception_type_name(exc)) from exc
         finally:
             _close_response(response)
         return b"".join(chunks)
@@ -562,6 +812,291 @@ def _close_response(response: object) -> None:
     close = getattr(response, "close", None)
     if callable(close):
         close()
+
+
+def _close_session(session: object) -> None:
+    close = getattr(session, "close", None)
+    if callable(close):
+        close()
+
+
+def _remaining_feed_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _FeedUrlTimeoutError("feed URL request timed out")
+    return remaining
+
+
+def _feed_request_timeout(deadline: float) -> tuple[float, float]:
+    remaining = _remaining_feed_timeout(deadline)
+    return remaining, min(remaining, FEED_RESPONSE_READ_TIMEOUT_SECONDS)
+
+
+@contextmanager
+def _pin_feed_url_dns(
+    hostnames: tuple[str, ...],
+    addrinfos: tuple[Any, ...],
+    *,
+    deadline: float | None = None,
+) -> Iterator[None]:
+    hostname_set = set(hostnames)
+    expected_port = _addrinfo_port(addrinfos)
+
+    with _feed_dns_pin_lock(deadline):
+        original_getaddrinfo = socket.getaddrinfo
+
+        def pinned_getaddrinfo(
+            host: bytes | str | None,
+            port: bytes | str | int | None,
+            family: int = 0,
+            type: int = 0,
+            proto: int = 0,
+            flags: int = 0,
+        ) -> list[Any]:
+            host_matches = _normalize_host_for_local_checks(host) in hostname_set
+            port_matches = _dns_port_matches(port, expected_port)
+            if host_matches and port_matches:
+                matching_addrinfos = _filter_addrinfos(
+                    addrinfos,
+                    family=family,
+                    socket_type=type,
+                    proto=proto,
+                    flags=flags,
+                )
+                if matching_addrinfos:
+                    return matching_addrinfos
+                raise socket.gaierror(
+                    "pinned DNS result does not match requested parameters"
+                )
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+
+        socket.getaddrinfo = pinned_getaddrinfo  # type: ignore[assignment]
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo  # type: ignore[assignment]
+
+
+@contextmanager
+def _feed_dns_pin_lock(deadline: float | None) -> Iterator[None]:
+    lock: Any = SOURCE_DNS_PIN_LOCK
+    if deadline is None or not hasattr(lock, "acquire") or not hasattr(lock, "release"):
+        with lock:
+            yield
+        return
+    timeout = _remaining_feed_timeout(deadline)
+    if not lock.acquire(timeout=timeout):
+        raise _FeedUrlTimeoutError("feed URL DNS pin lock timed out")
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _exception_type_name(exc: BaseException) -> str:
+    return type(exc).__name__
+
+
+def _validate_feed_item_url(
+    value: object,
+    *,
+    deadline: float | None = None,
+    resolve_hostname: bool = False,
+) -> str:
+    url = validate_ai_brief_source_url(value)
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    port = _validated_url_port(parsed, field_name="url")
+    hostnames = _feed_url_hostname_aliases(hostname)
+    if _is_blocked_feed_item_hostname(hostname):
+        raise ValueError("url must not target local or private hosts")
+    if resolve_hostname:
+        hostnames = _feed_url_fetch_hostname_aliases(hostname, field_name="url")
+        _resolve_feed_item_addrinfos(hostnames, port, deadline=deadline)
+    return url
+
+
+def _resolve_feed_item_addrinfos(
+    hostnames: tuple[str, ...],
+    port: int,
+    *,
+    deadline: float | None,
+) -> tuple[Any, ...]:
+    if any(_is_blocked_feed_url_hostname(hostname) for hostname in hostnames):
+        raise ValueError("url must not target local or private hosts")
+    resolution_hostname = hostnames[-1] if hostnames else ""
+    try:
+        with _feed_dns_pin_lock(deadline):
+            addrinfos = _getaddrinfo_with_timeout(
+                resolution_hostname,
+                port,
+                timeout=_feed_dns_timeout(deadline),
+            )
+    except TimeoutError as exc:
+        raise _FeedUrlTimeoutError("feed item URL DNS resolution timed out") from exc
+    except OSError as exc:
+        raise ValueError("url hostname could not be resolved") from exc
+    if not addrinfos:
+        raise ValueError("url hostname could not be resolved")
+    if any(_is_blocked_feed_addrinfo(addrinfo) for addrinfo in addrinfos):
+        raise ValueError("url must not target local or private hosts")
+    return tuple(addrinfos)
+
+
+def _is_blocked_feed_item_hostname(hostname: str) -> bool:
+    return any(
+        _is_local_hostname(alias) or _is_blocked_ip_text(alias)
+        for alias in _feed_url_hostname_aliases(hostname)
+    )
+
+
+def _is_blocked_feed_url_hostname(normalized_hostname: str) -> bool:
+    return _is_local_hostname(normalized_hostname) or _is_blocked_ip_text(
+        normalized_hostname
+    )
+
+
+def _is_blocked_feed_addrinfo(addrinfo: object) -> bool:
+    try:
+        sockaddr = cast(Any, addrinfo)[4]
+        ip_text = str(sockaddr[0])
+    except IndexError:
+        return True
+    except TypeError:
+        return True
+    except KeyError:
+        return True
+    return _is_blocked_ip_text(ip_text)
+
+
+def _addrinfo_port(addrinfos: tuple[Any, ...]) -> int | None:
+    try:
+        return int(addrinfos[0][4][1])
+    except IndexError:
+        return None
+    except TypeError:
+        return None
+    except KeyError:
+        return None
+    except ValueError:
+        return None
+
+
+def _dns_port_matches(
+    port: bytes | str | int | None, expected_port: int | None
+) -> bool:
+    if expected_port is None:
+        return False
+    if isinstance(port, bytes):
+        port = port.decode("ascii", errors="ignore")
+    try:
+        return int(str(port)) == expected_port
+    except ValueError:
+        return False
+
+
+def _filter_addrinfos(
+    addrinfos: tuple[Any, ...],
+    *,
+    family: int,
+    socket_type: int,
+    proto: int,
+    flags: int,
+) -> list[Any]:
+    if flags != 0:
+        return []
+    return [
+        addrinfo
+        for addrinfo in addrinfos
+        if _addrinfo_matches_request(
+            addrinfo,
+            family=family,
+            socket_type=socket_type,
+            proto=proto,
+        )
+    ]
+
+
+def _addrinfo_matches_request(
+    addrinfo: object,
+    *,
+    family: int,
+    socket_type: int,
+    proto: int,
+) -> bool:
+    addrinfo_any = cast(Any, addrinfo)
+    try:
+        addrinfo_family = int(addrinfo_any[0])
+        addrinfo_type = int(addrinfo_any[1])
+        addrinfo_proto = int(addrinfo_any[2])
+    except IndexError:
+        return False
+    except TypeError:
+        return False
+    except KeyError:
+        return False
+    except ValueError:
+        return False
+    return (
+        (family == 0 or addrinfo_family == 0 or int(family) == addrinfo_family)
+        and (
+            socket_type == 0 or addrinfo_type == 0 or int(socket_type) == addrinfo_type
+        )
+        and (proto == 0 or addrinfo_proto == 0 or int(proto) == addrinfo_proto)
+    )
+
+
+def _is_blocked_ip_text(value: str) -> bool:
+    try:
+        return _is_blocked_ip(ipaddress.ip_address(value))
+    except ValueError:
+        pass
+    try:
+        return _is_blocked_ip(ipaddress.IPv4Address(socket.inet_aton(value)))
+    except OSError:
+        return False
+
+
+def _is_blocked_ip(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    if address.is_multicast or not address.is_global:
+        return True
+    if isinstance(address, ipaddress.IPv6Address):
+        return any(
+            _is_blocked_ip(embedded_address)
+            for embedded_address in _embedded_ipv4_addresses(address)
+        )
+    return False
+
+
+def _embedded_ipv4_addresses(
+    address: ipaddress.IPv6Address,
+) -> tuple[ipaddress.IPv4Address, ...]:
+    embedded_addresses: list[ipaddress.IPv4Address] = []
+    if address.ipv4_mapped is not None:
+        embedded_addresses.append(address.ipv4_mapped)
+    if address.sixtofour is not None:
+        embedded_addresses.append(address.sixtofour)
+    if address.teredo is not None:
+        embedded_addresses.extend(address.teredo)
+    if address in _NAT64_WELL_KNOWN_PREFIX:
+        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    if address in _IPV4_COMPATIBLE_IPV6_PREFIX and int(address) > 0xFFFF:
+        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return tuple(embedded_addresses)
+
+
+def _is_local_hostname(normalized_hostname: str) -> bool:
+    return normalized_hostname in {"localhost", "ip6-localhost"} or (
+        normalized_hostname.endswith(".localhost")
+    )
+
+
+def _normalize_host_for_local_checks(hostname: object) -> str:
+    if isinstance(hostname, bytes):
+        hostname = hostname.decode("ascii", errors="ignore")
+    return str(hostname or "").strip().strip("[]").lower().rstrip(".")
 
 
 def _reject_unsafe_xml_declarations(data: bytes) -> None:
@@ -603,6 +1138,9 @@ def _parse_rss_item(
     ticker: str,
     idx: int,
     item: ET.Element,
+    *,
+    source_url_deadline: float | None,
+    resolve_source_url_hostnames: bool,
 ) -> tuple[_FeedSourceRow, None] | tuple[None, AiBriefSourceCollectIssue]:
     title = _first_child_text(item, "title")
     url = _first_child_text(item, "link")
@@ -618,6 +1156,8 @@ def _parse_rss_item(
         title=title,
         url=url,
         published_text=published_text,
+        source_url_deadline=source_url_deadline,
+        resolve_source_url_hostnames=resolve_source_url_hostnames,
     )
 
 
@@ -625,6 +1165,9 @@ def _parse_atom_entry(
     ticker: str,
     idx: int,
     entry: ET.Element,
+    *,
+    source_url_deadline: float | None,
+    resolve_source_url_hostnames: bool,
 ) -> tuple[_FeedSourceRow, None] | tuple[None, AiBriefSourceCollectIssue]:
     published_text = _first_child_text(entry, "published") or _first_child_text(
         entry, "updated"
@@ -635,6 +1178,8 @@ def _parse_atom_entry(
         title=_first_child_text(entry, "title"),
         url=_atom_entry_url(entry),
         published_text=published_text,
+        source_url_deadline=source_url_deadline,
+        resolve_source_url_hostnames=resolve_source_url_hostnames,
     )
 
 
@@ -659,6 +1204,8 @@ def _build_feed_row(
     title: str,
     url: str,
     published_text: str,
+    source_url_deadline: float | None,
+    resolve_source_url_hostnames: bool,
 ) -> tuple[_FeedSourceRow, None] | tuple[None, AiBriefSourceCollectIssue]:
     if not title or not url or not published_text:
         return None, AiBriefSourceCollectIssue(
@@ -670,7 +1217,11 @@ def _build_feed_row(
             ),
         )
     try:
-        url = validate_ai_brief_source_url(url)
+        url = _validate_feed_item_url(
+            url,
+            deadline=source_url_deadline,
+            resolve_hostname=resolve_source_url_hostnames,
+        )
     except ValueError as exc:
         return None, AiBriefSourceCollectIssue(
             ticker=ticker,
@@ -747,7 +1298,7 @@ def _normalize_feed_rows(
                     AiBriefSourceCollectIssue(
                         ticker=ticker,
                         code="feed_item_duplicate_url",
-                        message=f"duplicate feed item URL ignored: {row.url}",
+                        message="duplicate feed item URL ignored",
                     )
                 )
                 continue

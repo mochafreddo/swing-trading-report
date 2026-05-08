@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sab import ai_brief_sources
 from sab.ai_brief_source_eval import evaluate_ai_brief_source_report, parse_eval_now
 from scripts.eval_ai_brief_sources import main as eval_sources_main
 
@@ -33,6 +34,24 @@ def test_source_eval_passes_good_payload() -> None:
     assert result.summary["coverage_ratio"] == 1.0
     assert result.summary["source_count"] == 3
     assert result.issues == []
+
+
+def test_source_eval_does_not_resolve_source_row_hostnames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        raise AssertionError("source eval should stay offline")
+
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", fail_getaddrinfo)
+
+    result = evaluate_ai_brief_source_report(
+        entry_report_path=_fixture("entry.us.json"),
+        source_report_path=_fixture("sources.good.json"),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.summary["covered_ticker_count"] == 3
 
 
 def test_source_eval_fails_when_coverage_is_below_default_threshold() -> None:

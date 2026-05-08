@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sab import ai_brief_sources
 from sab.__main__ import main
 from sab.ai_brief import FakeAiBriefProvider, run_ai_brief
 from sab.ai_brief_sources import (
@@ -18,6 +20,36 @@ from sab.ai_brief_sources import (
 
 def _fresh_published_at() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+
+
+def _assert_timeout_tuple_not_expired(
+    timeout: object,
+    *,
+    requested_timeout_seconds: float,
+) -> None:
+    assert isinstance(timeout, tuple)
+    connect_timeout, read_timeout = timeout
+    assert isinstance(connect_timeout, float)
+    assert isinstance(read_timeout, float)
+    assert 0 < connect_timeout <= requested_timeout_seconds
+    assert read_timeout == pytest.approx(min(connect_timeout, 1.0), abs=0.01)
+
+
+@pytest.fixture(autouse=True)
+def _mock_source_api_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", 443),
+            )
+        ],
+    )
 
 
 def _entry_row(
@@ -729,10 +761,15 @@ class _HttpJsonSourceSession:
         self.payload = payload
         self.status_code = status_code
         self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
 
     def post(self, url: str, **kwargs: object) -> _JsonResponse:
         self.calls.append({"url": url, **kwargs})
         return _JsonResponse(self.payload, status_code=self.status_code)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _HttpJsonSourceTimeoutSession:
@@ -823,6 +860,34 @@ class _TimeoutStreamingHttpJsonSourceSession:
         return self.response
 
 
+class _FailingStreamingHttpJsonSourceResponse:
+    status_code = 200
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        assert chunk_size == 64 * 1024
+        raise ai_brief_sources.requests.exceptions.ChunkedEncodingError(
+            "bad chunk for /api?token=secret-token"
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FailingStreamingHttpJsonSourceSession:
+    def __init__(self) -> None:
+        self.response = _FailingStreamingHttpJsonSourceResponse()
+
+    def post(
+        self, *args: object, **kwargs: object
+    ) -> _FailingStreamingHttpJsonSourceResponse:
+        return self.response
+
+
 def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -860,7 +925,10 @@ def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_r
     )
 
     assert session.calls[0]["url"] == "https://source.example/api"
-    assert session.calls[0]["timeout"] == 4.5
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
     assert session.calls[0]["allow_redirects"] is False
     assert session.calls[0]["json"] == {
         "schema": "sab.ai_brief_source_request.v1",
@@ -877,6 +945,348 @@ def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_r
     assert [issue["code"] for issue in result.source_issues] == [
         "http_source_unknown_ticker"
     ]
+
+
+def test_load_ai_brief_sources_http_json_preserves_report_issues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "source_api_partial",
+                    "severity": "WARN",
+                    "message": "eligible ticker diagnostic",
+                },
+                {
+                    "ticker": "MSFT.NAS",
+                    "code": "source_api_unrelated",
+                    "severity": "WARN",
+                    "message": "ineligible ticker diagnostic",
+                },
+            ],
+            "issues": [
+                {
+                    "ticker": None,
+                    "code": "source_api_global",
+                    "severity": "INFO",
+                    "message": "global diagnostic",
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "source_api_partial",
+            "severity": "WARN",
+            "message": "eligible ticker diagnostic",
+        },
+        {
+            "ticker": None,
+            "code": "source_api_global",
+            "severity": "INFO",
+            "message": "global diagnostic",
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://localhost/internal",
+        "http://127.1/latest",
+        "http://2130706433/latest",
+        "http://0x7f000001/latest",
+        "http://2852039166/latest",
+        "http://[64:ff9b::a9fe:a9fe]/latest",
+        "http://224.0.0.1/latest",
+        "http://[ff02::1]/latest",
+        "http://[::ffff:224.0.0.1]/latest",
+        "http://[64:ff9b::e000:1]/latest",
+        "http://[::7f00:1]/latest",
+        "http://127\u30020\u30020\u30021/latest",
+        "http://\uff11\uff12\uff17.\uff11/latest",
+        "http://\uff10x\uff17f\uff10\uff10\uff10\uff10\uff10\uff11/latest",
+    ],
+)
+def test_load_ai_brief_sources_http_json_rejects_private_source_row_url(
+    monkeypatch: pytest.MonkeyPatch,
+    source_url: str,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Internal metadata",
+                    "url": source_url,
+                    "published_at": now.isoformat(),
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "http_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "http source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://localhost/internal",
+        "http://127.1/latest",
+        "http://2130706433/latest",
+        "http://0x7f000001/latest",
+        "http://2852039166/latest",
+        "http://[64:ff9b::a9fe:a9fe]/latest",
+        "http://224.0.0.1/latest",
+        "http://[ff02::1]/latest",
+        "http://[::ffff:224.0.0.1]/latest",
+        "http://[64:ff9b::e000:1]/latest",
+        "http://[::7f00:1]/latest",
+        "http://127\u30020\u30020\u30021/latest",
+        "http://\uff11\uff12\uff17.\uff11/latest",
+        "http://\uff10x\uff17f\uff10\uff10\uff10\uff10\uff10\uff11/latest",
+    ],
+)
+def test_load_ai_brief_sources_local_json_rejects_private_source_row_url(
+    tmp_path: Path,
+    source_url: str,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    path = _write_source_report(
+        tmp_path,
+        sources=[
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Internal metadata",
+                "url": source_url,
+                "published_at": now.isoformat(),
+            }
+        ],
+    )
+
+    result = load_ai_brief_sources(
+        source_provider="local-json",
+        source_report_path=path.as_posix(),
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "local_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "local source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_rejects_source_row_hostname_resolving_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Private resolving source",
+                    "url": "https://news.example.test/source",
+                    "published_at": now.isoformat(),
+                }
+            ]
+        }
+    )
+
+    def selective_getaddrinfo(
+        host: object,
+        port: object,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[object]:
+        host_text = host.decode("ascii") if isinstance(host, bytes) else str(host)
+        port_int = port if isinstance(port, int) else int(str(port))
+        resolved_ip = (
+            "169.254.169.254" if host_text == "news.example.test" else "93.184.216.34"
+        )
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                (resolved_ip, port_int),
+            )
+        ]
+
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        selective_getaddrinfo,
+    )
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "http_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "http source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_reports_unresolved_http_source_row_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _HttpJsonSourceSession(
+        {
+            "sources": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "title": "Unresolved source",
+                    "url": "https://news.example.test/source",
+                    "published_at": now.isoformat(),
+                }
+            ]
+        }
+    )
+
+    def selective_getaddrinfo(
+        host: object,
+        port: object,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[object]:
+        host_text = host.decode("ascii") if isinstance(host, bytes) else str(host)
+        port_int = port if isinstance(port, int) else int(str(port))
+        if host_text == "news.example.test":
+            raise ai_brief_sources.socket.gaierror("no such host")
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", port_int),
+            )
+        ]
+
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        selective_getaddrinfo,
+    )
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "http_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "http source row ignored because url hostname could not be resolved"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_redacts_malformed_source_row_url(
+    tmp_path: Path,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    path = _write_source_report(
+        tmp_path,
+        sources=[
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Malformed source",
+                "url": "https://secret-token@ex\u2100ample.test/source",
+                "published_at": now.isoformat(),
+            }
+        ],
+    )
+
+    result = load_ai_brief_sources(
+        source_provider="local-json",
+        source_report_path=path.as_posix(),
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    message = str(result.source_issues[0]["message"])
+    assert "invalid" in message
+    assert "secret-token" not in message
+    assert "ex" not in message
 
 
 def test_load_ai_brief_sources_http_json_sends_token_only_for_configured_url(
@@ -918,6 +1328,47 @@ def test_load_ai_brief_sources_http_json_sends_token_only_for_configured_url(
     other_headers = other_session.calls[0]["headers"]
     assert isinstance(other_headers, dict)
     assert "Authorization" not in other_headers
+
+
+def test_load_ai_brief_sources_token_match_does_not_repeat_dns_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    lookup_count = 0
+
+    def one_shot_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count > 1:
+            raise ai_brief_sources.socket.gaierror("unexpected token DNS lookup")
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", 443),
+            )
+        ]
+
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_TOKEN", "source-token")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/api")
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", one_shot_getaddrinfo)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    headers = session.calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Authorization"] == "Bearer source-token"
+    assert lookup_count == 1
 
 
 @pytest.mark.parametrize(
@@ -965,11 +1416,48 @@ def test_load_ai_brief_sources_rejects_source_api_url_userinfo_before_post(
     assert session.calls == []
 
 
+def test_load_ai_brief_sources_redacts_malformed_source_api_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    malformed_url = "https://secret-token@ex\u2100ample.test/api"
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url=malformed_url,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "invalid" in message
+    assert "secret-token" not in message
+    assert "ex" not in message
+    assert session.calls == []
+
+
 @pytest.mark.parametrize(
     ("url", "message"),
     [
         ("http://source.example/api", "https"),
+        ("https://%31%32%37.0.0.1/api", "percent escapes"),
+        ("https:\\\\127.0.0.1\\api", "backslashes"),
         ("https://127.0.0.1/api", "local or private"),
+        ("https://127.1/api", "local or private"),
+        ("https://2130706433/api", "local or private"),
+        ("https://0x7f000001/api", "local or private"),
+        ("https://2852039166/api", "local or private"),
+        ("https://100.64.0.1/api", "local or private"),
+        ("https://[64:ff9b::a9fe:a9fe]/api", "local or private"),
+        ("https://224.0.0.1/api", "local or private"),
+        ("https://[ff02::1]/api", "local or private"),
+        ("https://[::ffff:224.0.0.1]/api", "local or private"),
+        ("https://[64:ff9b::e000:1]/api", "local or private"),
+        ("https://[::7f00:1]/api", "local or private"),
         ("https://localhost/api", "local or private"),
     ],
 )
@@ -992,6 +1480,846 @@ def test_load_ai_brief_sources_rejects_unsafe_source_api_url_before_post(
         )
 
     assert session.calls == []
+
+
+def test_load_ai_brief_sources_rejects_zero_source_api_port_before_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="port"):
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example:0/api",
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_rejects_source_api_hostname_resolving_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("10.0.0.9", 443))],
+    )
+
+    with pytest.raises(AiBriefSourceProviderError, match="local or private"):
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example/api",
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+
+
+def test_load_ai_brief_sources_rejects_unresolved_source_api_hostname_before_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+
+    def unresolved_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        raise ai_brief_sources.socket.gaierror("no such host")
+
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.socket.getaddrinfo",
+        unresolved_getaddrinfo,
+    )
+
+    with pytest.raises(AiBriefSourceProviderError, match="could not be resolved"):
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example/api",
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+
+
+def test_load_ai_brief_sources_source_api_dns_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    session = _HttpJsonSourceSession({"sources": []})
+
+    def slow_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        time.sleep(0.05)
+        return [(0, 0, 0, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.socket.getaddrinfo",
+        slow_getaddrinfo,
+    )
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="DNS"):
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example/api",
+            source_timeout_seconds=0.001,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+
+
+def test_load_ai_brief_sources_pins_source_api_dns_resolution_during_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    fresh = (now - dt.timedelta(hours=1)).isoformat()
+    lookup_count = 0
+
+    def rebinding_getaddrinfo(*_args, **_kwargs):
+        nonlocal lookup_count
+        hostname = _args[0].decode("ascii") if isinstance(_args[0], bytes) else _args[0]
+        if "news.example" in str(hostname):
+            resolved_ip = "93.184.216.34"
+        else:
+            lookup_count += 1
+            resolved_ip = "93.184.216.34" if lookup_count == 1 else "10.0.0.9"
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                (resolved_ip, 443),
+            )
+        ]
+
+    class _ResolvingHttpJsonSourceSession(_HttpJsonSourceSession):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    "sources": [
+                        {
+                            "ticker": "AAPL.NAS",
+                            "title": "Apple source",
+                            "url": "https://news.example/aapl",
+                            "published_at": fresh,
+                        }
+                    ]
+                }
+            )
+            self.resolved_ips: list[str] = []
+
+        def post(self, url: str, **kwargs: object) -> _JsonResponse:
+            addrinfos = ai_brief_sources.socket.getaddrinfo(
+                b"source.example",
+                443,
+                type=ai_brief_sources.socket.SOCK_STREAM,
+            )
+            self.resolved_ips = [str(addrinfo[4][0]) for addrinfo in addrinfos]
+            return super().post(url, **kwargs)
+
+    session = _ResolvingHttpJsonSourceSession()
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", rebinding_getaddrinfo)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert session.resolved_ips == ["93.184.216.34"]
+    assert result.sources_by_ticker["AAPL.NAS"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+
+
+def test_load_ai_brief_sources_pins_source_api_idna_dns_alias_during_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    fresh = (now - dt.timedelta(hours=1)).isoformat()
+    source_host = "sourc\N{LATIN SMALL LETTER U WITH DIAERESIS}.example"
+    source_api_url = f"https://{source_host}/api"
+    idna_host = "xn--sourc-ova.example"
+    lookup_count = 0
+
+    def rebinding_getaddrinfo(*_args, **_kwargs):
+        nonlocal lookup_count
+        hostname = _args[0].decode("ascii") if isinstance(_args[0], bytes) else _args[0]
+        if "news.example" in str(hostname):
+            resolved_ip = "93.184.216.34"
+        else:
+            lookup_count += 1
+            resolved_ip = "93.184.216.34" if lookup_count == 1 else "10.0.0.9"
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                (resolved_ip, 443),
+            )
+        ]
+
+    class _ResolvingHttpJsonSourceSession(_HttpJsonSourceSession):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    "sources": [
+                        {
+                            "ticker": "AAPL.NAS",
+                            "title": "Apple source",
+                            "url": "https://news.example/aapl",
+                            "published_at": fresh,
+                        }
+                    ]
+                }
+            )
+            self.resolved_ips: list[str] = []
+
+        def post(self, url: str, **kwargs: object) -> _JsonResponse:
+            addrinfos = ai_brief_sources.socket.getaddrinfo(
+                idna_host.encode("ascii"),
+                443,
+                type=ai_brief_sources.socket.SOCK_STREAM,
+            )
+            self.resolved_ips = [str(addrinfo[4][0]) for addrinfo in addrinfos]
+            return super().post(url, **kwargs)
+
+    session = _ResolvingHttpJsonSourceSession()
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", rebinding_getaddrinfo)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url=source_api_url,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert session.resolved_ips == ["93.184.216.34"]
+    assert result.sources_by_ticker["AAPL.NAS"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+
+
+def test_load_ai_brief_sources_pins_source_api_idna2008_dns_alias_during_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    fresh = (now - dt.timedelta(hours=1)).isoformat()
+    source_host = "fa\N{LATIN SMALL LETTER SHARP S}.example"
+    source_api_url = f"https://{source_host}/api"
+    idna_host = "xn--fa-hia.example"
+    lookup_count = 0
+
+    def rebinding_getaddrinfo(*_args, **_kwargs):
+        nonlocal lookup_count
+        hostname = _args[0].decode("ascii") if isinstance(_args[0], bytes) else _args[0]
+        if "news.example" in str(hostname):
+            resolved_ip = "93.184.216.34"
+        else:
+            lookup_count += 1
+            resolved_ip = "93.184.216.34" if lookup_count == 1 else "10.0.0.9"
+        return [
+            (
+                ai_brief_sources.socket.AF_INET,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                (resolved_ip, 443),
+            )
+        ]
+
+    class _ResolvingHttpJsonSourceSession(_HttpJsonSourceSession):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    "sources": [
+                        {
+                            "ticker": "AAPL.NAS",
+                            "title": "Apple source",
+                            "url": "https://news.example/aapl",
+                            "published_at": fresh,
+                        }
+                    ]
+                }
+            )
+            self.resolved_ips: list[str] = []
+
+        def post(self, url: str, **kwargs: object) -> _JsonResponse:
+            addrinfos = ai_brief_sources.socket.getaddrinfo(
+                idna_host.encode("ascii"),
+                443,
+                type=ai_brief_sources.socket.SOCK_STREAM,
+            )
+            self.resolved_ips = [str(addrinfo[4][0]) for addrinfo in addrinfos]
+            return super().post(url, **kwargs)
+
+    session = _ResolvingHttpJsonSourceSession()
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", rebinding_getaddrinfo)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url=source_api_url,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert session.resolved_ips == ["93.184.216.34"]
+    assert result.sources_by_ticker["AAPL.NAS"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+
+
+def test_validate_source_api_url_resolves_after_dns_pin_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def original_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        return [(0, 0, 0, "", ("93.184.216.34", 443))]
+
+    def stale_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        return [(0, 0, 0, "", ("10.0.0.9", 443))]
+
+    class _RestoringLock:
+        def __enter__(self) -> None:
+            monkeypatch.setattr(
+                ai_brief_sources.socket,
+                "getaddrinfo",
+                original_getaddrinfo,
+            )
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        stale_getaddrinfo,
+    )
+    monkeypatch.setattr(ai_brief_sources, "SOURCE_DNS_PIN_LOCK", _RestoringLock())
+
+    assert (
+        ai_brief_sources.validate_ai_brief_source_api_url("https://source.example/api")
+        == "https://source.example/api"
+    )
+
+
+def test_nested_source_dns_pin_is_reentrant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def public_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        return [(0, 0, 0, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        public_getaddrinfo,
+    )
+
+    with ai_brief_sources._pin_source_api_dns(
+        ("source.example",),
+        ((0, 0, 0, "", ("93.184.216.34", 443)),),
+    ):
+        assert (
+            ai_brief_sources.validate_ai_brief_source_api_url(
+                "https://source.example/api"
+            )
+            == "https://source.example/api"
+        )
+
+    assert ai_brief_sources.socket.getaddrinfo is public_getaddrinfo
+
+
+def test_source_dns_pin_delegates_same_host_different_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def original_getaddrinfo(
+        _host: object,
+        port: object,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[object]:
+        port_int = port if isinstance(port, int) else int(str(port))
+        return [(0, 0, 0, "", ("198.51.100.9", port_int))]
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        original_getaddrinfo,
+    )
+
+    with ai_brief_sources._pin_source_api_dns(
+        ("source.example",),
+        ((0, 0, 0, "", ("93.184.216.34", 443)),),
+    ):
+        pinned_addrinfos = ai_brief_sources.socket.getaddrinfo("source.example", 443)
+        delegated_addrinfos = ai_brief_sources.socket.getaddrinfo(
+            "source.example", 8443
+        )
+
+    assert pinned_addrinfos == [(0, 0, 0, "", ("93.184.216.34", 443))]
+    assert delegated_addrinfos == [(0, 0, 0, "", ("198.51.100.9", 8443))]
+    assert ai_brief_sources.socket.getaddrinfo is original_getaddrinfo
+
+
+def test_source_dns_pin_delegates_same_host_same_port_different_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def original_getaddrinfo(
+        host: object,
+        port: object,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[object]:
+        calls.append(host)
+        port_int = port if isinstance(port, int) else int(str(port))
+        return [
+            (
+                ai_brief_sources.socket.AF_INET6,
+                ai_brief_sources.socket.SOCK_STREAM,
+                0,
+                "",
+                ("2001:db8::9", port_int, 0, 0),
+            )
+        ]
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        original_getaddrinfo,
+    )
+
+    with (
+        ai_brief_sources._pin_source_api_dns(
+            ("source.example",),
+            (
+                (
+                    ai_brief_sources.socket.AF_INET,
+                    ai_brief_sources.socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("93.184.216.34", 443),
+                ),
+            ),
+        ),
+        pytest.raises(ai_brief_sources.socket.gaierror),
+    ):
+        ai_brief_sources.socket.getaddrinfo(
+            "source.example",
+            443,
+            family=ai_brief_sources.socket.AF_INET6,
+            type=ai_brief_sources.socket.SOCK_STREAM,
+        )
+
+    assert calls == []
+    assert ai_brief_sources.socket.getaddrinfo is original_getaddrinfo
+
+
+def test_source_dns_pin_rejects_same_host_same_port_nonzero_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def original_getaddrinfo(
+        host: object,
+        port: object,
+        *_args: object,
+        **_kwargs: object,
+    ) -> list[object]:
+        calls.append(host)
+        port_int = port if isinstance(port, int) else int(str(port))
+        return [(0, 0, 0, "", ("10.0.0.9", port_int))]
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        original_getaddrinfo,
+    )
+
+    with (
+        ai_brief_sources._pin_source_api_dns(
+            ("source.example",),
+            (
+                (
+                    ai_brief_sources.socket.AF_INET,
+                    ai_brief_sources.socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("93.184.216.34", 443),
+                ),
+            ),
+        ),
+        pytest.raises(ai_brief_sources.socket.gaierror),
+    ):
+        ai_brief_sources.socket.getaddrinfo(
+            "source.example",
+            443,
+            family=ai_brief_sources.socket.AF_INET,
+            type=ai_brief_sources.socket.SOCK_STREAM,
+            flags=1,
+        )
+
+    assert calls == []
+    assert ai_brief_sources.socket.getaddrinfo is original_getaddrinfo
+
+
+def test_source_dns_resolver_waits_for_slot_within_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingSlots:
+        def __init__(self) -> None:
+            self.acquire_calls: list[tuple[bool, float | None]] = []
+
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            self.acquire_calls.append((blocking, timeout))
+            return True
+
+        def release(self) -> None:
+            pass
+
+    slots = _RecordingSlots()
+    monkeypatch.setattr(ai_brief_sources, "_SOURCE_DNS_RESOLVER_SLOTS", slots)
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+
+    addrinfos = ai_brief_sources._getaddrinfo_with_timeout(
+        "source.example",
+        443,
+        timeout=0.5,
+    )
+
+    assert addrinfos == [(0, 0, 0, "", ("93.184.216.34", 443))]
+    assert slots.acquire_calls == [(True, 0.5)]
+
+
+def test_source_dns_resolver_releases_slot_when_thread_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingSlots:
+        def __init__(self) -> None:
+            self.release_count = 0
+
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            return True
+
+        def release(self) -> None:
+            self.release_count += 1
+
+    class _FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread unavailable")
+
+    slots = _RecordingSlots()
+    monkeypatch.setattr(ai_brief_sources, "_SOURCE_DNS_RESOLVER_SLOTS", slots)
+    monkeypatch.setattr(ai_brief_sources.threading, "Thread", _FailingThread)
+
+    with pytest.raises(RuntimeError, match="thread unavailable"):
+        ai_brief_sources._getaddrinfo_with_timeout(
+            "source.example",
+            443,
+            timeout=0.5,
+        )
+
+    assert slots.release_count == 1
+
+
+def test_source_dns_resolver_does_not_start_thread_when_slot_wait_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingSlots:
+        def __init__(self) -> None:
+            self.release_count = 0
+
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            return True
+
+        def release(self) -> None:
+            self.release_count += 1
+
+    class _UnexpectedThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("resolver thread should not start after timeout")
+
+    slots = _RecordingSlots()
+    monotonic_values = iter([0.0, 0.6])
+    monkeypatch.setattr(ai_brief_sources, "_SOURCE_DNS_RESOLVER_SLOTS", slots)
+    monkeypatch.setattr(
+        ai_brief_sources.time, "monotonic", lambda: next(monotonic_values)
+    )
+    monkeypatch.setattr(ai_brief_sources.threading, "Thread", _UnexpectedThread)
+
+    with pytest.raises(TimeoutError):
+        ai_brief_sources._getaddrinfo_with_timeout(
+            "source.example",
+            443,
+            timeout=0.5,
+        )
+
+    assert slots.release_count == 1
+
+
+def test_source_dns_resolver_rejects_result_completed_after_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingSlots:
+        def __init__(self) -> None:
+            self.release_count = 0
+
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            return True
+
+        def release(self) -> None:
+            self.release_count += 1
+
+    class _SynchronousThread:
+        def __init__(self, *, target, **_kwargs: object) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    slots = _RecordingSlots()
+    monotonic_values = iter([0.0, 0.0, 0.6, 0.6])
+    monkeypatch.setattr(ai_brief_sources, "_SOURCE_DNS_RESOLVER_SLOTS", slots)
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(
+        ai_brief_sources.time, "monotonic", lambda: next(monotonic_values)
+    )
+    monkeypatch.setattr(ai_brief_sources.threading, "Thread", _SynchronousThread)
+
+    with pytest.raises(TimeoutError):
+        ai_brief_sources._getaddrinfo_with_timeout(
+            "source.example",
+            443,
+            timeout=0.5,
+        )
+
+    assert slots.release_count == 1
+
+
+def test_source_dns_resolver_late_completion_releases_acquired_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingSlots:
+        def __init__(self, released: threading.Event) -> None:
+            self.released = released
+            self.release_count = 0
+
+        def acquire(
+            self,
+            blocking: bool = True,
+            timeout: float | None = None,
+        ) -> bool:
+            return True
+
+        def release(self) -> None:
+            self.release_count += 1
+            self.released.set()
+
+    class _UnexpectedSlots:
+        def release(self) -> None:
+            raise AssertionError("late resolver released the replacement slots")
+
+    resolver_started = threading.Event()
+    release_resolver = threading.Event()
+    slot_released = threading.Event()
+
+    def gated_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+        resolver_started.set()
+        release_resolver.wait(timeout=1.0)
+        return [(0, 0, 0, "", ("93.184.216.34", 443))]
+
+    slots = _RecordingSlots(slot_released)
+    monkeypatch.setattr(ai_brief_sources, "_SOURCE_DNS_RESOLVER_SLOTS", slots)
+    monkeypatch.setattr(ai_brief_sources.socket, "getaddrinfo", gated_getaddrinfo)
+
+    with pytest.raises(TimeoutError):
+        ai_brief_sources._getaddrinfo_with_timeout(
+            "source.example",
+            443,
+            timeout=0.001,
+        )
+
+    assert resolver_started.wait(timeout=1.0)
+    monkeypatch.setattr(
+        ai_brief_sources,
+        "_SOURCE_DNS_RESOLVER_SLOTS",
+        _UnexpectedSlots(),
+    )
+    release_resolver.set()
+
+    assert slot_released.wait(timeout=1.0)
+    assert slots.release_count == 1
+
+
+def test_load_ai_brief_sources_uses_remaining_timeout_for_source_api_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 0.75, 0.75])
+    monkeypatch.setattr(
+        ai_brief_sources.time,
+        "monotonic",
+        lambda: next(monotonic_values, 0.75),
+    )
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=1.0,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    timeout = session.calls[0]["timeout"]
+    assert isinstance(timeout, tuple)
+    assert timeout == pytest.approx((0.25, 0.25))
+
+
+def test_load_ai_brief_sources_disables_proxy_env_and_closes_http_json_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    assert session.trust_env is False
+    assert session.closed is True
+
+
+def test_load_ai_brief_sources_redacts_source_api_request_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_api_url = "https://source.example/api?token=secret-token"
+
+    class _FailingHttpJsonSourceSession:
+        def post(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "Max retries exceeded with url: /api?token=secret-token"
+            )
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingHttpJsonSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url=source_api_url,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "secret-token" not in message
+    assert "/api" not in message
+
+
+def test_load_ai_brief_sources_redacts_source_api_timeout_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_api_url = "https://source.example/api?token=secret-token"
+
+    class _TimeoutHttpJsonSourceSession:
+        def post(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.Timeout(
+                "Read timed out for /api?token=secret-token"
+            )
+
+    monkeypatch.setattr(
+        ai_brief_sources.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _TimeoutHttpJsonSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url=source_api_url,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "secret-token" not in message
+    assert "/api" not in message
 
 
 def test_load_ai_brief_sources_closes_http_error_response(
@@ -1055,7 +2383,7 @@ def test_load_ai_brief_sources_rejects_http_json_body_after_total_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _SlowStreamingHttpJsonSourceSession()
-    times = iter([0.0, 2.0])
+    times = iter([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 2.0])
     monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
     monkeypatch.setattr(
         "sab.ai_brief_sources.time.monotonic",
@@ -1091,6 +2419,29 @@ def test_load_ai_brief_sources_converts_streaming_body_timeout(
             now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
         )
 
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_redacts_streaming_body_request_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FailingStreamingHttpJsonSourceSession()
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="http-json",
+            source_report_path=None,
+            source_api_url="https://source.example/api?token=secret-token",
+            source_timeout_seconds=1.0,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ChunkedEncodingError" in message
+    assert "secret-token" not in message
+    assert "/api" not in message
     assert session.response.closed is True
 
 
