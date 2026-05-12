@@ -6,6 +6,10 @@ import { POST as logoutPost } from "@/app/api/auth/logout/route";
 import { ADMIN_SESSION_COOKIE_NAME } from "@/lib/admin-session";
 import { __resetLoginThrottleForTests } from "@/lib/login-throttle";
 
+function stubSessionSecret(): void {
+  vi.stubEnv("SAB_SESSION_SECRET", "x".repeat(32));
+}
+
 afterEach(() => {
   __resetLoginThrottleForTests();
   vi.unstubAllEnvs();
@@ -16,7 +20,7 @@ describe("auth routes", () => {
   it("sets signed session cookie on successful login", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
 
     const request = new NextRequest("http://localhost:55300/api/auth/login", {
       method: "POST",
@@ -41,7 +45,7 @@ describe("auth routes", () => {
   it("returns 401 JSON on login failure", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
 
     const request = new NextRequest("http://localhost:55300/api/auth/login", {
       method: "POST",
@@ -61,7 +65,7 @@ describe("auth routes", () => {
   it("returns 429 after repeated failed login attempts", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     vi.stubEnv("SAB_LOGIN_MAX_ATTEMPTS", "2");
     vi.stubEnv("SAB_LOGIN_WINDOW_SECONDS", "900");
     vi.stubEnv("SAB_LOGIN_BLOCK_SECONDS", "60");
@@ -92,7 +96,7 @@ describe("auth routes", () => {
   it("applies global throttle across different usernames", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     vi.stubEnv("SAB_LOGIN_MAX_ATTEMPTS", "2");
     vi.stubEnv("SAB_LOGIN_WINDOW_SECONDS", "900");
     vi.stubEnv("SAB_LOGIN_BLOCK_SECONDS", "60");
@@ -119,7 +123,7 @@ describe("auth routes", () => {
   it("does not double-count when username matches global sentinel", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     vi.stubEnv("SAB_LOGIN_MAX_ATTEMPTS", "2");
     vi.stubEnv("SAB_LOGIN_WINDOW_SECONDS", "900");
     vi.stubEnv("SAB_LOGIN_BLOCK_SECONDS", "60");
@@ -146,7 +150,7 @@ describe("auth routes", () => {
   it("keeps global throttle enforced under username spray beyond key cap", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     vi.stubEnv("SAB_LOGIN_MAX_ATTEMPTS", "513");
     vi.stubEnv("SAB_LOGIN_WINDOW_SECONDS", "900");
     vi.stubEnv("SAB_LOGIN_BLOCK_SECONDS", "60");
@@ -188,7 +192,7 @@ describe("auth routes", () => {
     vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

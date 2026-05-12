@@ -16,6 +16,10 @@ function makeRequest(cookieValue?: string): { headers: Headers } {
   return { headers };
 }
 
+function stubSessionSecret(): void {
+  vi.stubEnv("SAB_SESSION_SECRET", "x".repeat(32));
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -32,7 +36,7 @@ describe("admin-auth", () => {
   it("accepts valid session cookie", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const credentialVersion = await getAdminCredentialVersion();
     const token = await createAdminSessionToken({ credentialVersion });
 
@@ -44,7 +48,7 @@ describe("admin-auth", () => {
   it("rejects missing session cookie", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
 
     await expect(requireAdminAuth(makeRequest())).rejects.toThrow(
       AdminAuthError,
@@ -54,7 +58,7 @@ describe("admin-auth", () => {
   it("rejects invalid session cookie", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
 
     await expect(
       requireAdminAuth(makeRequest("sab_admin_session=bad-token")),
@@ -64,7 +68,7 @@ describe("admin-auth", () => {
   it("rejects old session when password changes", async () => {
     vi.stubEnv("SAB_BASIC_AUTH_USER", "sab");
     vi.stubEnv("SAB_BASIC_AUTH_PASS", "pass");
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const credentialVersion = await getAdminCredentialVersion();
     const token = await createAdminSessionToken({ credentialVersion });
 

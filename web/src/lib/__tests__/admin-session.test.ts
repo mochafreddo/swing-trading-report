@@ -10,13 +10,17 @@ import {
   verifyAdminSessionToken,
 } from "@/lib/admin-session";
 
+function stubSessionSecret(): void {
+  vi.stubEnv("SAB_SESSION_SECRET", "x".repeat(32));
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe("admin-session", () => {
   it("creates and verifies signed session token", async () => {
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const credentialVersion = await buildAdminCredentialVersion("sab", "pass");
     const token = await createAdminSessionToken({
       credentialVersion,
@@ -29,7 +33,7 @@ describe("admin-session", () => {
   });
 
   it("rejects tampered session token", async () => {
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const credentialVersion = await buildAdminCredentialVersion("sab", "pass");
     const token = await createAdminSessionToken({ credentialVersion });
     const tampered = `${token}x`;
@@ -40,7 +44,7 @@ describe("admin-session", () => {
   });
 
   it("rejects expired session token", async () => {
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const issuedAt = 1_700_000_000_000;
     const credentialVersion = await buildAdminCredentialVersion("sab", "pass");
     const token = await createAdminSessionToken({
@@ -55,7 +59,7 @@ describe("admin-session", () => {
   });
 
   it("rejects token when credential version mismatches", async () => {
-    vi.stubEnv("SAB_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    stubSessionSecret();
     const tokenVersion = await buildAdminCredentialVersion("sab", "pass");
     const otherVersion = await buildAdminCredentialVersion("sab", "next-pass");
     const token = await createAdminSessionToken({
