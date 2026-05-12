@@ -207,6 +207,12 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - If strategy logic changes, including signals, risk, evaluation criteria, or mode-specific rules, update [STRATEGY.md](docs/STRATEGY.md) with it.
 - If logic, flow, or component responsibilities change, evaluate whether [ARCHITECTURE.md](docs/ARCHITECTURE.md) should also be updated.
 
+### Release Automation
+
+- Release Please owns `.release-please-manifest.json`, `CHANGELOG.md`, `pyproject.toml`, and `web/package.json` release bumps after feature PRs land.
+- Do not pre-bump Release Please-owned files in feature PRs. If a release is recovered manually, create the matching GitHub release/tag for the manifest version before allowing Release Please to run again.
+- When Release Please updates `pyproject.toml`, refresh `uv.lock` with `UV_CACHE_DIR=.uv-cache uv lock` before merging the release PR.
+
 ### Pre-commit (Sandbox)
 
 - Recommended: `just precommit-all`
