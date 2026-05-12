@@ -158,6 +158,8 @@ If exceeding these targets is clearer or better aligned with repository conventi
 ### Execution Priority
 
 - Toolchain sync: `mise install`
+- If `just ...` fails because `pnpm` is not on `PATH`, rerun through mise:
+  `mise exec -- just ...` (for example, `mise exec -- just ci-web`).
 - When tool versions change, refresh the lockfile: `mise lock --platform linux-x64,macos-arm64 && mise install`
 - `direnv allow .` is a local trust decision, so automation agents must not run it arbitrarily. If needed, ask for user approval and run it once.
 - direnv does not auto-load `.env`; it only loads `.envrc.local`.
