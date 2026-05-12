@@ -217,7 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--source-provider",
         type=str,
         default=None,
-        choices=["none", "local-json", "http-json"],
+        choices=["none", "local-json", "http-json", "finnhub"],
         help="Optional source provider for AI brief candidate context",
     )
     ai_brief.add_argument(
@@ -236,7 +236,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--source-timeout-seconds",
         type=float,
         default=None,
-        help="External source API timeout in seconds",
+        help="External source provider timeout in seconds",
     )
     ai_brief.add_argument(
         "--upload",

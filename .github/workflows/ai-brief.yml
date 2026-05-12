@@ -69,6 +69,7 @@ on:
           - none
           - local-json
           - http-json
+          - finnhub
       source_report_path:
         description: "Local source JSON path when source_provider=local-json"
         required: false
@@ -80,7 +81,7 @@ on:
         default: ""
         type: string
       source_timeout_seconds:
-        description: "Optional external source API timeout in seconds"
+        description: "Optional external source provider timeout in seconds"
         required: false
         default: ""
         type: string
@@ -147,6 +148,7 @@ jobs:
           RAW_SOURCE_REPORT_PATH: ${{ github.event.inputs.source_report_path }}
           RAW_SOURCE_API_URL: ${{ github.event.inputs.source_api_url }}
           RAW_SOURCE_TIMEOUT_SECONDS: ${{ github.event.inputs.source_timeout_seconds }}
+          DEFAULT_SOURCE_PROVIDER: ${{ vars.AI_BRIEF_SOURCE_PROVIDER }}
           DEFAULT_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
           RAW_SEND_NOTIFICATIONS: ${{ github.event.inputs.send_notifications }}
         run: |
@@ -270,9 +272,12 @@ jobs:
           PY
           fi
 
+          default_source_provider="${DEFAULT_SOURCE_PROVIDER,,}"
           source_provider="${RAW_SOURCE_PROVIDER}"
           if [[ "${is_schedule}" == "true" ]]; then
-            if [[ -n "${DEFAULT_SOURCE_API_URL}" ]]; then
+            if [[ -n "${default_source_provider}" ]]; then
+              source_provider="${default_source_provider}"
+            elif [[ -n "${DEFAULT_SOURCE_API_URL}" ]]; then
               source_provider="http-json"
             else
               source_provider="none"
@@ -282,7 +287,7 @@ jobs:
           fi
           source_provider="${source_provider,,}"
           case "${source_provider}" in
-            none|local-json|http-json) ;;
+            none|local-json|http-json|finnhub) ;;
             *)
               echo "Unsupported source_provider: ${source_provider}" >&2
               exit 1
@@ -303,8 +308,10 @@ jobs:
           fi
 
           source_api_url="${RAW_SOURCE_API_URL}"
-          if [[ "${is_schedule}" == "true" && -z "${source_api_url}" ]]; then
+          if [[ "${is_schedule}" == "true" && "${source_provider}" == "http-json" && -z "${source_api_url}" ]]; then
             source_api_url="${DEFAULT_SOURCE_API_URL}"
+          elif [[ "${is_schedule}" == "true" && "${source_provider}" != "http-json" ]]; then
+            source_api_url=""
           fi
           if [[ "${source_api_url}" == *$'\n'* || "${source_api_url}" == *$'\r'* ]]; then
             echo "source_api_url must be a single-line value" >&2
@@ -631,6 +638,7 @@ jobs:
           AI_BRIEF_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
           AI_BRIEF_SOURCE_API_TOKEN: ${{ secrets.AI_BRIEF_SOURCE_API_TOKEN }}
           AI_BRIEF_SOURCE_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_SOURCE_TIMEOUT_SECONDS }}
+          FINNHUB_API_KEY: ${{ steps.params.outputs.source_provider == 'finnhub' && secrets.FINNHUB_API_KEY || '' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
@@ -662,6 +670,8 @@ jobs:
               cmd+=(--source-report "${PARAM_SOURCE_REPORT_PATH}")
             elif [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" ]]; then
               cmd+=(--source-api-url "${PARAM_SOURCE_API_URL}")
+            fi
+            if [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" ]]; then
               if [[ -n "${PARAM_SOURCE_TIMEOUT_SECONDS}" ]]; then
                 cmd+=(--source-timeout-seconds "${PARAM_SOURCE_TIMEOUT_SECONDS}")
               fi

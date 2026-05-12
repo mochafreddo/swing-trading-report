@@ -772,6 +772,68 @@ class _HttpJsonSourceSession:
         self.closed = True
 
 
+class _FinnhubSourceSession:
+    def __init__(self, payloads_by_symbol: dict[str, object]) -> None:
+        self.payloads_by_symbol = payloads_by_symbol
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        symbol = str(params.get("symbol") or "")
+        payload = self.payloads_by_symbol.get(symbol, [])
+        return _JsonResponse(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FinnhubStaticResponse:
+    def __init__(self, text: str, *, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> list[bytes]:
+        assert chunk_size == 64 * 1024
+        return [self.text.encode("utf-8")]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FinnhubStaticSession:
+    def __init__(self, response: _FinnhubStaticResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _FinnhubStaticResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FinnhubTimeoutSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("finnhub timed out")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _HttpJsonSourceTimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_sources as ai_brief_sources
@@ -945,6 +1007,271 @@ def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_r
     assert [issue["code"] for issue in result.source_issues] == [
         "http_source_unknown_ticker"
     ]
+
+
+def test_load_ai_brief_sources_finnhub_maps_us_tickers_and_normalizes_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    published_at = int((now - dt.timedelta(hours=2)).timestamp())
+    session = _FinnhubSourceSession(
+        {
+            "AAPL": [
+                {
+                    "headline": "Apple supplier update",
+                    "url": "https://news.example/aapl",
+                    "datetime": published_at,
+                }
+            ],
+            "BRK.B": [
+                {
+                    "headline": "Berkshire class B update",
+                    "url": "https://news.example/brk-b",
+                    "datetime": published_at,
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="finnhub",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS", "BRK.B.NYS", "005930"},
+        now=now,
+    )
+
+    assert [call["url"] for call in session.calls] == [
+        "https://api.finnhub.io/api/v1/company-news",
+        "https://api.finnhub.io/api/v1/company-news",
+    ]
+    assert [call["params"] for call in session.calls] == [
+        {
+            "symbol": "AAPL",
+            "from": "2026-05-02",
+            "to": "2026-05-05",
+            "token": "finnhub-secret",
+        },
+        {
+            "symbol": "BRK.B",
+            "from": "2026-05-02",
+            "to": "2026-05-05",
+            "token": "finnhub-secret",
+        },
+    ]
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
+    assert session.calls[0]["allow_redirects"] is False
+    assert session.trust_env is False
+    assert session.closed is True
+    assert result.sources_by_ticker["AAPL.NAS"][0] == {
+        "title": "Apple supplier update",
+        "url": "https://news.example/aapl",
+        "published_at": "2026-05-05T07:00:00+00:00",
+    }
+    assert result.sources_by_ticker["BRK.B.NYS"][0]["url"] == (
+        "https://news.example/brk-b"
+    )
+    assert result.source_issues == [
+        {
+            "ticker": "005930",
+            "code": "finnhub_source_unsupported_market",
+            "severity": "WARN",
+            "message": "Finnhub source provider supports US tickers only",
+        }
+    ]
+
+
+def test_load_ai_brief_sources_finnhub_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FinnhubSourceSession({"AAPL": []})
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="FINNHUB_API_KEY"):
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_finnhub_rejects_unsafe_news_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _FinnhubSourceSession(
+        {
+            "AAPL": [
+                {
+                    "headline": "Internal metadata",
+                    "url": "http://169.254.169.254/latest",
+                    "datetime": int(now.timestamp()),
+                }
+            ]
+        }
+    )
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="finnhub",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "finnhub_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "Finnhub source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_finnhub_redacts_request_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingFinnhubSourceSession:
+        trust_env = True
+
+        def get(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "failed for /company-news?token=finnhub-secret"
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingFinnhubSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "finnhub-secret" not in message
+    assert "/company-news" not in message
+
+
+def test_load_ai_brief_sources_finnhub_http_error_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FinnhubStaticSession(
+        _FinnhubStaticResponse('{"error":"internal-token"}', status_code=429)
+    )
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert str(excinfo.value) == "Finnhub source request failed with HTTP 429"
+    assert "finnhub-secret" not in str(excinfo.value)
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_finnhub_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FinnhubTimeoutSession()
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="Finnhub"):
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+
+
+def test_load_ai_brief_sources_finnhub_bad_json_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FinnhubStaticSession(_FinnhubStaticResponse("{not-json"))
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="not valid JSON"):
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_finnhub_oversized_body_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _FinnhubStaticSession(
+        _FinnhubStaticResponse("x" * (MAX_SOURCE_API_RESPONSE_BYTES + 1))
+    )
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
+        load_ai_brief_sources(
+            source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
 
 
 def test_load_ai_brief_sources_http_json_preserves_report_issues(
@@ -2488,6 +2815,79 @@ def test_run_ai_brief_http_json_source_provider_enriches_candidates(
     assert payload["source_issues"] == []
 
 
+def test_run_ai_brief_finnhub_source_provider_enriches_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _FinnhubSourceSession(
+        {
+            "AAPL": [
+                {
+                    "headline": "Apple source",
+                    "url": "https://news.example/aapl",
+                    "datetime": int(dt.datetime.now(dt.UTC).timestamp()),
+                }
+            ]
+        }
+    )
+    monkeypatch.setenv("FINNHUB_API_KEY", "finnhub-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="finnhub",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_finnhub_source_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="finnhub",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert "FINNHUB_API_KEY" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_source_api_url_implies_http_json_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2645,12 +3045,12 @@ class _HttpErrorSession:
 
 
 class _JsonResponse:
-    def __init__(self, payload: dict[str, object], *, status_code: int = 200) -> None:
+    def __init__(self, payload: object, *, status_code: int = 200) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = json.dumps(payload)
 
-    def json(self) -> dict[str, object]:
+    def json(self) -> object:
         return self._payload
 
 
@@ -3386,6 +3786,35 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "source_timeout_seconds": 2.5,
         "upload": False,
     }
+
+
+def test_main_accepts_finnhub_ai_brief_source_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--source-provider",
+            "finnhub",
+            "--source-timeout-seconds",
+            "2.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source_provider"] == "finnhub"
+    assert captured["source_timeout_seconds"] == 2.5
 
 
 def test_main_routes_ai_brief_upload_option(monkeypatch: pytest.MonkeyPatch) -> None:

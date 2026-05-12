@@ -4,11 +4,11 @@
 
 ### Phase 2 real provider and eval suite
 
-**What:** Add provider-specific live news/API adapters for `ai-brief`. The generic `http-json` source API adapter covers the external API trust boundary, offline source-quality evals cover collected payload quality, and RSS/Atom/RDF local/live HTTPS feed collection now covers vendor-neutral payload generation; paid/vendor-specific JSON API adapters remain.
+**What:** Expand provider-specific live news/API adapters for `ai-brief`. The generic `http-json` source API adapter covers the external API trust boundary, offline source-quality evals cover collected payload quality, RSS/Atom/RDF local/live HTTPS feed collection covers vendor-neutral payload generation, and Finnhub now covers the first paid/vendor-specific US Company News adapter; additional vendors and source-quality evaluation coverage remain.
 
 **Why:** Fake provider only exercises the artifact contract; it does not validate recommendation quality, source collection quality, or prompt safety.
 
-**Context:** Phase 1 is intentionally scoped to local artifact generation, fake provider output, and validator guardrails. OpenAI model judgment now starts from the Phase 1 fixtures and the `sab.ai_brief.v1` validator contract, with tests for timeout/failure handling, unknown ticker rejection, `SKIP`/`REVIEW` non-promotion, weak source disclosure, and financial-safety language. Local JSON and generic external HTTP JSON source context can now be injected without expanding eligible tickers. Collected source payloads can be evaluated offline for freshness, eligibility, cap, duplicate URL, and coverage quality. RSS/Atom/RDF local files and live HTTPS feed URLs can be converted into compatible `sources[]` payloads without secrets; URL failures are ticker-level WARN issues. Paid/vendor-specific news API collection is still pending.
+**Context:** Phase 1 is intentionally scoped to local artifact generation, fake provider output, and validator guardrails. OpenAI model judgment now starts from the Phase 1 fixtures and the `sab.ai_brief.v1` validator contract, with tests for timeout/failure handling, unknown ticker rejection, `SKIP`/`REVIEW` non-promotion, weak source disclosure, and financial-safety language. Local JSON, generic external HTTP JSON, and Finnhub Company News source context can now be injected without expanding eligible tickers. Collected source payloads can be evaluated offline for freshness, eligibility, cap, duplicate URL, and coverage quality. RSS/Atom/RDF local files and live HTTPS feed URLs can be converted into compatible `sources[]` payloads without secrets; URL failures are ticker-level WARN issues. Finnhub v1 is intentionally US-only, so KR coverage and broader vendor comparison remain pending.
 
 **Effort:** M
 **Priority:** P1
@@ -27,3 +27,4 @@
 - 2026-05-06: Phase 2 source eval slice - offline AI Brief source payload quality evaluator, deterministic fixtures, script/just entrypoint, and docs coverage.
 - 2026-05-06: Phase 2 source collector slice - RSS/Atom/RDF captured-feed source payload builder, deterministic feed fixtures, script/just entrypoint, eval compatibility tests, and docs coverage.
 - 2026-05-07: Phase 2 live RSS feed URL collection slice - HTTPS feed URL catalog rows, safe bounded fetch, ticker-level WARN issues, CLI timeout option, tests, and docs coverage.
+- 2026-05-12: Phase 2 Finnhub source provider slice - US-only Finnhub Company News adapter, ticker symbol mapping, workflow variable/secret wiring, provider failure artifacts, tests, and docs coverage.

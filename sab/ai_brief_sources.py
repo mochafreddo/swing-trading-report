@@ -18,9 +18,12 @@ from urllib.parse import urlparse
 import idna
 import requests  # type: ignore[import-untyped]
 
+from .tickers import parse_ticker
+
 SOURCE_PROVIDER_NONE = "none"
 SOURCE_PROVIDER_LOCAL_JSON = "local-json"
 SOURCE_PROVIDER_HTTP_JSON = "http-json"
+SOURCE_PROVIDER_FINNHUB = "finnhub"
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
 SOURCE_FRESHNESS_HOURS = 72
@@ -31,6 +34,7 @@ DEFAULT_SOURCE_TIMEOUT_SECONDS = 10.0
 SOURCE_ROW_DNS_TIMEOUT_SECONDS = 1.0
 SOURCE_DNS_RESOLVER_WORKERS = 4
 SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
+FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
 SOURCE_DNS_PIN_LOCK = threading.RLock()
@@ -85,6 +89,16 @@ def load_ai_brief_sources(
     if source_provider == SOURCE_PROVIDER_HTTP_JSON:
         return _load_http_json_source_report(
             source_api_url=source_api_url,
+            source_timeout_seconds=(
+                DEFAULT_SOURCE_TIMEOUT_SECONDS
+                if source_timeout_seconds is None
+                else source_timeout_seconds
+            ),
+            eligible_tickers=eligible_tickers,
+            now=resolved_now,
+        )
+    if source_provider == SOURCE_PROVIDER_FINNHUB:
+        return _load_finnhub_source_report(
             source_timeout_seconds=(
                 DEFAULT_SOURCE_TIMEOUT_SECONDS
                 if source_timeout_seconds is None
@@ -217,6 +231,166 @@ def _parse_source_api_response_payload(
         )
     _validate_source_report_contract(payload, subject="source API response")
     return payload
+
+
+def _load_finnhub_source_report(
+    *,
+    source_timeout_seconds: float,
+    eligible_tickers: set[str],
+    now: dt.datetime,
+) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    api_key = str(os.getenv("FINNHUB_API_KEY") or "").strip()
+    if not api_key:
+        raise AiBriefSourceProviderError(
+            "--source-provider finnhub requires FINNHUB_API_KEY"
+        )
+
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            FINNHUB_COMPANY_NEWS_URL,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+
+    now_utc = now.astimezone(dt.UTC)
+    from_date = (now_utc - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)).date()
+    to_date = now_utc.date()
+    headers = {"Accept": "application/json"}
+    source_rows: list[object] = []
+    source_issues: list[dict[str, object]] = []
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        for ticker in sorted(eligible_tickers):
+            parsed = parse_ticker(ticker)
+            if parsed.market != "US":
+                source_issues.append(
+                    _source_issue(
+                        ticker=ticker,
+                        code="finnhub_source_unsupported_market",
+                        message="Finnhub source provider supports US tickers only",
+                    )
+                )
+                continue
+
+            params = {
+                "symbol": parsed.symbol,
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "token": api_key,
+            }
+            try:
+                with _pin_source_api_dns(
+                    validated_source_api_url.hostnames,
+                    validated_source_api_url.addrinfos,
+                    deadline=deadline,
+                ):
+                    response = session.get(
+                        validated_source_api_url.url,
+                        params=params,
+                        headers=headers,
+                        timeout=_source_request_timeout(deadline),
+                        stream=True,
+                        allow_redirects=False,
+                    )
+            except requests.Timeout as exc:
+                raise AiBriefSourceProviderTimeoutError(
+                    "Finnhub source request timed out"
+                ) from exc
+            except requests.RequestException as exc:
+                raise AiBriefSourceProviderError(
+                    f"Finnhub source request failed: {_exception_type_name(exc)}"
+                ) from exc
+
+            if 300 <= response.status_code < 400:
+                _close_response(response)
+                raise AiBriefSourceProviderError(
+                    "Finnhub source redirect was not followed "
+                    f"(HTTP {response.status_code})"
+                )
+            if response.status_code >= 400:
+                _close_response(response)
+                raise AiBriefSourceProviderError(
+                    f"Finnhub source request failed with HTTP {response.status_code}"
+                )
+
+            payload = _parse_finnhub_response_payload(response, deadline=deadline)
+            source_rows.extend(_normalize_finnhub_news_rows(ticker, payload))
+
+        normalized = _normalize_source_rows(
+            rows=source_rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="finnhub_source",
+            issue_subject="Finnhub source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=normalized.sources_by_ticker,
+            source_issues=[*source_issues, *normalized.source_issues],
+        )
+    finally:
+        _close_session(session)
+
+
+def _parse_finnhub_response_payload(response: Any, *, deadline: float) -> list[object]:
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            "Finnhub source response was not valid JSON"
+        ) from exc
+    if not isinstance(payload, list):
+        raise AiBriefSourceProviderError(
+            "Finnhub source response must contain a JSON array"
+        )
+    return payload
+
+
+def _normalize_finnhub_news_rows(
+    ticker: str,
+    payload: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": "",
+                    "url": "",
+                    "published_at": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": str(item.get("headline") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "published_at": _finnhub_published_at_iso(item.get("datetime")),
+            }
+        )
+    return rows
+
+
+def _finnhub_published_at_iso(value: object) -> str:
+    if isinstance(value, bool):
+        return ""
+    try:
+        timestamp = float(str(value).strip())
+    except TypeError, ValueError:
+        return ""
+    if not math.isfinite(timestamp):
+        return ""
+    return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
 
 
 def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
@@ -1127,6 +1301,7 @@ __all__ = [
     "MAX_SOURCE_API_RESPONSE_BYTES",
     "SOURCE_FRESHNESS_HOURS",
     "SOURCE_FUTURE_SKEW_MINUTES",
+    "SOURCE_PROVIDER_FINNHUB",
     "SOURCE_PROVIDER_HTTP_JSON",
     "SOURCE_PROVIDER_LOCAL_JSON",
     "SOURCE_PROVIDER_NONE",

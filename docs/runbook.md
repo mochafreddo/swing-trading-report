@@ -52,6 +52,8 @@
       - Notify(자동 실행/AI Brief 수동 opt-in 및 schedule): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`
       - AI Brief OpenAI provider(scheduled AI Brief는 필요): `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `AI_BRIEF_MODEL_TIMEOUT_SECONDS`
       - AI Brief 외부 source API provider(선택): `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_TOKEN`, `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`
+      - AI Brief Finnhub source provider(선택, US-only): `FINNHUB_API_KEY`
+      - AI Brief scheduled 기본 source provider(선택, repository variable): `AI_BRIEF_SOURCE_PROVIDER=finnhub`
     - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
@@ -181,13 +183,14 @@
   - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작합니다.
   - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
-  - `AI_BRIEF_SOURCE_API_URL` 변수가 설정되어 있으면 scheduled 실행은 `source_provider=http-json`로 외부 source API context를 함께 주입합니다. 수동 실행에서는 `source_provider=http-json`과 `source_api_url` 입력을 사용합니다.
+  - scheduled 실행은 `AI_BRIEF_SOURCE_PROVIDER` repository variable이 있으면 해당 값을 source provider로 사용합니다. 이 값이 없고 `AI_BRIEF_SOURCE_API_URL` 변수가 있으면 `source_provider=http-json`, 둘 다 없으면 `source_provider=none`으로 실행합니다. 수동 실행에서는 `source_provider=none|local-json|http-json|finnhub` 입력을 사용합니다.
   - `http-json` source API는 HTTPS URL만 허용하며 local/private host와 redirect 응답은 거부됩니다. API는 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST로 받고, `sources[]` row(`ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`)를 반환해야 합니다. source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없고, source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다. API token secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
+  - `finnhub` source provider는 `FINNHUB_API_KEY` secret으로 Finnhub Company News를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`는 `AAPL`, `BRK.B.NYS`는 `BRK.B`로 요청하고, KR ticker는 요청하지 않은 채 `source_issues[]` WARN으로 남깁니다. 반환 row의 `headline`/`url`/Unix `datetime`은 기존 source row 계약으로 정규화되며, freshness/future-time/duplicate/cap/URL safety/DNS 검증을 통과한 row만 AI Brief 입력에 들어갑니다.
   - RSS/Atom/RDF feed에서 source payload를 만들 때는 `just ai-brief-source-collect --feed-catalog <feeds.json> --output <sources.json>`를 사용합니다. feed catalog는 ticker별 로컬 파일 경로(`path`/`feed_path`) 또는 live HTTPS feed URL(`url`/`feed_url`) 중 정확히 하나를 담고, 도구는 fresh source만 ticker별 최대 3건까지 `sab.ai_brief_sources.v1` payload로 출력합니다.
     - catalog 예: `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","path":"aapl.rss"}]}`
     - live URL catalog 예: `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`
     - 로컬 feed 파일은 네트워크/DNS 없이 처리하며 item URL의 literal local/private IP와 localhost를 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, DNS 기반 local/private host, redirect, 1MB 초과 응답을 거부합니다. `--feed-timeout-seconds` 기본값은 10초이며, HTTP/timeout/invalid feed는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남습니다.
-  - scheduled AI Brief의 운영 source 경로는 계속 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json`을 사용합니다. 유료/벤더별 JSON API adapter는 SAB 내부 SDK가 아니라 이 외부 source API 경계 뒤에서 운영하는 후속 작업입니다. 로컬/live feed `sources[]` payload 품질은 `just ai-brief-source-eval --entry-report <entry.json> --source-report <sources.json>`로 점검합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다.
+  - 로컬/live feed `sources[]` payload 품질은 `just ai-brief-source-eval --entry-report <entry.json> --source-report <sources.json>`로 점검합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다.
   - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남기고, AI Brief 리포트는 Supabase Storage/`report_index`에도 업로드합니다.
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - 관련 secret이 없으면 발송 단계는 skip하며 workflow 자체는 계속 성공할 수 있습니다.

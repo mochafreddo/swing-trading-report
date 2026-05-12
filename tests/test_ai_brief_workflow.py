@@ -50,6 +50,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
         "none",
         "local-json",
         "http-json",
+        "finnhub",
     ]
     assert "source_api_url" in dispatch_inputs
     assert "source_timeout_seconds" in dispatch_inputs
@@ -65,10 +66,16 @@ def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> N
 
     assert params_env.get("EVENT_NAME") == "${{ github.event_name }}"
     assert params_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
+    assert (
+        params_env.get("DEFAULT_SOURCE_PROVIDER")
+        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER }}"
+    )
     assert '"30 22 * * 0-4") scheduled_market="KR"' in params_script
     assert '"30 12 * * 1-5") scheduled_market="US"' in params_script
     assert 'model_provider="openai"' in params_script
     assert 'send_notifications="true"' in params_script
+    assert 'default_source_provider="${DEFAULT_SOURCE_PROVIDER,,}"' in params_script
+    assert 'source_provider="${default_source_provider}"' in params_script
     assert 'echo "is_schedule=${is_schedule}"' in params_script
     assert 'echo "scheduled_market=${scheduled_market}"' in params_script
 
@@ -182,6 +189,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     assert "source_api_url must be a single-line value" in params_script
     assert "source_timeout_seconds must be a single-line value" in params_script
     assert "source_provider=http-json requires source_api_url" in params_script
+    assert "none|local-json|http-json|finnhub" in params_script
     assert "Unsupported send_notifications" in params_script
 
     ai_brief_step = _find_step_by_name(steps, "Run AI brief")
@@ -202,8 +210,16 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         ai_brief_env.get("PARAM_SOURCE_API_URL")
         == "${{ steps.params.outputs.source_api_url }}"
     )
+    assert ai_brief_env.get("FINNHUB_API_KEY") == (
+        "${{ steps.params.outputs.source_provider == 'finnhub' && "
+        "secrets.FINNHUB_API_KEY || '' }}"
+    )
     assert "--source-api-url" in ai_brief_script
     assert "--source-timeout-seconds" in ai_brief_script
+    assert (
+        '[[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" ]]'
+        in ai_brief_script
+    )
     assert 'source_api_token=""' in ai_brief_script
     assert (
         '[[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]'
