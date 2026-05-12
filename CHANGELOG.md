@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.1...v1.22.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **web:** Next.js 보안 패치 적용 ([d2569f4](https://github.com/mochafreddo/swing-trading-report/commit/d2569f4404d6cb4df780f78e78b23326a903cd63))
+
 ## [1.22.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.0...v1.22.1) (2026-05-08)
 
 
