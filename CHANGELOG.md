@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.2...v1.23.0) (2026-05-12)
+
+
+### Features
+
+* **ai-brief:** Finnhub Company News source provider 추가
+
 ## [1.22.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.1...v1.22.2) (2026-05-12)
 
 
