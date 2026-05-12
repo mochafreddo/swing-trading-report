@@ -20,6 +20,7 @@ from .ai_brief_providers import (
 )
 from .ai_brief_sources import (
     DEFAULT_SOURCE_TIMEOUT_SECONDS,
+    SOURCE_PROVIDER_FINNHUB,
     SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_LOCAL_JSON,
     SOURCE_PROVIDER_NONE,
@@ -41,7 +42,15 @@ _PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
 _ALLOWED_SOURCE_PROVIDERS = frozenset(
-    {SOURCE_PROVIDER_NONE, SOURCE_PROVIDER_LOCAL_JSON, SOURCE_PROVIDER_HTTP_JSON}
+    {
+        SOURCE_PROVIDER_NONE,
+        SOURCE_PROVIDER_LOCAL_JSON,
+        SOURCE_PROVIDER_HTTP_JSON,
+        SOURCE_PROVIDER_FINNHUB,
+    }
+)
+_TIMEOUT_SOURCE_PROVIDERS = frozenset(
+    {SOURCE_PROVIDER_HTTP_JSON, SOURCE_PROVIDER_FINNHUB}
 )
 
 
@@ -117,6 +126,10 @@ def _normalize_source_provider(
         raise ValueError("--source-provider local-json does not use --source-api-url")
     if provider == SOURCE_PROVIDER_HTTP_JSON and source_report_path:
         raise ValueError("--source-provider http-json does not use --source-report")
+    if provider == SOURCE_PROVIDER_FINNHUB and source_report_path:
+        raise ValueError("--source-provider finnhub does not use --source-report")
+    if provider == SOURCE_PROVIDER_FINNHUB and source_api_url:
+        raise ValueError("--source-provider finnhub does not use --source-api-url")
     return provider
 
 
@@ -137,11 +150,11 @@ def _normalize_source_api_url(*, provider: str, value: str | None) -> str | None
 def _normalize_source_timeout_seconds(
     *, provider: str, value: float | None
 ) -> float | None:
-    if provider != SOURCE_PROVIDER_HTTP_JSON:
+    if provider not in _TIMEOUT_SOURCE_PROVIDERS:
         if value is not None:
             raise ValueError(
                 "--source-timeout-seconds is only valid with "
-                "--source-provider http-json"
+                "--source-provider http-json or finnhub"
             )
         return None
     if value is None:
