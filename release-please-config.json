@@ -1,13 +1,15 @@
 {
   "packages": {
     ".": {
-      "release-type": "simple",
+      "release-type": "python",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "pyproject.toml",
-        "web/package.json"
+        {
+          "type": "json",
+          "path": "web/package.json",
+          "jsonpath": "$.version"
+        }
       ]
     }
   }
 }
-
