@@ -8,6 +8,9 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+RELEASE_PLEASE_V5_PIN = (
+    "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
+)
 
 
 def _read_json(path: str) -> dict[str, Any]:
@@ -66,6 +69,7 @@ def test_release_please_uses_manifest_mode_without_deprecated_command() -> None:
     if not isinstance(release_inputs, dict):
         raise AssertionError("Release Please step must define inputs")
 
+    assert release_step["uses"] == RELEASE_PLEASE_V5_PIN
     assert "command" not in release_inputs
     assert release_inputs["config-file"] == "release-please-config.json"
     assert release_inputs["manifest-file"] == ".release-please-manifest.json"
