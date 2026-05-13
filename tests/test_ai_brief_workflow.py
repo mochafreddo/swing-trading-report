@@ -51,6 +51,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
         "local-json",
         "http-json",
         "finnhub",
+        "naver-news",
     ]
     assert "source_api_url" in dispatch_inputs
     assert "source_timeout_seconds" in dispatch_inputs
@@ -189,7 +190,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     assert "source_api_url must be a single-line value" in params_script
     assert "source_timeout_seconds must be a single-line value" in params_script
     assert "source_provider=http-json requires source_api_url" in params_script
-    assert "none|local-json|http-json|finnhub" in params_script
+    assert "none|local-json|http-json|finnhub|naver-news" in params_script
     assert "Unsupported send_notifications" in params_script
 
     ai_brief_step = _find_step_by_name(steps, "Run AI brief")
@@ -214,10 +215,18 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         "${{ steps.params.outputs.source_provider == 'finnhub' && "
         "secrets.FINNHUB_API_KEY || '' }}"
     )
+    assert ai_brief_env.get("NAVER_CLIENT_ID") == (
+        "${{ steps.params.outputs.source_provider == 'naver-news' && "
+        "secrets.NAVER_CLIENT_ID || '' }}"
+    )
+    assert ai_brief_env.get("NAVER_CLIENT_SECRET") == (
+        "${{ steps.params.outputs.source_provider == 'naver-news' && "
+        "secrets.NAVER_CLIENT_SECRET || '' }}"
+    )
     assert "--source-api-url" in ai_brief_script
     assert "--source-timeout-seconds" in ai_brief_script
     assert (
-        '[[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" ]]'
+        '[[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" || "${PARAM_SOURCE_PROVIDER}" == "naver-news" ]]'
         in ai_brief_script
     )
     assert 'source_api_token=""' in ai_brief_script

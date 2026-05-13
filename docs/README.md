@@ -37,6 +37,14 @@
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)
 - [Codex Systematic Equities Team](codex-systematic-equities-team.md)
 
+## 저장소 운영 문서
+
+- [기여 가이드](../CONTRIBUTING.md)
+- [보안 정책](../SECURITY.md)
+- [변경 이력](../CHANGELOG.md)
+- [TODO](../TODOS.md)
+- [에이전트 작업 지침](../AGENTS.md)
+
 ## 설계 기록
 
 - [Holdings 추가매수 입력 설계](holdings-add-buy.md)

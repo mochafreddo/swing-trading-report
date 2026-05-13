@@ -23,6 +23,7 @@ from .ai_brief_sources import (
     SOURCE_PROVIDER_FINNHUB,
     SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_LOCAL_JSON,
+    SOURCE_PROVIDER_NAVER_NEWS,
     SOURCE_PROVIDER_NONE,
     AiBriefSourceProviderError,
     load_ai_brief_sources,
@@ -47,10 +48,14 @@ _ALLOWED_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_LOCAL_JSON,
         SOURCE_PROVIDER_HTTP_JSON,
         SOURCE_PROVIDER_FINNHUB,
+        SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
 _TIMEOUT_SOURCE_PROVIDERS = frozenset(
-    {SOURCE_PROVIDER_HTTP_JSON, SOURCE_PROVIDER_FINNHUB}
+    {SOURCE_PROVIDER_HTTP_JSON, SOURCE_PROVIDER_FINNHUB, SOURCE_PROVIDER_NAVER_NEWS}
+)
+_FIXED_API_SOURCE_PROVIDERS = frozenset(
+    {SOURCE_PROVIDER_FINNHUB, SOURCE_PROVIDER_NAVER_NEWS}
 )
 
 
@@ -126,10 +131,10 @@ def _normalize_source_provider(
         raise ValueError("--source-provider local-json does not use --source-api-url")
     if provider == SOURCE_PROVIDER_HTTP_JSON and source_report_path:
         raise ValueError("--source-provider http-json does not use --source-report")
-    if provider == SOURCE_PROVIDER_FINNHUB and source_report_path:
-        raise ValueError("--source-provider finnhub does not use --source-report")
-    if provider == SOURCE_PROVIDER_FINNHUB and source_api_url:
-        raise ValueError("--source-provider finnhub does not use --source-api-url")
+    if provider in _FIXED_API_SOURCE_PROVIDERS and source_report_path:
+        raise ValueError(f"--source-provider {provider} does not use --source-report")
+    if provider in _FIXED_API_SOURCE_PROVIDERS and source_api_url:
+        raise ValueError(f"--source-provider {provider} does not use --source-api-url")
     return provider
 
 
@@ -154,7 +159,7 @@ def _normalize_source_timeout_seconds(
         if value is not None:
             raise ValueError(
                 "--source-timeout-seconds is only valid with "
-                "--source-provider http-json or finnhub"
+                "--source-provider http-json, finnhub, or naver-news"
             )
         return None
     if value is None:
@@ -495,6 +500,11 @@ def run_ai_brief(
 
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
     source_provider_issues: list[dict[str, object]] = []
+    ticker_names = {
+        str(candidate["ticker"]): str(candidate.get("name") or "").strip()
+        for candidate in preselected_candidates
+        if str(candidate.get("name") or "").strip()
+    }
     try:
         source_provider_result = load_ai_brief_sources(
             source_provider=normalized_source_provider,
@@ -504,6 +514,7 @@ def run_ai_brief(
             eligible_tickers={
                 str(candidate["ticker"]) for candidate in preselected_candidates
             },
+            ticker_names=ticker_names,
         )
         preselected_candidates = _attach_candidate_sources(
             preselected_candidates,
