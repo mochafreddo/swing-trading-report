@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.26.1...v1.26.2) (2026-05-13)
+
+
+### Bug Fixes
+
+* **ci:** 워크플로 출력 리다이렉션 경고 수정 ([#139](https://github.com/mochafreddo/swing-trading-report/issues/139)) ([bcb1a78](https://github.com/mochafreddo/swing-trading-report/commit/bcb1a78fecafdd0c2684959ddcfd57201f7bf8d3))
+
 ## [1.26.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.26.0...v1.26.1) (2026-05-13)
 
 
