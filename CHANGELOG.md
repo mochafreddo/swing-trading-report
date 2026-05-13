@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.25.1...v1.26.0) (2026-05-13)
+
+
+### Features
+
+* **ai-brief:** 추천 artifact 평가기를 추가한다 ([#136](https://github.com/mochafreddo/swing-trading-report/issues/136)) ([fc42118](https://github.com/mochafreddo/swing-trading-report/commit/fc42118c1ceb51207a241c55c013ac46d65036f9))
+
 ## [1.25.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.25.0...v1.25.1) (2026-05-13)
 
 
