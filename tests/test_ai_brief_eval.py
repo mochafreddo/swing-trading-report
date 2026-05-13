@@ -190,6 +190,54 @@ def test_ai_brief_eval_fails_when_excluded_candidates_do_not_match_entry_report(
     }.issubset(_issue_codes(result))
 
 
+def test_ai_brief_eval_fails_when_ai_brief_report_cannot_be_loaded(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "broken.ai-brief.json"
+    report_path.write_text("{", encoding="utf-8")
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path.as_posix(),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"ai_brief_report_failed"}
+
+
+def test_ai_brief_eval_fails_when_ai_brief_report_is_not_an_object(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "list.ai-brief.json"
+    report_path.write_text("[]", encoding="utf-8")
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path.as_posix(),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
+
+
+def test_ai_brief_eval_fails_when_generated_at_is_invalid(
+    tmp_path: Path,
+) -> None:
+    payload = _load_good_ai_brief()
+    payload["generated_at"] = "not-a-date"
+    report_path = _write_payload(tmp_path, "bad-date.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
+
+
 def test_ai_brief_eval_fails_silent_empty_recommendation_artifact(
     tmp_path: Path,
 ) -> None:
@@ -208,6 +256,34 @@ def test_ai_brief_eval_fails_silent_empty_recommendation_artifact(
 
     assert result.status == "FAIL"
     assert "recommendation_report_empty" in _issue_codes(result)
+
+
+def test_ai_brief_eval_fails_when_report_market_does_not_match_entry_market(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.kr.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "KR",
+            "entries": [{"ticker": "005930", "action": "ENTER"}],
+        },
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert {
+        "ai_brief_market_mismatch",
+        "eligible_tickers_mismatch",
+        "recommendation_ticker_not_preselected",
+    }.issubset(_issue_codes(result))
 
 
 def test_ai_brief_eval_fails_when_source_backed_ratio_is_below_default(
@@ -273,6 +349,36 @@ def test_ai_brief_eval_warns_for_low_confidence_unbacked_recommendation_with_iss
     }
 
 
+def test_ai_brief_eval_fails_for_reported_system_error(
+    tmp_path: Path,
+) -> None:
+    payload = _load_good_ai_brief()
+    payload["system_issues"] = [
+        {
+            "code": "openai_response_contract_invalid",
+            "severity": "ERROR",
+            "message": "model output could not be parsed",
+        }
+    ]
+    summary = _copy_mapping(payload["summary"])
+    summary["entry_count"] = True
+    summary["system_issue_count"] = 1
+    payload["summary"] = summary
+    report_path = _write_payload(tmp_path, "system-error.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert {
+        "ai_brief_system_issue_error",
+        "summary_count_mismatch",
+    }.issubset(_issue_codes(result))
+
+
 def test_ai_brief_eval_reports_invalid_ai_brief_contract(tmp_path: Path) -> None:
     payload = _load_good_ai_brief()
     payload["model_provider"] = "unknown"
@@ -326,6 +432,88 @@ def test_ai_brief_eval_script_accepts_market_override_for_mixed_entry_report(
     output = json.loads(captured.out)
     assert exit_code == 0
     assert output["status"] == "PASS"
+
+
+def test_ai_brief_eval_fails_for_mixed_entry_report_without_market(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(tmp_path, "entry.mixed.json", _mixed_entry_payload())
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"entry_report_market_required"}
+
+
+def test_ai_brief_eval_fails_when_entry_report_cannot_be_loaded(
+    tmp_path: Path,
+) -> None:
+    entry_path = tmp_path / "broken-entry.json"
+    entry_path.write_text("{", encoding="utf-8")
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path.as_posix(),
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"entry_report_failed"}
+
+
+def test_ai_brief_eval_fails_when_market_override_disagrees_with_entry_report() -> None:
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        market="KR",
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"entry_report_market_mismatch"}
+
+
+@pytest.mark.parametrize(
+    ("entry_payload", "expected_code"),
+    [
+        (
+            {"schema": "sab.report.v1", "type": "entry", "market": "EU", "entries": []},
+            "entry_report_invalid",
+        ),
+        (
+            {"schema": "sab.report.v1", "type": "entry", "market": "US", "entries": {}},
+            "entry_report_invalid",
+        ),
+        (
+            {
+                "schema": "sab.report.v1",
+                "type": "entry",
+                "market": "US",
+                "entries": ["ignored", {"ticker": "AAPL.NAS", "action": "HOLD"}],
+            },
+            "entry_report_invalid",
+        ),
+    ],
+)
+def test_ai_brief_eval_fails_for_invalid_entry_report_shape(
+    tmp_path: Path,
+    entry_payload: dict[str, object],
+    expected_code: str,
+) -> None:
+    entry_path = _write_payload(tmp_path, "bad-entry.json", entry_payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {expected_code}
 
 
 def test_ai_brief_eval_script_outputs_pretty_json_and_returns_zero(capsys) -> None:
@@ -398,9 +586,34 @@ def test_ai_brief_eval_script_returns_zero_for_warn(
     assert output["status"] == "WARN"
 
 
+def test_ai_brief_eval_script_exits_for_invalid_now(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        eval_brief_main(
+            [
+                "--entry-report",
+                _fixture("entry.us.json"),
+                "--ai-brief-report",
+                _fixture("ai-brief.good.json"),
+                "--now",
+                "not-a-date",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "now must be an ISO 8601 datetime" in captured.err
+
+
 def test_parse_eval_now_requires_utc_offset() -> None:
     with pytest.raises(ValueError, match="UTC offset"):
         parse_eval_now("2026-05-06T12:00:00")
+
+
+def test_parse_eval_now_rejects_empty_or_invalid_values() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        parse_eval_now(" ")
+    with pytest.raises(ValueError, match="ISO 8601"):
+        parse_eval_now("not-a-date")
 
 
 def test_ai_brief_eval_rejects_invalid_minimum_source_backed_ratio() -> None:
@@ -419,6 +632,27 @@ def test_ai_brief_eval_rejects_nan_minimum_source_backed_ratio() -> None:
             ai_brief_report_path=_fixture("ai-brief.good.json"),
             minimum_source_backed_ratio=float("nan"),
         )
+
+
+def test_ai_brief_eval_rejects_invalid_market_override() -> None:
+    with pytest.raises(ValueError, match="market must be KR or US"):
+        ai_brief_eval.evaluate_ai_brief_recommendation_report(
+            entry_report_path=_fixture("entry.us.json"),
+            ai_brief_report_path=_fixture("ai-brief.good.json"),
+            market="EU",
+            now=EVAL_NOW,
+        )
+
+
+def test_ai_brief_eval_treats_blank_market_override_as_unspecified() -> None:
+    result = ai_brief_eval.evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=_fixture("ai-brief.good.json"),
+        market=" ",
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
 
 
 def _mixed_entry_payload() -> dict[str, object]:
