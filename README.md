@@ -112,6 +112,7 @@
 - RSS/Atom/RDF source payload 생성(개발용, 로컬 파일 또는 live HTTPS feed URL catalog): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
 - 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - 여러 source payload 오프라인 비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report naver=naver.sources.json`
+- 여러 live source provider 캡처/비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report reports/YYYY-MM-DD.entry.json --provider naver=naver-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --buy-report reports/YYYY-MM-DD.buy.json --market KR`
 - 생성한 AI Brief 추천 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
@@ -165,6 +166,7 @@
   - `--source-provider finnhub`는 `FINNHUB_API_KEY`로 Finnhub Company News를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `headline`/`url`/Unix `datetime`을 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
   - `--source-provider naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 Naver Search API 뉴스 endpoint(`https://openapi.naver.com/v1/search/news.json`)를 ticker별 1회 조회합니다. v1은 KR ticker만 지원하며 `--buy-report`의 회사명을 검색어로 우선 사용하고, 없으면 6자리 ticker를 사용합니다. 요청은 `display=10`, `start=1`, `sort=date`로 보냅니다. US ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`(HTML 제거), `originallink` 또는 `link`, `pubDate`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
   - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. 로컬 feed 파일은 offline으로 처리하고 item URL의 literal local/private IP와 localhost만 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, live item URL도 DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
+  - `scripts/compare_ai_brief_live_sources.py`는 `--provider LABEL=PROVIDER`를 2개 이상 받아 `http-json`/`finnhub`/`naver-news` live source 결과를 각각 `sab.ai_brief_sources.v1` payload로 저장한 뒤 기존 source eval 비교를 실행합니다. `http-json` label에는 `--source-api-url LABEL=URL`을 지정하며, URL 없는 `http-json` provider가 정확히 하나면 `AI_BRIEF_SOURCE_API_URL`을 사용합니다. provider 실패는 전체 실행을 멈추지 않고 해당 payload의 top-level `ERROR` issue로 기록되어 비교 결과에서 FAIL로 판정됩니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
   - source provider timeout/HTTP/JSON/body-size 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
@@ -244,6 +246,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --compare-source-report finnhub=<path> --compare-source-report naver=<path>` | 여러 AI Brief source payload를 같은 entry 후보 기준으로 비교 평가 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report <path> --provider naver=naver-news --provider vendor=http-json --source-api-url vendor=<url>` | 여러 live AI Brief source provider를 캡처한 뒤 같은 entry 후보 기준으로 비교 평가. `market=MIXED` entry report는 `--market KR|US` 필요 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report <path> --ai-brief-report <path>` | 생성한 AI Brief 추천 artifact 품질 평가 |
 
 ## 작업 자동화 (just + direnv)
@@ -256,6 +259,7 @@
   - `just ai-brief-source-collect --feed-catalog feeds.json --output captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/YYYY-MM-DD.entry.json --source-report captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/example.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report naver=naver.sources.json --now 2026-05-06T12:00:00+00:00 --pretty`
+  - `just ai-brief-source-live-compare --entry-report reports/example.entry.json --provider naver=naver-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --buy-report reports/example.buy.json --market KR --pretty`
   - `just ai-brief-eval --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
   - `just quality` (ruff + format-check + mypy + pytest)
   - `just check` (`just quality` 별칭 호환)
@@ -278,7 +282,7 @@
   - `report/` - 리포트 아티팩트(JSON) 생성
 - `web/` - Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` - 생성된 JSON 리포트 아티팩트 출력 폴더
-- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `eval_ai_brief_recommendations.py`)
+- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `eval_ai_brief_recommendations.py`)
 - `data/` - 캐시/상태(현재 JSON, 추후 SQLite 고려)
 - `docs/README.md` - 문서 인덱스(진입점)
   - `docs/adr/README.md` - ADR 인덱스
@@ -424,7 +428,7 @@
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
 - GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. 수동 `source_provider=http-json` 또는 scheduled fallback `AI_BRIEF_SOURCE_API_URL`은 외부 source API context를 주입하고, 수동 `source_provider=finnhub` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=finnhub`는 `FINNHUB_API_KEY` secret으로 US Company News context를 주입합니다. 수동 `source_provider=naver-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets로 KR Naver News context를 주입합니다. Scheduled provider 선택은 `AI_BRIEF_SOURCE_PROVIDER`가 우선이고, 없으면 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json`, 둘 다 없으면 `none`입니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
-- RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
+- RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교합니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
 
 ### 실험
 
@@ -435,7 +439,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 추가 유료/벤더별 news/API adapter 운영화와 source 품질 eval suite 고도화
+- 추가 유료/벤더별 news/API adapter 운영화
 
 ### 폐기 후보
 

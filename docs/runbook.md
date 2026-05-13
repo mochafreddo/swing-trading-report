@@ -8,7 +8,7 @@
 
 ### 현재 제공
 
-- CLI `scan`/`sell`/`entry`/`ai-brief` 실행, AI Brief source payload 수집/평가, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
+- CLI `scan`/`sell`/`entry`/`ai-brief` 실행, AI Brief source payload 수집/평가/live 비교, 웹 prod/dev 실행, Holdings Add Buy, YAML import/export, scan/sell Run 트리거를 현재 다룹니다.
 - schedule 기반 알림, 수동/scheduled AI brief workflow와 알림 발송, branch protection 운영 절차도 현재 runbook 범위에 포함합니다.
 
 ### 실험
@@ -160,6 +160,7 @@
   - `just ai-brief-source-collect --feed-catalog feeds.json --output captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/example.entry.json --source-report captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/example.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report naver=naver.sources.json --now 2026-05-06T12:00:00+00:00 --pretty`
+  - `just ai-brief-source-live-compare --entry-report reports/example.entry.json --provider naver=naver-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --buy-report reports/example.buy.json --market KR --pretty`
   - `just ai-brief-eval --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
   - `just quality`
   - `just check`
@@ -195,6 +196,7 @@
     - live URL catalog 예: `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`
     - 로컬 feed 파일은 네트워크/DNS 없이 처리하며 item URL의 literal local/private IP와 localhost를 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, DNS 기반 local/private host, redirect, 1MB 초과 응답을 거부합니다. `--feed-timeout-seconds` 기본값은 10초이며, HTTP/timeout/invalid feed는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남습니다.
   - 로컬/live feed `sources[]` payload 품질은 `just ai-brief-source-eval --entry-report <entry.json> --source-report <sources.json>`로 점검합니다. 여러 캡처 payload를 비교하려면 `--compare-source-report <label=path>`를 2개 이상 지정합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다.
+  - live provider 자체를 비교하려면 `just ai-brief-source-live-compare --entry-report <entry.json> --provider <label=provider>`를 사용합니다. provider는 `http-json`, `finnhub`, `naver-news`만 지원하며 2개 이상 지정해야 합니다. `market=MIXED` entry report는 `--market KR|US`를 함께 지정합니다. `http-json`에는 `--source-api-url <label=url>`을 지정하고, URL 없는 `http-json` provider가 정확히 하나면 `AI_BRIEF_SOURCE_API_URL`을 사용합니다. 각 provider 결과는 `sab.ai_brief_sources.v1` payload로 저장되고, provider 실패는 해당 payload의 top-level `ERROR` issue로 남아 비교 결과에서 FAIL로 표시됩니다.
   - 생성된 `*.ai-brief.json` recommendation artifact 품질은 `just ai-brief-eval --entry-report <entry.json> --ai-brief-report <ai-brief.json>`로 점검합니다. 이 평가는 네트워크/secret 없이 entry 후보 정합성, summary count, rank, source-backed ratio, source 없는 추천의 confidence 안전성을 확인합니다.
   - 결과물은 Actions artifact(`buy`, `entry`, `ai-brief` JSON과 Slack/Telegram preview 텍스트)로 남기고, AI Brief 리포트는 Supabase Storage/`report_index`에도 업로드합니다.
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.

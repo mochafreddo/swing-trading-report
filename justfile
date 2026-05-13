@@ -50,6 +50,9 @@ ai-brief-eval *args:
 ai-brief-source-collect *args:
   uv run python scripts/collect_ai_brief_sources.py {{args}}
 
+ai-brief-source-live-compare *args:
+  uv run python scripts/compare_ai_brief_live_sources.py {{args}}
+
 # Python quality gates
 ruff:
   uv run ruff check .
