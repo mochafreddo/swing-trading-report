@@ -196,8 +196,10 @@ jobs:
 
           uploaded_key="$(sed -n 's/.*Buy report uploaded to Supabase: //p' scan.log | tail -n 1 | tr -d '\r')"
 
-          echo "report_path=${report_path}" >> "${GITHUB_OUTPUT}"
-          echo "uploaded_key=${uploaded_key}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "report_path=${report_path}"
+            echo "uploaded_key=${uploaded_key}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Upload generated report artifact
         if: success()
