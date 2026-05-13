@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.25.0...v1.25.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **ci:** uv 락 파일 버전을 1.25.0으로 동기화 ([7467d92](https://github.com/mochafreddo/swing-trading-report/commit/7467d92e993e6236ddec0951ebad7f0cd8c4b7d6))
+
 ## [1.25.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.24.0...v1.25.0) (2026-05-13)
 
 
