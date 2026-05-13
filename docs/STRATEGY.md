@@ -413,6 +413,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있습니다.
 - OpenAI provider timeout/요청 실패/출력 계약 실패는 추천을 비우고 `system_issues[]`로 남깁니다.
 - source provider timeout/HTTP/JSON 실패는 추천 생성을 중단하지 않고 `system_issues[]`로 남기며, 추천에 소스가 없으면 ticker별 `source_issues[]`로 disclose해야 합니다.
+- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. eligible/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다.
 - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
 - mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 
