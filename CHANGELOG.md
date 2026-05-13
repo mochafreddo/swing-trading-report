@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.23.0...v1.24.0) (2026-05-13)
+
+
+### Features
+
+* **ai-brief:** Naver News source provider 추가 ([#130](https://github.com/mochafreddo/swing-trading-report/issues/130)) ([518599d](https://github.com/mochafreddo/swing-trading-report/commit/518599db75529df167159dbfaac08249dcb61c48))
+
 ## [1.23.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.22.2...v1.23.0) (2026-05-12)
 
 
