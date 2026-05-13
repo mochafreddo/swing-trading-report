@@ -1,0 +1,115 @@
+{
+  "schema": "sab.ai_brief.v1",
+  "type": "ai_brief",
+  "generated_at": "2026-05-06T12:00:00+00:00",
+  "report_date": "2026-05-06",
+  "source_entry_report": "entry.us.json",
+  "source_buy_report": "source.buy.json",
+  "market": "US",
+  "model_provider": "openai",
+  "model_name": "gpt-test",
+  "summary": {
+    "entry_count": 8,
+    "preselected_count": 5,
+    "recommendation_count": 3,
+    "excluded_count": 2,
+    "vetoed_count": 0,
+    "cap_excluded_count": 1,
+    "source_issue_count": 0,
+    "system_issue_count": 0
+  },
+  "recommendations": [
+    {
+      "ticker": "AAPL.NAS",
+      "name": "Apple",
+      "rank": 1,
+      "action": "ENTER",
+      "confidence": "MEDIUM",
+      "rationale": [
+        "entry report marked this candidate ENTER"
+      ],
+      "checklist": [
+        "manually confirm current price and risk limits before any order"
+      ],
+      "sources": [
+        {
+          "title": "Apple source",
+          "url": "https://news.example.test/aapl",
+          "published_at": "2026-05-06T10:00:00+00:00"
+        }
+      ],
+      "as_of": "2026-05-06T12:00:00+00:00"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "name": "Microsoft",
+      "rank": 2,
+      "action": "ENTER",
+      "confidence": "MEDIUM",
+      "rationale": [
+        "entry report marked this candidate ENTER"
+      ],
+      "checklist": [
+        "manually confirm current price and risk limits before any order"
+      ],
+      "sources": [
+        {
+          "title": "Microsoft source",
+          "url": "https://news.example.test/msft",
+          "published_at": "2026-05-06T09:30:00+00:00"
+        }
+      ],
+      "as_of": "2026-05-06T12:00:00+00:00"
+    },
+    {
+      "ticker": "TSLA.NAS",
+      "name": "Tesla",
+      "rank": 3,
+      "action": "ENTER",
+      "confidence": "MEDIUM",
+      "rationale": [
+        "entry report marked this candidate ENTER"
+      ],
+      "checklist": [
+        "manually confirm current price and risk limits before any order"
+      ],
+      "sources": [
+        {
+          "title": "Tesla source",
+          "url": "https://news.example.test/tsla",
+          "published_at": "2026-05-06T09:00:00+00:00"
+        }
+      ],
+      "as_of": "2026-05-06T12:00:00+00:00"
+    }
+  ],
+  "excluded_candidates": [
+    {
+      "ticker": "NVDA.NAS",
+      "action": "REVIEW",
+      "reason": "entry report action was REVIEW"
+    },
+    {
+      "ticker": "META.NAS",
+      "action": "SKIP",
+      "reason": "entry report action was SKIP"
+    }
+  ],
+  "vetoed_candidates": [],
+  "cap_excluded_candidates": [
+    {
+      "ticker": "NFLX.NAS",
+      "action": "ENTER",
+      "reason": "preselection cap 5 exceeded"
+    }
+  ],
+  "source_issues": [],
+  "system_issues": [],
+  "eligible_tickers": [
+    "AAPL.NAS",
+    "MSFT.NAS",
+    "TSLA.NAS",
+    "AMZN.NAS",
+    "GOOGL.NAS"
+  ]
+}

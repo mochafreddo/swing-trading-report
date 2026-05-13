@@ -1,0 +1,43 @@
+{
+  "schema": "sab.report.v1",
+  "type": "entry",
+  "market": "US",
+  "entries": [
+    {
+      "ticker": "AAPL.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "MSFT.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "NVDA.NAS",
+      "action": "REVIEW"
+    },
+    {
+      "ticker": "META.NAS",
+      "action": "SKIP"
+    },
+    {
+      "ticker": "TSLA.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "AMZN.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "GOOGL.NAS",
+      "action": "ENTER"
+    },
+    {
+      "ticker": "NFLX.NAS",
+      "action": "ENTER"
+    }
+  ],
+  "summary": {
+    "entry_count": 8
+  },
+  "system_issues": []
+}
