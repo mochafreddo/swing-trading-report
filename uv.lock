@@ -907,7 +907,7 @@ wheels = [
 
 [[package]]
 name = "swing-trading-report"
-version = "1.25.1"
+version = "1.26.0"
 source = { virtual = "." }
 dependencies = [
     { name = "idna" },
