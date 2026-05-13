@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import email.utils
+import html
 import ipaddress
 import json
 import math
 import os
 import queue
+import re
 import socket
 import threading
 import time
@@ -24,6 +27,7 @@ SOURCE_PROVIDER_NONE = "none"
 SOURCE_PROVIDER_LOCAL_JSON = "local-json"
 SOURCE_PROVIDER_HTTP_JSON = "http-json"
 SOURCE_PROVIDER_FINNHUB = "finnhub"
+SOURCE_PROVIDER_NAVER_NEWS = "naver-news"
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
 SOURCE_FRESHNESS_HOURS = 72
@@ -35,12 +39,15 @@ SOURCE_ROW_DNS_TIMEOUT_SECONDS = 1.0
 SOURCE_DNS_RESOLVER_WORKERS = 4
 SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
+NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
+NAVER_NEWS_DISPLAY_COUNT = 10
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
 SOURCE_DNS_PIN_LOCK = threading.RLock()
 _SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORKERS)
 _NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
 _IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,7 @@ def load_ai_brief_sources(
     source_api_url: str | None = None,
     source_timeout_seconds: float | None = None,
     eligible_tickers: set[str],
+    ticker_names: Mapping[str, str] | None = None,
     now: dt.datetime | None = None,
 ) -> AiBriefSourceProviderResult:
     if source_provider == SOURCE_PROVIDER_NONE:
@@ -105,6 +113,17 @@ def load_ai_brief_sources(
                 else source_timeout_seconds
             ),
             eligible_tickers=eligible_tickers,
+            now=resolved_now,
+        )
+    if source_provider == SOURCE_PROVIDER_NAVER_NEWS:
+        return _load_naver_news_source_report(
+            source_timeout_seconds=(
+                DEFAULT_SOURCE_TIMEOUT_SECONDS
+                if source_timeout_seconds is None
+                else source_timeout_seconds
+            ),
+            eligible_tickers=eligible_tickers,
+            ticker_names=ticker_names or {},
             now=resolved_now,
         )
     raise AiBriefSourceProviderError(f"unsupported source provider {source_provider!r}")
@@ -391,6 +410,208 @@ def _finnhub_published_at_iso(value: object) -> str:
     if not math.isfinite(timestamp):
         return ""
     return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
+
+
+def _load_naver_news_source_report(
+    *,
+    source_timeout_seconds: float,
+    eligible_tickers: set[str],
+    ticker_names: Mapping[str, str],
+    now: dt.datetime,
+) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    client_id = str(os.getenv("NAVER_CLIENT_ID") or "").strip()
+    client_secret = str(os.getenv("NAVER_CLIENT_SECRET") or "").strip()
+    if not client_id or not client_secret:
+        raise AiBriefSourceProviderError(
+            "--source-provider naver-news requires NAVER_CLIENT_ID and "
+            "NAVER_CLIENT_SECRET"
+        )
+
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            NAVER_NEWS_SEARCH_URL,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+
+    headers = {
+        "Accept": "application/json",
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    source_rows: list[object] = []
+    source_issues: list[dict[str, object]] = []
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        for ticker in sorted(eligible_tickers):
+            parsed = parse_ticker(ticker)
+            if parsed.market != "KR":
+                source_issues.append(
+                    _source_issue(
+                        ticker=ticker,
+                        code="naver_news_source_unsupported_market",
+                        message="Naver News source provider supports KR tickers only",
+                    )
+                )
+                continue
+
+            params = {
+                "query": _naver_news_query_for_ticker(
+                    ticker,
+                    ticker_code=parsed.symbol,
+                    ticker_names=ticker_names,
+                ),
+                "display": NAVER_NEWS_DISPLAY_COUNT,
+                "start": 1,
+                "sort": "date",
+            }
+            try:
+                with _pin_source_api_dns(
+                    validated_source_api_url.hostnames,
+                    validated_source_api_url.addrinfos,
+                    deadline=deadline,
+                ):
+                    response = session.get(
+                        validated_source_api_url.url,
+                        params=params,
+                        headers=headers,
+                        timeout=_source_request_timeout(deadline),
+                        stream=True,
+                        allow_redirects=False,
+                    )
+            except requests.Timeout as exc:
+                raise AiBriefSourceProviderTimeoutError(
+                    "Naver News source request timed out"
+                ) from exc
+            except requests.RequestException as exc:
+                raise AiBriefSourceProviderError(
+                    f"Naver News source request failed: {_exception_type_name(exc)}"
+                ) from exc
+
+            if 300 <= response.status_code < 400:
+                _close_response(response)
+                raise AiBriefSourceProviderError(
+                    "Naver News source redirect was not followed "
+                    f"(HTTP {response.status_code})"
+                )
+            if response.status_code >= 400:
+                _close_response(response)
+                raise AiBriefSourceProviderError(
+                    f"Naver News source request failed with HTTP {response.status_code}"
+                )
+
+            payload = _parse_naver_news_response_payload(response, deadline=deadline)
+            source_rows.extend(_normalize_naver_news_rows(ticker, payload))
+
+        normalized = _normalize_source_rows(
+            rows=source_rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="naver_news_source",
+            issue_subject="Naver News source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=normalized.sources_by_ticker,
+            source_issues=[*source_issues, *normalized.source_issues],
+        )
+    finally:
+        _close_session(session)
+
+
+def _naver_news_query_for_ticker(
+    ticker: str,
+    *,
+    ticker_code: str,
+    ticker_names: Mapping[str, str],
+) -> str:
+    name = str(ticker_names.get(ticker) or "").strip()
+    return name or ticker_code
+
+
+def _parse_naver_news_response_payload(
+    response: Any,
+    *,
+    deadline: float,
+) -> list[object]:
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            "Naver News source response was not valid JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise AiBriefSourceProviderError(
+            "Naver News source response must contain a JSON object"
+        )
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise AiBriefSourceProviderError(
+            "Naver News source response items must be a list"
+        )
+    return items
+
+
+def _normalize_naver_news_rows(
+    ticker: str,
+    payload: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": "",
+                    "url": "",
+                    "published_at": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": _clean_naver_news_text(item.get("title")),
+                "url": _naver_news_url(item),
+                "published_at": _naver_news_published_at_iso(item.get("pubDate")),
+            }
+        )
+    return rows
+
+
+def _clean_naver_news_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return _HTML_TAG_RE.sub("", html.unescape(text)).strip()
+
+
+def _naver_news_url(item: Mapping[str, Any]) -> str:
+    originallink = str(item.get("originallink") or "").strip()
+    if originallink:
+        return originallink
+    return str(item.get("link") or "").strip()
+
+
+def _naver_news_published_at_iso(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = email.utils.parsedate_to_datetime(text)
+    except TypeError, ValueError:
+        return ""
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return ""
+    return parsed.isoformat()
 
 
 def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
@@ -1304,6 +1525,7 @@ __all__ = [
     "SOURCE_PROVIDER_FINNHUB",
     "SOURCE_PROVIDER_HTTP_JSON",
     "SOURCE_PROVIDER_LOCAL_JSON",
+    "SOURCE_PROVIDER_NAVER_NEWS",
     "SOURCE_PROVIDER_NONE",
     "SOURCE_REPORT_SCHEMA",
     "SOURCE_REPORT_TYPE",

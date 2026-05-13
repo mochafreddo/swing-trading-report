@@ -88,6 +88,10 @@
 - 선택(AI Brief Finnhub source provider; US ticker only):
   - `FINNHUB_API_KEY=...`
   - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=finnhub`와 secret `FINNHUB_API_KEY`를 설정
+- 선택(AI Brief Naver News source provider; KR ticker only):
+  - `NAVER_CLIENT_ID=...`
+  - `NAVER_CLIENT_SECRET=...`
+  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=naver-news`와 secrets `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`을 설정
 - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
 ### 3. 핵심 실행
@@ -104,6 +108,7 @@
 - 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
 - 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
 - Finnhub Company News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub`
+- Naver News 포함 브리프(선택, KR ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --buy-report reports/YYYY-MM-DD.buy.json --source-provider naver-news`
 - RSS/Atom/RDF source payload 생성(개발용, 로컬 파일 또는 live HTTPS feed URL catalog): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
 - 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
@@ -156,9 +161,10 @@
   - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`을 포함해야 하며, offline 경로라 DNS 조회 없이 literal local/private IP와 localhost만 거부합니다. source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다.
   - `--source-provider http-json --source-api-url <url>`는 외부 source API에 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. API URL은 HTTPS여야 하며 local/private host와 redirect 응답은 거부합니다. 반환된 source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없습니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`은 실행 URL이 `AI_BRIEF_SOURCE_API_URL`과 정확히 일치할 때만 Bearer 토큰으로 전송합니다.
   - `--source-provider finnhub`는 `FINNHUB_API_KEY`로 Finnhub Company News를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `headline`/`url`/Unix `datetime`을 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
+  - `--source-provider naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 Naver Search API 뉴스 endpoint(`https://openapi.naver.com/v1/search/news.json`)를 ticker별 1회 조회합니다. v1은 KR ticker만 지원하며 `--buy-report`의 회사명을 검색어로 우선 사용하고, 없으면 6자리 ticker를 사용합니다. 요청은 `display=10`, `start=1`, `sort=date`로 보냅니다. US ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`(HTML 제거), `originallink` 또는 `link`, `pubDate`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
   - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. 로컬 feed 파일은 offline으로 처리하고 item URL의 literal local/private IP와 localhost만 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, live item URL도 DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
-  - source provider timeout/HTTP/JSON 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
+  - source provider timeout/HTTP/JSON/body-size 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
   - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있으며, 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
 
@@ -231,6 +237,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider finnhub` | Finnhub Company News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --buy-report <path> --source-provider naver-news` | Naver News source context를 포함해 KR AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 
@@ -409,7 +416,7 @@
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
-- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. 수동 `source_provider=http-json` 또는 scheduled fallback `AI_BRIEF_SOURCE_API_URL`은 외부 source API context를 주입하고, 수동 `source_provider=finnhub` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=finnhub`는 `FINNHUB_API_KEY` secret으로 US Company News context를 주입합니다. Scheduled provider 선택은 `AI_BRIEF_SOURCE_PROVIDER`가 우선이고, 없으면 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json`, 둘 다 없으면 `none`입니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
+- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. 수동 `source_provider=http-json` 또는 scheduled fallback `AI_BRIEF_SOURCE_API_URL`은 외부 source API context를 주입하고, 수동 `source_provider=finnhub` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=finnhub`는 `FINNHUB_API_KEY` secret으로 US Company News context를 주입합니다. 수동 `source_provider=naver-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets로 KR Naver News context를 주입합니다. Scheduled provider 선택은 `AI_BRIEF_SOURCE_PROVIDER`가 우선이고, 없으면 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json`, 둘 다 없으면 `none`입니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
 - RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, 기존 `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인할 수 있습니다.
 
 ### 실험
@@ -421,7 +428,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 유료/벤더별 news/API adapter 운영화와 source 품질 eval suite 고도화
+- 추가 유료/벤더별 news/API adapter 운영화와 source 품질 eval suite 고도화
 
 ### 폐기 후보
 

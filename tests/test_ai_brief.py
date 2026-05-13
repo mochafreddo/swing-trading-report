@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import email.utils
 import json
 import threading
 from pathlib import Path
@@ -834,6 +835,68 @@ class _FinnhubTimeoutSession:
         self.closed = True
 
 
+class _NaverNewsSourceSession:
+    def __init__(self, payloads_by_query: dict[str, object]) -> None:
+        self.payloads_by_query = payloads_by_query
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        query = str(params.get("query") or "")
+        payload = self.payloads_by_query.get(query, {"items": []})
+        return _JsonResponse(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _NaverNewsStaticResponse:
+    def __init__(self, text: str, *, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> list[bytes]:
+        assert chunk_size == 64 * 1024
+        return [self.text.encode("utf-8")]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _NaverNewsStaticSession:
+    def __init__(self, response: _NaverNewsStaticResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _NaverNewsStaticResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _NaverNewsTimeoutSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("naver timed out")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _HttpJsonSourceTimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_sources as ai_brief_sources
@@ -1267,6 +1330,374 @@ def test_load_ai_brief_sources_finnhub_oversized_body_is_provider_failure(
             source_api_url=None,
             source_timeout_seconds=4.5,
             eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_naver_news_uses_kr_names_and_normalizes_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _NaverNewsSourceSession(
+        {
+            "000660": {
+                "items": [
+                    {
+                        "title": "&lt;b&gt;SK하이닉스&lt;/b&gt; 실적 &amp; AI 수요",
+                        "originallink": "https://news.example/sk-hynix",
+                        "link": "https://n.news.naver.com/article/000660",
+                        "pubDate": "Tue, 05 May 2026 16:00:00 +0900",
+                    }
+                ]
+            },
+            "삼성전자": {
+                "items": [
+                    {
+                        "title": "<b>삼성전자</b> 공급망 점검",
+                        "originallink": "",
+                        "link": "https://n.news.naver.com/article/005930",
+                        "pubDate": "Tue, 05 May 2026 17:00:00 +0900",
+                    }
+                ]
+            },
+        }
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"005930", "000660.KS", "AAPL.NAS"},
+        ticker_names={"005930": "삼성전자"},
+        now=now,
+    )
+
+    assert [call["url"] for call in session.calls] == [
+        "https://openapi.naver.com/v1/search/news.json",
+        "https://openapi.naver.com/v1/search/news.json",
+    ]
+    assert [call["params"] for call in session.calls] == [
+        {"query": "000660", "display": 10, "start": 1, "sort": "date"},
+        {"query": "삼성전자", "display": 10, "start": 1, "sort": "date"},
+    ]
+    headers = session.calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["X-Naver-Client-Id"] == "naver-client"
+    assert headers["X-Naver-Client-Secret"] == "naver-secret"
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
+    assert session.calls[0]["allow_redirects"] is False
+    assert session.trust_env is False
+    assert session.closed is True
+    assert result.sources_by_ticker["000660.KS"][0] == {
+        "title": "SK하이닉스 실적 & AI 수요",
+        "url": "https://news.example/sk-hynix",
+        "published_at": "2026-05-05T16:00:00+09:00",
+    }
+    assert result.sources_by_ticker["005930"][0]["title"] == "삼성전자 공급망 점검"
+    assert result.sources_by_ticker["005930"][0]["url"] == (
+        "https://n.news.naver.com/article/005930"
+    )
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "naver_news_source_unsupported_market",
+            "severity": "WARN",
+            "message": "Naver News source provider supports KR tickers only",
+        }
+    ]
+
+
+def test_load_ai_brief_sources_naver_news_reports_stale_future_duplicate_and_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    stale = email.utils.format_datetime(now - dt.timedelta(hours=73))
+    fresh = email.utils.format_datetime(now - dt.timedelta(hours=1))
+    future = email.utils.format_datetime(now + dt.timedelta(minutes=16))
+    session = _NaverNewsSourceSession(
+        {
+            "삼성전자": {
+                "items": [
+                    {
+                        "title": "Old source",
+                        "originallink": "https://news.example/stale",
+                        "link": "https://n.news.naver.com/article/stale",
+                        "pubDate": stale,
+                    },
+                    {
+                        "title": "Future source",
+                        "originallink": "https://news.example/future",
+                        "link": "https://n.news.naver.com/article/future",
+                        "pubDate": future,
+                    },
+                    {
+                        "title": "Fresh 1",
+                        "originallink": "https://news.example/fresh-1",
+                        "link": "https://n.news.naver.com/article/fresh-1",
+                        "pubDate": fresh,
+                    },
+                    {
+                        "title": "Duplicate",
+                        "originallink": "https://news.example/fresh-1",
+                        "link": "https://n.news.naver.com/article/duplicate",
+                        "pubDate": fresh,
+                    },
+                    {
+                        "title": "Fresh 2",
+                        "originallink": "https://news.example/fresh-2",
+                        "link": "https://n.news.naver.com/article/fresh-2",
+                        "pubDate": fresh,
+                    },
+                    {
+                        "title": "Fresh 3",
+                        "originallink": "https://news.example/fresh-3",
+                        "link": "https://n.news.naver.com/article/fresh-3",
+                        "pubDate": fresh,
+                    },
+                    {
+                        "title": "Fresh 4",
+                        "originallink": "https://news.example/fresh-4",
+                        "link": "https://n.news.naver.com/article/fresh-4",
+                        "pubDate": fresh,
+                    },
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"005930"},
+        ticker_names={"005930": "삼성전자"},
+        now=now,
+    )
+
+    assert [source["url"] for source in result.sources_by_ticker["005930"]] == [
+        "https://news.example/fresh-1",
+        "https://news.example/fresh-2",
+        "https://news.example/fresh-3",
+    ]
+    assert [issue["code"] for issue in result.source_issues] == [
+        "naver_news_source_stale",
+        "naver_news_source_future",
+        "naver_news_source_duplicate_url",
+        "naver_news_source_cap_exceeded",
+    ]
+
+
+def test_load_ai_brief_sources_naver_news_requires_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _NaverNewsSourceSession({"삼성전자": {"items": []}})
+    monkeypatch.delenv("NAVER_CLIENT_ID", raising=False)
+    monkeypatch.delenv("NAVER_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="NAVER_CLIENT_ID"):
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_naver_news_rejects_unsafe_news_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _NaverNewsSourceSession(
+        {
+            "삼성전자": {
+                "items": [
+                    {
+                        "title": "Internal metadata",
+                        "originallink": "http://169.254.169.254/latest",
+                        "link": "https://n.news.naver.com/article/005930",
+                        "pubDate": "Tue, 05 May 2026 17:00:00 +0900",
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"005930"},
+        ticker_names={"005930": "삼성전자"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "005930",
+            "code": "naver_news_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "Naver News source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_naver_news_redacts_request_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingNaverNewsSourceSession:
+        trust_env = True
+
+        def get(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "failed for /v1/search/news.json?client_secret=naver-secret"
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingNaverNewsSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "naver-secret" not in message
+    assert "/v1/search/news" not in message
+
+
+def test_load_ai_brief_sources_naver_news_http_error_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _NaverNewsStaticSession(
+        _NaverNewsStaticResponse('{"errorMessage":"internal-secret"}', status_code=429)
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert str(excinfo.value) == "Naver News source request failed with HTTP 429"
+    assert "naver-secret" not in str(excinfo.value)
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_naver_news_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _NaverNewsTimeoutSession()
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="Naver News"):
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+
+
+def test_load_ai_brief_sources_naver_news_bad_json_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _NaverNewsStaticSession(_NaverNewsStaticResponse("{not-json"))
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="not valid JSON"):
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_naver_news_oversized_body_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _NaverNewsStaticSession(
+        _NaverNewsStaticResponse("x" * (MAX_SOURCE_API_RESPONSE_BYTES + 1))
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
+        load_ai_brief_sources(
+            source_provider="naver-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"005930"},
+            ticker_names={"005930": "삼성전자"},
             now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
         )
 
@@ -2888,6 +3319,149 @@ def test_run_ai_brief_finnhub_source_failure_keeps_artifact(
     assert "FINNHUB_API_KEY" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_naver_news_source_provider_enriches_kr_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="KR",
+        entries=[_entry_row("005930")],
+    )
+    buy_report = tmp_path / "source.buy.json"
+    fresh_pub_date = email.utils.format_datetime(dt.datetime.now(dt.UTC))
+    buy_report.write_text(
+        json.dumps(
+            {
+                "schema": "sab.report.v1",
+                "type": "buy",
+                "candidates": [{"ticker": "005930", "name": "삼성전자"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_dir = tmp_path / "reports"
+    session = _NaverNewsSourceSession(
+        {
+            "삼성전자": {
+                "items": [
+                    {
+                        "title": "<b>삼성전자</b> AI 반도체 공급",
+                        "originallink": "https://news.example/samsung",
+                        "link": "https://n.news.naver.com/article/005930",
+                        "pubDate": fresh_pub_date,
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("NAVER_CLIENT_ID", "naver-client")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "naver-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=buy_report.as_posix(),
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    assert session.calls[0]["params"]["query"] == "삼성전자"  # type: ignore[index]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/samsung"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_naver_news_source_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="KR",
+        entries=[_entry_row("005930")],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.delenv("NAVER_CLIENT_ID", raising=False)
+    monkeypatch.delenv("NAVER_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert "NAVER_CLIENT_ID" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_naver_news_rejects_source_report_path(tmp_path: Path) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="KR",
+        entries=[_entry_row("005930")],
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="naver-news",
+        source_report_path=(tmp_path / "source.sources.json").as_posix(),
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 1
+
+
+def test_run_ai_brief_naver_news_rejects_source_api_url(tmp_path: Path) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="KR",
+        entries=[_entry_row("005930")],
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="naver-news",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 1
+
+
 def test_run_ai_brief_source_api_url_implies_http_json_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -3814,6 +4388,35 @@ def test_main_accepts_finnhub_ai_brief_source_provider(
 
     assert exit_code == 0
     assert captured["source_provider"] == "finnhub"
+    assert captured["source_timeout_seconds"] == 2.5
+
+
+def test_main_accepts_naver_news_ai_brief_source_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--source-provider",
+            "naver-news",
+            "--source-timeout-seconds",
+            "2.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source_provider"] == "naver-news"
     assert captured["source_timeout_seconds"] == 2.5
 
 

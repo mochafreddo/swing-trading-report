@@ -70,6 +70,7 @@ on:
           - local-json
           - http-json
           - finnhub
+          - naver-news
       source_report_path:
         description: "Local source JSON path when source_provider=local-json"
         required: false
@@ -287,7 +288,7 @@ jobs:
           fi
           source_provider="${source_provider,,}"
           case "${source_provider}" in
-            none|local-json|http-json|finnhub) ;;
+            none|local-json|http-json|finnhub|naver-news) ;;
             *)
               echo "Unsupported source_provider: ${source_provider}" >&2
               exit 1
@@ -639,6 +640,8 @@ jobs:
           AI_BRIEF_SOURCE_API_TOKEN: ${{ secrets.AI_BRIEF_SOURCE_API_TOKEN }}
           AI_BRIEF_SOURCE_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_SOURCE_TIMEOUT_SECONDS }}
           FINNHUB_API_KEY: ${{ steps.params.outputs.source_provider == 'finnhub' && secrets.FINNHUB_API_KEY || '' }}
+          NAVER_CLIENT_ID: ${{ steps.params.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_ID || '' }}
+          NAVER_CLIENT_SECRET: ${{ steps.params.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_SECRET || '' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
@@ -671,7 +674,7 @@ jobs:
             elif [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" ]]; then
               cmd+=(--source-api-url "${PARAM_SOURCE_API_URL}")
             fi
-            if [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" ]]; then
+            if [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" || "${PARAM_SOURCE_PROVIDER}" == "naver-news" ]]; then
               if [[ -n "${PARAM_SOURCE_TIMEOUT_SECONDS}" ]]; then
                 cmd+=(--source-timeout-seconds "${PARAM_SOURCE_TIMEOUT_SECONDS}")
               fi
