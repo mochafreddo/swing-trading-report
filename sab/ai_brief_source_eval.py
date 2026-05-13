@@ -47,6 +47,20 @@ class AiBriefSourceEvalResult:
         }
 
 
+@dataclass(frozen=True)
+class AiBriefSourceCompareResult:
+    status: AiBriefSourceEvalStatus
+    summary: dict[str, object]
+    reports: list[dict[str, object]]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "summary": self.summary,
+            "reports": self.reports,
+        }
+
+
 def evaluate_ai_brief_source_report(
     *,
     entry_report_path: str,
@@ -158,6 +172,80 @@ def evaluate_ai_brief_source_report(
         minimum_coverage_ratio=minimum_coverage_ratio,
         issues=issues,
         duplicate_url_count=provider_duplicate_count + len(duplicate_issues),
+    )
+
+
+def compare_ai_brief_source_reports(
+    *,
+    entry_report_path: str,
+    source_reports: Mapping[str, str],
+    market: str | None = None,
+    minimum_coverage_ratio: float = 1.0,
+    now: dt.datetime | None = None,
+) -> AiBriefSourceCompareResult:
+    if len(source_reports) < 2:
+        raise ValueError("source_reports must contain at least two reports")
+    resolved_now = now or dt.datetime.now().astimezone()
+    reports: list[dict[str, object]] = []
+    pass_count = 0
+    warn_count = 0
+    fail_count = 0
+    for label, source_report_path in source_reports.items():
+        result = evaluate_ai_brief_source_report(
+            entry_report_path=entry_report_path,
+            source_report_path=source_report_path,
+            market=market,
+            minimum_coverage_ratio=minimum_coverage_ratio,
+            now=resolved_now,
+        )
+        if result.status == "PASS":
+            pass_count += 1
+        elif result.status == "WARN":
+            warn_count += 1
+        else:
+            fail_count += 1
+        reports.append(
+            {
+                "label": label,
+                "status": result.status,
+                "summary": result.summary,
+                "issues": [issue.to_dict() for issue in result.issues],
+            }
+        )
+
+    status: AiBriefSourceEvalStatus = "PASS"
+    if fail_count:
+        status = "FAIL"
+    elif warn_count:
+        status = "WARN"
+
+    summary = {
+        "report_count": len(reports),
+        "pass_count": pass_count,
+        "warn_count": warn_count,
+        "fail_count": fail_count,
+        "leaders": {
+            "coverage": _leader_labels(
+                reports,
+                key="coverage_ratio",
+                prefer_high=True,
+            ),
+            "source_count": _leader_labels(
+                reports,
+                key="source_count",
+                prefer_high=True,
+            ),
+            "fewest_issues": _leader_labels(
+                reports,
+                key="issue_count",
+                prefer_high=False,
+            ),
+        },
+    }
+    return AiBriefSourceCompareResult(
+        status=status,
+        summary=summary,
+        reports=reports,
     )
 
 
@@ -321,6 +409,39 @@ def _coverage_ratio(*, eligible_tickers: set[str], covered_tickers: set[str]) ->
     return len(covered_tickers) / len(eligible_tickers)
 
 
+def _leader_labels(
+    reports: list[dict[str, object]],
+    *,
+    key: str,
+    prefer_high: bool,
+) -> list[str]:
+    scores = [
+        (
+            str(report["label"]),
+            _summary_number(report["summary"], key),
+        )
+        for report in reports
+        if isinstance(report.get("summary"), Mapping)
+    ]
+    if not scores:
+        return []
+    best_score = (
+        max(score for _, score in scores)
+        if prefer_high
+        else min(score for _, score in scores)
+    )
+    return sorted(label for label, score in scores if score == best_score)
+
+
+def _summary_number(summary: object, key: str) -> float:
+    if not isinstance(summary, Mapping):
+        return 0.0
+    value = summary.get(key)
+    if isinstance(value, int | float):
+        return float(value)
+    return 0.0
+
+
 def _optional_text(value: object) -> str | None:
     if value is None:
         return None
@@ -342,8 +463,10 @@ def parse_eval_now(value: str) -> dt.datetime:
 
 
 __all__ = [
+    "AiBriefSourceCompareResult",
     "AiBriefSourceEvalIssue",
     "AiBriefSourceEvalResult",
+    "compare_ai_brief_source_reports",
     "evaluate_ai_brief_source_report",
     "parse_eval_now",
 ]

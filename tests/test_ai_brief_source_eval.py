@@ -5,8 +5,12 @@ import json
 from pathlib import Path
 
 import pytest
+from sab import ai_brief_source_eval as source_eval
 from sab import ai_brief_sources
-from sab.ai_brief_source_eval import evaluate_ai_brief_source_report, parse_eval_now
+from sab.ai_brief_source_eval import (
+    evaluate_ai_brief_source_report,
+    parse_eval_now,
+)
 from scripts.eval_ai_brief_sources import main as eval_sources_main
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "ai_brief_sources"
@@ -310,6 +314,110 @@ def test_source_eval_market_filters_mixed_entry_report(tmp_path: Path) -> None:
     assert result.summary["covered_ticker_count"] == 1
 
 
+def test_source_eval_compare_reports_returns_all_results_and_fail_status() -> None:
+    result = source_eval.compare_ai_brief_source_reports(
+        entry_report_path=_fixture("entry.us.json"),
+        source_reports={
+            "good": _fixture("sources.good.json"),
+            "partial": _fixture("sources.partial.json"),
+        },
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert result.summary["report_count"] == 2
+    assert result.summary["pass_count"] == 1
+    assert result.summary["fail_count"] == 1
+    assert [report["label"] for report in result.reports] == ["good", "partial"]
+    assert [report["status"] for report in result.reports] == ["PASS", "FAIL"]
+
+
+def test_source_eval_compare_reports_passes_and_sorts_tied_leaders() -> None:
+    result = source_eval.compare_ai_brief_source_reports(
+        entry_report_path=_fixture("entry.us.json"),
+        source_reports={
+            "zeta": _fixture("sources.good.json"),
+            "alpha": _fixture("sources.good.json"),
+        },
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.summary["pass_count"] == 2
+    assert result.summary["warn_count"] == 0
+    assert result.summary["fail_count"] == 0
+    assert result.summary["leaders"] == {
+        "coverage": ["alpha", "zeta"],
+        "source_count": ["alpha", "zeta"],
+        "fewest_issues": ["alpha", "zeta"],
+    }
+
+
+def test_source_eval_compare_reports_does_not_short_circuit_failures(
+    tmp_path: Path,
+) -> None:
+    missing_report = tmp_path / "missing.sources.json"
+
+    result = source_eval.compare_ai_brief_source_reports(
+        entry_report_path=_fixture("entry.us.json"),
+        source_reports={
+            "missing": missing_report.as_posix(),
+            "good": _fixture("sources.good.json"),
+        },
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert [report["label"] for report in result.reports] == ["missing", "good"]
+    assert [report["status"] for report in result.reports] == ["FAIL", "PASS"]
+
+
+def test_source_eval_compare_reports_requires_at_least_two_reports() -> None:
+    with pytest.raises(ValueError, match="at least two"):
+        source_eval.compare_ai_brief_source_reports(
+            entry_report_path=_fixture("entry.us.json"),
+            source_reports={"only": _fixture("sources.good.json")},
+            now=EVAL_NOW,
+        )
+
+
+def test_source_eval_compare_reports_reuses_one_default_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_now_values: list[dt.datetime | None] = []
+
+    def fake_evaluate_ai_brief_source_report(**kwargs):
+        recorded_now_values.append(kwargs["now"])
+        return source_eval.AiBriefSourceEvalResult(
+            status="PASS",
+            summary={
+                "coverage_ratio": 1.0,
+                "source_count": 1,
+                "issue_count": 0,
+            },
+            issues=[],
+        )
+
+    monkeypatch.setattr(
+        source_eval,
+        "evaluate_ai_brief_source_report",
+        fake_evaluate_ai_brief_source_report,
+    )
+
+    result = source_eval.compare_ai_brief_source_reports(
+        entry_report_path=_fixture("entry.us.json"),
+        source_reports={
+            "first": _fixture("sources.good.json"),
+            "second": _fixture("sources.partial.json"),
+        },
+    )
+
+    assert result.status == "PASS"
+    assert len(recorded_now_values) == 2
+    assert recorded_now_values[0] is not None
+    assert recorded_now_values[0] == recorded_now_values[1]
+
+
 def test_source_eval_script_outputs_json_and_returns_zero_for_warn(
     capsys,
 ) -> None:
@@ -329,6 +437,7 @@ def test_source_eval_script_outputs_json_and_returns_zero_for_warn(
     assert exit_code == 0
     assert payload["status"] == "WARN"
     assert payload["summary"]["duplicate_url_count"] == 1
+    assert "reports" not in payload
 
 
 def test_source_eval_script_returns_nonzero_for_fail(capsys) -> None:
@@ -347,6 +456,69 @@ def test_source_eval_script_returns_nonzero_for_fail(capsys) -> None:
     payload = json.loads(captured.out)
     assert exit_code == 1
     assert payload["status"] == "FAIL"
+
+
+def test_source_eval_script_compares_reports_and_returns_nonzero_for_fail(
+    capsys,
+) -> None:
+    exit_code = eval_sources_main(
+        [
+            "--entry-report",
+            _fixture("entry.us.json"),
+            "--compare-source-report",
+            f"good={_fixture('sources.good.json')}",
+            "--compare-source-report",
+            f"partial={_fixture('sources.partial.json')}",
+            "--now",
+            "2026-05-06T12:00:00+00:00",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 1
+    assert payload["status"] == "FAIL"
+    assert [report["label"] for report in payload["reports"]] == ["good", "partial"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        [
+            "--entry-report",
+            _fixture("entry.us.json"),
+            "--source-report",
+            _fixture("sources.good.json"),
+            "--compare-source-report",
+            f"other={_fixture('sources.partial.json')}",
+        ],
+        [
+            "--entry-report",
+            _fixture("entry.us.json"),
+            "--compare-source-report",
+            f"bad label={_fixture('sources.good.json')}",
+            "--compare-source-report",
+            f"other={_fixture('sources.partial.json')}",
+        ],
+        [
+            "--entry-report",
+            _fixture("entry.us.json"),
+            "--compare-source-report",
+            f"same={_fixture('sources.good.json')}",
+            "--compare-source-report",
+            f"same={_fixture('sources.partial.json')}",
+        ],
+        [
+            "--entry-report",
+            _fixture("entry.us.json"),
+            "--compare-source-report",
+            f"only={_fixture('sources.good.json')}",
+        ],
+    ],
+)
+def test_source_eval_script_rejects_invalid_compare_args(args) -> None:
+    with pytest.raises(SystemExit):
+        eval_sources_main(args)
 
 
 def test_parse_eval_now_requires_utc_offset() -> None:
