@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.24.0...v1.25.0) (2026-05-13)
+
+
+### Features
+
+* **ai-brief:** source eval 비교 모드 추가 ([#132](https://github.com/mochafreddo/swing-trading-report/issues/132)) ([445fb7e](https://github.com/mochafreddo/swing-trading-report/commit/445fb7e562a1b93b4b893a03b98431e16874ae31))
+
 ## [1.24.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.23.0...v1.24.0) (2026-05-13)
 
 
