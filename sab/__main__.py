@@ -217,7 +217,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--source-provider",
         type=str,
         default=None,
-        choices=["none", "local-json", "http-json", "finnhub", "naver-news"],
+        choices=[
+            "none",
+            "local-json",
+            "http-json",
+            "finnhub",
+            "polygon-news",
+            "naver-news",
+        ],
         help="Optional source provider for AI brief candidate context",
     )
     ai_brief.add_argument(
