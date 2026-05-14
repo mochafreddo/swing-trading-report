@@ -30,6 +30,7 @@ SOURCE_PROVIDER_FINNHUB = "finnhub"
 SOURCE_PROVIDER_POLYGON_NEWS = "polygon-news"
 SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS = "alpha-vantage-news"
 SOURCE_PROVIDER_MARKETAUX_NEWS = "marketaux-news"
+SOURCE_PROVIDER_BENZINGA_NEWS = "benzinga-news"
 SOURCE_PROVIDER_NAVER_NEWS = "naver-news"
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
@@ -48,6 +49,8 @@ ALPHA_VANTAGE_NEWS_URL = "https://www.alphavantage.co/query"
 ALPHA_VANTAGE_NEWS_LIMIT = 10
 MARKETAUX_NEWS_URL = "https://api.marketaux.com/v1/news/all"
 MARKETAUX_NEWS_LIMIT = 10
+BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
+BENZINGA_NEWS_LIMIT = 10
 NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_NEWS_DISPLAY_COUNT = 10
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
@@ -146,6 +149,16 @@ def load_ai_brief_sources(
         )
     if source_provider == SOURCE_PROVIDER_MARKETAUX_NEWS:
         return _load_marketaux_news_source_report(
+            source_timeout_seconds=(
+                DEFAULT_SOURCE_TIMEOUT_SECONDS
+                if source_timeout_seconds is None
+                else source_timeout_seconds
+            ),
+            eligible_tickers=eligible_tickers,
+            now=resolved_now,
+        )
+    if source_provider == SOURCE_PROVIDER_BENZINGA_NEWS:
+        return _load_benzinga_news_source_report(
             source_timeout_seconds=(
                 DEFAULT_SOURCE_TIMEOUT_SECONDS
                 if source_timeout_seconds is None
@@ -890,6 +903,174 @@ def _normalize_marketaux_news_rows(
             }
         )
     return rows
+
+
+def _load_benzinga_news_source_report(
+    *,
+    source_timeout_seconds: float,
+    eligible_tickers: set[str],
+    now: dt.datetime,
+) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    api_token = str(os.getenv("BENZINGA_API_TOKEN") or "").strip()
+    if not api_token:
+        raise AiBriefSourceProviderError(
+            "--source-provider benzinga-news requires BENZINGA_API_TOKEN"
+        )
+
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            BENZINGA_NEWS_URL,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+
+    published_since = int(
+        (
+            now.astimezone(dt.UTC) - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)
+        ).timestamp()
+    )
+    headers = {"Accept": "application/json"}
+    source_rows: list[object] = []
+    source_issues: list[dict[str, object]] = []
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        for ticker in sorted(eligible_tickers):
+            parsed = parse_ticker(ticker)
+            if parsed.market != "US":
+                source_issues.append(
+                    _source_issue(
+                        ticker=ticker,
+                        code="benzinga_news_source_unsupported_market",
+                        message=(
+                            "Benzinga News source provider supports US tickers only"
+                        ),
+                    )
+                )
+                continue
+
+            params = {
+                "token": api_token,
+                "tickers": parsed.symbol,
+                "pageSize": BENZINGA_NEWS_LIMIT,
+                "displayOutput": "headline",
+                "sort": "created:desc",
+                "publishedSince": published_since,
+            }
+            response = _get_vendor_source_response(
+                session=session,
+                validated_source_api_url=validated_source_api_url,
+                params=params,
+                headers=headers,
+                deadline=deadline,
+                source_subject="Benzinga News source",
+            )
+            payload = _parse_benzinga_news_response_payload(
+                response,
+                deadline=deadline,
+            )
+            source_rows.extend(_normalize_benzinga_news_rows(ticker, payload))
+
+        normalized = _normalize_source_rows(
+            rows=source_rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="benzinga_news_source",
+            issue_subject="Benzinga News source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=normalized.sources_by_ticker,
+            source_issues=[*source_issues, *normalized.source_issues],
+        )
+    finally:
+        _close_session(session)
+
+
+def _parse_benzinga_news_response_payload(
+    response: Any,
+    *,
+    deadline: float,
+) -> list[object]:
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            "Benzinga News source response was not valid JSON"
+        ) from exc
+    if not isinstance(payload, list):
+        raise AiBriefSourceProviderError(
+            "Benzinga News source response must contain a JSON array"
+        )
+    return payload
+
+
+def _normalize_benzinga_news_rows(
+    ticker: str,
+    payload: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": "",
+                    "url": "",
+                    "published_at": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "published_at": _benzinga_news_published_at_iso(
+                    _benzinga_news_publication_value(item)
+                ),
+            }
+        )
+    return rows
+
+
+def _benzinga_news_publication_value(item: Mapping[str, Any]) -> object:
+    created = item.get("created")
+    if created is not None and str(created).strip():
+        return created
+    return item.get("updated")
+
+
+def _benzinga_news_published_at_iso(value: object) -> str:
+    if isinstance(value, bool) or value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        timestamp = float(text)
+    except ValueError:
+        pass
+    else:
+        if math.isfinite(timestamp):
+            return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = email.utils.parsedate_to_datetime(text)
+        except TypeError, ValueError:
+            return ""
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return parsed.isoformat()
 
 
 def _load_naver_news_source_report(
@@ -1976,6 +2157,7 @@ __all__ = [
     "SOURCE_FRESHNESS_HOURS",
     "SOURCE_FUTURE_SKEW_MINUTES",
     "SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS",
+    "SOURCE_PROVIDER_BENZINGA_NEWS",
     "SOURCE_PROVIDER_FINNHUB",
     "SOURCE_PROVIDER_HTTP_JSON",
     "SOURCE_PROVIDER_LOCAL_JSON",

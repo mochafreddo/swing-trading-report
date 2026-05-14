@@ -1083,6 +1083,68 @@ class _MarketauxNewsTimeoutSession:
         self.closed = True
 
 
+class _BenzingaNewsSourceSession:
+    def __init__(self, payloads_by_ticker: dict[str, object]) -> None:
+        self.payloads_by_ticker = payloads_by_ticker
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        ticker = str(params.get("tickers") or "")
+        payload = self.payloads_by_ticker.get(ticker, [])
+        return _JsonResponse(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _BenzingaNewsStaticResponse:
+    def __init__(self, text: str, *, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> list[bytes]:
+        assert chunk_size == 64 * 1024
+        return [self.text.encode("utf-8")]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _BenzingaNewsStaticSession:
+    def __init__(self, response: _BenzingaNewsStaticResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _BenzingaNewsStaticResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _BenzingaNewsTimeoutSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("benzinga timed out")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _HttpJsonSourceTimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_sources as ai_brief_sources
@@ -2530,6 +2592,449 @@ def test_load_ai_brief_sources_marketaux_news_oversized_body_is_provider_failure
     with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
         load_ai_brief_sources(
             source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_maps_us_tickers_and_normalizes_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    created_at = int((now - dt.timedelta(hours=2)).timestamp())
+    updated_at = int((now - dt.timedelta(hours=1)).timestamp())
+    published_since = int(
+        (now - dt.timedelta(hours=ai_brief_sources.SOURCE_FRESHNESS_HOURS)).timestamp()
+    )
+    session = _BenzingaNewsSourceSession(
+        {
+            "AAPL": [
+                {
+                    "title": "Apple supplier update",
+                    "url": "https://news.example/aapl",
+                    "created": created_at,
+                }
+            ],
+            "BRK.B": [
+                {
+                    "title": "Berkshire class B update",
+                    "url": "https://news.example/brk-b",
+                    "created": "",
+                    "updated": updated_at,
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS", "BRK.B.NYS", "005930"},
+        now=now,
+    )
+
+    assert [call["url"] for call in session.calls] == [
+        "https://api.benzinga.com/api/v2/news",
+        "https://api.benzinga.com/api/v2/news",
+    ]
+    assert [call["params"] for call in session.calls] == [
+        {
+            "token": "benzinga-secret",
+            "tickers": "AAPL",
+            "pageSize": 10,
+            "displayOutput": "headline",
+            "sort": "created:desc",
+            "publishedSince": published_since,
+        },
+        {
+            "token": "benzinga-secret",
+            "tickers": "BRK.B",
+            "pageSize": 10,
+            "displayOutput": "headline",
+            "sort": "created:desc",
+            "publishedSince": published_since,
+        },
+    ]
+    headers = session.calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Accept"] == "application/json"
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
+    assert session.calls[0]["allow_redirects"] is False
+    assert session.trust_env is False
+    assert session.closed is True
+    assert result.sources_by_ticker["AAPL.NAS"][0] == {
+        "title": "Apple supplier update",
+        "url": "https://news.example/aapl",
+        "published_at": "2026-05-05T07:00:00+00:00",
+    }
+    assert result.sources_by_ticker["BRK.B.NYS"][0] == {
+        "title": "Berkshire class B update",
+        "url": "https://news.example/brk-b",
+        "published_at": "2026-05-05T08:00:00+00:00",
+    }
+    assert result.source_issues == [
+        {
+            "ticker": "005930",
+            "code": "benzinga_news_source_unsupported_market",
+            "severity": "WARN",
+            "message": "Benzinga News source provider supports US tickers only",
+        }
+    ]
+
+
+def test_load_ai_brief_sources_benzinga_news_parses_rfc_created_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 12, 0, tzinfo=dt.UTC)
+    session = _BenzingaNewsSourceSession(
+        {
+            "AAPL": [
+                {
+                    "title": "Apple supplier update",
+                    "url": "https://news.example/aapl",
+                    "created": "Tue, 05 May 2026 07:35:14 -0400",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker["AAPL.NAS"][0] == {
+        "title": "Apple supplier update",
+        "url": "https://news.example/aapl",
+        "published_at": "2026-05-05T07:35:14-04:00",
+    }
+    assert result.source_issues == []
+
+
+def test_load_ai_brief_sources_benzinga_news_requires_api_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsSourceSession({"AAPL": []})
+    monkeypatch.delenv("BENZINGA_API_TOKEN", raising=False)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="BENZINGA_API_TOKEN"):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_benzinga_news_rejects_non_positive_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsSourceSession({"AAPL": []})
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(
+        AiBriefSourceProviderError,
+        match="source timeout seconds must be positive",
+    ):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=0,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_benzinga_news_wraps_endpoint_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsSourceSession({"AAPL": []})
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.socket.getaddrinfo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ai_brief_sources.socket.gaierror("no such host")
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefSourceProviderError,
+        match="source API URL hostname could not be resolved",
+    ):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_benzinga_news_rejects_unsafe_news_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _BenzingaNewsSourceSession(
+        {
+            "AAPL": [
+                {
+                    "title": "Internal metadata",
+                    "url": "http://169.254.169.254/latest",
+                    "created": int(now.timestamp()),
+                }
+            ]
+        }
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "benzinga_news_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "Benzinga News source row ignored because url must not target "
+                "local or private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_benzinga_news_redacts_request_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingBenzingaNewsSourceSession:
+        trust_env = True
+
+        def get(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "failed for /api/v2/news?token=benzinga-secret"
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingBenzingaNewsSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "benzinga-secret" not in message
+    assert "/api/v2/news" not in message
+
+
+def test_load_ai_brief_sources_benzinga_news_http_error_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsStaticSession(
+        _BenzingaNewsStaticResponse('{"error":"internal-token"}', status_code=429)
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert str(excinfo.value) == "Benzinga News source request failed with HTTP 429"
+    assert "benzinga-secret" not in str(excinfo.value)
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_redirect_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsStaticSession(
+        _BenzingaNewsStaticResponse("", status_code=302)
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="redirect"):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsTimeoutSession()
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="Benzinga News"):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+
+
+@pytest.mark.parametrize(
+    ("response_body", "message"),
+    [
+        ("{}", "must contain a JSON array"),
+        ('["not-object"]', "title is required"),
+    ],
+)
+def test_load_ai_brief_sources_benzinga_news_rejects_invalid_payload_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    response_body: str,
+    message: str,
+) -> None:
+    session = _BenzingaNewsStaticSession(_BenzingaNewsStaticResponse(response_body))
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    if response_body.startswith("{"):
+        with pytest.raises(AiBriefSourceProviderError, match=message):
+            load_ai_brief_sources(
+                source_provider="benzinga-news",
+                source_report_path=None,
+                source_api_url=None,
+                source_timeout_seconds=4.5,
+                eligible_tickers={"AAPL.NAS"},
+                now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+            )
+        assert session.closed is True
+        assert session.response.closed is True
+        return
+
+    result = load_ai_brief_sources(
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "benzinga_news_source_invalid_row",
+            "severity": "WARN",
+            "message": "Benzinga News source row ignored because title is required",
+        }
+    ]
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_bad_json_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsStaticSession(_BenzingaNewsStaticResponse("{not-json"))
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="not valid JSON"):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_oversized_body_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _BenzingaNewsStaticSession(
+        _BenzingaNewsStaticResponse("x" * (MAX_SOURCE_API_RESPONSE_BYTES + 1))
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
+        load_ai_brief_sources(
+            source_provider="benzinga-news",
             source_report_path=None,
             source_api_url=None,
             source_timeout_seconds=4.5,
@@ -4750,6 +5255,79 @@ def test_run_ai_brief_marketaux_news_source_failure_keeps_artifact(
     assert "MARKETAUX_API_TOKEN" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_benzinga_news_source_provider_enriches_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _BenzingaNewsSourceSession(
+        {
+            "AAPL": [
+                {
+                    "title": "Apple source",
+                    "url": "https://news.example/aapl",
+                    "created": int(dt.datetime.now(dt.UTC).timestamp()),
+                }
+            ]
+        }
+    )
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_benzinga_news_source_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.delenv("BENZINGA_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert "BENZINGA_API_TOKEN" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_naver_news_source_provider_enriches_kr_candidates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -5906,6 +6484,35 @@ def test_main_accepts_marketaux_news_ai_brief_source_provider(
 
     assert exit_code == 0
     assert captured["source_provider"] == "marketaux-news"
+    assert captured["source_timeout_seconds"] == 2.5
+
+
+def test_main_accepts_benzinga_news_ai_brief_source_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--source-provider",
+            "benzinga-news",
+            "--source-timeout-seconds",
+            "2.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source_provider"] == "benzinga-news"
     assert captured["source_timeout_seconds"] == 2.5
 
 

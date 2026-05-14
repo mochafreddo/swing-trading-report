@@ -30,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Live source provider to capture; repeat at least twice. PROVIDER is "
             "http-json, finnhub, polygon-news, alpha-vantage-news, "
-            "marketaux-news, or naver-news."
+            "marketaux-news, benzinga-news, or naver-news."
         ),
     )
     parser.add_argument(

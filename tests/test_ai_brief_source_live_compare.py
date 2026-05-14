@@ -131,6 +131,26 @@ def test_live_source_spec_parser_accepts_marketaux_news_provider() -> None:
     ]
 
 
+def test_live_source_spec_parser_accepts_benzinga_news_provider() -> None:
+    specs = live_compare.parse_live_source_provider_specs(
+        provider_values=["benzinga=benzinga-news", "polygon=polygon-news"],
+        source_api_url_values=[],
+    )
+
+    assert specs == [
+        live_compare.AiBriefLiveSourceProviderSpec(
+            label="benzinga",
+            provider="benzinga-news",
+            source_api_url=None,
+        ),
+        live_compare.AiBriefLiveSourceProviderSpec(
+            label="polygon",
+            provider="polygon-news",
+            source_api_url=None,
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
     ("provider_values", "source_api_url_values", "message"),
     [
@@ -335,6 +355,63 @@ def test_live_source_compare_captures_marketaux_news_provider(
     payload = json.loads(Path(result.source_reports[0].path).read_text())
     assert payload["provider"] == "marketaux-news"
     assert payload["sources"][0]["title"] == "Marketaux Apple source"
+
+
+def test_live_source_compare_captures_benzinga_news_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="US",
+        entries=[_enter_row("AAPL.NAS")],
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_load_ai_brief_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        calls.append(kwargs)
+        provider = kwargs["source_provider"]
+        title = (
+            "Benzinga Apple source"
+            if provider == "benzinga-news"
+            else "HTTP Apple source"
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [_source(title, "https://news.example/aapl")]
+            },
+            source_issues=[],
+        )
+
+    monkeypatch.setattr(
+        live_compare,
+        "load_ai_brief_sources",
+        fake_load_ai_brief_sources,
+    )
+
+    result = live_compare.compare_ai_brief_live_sources(
+        entry_report_path=entry_report.as_posix(),
+        provider_specs=[
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="benzinga",
+                provider="benzinga-news",
+            ),
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="json",
+                provider="http-json",
+                source_api_url="https://source.example/api",
+            ),
+        ],
+        now=EVAL_NOW,
+        output_dir=(tmp_path / "live-sources").as_posix(),
+    )
+
+    assert result.status == "PASS"
+    assert calls[0]["source_provider"] == "benzinga-news"
+    assert calls[0]["eligible_tickers"] == {"AAPL.NAS"}
+    payload = json.loads(Path(result.source_reports[0].path).read_text())
+    assert payload["provider"] == "benzinga-news"
+    assert payload["sources"][0]["title"] == "Benzinga Apple source"
 
 
 def test_live_source_compare_records_provider_failure_as_failed_report(
