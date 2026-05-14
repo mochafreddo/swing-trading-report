@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.27.0...v1.28.0) (2026-05-14)
+
+
+### Features
+
+* **ai-brief:** Alpha Vantage 뉴스 제공자 추가 ([#144](https://github.com/mochafreddo/swing-trading-report/issues/144)) ([92f3cb4](https://github.com/mochafreddo/swing-trading-report/commit/92f3cb4d74caac21f28d5f5646bfbff9d8de0b94))
+
 ## [1.27.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.26.2...v1.27.0) (2026-05-14)
 
 
