@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.29.1...v1.30.0) (2026-05-14)
+
+
+### Features
+
+* **ai-brief:** Benzinga 뉴스 소스 제공자 추가 ([#149](https://github.com/mochafreddo/swing-trading-report/issues/149)) ([722ed82](https://github.com/mochafreddo/swing-trading-report/commit/722ed8275653c8624c79cc4bf9a1ac9632c93b10))
+
 ## [1.29.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.29.0...v1.29.1) (2026-05-14)
 
 
