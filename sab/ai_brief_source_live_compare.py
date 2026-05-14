@@ -12,6 +12,7 @@ from typing import Any
 
 from .ai_brief_source_eval import compare_ai_brief_source_reports
 from .ai_brief_sources import (
+    SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
     SOURCE_PROVIDER_FINNHUB,
     SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_NAVER_NEWS,
@@ -31,6 +32,7 @@ _LIVE_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_HTTP_JSON,
         SOURCE_PROVIDER_FINNHUB,
         SOURCE_PROVIDER_POLYGON_NEWS,
+        SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
