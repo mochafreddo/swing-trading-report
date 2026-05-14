@@ -223,6 +223,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "http-json",
             "finnhub",
             "polygon-news",
+            "alpha-vantage-news",
             "naver-news",
         ],
         help="Optional source provider for AI brief candidate context",

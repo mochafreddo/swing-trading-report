@@ -91,6 +91,26 @@ def test_live_source_spec_parser_binds_single_http_json_to_env(
     ]
 
 
+def test_live_source_spec_parser_accepts_alpha_vantage_news_provider() -> None:
+    specs = live_compare.parse_live_source_provider_specs(
+        provider_values=["av=alpha-vantage-news", "polygon=polygon-news"],
+        source_api_url_values=[],
+    )
+
+    assert specs == [
+        live_compare.AiBriefLiveSourceProviderSpec(
+            label="av",
+            provider="alpha-vantage-news",
+            source_api_url=None,
+        ),
+        live_compare.AiBriefLiveSourceProviderSpec(
+            label="polygon",
+            provider="polygon-news",
+            source_api_url=None,
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
     ("provider_values", "source_api_url_values", "message"),
     [

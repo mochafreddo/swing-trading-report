@@ -28,6 +28,7 @@ SOURCE_PROVIDER_LOCAL_JSON = "local-json"
 SOURCE_PROVIDER_HTTP_JSON = "http-json"
 SOURCE_PROVIDER_FINNHUB = "finnhub"
 SOURCE_PROVIDER_POLYGON_NEWS = "polygon-news"
+SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS = "alpha-vantage-news"
 SOURCE_PROVIDER_NAVER_NEWS = "naver-news"
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
@@ -42,6 +43,8 @@ SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
 POLYGON_NEWS_URL = "https://api.polygon.io/v2/reference/news"
 POLYGON_NEWS_LIMIT = 10
+ALPHA_VANTAGE_NEWS_URL = "https://www.alphavantage.co/query"
+ALPHA_VANTAGE_NEWS_LIMIT = 10
 NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_NEWS_DISPLAY_COUNT = 10
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
@@ -128,6 +131,16 @@ def load_ai_brief_sources(
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
+    if source_provider == SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS:
+        return _load_alpha_vantage_news_source_report(
+            source_timeout_seconds=(
+                DEFAULT_SOURCE_TIMEOUT_SECONDS
+                if source_timeout_seconds is None
+                else source_timeout_seconds
+            ),
+            eligible_tickers=eligible_tickers,
+            now=resolved_now,
+        )
     if source_provider == SOURCE_PROVIDER_NAVER_NEWS:
         return _load_naver_news_source_report(
             source_timeout_seconds=(
@@ -197,14 +210,14 @@ def _load_http_json_source_report(
                     stream=True,
                     allow_redirects=False,
                 )
-        except requests.Timeout as exc:
+        except requests.Timeout:
             raise AiBriefSourceProviderTimeoutError(
                 "source API request timed out"
-            ) from exc
+            ) from None
         except requests.RequestException as exc:
             raise AiBriefSourceProviderError(
                 f"source API request failed: {_exception_type_name(exc)}"
-            ) from exc
+            ) from None
 
         if 300 <= response.status_code < 400:
             _close_response(response)
@@ -288,14 +301,14 @@ def _get_vendor_source_response(
                 stream=True,
                 allow_redirects=False,
             )
-    except requests.Timeout as exc:
+    except requests.Timeout:
         raise AiBriefSourceProviderTimeoutError(
             f"{source_subject} request timed out"
-        ) from exc
+        ) from None
     except requests.RequestException as exc:
         raise AiBriefSourceProviderError(
             f"{source_subject} request failed: {_exception_type_name(exc)}"
-        ) from exc
+        ) from None
 
     if 300 <= response.status_code < 400:
         _close_response(response)
@@ -575,6 +588,158 @@ def _normalize_polygon_news_rows(
     return rows
 
 
+def _load_alpha_vantage_news_source_report(
+    *,
+    source_timeout_seconds: float,
+    eligible_tickers: set[str],
+    now: dt.datetime,
+) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    api_key = str(os.getenv("ALPHA_VANTAGE_API_KEY") or "").strip()
+    if not api_key:
+        raise AiBriefSourceProviderError(
+            "--source-provider alpha-vantage-news requires ALPHA_VANTAGE_API_KEY"
+        )
+
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            ALPHA_VANTAGE_NEWS_URL,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+
+    time_from = now.astimezone(dt.UTC) - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)
+    time_from_text = time_from.strftime("%Y%m%dT%H%M")
+    headers = {"Accept": "application/json"}
+    source_rows: list[object] = []
+    source_issues: list[dict[str, object]] = []
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        for ticker in sorted(eligible_tickers):
+            parsed = parse_ticker(ticker)
+            if parsed.market != "US":
+                source_issues.append(
+                    _source_issue(
+                        ticker=ticker,
+                        code="alpha_vantage_news_source_unsupported_market",
+                        message=(
+                            "Alpha Vantage News source provider supports US "
+                            "tickers only"
+                        ),
+                    )
+                )
+                continue
+
+            params = {
+                "function": "NEWS_SENTIMENT",
+                "tickers": parsed.symbol,
+                "time_from": time_from_text,
+                "sort": "LATEST",
+                "limit": ALPHA_VANTAGE_NEWS_LIMIT,
+                "apikey": api_key,
+            }
+            response = _get_vendor_source_response(
+                session=session,
+                validated_source_api_url=validated_source_api_url,
+                params=params,
+                headers=headers,
+                deadline=deadline,
+                source_subject="Alpha Vantage News source",
+            )
+            payload = _parse_alpha_vantage_news_response_payload(
+                response,
+                deadline=deadline,
+            )
+            source_rows.extend(_normalize_alpha_vantage_news_rows(ticker, payload))
+
+        normalized = _normalize_source_rows(
+            rows=source_rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="alpha_vantage_news_source",
+            issue_subject="Alpha Vantage News source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=normalized.sources_by_ticker,
+            source_issues=[*source_issues, *normalized.source_issues],
+        )
+    finally:
+        _close_session(session)
+
+
+def _parse_alpha_vantage_news_response_payload(
+    response: Any,
+    *,
+    deadline: float,
+) -> list[object]:
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            "Alpha Vantage News source response was not valid JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise AiBriefSourceProviderError(
+            "Alpha Vantage News source response must contain a JSON object"
+        )
+    feed = payload.get("feed")
+    if not isinstance(feed, list):
+        raise AiBriefSourceProviderError(
+            "Alpha Vantage News source response feed must be a list"
+        )
+    return feed
+
+
+def _normalize_alpha_vantage_news_rows(
+    ticker: str,
+    payload: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": "",
+                    "url": "",
+                    "published_at": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "published_at": _alpha_vantage_news_published_at_iso(
+                    item.get("time_published")
+                ),
+            }
+        )
+    return rows
+
+
+def _alpha_vantage_news_published_at_iso(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for date_format in ("%Y%m%dT%H%M%S", "%Y%m%dT%H%M"):
+        try:
+            parsed = dt.datetime.strptime(text, date_format)
+        except ValueError:
+            continue
+        return parsed.replace(tzinfo=dt.UTC).isoformat()
+    return ""
+
+
 def _load_naver_news_source_report(
     *,
     source_timeout_seconds: float,
@@ -773,14 +938,14 @@ def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
                         f"{MAX_SOURCE_API_RESPONSE_BYTES} bytes)"
                     )
                 chunks.append(bytes(chunk))
-        except requests.Timeout as exc:
+        except requests.Timeout:
             raise AiBriefSourceProviderTimeoutError(
                 "source API response body timed out"
-            ) from exc
+            ) from None
         except requests.RequestException as exc:
             raise AiBriefSourceProviderError(
                 f"source API response body failed: {_exception_type_name(exc)}"
-            ) from exc
+            ) from None
         finally:
             _close_response(response)
         return b"".join(chunks)
@@ -1658,6 +1823,7 @@ __all__ = [
     "MAX_SOURCE_API_RESPONSE_BYTES",
     "SOURCE_FRESHNESS_HOURS",
     "SOURCE_FUTURE_SKEW_MINUTES",
+    "SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS",
     "SOURCE_PROVIDER_FINNHUB",
     "SOURCE_PROVIDER_HTTP_JSON",
     "SOURCE_PROVIDER_LOCAL_JSON",
