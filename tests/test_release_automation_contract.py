@@ -47,6 +47,20 @@ def _release_please_step() -> dict[Any, Any]:
     raise AssertionError("Release Please workflow step not found")
 
 
+def _release_please_uv_lock_extra_file() -> dict[str, Any]:
+    config = _read_json("release-please-config.json")
+    root_package = config["packages"]["."]
+    extra_files = root_package["extra-files"]
+    if not isinstance(extra_files, list):
+        raise AssertionError("Release Please extra-files must be a list")
+
+    for extra_file in extra_files:
+        if isinstance(extra_file, dict) and extra_file.get("path") == "uv.lock":
+            return extra_file
+
+    raise AssertionError("Release Please must manage uv.lock")
+
+
 def _locked_project_version() -> str:
     lock = _read_toml("uv.lock")
     packages = lock.get("package")
@@ -61,6 +75,46 @@ def _locked_project_version() -> str:
             raise AssertionError("uv.lock project package must have a string version")
 
     raise AssertionError("uv.lock project package entry not found")
+
+
+def _as_release_please_toml_jsonpath_data(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _as_release_please_toml_jsonpath_data(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_as_release_please_toml_jsonpath_data(child) for child in value]
+    return {"value": value}
+
+
+def _release_please_toml_package_version_matches(
+    jsonpath: str,
+    data: dict[str, Any],
+    package_name: str,
+) -> list[list[str | int]]:
+    expected_jsonpath = f'$.package[?(@.name.value=="{package_name}")].version'
+    if jsonpath != expected_jsonpath:
+        return []
+
+    packages = data.get("package")
+    if not isinstance(packages, list):
+        raise AssertionError("uv.lock must contain package entries")
+
+    matches: list[list[str | int]] = []
+    for index, package in enumerate(packages):
+        if not isinstance(package, dict):
+            continue
+        name = package.get("name")
+        version = package.get("version")
+        if (
+            isinstance(name, dict)
+            and name.get("value") == package_name
+            and isinstance(version, dict)
+            and "value" in version
+        ):
+            matches.append(["package", index, "version"])
+    return matches
 
 
 def test_release_please_uses_manifest_mode_without_deprecated_command() -> None:
@@ -90,8 +144,28 @@ def test_release_please_owns_python_and_web_versions() -> None:
     assert {
         "type": "toml",
         "path": "uv.lock",
-        "jsonpath": '$.package[?(@.name=="swing-trading-report")].version',
+        "jsonpath": '$.package[?(@.name.value=="swing-trading-report")].version',
     } in extra_files
+
+
+def test_release_please_uv_lock_jsonpath_matches_tagged_toml_shape() -> None:
+    pyproject = _read_toml("pyproject.toml")
+    project_name = pyproject["project"]["name"]
+    extra_file = _release_please_uv_lock_extra_file()
+    jsonpath = extra_file["jsonpath"]
+    if not isinstance(project_name, str) or not isinstance(jsonpath, str):
+        raise AssertionError("Project name and uv.lock JSONPath must be strings")
+
+    tagged_lock = _as_release_please_toml_jsonpath_data(_read_toml("uv.lock"))
+
+    assert _release_please_toml_package_version_matches(
+        jsonpath,
+        tagged_lock,
+        project_name,
+    ), (
+        "Release Please TOML JSONPath must match the updater's tagged scalar "
+        "shape, where TOML strings are exposed as objects with a .value field."
+    )
 
 
 def test_release_metadata_versions_stay_in_lockstep() -> None:
