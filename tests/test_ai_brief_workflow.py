@@ -53,6 +53,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
         "finnhub",
         "polygon-news",
         "alpha-vantage-news",
+        "marketaux-news",
         "naver-news",
     ]
     assert "source_api_url" in dispatch_inputs
@@ -193,7 +194,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     assert "source_timeout_seconds must be a single-line value" in params_script
     assert "source_provider=http-json requires source_api_url" in params_script
     assert (
-        "none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|naver-news"
+        "none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|marketaux-news|naver-news"
     ) in params_script
     assert "Unsupported send_notifications" in params_script
 
@@ -231,6 +232,10 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         "${{ steps.params.outputs.source_provider == 'alpha-vantage-news' && "
         "secrets.ALPHA_VANTAGE_API_KEY || '' }}"
     )
+    assert ai_brief_env.get("MARKETAUX_API_TOKEN") == (
+        "${{ steps.params.outputs.source_provider == 'marketaux-news' && "
+        "secrets.MARKETAUX_API_TOKEN || '' }}"
+    )
     assert ai_brief_env.get("NAVER_CLIENT_ID") == (
         "${{ steps.params.outputs.source_provider == 'naver-news' && "
         "secrets.NAVER_CLIENT_ID || '' }}"
@@ -246,6 +251,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         '"${PARAM_SOURCE_PROVIDER}" == "finnhub" || '
         '"${PARAM_SOURCE_PROVIDER}" == "polygon-news" || '
         '"${PARAM_SOURCE_PROVIDER}" == "alpha-vantage-news" || '
+        '"${PARAM_SOURCE_PROVIDER}" == "marketaux-news" || '
         '"${PARAM_SOURCE_PROVIDER}" == "naver-news" ]]'
     )
     assert expected_timeout_provider_condition in ai_brief_script

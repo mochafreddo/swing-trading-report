@@ -1021,6 +1021,68 @@ class _AlphaVantageNewsTimeoutSession:
         self.closed = True
 
 
+class _MarketauxNewsSourceSession:
+    def __init__(self, payloads_by_symbol: dict[str, object]) -> None:
+        self.payloads_by_symbol = payloads_by_symbol
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        symbol = str(params.get("symbols") or "")
+        payload = self.payloads_by_symbol.get(symbol, {"data": []})
+        return _JsonResponse(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _MarketauxNewsStaticResponse:
+    def __init__(self, text: str, *, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> list[bytes]:
+        assert chunk_size == 64 * 1024
+        return [self.text.encode("utf-8")]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _MarketauxNewsStaticSession:
+    def __init__(self, response: _MarketauxNewsStaticResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _MarketauxNewsStaticResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _MarketauxNewsTimeoutSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("marketaux timed out")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _HttpJsonSourceTimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_sources as ai_brief_sources
@@ -2045,6 +2107,429 @@ def test_load_ai_brief_sources_alpha_vantage_news_oversized_body_is_provider_fai
     with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
         load_ai_brief_sources(
             source_provider="alpha-vantage-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_maps_us_tickers_and_normalizes_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    published_at = (now - dt.timedelta(hours=2)).isoformat()
+    session = _MarketauxNewsSourceSession(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "title": "Apple supplier update",
+                        "url": "https://news.example/aapl",
+                        "published_at": published_at,
+                    }
+                ]
+            },
+            "BRK.B": {
+                "data": [
+                    {
+                        "title": "Berkshire class B update",
+                        "url": "https://news.example/brk-b",
+                        "published_at": published_at,
+                    }
+                ]
+            },
+        }
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="marketaux-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS", "BRK.B.NYS", "005930"},
+        now=now,
+    )
+
+    assert [call["url"] for call in session.calls] == [
+        "https://api.marketaux.com/v1/news/all",
+        "https://api.marketaux.com/v1/news/all",
+    ]
+    assert [call["params"] for call in session.calls] == [
+        {
+            "api_token": "marketaux-secret",
+            "symbols": "AAPL",
+            "countries": "us",
+            "language": "en",
+            "filter_entities": "true",
+            "must_have_entities": "true",
+            "published_after": "2026-05-02T09:00:00",
+            "limit": 10,
+        },
+        {
+            "api_token": "marketaux-secret",
+            "symbols": "BRK.B",
+            "countries": "us",
+            "language": "en",
+            "filter_entities": "true",
+            "must_have_entities": "true",
+            "published_after": "2026-05-02T09:00:00",
+            "limit": 10,
+        },
+    ]
+    headers = session.calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Accept"] == "application/json"
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
+    assert session.calls[0]["allow_redirects"] is False
+    assert session.trust_env is False
+    assert session.closed is True
+    assert result.sources_by_ticker["AAPL.NAS"][0] == {
+        "title": "Apple supplier update",
+        "url": "https://news.example/aapl",
+        "published_at": "2026-05-05T07:00:00+00:00",
+    }
+    assert result.sources_by_ticker["BRK.B.NYS"][0]["url"] == (
+        "https://news.example/brk-b"
+    )
+    assert result.source_issues == [
+        {
+            "ticker": "005930",
+            "code": "marketaux_news_source_unsupported_market",
+            "severity": "WARN",
+            "message": "Marketaux News source provider supports US tickers only",
+        }
+    ]
+
+
+def test_load_ai_brief_sources_marketaux_news_requires_api_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsSourceSession({"AAPL": {"data": []}})
+    monkeypatch.delenv("MARKETAUX_API_TOKEN", raising=False)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="MARKETAUX_API_TOKEN"):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_marketaux_news_rejects_non_positive_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsSourceSession({"AAPL": {"data": []}})
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(
+        AiBriefSourceProviderError,
+        match="source timeout seconds must be positive",
+    ):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=0,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_marketaux_news_wraps_endpoint_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsSourceSession({"AAPL": {"data": []}})
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.socket.getaddrinfo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ai_brief_sources.socket.gaierror("no such host")
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefSourceProviderError,
+        match="source API URL hostname could not be resolved",
+    ):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_marketaux_news_rejects_unsafe_news_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _MarketauxNewsSourceSession(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "title": "Internal metadata",
+                        "url": "http://169.254.169.254/latest",
+                        "published_at": now.isoformat(),
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="marketaux-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "marketaux_news_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "Marketaux News source row ignored because url must not target "
+                "local or private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_marketaux_news_redacts_request_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingMarketauxNewsSourceSession:
+        trust_env = True
+
+        def get(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "failed for /v1/news/all?api_token=marketaux-secret"
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingMarketauxNewsSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "marketaux-secret" not in message
+    assert "/v1/news/all" not in message
+
+
+def test_load_ai_brief_sources_marketaux_news_http_error_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsStaticSession(
+        _MarketauxNewsStaticResponse(
+            '{"error":{"message":"internal-token"}}',
+            status_code=429,
+        )
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert str(excinfo.value) == "Marketaux News source request failed with HTTP 429"
+    assert "marketaux-secret" not in str(excinfo.value)
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_redirect_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsStaticSession(
+        _MarketauxNewsStaticResponse("", status_code=302)
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="redirect"):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsTimeoutSession()
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="Marketaux News"):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+
+
+@pytest.mark.parametrize(
+    ("response_body", "message"),
+    [
+        ("[]", "must contain a JSON object"),
+        ('{"data": {}}', "data must be a list"),
+    ],
+)
+def test_load_ai_brief_sources_marketaux_news_rejects_invalid_payload_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    response_body: str,
+    message: str,
+) -> None:
+    session = _MarketauxNewsStaticSession(_MarketauxNewsStaticResponse(response_body))
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match=message):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_reports_non_object_data_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsStaticSession(
+        _MarketauxNewsStaticResponse('{"data":["not-object"]}')
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="marketaux-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "marketaux_news_source_invalid_row",
+            "severity": "WARN",
+            "message": "Marketaux News source row ignored because title is required",
+        }
+    ]
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_bad_json_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsStaticSession(_MarketauxNewsStaticResponse("{not-json"))
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="not valid JSON"):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_marketaux_news_oversized_body_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _MarketauxNewsStaticSession(
+        _MarketauxNewsStaticResponse("x" * (MAX_SOURCE_API_RESPONSE_BYTES + 1))
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
+        load_ai_brief_sources(
+            source_provider="marketaux-news",
             source_report_path=None,
             source_api_url=None,
             source_timeout_seconds=4.5,
@@ -4190,6 +4675,81 @@ def test_run_ai_brief_alpha_vantage_news_source_failure_keeps_artifact(
     assert "ALPHA_VANTAGE_API_KEY" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_marketaux_news_source_provider_enriches_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _MarketauxNewsSourceSession(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "title": "Apple source",
+                        "url": "https://news.example/aapl",
+                        "published_at": dt.datetime.now(dt.UTC).isoformat(),
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("MARKETAUX_API_TOKEN", "marketaux-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="marketaux-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_marketaux_news_source_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.delenv("MARKETAUX_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="marketaux-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert "MARKETAUX_API_TOKEN" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_naver_news_source_provider_enriches_kr_candidates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -5317,6 +5877,35 @@ def test_main_accepts_alpha_vantage_news_ai_brief_source_provider(
 
     assert exit_code == 0
     assert captured["source_provider"] == "alpha-vantage-news"
+    assert captured["source_timeout_seconds"] == 2.5
+
+
+def test_main_accepts_marketaux_news_ai_brief_source_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--source-provider",
+            "marketaux-news",
+            "--source-timeout-seconds",
+            "2.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source_provider"] == "marketaux-news"
     assert captured["source_timeout_seconds"] == 2.5
 
 

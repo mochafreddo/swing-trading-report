@@ -24,6 +24,7 @@ from .ai_brief_sources import (
     SOURCE_PROVIDER_FINNHUB,
     SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_LOCAL_JSON,
+    SOURCE_PROVIDER_MARKETAUX_NEWS,
     SOURCE_PROVIDER_NAVER_NEWS,
     SOURCE_PROVIDER_NONE,
     SOURCE_PROVIDER_POLYGON_NEWS,
@@ -52,6 +53,7 @@ _ALLOWED_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_FINNHUB,
         SOURCE_PROVIDER_POLYGON_NEWS,
         SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+        SOURCE_PROVIDER_MARKETAUX_NEWS,
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
@@ -61,6 +63,7 @@ _TIMEOUT_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_FINNHUB,
         SOURCE_PROVIDER_POLYGON_NEWS,
         SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+        SOURCE_PROVIDER_MARKETAUX_NEWS,
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
@@ -69,6 +72,7 @@ _FIXED_API_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_FINNHUB,
         SOURCE_PROVIDER_POLYGON_NEWS,
         SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+        SOURCE_PROVIDER_MARKETAUX_NEWS,
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
@@ -175,7 +179,7 @@ def _normalize_source_timeout_seconds(
             raise ValueError(
                 "--source-timeout-seconds is only valid with "
                 "--source-provider http-json, finnhub, polygon-news, "
-                "alpha-vantage-news, or naver-news"
+                "alpha-vantage-news, marketaux-news, or naver-news"
             )
         return None
     if value is None:
