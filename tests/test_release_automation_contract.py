@@ -87,6 +87,11 @@ def test_release_please_owns_python_and_web_versions() -> None:
         "path": "web/package.json",
         "jsonpath": "$.version",
     } in extra_files
+    assert {
+        "type": "toml",
+        "path": "uv.lock",
+        "jsonpath": '$.package[?(@.name=="swing-trading-report")].version',
+    } in extra_files
 
 
 def test_release_metadata_versions_stay_in_lockstep() -> None:
