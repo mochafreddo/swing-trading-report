@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.26.2...v1.27.0) (2026-05-14)
+
+
+### Features
+
+* **ai-brief:** Polygon News source provider 추가 ([#142](https://github.com/mochafreddo/swing-trading-report/issues/142)) ([e2871c0](https://github.com/mochafreddo/swing-trading-report/commit/e2871c0341a82c0068371ee89b1d33680debb34d))
+
 ## [1.26.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.26.1...v1.26.2) (2026-05-13)
 
 
