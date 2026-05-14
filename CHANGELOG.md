@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.1...v1.30.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* **release:** uv 락 JSONPath를 TOML 구조에 맞춘다 ([0cec063](https://github.com/mochafreddo/swing-trading-report/commit/0cec06345c6c6acc6f93948db49ff5ba4123b767))
+
 ## [1.30.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.0...v1.30.1) (2026-05-14)
 
 
