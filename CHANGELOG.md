@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.28.0...v1.29.0) (2026-05-14)
+
+
+### Features
+
+* **ai-brief:** Marketaux 뉴스 소스 provider 추가 ([#146](https://github.com/mochafreddo/swing-trading-report/issues/146)) ([8c62cc9](https://github.com/mochafreddo/swing-trading-report/commit/8c62cc904509be718e98a9452ea1566a44fc638e))
+
 ## [1.28.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.27.0...v1.28.0) (2026-05-14)
 
 
