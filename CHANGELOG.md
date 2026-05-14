@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.0...v1.30.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **release:** uv 락 버전을 릴리스 자동화에 포함한다 ([8c52805](https://github.com/mochafreddo/swing-trading-report/commit/8c52805648284eda7af62b6ea6585058632c559c))
+
 ## [1.30.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.29.1...v1.30.0) (2026-05-14)
 
 
