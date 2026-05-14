@@ -51,6 +51,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
         "local-json",
         "http-json",
         "finnhub",
+        "polygon-news",
         "naver-news",
     ]
     assert "source_api_url" in dispatch_inputs
@@ -190,7 +191,7 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     assert "source_api_url must be a single-line value" in params_script
     assert "source_timeout_seconds must be a single-line value" in params_script
     assert "source_provider=http-json requires source_api_url" in params_script
-    assert "none|local-json|http-json|finnhub|naver-news" in params_script
+    assert "none|local-json|http-json|finnhub|polygon-news|naver-news" in params_script
     assert "Unsupported send_notifications" in params_script
 
     ai_brief_step = _find_step_by_name(steps, "Run AI brief")
@@ -211,9 +212,17 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         ai_brief_env.get("PARAM_SOURCE_API_URL")
         == "${{ steps.params.outputs.source_api_url }}"
     )
+    assert ai_brief_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
+        "${{ steps.params.outputs.source_provider == 'http-json' && "
+        "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
+    )
     assert ai_brief_env.get("FINNHUB_API_KEY") == (
         "${{ steps.params.outputs.source_provider == 'finnhub' && "
         "secrets.FINNHUB_API_KEY || '' }}"
+    )
+    assert ai_brief_env.get("POLYGON_API_KEY") == (
+        "${{ steps.params.outputs.source_provider == 'polygon-news' && "
+        "secrets.POLYGON_API_KEY || '' }}"
     )
     assert ai_brief_env.get("NAVER_CLIENT_ID") == (
         "${{ steps.params.outputs.source_provider == 'naver-news' && "
@@ -225,10 +234,13 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     )
     assert "--source-api-url" in ai_brief_script
     assert "--source-timeout-seconds" in ai_brief_script
-    assert (
-        '[[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || "${PARAM_SOURCE_PROVIDER}" == "finnhub" || "${PARAM_SOURCE_PROVIDER}" == "naver-news" ]]'
-        in ai_brief_script
+    expected_timeout_provider_condition = (
+        '[[ "${PARAM_SOURCE_PROVIDER}" == "http-json" || '
+        '"${PARAM_SOURCE_PROVIDER}" == "finnhub" || '
+        '"${PARAM_SOURCE_PROVIDER}" == "polygon-news" || '
+        '"${PARAM_SOURCE_PROVIDER}" == "naver-news" ]]'
     )
+    assert expected_timeout_provider_condition in ai_brief_script
     assert 'source_api_token=""' in ai_brief_script
     assert (
         '[[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]'

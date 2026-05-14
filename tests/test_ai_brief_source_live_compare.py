@@ -73,7 +73,7 @@ def test_live_source_spec_parser_binds_single_http_json_to_env(
     monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/api")
 
     specs = live_compare.parse_live_source_provider_specs(
-        provider_values=["json=http-json", "finnhub=finnhub"],
+        provider_values=["json=http-json", "polygon=polygon-news"],
         source_api_url_values=[],
     )
 
@@ -84,8 +84,8 @@ def test_live_source_spec_parser_binds_single_http_json_to_env(
             source_api_url="https://source.example/api",
         ),
         live_compare.AiBriefLiveSourceProviderSpec(
-            label="finnhub",
-            provider="finnhub",
+            label="polygon",
+            provider="polygon-news",
             source_api_url=None,
         ),
     ]
@@ -251,8 +251,10 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
     )
 
     def fake_load_ai_brief_sources(**kwargs: object) -> AiBriefSourceProviderResult:
-        if kwargs["source_provider"] == "finnhub":
-            raise AiBriefSourceProviderTimeoutError("Finnhub source request timed out")
+        if kwargs["source_provider"] == "polygon-news":
+            raise AiBriefSourceProviderTimeoutError(
+                "Polygon News source request timed out"
+            )
         return AiBriefSourceProviderResult(
             sources_by_ticker={
                 "AAPL.NAS": [_source("HTTP Apple source", "https://news.example/aapl")]
@@ -275,8 +277,8 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
                 source_api_url="https://source.example/api",
             ),
             live_compare.AiBriefLiveSourceProviderSpec(
-                label="finnhub",
-                provider="finnhub",
+                label="polygon",
+                provider="polygon-news",
             ),
         ],
         now=EVAL_NOW,
@@ -293,7 +295,7 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
             "ticker": None,
             "code": "source_provider_timeout",
             "severity": "ERROR",
-            "message": "Finnhub source request timed out",
+            "message": "Polygon News source request timed out",
         }
     ]
 
@@ -426,7 +428,7 @@ def test_live_source_compare_script_outputs_json_and_returns_nonzero_for_fail(
             "--provider",
             "json=http-json",
             "--provider",
-            "finnhub=finnhub",
+            "polygon=polygon-news",
             "--source-api-url",
             "json=https://source.example/api",
             "--output-dir",
@@ -451,8 +453,8 @@ def test_live_source_compare_script_outputs_json_and_returns_nonzero_for_fail(
             source_api_url="https://source.example/api",
         ),
         live_compare.AiBriefLiveSourceProviderSpec(
-            label="finnhub",
-            provider="finnhub",
+            label="polygon",
+            provider="polygon-news",
         ),
     ]
 
@@ -485,7 +487,7 @@ def test_live_source_compare_script_returns_zero_for_pass(
             "--provider",
             "json=http-json",
             "--provider",
-            "finnhub=finnhub",
+            "polygon=polygon-news",
             "--source-api-url",
             "json=https://source.example/api",
         ]

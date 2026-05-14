@@ -897,6 +897,68 @@ class _NaverNewsTimeoutSession:
         self.closed = True
 
 
+class _PolygonNewsSourceSession:
+    def __init__(self, payloads_by_ticker: dict[str, object]) -> None:
+        self.payloads_by_ticker = payloads_by_ticker
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _JsonResponse:
+        self.calls.append({"url": url, **kwargs})
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        ticker = str(params.get("ticker") or "")
+        payload = self.payloads_by_ticker.get(ticker, {"results": []})
+        return _JsonResponse(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _PolygonNewsStaticResponse:
+    def __init__(self, text: str, *, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+        self.closed = False
+
+    def iter_content(self, *, chunk_size: int) -> list[bytes]:
+        assert chunk_size == 64 * 1024
+        return [self.text.encode("utf-8")]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _PolygonNewsStaticSession:
+    def __init__(self, response: _PolygonNewsStaticResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, url: str, **kwargs: object) -> _PolygonNewsStaticResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _PolygonNewsTimeoutSession:
+    def __init__(self) -> None:
+        self.closed = False
+        self.trust_env = True
+
+    def get(self, *args: object, **kwargs: object) -> object:
+        import sab.ai_brief_sources as ai_brief_sources
+
+        raise ai_brief_sources.requests.Timeout("polygon timed out")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _HttpJsonSourceTimeoutSession:
     def post(self, *args: object, **kwargs: object) -> object:
         import sab.ai_brief_sources as ai_brief_sources
@@ -1326,6 +1388,293 @@ def test_load_ai_brief_sources_finnhub_oversized_body_is_provider_failure(
     with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
         load_ai_brief_sources(
             source_provider="finnhub",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_polygon_news_maps_us_tickers_and_normalizes_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    published_at = (now - dt.timedelta(hours=2)).isoformat()
+    session = _PolygonNewsSourceSession(
+        {
+            "AAPL": {
+                "results": [
+                    {
+                        "title": "Apple supplier update",
+                        "article_url": "https://news.example/aapl",
+                        "published_utc": published_at,
+                    }
+                ]
+            },
+            "BRK.B": {
+                "results": [
+                    {
+                        "title": "Berkshire class B update",
+                        "article_url": "https://news.example/brk-b",
+                        "published_utc": published_at,
+                    }
+                ]
+            },
+        }
+    )
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="polygon-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS", "BRK.B.NYS", "005930"},
+        now=now,
+    )
+
+    assert [call["url"] for call in session.calls] == [
+        "https://api.polygon.io/v2/reference/news",
+        "https://api.polygon.io/v2/reference/news",
+    ]
+    assert [call["params"] for call in session.calls] == [
+        {"ticker": "AAPL", "limit": 10, "order": "desc", "sort": "published_utc"},
+        {"ticker": "BRK.B", "limit": 10, "order": "desc", "sort": "published_utc"},
+    ]
+    headers = session.calls[0]["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Accept"] == "application/json"
+    assert headers["Authorization"] == "Bearer polygon-secret"
+    assert "polygon-secret" not in str(session.calls[0]["params"])
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=4.5,
+    )
+    assert session.calls[0]["allow_redirects"] is False
+    assert session.trust_env is False
+    assert session.closed is True
+    assert result.sources_by_ticker["AAPL.NAS"][0] == {
+        "title": "Apple supplier update",
+        "url": "https://news.example/aapl",
+        "published_at": "2026-05-05T07:00:00+00:00",
+    }
+    assert result.sources_by_ticker["BRK.B.NYS"][0]["url"] == (
+        "https://news.example/brk-b"
+    )
+    assert result.source_issues == [
+        {
+            "ticker": "005930",
+            "code": "polygon_news_source_unsupported_market",
+            "severity": "WARN",
+            "message": "Polygon News source provider supports US tickers only",
+        }
+    ]
+
+
+def test_load_ai_brief_sources_polygon_news_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsSourceSession({"AAPL": {"results": []}})
+    monkeypatch.delenv("POLYGON_API_KEY", raising=False)
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="POLYGON_API_KEY"):
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.calls == []
+    assert session.closed is False
+
+
+def test_load_ai_brief_sources_polygon_news_rejects_unsafe_news_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC)
+    session = _PolygonNewsSourceSession(
+        {
+            "AAPL": {
+                "results": [
+                    {
+                        "title": "Internal metadata",
+                        "article_url": "http://169.254.169.254/latest",
+                        "published_utc": now.isoformat(),
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="polygon-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=4.5,
+        eligible_tickers={"AAPL.NAS"},
+        now=now,
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "polygon_news_source_invalid_row",
+            "severity": "WARN",
+            "message": (
+                "Polygon News source row ignored because url must not target local or "
+                "private hosts"
+            ),
+        }
+    ]
+
+
+def test_load_ai_brief_sources_polygon_news_redacts_request_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingPolygonNewsSourceSession:
+        trust_env = True
+
+        def get(self, *args: object, **kwargs: object) -> object:
+            raise ai_brief_sources.requests.ConnectionError(
+                "failed for /v2/reference/news?apiKey=polygon-secret"
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr(
+        "sab.ai_brief_sources.requests.Session",
+        lambda: _FailingPolygonNewsSourceSession(),
+    )
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    message = str(excinfo.value)
+    assert "ConnectionError" in message
+    assert "polygon-secret" not in message
+    assert "/v2/reference/news" not in message
+
+
+def test_load_ai_brief_sources_polygon_news_http_error_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsStaticSession(
+        _PolygonNewsStaticResponse('{"error":"internal-token"}', status_code=429)
+    )
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError) as excinfo:
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert str(excinfo.value) == "Polygon News source request failed with HTTP 429"
+    assert "polygon-secret" not in str(excinfo.value)
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_polygon_news_redirect_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsStaticSession(_PolygonNewsStaticResponse("", status_code=302))
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="redirect"):
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_polygon_news_timeout_is_provider_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsTimeoutSession()
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderTimeoutError, match="Polygon News"):
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+
+
+def test_load_ai_brief_sources_polygon_news_bad_json_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsStaticSession(_PolygonNewsStaticResponse("{not-json"))
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="not valid JSON"):
+        load_ai_brief_sources(
+            source_provider="polygon-news",
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=4.5,
+            eligible_tickers={"AAPL.NAS"},
+            now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+        )
+
+    assert session.closed is True
+    assert session.response.closed is True
+
+
+def test_load_ai_brief_sources_polygon_news_oversized_body_is_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _PolygonNewsStaticSession(
+        _PolygonNewsStaticResponse("x" * (MAX_SOURCE_API_RESPONSE_BYTES + 1))
+    )
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    with pytest.raises(AiBriefSourceProviderError, match="response body is too large"):
+        load_ai_brief_sources(
+            source_provider="polygon-news",
             source_report_path=None,
             source_api_url=None,
             source_timeout_seconds=4.5,
@@ -3319,6 +3668,81 @@ def test_run_ai_brief_finnhub_source_failure_keeps_artifact(
     assert "FINNHUB_API_KEY" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_polygon_news_source_provider_enriches_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _PolygonNewsSourceSession(
+        {
+            "AAPL": {
+                "results": [
+                    {
+                        "title": "Apple source",
+                        "article_url": "https://news.example/aapl",
+                        "published_utc": dt.datetime.now(dt.UTC).isoformat(),
+                    }
+                ]
+            }
+        }
+    )
+    monkeypatch.setenv("POLYGON_API_KEY", "polygon-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="polygon-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://news.example/aapl"
+    )
+    assert payload["source_issues"] == []
+
+
+def test_run_ai_brief_polygon_news_source_failure_keeps_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.delenv("POLYGON_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="polygon-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["sources"] == []
+    assert payload["system_issues"][0]["code"] == "source_provider_failed"
+    assert "POLYGON_API_KEY" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_naver_news_source_provider_enriches_kr_candidates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -4388,6 +4812,35 @@ def test_main_accepts_finnhub_ai_brief_source_provider(
 
     assert exit_code == 0
     assert captured["source_provider"] == "finnhub"
+    assert captured["source_timeout_seconds"] == 2.5
+
+
+def test_main_accepts_polygon_news_ai_brief_source_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("sab.__main__.run_ai_brief", fake_run_ai_brief)
+
+    exit_code = main(
+        [
+            "ai-brief",
+            "--entry-report",
+            "reports/source.entry.json",
+            "--source-provider",
+            "polygon-news",
+            "--source-timeout-seconds",
+            "2.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source_provider"] == "polygon-news"
     assert captured["source_timeout_seconds"] == 2.5
 
 

@@ -15,6 +15,7 @@ from .ai_brief_sources import (
     SOURCE_PROVIDER_FINNHUB,
     SOURCE_PROVIDER_HTTP_JSON,
     SOURCE_PROVIDER_NAVER_NEWS,
+    SOURCE_PROVIDER_POLYGON_NEWS,
     SOURCE_REPORT_SCHEMA,
     SOURCE_REPORT_TYPE,
     AiBriefSourceProviderError,
@@ -26,7 +27,12 @@ from .utils.atomic_io import atomic_write_json
 
 _ALLOWED_PROVIDER_LABEL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _LIVE_SOURCE_PROVIDERS = frozenset(
-    {SOURCE_PROVIDER_HTTP_JSON, SOURCE_PROVIDER_FINNHUB, SOURCE_PROVIDER_NAVER_NEWS}
+    {
+        SOURCE_PROVIDER_HTTP_JSON,
+        SOURCE_PROVIDER_FINNHUB,
+        SOURCE_PROVIDER_POLYGON_NEWS,
+        SOURCE_PROVIDER_NAVER_NEWS,
+    }
 )
 _ALLOWED_MARKETS = frozenset({"KR", "US"})
 

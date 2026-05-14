@@ -27,6 +27,7 @@ SOURCE_PROVIDER_NONE = "none"
 SOURCE_PROVIDER_LOCAL_JSON = "local-json"
 SOURCE_PROVIDER_HTTP_JSON = "http-json"
 SOURCE_PROVIDER_FINNHUB = "finnhub"
+SOURCE_PROVIDER_POLYGON_NEWS = "polygon-news"
 SOURCE_PROVIDER_NAVER_NEWS = "naver-news"
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
@@ -39,6 +40,8 @@ SOURCE_ROW_DNS_TIMEOUT_SECONDS = 1.0
 SOURCE_DNS_RESOLVER_WORKERS = 4
 SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
+POLYGON_NEWS_URL = "https://api.polygon.io/v2/reference/news"
+POLYGON_NEWS_LIMIT = 10
 NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_NEWS_DISPLAY_COUNT = 10
 _ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
@@ -107,6 +110,16 @@ def load_ai_brief_sources(
         )
     if source_provider == SOURCE_PROVIDER_FINNHUB:
         return _load_finnhub_source_report(
+            source_timeout_seconds=(
+                DEFAULT_SOURCE_TIMEOUT_SECONDS
+                if source_timeout_seconds is None
+                else source_timeout_seconds
+            ),
+            eligible_tickers=eligible_tickers,
+            now=resolved_now,
+        )
+    if source_provider == SOURCE_PROVIDER_POLYGON_NEWS:
+        return _load_polygon_news_source_report(
             source_timeout_seconds=(
                 DEFAULT_SOURCE_TIMEOUT_SECONDS
                 if source_timeout_seconds is None
@@ -252,6 +265,51 @@ def _parse_source_api_response_payload(
     return payload
 
 
+def _get_vendor_source_response(
+    *,
+    session: requests.Session,
+    validated_source_api_url: _ValidatedSourceApiUrl,
+    params: Mapping[str, object],
+    headers: Mapping[str, str],
+    deadline: float,
+    source_subject: str,
+) -> Any:
+    try:
+        with _pin_source_api_dns(
+            validated_source_api_url.hostnames,
+            validated_source_api_url.addrinfos,
+            deadline=deadline,
+        ):
+            response = session.get(
+                validated_source_api_url.url,
+                params=params,
+                headers=headers,
+                timeout=_source_request_timeout(deadline),
+                stream=True,
+                allow_redirects=False,
+            )
+    except requests.Timeout as exc:
+        raise AiBriefSourceProviderTimeoutError(
+            f"{source_subject} request timed out"
+        ) from exc
+    except requests.RequestException as exc:
+        raise AiBriefSourceProviderError(
+            f"{source_subject} request failed: {_exception_type_name(exc)}"
+        ) from exc
+
+    if 300 <= response.status_code < 400:
+        _close_response(response)
+        raise AiBriefSourceProviderError(
+            f"{source_subject} redirect was not followed (HTTP {response.status_code})"
+        )
+    if response.status_code >= 400:
+        _close_response(response)
+        raise AiBriefSourceProviderError(
+            f"{source_subject} request failed with HTTP {response.status_code}"
+        )
+    return response
+
+
 def _load_finnhub_source_report(
     *,
     source_timeout_seconds: float,
@@ -303,41 +361,14 @@ def _load_finnhub_source_report(
                 "to": to_date.isoformat(),
                 "token": api_key,
             }
-            try:
-                with _pin_source_api_dns(
-                    validated_source_api_url.hostnames,
-                    validated_source_api_url.addrinfos,
-                    deadline=deadline,
-                ):
-                    response = session.get(
-                        validated_source_api_url.url,
-                        params=params,
-                        headers=headers,
-                        timeout=_source_request_timeout(deadline),
-                        stream=True,
-                        allow_redirects=False,
-                    )
-            except requests.Timeout as exc:
-                raise AiBriefSourceProviderTimeoutError(
-                    "Finnhub source request timed out"
-                ) from exc
-            except requests.RequestException as exc:
-                raise AiBriefSourceProviderError(
-                    f"Finnhub source request failed: {_exception_type_name(exc)}"
-                ) from exc
-
-            if 300 <= response.status_code < 400:
-                _close_response(response)
-                raise AiBriefSourceProviderError(
-                    "Finnhub source redirect was not followed "
-                    f"(HTTP {response.status_code})"
-                )
-            if response.status_code >= 400:
-                _close_response(response)
-                raise AiBriefSourceProviderError(
-                    f"Finnhub source request failed with HTTP {response.status_code}"
-                )
-
+            response = _get_vendor_source_response(
+                session=session,
+                validated_source_api_url=validated_source_api_url,
+                params=params,
+                headers=headers,
+                deadline=deadline,
+                source_subject="Finnhub source",
+            )
             payload = _parse_finnhub_response_payload(response, deadline=deadline)
             source_rows.extend(_normalize_finnhub_news_rows(ticker, payload))
 
@@ -412,6 +443,138 @@ def _finnhub_published_at_iso(value: object) -> str:
     return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
 
 
+def _load_polygon_news_source_report(
+    *,
+    source_timeout_seconds: float,
+    eligible_tickers: set[str],
+    now: dt.datetime,
+) -> AiBriefSourceProviderResult:
+    if not math.isfinite(source_timeout_seconds) or source_timeout_seconds <= 0:
+        raise AiBriefSourceProviderError("source timeout seconds must be positive")
+    api_key = str(os.getenv("POLYGON_API_KEY") or "").strip()
+    if not api_key:
+        raise AiBriefSourceProviderError(
+            "--source-provider polygon-news requires POLYGON_API_KEY"
+        )
+
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            POLYGON_NEWS_URL,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    source_rows: list[object] = []
+    source_issues: list[dict[str, object]] = []
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        for ticker in sorted(eligible_tickers):
+            parsed = parse_ticker(ticker)
+            if parsed.market != "US":
+                source_issues.append(
+                    _source_issue(
+                        ticker=ticker,
+                        code="polygon_news_source_unsupported_market",
+                        message=(
+                            "Polygon News source provider supports US tickers only"
+                        ),
+                    )
+                )
+                continue
+
+            params = {
+                "ticker": parsed.symbol,
+                "limit": POLYGON_NEWS_LIMIT,
+                "order": "desc",
+                "sort": "published_utc",
+            }
+            response = _get_vendor_source_response(
+                session=session,
+                validated_source_api_url=validated_source_api_url,
+                params=params,
+                headers=headers,
+                deadline=deadline,
+                source_subject="Polygon News source",
+            )
+            payload = _parse_polygon_news_response_payload(response, deadline=deadline)
+            source_rows.extend(_normalize_polygon_news_rows(ticker, payload))
+
+        normalized = _normalize_source_rows(
+            rows=source_rows,
+            eligible_tickers=eligible_tickers,
+            now=now,
+            issue_prefix="polygon_news_source",
+            issue_subject="Polygon News source",
+            source_url_deadline=deadline,
+            resolve_source_url_hostnames=True,
+        )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker=normalized.sources_by_ticker,
+            source_issues=[*source_issues, *normalized.source_issues],
+        )
+    finally:
+        _close_session(session)
+
+
+def _parse_polygon_news_response_payload(
+    response: Any,
+    *,
+    deadline: float,
+) -> list[object]:
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            "Polygon News source response was not valid JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise AiBriefSourceProviderError(
+            "Polygon News source response must contain a JSON object"
+        )
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise AiBriefSourceProviderError(
+            "Polygon News source response results must be a list"
+        )
+    return results
+
+
+def _normalize_polygon_news_rows(
+    ticker: str,
+    payload: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": "",
+                    "url": "",
+                    "published_at": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("article_url") or "").strip(),
+                "published_at": str(item.get("published_utc") or "").strip(),
+            }
+        )
+    return rows
+
+
 def _load_naver_news_source_report(
     *,
     source_timeout_seconds: float,
@@ -471,41 +634,14 @@ def _load_naver_news_source_report(
                 "start": 1,
                 "sort": "date",
             }
-            try:
-                with _pin_source_api_dns(
-                    validated_source_api_url.hostnames,
-                    validated_source_api_url.addrinfos,
-                    deadline=deadline,
-                ):
-                    response = session.get(
-                        validated_source_api_url.url,
-                        params=params,
-                        headers=headers,
-                        timeout=_source_request_timeout(deadline),
-                        stream=True,
-                        allow_redirects=False,
-                    )
-            except requests.Timeout as exc:
-                raise AiBriefSourceProviderTimeoutError(
-                    "Naver News source request timed out"
-                ) from exc
-            except requests.RequestException as exc:
-                raise AiBriefSourceProviderError(
-                    f"Naver News source request failed: {_exception_type_name(exc)}"
-                ) from exc
-
-            if 300 <= response.status_code < 400:
-                _close_response(response)
-                raise AiBriefSourceProviderError(
-                    "Naver News source redirect was not followed "
-                    f"(HTTP {response.status_code})"
-                )
-            if response.status_code >= 400:
-                _close_response(response)
-                raise AiBriefSourceProviderError(
-                    f"Naver News source request failed with HTTP {response.status_code}"
-                )
-
+            response = _get_vendor_source_response(
+                session=session,
+                validated_source_api_url=validated_source_api_url,
+                params=params,
+                headers=headers,
+                deadline=deadline,
+                source_subject="Naver News source",
+            )
             payload = _parse_naver_news_response_payload(response, deadline=deadline)
             source_rows.extend(_normalize_naver_news_rows(ticker, payload))
 
@@ -1527,6 +1663,7 @@ __all__ = [
     "SOURCE_PROVIDER_LOCAL_JSON",
     "SOURCE_PROVIDER_NAVER_NEWS",
     "SOURCE_PROVIDER_NONE",
+    "SOURCE_PROVIDER_POLYGON_NEWS",
     "SOURCE_REPORT_SCHEMA",
     "SOURCE_REPORT_TYPE",
     "AiBriefSourceProviderError",
