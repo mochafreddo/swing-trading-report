@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.29.0...v1.29.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **release:** uv 락 버전을 1.29.0으로 동기화한다 ([97d04cd](https://github.com/mochafreddo/swing-trading-report/commit/97d04cd7a8706f5dfabcfc33681e31a1ff69571a))
+
 ## [1.29.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.28.0...v1.29.0) (2026-05-14)
 
 
