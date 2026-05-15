@@ -4,6 +4,20 @@
 
 ### Phase 2 real provider and eval suite
 
+**Goal:** Make `ai-brief` production-usable for KR/US pre-open review with
+OpenAI judgment plus at least one configured, source-backed news provider per
+target market. Provider expansion stops once quality/cost/reliability can be
+compared from captured payloads; new adapters should require a concrete gap,
+not be added just because another vendor exists.
+
+**Exit criteria:**
+
+- KR scheduled brief can run with `naver-news` + OpenAI, including empty-candidate days.
+- US scheduled brief can run with one selected paid/vendor source provider + OpenAI.
+- Live source comparison has enough captured payloads to choose the default US provider.
+- Offline source and recommendation evals pass for the selected provider setup.
+- Required GitHub variables/secrets and local `.env` setup are documented.
+
 **What:** Expand provider-specific live news/API adapters for `ai-brief`. The generic `http-json` source API adapter covers the external API trust boundary, offline source-quality evals cover collected payload quality, RSS/Atom/RDF local/live HTTPS feed collection covers vendor-neutral payload generation, Finnhub covers the first paid/vendor-specific US Company News adapter, Polygon News covers a second paid/vendor-specific US news adapter, Alpha Vantage News covers another US market news/sentiment adapter, Marketaux News and Benzinga News cover additional US financial news adapters, Naver News covers the first KR vendor-specific news adapter, offline source eval can now compare multiple captured payloads, a live comparison runner can capture existing live providers into comparable source payloads, and offline recommendation eval covers AI Brief artifact quality; additional vendor adapters remain.
 
 **Why:** Fake provider only exercises the artifact contract; it does not validate recommendation quality, source collection quality, or prompt safety.
