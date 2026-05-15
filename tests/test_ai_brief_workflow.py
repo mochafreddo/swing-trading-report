@@ -172,6 +172,25 @@ def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
     assert "ai_brief_report_path" in ai_brief_script
 
 
+def test_ai_brief_workflow_allows_empty_scheduled_scan_only() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = _steps(workflow)
+
+    run_scan_step = _find_step_by_name(steps, "Run scan")
+    run_scan_script = str(run_scan_step.get("run") or "")
+
+    assert "scan_status=${PIPESTATUS[0]}" in run_scan_script
+    assert 'allow_empty_scan="false"' in run_scan_script
+    assert 'if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then' in run_scan_script
+    assert '"No tickers provided (watchlist empty or missing)"' in run_scan_script
+    assert 'allow_empty_scan="true"' in run_scan_script
+    assert (
+        'if [[ "${scan_status}" -ne 0 && "${allow_empty_scan}" != "true" ]]; then'
+        in run_scan_script
+    )
+    assert 'exit "${scan_status}"' in run_scan_script
+
+
 def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)

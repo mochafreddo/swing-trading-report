@@ -522,10 +522,13 @@ jobs:
           set -euo pipefail
           mkdir -p reports
 
+          set +e
           uv run -m sab scan \
             --provider "${{ steps.params.outputs.provider }}" \
             --markets "${{ steps.params.outputs.market }}" \
             --universe "${{ steps.params.outputs.universe }}" 2>&1 | tee scan.log
+          scan_status=${PIPESTATUS[0]}
+          set -e
 
           buy_report_path="$(sed -n 's/.*Buy report written to: //p' scan.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${buy_report_path}" ]]; then
@@ -545,6 +548,17 @@ jobs:
           if [[ -z "${buy_report_path}" || ! -f "${buy_report_path}" ]]; then
             echo "Buy report (*.buy.json) not found under reports/" >&2
             exit 1
+          fi
+
+          allow_empty_scan="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            if grep -Fq "No tickers provided (watchlist empty or missing)" scan.log; then
+              allow_empty_scan="true"
+              echo "Scheduled scan produced no tickers; continuing with empty buy report."
+            fi
+          fi
+          if [[ "${scan_status}" -ne 0 && "${allow_empty_scan}" != "true" ]]; then
+            exit "${scan_status}"
           fi
 
           echo "buy_report_path=${buy_report_path}" >> "${GITHUB_OUTPUT}"

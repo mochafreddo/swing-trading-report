@@ -154,6 +154,7 @@
   - `ai-brief.yml` workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남기고, AI Brief 리포트도 Supabase Storage/report_index에 업로드합니다.
   - 수동 `ai-brief.yml` 실행은 `send_notifications=true`를 선택했을 때만 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - scheduled `ai-brief.yml` 실행은 KR/US 장전 schedule과 런타임 가드를 사용하며, 장일+PRE_OPEN일 때만 scan/entry/ai-brief와 알림 발송을 진행합니다.
+  - scheduled `ai-brief.yml`에서 watchlist와 screener가 모두 빈 결과를 만들면 실패 대신 빈 buy/entry/ai-brief artifact를 생성해 "후보 없음" 상태로 남깁니다. 다른 scan 오류는 계속 실패합니다.
 
 ## 실행/입력 정책
 
