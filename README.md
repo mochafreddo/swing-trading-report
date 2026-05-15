@@ -272,7 +272,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --compare-source-report finnhub=<path> --compare-source-report polygon=<path> --compare-source-report av=<path> --compare-source-report marketaux=<path> --compare-source-report benzinga=<path> --compare-source-report naver=<path>` | 여러 AI Brief source payload를 같은 entry 후보 기준으로 비교 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report <path> --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=<url>` | 여러 live AI Brief source provider를 캡처한 뒤 같은 entry 후보 기준으로 비교 평가. `market=MIXED` entry report는 `--market KR|US` 필요 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report <path> --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=<url>` | 여러 live AI Brief source provider를 캡처한 뒤 같은 entry 후보 기준으로 비교 평가하고 provider별 `duration_ms`/fastest leader를 남김. `market=MIXED` entry report는 `--market KR|US` 필요 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report <path> --ai-brief-report <path>` | 생성한 AI Brief 추천 artifact 품질 평가 |
 
 ## 작업 자동화 (just + direnv)
