@@ -2,6 +2,9 @@
 
 ## AI Brief
 
+> Origin: `/office-hours` design doc 2026-05-05 (`~/.gstack/projects/mochafreddo-swing-trading-report/mochafreddo-main-design-20260505-134045.md`).
+> Phase 1 + design doc의 Next Steps 1-9 완료. Phase 2 이후는 본 TODOS가 source of truth.
+
 ### Phase 2 real provider and eval suite
 
 **Goal:** Make `ai-brief` production-usable for KR/US pre-open review with
