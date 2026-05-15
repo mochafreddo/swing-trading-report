@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -284,12 +285,13 @@ def test_live_source_compare_captures_providers_and_preserves_naver_names(
     assert json_payload["label"] == "json"
     assert json_payload["provider"] == "http-json"
     assert json_payload["status"] == "PASS"
-    assert json_payload["summary"] == {
-        "source_count": 1,
-        "covered_ticker_count": 1,
-        "covered_tickers": ["005930"],
-        "issue_count": 0,
-    }
+    json_summary = json_payload["summary"]
+    assert json_summary["source_count"] == 1
+    assert json_summary["covered_ticker_count"] == 1
+    assert json_summary["covered_tickers"] == ["005930"]
+    assert json_summary["issue_count"] == 0
+    assert isinstance(json_summary["duration_ms"], int)
+    assert json_summary["duration_ms"] >= 0
     assert json_payload["sources"] == [
         {
             "ticker": "005930",
@@ -298,6 +300,126 @@ def test_live_source_compare_captures_providers_and_preserves_naver_names(
             "published_at": "2026-05-13T08:00:00+00:00",
         }
     ]
+
+
+def test_live_source_compare_records_provider_duration_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="US",
+        entries=[_enter_row("AAPL.NAS")],
+    )
+    output_dir = tmp_path / "live-sources"
+    monotonic_values = iter([10.0, 10.125, 20.0, 20.05])
+
+    def fake_load_ai_brief_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = kwargs["source_provider"]
+        title = "Fast Apple source" if provider == "http-json" else "Slow Apple source"
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [_source(title, "https://news.example/aapl")]
+            },
+            source_issues=[],
+        )
+
+    monkeypatch.setattr(
+        live_compare,
+        "_monotonic_seconds",
+        lambda: next(monotonic_values),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        live_compare,
+        "load_ai_brief_sources",
+        fake_load_ai_brief_sources,
+    )
+
+    result = live_compare.compare_ai_brief_live_sources(
+        entry_report_path=entry_report.as_posix(),
+        provider_specs=[
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="slow",
+                provider="polygon-news",
+            ),
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="fast",
+                provider="http-json",
+                source_api_url="https://source.example/api",
+            ),
+        ],
+        now=EVAL_NOW,
+        output_dir=output_dir.as_posix(),
+    )
+
+    assert [report.duration_ms for report in result.source_reports] == [125, 50]
+    assert result.source_reports[0].to_dict()["duration_ms"] == 125
+    assert result.summary["provider_durations_ms"] == {"slow": 125, "fast": 50}
+    leaders = result.summary["leaders"]
+    assert isinstance(leaders, Mapping)
+    assert leaders["coverage"] == ["fast", "slow"]
+    assert leaders["source_count"] == ["fast", "slow"]
+    assert leaders["fewest_issues"] == ["fast", "slow"]
+    assert leaders["fastest_duration_ms"] == ["fast"]
+
+    slow_payload = json.loads(Path(result.source_reports[0].path).read_text())
+    assert slow_payload["summary"]["duration_ms"] == 125
+    fast_payload = json.loads(Path(result.source_reports[1].path).read_text())
+    assert fast_payload["summary"]["duration_ms"] == 50
+
+
+def test_live_source_compare_sorts_tied_fastest_duration_leaders(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        market="US",
+        entries=[_enter_row("AAPL.NAS")],
+    )
+    monotonic_values = iter([1.0, 1.1, 2.0, 2.1])
+
+    def fake_load_ai_brief_sources(**_kwargs: object) -> AiBriefSourceProviderResult:
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [_source("Apple source", "https://news.example/aapl")]
+            },
+            source_issues=[],
+        )
+
+    monkeypatch.setattr(
+        live_compare,
+        "_monotonic_seconds",
+        lambda: next(monotonic_values),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        live_compare,
+        "load_ai_brief_sources",
+        fake_load_ai_brief_sources,
+    )
+
+    result = live_compare.compare_ai_brief_live_sources(
+        entry_report_path=entry_report.as_posix(),
+        provider_specs=[
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="beta",
+                provider="polygon-news",
+            ),
+            live_compare.AiBriefLiveSourceProviderSpec(
+                label="alpha",
+                provider="http-json",
+                source_api_url="https://source.example/api",
+            ),
+        ],
+        now=EVAL_NOW,
+        output_dir=(tmp_path / "live-sources").as_posix(),
+    )
+
+    leaders = result.summary["leaders"]
+    assert isinstance(leaders, Mapping)
+    assert leaders["fastest_duration_ms"] == ["alpha", "beta"]
 
 
 def test_live_source_compare_captures_marketaux_news_provider(
@@ -423,6 +545,7 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
         market="US",
         entries=[_enter_row("AAPL.NAS")],
     )
+    monotonic_values = iter([10.0, 10.02, 20.0, 20.045])
 
     def fake_load_ai_brief_sources(**kwargs: object) -> AiBriefSourceProviderResult:
         if kwargs["source_provider"] == "polygon-news":
@@ -436,6 +559,12 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
             source_issues=[],
         )
 
+    monkeypatch.setattr(
+        live_compare,
+        "_monotonic_seconds",
+        lambda: next(monotonic_values),
+        raising=False,
+    )
     monkeypatch.setattr(
         live_compare,
         "load_ai_brief_sources",
@@ -461,8 +590,11 @@ def test_live_source_compare_records_provider_failure_as_failed_report(
 
     assert result.status == "FAIL"
     assert result.summary["fail_count"] == 1
+    assert [report.duration_ms for report in result.source_reports] == [20, 45]
+    assert result.summary["provider_durations_ms"] == {"json": 20, "polygon": 45}
     assert result.source_reports[1].status == "FAIL"
     failure_payload = json.loads(Path(result.source_reports[1].path).read_text())
+    assert failure_payload["summary"]["duration_ms"] == 45
     assert failure_payload["sources"] == []
     assert failure_payload["issues"] == [
         {
@@ -522,10 +654,17 @@ def test_live_source_compare_skips_live_providers_when_no_eligible_tickers(
         market="US",
         entries=[_enter_row("AAPL.NAS", action="REVIEW")],
     )
+    monotonic_values = iter([30.0, 30.0, 40.0, 40.002])
 
     def fail_load_ai_brief_sources(**_kwargs: object) -> AiBriefSourceProviderResult:
         raise AssertionError("no eligible tickers should skip live provider calls")
 
+    monkeypatch.setattr(
+        live_compare,
+        "_monotonic_seconds",
+        lambda: next(monotonic_values),
+        raising=False,
+    )
     monkeypatch.setattr(
         live_compare,
         "load_ai_brief_sources",
@@ -552,10 +691,16 @@ def test_live_source_compare_skips_live_providers_when_no_eligible_tickers(
 
     assert result.status == "FAIL"
     assert [report.status for report in result.source_reports] == ["FAIL", "FAIL"]
+    assert [report.duration_ms for report in result.source_reports] == [0, 2]
+    assert result.summary["provider_durations_ms"] == {"json": 0, "finnhub": 2}
+    leaders = result.summary["leaders"]
+    assert isinstance(leaders, Mapping)
+    assert leaders["fastest_duration_ms"] == ["json"]
     report_issues = result.reports[0]["issues"]
     assert isinstance(report_issues, list)
     assert report_issues[0]["code"] == "entry_report_no_eligible_tickers"
     payload = json.loads(Path(result.source_reports[0].path).read_text())
+    assert payload["summary"]["duration_ms"] == 0
     assert payload["sources"] == []
     assert payload["issues"] == [
         {
