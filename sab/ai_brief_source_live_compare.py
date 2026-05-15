@@ -5,8 +5,9 @@ import json
 import math
 import os
 import re
+import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,7 @@ class AiBriefLiveSourceReport:
     status: str
     source_count: int
     issue_count: int
+    duration_ms: int
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -67,6 +69,7 @@ class AiBriefLiveSourceReport:
             "status": self.status,
             "source_count": self.source_count,
             "issue_count": self.issue_count,
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -76,6 +79,7 @@ class _CapturedSourceReport:
     status: str
     source_count: int
     issue_count: int
+    duration_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -182,6 +186,7 @@ def compare_ai_brief_live_sources(
     source_reports: list[AiBriefLiveSourceReport] = []
     source_report_paths: dict[str, str] = {}
     for spec in resolved_specs:
+        capture_started_at = _monotonic_seconds()
         captured = (
             _capture_source_report(
                 spec=spec,
@@ -195,6 +200,13 @@ def compare_ai_brief_live_sources(
                 spec=spec,
                 generated_at=resolved_now,
             )
+        )
+        captured = _with_capture_duration(
+            captured,
+            duration_ms=_elapsed_ms(
+                started_at=capture_started_at,
+                completed_at=_monotonic_seconds(),
+            ),
         )
         report_path = output_path / f"{spec.label}.sources.json"
         atomic_write_json(
@@ -211,6 +223,7 @@ def compare_ai_brief_live_sources(
                 status=captured.status,
                 source_count=captured.source_count,
                 issue_count=captured.issue_count,
+                duration_ms=captured.duration_ms,
             )
         )
         source_report_paths[spec.label] = report_path.as_posix()
@@ -224,7 +237,7 @@ def compare_ai_brief_live_sources(
     )
     return AiBriefLiveSourceCompareResult(
         status=compare_result.status,
-        summary=compare_result.summary,
+        summary=_with_live_source_summary(compare_result.summary, source_reports),
         reports=compare_result.reports,
         source_reports=source_reports,
     )
@@ -329,6 +342,57 @@ def _source_report_capture(
         source_count=len(sources),
         issue_count=len(issues),
     )
+
+
+def _with_capture_duration(
+    captured: _CapturedSourceReport,
+    *,
+    duration_ms: int,
+) -> _CapturedSourceReport:
+    payload = dict(captured.payload)
+    summary = payload.get("summary")
+    summary_payload = dict(summary) if isinstance(summary, Mapping) else {}
+    summary_payload["duration_ms"] = duration_ms
+    payload["summary"] = summary_payload
+    return replace(captured, payload=payload, duration_ms=duration_ms)
+
+
+def _with_live_source_summary(
+    summary: Mapping[str, object],
+    source_reports: Sequence[AiBriefLiveSourceReport],
+) -> dict[str, object]:
+    payload = dict(summary)
+    provider_durations_ms = {
+        source_report.label: source_report.duration_ms
+        for source_report in source_reports
+    }
+    leaders = payload.get("leaders")
+    leader_payload = dict(leaders) if isinstance(leaders, Mapping) else {}
+    leader_payload["fastest_duration_ms"] = _fastest_duration_labels(
+        provider_durations_ms
+    )
+    payload["leaders"] = leader_payload
+    payload["provider_durations_ms"] = provider_durations_ms
+    return payload
+
+
+def _fastest_duration_labels(provider_durations_ms: Mapping[str, int]) -> list[str]:
+    if not provider_durations_ms:
+        return []
+    fastest = min(provider_durations_ms.values())
+    return sorted(
+        label
+        for label, duration_ms in provider_durations_ms.items()
+        if duration_ms == fastest
+    )
+
+
+def _monotonic_seconds() -> float:
+    return time.monotonic()
+
+
+def _elapsed_ms(*, started_at: float, completed_at: float) -> int:
+    return max(0, round((completed_at - started_at) * 1000))
 
 
 def _source_rows(
