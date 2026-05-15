@@ -75,12 +75,48 @@ def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> N
         params_env.get("DEFAULT_SOURCE_PROVIDER")
         == "${{ vars.AI_BRIEF_SOURCE_PROVIDER }}"
     )
+    assert (
+        params_env.get("DEFAULT_SOURCE_PROVIDER_KR")
+        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_KR }}"
+    )
+    assert (
+        params_env.get("DEFAULT_SOURCE_PROVIDER_US")
+        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_US }}"
+    )
+    assert (
+        params_env.get("DEFAULT_SOURCE_API_URL")
+        == "${{ vars.AI_BRIEF_SOURCE_API_URL }}"
+    )
+    assert (
+        params_env.get("DEFAULT_SOURCE_API_URL_KR")
+        == "${{ vars.AI_BRIEF_SOURCE_API_URL_KR }}"
+    )
+    assert (
+        params_env.get("DEFAULT_SOURCE_API_URL_US")
+        == "${{ vars.AI_BRIEF_SOURCE_API_URL_US }}"
+    )
     assert '"30 22 * * 0-4") scheduled_market="KR"' in params_script
     assert '"30 12 * * 1-5") scheduled_market="US"' in params_script
     assert 'model_provider="openai"' in params_script
     assert 'send_notifications="true"' in params_script
+    assert (
+        'market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_KR,,}"'
+        in params_script
+    )
+    assert (
+        'market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_US,,}"'
+        in params_script
+    )
+    assert (
+        'market_default_source_api_url="${DEFAULT_SOURCE_API_URL_KR}"' in params_script
+    )
+    assert (
+        'market_default_source_api_url="${DEFAULT_SOURCE_API_URL_US}"' in params_script
+    )
+    assert 'source_provider="${market_default_source_provider}"' in params_script
     assert 'default_source_provider="${DEFAULT_SOURCE_PROVIDER,,}"' in params_script
     assert 'source_provider="${default_source_provider}"' in params_script
+    assert 'source_api_url="${market_default_source_api_url}"' in params_script
     assert 'echo "is_schedule=${is_schedule}"' in params_script
     assert 'echo "scheduled_market=${scheduled_market}"' in params_script
 
@@ -221,6 +257,14 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
         "${{ steps.params.outputs.source_provider == 'http-json' && "
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
     )
+    assert (
+        ai_brief_env.get("AI_BRIEF_SOURCE_API_URL_KR")
+        == "${{ vars.AI_BRIEF_SOURCE_API_URL_KR }}"
+    )
+    assert (
+        ai_brief_env.get("AI_BRIEF_SOURCE_API_URL_US")
+        == "${{ vars.AI_BRIEF_SOURCE_API_URL_US }}"
+    )
     assert ai_brief_env.get("FINNHUB_API_KEY") == (
         "${{ steps.params.outputs.source_provider == 'finnhub' && "
         "secrets.FINNHUB_API_KEY || '' }}"
@@ -264,6 +308,14 @@ def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> Non
     assert 'source_api_token=""' in ai_brief_script
     assert (
         '[[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]'
+        in ai_brief_script
+    )
+    assert (
+        '[[ -n "${AI_BRIEF_SOURCE_API_URL_KR}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL_KR}" ]]'
+        in ai_brief_script
+    )
+    assert (
+        '[[ -n "${AI_BRIEF_SOURCE_API_URL_US}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL_US}" ]]'
         in ai_brief_script
     )
     assert 'source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"' in ai_brief_script

@@ -154,7 +154,11 @@ jobs:
           RAW_SOURCE_API_URL: ${{ github.event.inputs.source_api_url }}
           RAW_SOURCE_TIMEOUT_SECONDS: ${{ github.event.inputs.source_timeout_seconds }}
           DEFAULT_SOURCE_PROVIDER: ${{ vars.AI_BRIEF_SOURCE_PROVIDER }}
+          DEFAULT_SOURCE_PROVIDER_KR: ${{ vars.AI_BRIEF_SOURCE_PROVIDER_KR }}
+          DEFAULT_SOURCE_PROVIDER_US: ${{ vars.AI_BRIEF_SOURCE_PROVIDER_US }}
           DEFAULT_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
+          DEFAULT_SOURCE_API_URL_KR: ${{ vars.AI_BRIEF_SOURCE_API_URL_KR }}
+          DEFAULT_SOURCE_API_URL_US: ${{ vars.AI_BRIEF_SOURCE_API_URL_US }}
           RAW_SEND_NOTIFICATIONS: ${{ github.event.inputs.send_notifications }}
         run: |
           set -euo pipefail
@@ -278,11 +282,26 @@ jobs:
           fi
 
           default_source_provider="${DEFAULT_SOURCE_PROVIDER,,}"
+          market_default_source_provider=""
+          market_default_source_api_url=""
+          case "${market}" in
+            KR)
+              market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_KR,,}"
+              market_default_source_api_url="${DEFAULT_SOURCE_API_URL_KR}"
+              ;;
+            US)
+              market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_US,,}"
+              market_default_source_api_url="${DEFAULT_SOURCE_API_URL_US}"
+              ;;
+          esac
+
           source_provider="${RAW_SOURCE_PROVIDER}"
           if [[ "${is_schedule}" == "true" ]]; then
-            if [[ -n "${default_source_provider}" ]]; then
+            if [[ -n "${market_default_source_provider}" ]]; then
+              source_provider="${market_default_source_provider}"
+            elif [[ -n "${default_source_provider}" ]]; then
               source_provider="${default_source_provider}"
-            elif [[ -n "${DEFAULT_SOURCE_API_URL}" ]]; then
+            elif [[ -n "${market_default_source_api_url}" || -n "${DEFAULT_SOURCE_API_URL}" ]]; then
               source_provider="http-json"
             else
               source_provider="none"
@@ -314,7 +333,11 @@ jobs:
 
           source_api_url="${RAW_SOURCE_API_URL}"
           if [[ "${is_schedule}" == "true" && "${source_provider}" == "http-json" && -z "${source_api_url}" ]]; then
-            source_api_url="${DEFAULT_SOURCE_API_URL}"
+            if [[ -n "${market_default_source_api_url}" ]]; then
+              source_api_url="${market_default_source_api_url}"
+            else
+              source_api_url="${DEFAULT_SOURCE_API_URL}"
+            fi
           elif [[ "${is_schedule}" == "true" && "${source_provider}" != "http-json" ]]; then
             source_api_url=""
           fi
@@ -641,6 +664,8 @@ jobs:
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
           AI_BRIEF_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
+          AI_BRIEF_SOURCE_API_URL_KR: ${{ vars.AI_BRIEF_SOURCE_API_URL_KR }}
+          AI_BRIEF_SOURCE_API_URL_US: ${{ vars.AI_BRIEF_SOURCE_API_URL_US }}
           AI_BRIEF_SOURCE_API_TOKEN: ${{ steps.params.outputs.source_provider == 'http-json' && secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}
           AI_BRIEF_SOURCE_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_SOURCE_TIMEOUT_SECONDS }}
           FINNHUB_API_KEY: ${{ steps.params.outputs.source_provider == 'finnhub' && secrets.FINNHUB_API_KEY || '' }}
@@ -692,6 +717,10 @@ jobs:
           source_api_token=""
           if [[ "${PARAM_SOURCE_PROVIDER}" == "http-json" ]]; then
             if [[ -n "${AI_BRIEF_SOURCE_API_URL}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL}" ]]; then
+              source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"
+            elif [[ -n "${AI_BRIEF_SOURCE_API_URL_KR}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL_KR}" ]]; then
+              source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"
+            elif [[ -n "${AI_BRIEF_SOURCE_API_URL_US}" && "${PARAM_SOURCE_API_URL}" == "${AI_BRIEF_SOURCE_API_URL_US}" ]]; then
               source_api_token="${AI_BRIEF_SOURCE_API_TOKEN:-}"
             elif [[ -n "${AI_BRIEF_SOURCE_API_TOKEN:-}" ]]; then
               echo "Source API token is not forwarded for custom source_api_url." >&2

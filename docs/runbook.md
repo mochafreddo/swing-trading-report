@@ -51,14 +51,14 @@
       - Web 로컬 실행(선택): `WEB_HOST_PORT`(prod, 기본 `55300`), `WEB_DEV_HOST_PORT`(dev, 기본 `55301`)
       - Notify(자동 실행/AI Brief 수동 opt-in 및 schedule): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`
       - AI Brief OpenAI provider(scheduled AI Brief는 필요): `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `AI_BRIEF_MODEL_TIMEOUT_SECONDS`
-      - AI Brief 외부 source API provider(선택): `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_TOKEN`, `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`
+      - AI Brief 외부 source API provider(선택): `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US`, `AI_BRIEF_SOURCE_API_TOKEN`, `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`
       - AI Brief Finnhub source provider(선택, US-only): `FINNHUB_API_KEY`
       - AI Brief Polygon News source provider(선택, US-only): `POLYGON_API_KEY`
       - AI Brief Alpha Vantage News source provider(선택, US-only): `ALPHA_VANTAGE_API_KEY`
       - AI Brief Marketaux News source provider(선택, US-only): `MARKETAUX_API_TOKEN`
       - AI Brief Benzinga News source provider(선택, US-only): `BENZINGA_API_TOKEN`
       - AI Brief Naver News source provider(선택, KR-only): `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`
-      - AI Brief scheduled 기본 source provider(선택, repository variable): `AI_BRIEF_SOURCE_PROVIDER=finnhub`, `polygon-news`, `alpha-vantage-news`, `marketaux-news`, `benzinga-news`, 또는 `naver-news`
+      - AI Brief scheduled 기본 source provider(선택, repository variable): 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`, `AI_BRIEF_SOURCE_PROVIDER_US=finnhub|polygon-news|alpha-vantage-news|marketaux-news|benzinga-news` 권장. 전역 fallback으로 `AI_BRIEF_SOURCE_PROVIDER=...`도 지원
     - `config.yaml`과 `.env`에 동일 키를 중복 정의하지 않기(충돌 시 실패)
     - 선택: `uv sync --extra pykrx`로 KR 폴백/프로바이더 활성화
 - 런타임:
@@ -191,8 +191,8 @@
   - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작합니다.
   - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
-  - scheduled 실행은 `AI_BRIEF_SOURCE_PROVIDER` repository variable이 있으면 해당 값을 source provider로 사용합니다. 이 값이 없고 `AI_BRIEF_SOURCE_API_URL` 변수가 있으면 `source_provider=http-json`, 둘 다 없으면 `source_provider=none`으로 실행합니다. 수동 실행에서는 `source_provider=none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|marketaux-news|benzinga-news|naver-news` 입력을 사용합니다.
-  - `http-json` source API는 HTTPS URL만 허용하며 local/private host와 redirect 응답은 거부됩니다. API는 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST로 받고, `sources[]` row(`ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`)를 반환해야 합니다. source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없고, source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다. API token secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
+  - scheduled 실행은 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US` repository variable이 있으면 해당 값을 source provider로 사용합니다. 시장별 값이 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. 수동 실행에서는 `source_provider=none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|marketaux-news|benzinga-news|naver-news` 입력을 사용합니다.
+  - `http-json` source API는 HTTPS URL만 허용하며 local/private host와 redirect 응답은 거부됩니다. API는 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST로 받고, `sources[]` row(`ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`)를 반환해야 합니다. source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없고, source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다. API token secret은 실행 URL이 설정된 전역 또는 시장별 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송합니다.
   - `finnhub` source provider는 `FINNHUB_API_KEY` secret으로 Finnhub Company News를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`는 `AAPL`, `BRK.B.NYS`는 `BRK.B`로 요청하고, KR ticker는 요청하지 않은 채 `source_issues[]` WARN으로 남깁니다. 반환 row의 `headline`/`url`/Unix `datetime`은 기존 source row 계약으로 정규화되며, freshness/future-time/duplicate/cap/URL safety/DNS 검증을 통과한 row만 AI Brief 입력에 들어갑니다.
   - `polygon-news` source provider는 `POLYGON_API_KEY` secret으로 Polygon.io Stocks News endpoint(`https://api.polygon.io/v2/reference/news`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`는 `AAPL`, `BRK.B.NYS`는 `BRK.B`로 요청하고, KR ticker는 요청하지 않은 채 `source_issues[]` WARN으로 남깁니다. 요청은 `ticker`, `limit=10`, `order=desc`, `sort=published_utc`로 보내며 API key는 `Authorization: Bearer` header로만 전송합니다. 반환 row의 `title`/`article_url`/`published_utc`는 기존 source row 계약으로 정규화되며, freshness/future-time/duplicate/cap/URL safety/DNS 검증을 통과한 row만 AI Brief 입력에 들어갑니다.
   - `alpha-vantage-news` source provider는 `ALPHA_VANTAGE_API_KEY` secret으로 Alpha Vantage `NEWS_SENTIMENT` endpoint(`https://www.alphavantage.co/query`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`는 `AAPL`, `BRK.B.NYS`는 `BRK.B`로 요청하고, KR ticker는 요청하지 않은 채 `source_issues[]` WARN으로 남깁니다. 요청은 `function=NEWS_SENTIMENT`, `tickers`, `time_from=<now-72h UTC>`, `sort=LATEST`, `limit=10`으로 보내며 반환 row의 `feed[].title`/`feed[].url`/`feed[].time_published`는 기존 source row 계약으로 정규화됩니다.

@@ -83,27 +83,28 @@
   - `AI_BRIEF_MODEL_TIMEOUT_SECONDS=20`
 - 선택(AI Brief 외부 source API provider):
   - `AI_BRIEF_SOURCE_API_URL=...`
-  - `AI_BRIEF_SOURCE_API_TOKEN=...` (실행 URL이 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 Bearer 토큰으로 전송)
+  - scheduled `ai-brief.yml`에서 시장별 기본 API URL을 쓰려면 repository variable `AI_BRIEF_SOURCE_API_URL_KR=...` 또는 `AI_BRIEF_SOURCE_API_URL_US=...`를 설정
+  - `AI_BRIEF_SOURCE_API_TOKEN=...` (실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` 중 하나와 일치할 때만 Bearer 토큰으로 전송)
   - `AI_BRIEF_SOURCE_TIMEOUT_SECONDS=10`
 - 선택(AI Brief Finnhub source provider; US ticker only):
   - `FINNHUB_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=finnhub`와 secret `FINNHUB_API_KEY`를 설정
+  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`와 secret `FINNHUB_API_KEY`를 설정
 - 선택(AI Brief Polygon News source provider; US ticker only):
   - `POLYGON_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=polygon-news`와 secret `POLYGON_API_KEY`를 설정
+  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=polygon-news`와 secret `POLYGON_API_KEY`를 설정
 - 선택(AI Brief Alpha Vantage News source provider; US ticker only):
   - `ALPHA_VANTAGE_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=alpha-vantage-news`와 secret `ALPHA_VANTAGE_API_KEY`를 설정
+  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=alpha-vantage-news`와 secret `ALPHA_VANTAGE_API_KEY`를 설정
 - 선택(AI Brief Marketaux News source provider; US ticker only):
   - `MARKETAUX_API_TOKEN=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=marketaux-news`와 secret `MARKETAUX_API_TOKEN`을 설정
+  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=marketaux-news`와 secret `MARKETAUX_API_TOKEN`을 설정
 - 선택(AI Brief Benzinga News source provider; US ticker only):
   - `BENZINGA_API_TOKEN=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=benzinga-news`와 secret `BENZINGA_API_TOKEN`을 설정
+  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=benzinga-news`와 secret `BENZINGA_API_TOKEN`을 설정
 - 선택(AI Brief Naver News source provider; KR ticker only):
   - `NAVER_CLIENT_ID=...`
   - `NAVER_CLIENT_SECRET=...`
-  - scheduled `ai-brief.yml`에서 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER=naver-news`와 secrets `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`을 설정
+  - scheduled `ai-brief.yml`에서 KR 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`와 secrets `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`을 설정
 - 전체 키 목록/설명은 `.env.example`을 참고하세요.
 
 ### 3. 핵심 실행
@@ -451,7 +452,7 @@
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
-- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. 수동 `source_provider=http-json` 또는 scheduled fallback `AI_BRIEF_SOURCE_API_URL`은 외부 source API context를 주입하고, 수동 `source_provider=finnhub` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=finnhub`는 `FINNHUB_API_KEY` secret으로 US Company News context를 주입합니다. 수동 `source_provider=polygon-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=polygon-news`는 `POLYGON_API_KEY` secret으로 US Polygon News context를 주입합니다. 수동 `source_provider=alpha-vantage-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=alpha-vantage-news`는 `ALPHA_VANTAGE_API_KEY` secret으로 US Alpha Vantage News context를 주입합니다. 수동 `source_provider=marketaux-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=marketaux-news`는 `MARKETAUX_API_TOKEN` secret으로 US Marketaux News context를 주입합니다. 수동 `source_provider=benzinga-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=benzinga-news`는 `BENZINGA_API_TOKEN` secret으로 US Benzinga News context를 주입합니다. 수동 `source_provider=naver-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER=naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets로 KR Naver News context를 주입합니다. Scheduled provider 선택은 `AI_BRIEF_SOURCE_PROVIDER`가 우선이고, 없으면 `AI_BRIEF_SOURCE_API_URL` 기반 `http-json`, 둘 다 없으면 `none`입니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
+- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. 수동 `source_provider=http-json` 또는 scheduled fallback `AI_BRIEF_SOURCE_API_URL[_KR|_US]`는 외부 source API context를 주입하고, 수동 `source_provider=finnhub` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`는 `FINNHUB_API_KEY` secret으로 US Company News context를 주입합니다. 수동 `source_provider=polygon-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_US=polygon-news`는 `POLYGON_API_KEY` secret으로 US Polygon News context를 주입합니다. 수동 `source_provider=alpha-vantage-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_US=alpha-vantage-news`는 `ALPHA_VANTAGE_API_KEY` secret으로 US Alpha Vantage News context를 주입합니다. 수동 `source_provider=marketaux-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_US=marketaux-news`는 `MARKETAUX_API_TOKEN` secret으로 US Marketaux News context를 주입합니다. 수동 `source_provider=benzinga-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_US=benzinga-news`는 `BENZINGA_API_TOKEN` secret으로 US Benzinga News context를 주입합니다. 수동 `source_provider=naver-news` 또는 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets로 KR Naver News context를 주입합니다. Scheduled provider 선택은 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`가 우선이고, 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별/전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. `AI_BRIEF_SOURCE_API_TOKEN` secret은 실행 URL이 설정된 전역 또는 시장별 `AI_BRIEF_SOURCE_API_URL` 변수와 일치할 때만 전달합니다.
 - RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교합니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
 
 ### 실험
