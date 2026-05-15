@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.31.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.2...v1.31.0) (2026-05-15)
+
+
+### Features
+
+* **ai-brief:** scheduled run에서 빈 watchlist 결과를 success로 처리한다 ([5219a1e](https://github.com/mochafreddo/swing-trading-report/commit/5219a1e873e2c07adb85903597e95c80d25a8061))
+* **ai-brief:** scheduled source provider를 시장별로 분리한다 ([df6a999](https://github.com/mochafreddo/swing-trading-report/commit/df6a9992731e7f092f7e1764b5445c0d39747f71))
+
+
+### Documentation
+
+* **todos:** AI Brief에 design doc origin 노트 추가 ([e5b677b](https://github.com/mochafreddo/swing-trading-report/commit/e5b677b29e97bf17531b4161db4e6fad68630b45))
+* **todos:** Phase 2 목표와 완료 조건 추가 ([a9afc36](https://github.com/mochafreddo/swing-trading-report/commit/a9afc368120d25ffae3579a71bb46cf44fb758e8))
+
 ## [1.30.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.1...v1.30.2) (2026-05-14)
 
 
