@@ -25,9 +25,10 @@ recommendation eval은 여전히 통과하지 못했다. `TODOS.md` Completed에
     `KIS_APP_KEY`, `KIS_APP_SECRET`
   - Not configured among US provider candidates: `FINNHUB_API_KEY`,
     `ALPHA_VANTAGE_API_KEY`, `MARKETAUX_API_TOKEN`
-- Local `.envrc.local` exposes `BENZINGA_API_TOKEN`, `POLYGON_API_KEY`,
+- Local `.envrc.local` contains `BENZINGA_API_TOKEN`, `POLYGON_API_KEY`,
   `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `KIS_APP_KEY`, and
-  `KIS_APP_SECRET`.
+  `KIS_APP_SECRET`. Values must be exported, or sourced with `set -a`, before
+  running `uv run`/`just` commands that need child-process access.
 
 ## Provider Matrix
 
@@ -69,10 +70,21 @@ Local comparison evidence:
 | 1 | `tmp/ai-brief-us-provider-selection/2026-05-20/run-1/` | 0 sources, coverage 0.000 | 3 sources, coverage 0.333 | FAIL |
 | 2 | `tmp/ai-brief-us-provider-selection/2026-05-20/run-2/` | 0 sources, coverage 0.000 | HTTP 429, 0 sources | FAIL |
 | 3 | `tmp/ai-brief-us-provider-selection/2026-05-20/run-3/` | 0 sources, coverage 0.000 | 3 sources, coverage 0.333 | FAIL |
+| 4 | `reports/ai-brief-source-live-compare/` | 0 sources, coverage 0.000 | 3 sources, coverage 0.333 | FAIL |
 
 Polygon was the coverage/source-count leader in runs 1 and 3, but only covered
 `BABA.NYS`; `AXTI.NAS` and `WELL.NYS` rows were rejected as stale. Run 2 hit
 Polygon HTTP 429, consistent with a low-rate-limit plan.
+
+Run 4 first reacquired a fresh local US scan and entry report on 2026-05-20:
+
+- Buy report: `reports/2026-05-19.buy.json`
+- Entry report: `reports/2026-05-20.entry.json`
+- Eligible US `ENTER` tickers: `AXTI.NAS`, `WELL.NYS`, `BABA.NYS`
+
+The fresh report did not change the coverage result. Benzinga returned no usable
+sources and no provider issues. Polygon returned 3 usable sources, all for
+`BABA.NYS`; `AXTI.NAS` and `WELL.NYS` rows were rejected as stale.
 
 ## Offline Source Eval
 
@@ -80,6 +92,19 @@ Executed against run 3 captured payloads:
 
 - Command: `just ai-brief-source-eval --entry-report ... --compare-source-report
   benzinga=... --compare-source-report polygon=... --market US --pretty`
+- Status: `FAIL`
+- Benzinga: 0 sources, coverage 0.000
+- Polygon: 3 sources, coverage 0.333
+- Eval failure: `source_coverage_below_threshold`
+
+Executed again against run 4 captured payloads:
+
+- Command: `just ai-brief-source-eval --entry-report
+  reports/2026-05-20.entry.json --compare-source-report
+  benzinga=reports/ai-brief-source-live-compare/benzinga.sources.json
+  --compare-source-report
+  polygon=reports/ai-brief-source-live-compare/polygon.sources.json --market US
+  --pretty`
 - Status: `FAIL`
 - Benzinga: 0 sources, coverage 0.000
 - Polygon: 3 sources, coverage 0.333
@@ -186,8 +211,8 @@ errors:
 
 ## Follow-ups
 
-1. Acquire a fresh US market-date entry report with candidates that have current
-   company-specific news, then rerun Benzinga/Polygon comparison.
+1. Re-run live comparison when the US entry candidate set changes or when the
+   candidates have current company-specific news.
 2. If staying on Polygon Basic, space comparison runs to avoid the 5 calls/minute
    limit, or upgrade to a plan that supports the intended request rate.
 3. Consider adding `FINNHUB_API_KEY` as a third comparison provider if
