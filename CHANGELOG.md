@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.31.0...v1.31.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **ci:** requests 타입 검사 실패 수정 ([5154de0](https://github.com/mochafreddo/swing-trading-report/commit/5154de0a8593472ad94989ec7ffe8e1b70c55feb))
+
 ## [1.31.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.30.2...v1.31.0) (2026-05-15)
 
 
