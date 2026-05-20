@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,6 +32,9 @@ _AUTOMATED_ORDER_PHRASES = (
     "submit order",
     "automatic order",
     "automated order",
+)
+type _JsonValue = (
+    None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
 
 
@@ -171,7 +174,7 @@ class OpenAiBriefProvider:
 
 def _build_openai_request_payload(
     *, model_name: str, candidates: list[dict[str, object]]
-) -> dict[str, object]:
+) -> dict[str, _JsonValue]:
     return {
         "model": model_name,
         "input": [
@@ -218,7 +221,7 @@ def _build_openai_request_payload(
     }
 
 
-def _openai_result_schema() -> dict[str, object]:
+def _openai_result_schema() -> dict[str, _JsonValue]:
     return {
         "type": "object",
         "additionalProperties": False,

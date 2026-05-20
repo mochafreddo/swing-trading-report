@@ -12,7 +12,7 @@ import re
 import socket
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -60,6 +60,10 @@ _SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORK
 _NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
 _IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
+type _JsonValue = (
+    None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
+)
+type _SourceQueryParams = Mapping[str, str | int]
 
 
 @dataclass(frozen=True)
@@ -205,7 +209,7 @@ def _load_http_json_source_report(
     except ValueError as exc:
         raise AiBriefSourceProviderError(str(exc)) from exc
     url = validated_source_api_url.url
-    request_payload = {
+    request_payload: dict[str, _JsonValue] = {
         "schema": "sab.ai_brief_source_request.v1",
         "tickers": sorted(eligible_tickers),
         "max_sources_per_ticker": MAX_SOURCES_PER_TICKER,
@@ -308,7 +312,7 @@ def _get_vendor_source_response(
     *,
     session: requests.Session,
     validated_source_api_url: _ValidatedSourceApiUrl,
-    params: Mapping[str, object],
+    params: _SourceQueryParams,
     headers: Mapping[str, str],
     deadline: float,
     source_subject: str,
@@ -529,7 +533,7 @@ def _load_polygon_news_source_report(
                 )
                 continue
 
-            params = {
+            params: dict[str, str | int] = {
                 "ticker": parsed.symbol,
                 "limit": POLYGON_NEWS_LIMIT,
                 "order": "desc",
@@ -661,7 +665,7 @@ def _load_alpha_vantage_news_source_report(
                 )
                 continue
 
-            params = {
+            params: dict[str, str | int] = {
                 "function": "NEWS_SENTIMENT",
                 "tickers": parsed.symbol,
                 "time_from": time_from_text,
@@ -813,7 +817,7 @@ def _load_marketaux_news_source_report(
                 )
                 continue
 
-            params = {
+            params: dict[str, str | int] = {
                 "api_token": api_token,
                 "symbols": parsed.symbol,
                 "countries": "us",
@@ -954,7 +958,7 @@ def _load_benzinga_news_source_report(
                 )
                 continue
 
-            params = {
+            params: dict[str, str | int] = {
                 "token": api_token,
                 "tickers": parsed.symbol,
                 "pageSize": BENZINGA_NEWS_LIMIT,
@@ -1122,7 +1126,7 @@ def _load_naver_news_source_report(
                 )
                 continue
 
-            params = {
+            params: dict[str, str | int] = {
                 "query": _naver_news_query_for_ticker(
                     ticker,
                     ticker_code=parsed.symbol,
