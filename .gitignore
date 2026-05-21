@@ -15,6 +15,7 @@ build/
 htmlcov/
 .mypy_cache/
 .pre-commit-cache/
+.playwright-mcp/
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
