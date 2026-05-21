@@ -444,7 +444,10 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
     ) in text
     assert "source: Apple supply chain update" in text
     assert "2. MSFT.NAS | MEDIUM | entry setup remains valid | sources 0" in text
-    assert "source issue: MSFT.NAS openai_no_external_sources" in text
+    assert (
+        "source issue: MSFT.NAS openai_no_external_sources - "
+        "No supplied source context."
+    ) in text
 
 
 def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> None:
@@ -477,7 +480,94 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
 
     assert "추천 후보 0건 (표시 0건)" in text
     assert "추천 후보 없음" in text
-    assert "system issue: model_provider_timeout" in text
+    assert "system issue: model_provider_timeout - OpenAI request timed out." in text
+
+
+def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candidates() -> (
+    None
+):
+    report = {
+        "generated_at": "2026-05-20T02:19:26+00:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-5.4-mini",
+        "summary": {
+            "entry_count": 3,
+            "preselected_count": 3,
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 1,
+        },
+        "eligible_tickers": ["AXTI.NAS", "WELL.NYS", "BABA.NYS"],
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [
+            {
+                "ticker": None,
+                "code": "model_provider_failed",
+                "severity": "ERROR",
+                "message": "OpenAI request failed with HTTP 429: quota exceeded",
+            }
+        ],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "entry_preselected_count=3" in text
+    assert (
+        "추천 생성 실패/보류: ENTER 후보 3건이 있었지만 추천 결과가 비었습니다." in text
+    )
+    assert "대상: AXTI.NAS, WELL.NYS, BABA.NYS" in text
+    assert (
+        "system issue: model_provider_failed - OpenAI request failed with HTTP 429: "
+        "quota exceeded"
+    ) in text
+
+
+def test_build_ai_brief_telegram_report_text_limits_eligible_ticker_preview() -> None:
+    report = {
+        "generated_at": "2026-05-20T02:19:26+00:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-5.4-mini",
+        "summary": {
+            "preselected_count": 7,
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 1,
+        },
+        "eligible_tickers": [
+            "T000.NAS",
+            "T001.NAS",
+            "T002.NAS",
+            "T003.NAS",
+            "T004.NAS",
+            "T005.NAS",
+            "T006.NAS",
+        ],
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [
+            {
+                "ticker": None,
+                "code": "model_provider_failed",
+                "severity": "ERROR",
+                "message": "OpenAI request failed.",
+            }
+        ],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "entry_preselected_count=7" in text
+    assert "대상: T000.NAS, T001.NAS, T002.NAS, T003.NAS, T004.NAS, 외 2건" in text
+    assert "T005.NAS" not in text
 
 
 def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() -> None:

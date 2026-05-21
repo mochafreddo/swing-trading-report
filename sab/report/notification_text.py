@@ -45,6 +45,13 @@ def _safe_str(value: Any, *, default: str = "") -> str:
     return text if text else default
 
 
+def _safe_single_line(value: Any, *, default: str = "", max_chars: int = 140) -> str:
+    text = " ".join(_safe_str(value, default=default).split())
+    if len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 3].rstrip()}..."
+
+
 def _generated_at(report: dict[str, Any]) -> str:
     generated_at = _safe_str(report.get("generated_at"))
     if generated_at:
@@ -488,9 +495,19 @@ def _first_source_title(recommendation: dict[str, Any]) -> str:
 def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
     ticker = _safe_str(issue.get("ticker"))
     code = _safe_str(issue.get("code"), default="-")
-    if ticker:
-        return f"{prefix}: {ticker} {code}"
-    return f"{prefix}: {code}"
+    message = _safe_single_line(issue.get("message"))
+    base = f"{prefix}: {ticker} {code}" if ticker else f"{prefix}: {code}"
+    if message:
+        return f"{base} - {message}"
+    return base
+
+
+def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:
+    tickers = [_safe_str(item) for item in _as_list(value)]
+    tickers = [ticker for ticker in tickers if ticker]
+    shown = tickers[: max(max_items, 0)]
+    preview = ", ".join(shown)
+    return preview, max(len(tickers) - len(shown), 0)
 
 
 def build_ai_brief_telegram_report_text(
@@ -501,7 +518,7 @@ def build_ai_brief_telegram_report_text(
     max_items: int = 5,
 ) -> str:
     (
-        _preselected_count,
+        preselected_count,
         _recommendation_count,
         source_issue_count,
         system_issue_count,
@@ -519,12 +536,22 @@ def build_ai_brief_telegram_report_text(
         f"market={_safe_str(report.get('market'), default='-')}",
         f"model={model_provider}/{model_name}",
         f"generated_at={_generated_at(report)}",
+        f"entry_preselected_count={preselected_count}",
         f"추천 후보 {total}건 (표시 {shown}건)",
         f"issues source={source_issue_count} system={system_issue_count}",
     ]
 
     if total == 0:
         lines.append("추천 후보 없음")
+        if preselected_count > 0:
+            lines.append(
+                "추천 생성 실패/보류: ENTER 후보 "
+                f"{preselected_count}건이 있었지만 추천 결과가 비었습니다."
+            )
+            ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
+            if ticker_preview:
+                suffix = f", 외 {extra}건" if extra > 0 else ""
+                lines.append(f"대상: {ticker_preview}{suffix}")
     else:
         for idx, row in enumerate(recommendations[:shown], start=1):
             ticker = _safe_str(row.get("ticker"), default="-")
