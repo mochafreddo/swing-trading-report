@@ -183,7 +183,7 @@
 - 자동 실행(GitHub Actions)
   - `schedule`로 scan/sell을 실행하고, 결과를 Supabase에 저장합니다.
   - 알림은 자동 실행일 때만 전송합니다.
-  - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보 상위 5건 + 나머지 개수)을 전송합니다.
+  - 텔레그램: 리포트 본문(scan 진입 가능 후보 전체를 Telegram 한도에 맞춰 분할 전송, sell 매도·점검 후보 상위 5건 + 나머지 개수)을 전송합니다.
   - 슬랙: 기존 key=value 요약 포맷을 유지합니다.
 - AI Brief 수동/scheduled 실행(GitHub Actions)
   - `.github/workflows/ai-brief.yml`은 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다.

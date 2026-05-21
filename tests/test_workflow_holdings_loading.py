@@ -44,6 +44,20 @@ def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
     assert ": > watchlist.txt" in run_script
 
 
+def test_scan_workflow_sends_telegram_message_chunks() -> None:
+    workflow = _load_workflow(".github/workflows/scan.yml")
+    steps = workflow["jobs"]["scan"]["steps"]
+
+    telegram_step = _find_step_by_name(
+        steps, "Send Telegram notification (schedule only)"
+    )
+    run_script = str(telegram_step.get("run") or "")
+
+    assert "split_telegram_message_text" in run_script
+    assert "sendMessage" in run_script
+    assert "for message_text in" in run_script
+
+
 def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     workflow = _load_workflow(".github/workflows/sell.yml")
     steps = workflow["jobs"]["sell"]["steps"]

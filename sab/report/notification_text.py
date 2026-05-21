@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
+TELEGRAM_MESSAGE_MAX_CHARS = 4096
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -182,10 +184,92 @@ def _format_pnl(value: Any) -> str:
     return f"{pnl * 100:+.1f}%"
 
 
+def _format_sell_action(action: str) -> str:
+    normalized = _safe_str(action).upper()
+    if normalized == "SELL":
+        return "매도"
+    if normalized == "REVIEW":
+        return "점검"
+    if normalized == "HOLD":
+        return "보유"
+    return normalized or "-"
+
+
+def _format_provider_label(provider: Any) -> str:
+    normalized = _safe_str(provider, default="kis").lower()
+    labels = {
+        "kis": "KIS",
+        "pykrx": "PyKRX",
+    }
+    return labels.get(normalized, _safe_str(provider, default="KIS"))
+
+
+def _format_universe_label(universe: Any) -> str:
+    normalized = _safe_str(universe, default="both").lower()
+    labels = {
+        "kr": "국내",
+        "us": "미국",
+        "both": "국내+미국",
+    }
+    return labels.get(normalized, _safe_str(universe, default="국내+미국"))
+
+
+def _is_scan_telegram_candidate(row: dict[str, Any]) -> bool:
+    entry_state = _safe_str(row.get("entry_state")).upper()
+    return entry_state in {"", "READY"}
+
+
 def _normalize_actions(actions: Collection[str]) -> set[str]:
     normalized = {_safe_str(action).upper() for action in actions}
     normalized.discard("")
     return normalized
+
+
+def split_telegram_message_text(
+    text: str,
+    *,
+    max_chars: int = TELEGRAM_MESSAGE_MAX_CHARS,
+) -> list[str]:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be > 0")
+
+    lines = str(text).splitlines()
+    if not lines:
+        return []
+
+    parts: list[str] = []
+    current = ""
+    for line in lines:
+        pending = line
+        while pending:
+            if not current:
+                if len(pending) <= max_chars:
+                    current = pending
+                    pending = ""
+                else:
+                    parts.append(pending[:max_chars])
+                    pending = pending[max_chars:]
+                continue
+
+            candidate = f"{current}\n{pending}"
+            if len(candidate) <= max_chars:
+                current = candidate
+                pending = ""
+            else:
+                parts.append(current)
+                current = ""
+
+        if line == "" and current:
+            candidate = f"{current}\n"
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                parts.append(current)
+                current = ""
+
+    if current:
+        parts.append(current)
+    return parts
 
 
 def build_scan_slack_summary_text(
@@ -284,25 +368,32 @@ def build_scan_telegram_report_text(
     provider: str,
     universe: str,
     storage_key: str | None = None,
-    max_items: int = 5,
+    max_items: int | None = None,
 ) -> str:
+    # Kept for existing callers; scan Telegram intentionally lists all READY rows.
+    _ = max_items
     candidates_raw = _as_list(report.get("candidates"))
-    candidates = [row for row in candidates_raw if isinstance(row, dict)]
-    total = len(candidates)
-    shown = min(total, max(max_items, 0))
+    ready_candidates = [
+        row
+        for row in candidates_raw
+        if isinstance(row, dict) and _is_scan_telegram_candidate(row)
+    ]
+    total = len(ready_candidates)
 
     lines = [
-        "[SAB][scan][schedule]",
-        f"provider={_safe_str(provider, default='kis')}",
-        f"universe={_safe_str(universe, default='both')}",
-        f"generated_at={_generated_at(report)}",
-        f"매수 후보 {total}건 (표시 {shown}건)",
+        "[SAB] 매수 후보",
+        (
+            f"시장: {_format_universe_label(universe)} / "
+            f"데이터: {_format_provider_label(provider)}"
+        ),
+        f"시각: {_generated_at(report)}",
+        f"진입 가능: {total}건",
     ]
 
     if total == 0:
-        lines.append("매수 후보 없음")
+        lines.append("진입 가능 후보 없음")
     else:
-        for idx, row in enumerate(candidates[:shown], start=1):
+        for idx, row in enumerate(ready_candidates, start=1):
             ticker = _safe_str(row.get("ticker"), default="-")
             name = _safe_str(row.get("name"))
             ticker_name = f"{ticker} {name}".strip()
@@ -311,7 +402,6 @@ def build_scan_telegram_report_text(
                 row.get("score"),
                 default=_safe_str(row.get("score_value"), default="-"),
             )
-            entry_state = _safe_str(row.get("entry_state"), default="-")
             reason = _safe_str(
                 row.get("entry_state_reason"),
                 default=_safe_str(
@@ -319,18 +409,12 @@ def build_scan_telegram_report_text(
                     default=_safe_str(row.get("risk_guide"), default="-"),
                 ),
             )
-            lines.append(
-                f"{idx}. {ticker_name} | {price} | score {score} | "
-                f"{entry_state}/{reason}"
-            )
-        extra = total - shown
-        if extra > 0:
-            lines.append(f"외 {extra}건")
+            lines.append(f"{idx}. {ticker_name} | {price} | 점수 {score} | {reason}")
 
     key = _safe_str(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(f"보관: {key}")
+    lines.append(f"실행: {run_url}")
     return "\n".join(lines)
 
 
@@ -356,32 +440,32 @@ def build_sell_telegram_report_text(
     hold_count = action_counts.get("HOLD", 0)
 
     lines = [
-        "[SAB][sell][schedule]",
-        f"provider={_safe_str(provider, default='kis')}",
-        f"generated_at={_generated_at(report)}",
+        "[SAB] 매도 점검",
+        f"데이터: {_format_provider_label(provider)}",
+        f"시각: {_generated_at(report)}",
         (
-            f"매도/점검 후보 {total}건 "
-            f"(SELL {sell_count}, REVIEW {review_count}, HOLD {hold_count} 제외)"
+            f"대상: {total}건 "
+            f"(매도 {sell_count}, 점검 {review_count}, 보유 {hold_count} 제외)"
         ),
     ]
 
     if total == 0:
-        lines.append("매도/점검 후보 없음")
+        lines.append("매도/점검 대상 없음")
     else:
         for idx, row in enumerate(filtered[:shown], start=1):
             ticker = _safe_str(row.get("ticker"), default="-")
-            action = _safe_str(row.get("action"), default="-").upper()
+            action = _format_sell_action(_safe_str(row.get("action"), default="-"))
             pnl = _format_pnl(row.get("pnl_pct"))
             reason = _first_reason(row)
-            lines.append(f"{idx}. {ticker} | {action} | PnL {pnl} | {reason}")
+            lines.append(f"{idx}. {ticker} | {action} | {pnl} | {reason}")
         extra = total - shown
         if extra > 0:
             lines.append(f"외 {extra}건")
 
     key = _safe_str(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(f"보관: {key}")
+    lines.append(f"실행: {run_url}")
     return "\n".join(lines)
 
 
@@ -479,4 +563,5 @@ __all__ = [
     "build_scan_telegram_report_text",
     "build_sell_slack_summary_text",
     "build_sell_telegram_report_text",
+    "split_telegram_message_text",
 ]

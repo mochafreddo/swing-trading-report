@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sab.report import notification_text
 from sab.report.notification_text import (
     build_ai_brief_slack_summary_text,
     build_ai_brief_telegram_report_text,
@@ -47,22 +48,24 @@ def test_build_scan_telegram_report_text_includes_buy_candidates() -> None:
         run_url="https://github.com/example/repo/actions/runs/123",
         provider="kis",
         universe="both",
+        storage_key="2026/02/2026-02-11.buy.json",
         max_items=5,
     )
 
-    assert "매수 후보 3건 (표시 3건)" in text
+    assert "[SAB] 매수 후보" in text
+    assert "시장: 국내+미국 / 데이터: KIS" in text
+    assert "시각: 2026-02-11 21:03 KST" in text
+    assert "진입 가능: 3건" in text
     assert (
-        "1. GS.NYS 골드만삭스 | $948.99 | score 7.0 | READY/Pullback bounce confirmed"
+        "1. GS.NYS 골드만삭스 | $948.99 | 점수 7.0 | Pullback bounce confirmed" in text
+    )
+    assert "2. SYK.NYS 스트라이커 | $361.06 | 점수 7.0 | RSI crossed above 50" in text
+    assert (
+        "3. MDT.NYS 메드트로닉 | $101.42 | 점수 6.5 | Reversal candle near EMA short"
         in text
     )
-    assert (
-        "2. SYK.NYS 스트라이커 | $361.06 | score 7.0 | READY/RSI crossed above 50"
-        in text
-    )
-    assert (
-        "3. MDT.NYS 메드트로닉 | $101.42 | score 6.5 | READY/Reversal candle near EMA short"
-        in text
-    )
+    assert "보관: 2026/02/2026-02-11.buy.json" in text
+    assert text.endswith("실행: https://github.com/example/repo/actions/runs/123")
 
 
 def test_build_scan_telegram_report_text_handles_zero_candidates() -> None:
@@ -79,8 +82,82 @@ def test_build_scan_telegram_report_text_handles_zero_candidates() -> None:
         universe="KR",
     )
 
-    assert "매수 후보 0건 (표시 0건)" in text
-    assert "매수 후보 없음" in text
+    assert "진입 가능: 0건" in text
+    assert "진입 가능 후보 없음" in text
+
+
+def test_build_scan_telegram_report_text_includes_all_ready_candidates_only() -> None:
+    candidates = []
+    for idx in range(7):
+        entry_state = "WATCH" if idx == 2 else "READY"
+        candidates.append(
+            {
+                "ticker": f"T{idx:03d}",
+                "name": f"Name{idx}",
+                "price": f"${100 + idx}",
+                "score": "6.0",
+                "entry_state": entry_state,
+                "entry_state_reason": f"Reason {idx}",
+            }
+        )
+
+    report = {
+        "generated_at": "2026-02-11 21:03 KST",
+        "summary": {"candidate_count": 7, "issue_count": 0},
+        "candidates": candidates,
+    }
+
+    text = build_scan_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/987",
+        provider="kis",
+        universe="US",
+        max_items=5,
+    )
+
+    assert "진입 가능: 6건" in text
+    assert "외 " not in text
+    assert "T002 Name2" not in text
+    assert "T006 Name6" in text
+
+
+def test_build_scan_telegram_report_text_keeps_legacy_candidates_without_entry_state() -> (
+    None
+):
+    report = {
+        "generated_at": "2026-02-11 21:03 KST",
+        "summary": {"candidate_count": 1, "issue_count": 0},
+        "candidates": [
+            {
+                "ticker": "LEGACY.NYS",
+                "name": "Legacy Candidate",
+                "price": "$120",
+                "score": "6.8",
+                "risk_guide": "Stop $112 / Target $136",
+            }
+        ],
+    }
+
+    text = build_scan_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/988",
+        provider="kis",
+        universe="US",
+    )
+
+    assert "진입 가능: 1건" in text
+    assert "LEGACY.NYS Legacy Candidate" in text
+
+
+def test_split_telegram_message_text_keeps_parts_within_limit() -> None:
+    assert hasattr(notification_text, "split_telegram_message_text")
+
+    text = "\n".join(f"{idx}. T{idx:03d}.NYS | $100 | 점수 6.0" for idx in range(12))
+    parts = notification_text.split_telegram_message_text(text, max_chars=80)
+
+    assert len(parts) > 1
+    assert all(0 < len(part) <= 80 for part in parts)
+    assert "\n".join(parts) == text
 
 
 def test_build_sell_telegram_report_text_excludes_hold_rows() -> None:
@@ -124,14 +201,20 @@ def test_build_sell_telegram_report_text_excludes_hold_rows() -> None:
         run_url="https://github.com/example/repo/actions/runs/456",
         provider="kis",
         include_actions=("SELL", "REVIEW"),
+        storage_key="2026/02/2026-02-11.sell.json",
         max_items=5,
     )
 
-    assert "매도/점검 후보 3건 (SELL 1, REVIEW 2, HOLD 1 제외)" in text
-    assert "CMG.NYS | SELL | PnL +12.3% | Hard stop triggered" in text
-    assert "COP.NYS | REVIEW | PnL +8.8% | Reached profit target zone" in text
-    assert "MSI.NYS | REVIEW | PnL -3.4% | Close below EMA short" in text
+    assert "[SAB] 매도 점검" in text
+    assert "데이터: KIS" in text
+    assert "시각: 2026-02-11 21:00 KST" in text
+    assert "대상: 3건 (매도 1, 점검 2, 보유 1 제외)" in text
+    assert "CMG.NYS | 매도 | +12.3% | Hard stop triggered" in text
+    assert "COP.NYS | 점검 | +8.8% | Reached profit target zone" in text
+    assert "MSI.NYS | 점검 | -3.4% | Close below EMA short" in text
     assert "CI.NYS" not in text
+    assert "보관: 2026/02/2026-02-11.sell.json" in text
+    assert text.endswith("실행: https://github.com/example/repo/actions/runs/456")
 
 
 def test_build_sell_telegram_report_text_handles_hold_only() -> None:
@@ -165,11 +248,11 @@ def test_build_sell_telegram_report_text_handles_hold_only() -> None:
         include_actions=("SELL", "REVIEW"),
     )
 
-    assert "매도/점검 후보 0건 (SELL 0, REVIEW 0, HOLD 2 제외)" in text
-    assert "매도/점검 후보 없음" in text
+    assert "대상: 0건 (매도 0, 점검 0, 보유 2 제외)" in text
+    assert "매도/점검 대상 없음" in text
 
 
-def test_build_scan_telegram_report_text_limits_items_and_adds_rest_count() -> None:
+def test_build_scan_telegram_report_text_keeps_all_ready_candidates() -> None:
     candidates = []
     for idx in range(7):
         candidates.append(
@@ -197,10 +280,11 @@ def test_build_scan_telegram_report_text_limits_items_and_adds_rest_count() -> N
         max_items=5,
     )
 
-    assert "매수 후보 7건 (표시 5건)" in text
-    assert "외 2건" in text
+    assert "진입 가능: 7건" in text
+    assert "외 " not in text
     assert "T004 Name4" in text
-    assert "T005 Name5" not in text
+    assert "T005 Name5" in text
+    assert "T006 Name6" in text
 
 
 def test_build_sell_telegram_report_text_limits_items_and_adds_rest_count() -> None:
@@ -233,10 +317,10 @@ def test_build_sell_telegram_report_text_limits_items_and_adds_rest_count() -> N
         max_items=5,
     )
 
-    assert "매도/점검 후보 7건 (SELL 4, REVIEW 3, HOLD 0 제외)" in text
+    assert "대상: 7건 (매도 4, 점검 3, 보유 0 제외)" in text
     assert "외 2건" in text
-    assert "S004 | SELL | PnL +5.0% | Reason 4" in text
-    assert "S005 | REVIEW | PnL +6.0% | Reason 5" not in text
+    assert "S004 | 매도 | +5.0% | Reason 4" in text
+    assert "S005 | 점검 | +6.0% | Reason 5" not in text
 
 
 def test_build_scan_slack_summary_text_keeps_key_value_format() -> None:
