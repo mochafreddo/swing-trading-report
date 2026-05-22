@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.32.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.31.1...v1.32.0) (2026-05-22)
+
+
+### Features
+
+* **ai-brief:** 브리프 판단 상태를 명시한다 ([#161](https://github.com/mochafreddo/swing-trading-report/issues/161)) ([acbb8d2](https://github.com/mochafreddo/swing-trading-report/commit/acbb8d2123d8a89a8861dc22a77f7c96b0bcb243))
+
+
+### Bug Fixes
+
+* **notification:** AI Brief 빈 추천 사유 표시 ([93ae5e2](https://github.com/mochafreddo/swing-trading-report/commit/93ae5e2b69d26b22cf0cc0ab68253938e33d1605))
+* **notification:** 텔레그램 알림을 생략 없이 전송 ([47296c8](https://github.com/mochafreddo/swing-trading-report/commit/47296c80c033849cf8cfa8f203e1d667cceec3fb))
+
+
+### Documentation
+
+* **ai-brief:** US 소스 제공자 검증 결과 문서화 ([82756bc](https://github.com/mochafreddo/swing-trading-report/commit/82756bc376fdc9f5173cac80936b8f2608ede32c))
+* **ai-brief:** US 소스 제공자 재검증 결과 추가 ([ed691cd](https://github.com/mochafreddo/swing-trading-report/commit/ed691cdf7fa90a16aea84c5dea8941cda2de910e))
+
 ## [1.31.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.31.0...v1.31.1) (2026-05-20)
 
 
