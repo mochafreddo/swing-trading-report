@@ -3,6 +3,15 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
+from .ai_brief_state import (
+    BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
+    BRIEF_REASON_WEAK_NEWS_COVERAGE,
+    BRIEF_STATE_FINAL_JUDGMENT,
+    BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
+    BRIEF_STATE_NO_SIGNAL,
+    read_ai_brief_state,
+)
+
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
 
 
@@ -128,24 +137,31 @@ def _ai_brief_counts(
     source_issues = [row for row in source_issues_raw if isinstance(row, dict)]
     system_issues_raw = _as_list(report.get("system_issues"))
     system_issues = [row for row in system_issues_raw if isinstance(row, dict)]
+    eligible_count = len(
+        [item for item in _as_list(report.get("eligible_tickers")) if _safe_str(item)]
+    )
 
-    preselected_count = _safe_int(
-        summary.get("preselected_count"),
-        default=_safe_int(report.get("preselected_count"), default=0),
+    recommendation_count = max(
+        _safe_int(summary.get("recommendation_count"), default=0),
+        _safe_int(report.get("recommendation_count"), default=0),
+        len(recommendations),
     )
-    recommendation_count = _safe_int(
-        summary.get("recommendation_count"),
-        default=_safe_int(
-            report.get("recommendation_count"), default=len(recommendations)
-        ),
+    preselected_count = max(
+        _safe_int(summary.get("preselected_count"), default=0),
+        _safe_int(report.get("preselected_count"), default=0),
+        eligible_count,
+        len(recommendations),
+        recommendation_count,
     )
-    source_issue_count = _safe_int(
-        summary.get("source_issue_count"),
-        default=_safe_int(report.get("source_issue_count"), default=len(source_issues)),
+    source_issue_count = max(
+        _safe_int(summary.get("source_issue_count"), default=0),
+        _safe_int(report.get("source_issue_count"), default=0),
+        len(source_issues),
     )
-    system_issue_count = _safe_int(
-        summary.get("system_issue_count"),
-        default=_safe_int(report.get("system_issue_count"), default=len(system_issues)),
+    system_issue_count = max(
+        _safe_int(summary.get("system_issue_count"), default=0),
+        _safe_int(report.get("system_issue_count"), default=0),
+        len(system_issues),
     )
     return (
         preselected_count,
@@ -348,6 +364,7 @@ def build_ai_brief_slack_summary_text(
         _source_issues,
         _system_issues,
     ) = _ai_brief_counts(report)
+    brief_state = read_ai_brief_state(report)
 
     lines = [
         "[SAB][ai-brief][schedule]",
@@ -356,6 +373,8 @@ def build_ai_brief_slack_summary_text(
         f"model_provider={_safe_str(report.get('model_provider'), default='fake')}",
         f"model_name={_safe_str(report.get('model_name'), default='-')}",
         f"generated_at={_generated_at(report)}",
+        f"brief_state={brief_state.state}",
+        f"brief_reason={brief_state.reason}",
         f"preselected_count={preselected_count}",
         f"recommendation_count={recommendation_count}",
         f"source_issue_count={source_issue_count}",
@@ -527,19 +546,43 @@ def build_ai_brief_telegram_report_text(
         system_issues,
     ) = _ai_brief_counts(report)
     total = len(recommendations)
-    shown = min(total, max(max_items, 0))
+    shown = min(total, max(max_items, 0), 3)
     model_provider = _safe_str(report.get("model_provider"), default="fake")
     model_name = _safe_str(report.get("model_name"), default="-")
+    brief_state = read_ai_brief_state(report)
 
     lines = [
         "[SAB][ai-brief][schedule]",
         f"market={_safe_str(report.get('market'), default='-')}",
         f"model={model_provider}/{model_name}",
         f"generated_at={_generated_at(report)}",
+        f"brief_state={brief_state.state}",
+        f"brief_reason={brief_state.reason}",
         f"entry_preselected_count={preselected_count}",
         f"추천 후보 {total}건 (표시 {shown}건)",
         f"issues source={source_issue_count} system={system_issue_count}",
     ]
+
+    if brief_state.state == BRIEF_STATE_NO_SIGNAL:
+        lines.append("오늘은 볼 종목 없음. 쉬어도 됨")
+    elif brief_state.state == BRIEF_STATE_FINAL_JUDGMENT:
+        lines.append(f"AI 최종 판단: 뉴스 근거 확인된 후보 {total}건")
+    elif brief_state.reason == BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE:
+        lines.append("AI 판단 보류: 모델/시스템 이슈 확인 필요")
+    elif brief_state.reason == BRIEF_REASON_WEAK_NEWS_COVERAGE:
+        lines.append("뉴스 근거 약함, 기술 신호만 있음")
+    else:
+        lines.append("AI 판단 보류: 추천을 확정하지 않음")
+
+    if (
+        brief_state.state == BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS
+        and preselected_count > 0
+        and total > 0
+    ):
+        ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
+        if ticker_preview:
+            suffix = f", 외 {extra}건" if extra > 0 else ""
+            lines.append(f"대상: {ticker_preview}{suffix}")
 
     if total == 0:
         lines.append("추천 후보 없음")
@@ -583,7 +626,49 @@ def build_ai_brief_telegram_report_text(
     return "\n".join(lines)
 
 
+def build_ai_brief_skipped_telegram_text(
+    *,
+    market: str,
+    session_state: str,
+    session_date: str,
+    run_url: str,
+    trading_session: object | None = None,
+) -> str:
+    trading_session_text = _safe_str(trading_session)
+    if trading_session_text:
+        is_trading_session = trading_session_text.lower() in {
+            "1",
+            "true",
+            "yes",
+            "open",
+        }
+        skip_message = (
+            "장전 시간이 아니라 AI Brief 건너뜀"
+            if is_trading_session
+            else "거래일이 아니라 AI Brief 건너뜀"
+        )
+    else:
+        skip_message = "장전 시간이 아니라 AI Brief 건너뜀"
+
+    lines = [
+        "[SAB][ai-brief][skipped]",
+        f"market={_safe_str(market, default='-')}",
+        f"session_state={_safe_str(session_state, default='-')}",
+        f"session_date={_safe_str(session_date, default='-')}",
+    ]
+    if trading_session_text:
+        lines.append(f"trading_session={trading_session_text}")
+    lines.extend(
+        [
+            skip_message,
+            f"run_url={run_url}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 __all__ = [
+    "build_ai_brief_skipped_telegram_text",
     "build_ai_brief_slack_summary_text",
     "build_ai_brief_telegram_report_text",
     "build_scan_slack_summary_text",

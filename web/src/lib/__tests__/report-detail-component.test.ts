@@ -5,6 +5,27 @@ import { describe, expect, it, vi } from "vitest";
 import { ReportDetail } from "@/components/reports/report-detail";
 import type { ReportJson } from "@/components/reports/types";
 
+function renderReportDetail(
+  detail: ReportJson,
+  aiBriefRows: ReportJson[] = [],
+): string {
+  return renderToStaticMarkup(
+    createElement(ReportDetail, {
+      detail,
+      loadingDetail: false,
+      error: null,
+      showRaw: false,
+      summary: detail.summary as ReportJson,
+      buyRows: [],
+      sellRows: [],
+      entryRows: [],
+      aiBriefRows,
+      rawDetailJson: "",
+      onToggleRaw: vi.fn(),
+    }),
+  );
+}
+
 describe("ReportDetail component", () => {
   it("renders candidate reason/risk columns and issues section", () => {
     const detail: ReportJson = {
@@ -128,6 +149,8 @@ describe("ReportDetail component", () => {
       market: "US",
       model_provider: "openai",
       model_name: "gpt-test",
+      brief_state: "NEEDS_REVIEW_WEAK_NEWS",
+      brief_reason: "weak_news_coverage",
       source_entry_report: "2026-05-05.entry.json",
       source_buy_report: "2026-05-04.buy.json",
       summary: {
@@ -177,6 +200,10 @@ describe("ReportDetail component", () => {
     );
 
     expect(html).toContain("model_provider");
+    expect(html).toContain("brief_state");
+    expect(html).toContain("NEEDS_REVIEW_WEAK_NEWS");
+    expect(html).toContain("brief_reason");
+    expect(html).toContain("weak_news_coverage");
     expect(html).toContain("source_entry_report");
     expect(html).toContain("Recommendations (1)");
     expect(html).toContain("AAPL.NAS");
@@ -184,5 +211,219 @@ describe("ReportDetail component", () => {
     expect(html).toContain("Apple supply chain update");
     expect(html).toContain("Source issues (1)");
     expect(html).toContain("openai_no_external_sources");
+  });
+
+  it("infers AI brief state for legacy artifacts without explicit fields", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "KR",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_entry_report: "2026-05-05.entry.json",
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 1,
+        source_issue_count: 1,
+        system_issue_count: 0,
+      },
+      source_issues: [
+        {
+          ticker: "005930",
+          code: "openai_no_external_sources",
+          severity: "WARN",
+          message: "No external source provider was configured.",
+        },
+      ],
+      system_issues: [],
+    };
+    const aiBriefRows: ReportJson[] = [
+      {
+        ticker: "005930",
+        rank: 1,
+        confidence: "LOW",
+        rationale: ["entry setup remains valid"],
+        checklist: ["manually confirm price and risk"],
+        sources: [],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(ReportDetail, {
+        detail,
+        loadingDetail: false,
+        error: null,
+        showRaw: false,
+        summary: detail.summary as ReportJson,
+        buyRows: [],
+        sellRows: [],
+        entryRows: [],
+        aiBriefRows,
+        rawDetailJson: "",
+        onToggleRaw: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("brief_state");
+    expect(html).toContain("NEEDS_REVIEW_WEAK_NEWS");
+    expect(html).toContain("brief_reason");
+    expect(html).toContain("weak_news_coverage");
+  });
+
+  it.each([
+    [
+      "no signal",
+      {
+        summary: {
+          preselected_count: 0,
+          recommendation_count: 0,
+          source_issue_count: 0,
+          system_issue_count: 0,
+        },
+        eligible_tickers: [],
+        recommendations: [],
+        source_issues: [],
+        system_issues: [],
+      },
+      "NO_SIGNAL",
+      "no_enter_candidates",
+    ],
+    [
+      "source-backed final",
+      {
+        summary: {
+          preselected_count: 1,
+          recommendation_count: 1,
+          source_issue_count: 0,
+          system_issue_count: 0,
+        },
+        eligible_tickers: ["AAPL.NAS"],
+        recommendations: [
+          {
+            ticker: "AAPL.NAS",
+            sources: [
+              { title: "Apple update", url: "https://example.test/aapl" },
+            ],
+          },
+        ],
+        source_issues: [],
+        system_issues: [],
+      },
+      "FINAL_JUDGMENT",
+      "source_backed_final",
+    ],
+    [
+      "model or system issue",
+      {
+        summary: {
+          preselected_count: 1,
+          recommendation_count: 0,
+          source_issue_count: 0,
+          system_issue_count: 1,
+        },
+        eligible_tickers: ["005930"],
+        recommendations: [],
+        source_issues: [],
+        system_issues: [{ code: "model_provider_failed" }],
+      },
+      "NEEDS_REVIEW_WEAK_NEWS",
+      "model_or_system_issue",
+    ],
+    [
+      "model deferred",
+      {
+        summary: {
+          preselected_count: 1,
+          recommendation_count: 0,
+          source_issue_count: 0,
+          system_issue_count: 0,
+        },
+        eligible_tickers: ["005930"],
+        recommendations: [],
+        source_issues: [],
+        system_issues: [],
+      },
+      "NEEDS_REVIEW_WEAK_NEWS",
+      "model_deferred",
+    ],
+    [
+      "stale source issue summary",
+      {
+        summary: {
+          preselected_count: 1,
+          recommendation_count: 1,
+          source_issue_count: 0,
+          system_issue_count: 0,
+        },
+        eligible_tickers: ["AAPL.NAS"],
+        recommendations: [
+          {
+            ticker: "AAPL.NAS",
+            sources: [
+              { title: "Apple update", url: "https://example.test/aapl" },
+            ],
+          },
+        ],
+        source_issues: [{ code: "source_coverage_below_threshold" }],
+        system_issues: [],
+      },
+      "NEEDS_REVIEW_WEAK_NEWS",
+      "weak_news_coverage",
+    ],
+  ])(
+    "infers AI brief state for legacy %s artifacts",
+    (_, partial, state, reason) => {
+      const detail: ReportJson = {
+        schema: "sab.ai_brief.v1",
+        type: "ai_brief",
+        generated_at: "2026-05-05T08:40:00+09:00",
+        market: "US",
+        model_provider: "openai",
+        model_name: "gpt-test",
+        source_entry_report: "2026-05-05.entry.json",
+        ...partial,
+      };
+
+      const html = renderReportDetail(detail);
+
+      expect(html).toContain("brief_state");
+      expect(html).toContain(state);
+      expect(html).toContain("brief_reason");
+      expect(html).toContain(reason);
+    },
+  );
+
+  it("does not infer AI brief state from display-only recommendation rows", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "US",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_entry_report: "2026-05-05.entry.json",
+      summary: {
+        preselected_count: 0,
+        recommendation_count: 0,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: [],
+      source_issues: [],
+      system_issues: [],
+    };
+
+    const html = renderReportDetail(detail, [
+      {
+        ticker: "AAPL.NAS",
+        sources: [{ title: "Apple update", url: "https://example.test/aapl" }],
+      },
+    ]);
+
+    expect(html).toContain("brief_state");
+    expect(html).toContain("NO_SIGNAL");
+    expect(html).toContain("brief_reason");
+    expect(html).toContain("no_enter_candidates");
   });
 });

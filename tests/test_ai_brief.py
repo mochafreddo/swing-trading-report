@@ -185,6 +185,8 @@ def test_run_ai_brief_writes_recommendations_from_entry_report_only(
     assert payload["recommendations"][0]["ticker"] == "AAPL.NAS"
     assert payload["recommendations"][0]["name"] == "Apple"
     assert payload["recommendations"][0]["confidence"] == "LOW"
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "weak_news_coverage"
     assert payload["excluded_candidates"] == [
         {
             "ticker": "MSFT.NAS",
@@ -322,6 +324,8 @@ def test_run_ai_brief_writes_empty_artifact_when_no_enter_candidates(
     assert payload["eligible_tickers"] == []
     assert payload["summary"]["recommendation_count"] == 0
     assert payload["summary"]["excluded_count"] == 2
+    assert payload["brief_state"] == "NO_SIGNAL"
+    assert payload["brief_reason"] == "no_enter_candidates"
 
 
 def test_run_ai_brief_applies_provider_boundary_before_output_cap(
@@ -402,6 +406,8 @@ def test_run_ai_brief_local_source_provider_enriches_fake_recommendation_sources
     )
     assert payload["source_issues"] == []
     assert payload["summary"]["source_issue_count"] == 0
+    assert payload["brief_state"] == "FINAL_JUDGMENT"
+    assert payload["brief_reason"] == "source_backed_final"
 
 
 def test_run_ai_brief_source_report_implies_local_json_provider(
@@ -499,6 +505,8 @@ def test_run_ai_brief_local_source_provider_failure_keeps_artifact(
     assert payload["recommendations"][0]["sources"] == []
     assert payload["system_issues"][0]["code"] == "source_provider_failed"
     assert payload["summary"]["system_issue_count"] == 1
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "model_or_system_issue"
 
 
 def test_run_ai_brief_uploads_when_forced(
@@ -5895,6 +5903,8 @@ def test_run_ai_brief_preserves_source_issues_when_openai_provider_fails(
     assert payload["recommendations"] == []
     assert payload["source_issues"][0]["code"] == "local_source_unknown_ticker"
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "model_or_system_issue"
 
 
 def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
@@ -5929,6 +5939,8 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
     assert payload["summary"]["system_issue_count"] == 1
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
     assert payload["system_issues"][0]["severity"] == "ERROR"
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "model_or_system_issue"
 
 
 def test_run_ai_brief_openai_http_error_writes_empty_artifact_with_system_issue(

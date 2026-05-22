@@ -31,6 +31,7 @@
 - [런북](runbook.md)
 - [시스템 아키텍처 개요](ARCHITECTURE.md)
 - [Swing 핵심 로직 설계(신호/리스크)](STRATEGY.md)
+- [AI Brief US source provider 결정 기록](ai-brief-us-source-provider-decision.md)
 - [Spec v1.1 현재 계약](spec-v1.1.md)
 - [KIS 설정 가이드](kis-setup.md)
 - [holdings.yaml 스키마](holdings-schema.md)

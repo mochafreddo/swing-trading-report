@@ -126,12 +126,13 @@ flowchart LR
    - `openai`는 Responses API structured output을 사용하며 timeout/요청 실패/모델 출력 계약 실패 시 추천 없이 `system_issues[]`를 남긴 artifact를 생성합니다.
    - OpenAI 출력 sources는 candidate에 주입된 source URL만 cite할 수 있고, 소스 없는 추천은 ticker별 `source_issues[]`를 요구합니다.
 6. 최종 추천은 최대 3개이며, `reports/YYYY-MM-DD(.n).ai-brief.json`을 로컬 파일 락 + 원자적 쓰기로 생성합니다.
-7. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.
-8. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
-9. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
-10. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload`을 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
-11. scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작하고, 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install 이후 scan/entry/ai-brief/알림 단계를 진행합니다.
-12. scheduled 실행 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다. Scheduled source provider는 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`가 우선이고, 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. `finnhub` scheduled 실행은 `FINNHUB_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `polygon-news` scheduled 실행은 `POLYGON_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `alpha-vantage-news` scheduled 실행은 `ALPHA_VANTAGE_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `marketaux-news` scheduled 실행은 `MARKETAUX_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `benzinga-news` scheduled 실행은 `BENZINGA_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `naver-news` scheduled 실행은 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets가 필요하며 v1은 KR ticker만 source request 대상으로 삼습니다. 수동 실행은 `send_notifications=false`가 기본이며, `true`를 명시했을 때만 Telegram/Slack preview 텍스트를 실제로 발송합니다.
+7. writer는 새 artifact에 top-level `brief_state`/`brief_reason`을 주입합니다. 상태는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 중 하나이며, entry preselection count, recommendation source coverage, source/system issue count만으로 결정합니다.
+8. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다. Telegram은 `NO_SIGNAL`이면 휴식 문구, `FINAL_JUDGMENT`이면 source-backed 후보, `NEEDS_REVIEW_WEAK_NEWS`이면 downgraded copy와 issue 요약을 보여줍니다.
+9. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
+10. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
+11. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload`을 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
+12. scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작하고, 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install 이후 scan/entry/ai-brief/알림 단계를 진행합니다. 가드가 막은 scheduled run은 Supabase/Reports artifact를 만들지 않고 Actions summary와 Telegram skipped 메시지만 남깁니다.
+13. scheduled 실행 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다. Scheduled source provider는 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`가 우선이고, 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. `finnhub` scheduled 실행은 `FINNHUB_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `polygon-news` scheduled 실행은 `POLYGON_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `alpha-vantage-news` scheduled 실행은 `ALPHA_VANTAGE_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `marketaux-news` scheduled 실행은 `MARKETAUX_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `benzinga-news` scheduled 실행은 `BENZINGA_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `naver-news` scheduled 실행은 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets가 필요하며 v1은 KR ticker만 source request 대상으로 삼습니다. 수동 실행은 `send_notifications=false`가 기본이며, `true`를 명시했을 때만 Telegram/Slack preview 텍스트를 실제로 발송합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -145,7 +146,7 @@ flowchart LR
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
 7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다.
 8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다.
-9. AI Brief 상세는 `recommendations[]`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다.
+9. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론합니다.
 
 ### 4.7 웹 운영 메트릭 대시보드 플로우
 
@@ -207,7 +208,7 @@ flowchart LR
   - `buy.summary`: `candidate_count`, `system_issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`, `rs_benchmark_requested/unavailable_count`, `rs_benchmark_unavailable_ratio`
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
   - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`
-  - `ai-brief.summary`: `entry_count`, `preselected_count`, `recommendation_count`, `source_issue_count`, `system_issue_count`
+  - `ai-brief.summary`: `entry_count`, `preselected_count`, `recommendation_count`, `source_issue_count`, `system_issue_count`; artifact top-level에는 `brief_state`, `brief_reason`이 함께 저장됩니다.
 - `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 - 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=strict`(기본)에서는 Supabase 장애 시 즉시 실패하고, `degrade`에서만 메모리 스로틀로 폴백합니다.

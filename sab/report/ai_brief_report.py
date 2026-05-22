@@ -12,6 +12,10 @@ from ..ai_brief_sources import (
     validate_ai_brief_source_url,
 )
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .ai_brief_state import (
+    validate_optional_ai_brief_state_fields,
+    with_inferred_ai_brief_state,
+)
 from .time_label import normalize_artifact_date
 
 _ARTIFACT_SCHEMA = "sab.ai_brief.v1"
@@ -336,6 +340,10 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
     )
     _validate_issue_list(payload, "source_issues")
     _validate_issue_list(payload, "system_issues")
+    try:
+        validate_optional_ai_brief_state_fields(payload)
+    except ValueError as exc:
+        raise AiBriefValidationError(str(exc)) from exc
 
 
 def write_ai_brief_report(
@@ -367,6 +375,7 @@ def write_ai_brief_report(
     payload["type"] = _REPORT_TYPE
     payload["generated_at"] = generated_at
     payload["report_date"] = report_date
+    payload = with_inferred_ai_brief_state(payload)
     validate_ai_brief_artifact(payload, now=validation_now)
 
     lock_path = os.path.join(report_dir, ".ai-brief.report.lock")

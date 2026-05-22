@@ -77,6 +77,10 @@ def _unbacked_payload(*, confidence: str = "LOW") -> dict[str, Any]:
 
 
 def test_ai_brief_eval_passes_source_backed_artifact() -> None:
+    legacy_payload = _load_good_ai_brief()
+    assert "brief_state" not in legacy_payload
+    assert "brief_reason" not in legacy_payload
+
     result = evaluate_ai_brief_recommendation_report(
         entry_report_path=_fixture("entry.us.json"),
         ai_brief_report_path=_fixture("ai-brief.good.json"),

@@ -127,6 +127,9 @@ def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> N
     assert "is_trading_session" in guard_script
     assert "resolve_run_session_state_map" in guard_script
     assert "Skipping scheduled AI brief" in guard_script
+    assert 'out.write(f"trading_session={str(trading_session).lower()}\\n")' in (
+        guard_script
+    )
 
     guarded_steps = [
         "Install dependencies",
@@ -217,6 +220,39 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert slack_step.get("continue-on-error") is True
     assert "TELEGRAM_BOT_TOKEN" in str(telegram_step.get("env") or {})
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
+
+
+def test_ai_brief_workflow_sends_skipped_message_when_schedule_guard_blocks() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = _steps(workflow)
+
+    build_step = _find_step_by_name(steps, "Build skipped scheduled notification")
+    send_step = _find_step_by_name(steps, "Send skipped Telegram notification")
+    build_if = str(build_step.get("if") or "")
+    send_if = str(send_step.get("if") or "")
+    build_script = str(build_step.get("run") or "")
+    build_env = build_step.get("env") or {}
+    send_env = send_step.get("env") or {}
+
+    assert "github.event_name == 'schedule'" in build_if
+    assert "steps.schedule_guard.outputs.should_run != 'true'" in build_if
+    assert "github.event_name == 'schedule'" in send_if
+    assert "steps.schedule_guard.outputs.should_run != 'true'" in send_if
+    assert "steps.params.outputs.send_notifications == 'true'" in send_if
+    assert "build_ai_brief_skipped_telegram_text" in build_script
+    assert "ai-brief.skipped.telegram.txt" in build_script
+    assert "GITHUB_STEP_SUMMARY" in build_script
+    assert build_env.get("SESSION_STATE") == (
+        "${{ steps.schedule_guard.outputs.session_state }}"
+    )
+    assert build_env.get("SESSION_DATE") == (
+        "${{ steps.schedule_guard.outputs.session_date }}"
+    )
+    assert build_env.get("TRADING_SESSION") == (
+        "${{ steps.schedule_guard.outputs.trading_session }}"
+    )
+    assert send_step.get("continue-on-error") is True
+    assert "TELEGRAM_BOT_TOKEN" in str(send_env)
 
 
 def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> None:

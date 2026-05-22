@@ -8,7 +8,12 @@ import {
   buildBuyCandidateViewModel,
   type ChipTone,
 } from "./buy-candidate-view-model";
-import { asRecord, formatPnlPercent, readNumber } from "./helpers";
+import {
+  asRecord,
+  asRecordArray,
+  formatPnlPercent,
+  readNumber,
+} from "./helpers";
 import type { ReportJson } from "./types";
 
 interface ReportDetailProps {
@@ -63,6 +68,141 @@ function asStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0);
+}
+
+const AI_BRIEF_STATE_NO_SIGNAL = "NO_SIGNAL";
+const AI_BRIEF_STATE_FINAL_JUDGMENT = "FINAL_JUDGMENT";
+const AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS = "NEEDS_REVIEW_WEAK_NEWS";
+const AI_BRIEF_REASON_NO_ENTER_CANDIDATES = "no_enter_candidates";
+const AI_BRIEF_REASON_SOURCE_BACKED_FINAL = "source_backed_final";
+const AI_BRIEF_REASON_WEAK_NEWS_COVERAGE = "weak_news_coverage";
+const AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE = "model_or_system_issue";
+const AI_BRIEF_REASON_MODEL_DEFERRED = "model_deferred";
+
+const VALID_AI_BRIEF_STATE_REASONS: Record<string, Set<string>> = {
+  [AI_BRIEF_STATE_NO_SIGNAL]: new Set([AI_BRIEF_REASON_NO_ENTER_CANDIDATES]),
+  [AI_BRIEF_STATE_FINAL_JUDGMENT]: new Set([
+    AI_BRIEF_REASON_SOURCE_BACKED_FINAL,
+  ]),
+  [AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS]: new Set([
+    AI_BRIEF_REASON_WEAK_NEWS_COVERAGE,
+    AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
+    AI_BRIEF_REASON_MODEL_DEFERRED,
+  ]),
+};
+
+interface AiBriefStateView {
+  state: string;
+  reason: string;
+}
+
+function withMatchingExplicitAiBriefState(
+  explicitState: string | null,
+  explicitReason: string | null,
+  inferred: AiBriefStateView,
+): AiBriefStateView {
+  if (
+    explicitState &&
+    explicitReason &&
+    explicitState === inferred.state &&
+    explicitReason === inferred.reason &&
+    VALID_AI_BRIEF_STATE_REASONS[explicitState]?.has(explicitReason)
+  ) {
+    return { state: explicitState, reason: explicitReason };
+  }
+  return inferred;
+}
+
+function readSummaryCount(
+  detail: ReportJson | null,
+  key: string,
+  fallback: number,
+): number {
+  const summaryRecord = asRecord(detail?.summary);
+  return (
+    readNumberLike(summaryRecord?.[key]) ??
+    readNumberLike(detail?.[key]) ??
+    fallback
+  );
+}
+
+function recommendationHasSources(row: ReportJson): boolean {
+  return asRecordArray(row.sources).length > 0;
+}
+
+function resolveAiBriefState(detail: ReportJson | null): AiBriefStateView {
+  const explicitState = readString(detail?.brief_state);
+  const explicitReason = readString(detail?.brief_reason);
+
+  const shownRecommendations = asRecordArray(detail?.recommendations);
+  const eligibleTickers = Array.isArray(detail?.eligible_tickers)
+    ? detail.eligible_tickers
+    : [];
+  const sourceIssues = asRecordArray(detail?.source_issues);
+  const systemIssues = asRecordArray(detail?.system_issues);
+  const recommendationCount = Math.max(
+    readSummaryCount(
+      detail,
+      "recommendation_count",
+      shownRecommendations.length,
+    ),
+    shownRecommendations.length,
+  );
+  const preselectedFloor = Math.max(
+    eligibleTickers.length,
+    shownRecommendations.length,
+    recommendationCount,
+  );
+  const preselectedCount = Math.max(
+    readSummaryCount(detail, "preselected_count", preselectedFloor),
+    preselectedFloor,
+  );
+  const sourceIssueCount = Math.max(
+    readSummaryCount(detail, "source_issue_count", sourceIssues.length),
+    sourceIssues.length,
+  );
+  const systemIssueCount = Math.max(
+    readSummaryCount(detail, "system_issue_count", systemIssues.length),
+    systemIssues.length,
+  );
+  const missingSources = shownRecommendations.some(
+    (row) => !recommendationHasSources(row),
+  );
+
+  if (preselectedCount === 0) {
+    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
+      state: AI_BRIEF_STATE_NO_SIGNAL,
+      reason: AI_BRIEF_REASON_NO_ENTER_CANDIDATES,
+    });
+  }
+  if (
+    shownRecommendations.length > 0 &&
+    recommendationCount > 0 &&
+    !missingSources &&
+    sourceIssueCount === 0 &&
+    systemIssueCount === 0
+  ) {
+    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
+      state: AI_BRIEF_STATE_FINAL_JUDGMENT,
+      reason: AI_BRIEF_REASON_SOURCE_BACKED_FINAL,
+    });
+  }
+  if (systemIssueCount > 0) {
+    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
+      state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
+      reason: AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
+    });
+  }
+  if (sourceIssueCount > 0 || missingSources) {
+    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
+      state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
+      reason: AI_BRIEF_REASON_WEAK_NEWS_COVERAGE,
+    });
+  }
+  return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
+    state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
+    reason: AI_BRIEF_REASON_MODEL_DEFERRED,
+  });
 }
 
 function formatIssue(value: unknown): string | null {
@@ -185,6 +325,7 @@ export function ReportDetail({
   const aiBriefMarket = readString(detail?.market);
   const modelProvider = readString(detail?.model_provider);
   const modelName = readString(detail?.model_name);
+  const aiBriefState = isAiBriefReport ? resolveAiBriefState(detail) : null;
   const signalEvalDate = readString(detail?.signal_eval_date);
   const entrySessionDate = readString(detail?.entry_session_date);
   const signalEvalDateByMarket = asRecord(detail?.signal_eval_date_by_market);
@@ -294,6 +435,18 @@ export function ReportDetail({
               <div>
                 <dt>model_name</dt>
                 <dd>{modelName ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>brief_state</dt>
+                <dd>{aiBriefState?.state ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>brief_reason</dt>
+                <dd>{aiBriefState?.reason ?? "-"}</dd>
               </div>
             )}
             <div>
