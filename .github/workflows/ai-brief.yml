@@ -456,6 +456,7 @@ jobs:
               out.write(f"should_run={str(should_run).lower()}\n")
               out.write(f"session_state={session_state}\n")
               out.write(f"session_date={session_date.isoformat()}\n")
+              out.write(f"trading_session={str(trading_session).lower()}\n")
 
           if should_run:
               print(
@@ -469,6 +470,61 @@ jobs:
                   f"date={session_date} trading_session={trading_session}"
               )
           PY
+
+      - name: Build skipped scheduled notification
+        if: github.event_name == 'schedule' && steps.schedule_guard.outputs.should_run != 'true'
+        env:
+          MARKET: ${{ steps.params.outputs.market }}
+          SESSION_STATE: ${{ steps.schedule_guard.outputs.session_state }}
+          SESSION_DATE: ${{ steps.schedule_guard.outputs.session_date }}
+          TRADING_SESSION: ${{ steps.schedule_guard.outputs.trading_session }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from sab.report.notification_text import build_ai_brief_skipped_telegram_text
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+          text = build_ai_brief_skipped_telegram_text(
+              market=os.environ["MARKET"],
+              session_state=os.environ["SESSION_STATE"],
+              session_date=os.environ["SESSION_DATE"],
+              trading_session=os.environ["TRADING_SESSION"],
+              run_url=run_url,
+          )
+          Path("ai-brief.skipped.telegram.txt").write_text(
+              text,
+              encoding="utf-8",
+          )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("### AI Brief skipped\n\n")
+              out.write("```text\n")
+              out.write(text)
+              out.write("\n```\n")
+          PY
+
+      - name: Send skipped Telegram notification
+        if: github.event_name == 'schedule' && steps.schedule_guard.outputs.should_run != 'true' && steps.params.outputs.send_notifications == 'true'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
+            echo "Telegram secrets not set; skipping."
+            exit 0
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text@ai-brief.skipped.telegram.txt" \
+            -d disable_web_page_preview=true
 
       - name: Install dependencies
         if: github.event_name != 'schedule' || steps.schedule_guard.outputs.should_run == 'true'

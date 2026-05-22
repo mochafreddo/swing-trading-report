@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sab.report import notification_text
 from sab.report.notification_text import (
+    build_ai_brief_skipped_telegram_text,
     build_ai_brief_slack_summary_text,
     build_ai_brief_telegram_report_text,
     build_scan_slack_summary_text,
@@ -391,8 +392,9 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
         "model_provider": "openai",
         "model_name": "gpt-test",
         "summary": {
+            "preselected_count": 2,
             "recommendation_count": 2,
-            "source_issue_count": 1,
+            "source_issue_count": 0,
             "system_issue_count": 0,
         },
         "recommendations": [
@@ -413,8 +415,61 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
                 "ticker": "MSFT.NAS",
                 "confidence": "MEDIUM",
                 "rationale": ["entry setup remains valid"],
-                "sources": [],
+                "sources": [
+                    {
+                        "title": "Microsoft product update",
+                        "url": "https://example.test/msft",
+                        "published_at": "2026-05-05T07:10:00+09:00",
+                    }
+                ],
             },
+        ],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+        max_items=5,
+    )
+
+    assert "[SAB][ai-brief][schedule]" in text
+    assert "market=US" in text
+    assert "model=openai/gpt-test" in text
+    assert "brief_state=FINAL_JUDGMENT" in text
+    assert "brief_reason=source_backed_final" in text
+    assert "AI 최종 판단: 뉴스 근거 확인된 후보 2건" in text
+    assert "추천 후보 2건 (표시 2건)" in text
+    assert "issues source=0 system=0" in text
+    assert (
+        "1. AAPL.NAS Apple | HIGH | source-backed context supports manual review | "
+        "sources 1"
+    ) in text
+    assert "source: Apple supply chain update" in text
+    assert "2. MSFT.NAS | MEDIUM | entry setup remains valid | sources 1" in text
+
+
+def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "preselected_count": 2,
+            "recommendation_count": 1,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": ["AAPL.NAS", "MSFT.NAS"],
+        "recommendations": [
+            {
+                "ticker": "MSFT.NAS",
+                "confidence": "MEDIUM",
+                "rationale": ["entry setup remains valid"],
+                "sources": [],
+            }
         ],
         "source_issues": [
             {
@@ -433,21 +488,64 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
         max_items=5,
     )
 
-    assert "[SAB][ai-brief][schedule]" in text
-    assert "market=US" in text
-    assert "model=openai/gpt-test" in text
-    assert "추천 후보 2건 (표시 2건)" in text
-    assert "issues source=1 system=0" in text
-    assert (
-        "1. AAPL.NAS Apple | HIGH | source-backed context supports manual review | "
-        "sources 1"
-    ) in text
-    assert "source: Apple supply chain update" in text
-    assert "2. MSFT.NAS | MEDIUM | entry setup remains valid | sources 0" in text
+    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
+    assert "brief_reason=weak_news_coverage" in text
+    assert "뉴스 근거 약함, 기술 신호만 있음" in text
+    assert "대상: AAPL.NAS, MSFT.NAS" in text
     assert (
         "source issue: MSFT.NAS openai_no_external_sources - "
         "No supplied source context."
     ) in text
+
+
+def test_build_ai_brief_telegram_report_text_counts_issue_arrays_when_summary_is_stale() -> (
+    None
+):
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "preselected_count": 1,
+            "recommendation_count": 1,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": ["AAPL.NAS"],
+        "recommendations": [
+            {
+                "ticker": "AAPL.NAS",
+                "confidence": "HIGH",
+                "rationale": ["entry setup remains valid"],
+                "sources": [
+                    {
+                        "title": "Apple supply chain update",
+                        "url": "https://example.test/aapl",
+                        "published_at": "2026-05-05T07:00:00+09:00",
+                    }
+                ],
+            }
+        ],
+        "source_issues": [
+            {
+                "ticker": "AAPL.NAS",
+                "code": "source_coverage_below_threshold",
+                "severity": "WARN",
+                "message": "Source coverage was below threshold.",
+            }
+        ],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+    )
+
+    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
+    assert "brief_reason=weak_news_coverage" in text
+    assert "issues source=1 system=0" in text
 
 
 def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> None:
@@ -457,10 +555,12 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
         "model_provider": "fake",
         "model_name": "fake-ai-brief-v1",
         "summary": {
+            "preselected_count": 1,
             "recommendation_count": 0,
             "source_issue_count": 0,
             "system_issue_count": 1,
         },
+        "eligible_tickers": ["005930"],
         "recommendations": [],
         "source_issues": [],
         "system_issues": [
@@ -479,6 +579,9 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
     )
 
     assert "추천 후보 0건 (표시 0건)" in text
+    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
+    assert "brief_reason=model_or_system_issue" in text
+    assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert "추천 후보 없음" in text
     assert "system issue: model_provider_timeout - OpenAI request timed out." in text
 
@@ -517,6 +620,8 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     )
 
     assert "entry_preselected_count=3" in text
+    assert "brief_reason=model_or_system_issue" in text
+    assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert (
         "추천 생성 실패/보류: ENTER 후보 3건이 있었지만 추천 결과가 비었습니다." in text
     )
@@ -599,10 +704,12 @@ def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() 
         max_items=5,
     )
 
-    assert "추천 후보 7건 (표시 5건)" in text
-    assert "외 2건" in text
-    assert "T004.NAS Name4" in text
-    assert "T005.NAS Name5" not in text
+    assert "추천 후보 7건 (표시 3건)" in text
+    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
+    assert "brief_reason=weak_news_coverage" in text
+    assert "외 4건" in text
+    assert "T002.NAS Name2" in text
+    assert "T003.NAS Name3" not in text
 
 
 def test_build_ai_brief_telegram_report_text_includes_storage_key() -> None:
@@ -624,6 +731,7 @@ def test_build_ai_brief_telegram_report_text_includes_storage_key() -> None:
     )
 
     assert "storage_key=2026/05/2026-05-05.ai-brief.json" in text
+    assert "오늘은 볼 종목 없음. 쉬어도 됨" in text
     assert text.endswith("run_url=https://github.com/example/repo/actions/runs/792")
 
 
@@ -658,6 +766,8 @@ def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
         "model_provider=openai",
         "model_name=gpt-test",
         "generated_at=2026-05-05T08:40:00+09:00",
+        "brief_state=NEEDS_REVIEW_WEAK_NEWS",
+        "brief_reason=weak_news_coverage",
         "preselected_count=5",
         "recommendation_count=3",
         "source_issue_count=1",
@@ -693,9 +803,43 @@ def test_build_ai_brief_slack_summary_text_falls_back_to_top_level_counts() -> N
         "model_provider=fake",
         "model_name=-",
         "generated_at=2026-05-05",
+        "brief_state=NEEDS_REVIEW_WEAK_NEWS",
+        "brief_reason=model_or_system_issue",
         "preselected_count=4",
         "recommendation_count=2",
         "source_issue_count=1",
         "system_issue_count=3",
         "run_url=https://github.com/mocha/swing-trading-report/actions/runs/793",
     ]
+
+
+def test_build_ai_brief_skipped_telegram_text_explains_not_preopen() -> None:
+    text = build_ai_brief_skipped_telegram_text(
+        market="US",
+        session_state="REGULAR",
+        session_date="2026-05-22",
+        trading_session="true",
+        run_url="https://github.com/example/repo/actions/runs/800",
+    )
+
+    assert "[SAB][ai-brief][skipped]" in text
+    assert "market=US" in text
+    assert "session_state=REGULAR" in text
+    assert "session_date=2026-05-22" in text
+    assert "trading_session=true" in text
+    assert "장전 시간이 아니라 AI Brief 건너뜀" in text
+    assert text.endswith("run_url=https://github.com/example/repo/actions/runs/800")
+
+
+def test_build_ai_brief_skipped_telegram_text_explains_non_trading_session() -> None:
+    text = build_ai_brief_skipped_telegram_text(
+        market="US",
+        session_state="AFTER_CLOSE",
+        session_date="2026-05-25",
+        trading_session="false",
+        run_url="https://github.com/example/repo/actions/runs/801",
+    )
+
+    assert "trading_session=false" in text
+    assert "거래일이 아니라 AI Brief 건너뜀" in text
+    assert "장전 시간이 아니라 AI Brief 건너뜀" not in text

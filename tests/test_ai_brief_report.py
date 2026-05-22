@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from sab.report.ai_brief_report import (
     AiBriefValidationError,
+    validate_ai_brief_artifact,
     write_ai_brief_report,
 )
 
@@ -83,6 +84,164 @@ def test_write_ai_brief_report_writes_schema_and_offset_generated_at(
     assert payload["generated_at"] == "2026-05-05T08:40:00+00:00"
     assert payload["report_date"] == "2026-05-05"
     assert payload["recommendations"][0]["ticker"] == "AAPL.NAS"
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "weak_news_coverage"
+
+
+def test_write_ai_brief_report_marks_no_signal_when_no_enter_candidates(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "preselected_count": 0,
+        "recommendation_count": 0,
+        "source_issue_count": 0,
+        "system_issue_count": 0,
+    }
+    artifact["recommendations"] = []
+    artifact["source_issues"] = []
+    artifact["system_issues"] = []
+    artifact["eligible_tickers"] = []
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["brief_state"] == "NO_SIGNAL"
+    assert payload["brief_reason"] == "no_enter_candidates"
+
+
+def test_write_ai_brief_report_marks_source_backed_final_judgment(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "Apple supply chain update",
+            "url": "https://example.test/aapl",
+            "published_at": "2026-05-05T08:00:00+00:00",
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+    artifact["source_issues"] = []
+    artifact["system_issues"] = []
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "source_issue_count": 0,
+        "system_issue_count": 0,
+    }
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["brief_state"] == "FINAL_JUDGMENT"
+    assert payload["brief_reason"] == "source_backed_final"
+
+
+def test_write_ai_brief_report_counts_issue_arrays_when_summary_is_stale(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "Apple supply chain update",
+            "url": "https://example.test/aapl",
+            "published_at": "2026-05-05T08:00:00+00:00",
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "source_issue_count": 0,
+        "system_issue_count": 0,
+    }
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "weak_news_coverage"
+
+
+def test_validate_ai_brief_artifact_accepts_legacy_missing_state() -> None:
+    payload = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+    }
+
+    validate_ai_brief_artifact(
+        payload,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+
+def test_validate_ai_brief_artifact_rejects_invalid_state_and_reason() -> None:
+    payload = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+        "brief_state": "REST",
+        "brief_reason": "weak_news_coverage",
+    }
+
+    with pytest.raises(AiBriefValidationError, match="brief_state"):
+        validate_ai_brief_artifact(
+            payload,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+    payload["brief_state"] = "NEEDS_REVIEW_WEAK_NEWS"
+    payload["brief_reason"] = "unknown_reason"
+    with pytest.raises(AiBriefValidationError, match="brief_reason"):
+        validate_ai_brief_artifact(
+            payload,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_state_that_disagrees_with_artifact() -> (
+    None
+):
+    payload = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+        "brief_state": "FINAL_JUDGMENT",
+        "brief_reason": "source_backed_final",
+    }
+
+    with pytest.raises(AiBriefValidationError, match="deterministic inference"):
+        validate_ai_brief_artifact(
+            payload,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
 
 
 def test_write_ai_brief_report_rejects_generated_at_without_offset(
