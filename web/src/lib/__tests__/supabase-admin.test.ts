@@ -22,6 +22,7 @@ import {
   upsertReportIndexEntry,
 } from "@/lib/supabase-admin";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
+import { parseErrorPayload } from "@/lib/supabase/admin-client";
 
 const REPORT_KEY_A = "2026/02/2026-02-14.buy.json";
 
@@ -255,6 +256,64 @@ describe("upsertReportIndexEntry", () => {
     expect(body).toContain('"report_key":"2026/02/2026-02-14.buy.json"');
     expect(body).toContain('"tickers":["AAPL.US"]');
     expect(body).toContain('"tickers_hydrated":true');
+  });
+});
+
+describe("parseErrorPayload", () => {
+  it.each([
+    {
+      name: "json message with metadata",
+      body: JSON.stringify({
+        message: "row missing",
+        code: "PGRST116",
+        details: "No rows found",
+        hint: "Check filter",
+      }),
+      status: 404,
+      expected: {
+        message: "row missing",
+        code: "PGRST116",
+        details: "No rows found",
+        hint: "Check filter",
+      },
+    },
+    {
+      name: "json error fallback",
+      body: JSON.stringify({ error: "bad request" }),
+      status: 400,
+      expected: {
+        message: "bad request",
+        code: null,
+        details: null,
+        hint: null,
+      },
+    },
+    {
+      name: "plain text body",
+      body: "gateway unavailable",
+      status: 503,
+      expected: {
+        message: "gateway unavailable",
+        code: null,
+        details: null,
+        hint: null,
+      },
+    },
+    {
+      name: "empty body",
+      body: "",
+      status: 500,
+      expected: {
+        message: "HTTP 500",
+        code: null,
+        details: null,
+        hint: null,
+      },
+    },
+  ])("parses $name", async ({ body, status, expected }) => {
+    await expect(
+      parseErrorPayload(new Response(body, { status })),
+    ).resolves.toEqual(expected);
   });
 });
 
