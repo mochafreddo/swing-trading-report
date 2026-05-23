@@ -4,6 +4,7 @@ import styles from "../reports-client.module.css";
 
 import { formatSummaryKeyForDisplay } from "@/lib/report-summary-label";
 
+import aiBriefStateContract from "./ai-brief-state-contract.json";
 import {
   buildBuyCandidateViewModel,
   type ChipTone,
@@ -70,30 +71,65 @@ function asStringArray(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
-const AI_BRIEF_STATE_NO_SIGNAL = "NO_SIGNAL";
-const AI_BRIEF_STATE_FINAL_JUDGMENT = "FINAL_JUDGMENT";
-const AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS = "NEEDS_REVIEW_WEAK_NEWS";
-const AI_BRIEF_REASON_NO_ENTER_CANDIDATES = "no_enter_candidates";
-const AI_BRIEF_REASON_SOURCE_BACKED_FINAL = "source_backed_final";
-const AI_BRIEF_REASON_WEAK_NEWS_COVERAGE = "weak_news_coverage";
-const AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE = "model_or_system_issue";
-const AI_BRIEF_REASON_MODEL_DEFERRED = "model_deferred";
-
-const VALID_AI_BRIEF_STATE_REASONS: Record<string, Set<string>> = {
-  [AI_BRIEF_STATE_NO_SIGNAL]: new Set([AI_BRIEF_REASON_NO_ENTER_CANDIDATES]),
-  [AI_BRIEF_STATE_FINAL_JUDGMENT]: new Set([
-    AI_BRIEF_REASON_SOURCE_BACKED_FINAL,
-  ]),
-  [AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS]: new Set([
-    AI_BRIEF_REASON_WEAK_NEWS_COVERAGE,
-    AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
-    AI_BRIEF_REASON_MODEL_DEFERRED,
-  ]),
-};
-
 interface AiBriefStateView {
   state: string;
   reason: string;
+}
+
+interface AiBriefStateInputsView {
+  preselectedCount: number;
+  recommendationCount: number;
+  sourceIssueCount: number;
+  systemIssueCount: number;
+  hasRecommendations: boolean;
+  missingRecommendationSources: boolean;
+}
+
+type AiBriefStateRuleId = keyof typeof aiBriefStateContract.rules;
+
+const AI_BRIEF_INFERENCE_PRECEDENCE =
+  aiBriefStateContract.inference_precedence as AiBriefStateRuleId[];
+
+const VALID_AI_BRIEF_STATE_REASONS: Record<
+  string,
+  Set<string>
+> = Object.fromEntries(
+  Object.entries(aiBriefStateContract.reasons_by_state).map(
+    ([state, reasons]) => [state, new Set(reasons)],
+  ),
+);
+
+const AI_BRIEF_RULE_PREDICATES: Record<
+  AiBriefStateRuleId,
+  (inputs: AiBriefStateInputsView) => boolean
+> = {
+  no_signal: (inputs) => inputs.preselectedCount === 0,
+  source_backed_final: (inputs) =>
+    inputs.hasRecommendations &&
+    inputs.recommendationCount > 0 &&
+    !inputs.missingRecommendationSources &&
+    inputs.sourceIssueCount === 0 &&
+    inputs.systemIssueCount === 0,
+  system_issue: (inputs) => inputs.systemIssueCount > 0,
+  weak_news_coverage: (inputs) =>
+    inputs.sourceIssueCount > 0 || inputs.missingRecommendationSources,
+  model_deferred: () => true,
+};
+
+function aiBriefStateForRule(ruleId: AiBriefStateRuleId): AiBriefStateView {
+  const rule = aiBriefStateContract.rules[ruleId];
+  return { state: rule.state, reason: rule.reason };
+}
+
+function inferAiBriefStateFromContract(
+  inputs: AiBriefStateInputsView,
+): AiBriefStateView {
+  for (const ruleId of AI_BRIEF_INFERENCE_PRECEDENCE) {
+    if (AI_BRIEF_RULE_PREDICATES[ruleId](inputs)) {
+      return aiBriefStateForRule(ruleId);
+    }
+  }
+  return aiBriefStateForRule("model_deferred");
 }
 
 function withMatchingExplicitAiBriefState(
@@ -169,40 +205,18 @@ function resolveAiBriefState(detail: ReportJson | null): AiBriefStateView {
     (row) => !recommendationHasSources(row),
   );
 
-  if (preselectedCount === 0) {
-    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
-      state: AI_BRIEF_STATE_NO_SIGNAL,
-      reason: AI_BRIEF_REASON_NO_ENTER_CANDIDATES,
-    });
-  }
-  if (
-    shownRecommendations.length > 0 &&
-    recommendationCount > 0 &&
-    !missingSources &&
-    sourceIssueCount === 0 &&
-    systemIssueCount === 0
-  ) {
-    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
-      state: AI_BRIEF_STATE_FINAL_JUDGMENT,
-      reason: AI_BRIEF_REASON_SOURCE_BACKED_FINAL,
-    });
-  }
-  if (systemIssueCount > 0) {
-    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
-      state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
-      reason: AI_BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
-    });
-  }
-  if (sourceIssueCount > 0 || missingSources) {
-    return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
-      state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
-      reason: AI_BRIEF_REASON_WEAK_NEWS_COVERAGE,
-    });
-  }
-  return withMatchingExplicitAiBriefState(explicitState, explicitReason, {
-    state: AI_BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
-    reason: AI_BRIEF_REASON_MODEL_DEFERRED,
-  });
+  return withMatchingExplicitAiBriefState(
+    explicitState,
+    explicitReason,
+    inferAiBriefStateFromContract({
+      preselectedCount,
+      recommendationCount,
+      sourceIssueCount,
+      systemIssueCount,
+      hasRecommendations: shownRecommendations.length > 0,
+      missingRecommendationSources: missingSources,
+    }),
+  );
 }
 
 function formatIssue(value: unknown): string | null {

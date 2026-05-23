@@ -10,6 +10,17 @@ from sab.report.ai_brief_report import (
     validate_ai_brief_artifact,
     write_ai_brief_report,
 )
+from sab.report.ai_brief_state import (
+    export_ai_brief_state_contract,
+    infer_ai_brief_state,
+    read_ai_brief_state,
+    validate_optional_ai_brief_state_fields,
+)
+
+_ROOT = Path(__file__).resolve().parents[1]
+_AI_BRIEF_STATE_CONTRACT_PATH = (
+    _ROOT / "web" / "src" / "components" / "reports" / "ai-brief-state-contract.json"
+)
 
 
 def _artifact(*, generated_at: str | None = None) -> dict[str, object]:
@@ -431,3 +442,159 @@ def test_write_ai_brief_report_rejects_unknown_vetoed_candidate(
 
     with pytest.raises(AiBriefValidationError, match="vetoed_candidates"):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_ai_brief_state_contract_matches_committed_web_artifact() -> None:
+    committed_contract = json.loads(
+        _AI_BRIEF_STATE_CONTRACT_PATH.read_text(encoding="utf-8")
+    )
+
+    assert committed_contract == export_ai_brief_state_contract()
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "payload", "state", "reason"),
+    [
+        (
+            "no_signal",
+            {
+                "summary": {
+                    "preselected_count": 0,
+                    "recommendation_count": 0,
+                    "source_issue_count": 0,
+                    "system_issue_count": 0,
+                },
+                "eligible_tickers": [],
+                "recommendations": [],
+                "source_issues": [],
+                "system_issues": [],
+            },
+            "NO_SIGNAL",
+            "no_enter_candidates",
+        ),
+        (
+            "source_backed_final",
+            {
+                "summary": {
+                    "preselected_count": 1,
+                    "recommendation_count": 1,
+                    "source_issue_count": 0,
+                    "system_issue_count": 0,
+                },
+                "eligible_tickers": ["AAPL.NAS"],
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "sources": [
+                            {
+                                "title": "Apple update",
+                                "url": "https://example.test/aapl",
+                            }
+                        ],
+                    }
+                ],
+                "source_issues": [],
+                "system_issues": [],
+            },
+            "FINAL_JUDGMENT",
+            "source_backed_final",
+        ),
+        (
+            "system_issue",
+            {
+                "summary": {
+                    "preselected_count": 1,
+                    "recommendation_count": 0,
+                    "source_issue_count": 0,
+                    "system_issue_count": 1,
+                },
+                "eligible_tickers": ["005930"],
+                "recommendations": [],
+                "source_issues": [],
+                "system_issues": [{"code": "model_provider_failed"}],
+            },
+            "NEEDS_REVIEW_WEAK_NEWS",
+            "model_or_system_issue",
+        ),
+        (
+            "weak_news_coverage",
+            {
+                "summary": {
+                    "preselected_count": 1,
+                    "recommendation_count": 1,
+                    "source_issue_count": 0,
+                    "system_issue_count": 0,
+                },
+                "eligible_tickers": ["AAPL.NAS"],
+                "recommendations": [{"ticker": "AAPL.NAS", "sources": []}],
+                "source_issues": [],
+                "system_issues": [],
+            },
+            "NEEDS_REVIEW_WEAK_NEWS",
+            "weak_news_coverage",
+        ),
+        (
+            "model_deferred",
+            {
+                "summary": {
+                    "preselected_count": 1,
+                    "recommendation_count": 0,
+                    "source_issue_count": 0,
+                    "system_issue_count": 0,
+                },
+                "eligible_tickers": ["005930"],
+                "recommendations": [],
+                "source_issues": [],
+                "system_issues": [],
+            },
+            "NEEDS_REVIEW_WEAK_NEWS",
+            "model_deferred",
+        ),
+    ],
+)
+def test_ai_brief_state_contract_drives_python_state_helpers(
+    rule_id: str,
+    payload: dict[str, object],
+    state: str,
+    reason: str,
+) -> None:
+    contract = export_ai_brief_state_contract()
+    rule = contract["rules"][rule_id]
+
+    inferred = infer_ai_brief_state(payload)
+    assert inferred.state == rule["state"] == state
+    assert inferred.reason == rule["reason"] == reason
+
+    payload_with_explicit = {
+        **payload,
+        "brief_state": rule["state"],
+        "brief_reason": rule["reason"],
+    }
+    validate_optional_ai_brief_state_fields(payload_with_explicit)
+    assert read_ai_brief_state(payload_with_explicit) == inferred
+
+
+def test_ai_brief_state_helpers_fall_back_when_explicit_contract_fields_invalid() -> (
+    None
+):
+    payload = {
+        "summary": {
+            "preselected_count": 1,
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": ["005930"],
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+        "brief_state": "FINAL_JUDGMENT",
+        "brief_reason": "source_backed_final",
+    }
+
+    with pytest.raises(ValueError, match="deterministic inference"):
+        validate_optional_ai_brief_state_fields(payload)
+
+    inferred = read_ai_brief_state(payload)
+    assert inferred.state == "NEEDS_REVIEW_WEAK_NEWS"
+    assert inferred.reason == "model_deferred"

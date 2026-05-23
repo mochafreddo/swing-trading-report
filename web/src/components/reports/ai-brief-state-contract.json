@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "states": ["NO_SIGNAL", "FINAL_JUDGMENT", "NEEDS_REVIEW_WEAK_NEWS"],
+  "reasons": [
+    "no_enter_candidates",
+    "source_backed_final",
+    "weak_news_coverage",
+    "model_or_system_issue",
+    "model_deferred"
+  ],
+  "reasons_by_state": {
+    "NO_SIGNAL": ["no_enter_candidates"],
+    "FINAL_JUDGMENT": ["source_backed_final"],
+    "NEEDS_REVIEW_WEAK_NEWS": [
+      "weak_news_coverage",
+      "model_or_system_issue",
+      "model_deferred"
+    ]
+  },
+  "inference_precedence": [
+    "no_signal",
+    "source_backed_final",
+    "system_issue",
+    "weak_news_coverage",
+    "model_deferred"
+  ],
+  "rules": {
+    "no_signal": {
+      "state": "NO_SIGNAL",
+      "reason": "no_enter_candidates"
+    },
+    "source_backed_final": {
+      "state": "FINAL_JUDGMENT",
+      "reason": "source_backed_final"
+    },
+    "system_issue": {
+      "state": "NEEDS_REVIEW_WEAK_NEWS",
+      "reason": "model_or_system_issue"
+    },
+    "weak_news_coverage": {
+      "state": "NEEDS_REVIEW_WEAK_NEWS",
+      "reason": "weak_news_coverage"
+    },
+    "model_deferred": {
+      "state": "NEEDS_REVIEW_WEAK_NEWS",
+      "reason": "model_deferred"
+    }
+  }
+}

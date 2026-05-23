@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import aiBriefStateContract from "@/components/reports/ai-brief-state-contract.json";
 import { ReportDetail } from "@/components/reports/report-detail";
 import type { ReportJson } from "@/components/reports/types";
 
@@ -394,6 +395,28 @@ describe("ReportDetail component", () => {
     },
   );
 
+  it("renders legacy AI brief fallback states from the shared contract", () => {
+    for (const [ruleId, rule] of Object.entries(aiBriefStateContract.rules)) {
+      const detail: ReportJson = {
+        schema: "sab.ai_brief.v1",
+        type: "ai_brief",
+        generated_at: "2026-05-05T08:40:00+09:00",
+        market: "US",
+        model_provider: "openai",
+        model_name: "gpt-test",
+        source_entry_report: "2026-05-05.entry.json",
+        ...legacyAiBriefFixtureForRule(ruleId),
+      };
+
+      const html = renderReportDetail(detail);
+
+      expect(html).toContain("brief_state");
+      expect(html).toContain(rule.state);
+      expect(html).toContain("brief_reason");
+      expect(html).toContain(rule.reason);
+    }
+  });
+
   it("does not infer AI brief state from display-only recommendation rows", () => {
     const detail: ReportJson = {
       schema: "sab.ai_brief.v1",
@@ -427,3 +450,81 @@ describe("ReportDetail component", () => {
     expect(html).toContain("no_enter_candidates");
   });
 });
+
+function legacyAiBriefFixtureForRule(ruleId: string): ReportJson {
+  if (ruleId === "no_signal") {
+    return {
+      summary: {
+        preselected_count: 0,
+        recommendation_count: 0,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: [],
+      recommendations: [],
+      source_issues: [],
+      system_issues: [],
+    };
+  }
+  if (ruleId === "source_backed_final") {
+    return {
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 1,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: ["AAPL.NAS"],
+      recommendations: [
+        {
+          ticker: "AAPL.NAS",
+          sources: [
+            { title: "Apple update", url: "https://example.test/aapl" },
+          ],
+        },
+      ],
+      source_issues: [],
+      system_issues: [],
+    };
+  }
+  if (ruleId === "system_issue") {
+    return {
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 0,
+        source_issue_count: 0,
+        system_issue_count: 1,
+      },
+      eligible_tickers: ["005930"],
+      recommendations: [],
+      source_issues: [],
+      system_issues: [{ code: "model_provider_failed" }],
+    };
+  }
+  if (ruleId === "weak_news_coverage") {
+    return {
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 1,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: ["AAPL.NAS"],
+      recommendations: [{ ticker: "AAPL.NAS", sources: [] }],
+      source_issues: [],
+      system_issues: [],
+    };
+  }
+  return {
+    summary: {
+      preselected_count: 1,
+      recommendation_count: 0,
+      source_issue_count: 0,
+      system_issue_count: 0,
+    },
+    eligible_tickers: ["005930"],
+    recommendations: [],
+    source_issues: [],
+    system_issues: [],
+  };
+}
