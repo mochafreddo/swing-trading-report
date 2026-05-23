@@ -15,7 +15,6 @@
     "files:src/components/holdings/import-export.test.ts:src/components/holdings/import-export.test.ts",
     "types:src/app/actions/auth.ts:AuthActionResult",
     "types:src/app/actions/auth.ts:LoginActionInput",
-    "types:src/app/actions/holdings.ts:AddBuyToHoldingActionInput",
     "types:src/app/actions/run.ts:RunActionResult",
     "types:src/components/holdings/add-buy-idempotency.ts:AddBuySubmitErrorResolution",
     "types:src/components/reports/buy-candidate-view-model.ts:BuyCandidateViewModel",
