@@ -1,7 +1,9 @@
-# 전략/로직 설계 — Swing Core Logic (v1.1)
+# 전략/로직 설계 — Swing Core Logic
 
-상태: Accepted (2026-03-28)  
-대상: `sab scan`/`sab sell`의 **신호 평가 및 리스크 가이드 산출 로직**  
+상태: Accepted
+계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
+최종 확인: 2026-05-23
+대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
 ## 문서 상태

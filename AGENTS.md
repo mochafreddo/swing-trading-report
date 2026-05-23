@@ -170,6 +170,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - Recipe list: `just --list`
 - Dependencies/locks: `just sync`, `just lock-upgrade`
 - Trading workflows: `just scan`, `just sell`, `just entry`
+- AI Brief workflows: `just ai-brief-source-collect`, `just ai-brief-source-eval`, `just ai-brief-source-live-compare`, `just ai-brief-eval`
 - Quality gates: for Python-only changes, run `just quality` (`just check` is the same alias); for web changes, run `just ci-web`; for Python+web changes, run both.
 - Dead code check: `just deadcode`
 - pre-commit: `just precommit-all`
@@ -177,10 +178,12 @@ If exceeding these targets is clearer or better aligned with repository conventi
 
 ### Direct Execution (uv Fallback)
 
-- `UV_CACHE_DIR=.uv-cache uv sync --all-extras --dev`
+- `UV_CACHE_DIR=.uv-cache uv sync --all-extras --all-groups`
 - `UV_CACHE_DIR=.uv-cache uv lock --upgrade`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab entry`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path>`
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
@@ -223,7 +226,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - Hook updates: `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit autoupdate`
 - Config validation: `UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config`
 - The first run may need network access to download hook repositories.
-- When committing staged `web/` changes, check `pnpm --dir web run lint` and `pnpm --dir web run format:check`.
+- When committing staged `web/` changes, check `pnpm --dir web run lint` and `pnpm --dir web run format:check`. When staged changes include `web/src/app/`, also check the `web-route-static-check` hook (`uv run python scripts/check_next_app_routes.py`).
 - Web typechecking is excluded from pre-commit and enforced in CI with `pnpm run typecheck` in the `web` job of `.github/workflows/ci.yml`.
 
 ### Web Smoke Checks

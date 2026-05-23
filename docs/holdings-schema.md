@@ -54,8 +54,8 @@ holdings:
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `ticker` | string | 종목 식별자. 국내는 **6자리 숫자 코드 문자열**(예: `"005930"`), 해외는 `티커.거래소`(예: `TSLA.NAS`, `AAPL.NYS`) |
-| `quantity` | int/float | 보유 수량 |
-| `entry_price` | float | 평균 매입가 (기본 통화) |
+| `quantity` | number | 보유 수량. DB는 `numeric(20,6)`(`>=0`)로 강제하고, Python 로더에서는 `float`로 처리합니다. |
+| `entry_price` | number | 평균 매입가 (기본 통화). DB는 `numeric(20,4)`(`>=0`)이며, `quantity>0` row는 `entry_price>0`을 요구합니다. |
 | `entry_currency` | string (선택) | 통화 표시 (예: `KRW`, `USD`). 수동 작성 파일에서는 US-only + `settings.default_currency: USD`일 때만 row 생략 허용. 웹 export는 모든 row에 명시적으로 기록 |
 | `entry_date` | string (YYYY-MM-DD) | 최초(또는 평균) 매입일 |
 | `strategy` | string (선택) | 전략 구분 (예: `swing`, `core`). 미지정 시 `settings.default_strategy` 적용 |

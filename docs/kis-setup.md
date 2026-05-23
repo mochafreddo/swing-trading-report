@@ -98,9 +98,14 @@ KIS_APP_SECRET=your_app_secret
 
 - uv 사용: 기본은 `uv sync` (기본 내장 파서로 `.env` 자동 로딩 지원)
 - (선택) `python-dotenv` 기반 고급 파싱: `uv sync --extra dotenv`
-- 커넥터 구조 제안
-  - `sab/data/kis_client.py`: 토큰 발급/캐시(파일 저장), 일봉 조회 API 래퍼
-  - 예외/재시도, 속도 제한, 간단 캐시(`./data/`) 포함
+- 커넥터 구조(현재 구현)
+  - `sab/data/kis_client.py`: 5개 mixin을 합성하는 facade(`KISClient`).
+  - `sab/data/kis/auth.py`: 토큰 발급/캐시 mixin.
+  - `sab/data/kis/quote.py`: 일봉 조회 mixin (KR/해외 공통).
+  - `sab/data/kis/ranking.py`: 거래량/거래대금/시가총액 등 랭킹 조회 mixin.
+  - `sab/data/kis/calendar.py`: 거래일/세션 calendar mixin.
+  - `sab/data/kis/common.py`: 공통 예외/credentials/state protocol. HTTP transport/retry/throttle은 `sab/data/kis_client.py`의 facade 쪽에서 합성합니다.
+  - 런타임 workflow 캐시는 설정된 `data.data_dir`/`DATA_DIR`에 적재되며 기본값은 `./data/`입니다. 직접 `KISClient`를 생성할 때는 `cache_dir`로 위치를 바꾸거나 캐시를 비활성화할 수 있습니다.
 - 폴백 전략(옵션)
   - KIS 장애/인증 실패 시 PyKRX로 한시적 대체(리포트에 경고 표기)
 - 구성 관리: 비시크릿은 `config.yaml`, 시크릿은 `.env`(중복 키 금지)

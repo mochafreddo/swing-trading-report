@@ -18,6 +18,8 @@
 
 YAML 로드는 선택사항(`pyyaml` 필요). 미설치 시에도 `.env`와 CLI만으로 작동합니다.
 
+위 우선순위는 “`config.yaml`과 `.env`에 동일 키가 정의되지 않는다”는 전제가 성립할 때 적용됩니다. 두 경로에 같은 키가 동시에 존재하면 fail-closed로 차단합니다(`sab/config.py`의 `_enforce_env_yaml_conflict_policy`). 자세한 정책은 `ADR-0003-config-conflict-policy.md`를 함께 보세요.
+
 ## 결과
 
 - 개발자 경험 향상: 예측 가능한 동작, 실행 단위 손쉬운 튜닝

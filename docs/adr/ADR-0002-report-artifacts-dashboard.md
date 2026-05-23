@@ -1,6 +1,6 @@
 ## ADR-0002 — 리포트 아티팩트: JSON 단일 출력 + 로컬 대시보드
 
-상태: 채택(Accepted)  •  날짜: 2026-02-08
+상태: 채택(Accepted, Amended 2026-05-23)  •  날짜: 2026-02-08
 
 ### 배경
 
@@ -21,6 +21,16 @@
   - 원격 보관: Supabase Storage(개인용 단일 소스)
 - 로컬 웹 UI는 Supabase(또는 로컬 파일)의 JSON 아티팩트를 읽어 렌더링한다. (웹 스택은 ADR-0004 참고)
 - 마크다운 리포트는 정식 출력이 아니며(기본 비활성/제거 방향), 필요해지면 “내보내기(export)”로만 재검토한다.
+
+### 후속 변경(Amendment, 2026-05-23)
+
+본 ADR 채택 이후 JSON 단일 출력 + 로컬 대시보드 규약을 따르는 두 종류의 run이 추가되어 현재 production set은 4종이다.
+
+- Storage/report_index run type: `buy | sell | entry | ai-brief` (`sab/report/storage_key.py:6` `_ALLOWED_RUN_TYPES`가 source of truth)
+- 추가 명령
+  - `sab entry`: `YYYY-MM-DD.entry.json` (`sab/report/entry_report.py`)
+  - `sab ai-brief`: `YYYY-MM-DD.ai-brief.json` (`sab/report/ai_brief_report.py`)
+- `buy`/`sell`/`entry` report schema는 `"sab.report.v1"` 계열을 유지하고, AI Brief artifact는 `schema="sab.ai_brief.v1"` / `type="ai_brief"`를 사용한다. Storage key와 `report_index.type`의 run type만 `ai-brief`로 표준화하며, 본 결정의 골격(JSON 단일 출력 + 로컬 대시보드)은 변경 없이 유지된다.
 
 ### 결과/영향
 

@@ -303,13 +303,17 @@
 
 - `sab/` - Python 애플리케이션 코드
   - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry` / `sab ai-brief`)
-  - `data/` - KIS/PyKRX 커넥터, 캐시
-  - `signals/` - EMA/RSI/ATR 계산
-  - `report/` - 리포트 아티팩트(JSON) 생성
+  - `scan.py`, `scan_screener.py`, `scan_evaluation.py` - Scan 오케스트레이션
+  - `sell.py`, `sell_evaluation.py`, `sell_runtime.py` - Sell 오케스트레이션
+  - `entry.py` - Entry 후보 산출
+  - `ai_brief.py`, `ai_brief_sources.py`, `ai_brief_providers.py`, `ai_brief_source_collectors.py`, `ai_brief_source_eval.py`, `ai_brief_source_live_compare.py`, `ai_brief_eval.py` - AI Brief 오케스트레이션/소스/평가
+  - `sab/data/` - KIS/PyKRX 커넥터(`sab/data/kis/` 서브패키지로 분리), 캐시 어댑터
+  - `sab/signals/` - EMA/RSI/ATR 계산
+  - `sab/report/` - 리포트 아티팩트(JSON) 생성, AI Brief 판단 상태 결정(`ai_brief_state.py`)
 - `web/` - Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` - 생성된 JSON 리포트 아티팩트 출력 폴더
-- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `eval_ai_brief_recommendations.py`)
-- `data/` - 캐시/상태(현재 JSON, 추후 SQLite 고려)
+- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `eval_ai_brief_recommendations.py` 외 `check_major_updates.py`/`check_next_app_routes.py`/`run_vulture.py`/`upgrade_deps.sh`)
+- `data/` (루트 폴더) - 런타임 캐시/상태(JSON; KIS 캔들, 토큰, `holidays_us.json` 등). `sab/data/` 패키지 코드와는 별개 위치임에 유의.
 - `docs/README.md` - 문서 인덱스(진입점)
   - `docs/adr/README.md` - ADR 인덱스
   - `docs/reviews/README.md` - 리뷰 인덱스
@@ -423,7 +427,7 @@
   - 각 항목에 만료일/사유 주석 필수
   - 만료 시 즉시 삭제
 - PR 차단(브랜치 보호) 필수 체크:
-  - `CI / Ruff + Mypy + Pytest (Python 3.14)`
+  - `CI / Ruff + Mypy + Pytest`
   - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`

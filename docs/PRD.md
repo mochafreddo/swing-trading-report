@@ -8,8 +8,9 @@
 
 ### 현재 제공
 
-- 로컬 `scan`/`sell`/`entry` JSON 리포트 생성과 웹 Reports/Holdings/Metrics는 현재 제공됩니다.
-- GitHub Actions `scan`/`sell` schedule 실행과 텔레그램/슬랙 요약 알림도 현재 제공됩니다.
+- 로컬 `scan`/`sell`/`entry`/`ai-brief` JSON 리포트 생성과 웹 Reports/Holdings/Metrics는 현재 제공됩니다.
+- GitHub Actions `scan`/`sell` schedule 실행, AI Brief 시장별 schedule(`.github/workflows/ai-brief.yml`, KR/US 분리), 텔레그램/슬랙 요약 알림이 현재 제공됩니다.
+- AI Brief는 entry 리포트를 입력으로 받아 source provider(`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`/`local-json`/`http-json`)와 model provider(`fake`/`openai`)를 조합해 운영 가능합니다.
 
 ### 실험
 
@@ -19,6 +20,7 @@
 
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
 - 원격 노출/클라우드 상시 운영 같은 운영 모델 확장
+- 본 PRD의 §4(요구사항) §8(로드맵) §10(AC)는 v1.2 시점 작성본이라 AI Brief 시리즈가 별도 backlog로만 반영되어 있습니다. 본 문서는 비전/backlog로 유지하고 현재 계약은 `docs/spec-v1.1.md`/`docs/ARCHITECTURE.md`/`docs/STRATEGY.md`/`docs/runbook.md`를 우선합니다.
 
 ### 폐기 후보
 
@@ -230,6 +232,12 @@
 - v1.2
   - 자동 실행 가이드/템플릿 제공(GitHub Actions)
   - 리포트 요약본 알림(텔레그램/슬랙) 전송(옵션)
+
+- v1.3+ (post-MVP, 별도 backlog로 진행)
+  - `sab entry` 후보 산출 및 `*.entry.json` 리포트 추가(이미 출시).
+  - `sab ai-brief` AI 브리핑 산출 및 `*.ai-brief.json` 리포트 추가, 외부/news source provider 6종 + local/http source provider 2종 + model provider 2종 지원(이미 출시).
+  - AI Brief weekday schedule(KR/US 시장별 cron 분리)과 brief state(`NO_SIGNAL`/`FINAL_JUDGMENT`/`NEEDS_REVIEW_WEAK_NEWS`) 도입(이미 출시).
+  - 위 항목들의 운영 계약은 `docs/runbook.md`, `docs/ARCHITECTURE.md`, `docs/STRATEGY.md`, `docs/ai-brief-us-source-provider-decision.md`에서 관리합니다.
 
 ---
 

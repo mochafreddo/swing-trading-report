@@ -276,7 +276,9 @@ RPC 시그니처 예:
 ## 9) 단계적 롤아웃(제안)
 
 1. Phase 1 (MVP): `Add Buy` UX + API + RPC + 미리보기 완료
-2. Phase 1.1: holdings create/edit currency 정책 정렬 완료
+2. Phase 1.1: holdings currency 정책 정렬 — 부분 적용 (backlog)
+   - 적용된 경로: `Add Buy` RPC(`supabase/migrations/20260303000000_add_holdings_add_buy_rpc.sql`, 현재 재정의는 `supabase/migrations/20260304002000_add_holdings_add_buy_idempotency.sql`), YAML import(`web/src/lib/holdings-yaml.ts`), Python loader(`sab/holdings_loader.py`)에서 ticker–currency 정합성을 강제합니다.
+   - 미적용 경로: 웹 `POST /api/holdings`, `PATCH /api/holdings/{ticker}`의 `holdingCreateSchema` / `holdingPatchSchema`(`web/src/lib/schemas.ts`)와 `createHolding` / `updateHolding`(`web/src/lib/supabase-admin.ts`)은 `entry_currency`를 ticker와 교차 검증하지 않습니다. create/edit 경로 통일은 후속 작업으로 남아 있습니다.
 3. Phase 2: `holding_events` 이벤트 로그 + UI 표시 + (선택) Undo는 backlog
 4. Phase 3: holdings.yaml import/export 이벤트(복수 랏) 모델 확장은 backlog
 

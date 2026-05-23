@@ -101,7 +101,7 @@ UV_CACHE_DIR=.uv-cache uv run pre-commit validate-config
 ```
 
 - 첫 실행 시 훅 저장소 다운로드를 위해 네트워크 접근이 필요할 수 있습니다.
-- staged 파일에 `web/` 변경이 있으면 `pnpm --dir web run lint`, `pnpm --dir web run format:check`가 함께 실행됩니다.
+- staged 파일에 `web/` 변경이 있으면 `pnpm --dir web run lint`, `pnpm --dir web run format:check`가 실행됩니다. staged 변경이 `web/src/app/`를 포함하면 `web-route-static-check` 훅(`uv run python scripts/check_next_app_routes.py`)도 실행됩니다.
 - `web` 타입체크는 pre-commit에서 제외되며 CI(`.github/workflows/ci.yml`)의 web job에서 `pnpm run typecheck`로 강제됩니다.
 
 ## 5) 브랜치/커밋/PR 규칙 (Branch, Commit, PR Rules)
@@ -142,7 +142,7 @@ CI is the source of truth when local and remote results differ.
 
 PR/푸시에서 확인되는 핵심 체크:
 
-- `CI / Ruff + Mypy + Pytest (Python 3.14)`
+- `CI / Ruff + Mypy + Pytest`
 - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
 - `workflow_audit`
 - `security_audit`
@@ -187,4 +187,4 @@ Use this checklist to validate that the guide is complete and actionable.
 1. 초행 기여자가 이 문서만 보고 환경 준비와 품질 검증 명령을 실행할 수 있어야 합니다.
 2. 문서의 명령어가 실제 도구체인(`uv`, `pre-commit`, `pnpm --dir web`)과 일치해야 합니다.
 3. 커밋/검증 규칙이 `README.md`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`와 충돌하지 않아야 합니다.
-4. `web/` 변경 시 pre-commit 대상(`lint`, `format:check`)과 CI 강제 검사(`typecheck`) 구간이 명확해야 합니다.
+4. `web/` 변경 시 pre-commit 대상(`lint`, `format:check`), `web/src/app/` 한정 route static check, CI 강제 검사(`typecheck`) 구간이 명확해야 합니다.

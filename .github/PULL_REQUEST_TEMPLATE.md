@@ -32,6 +32,8 @@
 
 - [ ] `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
 - [ ] `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
+- [ ] `UV_CACHE_DIR=.uv-cache uv run python -m sab entry`
+- [ ] `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path>`
 - [ ] `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
 - [ ] `pnpm --dir web run lint` (`web/` 변경 시)
 - [ ] `pnpm --dir web run format:check` (`web/` 변경 시)
