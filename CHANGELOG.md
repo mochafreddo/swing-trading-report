@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.32.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.0...v1.32.1) (2026-05-23)
+
+
+### Documentation
+
+* **ai-brief:** US 기본 소스 제공자를 Finnhub로 확정 ([608c980](https://github.com/mochafreddo/swing-trading-report/commit/608c980b2f07dcc215c009391e390a62b10d5570))
+* **todo:** 작업 문서 정리 ([11ea0c7](https://github.com/mochafreddo/swing-trading-report/commit/11ea0c7203a3f4534adec85274327844fc2b27fc))
+
 ## [1.32.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.31.1...v1.32.0) (2026-05-22)
 
 
