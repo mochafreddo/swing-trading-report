@@ -560,6 +560,142 @@ def test_collect_market_data_from_kis_uses_cache_when_provider_refresh_is_stale(
     assert saved_keys == []
 
 
+def test_collect_market_data_from_kis_applies_stale_cache_not_rejected_provider() -> (
+    None
+):
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            assert count == 220
+            return [
+                {
+                    "date": "20250107",
+                    "open": 200.0,
+                    "high": 201.0,
+                    "low": 199.0,
+                    "close": 200.0,
+                    "volume": 2_000_000.0,
+                }
+            ]
+
+    cached_candles = _candles_with_last_date("20250107")
+    applied: list[tuple[str, list[dict[str, Any]]]] = []
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        on_candles_applied_fn=lambda _runtime, ticker, candles: applied.append(
+            (ticker, candles)
+        ),
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == cached_candles
+    assert applied == [("005930", cached_candles)]
+    assert runtime.failures == []
+
+
+def test_collect_market_data_from_kis_uses_stale_cache_when_provider_has_no_data() -> (
+    None
+):
+    class _KisClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            assert count == 220
+            self.calls += 1
+            return []
+
+    cached_candles = _candles_with_last_date("20250107")
+    kis_client = _KisClient()
+    runtime = _build_runtime(kis_client=kis_client, stale_sessions_kr=1)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: pytest.fail(
+            "PyKRX fallback should only run for KIS exceptions"
+        ),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert kis_client.calls == 1
+    assert runtime.market_data["005930"] == cached_candles
+    assert runtime.ticker_data_source["005930"] == "kis"
+    assert runtime.failures == []
+
+
+@pytest.mark.parametrize(
+    ("provider_candles", "expected_failure"),
+    [
+        ([], "No candle data returned"),
+        (_candles_with_last_date("20250107"), "Provider returned stale candles"),
+        (
+            [
+                {
+                    "date": "20250107",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": float("nan"),
+                    "volume": 1_000_000.0,
+                }
+            ],
+            "No complete and finite candle data returned",
+        ),
+    ],
+)
+def test_collect_market_data_from_kis_does_not_try_pykrx_for_non_exception_rejections(
+    provider_candles: list[dict[str, Any]],
+    expected_failure: str,
+) -> None:
+    class _KisClient:
+        def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
+            assert symbol == "005930"
+            assert count == 220
+            return provider_candles
+
+    runtime = _build_runtime(kis_client=_KisClient(), stale_sessions_kr=0)
+
+    _collect_market_data_from_kis(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+        ensure_pykrx_client_fn=lambda _: pytest.fail(
+            "PyKRX fallback should only run for KIS exceptions"
+        ),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        get_pykrx_error_fn=lambda _: None,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert "005930" not in runtime.market_data
+    assert any(expected_failure in message for message in runtime.failures)
+
+
 def test_collect_market_data_from_kis_uses_cache_when_pykrx_fallback_is_stale() -> None:
     class _FailingKisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
@@ -1220,6 +1356,84 @@ def test_collect_market_data_from_pykrx_refreshes_stale_cache_with_fresh_provide
     assert runtime.pykrx_client.calls == 1
     assert runtime.market_data["005930"] == _candles_with_last_date("20250108")
     assert saved_payloads[_cache_key("005930")] == _candles_with_last_date("20250108")
+
+
+def test_collect_market_data_from_pykrx_uses_stale_cache_when_provider_has_no_data() -> (
+    None
+):
+    class _PykrxClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            assert adjusted is True
+            self.calls += 1
+            return []
+
+    cached_candles = _candles_with_last_date("20250107")
+    runtime = _build_runtime(
+        kis_client=None, data_provider="pykrx", stale_sessions_kr=1
+    )
+    runtime.pykrx_client = _PykrxClient()
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda _dir, key: (
+            cached_candles if key == _cache_key("005930") else None
+        ),
+        save_json_fn=lambda *_: None,
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.pykrx_client.calls == 1
+    assert runtime.market_data["005930"] == cached_candles
+    assert runtime.ticker_data_source["005930"] == "pykrx"
+    assert runtime.failures == [
+        "Warning: PyKRX provider data is end-of-day and may lag intraday feeds."
+    ]
+
+
+def test_collect_market_data_from_pykrx_continues_when_cache_persist_fails() -> None:
+    class _PykrxClient:
+        def daily_candles(
+            self, ticker: str, *, count: int, adjusted: bool = True
+        ) -> list[dict[str, Any]]:
+            assert ticker == "005930"
+            assert count == 220
+            assert adjusted is True
+            return _candles_with_last_date("20250108")
+
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    runtime.pykrx_client = _PykrxClient()
+
+    _collect_market_data_from_pykrx(
+        runtime,
+        tickers=["005930"],
+        target_bars=220,
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: (_ for _ in ()).throw(OSError("disk full")),
+        split_symbol_and_suffix_fn=_split_symbol_and_suffix,
+        exchange_from_suffix_fn=_exchange_from_suffix,
+        now_fn=lambda: dt.datetime(2025, 1, 8, 7, 0, tzinfo=dt.UTC),
+    )
+
+    assert runtime.market_data["005930"] == _candles_with_last_date("20250108")
+    assert runtime.ticker_data_source["005930"] == "pykrx"
+    assert any(
+        "Failed to persist cache" in message
+        and "005930" in message
+        and _cache_key("005930") in message
+        and "disk full" in message
+        for message in runtime.failures
+    )
 
 
 def test_collect_market_data_from_pykrx_rejects_stale_provider_response() -> None:
