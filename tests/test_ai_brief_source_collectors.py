@@ -13,6 +13,7 @@ import pytest
 import requests  # type: ignore[import-untyped]
 from sab import ai_brief_source_collectors as collectors
 from sab import ai_brief_sources
+from sab import ai_brief_url_safety as url_safety
 from sab.ai_brief_source_collectors import (
     MAX_FEED_BYTES,
     MAX_FEED_CATALOG_BYTES,
@@ -145,6 +146,18 @@ def _assert_timeout_tuple_not_expired(
 
 def _issue_codes(result) -> set[str]:
     return {issue.code for issue in result.issues}
+
+
+def test_shared_url_safety_normalizes_idna_and_blocks_private_aliases() -> None:
+    assert url_safety.hostname_aliases(
+        "b\N{LATIN SMALL LETTER U WITH DIAERESIS}cher.example"
+    ) == ("bücher.example", "xn--bcher-kva.example")
+    assert url_safety.is_blocked_hostname("localhost") is True
+    assert url_safety.is_blocked_hostname("0x7f000001") is True
+    assert url_safety.is_blocked_hostname("64:ff9b::a9fe:a9fe") is True
+    assert (
+        url_safety.is_blocked_addrinfo((0, 0, 0, "", ("169.254.169.254", 443))) is True
+    )
 
 
 @pytest.mark.parametrize("url_field", ["url", "feed_url"])

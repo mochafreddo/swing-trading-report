@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 import email.utils
-import ipaddress
 import json
 import math
-import queue
 import socket
 import threading
 import time
@@ -18,9 +16,9 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.parsers import expat
 
-import idna
 import requests  # type: ignore[import-untyped]
 
+from . import ai_brief_url_safety as url_safety
 from .ai_brief_sources import (
     MAX_SOURCES_PER_TICKER,
     SOURCE_DNS_PIN_LOCK,
@@ -41,8 +39,6 @@ FEED_ITEM_DNS_TIMEOUT_SECONDS = 1.0
 FEED_DNS_RESOLVER_WORKERS = 4
 FEED_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 _FEED_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(FEED_DNS_RESOLVER_WORKERS)
-_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
-_IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
 
 AiBriefSourceCollectStatus = Literal["PASS", "WARN"]
 
@@ -320,31 +316,11 @@ def _validate_feed_url(
 
 
 def _validated_url_port(parsed: Any, *, field_name: str) -> int:
-    try:
-        port_value = parsed.port
-    except ValueError as exc:
-        raise ValueError(f"{field_name} port is invalid") from exc
-    if port_value is None:
-        return 443 if parsed.scheme.lower() == "https" else 80
-    port = int(port_value)
-    if port <= 0:
-        raise ValueError(f"{field_name} port is invalid")
-    return port
+    return url_safety.validated_url_port(parsed, field_name=field_name)
 
 
 def _feed_url_hostname_aliases(hostname: str) -> tuple[str, ...]:
-    normalized = _normalize_host_for_local_checks(hostname)
-    aliases = [normalized]
-    for idna_hostname in (
-        _encode_feed_idna_hostname(normalized, uts46=False),
-        _encode_feed_idna_hostname(normalized, uts46=True),
-    ):
-        if idna_hostname is None:
-            continue
-        idna_hostname = _normalize_host_for_local_checks(idna_hostname)
-        if idna_hostname and idna_hostname not in aliases:
-            aliases.append(idna_hostname)
-    return tuple(aliases)
+    return url_safety.hostname_aliases(hostname)
 
 
 def _feed_url_fetch_hostname_aliases(
@@ -352,34 +328,7 @@ def _feed_url_fetch_hostname_aliases(
     *,
     field_name: str,
 ) -> tuple[str, ...]:
-    aliases = list(_feed_url_hostname_aliases(hostname))
-    if any(_is_blocked_feed_url_hostname(alias) for alias in aliases):
-        return tuple(aliases)
-    request_hostname = _encode_feed_idna_hostname(
-        _normalize_host_for_local_checks(hostname),
-        uts46=False,
-    )
-    if request_hostname is None:
-        raise ValueError(f"{field_name} hostname is invalid")
-    request_hostname = _normalize_host_for_local_checks(request_hostname)
-    if request_hostname in aliases:
-        aliases.remove(request_hostname)
-    aliases.append(request_hostname)
-    return tuple(aliases)
-
-
-def _encode_feed_idna_hostname(hostname: str, *, uts46: bool) -> str | None:
-    if hostname.isascii():
-        return hostname.lower()
-    try:
-        return idna.encode(
-            hostname.lower(),
-            strict=True,
-            std3_rules=True,
-            uts46=uts46,
-        ).decode("ascii")
-    except idna.IDNAError:
-        return None
+    return url_safety.fetch_hostname_aliases(hostname, field_name=field_name)
 
 
 def _resolve_feed_url_addrinfos(
@@ -388,7 +337,7 @@ def _resolve_feed_url_addrinfos(
     *,
     deadline: float | None,
 ) -> tuple[Any, ...]:
-    if any(_is_blocked_feed_url_hostname(hostname) for hostname in hostnames):
+    if any(url_safety.is_blocked_hostname(hostname) for hostname in hostnames):
         raise ValueError("feed URL must not target local or private hosts")
     resolution_hostname = hostnames[-1] if hostnames else ""
     try:
@@ -404,7 +353,7 @@ def _resolve_feed_url_addrinfos(
         raise ValueError("feed URL hostname could not be resolved") from exc
     if not addrinfos:
         raise ValueError("feed URL hostname could not be resolved")
-    if any(_is_blocked_feed_addrinfo(addrinfo) for addrinfo in addrinfos):
+    if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
         raise ValueError("feed URL must not target local or private hosts")
     return tuple(addrinfos)
 
@@ -415,60 +364,16 @@ def _getaddrinfo_with_timeout(
     *,
     timeout: float,
 ) -> list[Any]:
-    if timeout <= 0:
-        raise TimeoutError("DNS resolution timed out")
-    started_at = time.monotonic()
-    slots = _FEED_DNS_RESOLVER_SLOTS
-    if not slots.acquire(timeout=timeout):
-        raise TimeoutError("DNS resolver capacity exhausted")
-    resolver = socket.getaddrinfo
-    result_queue: queue.Queue[tuple[float, bool, Any]] = queue.Queue(maxsize=1)
-    remaining_timeout = timeout - (time.monotonic() - started_at)
-    if remaining_timeout <= 0:
-        slots.release()
-        raise TimeoutError("DNS resolution timed out")
-
-    def resolve() -> None:
-        try:
-            try:
-                result: tuple[bool, Any] = (
-                    True,
-                    resolver(
-                        hostname,
-                        port,
-                        type=socket.SOCK_STREAM,
-                    ),
-                )
-            except BaseException as exc:
-                result = (False, exc)
-            completed_at = time.monotonic()
-        finally:
-            slots.release()
-        success, value = result
-        result_queue.put((completed_at, success, value))
-
-    try:
-        thread = threading.Thread(
-            target=resolve,
-            name="ai-brief-feed-dns",
-            daemon=True,
-        )
-        thread.start()
-    except BaseException:
-        slots.release()
-        raise
-    remaining_timeout = timeout - (time.monotonic() - started_at)
-    if remaining_timeout <= 0:
-        raise TimeoutError("DNS resolution timed out")
-    try:
-        completed_at, success, value = result_queue.get(timeout=remaining_timeout)
-    except queue.Empty as exc:
-        raise TimeoutError("DNS resolution timed out") from exc
-    if completed_at - started_at > timeout:
-        raise TimeoutError("DNS resolution timed out")
-    if not success:
-        raise value
-    return cast(list[Any], value)
+    return url_safety.getaddrinfo_with_timeout(
+        hostname,
+        port,
+        timeout=timeout,
+        slots=_FEED_DNS_RESOLVER_SLOTS,
+        resolver=socket.getaddrinfo,
+        thread_factory=threading.Thread,
+        monotonic=time.monotonic,
+        thread_name="ai-brief-feed-dns",
+    )
 
 
 def _feed_dns_timeout(deadline: float | None) -> float:
@@ -839,58 +744,27 @@ def _pin_feed_url_dns(
     *,
     deadline: float | None = None,
 ) -> Iterator[None]:
-    hostname_set = set(hostnames)
-    expected_port = _addrinfo_port(addrinfos)
-
-    with _feed_dns_pin_lock(deadline):
-        original_getaddrinfo = socket.getaddrinfo
-
-        def pinned_getaddrinfo(
-            host: bytes | str | None,
-            port: bytes | str | int | None,
-            family: int = 0,
-            type: int = 0,
-            proto: int = 0,
-            flags: int = 0,
-        ) -> list[Any]:
-            host_matches = _normalize_host_for_local_checks(host) in hostname_set
-            port_matches = _dns_port_matches(port, expected_port)
-            if host_matches and port_matches:
-                matching_addrinfos = _filter_addrinfos(
-                    addrinfos,
-                    family=family,
-                    socket_type=type,
-                    proto=proto,
-                    flags=flags,
-                )
-                if matching_addrinfos:
-                    return matching_addrinfos
-                raise socket.gaierror(
-                    "pinned DNS result does not match requested parameters"
-                )
-            return original_getaddrinfo(host, port, family, type, proto, flags)
-
-        socket.getaddrinfo = pinned_getaddrinfo  # type: ignore[assignment]
-        try:
-            yield
-        finally:
-            socket.getaddrinfo = original_getaddrinfo  # type: ignore[assignment]
+    with url_safety.pin_dns(
+        hostnames,
+        addrinfos,
+        lock=SOURCE_DNS_PIN_LOCK,
+        deadline=deadline,
+        remaining_timeout=_remaining_feed_timeout,
+        timeout_error=lambda: _FeedUrlTimeoutError("feed URL DNS pin lock timed out"),
+        socket_module=socket,
+    ):
+        yield
 
 
 @contextmanager
 def _feed_dns_pin_lock(deadline: float | None) -> Iterator[None]:
-    lock: Any = SOURCE_DNS_PIN_LOCK
-    if deadline is None or not hasattr(lock, "acquire") or not hasattr(lock, "release"):
-        with lock:
-            yield
-        return
-    timeout = _remaining_feed_timeout(deadline)
-    if not lock.acquire(timeout=timeout):
-        raise _FeedUrlTimeoutError("feed URL DNS pin lock timed out")
-    try:
+    with url_safety.dns_pin_lock(
+        SOURCE_DNS_PIN_LOCK,
+        deadline=deadline,
+        remaining_timeout=_remaining_feed_timeout,
+        timeout_error=lambda: _FeedUrlTimeoutError("feed URL DNS pin lock timed out"),
+    ):
         yield
-    finally:
-        lock.release()
 
 
 def _exception_type_name(exc: BaseException) -> str:
@@ -922,7 +796,7 @@ def _resolve_feed_item_addrinfos(
     *,
     deadline: float | None,
 ) -> tuple[Any, ...]:
-    if any(_is_blocked_feed_url_hostname(hostname) for hostname in hostnames):
+    if any(url_safety.is_blocked_hostname(hostname) for hostname in hostnames):
         raise ValueError("url must not target local or private hosts")
     resolution_hostname = hostnames[-1] if hostnames else ""
     try:
@@ -938,165 +812,20 @@ def _resolve_feed_item_addrinfos(
         raise ValueError("url hostname could not be resolved") from exc
     if not addrinfos:
         raise ValueError("url hostname could not be resolved")
-    if any(_is_blocked_feed_addrinfo(addrinfo) for addrinfo in addrinfos):
+    if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
         raise ValueError("url must not target local or private hosts")
     return tuple(addrinfos)
 
 
 def _is_blocked_feed_item_hostname(hostname: str) -> bool:
     return any(
-        _is_local_hostname(alias) or _is_blocked_ip_text(alias)
+        url_safety.is_blocked_hostname(alias)
         for alias in _feed_url_hostname_aliases(hostname)
     )
 
 
 def _is_blocked_feed_url_hostname(normalized_hostname: str) -> bool:
-    return _is_local_hostname(normalized_hostname) or _is_blocked_ip_text(
-        normalized_hostname
-    )
-
-
-def _is_blocked_feed_addrinfo(addrinfo: object) -> bool:
-    try:
-        sockaddr = cast(Any, addrinfo)[4]
-        ip_text = str(sockaddr[0])
-    except IndexError:
-        return True
-    except TypeError:
-        return True
-    except KeyError:
-        return True
-    return _is_blocked_ip_text(ip_text)
-
-
-def _addrinfo_port(addrinfos: tuple[Any, ...]) -> int | None:
-    try:
-        return int(addrinfos[0][4][1])
-    except IndexError:
-        return None
-    except TypeError:
-        return None
-    except KeyError:
-        return None
-    except ValueError:
-        return None
-
-
-def _dns_port_matches(
-    port: bytes | str | int | None, expected_port: int | None
-) -> bool:
-    if expected_port is None:
-        return False
-    if isinstance(port, bytes):
-        port = port.decode("ascii", errors="ignore")
-    try:
-        return int(str(port)) == expected_port
-    except ValueError:
-        return False
-
-
-def _filter_addrinfos(
-    addrinfos: tuple[Any, ...],
-    *,
-    family: int,
-    socket_type: int,
-    proto: int,
-    flags: int,
-) -> list[Any]:
-    if flags != 0:
-        return []
-    return [
-        addrinfo
-        for addrinfo in addrinfos
-        if _addrinfo_matches_request(
-            addrinfo,
-            family=family,
-            socket_type=socket_type,
-            proto=proto,
-        )
-    ]
-
-
-def _addrinfo_matches_request(
-    addrinfo: object,
-    *,
-    family: int,
-    socket_type: int,
-    proto: int,
-) -> bool:
-    addrinfo_any = cast(Any, addrinfo)
-    try:
-        addrinfo_family = int(addrinfo_any[0])
-        addrinfo_type = int(addrinfo_any[1])
-        addrinfo_proto = int(addrinfo_any[2])
-    except IndexError:
-        return False
-    except TypeError:
-        return False
-    except KeyError:
-        return False
-    except ValueError:
-        return False
-    return (
-        (family == 0 or addrinfo_family == 0 or int(family) == addrinfo_family)
-        and (
-            socket_type == 0 or addrinfo_type == 0 or int(socket_type) == addrinfo_type
-        )
-        and (proto == 0 or addrinfo_proto == 0 or int(proto) == addrinfo_proto)
-    )
-
-
-def _is_blocked_ip_text(value: str) -> bool:
-    try:
-        return _is_blocked_ip(ipaddress.ip_address(value))
-    except ValueError:
-        pass
-    try:
-        return _is_blocked_ip(ipaddress.IPv4Address(socket.inet_aton(value)))
-    except OSError:
-        return False
-
-
-def _is_blocked_ip(
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-) -> bool:
-    if address.is_multicast or not address.is_global:
-        return True
-    if isinstance(address, ipaddress.IPv6Address):
-        return any(
-            _is_blocked_ip(embedded_address)
-            for embedded_address in _embedded_ipv4_addresses(address)
-        )
-    return False
-
-
-def _embedded_ipv4_addresses(
-    address: ipaddress.IPv6Address,
-) -> tuple[ipaddress.IPv4Address, ...]:
-    embedded_addresses: list[ipaddress.IPv4Address] = []
-    if address.ipv4_mapped is not None:
-        embedded_addresses.append(address.ipv4_mapped)
-    if address.sixtofour is not None:
-        embedded_addresses.append(address.sixtofour)
-    if address.teredo is not None:
-        embedded_addresses.extend(address.teredo)
-    if address in _NAT64_WELL_KNOWN_PREFIX:
-        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
-    if address in _IPV4_COMPATIBLE_IPV6_PREFIX and int(address) > 0xFFFF:
-        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
-    return tuple(embedded_addresses)
-
-
-def _is_local_hostname(normalized_hostname: str) -> bool:
-    return normalized_hostname in {"localhost", "ip6-localhost"} or (
-        normalized_hostname.endswith(".localhost")
-    )
-
-
-def _normalize_host_for_local_checks(hostname: object) -> str:
-    if isinstance(hostname, bytes):
-        hostname = hostname.decode("ascii", errors="ignore")
-    return str(hostname or "").strip().strip("[]").lower().rstrip(".")
+    return url_safety.is_blocked_hostname(normalized_hostname)
 
 
 def _reject_unsafe_xml_declarations(data: bytes) -> None:

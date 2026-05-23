@@ -3,11 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import email.utils
 import html
-import ipaddress
 import json
 import math
 import os
-import queue
 import re
 import socket
 import threading
@@ -15,12 +13,12 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlparse
 
-import idna
 import requests  # type: ignore[import-untyped]
 
+from . import ai_brief_url_safety as url_safety
 from .tickers import parse_ticker
 
 SOURCE_PROVIDER_NONE = "none"
@@ -53,12 +51,9 @@ BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
 BENZINGA_NEWS_LIMIT = 10
 NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_NEWS_DISPLAY_COUNT = 10
-_ALLOWED_SOURCE_URL_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
 SOURCE_DNS_PIN_LOCK = threading.RLock()
 _SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORKERS)
-_NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
-_IPV4_COMPATIBLE_IPV6_PREFIX = ipaddress.IPv6Network("::/96")
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
@@ -1640,29 +1635,7 @@ def _parse_offset_datetime(value: object) -> dt.datetime:
 
 
 def validate_ai_brief_source_url(value: object, *, field_name: str = "url") -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} is required")
-    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in text):
-        raise ValueError(f"{field_name} must not contain whitespace or control chars")
-    if "\\" in text:
-        raise ValueError(f"{field_name} must not contain backslashes")
-    try:
-        parsed = urlparse(text)
-        hostname = parsed.hostname
-        username = parsed.username
-        password = parsed.password
-    except ValueError as exc:
-        raise ValueError(f"{field_name} is invalid") from exc
-    if parsed.scheme.lower() not in _ALLOWED_SOURCE_URL_SCHEMES:
-        raise ValueError(f"{field_name} must use http or https")
-    if not parsed.netloc or not hostname:
-        raise ValueError(f"{field_name} must include a hostname")
-    if "@" in parsed.netloc or username is not None or password is not None:
-        raise ValueError(f"{field_name} must not include userinfo")
-    if "%" in parsed.netloc or "%" in hostname:
-        raise ValueError(f"{field_name} hostname must not contain percent escapes")
-    return text
+    return url_safety.validate_url(value, field_name=field_name)
 
 
 def validate_ai_brief_source_api_url(value: object) -> str:
@@ -1718,16 +1691,7 @@ def _validate_source_api_request_url(
 
 
 def _validated_url_port(parsed: Any, *, field_name: str) -> int:
-    try:
-        port_value = parsed.port
-    except ValueError as exc:
-        raise ValueError(f"{field_name} port is invalid") from exc
-    if port_value is None:
-        return 443 if parsed.scheme.lower() == "https" else 80
-    port = int(port_value)
-    if port <= 0:
-        raise ValueError(f"{field_name} port is invalid")
-    return port
+    return url_safety.validated_url_port(parsed, field_name=field_name)
 
 
 def _source_api_token_for_url(url: str) -> str:
@@ -1740,24 +1704,13 @@ def _source_api_token_for_url(url: str) -> str:
 
 def _is_blocked_source_row_hostname(hostname: str) -> bool:
     return any(
-        _is_local_source_api_hostname(alias) or _is_blocked_source_api_ip_text(alias)
+        url_safety.is_blocked_hostname(alias)
         for alias in _source_api_hostname_aliases(hostname)
     )
 
 
 def _source_api_hostname_aliases(hostname: str) -> tuple[str, ...]:
-    normalized = _normalize_source_api_hostname(hostname)
-    aliases = [normalized]
-    for idna_hostname in (
-        _encode_source_api_idna_hostname(normalized, uts46=False),
-        _encode_source_api_idna_hostname(normalized, uts46=True),
-    ):
-        if idna_hostname is None:
-            continue
-        idna_hostname = _normalize_source_api_hostname(idna_hostname)
-        if idna_hostname and idna_hostname not in aliases:
-            aliases.append(idna_hostname)
-    return tuple(aliases)
+    return url_safety.hostname_aliases(hostname)
 
 
 def _source_api_fetch_hostname_aliases(
@@ -1765,37 +1718,7 @@ def _source_api_fetch_hostname_aliases(
     *,
     field_name: str,
 ) -> tuple[str, ...]:
-    aliases = list(_source_api_hostname_aliases(hostname))
-    if any(
-        _is_local_source_api_hostname(alias) or _is_blocked_source_api_ip_text(alias)
-        for alias in aliases
-    ):
-        return tuple(aliases)
-    request_hostname = _encode_source_api_idna_hostname(
-        _normalize_source_api_hostname(hostname),
-        uts46=False,
-    )
-    if request_hostname is None:
-        raise ValueError(f"{field_name} hostname is invalid")
-    request_hostname = _normalize_source_api_hostname(request_hostname)
-    if request_hostname in aliases:
-        aliases.remove(request_hostname)
-    aliases.append(request_hostname)
-    return tuple(aliases)
-
-
-def _encode_source_api_idna_hostname(hostname: str, *, uts46: bool) -> str | None:
-    if hostname.isascii():
-        return hostname.lower()
-    try:
-        return idna.encode(
-            hostname.lower(),
-            strict=True,
-            std3_rules=True,
-            uts46=uts46,
-        ).decode("ascii")
-    except idna.IDNAError:
-        return None
+    return url_safety.fetch_hostname_aliases(hostname, field_name=field_name)
 
 
 def _resolve_source_api_addrinfos(
@@ -1819,9 +1742,9 @@ def _resolve_public_source_addrinfos(
     field_name: str,
     deadline: float | None,
 ) -> tuple[Any, ...]:
-    if any(_is_local_source_api_hostname(hostname) for hostname in hostnames):
+    if any(url_safety.is_local_hostname(hostname) for hostname in hostnames):
         raise ValueError(f"{field_name} must not target local or private hosts")
-    if any(_is_blocked_source_api_ip_text(hostname) for hostname in hostnames):
+    if any(url_safety.is_blocked_ip_text(hostname) for hostname in hostnames):
         raise ValueError(f"{field_name} must not target local or private hosts")
     resolution_hostname = hostnames[-1] if hostnames else ""
     try:
@@ -1839,7 +1762,7 @@ def _resolve_public_source_addrinfos(
         raise ValueError(f"{field_name} hostname could not be resolved") from exc
     if not addrinfos:
         raise ValueError(f"{field_name} hostname could not be resolved")
-    if any(_is_blocked_source_api_addrinfo(addrinfo) for addrinfo in addrinfos):
+    if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
         raise ValueError(f"{field_name} must not target local or private hosts")
     return tuple(addrinfos)
 
@@ -1850,60 +1773,16 @@ def _getaddrinfo_with_timeout(
     *,
     timeout: float,
 ) -> list[Any]:
-    if timeout <= 0:
-        raise TimeoutError("DNS resolution timed out")
-    started_at = time.monotonic()
-    slots = _SOURCE_DNS_RESOLVER_SLOTS
-    if not slots.acquire(timeout=timeout):
-        raise TimeoutError("DNS resolver capacity exhausted")
-    resolver = socket.getaddrinfo
-    result_queue: queue.Queue[tuple[float, bool, Any]] = queue.Queue(maxsize=1)
-    remaining_timeout = timeout - (time.monotonic() - started_at)
-    if remaining_timeout <= 0:
-        slots.release()
-        raise TimeoutError("DNS resolution timed out")
-
-    def resolve() -> None:
-        try:
-            try:
-                result: tuple[bool, Any] = (
-                    True,
-                    resolver(
-                        hostname,
-                        port,
-                        type=socket.SOCK_STREAM,
-                    ),
-                )
-            except BaseException as exc:
-                result = (False, exc)
-            completed_at = time.monotonic()
-        finally:
-            slots.release()
-        success, value = result
-        result_queue.put((completed_at, success, value))
-
-    try:
-        thread = threading.Thread(
-            target=resolve,
-            name="ai-brief-source-dns",
-            daemon=True,
-        )
-        thread.start()
-    except BaseException:
-        slots.release()
-        raise
-    remaining_timeout = timeout - (time.monotonic() - started_at)
-    if remaining_timeout <= 0:
-        raise TimeoutError("DNS resolution timed out")
-    try:
-        completed_at, success, value = result_queue.get(timeout=remaining_timeout)
-    except queue.Empty as exc:
-        raise TimeoutError("DNS resolution timed out") from exc
-    if completed_at - started_at > timeout:
-        raise TimeoutError("DNS resolution timed out")
-    if not success:
-        raise value
-    return cast(list[Any], value)
+    return url_safety.getaddrinfo_with_timeout(
+        hostname,
+        port,
+        timeout=timeout,
+        slots=_SOURCE_DNS_RESOLVER_SLOTS,
+        resolver=socket.getaddrinfo,
+        thread_factory=threading.Thread,
+        monotonic=time.monotonic,
+        thread_name="ai-brief-source-dns",
+    )
 
 
 def _source_dns_timeout(deadline: float | None) -> float:
@@ -1923,205 +1802,35 @@ def _pin_source_api_dns(
     *,
     deadline: float | None = None,
 ) -> Iterator[None]:
-    hostname_set = set(hostnames)
-    expected_port = _addrinfo_port(addrinfos)
-
-    with _source_dns_pin_lock(deadline):
-        original_getaddrinfo = socket.getaddrinfo
-
-        def pinned_getaddrinfo(
-            host: bytes | str | None,
-            port: bytes | str | int | None,
-            family: int = 0,
-            type: int = 0,
-            proto: int = 0,
-            flags: int = 0,
-        ) -> list[Any]:
-            host_matches = _normalize_source_api_hostname(host) in hostname_set
-            port_matches = _dns_port_matches(port, expected_port)
-            if host_matches and port_matches:
-                matching_addrinfos = _filter_addrinfos(
-                    addrinfos,
-                    family=family,
-                    socket_type=type,
-                    proto=proto,
-                    flags=flags,
-                )
-                if matching_addrinfos:
-                    return matching_addrinfos
-                raise socket.gaierror(
-                    "pinned DNS result does not match requested parameters"
-                )
-            return original_getaddrinfo(host, port, family, type, proto, flags)
-
-        socket.getaddrinfo = pinned_getaddrinfo  # type: ignore[assignment]
-        try:
-            yield
-        finally:
-            socket.getaddrinfo = original_getaddrinfo  # type: ignore[assignment]
+    with url_safety.pin_dns(
+        hostnames,
+        addrinfos,
+        lock=SOURCE_DNS_PIN_LOCK,
+        deadline=deadline,
+        remaining_timeout=_remaining_source_timeout,
+        timeout_error=lambda: AiBriefSourceProviderTimeoutError(
+            "source API DNS pin lock timed out"
+        ),
+        socket_module=socket,
+    ):
+        yield
 
 
 @contextmanager
 def _source_dns_pin_lock(deadline: float | None) -> Iterator[None]:
-    lock: Any = SOURCE_DNS_PIN_LOCK
-    if deadline is None or not hasattr(lock, "acquire") or not hasattr(lock, "release"):
-        with lock:
-            yield
-        return
-    timeout = _remaining_source_timeout(deadline)
-    if not lock.acquire(timeout=timeout):
-        raise AiBriefSourceProviderTimeoutError("source API DNS pin lock timed out")
-    try:
+    with url_safety.dns_pin_lock(
+        SOURCE_DNS_PIN_LOCK,
+        deadline=deadline,
+        remaining_timeout=_remaining_source_timeout,
+        timeout_error=lambda: AiBriefSourceProviderTimeoutError(
+            "source API DNS pin lock timed out"
+        ),
+    ):
         yield
-    finally:
-        lock.release()
-
-
-def _is_blocked_source_api_addrinfo(addrinfo: object) -> bool:
-    try:
-        sockaddr = addrinfo[4]  # type: ignore[index]
-        ip_text = str(sockaddr[0])
-    except IndexError:
-        return True
-    except TypeError:
-        return True
-    except KeyError:
-        return True
-    return _is_blocked_source_api_ip_text(ip_text)
-
-
-def _addrinfo_port(addrinfos: tuple[Any, ...]) -> int | None:
-    try:
-        return int(addrinfos[0][4][1])
-    except IndexError:
-        return None
-    except TypeError:
-        return None
-    except KeyError:
-        return None
-    except ValueError:
-        return None
-
-
-def _dns_port_matches(
-    port: bytes | str | int | None, expected_port: int | None
-) -> bool:
-    if expected_port is None:
-        return False
-    if isinstance(port, bytes):
-        port = port.decode("ascii", errors="ignore")
-    try:
-        return int(str(port)) == expected_port
-    except ValueError:
-        return False
-
-
-def _filter_addrinfos(
-    addrinfos: tuple[Any, ...],
-    *,
-    family: int,
-    socket_type: int,
-    proto: int,
-    flags: int,
-) -> list[Any]:
-    if flags != 0:
-        return []
-    return [
-        addrinfo
-        for addrinfo in addrinfos
-        if _addrinfo_matches_request(
-            addrinfo,
-            family=family,
-            socket_type=socket_type,
-            proto=proto,
-        )
-    ]
-
-
-def _addrinfo_matches_request(
-    addrinfo: object,
-    *,
-    family: int,
-    socket_type: int,
-    proto: int,
-) -> bool:
-    addrinfo_any: Any = addrinfo
-    try:
-        addrinfo_family = int(addrinfo_any[0])
-        addrinfo_type = int(addrinfo_any[1])
-        addrinfo_proto = int(addrinfo_any[2])
-    except IndexError:
-        return False
-    except TypeError:
-        return False
-    except KeyError:
-        return False
-    except ValueError:
-        return False
-    return (
-        (family == 0 or addrinfo_family == 0 or int(family) == addrinfo_family)
-        and (
-            socket_type == 0 or addrinfo_type == 0 or int(socket_type) == addrinfo_type
-        )
-        and (proto == 0 or addrinfo_proto == 0 or int(proto) == addrinfo_proto)
-    )
-
-
-def _is_blocked_source_api_ip_text(value: str) -> bool:
-    try:
-        return _is_blocked_source_api_ip(ipaddress.ip_address(value))
-    except ValueError:
-        pass
-    try:
-        return _is_blocked_source_api_ip(ipaddress.IPv4Address(socket.inet_aton(value)))
-    except OSError:
-        return False
-
-
-def _is_local_source_api_hostname(normalized_hostname: str) -> bool:
-    return normalized_hostname in {"localhost", "ip6-localhost"} or (
-        normalized_hostname.endswith(".localhost")
-    )
-
-
-def _normalize_source_api_hostname(hostname: object) -> str:
-    if isinstance(hostname, bytes):
-        hostname = hostname.decode("ascii", errors="ignore")
-    return str(hostname or "").strip().strip("[]").lower().rstrip(".")
 
 
 def _exception_type_name(exc: BaseException) -> str:
     return type(exc).__name__
-
-
-def _is_blocked_source_api_ip(
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-) -> bool:
-    if address.is_multicast or not address.is_global:
-        return True
-    if isinstance(address, ipaddress.IPv6Address):
-        return any(
-            _is_blocked_source_api_ip(embedded_address)
-            for embedded_address in _embedded_source_api_ipv4_addresses(address)
-        )
-    return False
-
-
-def _embedded_source_api_ipv4_addresses(
-    address: ipaddress.IPv6Address,
-) -> tuple[ipaddress.IPv4Address, ...]:
-    embedded_addresses: list[ipaddress.IPv4Address] = []
-    if address.ipv4_mapped is not None:
-        embedded_addresses.append(address.ipv4_mapped)
-    if address.sixtofour is not None:
-        embedded_addresses.append(address.sixtofour)
-    if address.teredo is not None:
-        embedded_addresses.extend(address.teredo)
-    if address in _NAT64_WELL_KNOWN_PREFIX:
-        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
-    if address in _IPV4_COMPATIBLE_IPV6_PREFIX and int(address) > 0xFFFF:
-        embedded_addresses.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
-    return tuple(embedded_addresses)
 
 
 def is_ai_brief_source_stale(
