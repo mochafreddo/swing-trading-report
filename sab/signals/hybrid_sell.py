@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
-import math
 from dataclasses import dataclass
 from typing import Any
 
 from ..data.trading_sessions import count_trading_sessions
+from ..utils.numeric import to_finite_float as _to_finite_float
 from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import ema, rsi, sma
@@ -63,16 +63,6 @@ def _compute_pnl_pct(
         return (last_close - entry_price) / entry_price
     except TypeError:
         return None
-
-
-def _to_finite_float(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(parsed):
-        return None
-    return parsed
 
 
 def _normalize_candle_date(value: Any) -> str:

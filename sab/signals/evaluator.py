@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from ..utils.numeric import to_finite_float as _to_finite_float
 from .etf_filters import is_etf_or_leveraged
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
@@ -30,16 +31,6 @@ class EvaluationSettings:
     rs_benchmark_return: float | None = None
     min_price: float = 0.0
     us_min_price: float | None = None
-
-
-def _to_finite_float(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(parsed):
-        return None
-    return parsed
 
 
 def evaluate_ticker(

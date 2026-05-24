@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from ..data.trading_sessions import count_trading_sessions
+from ..utils.numeric import to_finite_float as _to_finite_float
 from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
@@ -60,16 +61,6 @@ def _resolve_holding_market(*, ticker: str, holding: dict[str, Any]) -> str | No
             return "US"
 
     return None
-
-
-def _to_finite_float(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(parsed):
-        return None
-    return parsed
 
 
 def _to_finite_series(values: list[Any]) -> list[float] | None:

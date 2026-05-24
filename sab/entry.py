@@ -35,6 +35,7 @@ from .tickers import (
     validate_strict_holdings_ticker,
     validate_strict_us_ticker,
 )
+from .utils.numeric import to_finite_float as _to_finite_float
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +50,6 @@ _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
 _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO = 1.0
 _PORTFOLIO_BLOCK_REASON_TOTAL = "portfolio max active holdings reached"
-
-
-def _to_finite_float(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(parsed):
-        return None
-    return parsed
 
 
 def _to_positive_price(value: Any) -> float | None:
