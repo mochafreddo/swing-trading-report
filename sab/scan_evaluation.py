@@ -64,20 +64,13 @@ def _normalize_eval_date_key(value: Any) -> str | None:
     return date_text
 
 
-def _record_entry_reference_issue(runtime: _ScanRuntime, message: str) -> None:
-    if message not in runtime.system_issues:
-        runtime.system_issues.append(message)
-
-
-def _record_rs_benchmark_issue(runtime: _ScanRuntime, message: str) -> None:
-    if message not in runtime.system_issues:
-        runtime.system_issues.append(message)
-        runtime.logger.warning("%s", message)
-
-
-def _record_market_regime_issue(runtime: _ScanRuntime, message: str) -> None:
-    if message not in runtime.system_issues:
-        runtime.system_issues.append(message)
+def _record_system_issue(
+    runtime: _ScanRuntime, message: str, *, warn: bool = False
+) -> None:
+    if message in runtime.system_issues:
+        return
+    runtime.system_issues.append(message)
+    if warn:
         runtime.logger.warning("%s", message)
 
 
@@ -301,9 +294,10 @@ def _resolve_rs_benchmark_context(
             if benchmark_returns
             else "RS benchmark disabled"
         )
-        _record_rs_benchmark_issue(
+        _record_system_issue(
             runtime,
             issue_label + ": " + "; ".join(issues),
+            warn=True,
         )
         return benchmark_returns, benchmark_tickers, True
 
@@ -400,9 +394,10 @@ def _resolve_market_regime_context(
             if regime_by_market
             else "Market regime filter disabled"
         )
-        _record_market_regime_issue(
+        _record_system_issue(
             runtime,
             issue_label + ": " + "; ".join(issues),
+            warn=True,
         )
 
     return regime_by_market
@@ -433,7 +428,7 @@ def _enrich_entry_reference_prices(runtime: _ScanRuntime) -> None:
         candidate["entry_reference_close_raw_value"] = raw_close
         candidate["entry_reference_eval_date"] = eval_date_key
         if raw_close is None and issue is not None:
-            _record_entry_reference_issue(runtime, issue)
+            _record_system_issue(runtime, issue)
 
 
 def _apply_currency_display(
