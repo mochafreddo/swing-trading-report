@@ -127,6 +127,15 @@ class _ValidatedFeedUrl:
     addrinfos: tuple[Any, ...]
 
 
+def _feed_rows_single_issue(
+    *,
+    ticker: str | None,
+    code: str,
+    message: str,
+) -> tuple[list[_FeedSourceRow], list[AiBriefSourceCollectIssue]]:
+    return [], [AiBriefSourceCollectIssue(ticker=ticker, code=code, message=message)]
+
+
 def collect_ai_brief_sources(
     *,
     feed_catalog_path: str,
@@ -394,39 +403,29 @@ def _load_feed_rows(
     try:
         root = _parse_feed_root(feed_path)
     except _FeedFileTooLargeError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_file_too_large",
-                message=f"feed ignored because file is too large: {exc}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_file_too_large",
+            message=f"feed ignored because file is too large: {exc}",
+        )
     except _UnsafeFeedXmlError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_file_unsafe_xml",
-                message=f"feed ignored because XML is unsafe: {exc}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_file_unsafe_xml",
+            message=f"feed ignored because XML is unsafe: {exc}",
+        )
     except OSError:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_file_failed",
-                message=f"failed to read feed {_display_feed_path(feed_path)}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_file_failed",
+            message=f"failed to read feed {_display_feed_path(feed_path)}",
+        )
     except ET.ParseError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_file_failed",
-                message=(
-                    f"failed to parse feed {_display_feed_path(feed_path)}: {exc}"
-                ),
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_file_failed",
+            message=f"failed to parse feed {_display_feed_path(feed_path)}: {exc}",
+        )
 
     return _rows_from_feed_root(
         ticker=ticker,
@@ -448,21 +447,17 @@ def _load_feed_url_rows(
     try:
         feed_url = _validate_feed_url(feed_url_text, deadline=deadline)
     except _FeedUrlTimeoutError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_timeout",
-                message=f"feed URL request timed out: {exc}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_url_timeout",
+            message=f"feed URL request timed out: {exc}",
+        )
     except ValueError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_invalid",
-                message=f"feed URL ignored because {exc}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_url_invalid",
+            message=f"feed URL ignored because {exc}",
+        )
 
     session = requests.Session()
     session.trust_env = False
@@ -480,92 +475,72 @@ def _load_feed_url_rows(
                     allow_redirects=False,
                 )
         except requests.Timeout as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_timeout",
-                    message=f"feed URL request timed out: {_exception_type_name(exc)}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL request timed out: {_exception_type_name(exc)}",
+            )
         except _FeedUrlTimeoutError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_timeout",
-                    message=f"feed URL request timed out: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL request timed out: {exc}",
+            )
         except requests.RequestException as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_failed",
-                    message=f"feed URL request failed: {_exception_type_name(exc)}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL request failed: {_exception_type_name(exc)}",
+            )
 
         status_code = int(getattr(response, "status_code", 0) or 0)
         if 300 <= status_code < 400:
             _close_response(response)
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_redirect",
-                    message=f"feed URL redirect was not followed (HTTP {status_code})",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_redirect",
+                message=f"feed URL redirect was not followed (HTTP {status_code})",
+            )
         if status_code >= 400:
             _close_response(response)
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_failed",
-                    message=f"feed URL request failed with HTTP {status_code}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL request failed with HTTP {status_code}",
+            )
 
         try:
             root = _parse_feed_response_root(response, deadline=deadline)
         except _FeedFileTooLargeError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_too_large",
-                    message=f"feed URL ignored because body is too large: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_too_large",
+                message=f"feed URL ignored because body is too large: {exc}",
+            )
         except _FeedUrlTimeoutError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_timeout",
-                    message=f"feed URL response body timed out: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_timeout",
+                message=f"feed URL response body timed out: {exc}",
+            )
         except _UnsafeFeedXmlError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_unsafe_xml",
-                    message=f"feed URL ignored because XML is unsafe: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_unsafe_xml",
+                message=f"feed URL ignored because XML is unsafe: {exc}",
+            )
         except _FeedUrlFetchError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_failed",
-                    message=f"feed URL response body failed: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"feed URL response body failed: {exc}",
+            )
         except ET.ParseError as exc:
-            return [], [
-                AiBriefSourceCollectIssue(
-                    ticker=ticker,
-                    code="feed_url_failed",
-                    message=f"failed to parse feed URL response: {exc}",
-                )
-            ]
+            return _feed_rows_single_issue(
+                ticker=ticker,
+                code="feed_url_failed",
+                message=f"failed to parse feed URL response: {exc}",
+            )
 
         return _rows_from_feed_root(
             ticker=ticker,
@@ -576,13 +551,11 @@ def _load_feed_url_rows(
             resolve_source_url_hostnames=True,
         )
     except _FeedUrlTimeoutError as exc:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_url_timeout",
-                message=f"feed URL response item URL timed out: {exc}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_url_timeout",
+            message=f"feed URL response item URL timed out: {exc}",
+        )
     finally:
         _close_session(session)
 
@@ -604,13 +577,11 @@ def _rows_from_feed_root(
         raw_entries = _children_named(root, "entry")
         feed_kind = "atom"
     else:
-        return [], [
-            AiBriefSourceCollectIssue(
-                ticker=ticker,
-                code="feed_format_unsupported",
-                message=f"unsupported feed root {root.tag!r}",
-            )
-        ]
+        return _feed_rows_single_issue(
+            ticker=ticker,
+            code="feed_format_unsupported",
+            message=f"unsupported feed root {root.tag!r}",
+        )
 
     rows: list[_FeedSourceRow] = []
     issues: list[AiBriefSourceCollectIssue] = []
