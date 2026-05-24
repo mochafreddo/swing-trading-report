@@ -14,6 +14,8 @@ import {
   asRecordArray,
   formatPnlPercent,
   readNumber,
+  readNumberLike,
+  readString,
 } from "./helpers";
 import type { ReportJson } from "./types";
 
@@ -39,27 +41,6 @@ function formatSummaryValue(value: unknown): string {
     return JSON.stringify(value, null, 2);
   }
   return String(value);
-}
-
-function readString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function readNumberLike(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
 }
 
 function asStringArray(value: unknown): string[] {

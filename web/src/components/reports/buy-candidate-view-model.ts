@@ -1,3 +1,4 @@
+import { readNumberLike, readString } from "./helpers";
 import type { ReportJson } from "./types";
 
 const MAX_REASON_CHIPS = 5;
@@ -77,27 +78,6 @@ interface StructuredReason {
   status: string | null;
   value?: unknown;
   threshold?: unknown;
-}
-
-function readString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function readNumberLike(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
 }
 
 function readNonDashString(value: unknown): string | null {

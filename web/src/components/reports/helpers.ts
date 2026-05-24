@@ -37,6 +37,27 @@ export function readNumber(value: unknown): number | null {
   return null;
 }
 
+export function readNumberLike(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+export function readString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 export function formatPnlPercent(value: unknown): string {
   const pnl = readNumber(value);
   if (pnl === null) {
