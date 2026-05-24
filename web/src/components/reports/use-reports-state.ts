@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import {
+  REPORT_DETAIL_CACHE_MAX_ENTRIES,
+  REPORT_DETAIL_CACHE_TTL_MS,
+  REPORT_LIST_CACHE_MAX_ENTRIES,
+  REPORT_LIST_CACHE_TTL_MS,
+  REPORT_SEARCH_CACHE_TTL_MS,
+} from "@/lib/reports-cache-config";
 import type {
   ReportListItem,
   ReportsListResponse,
@@ -21,11 +28,6 @@ import type {
 } from "./types";
 
 const PAGE_LIMIT = 30;
-const LIST_CACHE_TTL_MS = 5_000;
-const SEARCH_CACHE_TTL_MS = 10_000;
-const DETAIL_CACHE_TTL_MS = 60 * 60 * 1000;
-const LIST_CACHE_MAX_ENTRIES = 100;
-const DETAIL_CACHE_MAX_ENTRIES = 200;
 
 interface TimedCacheEntry<T> {
   value: T;
@@ -90,7 +92,7 @@ function writeTimedCache<T>(
 }
 
 function resolveListCacheTtlMs(query: string): number {
-  return query.trim() ? SEARCH_CACHE_TTL_MS : LIST_CACHE_TTL_MS;
+  return query.trim() ? REPORT_SEARCH_CACHE_TTL_MS : REPORT_LIST_CACHE_TTL_MS;
 }
 
 function buildListCacheKey(
@@ -166,7 +168,7 @@ async function fetchReportsListCached(
       cacheKey,
       typed,
       resolveListCacheTtlMs(appliedQuery),
-      LIST_CACHE_MAX_ENTRIES,
+      REPORT_LIST_CACHE_MAX_ENTRIES,
     );
     return typed;
   };
@@ -218,8 +220,8 @@ async function fetchReportDetailCached(
       reportDetailCache,
       key,
       typed,
-      DETAIL_CACHE_TTL_MS,
-      DETAIL_CACHE_MAX_ENTRIES,
+      REPORT_DETAIL_CACHE_TTL_MS,
+      REPORT_DETAIL_CACHE_MAX_ENTRIES,
     );
     return typed;
   };

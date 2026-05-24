@@ -2,6 +2,13 @@ import { getSupabaseEnv } from "@/lib/env.server";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
 import { parseReportStorageKey } from "@/lib/report-key";
 import {
+  REPORT_DETAIL_CACHE_MAX_ENTRIES,
+  REPORT_DETAIL_CACHE_TTL_MS,
+  REPORT_LIST_CACHE_MAX_ENTRIES,
+  REPORT_LIST_CACHE_TTL_MS,
+  REPORT_SEARCH_CACHE_TTL_MS,
+} from "@/lib/reports-cache-config";
+import {
   downloadStorageJson,
   fetchReportIndexPage,
   type ReportIndexCursor,
@@ -14,11 +21,6 @@ import type {
 } from "@/lib/types";
 
 const REPORT_SEARCH_PAGE_SIZE = 100;
-const REPORT_LIST_CACHE_TTL_MS = 5_000;
-const REPORT_SEARCH_CACHE_TTL_MS = 10_000;
-const REPORT_DETAIL_CACHE_TTL_MS = 60 * 60 * 1000;
-const REPORT_LIST_CACHE_MAX_ENTRIES = 100;
-const REPORT_DETAIL_CACHE_MAX_ENTRIES = 200;
 
 type ReportIndexRow = Awaited<
   ReturnType<typeof fetchReportIndexPage>
