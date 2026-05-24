@@ -6,6 +6,7 @@ from typing import Any
 
 from ..data.trading_sessions import count_trading_sessions
 from ..utils.numeric import to_finite_float as _to_finite_float
+from ._candle_dates import parse_eval_date as _parse_eval_date
 from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import ema, rsi, sma
@@ -62,21 +63,6 @@ def _compute_pnl_pct(
     try:
         return (last_close - entry_price) / entry_price
     except TypeError:
-        return None
-
-
-def _normalize_candle_date(value: Any) -> str:
-    date_text = str(value or "").strip().replace("-", "")
-    return date_text[:8]
-
-
-def _parse_eval_date(value: Any) -> dt.date | None:
-    date_text = _normalize_candle_date(value)
-    if not date_text:
-        return None
-    try:
-        return dt.datetime.strptime(date_text, "%Y%m%d").date()
-    except ValueError:
         return None
 
 

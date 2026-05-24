@@ -7,6 +7,8 @@ from typing import Any, TypedDict
 
 from ..data.trading_sessions import count_trading_sessions
 from ..utils.numeric import to_finite_float as _to_finite_float
+from ._candle_dates import normalize_candle_date as _normalize_candle_date
+from ._candle_dates import parse_eval_date as _parse_eval_date
 from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
@@ -19,21 +21,6 @@ class Candle(TypedDict):
     low: float
     close: float
     volume: float
-
-
-def _normalize_candle_date(value: Any) -> str:
-    date_text = str(value or "").strip().replace("-", "")
-    return date_text[:8]
-
-
-def _parse_eval_date(value: Any) -> dt.date | None:
-    date_text = _normalize_candle_date(value)
-    if not date_text:
-        return None
-    try:
-        return dt.datetime.strptime(date_text, "%Y%m%d").date()
-    except ValueError:
-        return None
 
 
 _US_EXCHANGE_CODES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
