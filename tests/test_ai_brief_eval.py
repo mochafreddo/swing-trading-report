@@ -678,3 +678,22 @@ def _mixed_entry_payload() -> dict[str, object]:
         ],
         "system_issues": [],
     }
+
+
+def test_ai_brief_recommendation_issue_preserves_public_class_identity() -> None:
+    issue = ai_brief_eval.AiBriefRecommendationEvalIssue(
+        ticker="AAPL.NAS",
+        code="source_issue",
+        severity="WARN",
+        message="missing source",
+    )
+
+    assert issue.__class__.__module__ == "sab.ai_brief_eval"
+    assert issue.__class__.__name__ == "AiBriefRecommendationEvalIssue"
+    assert repr(issue).startswith("AiBriefRecommendationEvalIssue(")
+    assert issue.to_dict() == {
+        "ticker": "AAPL.NAS",
+        "code": "source_issue",
+        "severity": "WARN",
+        "message": "missing source",
+    }

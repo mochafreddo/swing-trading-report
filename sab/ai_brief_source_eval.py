@@ -4,8 +4,12 @@ import datetime as dt
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
 
+from .ai_brief_eval_common import (
+    AiBriefEvalIssue,
+    AiBriefEvalSeverity,
+    AiBriefEvalStatus,
+)
 from .ai_brief_sources import (
     SOURCE_PROVIDER_LOCAL_JSON,
     AiBriefSourceProviderError,
@@ -13,24 +17,13 @@ from .ai_brief_sources import (
 )
 from .tickers import infer_market_from_ticker
 
-AiBriefSourceEvalStatus = Literal["PASS", "WARN", "FAIL"]
-AiBriefSourceEvalSeverity = Literal["WARN", "FAIL"]
+AiBriefSourceEvalStatus = AiBriefEvalStatus
+AiBriefSourceEvalSeverity = AiBriefEvalSeverity
 
 
 @dataclass(frozen=True)
-class AiBriefSourceEvalIssue:
-    code: str
-    severity: AiBriefSourceEvalSeverity
-    message: str
-    ticker: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "ticker": self.ticker,
-            "code": self.code,
-            "severity": self.severity,
-            "message": self.message,
-        }
+class AiBriefSourceEvalIssue(AiBriefEvalIssue):
+    pass
 
 
 @dataclass(frozen=True)

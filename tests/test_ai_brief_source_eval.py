@@ -524,3 +524,22 @@ def test_source_eval_script_rejects_invalid_compare_args(args) -> None:
 def test_parse_eval_now_requires_utc_offset() -> None:
     with pytest.raises(ValueError, match="UTC offset"):
         parse_eval_now("2026-05-06T12:00:00")
+
+
+def test_source_eval_issue_preserves_public_class_identity() -> None:
+    issue = source_eval.AiBriefSourceEvalIssue(
+        ticker="AAPL.NAS",
+        code="feed_warning",
+        severity="WARN",
+        message="feed skipped",
+    )
+
+    assert issue.__class__.__module__ == "sab.ai_brief_source_eval"
+    assert issue.__class__.__name__ == "AiBriefSourceEvalIssue"
+    assert repr(issue).startswith("AiBriefSourceEvalIssue(")
+    assert issue.to_dict() == {
+        "ticker": "AAPL.NAS",
+        "code": "feed_warning",
+        "severity": "WARN",
+        "message": "feed skipped",
+    }

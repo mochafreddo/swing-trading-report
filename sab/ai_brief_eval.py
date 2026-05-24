@@ -7,28 +7,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from .ai_brief_eval_common import (
+    AiBriefEvalIssue,
+    AiBriefEvalSeverity,
+    AiBriefEvalStatus,
+)
 from .ai_brief_providers import PRESELECTION_LIMIT
 from .report.ai_brief_report import AiBriefValidationError, validate_ai_brief_artifact
 from .tickers import infer_market_from_ticker
 
-AiBriefRecommendationEvalStatus = Literal["PASS", "WARN", "FAIL"]
-AiBriefRecommendationEvalSeverity = Literal["WARN", "FAIL"]
+AiBriefRecommendationEvalStatus = AiBriefEvalStatus
+AiBriefRecommendationEvalSeverity = AiBriefEvalSeverity
 
 
 @dataclass(frozen=True)
-class AiBriefRecommendationEvalIssue:
-    code: str
-    severity: AiBriefRecommendationEvalSeverity
-    message: str
-    ticker: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "ticker": self.ticker,
-            "code": self.code,
-            "severity": self.severity,
-            "message": self.message,
-        }
+class AiBriefRecommendationEvalIssue(AiBriefEvalIssue):
+    pass
 
 
 @dataclass(frozen=True)
