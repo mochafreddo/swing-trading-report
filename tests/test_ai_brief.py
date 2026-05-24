@@ -1328,6 +1328,27 @@ def test_load_ai_brief_sources_http_json_posts_eligible_tickers_and_normalizes_r
     ]
 
 
+def test_load_ai_brief_sources_http_json_defaults_source_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _HttpJsonSourceSession({"sources": []})
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    load_ai_brief_sources(
+        source_provider="http-json",
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=None,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    _assert_timeout_tuple_not_expired(
+        session.calls[0]["timeout"],
+        requested_timeout_seconds=ai_brief_sources.DEFAULT_SOURCE_TIMEOUT_SECONDS,
+    )
+
+
 def test_load_ai_brief_sources_finnhub_maps_us_tickers_and_normalizes_news(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

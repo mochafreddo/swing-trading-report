@@ -95,6 +95,11 @@ def load_ai_brief_sources(
     if source_provider == SOURCE_PROVIDER_NONE:
         return AiBriefSourceProviderResult()
     resolved_now = now or dt.datetime.now().astimezone()
+    resolved_timeout = (
+        DEFAULT_SOURCE_TIMEOUT_SECONDS
+        if source_timeout_seconds is None
+        else source_timeout_seconds
+    )
     if source_provider == SOURCE_PROVIDER_LOCAL_JSON:
         if source_report_path is None or not source_report_path.strip():
             raise AiBriefSourceProviderError(
@@ -108,71 +113,43 @@ def load_ai_brief_sources(
     if source_provider == SOURCE_PROVIDER_HTTP_JSON:
         return _load_http_json_source_report(
             source_api_url=source_api_url,
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_FINNHUB:
         return _load_finnhub_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_POLYGON_NEWS:
         return _load_polygon_news_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS:
         return _load_alpha_vantage_news_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_MARKETAUX_NEWS:
         return _load_marketaux_news_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_BENZINGA_NEWS:
         return _load_benzinga_news_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             now=resolved_now,
         )
     if source_provider == SOURCE_PROVIDER_NAVER_NEWS:
         return _load_naver_news_source_report(
-            source_timeout_seconds=(
-                DEFAULT_SOURCE_TIMEOUT_SECONDS
-                if source_timeout_seconds is None
-                else source_timeout_seconds
-            ),
+            source_timeout_seconds=resolved_timeout,
             eligible_tickers=eligible_tickers,
             ticker_names=ticker_names or {},
             now=resolved_now,
