@@ -2,6 +2,7 @@ import {
   ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
   isAddBuyIdempotencyPayloadMismatchMessage,
 } from "@/lib/add-buy-idempotency";
+import { toErrorMessage } from "@/lib/error-utils";
 
 const IDEMPOTENCY_MISMATCH_HINT =
   "요청 충돌이 감지되어 새 Idempotency-Key를 자동 발급했습니다. 다시 시도하세요.";
@@ -57,7 +58,7 @@ function readErrorCode(error: unknown): string | null {
 export function resolveAddBuySubmitError(
   error: unknown,
 ): AddBuySubmitErrorResolution {
-  const baseMessage = error instanceof Error ? error.message : "Add buy failed";
+  const baseMessage = toErrorMessage(error, "Add buy failed");
   const errorCode = readErrorCode(error);
   const shouldRotateIdempotencyKey =
     errorCode === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE ||

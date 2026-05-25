@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import { InvalidReportKeyError, readReportDetail } from "@/lib/reports-data";
 import { reportDetailQuerySchema } from "@/lib/schemas";
 import { SupabaseApiError } from "@/lib/supabase-admin";
@@ -60,7 +61,6 @@ export async function GET(request: NextRequest) {
       return jsonWithNoStore({ error: "Report not found" }, { status: 404 });
     }
 
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return jsonWithNoStore({ error: message }, { status: 500 });
+    return jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

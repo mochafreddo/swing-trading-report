@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import { tickerSearchQuerySchema } from "@/lib/schemas";
 import { searchTickerDirectory } from "@/lib/ticker-directory";
 
@@ -34,7 +35,6 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

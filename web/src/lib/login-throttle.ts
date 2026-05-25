@@ -1,3 +1,4 @@
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   consumeLoginThrottleAttempt,
   deleteRuntimeStateEntry,
@@ -332,7 +333,7 @@ function logLoginThrottleDegraded(
       : typeof error === "object"
         ? "UnknownError"
         : typeof error;
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorMessage = toErrorMessage(error, String(error));
   console.warn(
     JSON.stringify({
       event: "login_throttle_degraded",

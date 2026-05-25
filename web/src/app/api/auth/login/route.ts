@@ -5,6 +5,7 @@ import {
   ADMIN_SESSION_COOKIE_NAME,
   getAdminSessionCookieOptions,
 } from "@/lib/admin-session";
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
@@ -51,8 +52,7 @@ export async function POST(request: NextRequest) {
         { status: error.status },
       );
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 
   let payload: unknown;
@@ -95,7 +95,6 @@ export async function POST(request: NextRequest) {
     );
     return response;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
@@ -45,8 +46,7 @@ export function toAdminApiGuardErrorResponse(
     return json({ error: error.message }, { status: error.status });
   }
 
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return json({ error: message }, { status: 500 });
+  return json({ error: toErrorMessage(error) }, { status: 500 });
 }
 
 export async function enforceAdminApiGuard(

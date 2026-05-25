@@ -1,4 +1,5 @@
 import { getSupabaseEnv } from "@/lib/env.server";
+import { toErrorMessage } from "@/lib/error-utils";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
 import { parseReportStorageKey } from "@/lib/report-key";
 import {
@@ -51,10 +52,9 @@ function toReportListItem(
 }
 
 function buildPartialFailureWarning(error: unknown): ReportSearchWarning {
-  const message = error instanceof Error ? error.message : "Unknown error";
   return {
     code: "partial_failure",
-    message: `검색 중 일부 인덱스 페이지를 불러오지 못했습니다: ${message}`,
+    message: `검색 중 일부 인덱스 페이지를 불러오지 못했습니다: ${toErrorMessage(error)}`,
   };
 }
 

@@ -3,6 +3,7 @@ import {
   validateAdminCredentials,
 } from "@/lib/admin-auth";
 import { createAdminSessionToken } from "@/lib/admin-session";
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   assertLoginAttemptAllowed,
   buildGlobalLoginThrottleKey,
@@ -31,9 +32,8 @@ async function clearLoginThrottleKeysBestEffort(
     try {
       await clearLoginAttemptFailures(throttleKey);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
       console.warn(
-        `Failed to clear login throttle state after successful login: ${message}`,
+        `Failed to clear login throttle state after successful login: ${toErrorMessage(error)}`,
       );
     }
   }

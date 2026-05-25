@@ -1,6 +1,7 @@
 "use server";
 
 import { requireAdminActionSession } from "@/lib/admin-action-auth";
+import { toErrorMessage } from "@/lib/error-utils";
 import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
 import {
   isScanUniverseAllowed,
@@ -30,7 +31,7 @@ export async function dispatchRunAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: toErrorMessage(error),
     };
   }
 
@@ -88,7 +89,7 @@ export async function dispatchRunAction(
 
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: toErrorMessage(error),
     };
   }
 }

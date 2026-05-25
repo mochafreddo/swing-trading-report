@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
+import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import { holdingAddBuySchema, holdingTickerSchema } from "@/lib/schemas";
@@ -121,7 +122,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: error.status },
       );
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

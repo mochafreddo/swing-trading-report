@@ -2,6 +2,7 @@
 
 import { requireAdminActionSession } from "@/lib/admin-action-auth";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
+import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import {
@@ -47,7 +48,7 @@ function parseTicker(ticker: string): string | null {
 function toUnknownError(error: unknown): HoldingsActionResult {
   return {
     ok: false,
-    error: error instanceof Error ? error.message : "Unknown error",
+    error: toErrorMessage(error),
   };
 }
 

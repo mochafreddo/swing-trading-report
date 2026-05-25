@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { logoutAction } from "@/app/actions/auth";
+import { toErrorMessage } from "@/lib/error-utils";
 
 import styles from "./main-nav.module.css";
 
@@ -36,9 +37,7 @@ export function MainNav() {
       router.replace("/login");
       router.refresh();
     } catch (error) {
-      setLogoutError(
-        error instanceof Error ? error.message : "Sign out failed",
-      );
+      setLogoutError(toErrorMessage(error, "Sign out failed"));
     } finally {
       setLoggingOut(false);
     }

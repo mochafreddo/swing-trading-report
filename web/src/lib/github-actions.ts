@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getGitHubEnv } from "@/lib/env.server";
+import { toErrorMessage } from "@/lib/error-utils";
 import { FetchTimeoutError, fetchWithTimeout } from "@/lib/fetch-timeout";
 import {
   claimRuntimeStateLock,
@@ -114,7 +115,7 @@ async function releaseRunDispatchLock(lock: DispatchLockHandle): Promise<void> {
   try {
     await releaseRuntimeStateLock(lock);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error, String(error));
     console.warn(
       JSON.stringify({
         event: "run_dispatch_lock_release_failed",

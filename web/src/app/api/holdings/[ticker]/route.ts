@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { holdingPatchSchema, holdingTickerSchema } from "@/lib/schemas";
 import {
@@ -73,8 +74,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         { status: error.status },
       );
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -103,7 +103,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         { status: error.status },
       );
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

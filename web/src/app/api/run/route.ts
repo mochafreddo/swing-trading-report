@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
 import {
   isScanUniverseAllowed,
@@ -87,7 +88,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

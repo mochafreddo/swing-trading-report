@@ -1,5 +1,6 @@
 import "server-only";
 
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   fetchReportIndexPage,
   type ReportIndexRow,
@@ -209,11 +210,9 @@ async function loadPanelState(
       error: null,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown metrics loading error";
     return {
       panel: null,
-      error: message,
+      error: toErrorMessage(error, "Unknown metrics loading error"),
     };
   }
 }

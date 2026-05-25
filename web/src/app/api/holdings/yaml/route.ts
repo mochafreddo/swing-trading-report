@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import {
   buildHoldingsYamlDocument,
   buildHoldingsYamlImportSummary,
@@ -17,10 +18,6 @@ import type { HoldingsYamlImportResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function toUnknownErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown error";
-}
 
 export async function GET(request: NextRequest) {
   const guardError = await enforceAdminApiGuard(request);
@@ -46,10 +43,7 @@ export async function GET(request: NextRequest) {
         { status: error.status },
       );
     }
-    return NextResponse.json(
-      { error: toUnknownErrorMessage(error) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -126,9 +120,6 @@ export async function POST(request: NextRequest) {
         { status: error.status },
       );
     }
-    return NextResponse.json(
-      { error: toUnknownErrorMessage(error) },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 }

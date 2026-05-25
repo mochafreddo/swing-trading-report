@@ -8,6 +8,7 @@ import {
   ADMIN_SESSION_COOKIE_NAME,
   getAdminSessionCookieOptions,
 } from "@/lib/admin-session";
+import { toErrorMessage } from "@/lib/error-utils";
 
 export type AuthActionResult =
   | {
@@ -47,7 +48,7 @@ export async function loginAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: toErrorMessage(error),
     };
   }
 }
@@ -66,7 +67,7 @@ export async function logoutAction(): Promise<AuthActionResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: toErrorMessage(error),
     };
   }
 }

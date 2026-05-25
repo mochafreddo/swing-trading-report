@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import { toErrorMessage } from "@/lib/error-utils";
 import { listReports } from "@/lib/reports-data";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
 import { reportListQuerySchema } from "@/lib/schemas";
@@ -62,7 +63,6 @@ export async function GET(request: NextRequest) {
     });
     return jsonWithNoStore(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return jsonWithNoStore({ error: message }, { status: 500 });
+    return jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 });
   }
 }
