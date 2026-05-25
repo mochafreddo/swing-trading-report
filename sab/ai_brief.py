@@ -7,6 +7,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from .ai_brief_eval_common import normalize_market
 from .ai_brief_providers import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
     MODEL_PROVIDER_FAKE,
@@ -80,17 +81,6 @@ _FIXED_API_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
-
-
-def _normalize_market(value: str | None) -> str | None:
-    if value is None:
-        return None
-    market = value.strip().upper()
-    if not market:
-        return None
-    if market not in _ALLOWED_MARKETS:
-        raise ValueError("market must be KR or US")
-    return market
 
 
 def _normalize_model_provider(value: str | None) -> str:
@@ -454,7 +444,7 @@ def run_ai_brief(
 ) -> int:
     try:
         source_api_url_input = str(source_api_url or "").strip() or None
-        normalized_market = _normalize_market(market)
+        normalized_market = normalize_market(market)
         normalized_model_provider = _normalize_model_provider(model_provider)
         normalized_model_name = _normalize_model_name(
             provider=normalized_model_provider,

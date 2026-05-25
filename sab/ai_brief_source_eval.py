@@ -9,6 +9,8 @@ from .ai_brief_eval_common import (
     AiBriefEvalIssue,
     AiBriefEvalSeverity,
     AiBriefEvalStatus,
+    normalize_market,
+    optional_text,
 )
 from .ai_brief_sources import (
     SOURCE_PROVIDER_LOCAL_JSON,
@@ -64,7 +66,7 @@ def evaluate_ai_brief_source_report(
 ) -> AiBriefSourceEvalResult:
     if minimum_coverage_ratio < 0 or minimum_coverage_ratio > 1:
         raise ValueError("minimum_coverage_ratio must be between 0 and 1")
-    normalized_market = _normalize_market(market)
+    normalized_market = normalize_market(market)
     resolved_now = now or dt.datetime.now().astimezone()
     eligible_tickers, entry_issue = _load_eligible_tickers(
         entry_report_path,
@@ -304,17 +306,6 @@ def _load_eligible_tickers(
     return tickers, None
 
 
-def _normalize_market(value: str | None) -> str | None:
-    if value is None:
-        return None
-    market = value.strip().upper()
-    if not market:
-        return None
-    if market not in {"KR", "US"}:
-        raise ValueError("market must be KR or US")
-    return market
-
-
 def _source_issues(rows: list[dict[str, object]]) -> list[AiBriefSourceEvalIssue]:
     issues: list[AiBriefSourceEvalIssue] = []
     for row in rows:
@@ -324,7 +315,7 @@ def _source_issues(rows: list[dict[str, object]]) -> list[AiBriefSourceEvalIssue
         )
         issues.append(
             AiBriefSourceEvalIssue(
-                ticker=_optional_text(row.get("ticker")),
+                ticker=optional_text(row.get("ticker")),
                 code=str(row.get("code") or "source_issue").strip(),
                 severity=eval_severity,
                 message=str(row.get("message") or "").strip(),
@@ -433,13 +424,6 @@ def _summary_number(summary: object, key: str) -> float:
     if isinstance(value, int | float):
         return float(value)
     return 0.0
-
-
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 def parse_eval_now(value: str) -> dt.datetime:

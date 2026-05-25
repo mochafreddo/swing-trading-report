@@ -8,6 +8,7 @@ from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
+from .ai_brief_eval_common import string_list
 from .ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
     is_ai_brief_source_future,
@@ -378,8 +379,8 @@ def _normalize_openai_provider_result(
                 "confidence": str(
                     raw_recommendation.get("confidence") or "LOW"
                 ).upper(),
-                "rationale": _string_list(raw_recommendation.get("rationale")),
-                "checklist": _string_list(raw_recommendation.get("checklist")),
+                "rationale": string_list(raw_recommendation.get("rationale")),
+                "checklist": string_list(raw_recommendation.get("checklist")),
                 "sources": _canonicalize_provider_sources(
                     _as_provider_mapping_rows(
                         raw_recommendation.get("sources"), field_name="sources"
@@ -572,8 +573,8 @@ def _validate_provider_result_contract(
             raise AiBriefProviderContractError(
                 "OpenAI output recommendations[].confidence must be LOW, MEDIUM, or HIGH"
             )
-        rationale = _string_list(recommendation.get("rationale"))
-        checklist = _string_list(recommendation.get("checklist"))
+        rationale = string_list(recommendation.get("rationale"))
+        checklist = string_list(recommendation.get("checklist"))
         if not rationale:
             raise AiBriefProviderContractError(
                 "OpenAI output recommendations[].rationale is required"
@@ -645,12 +646,6 @@ def _validate_provider_vetoed_candidates(
 
 def _offset_now_iso() -> str:
     return dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _candidate_sources(candidate: Mapping[str, object]) -> list[dict[str, object]]:

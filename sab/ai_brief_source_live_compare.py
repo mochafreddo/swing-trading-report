@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from .ai_brief_eval_common import normalize_market
 from .ai_brief_source_eval import compare_ai_brief_source_reports
 from .ai_brief_sources import (
     SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
@@ -165,7 +166,7 @@ def compare_ai_brief_live_sources(
         source_timeout_seconds
     )
     resolved_now = now or dt.datetime.now().astimezone()
-    normalized_market = _normalize_market(market)
+    normalized_market = normalize_market(market)
     eligible_tickers = _load_eligible_tickers(
         entry_report_path,
         market=normalized_market,
@@ -590,17 +591,6 @@ def _load_buy_ticker_names(
         if ticker in eligible_tickers and name:
             ticker_names[ticker] = name
     return ticker_names
-
-
-def _normalize_market(value: str | None) -> str | None:
-    if value is None:
-        return None
-    market = value.strip().upper()
-    if not market:
-        return None
-    if market not in _ALLOWED_MARKETS:
-        raise ValueError("market must be KR or US")
-    return market
 
 
 def _resolve_target_market(

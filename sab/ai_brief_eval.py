@@ -11,6 +11,9 @@ from .ai_brief_eval_common import (
     AiBriefEvalIssue,
     AiBriefEvalSeverity,
     AiBriefEvalStatus,
+    normalize_market,
+    optional_text,
+    string_list,
 )
 from .ai_brief_providers import PRESELECTION_LIMIT
 from .report.ai_brief_report import AiBriefValidationError, validate_ai_brief_artifact
@@ -84,7 +87,7 @@ def evaluate_ai_brief_recommendation_report(
             )
         )
 
-    normalized_market = _normalize_market(market)
+    normalized_market = normalize_market(market)
     entry_context, entry_issue = _load_entry_context(
         entry_report_path,
         market=normalized_market,
@@ -101,7 +104,7 @@ def evaluate_ai_brief_recommendation_report(
     )
     source_issues = _mapping_rows(ai_brief_report.get("source_issues"))
     system_issues = _mapping_rows(ai_brief_report.get("system_issues"))
-    eligible_tickers = _string_list(ai_brief_report.get("eligible_tickers"))
+    eligible_tickers = string_list(ai_brief_report.get("eligible_tickers"))
 
     issues: list[AiBriefRecommendationEvalIssue] = []
     report_market = str(ai_brief_report.get("market") or "").strip().upper()
@@ -482,7 +485,7 @@ def _reported_issue_issues(
     issues: list[AiBriefRecommendationEvalIssue] = []
     for row in rows:
         severity = str(row.get("severity") or "").strip().upper()
-        ticker = _optional_text(row.get("ticker"))
+        ticker = optional_text(row.get("ticker"))
         if severity == "ERROR":
             issues.append(
                 AiBriefRecommendationEvalIssue(
@@ -543,40 +546,16 @@ def _status_from_issues(
     return "PASS"
 
 
-def _normalize_market(value: str | None) -> str | None:
-    if value is None:
-        return None
-    market = value.strip().upper()
-    if not market:
-        return None
-    if market not in {"KR", "US"}:
-        raise ValueError("market must be KR or US")
-    return market
-
-
 def _mapping_rows(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(row) for row in value if isinstance(row, Mapping)]
 
 
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
 def _int_value(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
-
-
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 def parse_eval_now(value: str) -> dt.datetime:
