@@ -5,6 +5,12 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from ..ai_brief_eval_common import (
+    ALLOWED_CONFIDENCE,
+    ALLOWED_ISSUE_SEVERITY,
+    ALLOWED_MARKETS,
+    parse_iso_offset_datetime,
+)
 from ..ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
     is_ai_brief_source_future,
@@ -22,10 +28,7 @@ _ARTIFACT_SCHEMA = "sab.ai_brief.v1"
 _REPORT_TYPE = "ai_brief"
 _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
-_ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
-_ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
-_ALLOWED_ISSUE_SEVERITY = frozenset({"INFO", "WARN", "ERROR"})
 _AUTOMATED_ORDER_PHRASES = (
     "buy now",
     "execute order",
@@ -69,18 +72,14 @@ def _offset_iso(now: dt.datetime | None = None) -> str:
 
 
 def _parse_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
-    text = str(value or "").strip()
-    if not text:
-        raise AiBriefValidationError(f"{field_name} must be an offset datetime")
     try:
-        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parse_iso_offset_datetime(
+            value,
+            field_name=field_name,
+            empty_message=f"{field_name} must be an offset datetime",
+        )
     except ValueError as exc:
-        raise AiBriefValidationError(
-            f"{field_name} must be an ISO 8601 datetime"
-        ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise AiBriefValidationError(f"{field_name} must include a UTC offset")
-    return parsed
+        raise AiBriefValidationError(str(exc)) from exc
 
 
 def _report_date_from_generated_at(
@@ -119,10 +118,10 @@ def _validate_issue_list(payload: Mapping[str, Any], field_name: str) -> None:
             raise AiBriefValidationError(f"{field_name}[{idx}].code is required")
         if not message:
             raise AiBriefValidationError(f"{field_name}[{idx}].message is required")
-        if severity not in _ALLOWED_ISSUE_SEVERITY:
+        if severity not in ALLOWED_ISSUE_SEVERITY:
             raise AiBriefValidationError(
                 f"{field_name}[{idx}].severity must be one of "
-                f"{sorted(_ALLOWED_ISSUE_SEVERITY)}"
+                f"{sorted(ALLOWED_ISSUE_SEVERITY)}"
             )
 
 
@@ -240,10 +239,10 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
         if str(recommendation.get("action") or "").strip().upper() != "ENTER":
             raise AiBriefValidationError("recommendations[].action must be ENTER")
         confidence = str(recommendation.get("confidence") or "").strip().upper()
-        if confidence not in _ALLOWED_CONFIDENCE:
+        if confidence not in ALLOWED_CONFIDENCE:
             raise AiBriefValidationError(
                 "recommendations[].confidence must be one of "
-                f"{sorted(_ALLOWED_CONFIDENCE)}"
+                f"{sorted(ALLOWED_CONFIDENCE)}"
             )
         _parse_offset_datetime(
             recommendation.get("as_of"),
@@ -311,10 +310,8 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
     _parse_offset_datetime(payload.get("generated_at"), field_name="generated_at")
 
     market = str(payload.get("market") or "").strip().upper()
-    if market not in _ALLOWED_MARKETS:
-        raise AiBriefValidationError(
-            f"market must be one of {sorted(_ALLOWED_MARKETS)}"
-        )
+    if market not in ALLOWED_MARKETS:
+        raise AiBriefValidationError(f"market must be one of {sorted(ALLOWED_MARKETS)}")
     if str(payload.get("model_provider") or "").strip() not in _ALLOWED_MODEL_PROVIDERS:
         raise AiBriefValidationError(
             f"model_provider must be one of {sorted(_ALLOWED_MODEL_PROVIDERS)}"

@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import requests  # type: ignore[import-untyped]
 
 from . import ai_brief_url_safety as url_safety
+from .ai_brief_eval_common import parse_iso_offset_datetime
 from .tickers import parse_ticker
 
 SOURCE_PROVIDER_NONE = "none"
@@ -1599,16 +1600,7 @@ def _normalize_source_row(
 
 
 def _parse_offset_datetime(value: object) -> dt.datetime:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError("published_at is required")
-    try:
-        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("published_at must be an ISO 8601 datetime") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("published_at must include a UTC offset")
-    return parsed
+    return parse_iso_offset_datetime(value, field_name="published_at")
 
 
 def validate_ai_brief_source_url(value: object, *, field_name: str = "url") -> str:

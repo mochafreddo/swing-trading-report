@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .ai_brief_eval_common import normalize_market
+from .ai_brief_eval_common import ALLOWED_MARKETS, normalize_market
 from .ai_brief_source_eval import compare_ai_brief_source_reports
 from .ai_brief_sources import (
     SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
@@ -42,7 +42,6 @@ _LIVE_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
-_ALLOWED_MARKETS = frozenset({"KR", "US"})
 
 
 @dataclass(frozen=True)
@@ -603,7 +602,7 @@ def _resolve_target_market(
         if market_override is None:
             raise ValueError("MIXED entry report requires --market KR or --market US")
         return market_override
-    if report_market_text in _ALLOWED_MARKETS:
+    if report_market_text in ALLOWED_MARKETS:
         if market_override is not None and market_override != report_market_text:
             raise ValueError(
                 f"--market {market_override} does not match entry report "

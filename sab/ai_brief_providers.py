@@ -8,7 +8,12 @@ from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
-from .ai_brief_eval_common import string_list
+from .ai_brief_eval_common import (
+    ALLOWED_CONFIDENCE,
+    ALLOWED_ISSUE_SEVERITY,
+    parse_iso_offset_datetime,
+    string_list,
+)
 from .ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
     is_ai_brief_source_future,
@@ -23,8 +28,6 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 PRESELECTION_LIMIT = 5
 RECOMMENDATION_LIMIT = 3
 
-_ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
-_ALLOWED_ISSUE_SEVERITY = frozenset({"INFO", "WARN", "ERROR"})
 _MAX_SOURCES_PER_TICKER = 3
 _AUTOMATED_ORDER_PHRASES = (
     "buy now",
@@ -467,20 +470,12 @@ def _source_rows_by_ticker(
 
 
 def _parse_provider_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
-    text = str(value or "").strip()
-    if not text:
-        raise AiBriefProviderContractError(f"OpenAI output {field_name} is required")
     try:
-        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise AiBriefProviderContractError(
-            f"OpenAI output {field_name} must be an ISO 8601 datetime"
-        ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise AiBriefProviderContractError(
-            f"OpenAI output {field_name} must include a UTC offset"
+        return parse_iso_offset_datetime(
+            value, field_name=f"OpenAI output {field_name}"
         )
-    return parsed
+    except ValueError as exc:
+        raise AiBriefProviderContractError(str(exc)) from exc
 
 
 def _validate_provider_sources(
@@ -569,7 +564,7 @@ def _validate_provider_result_contract(
             )
         seen_ranks.add(rank)
         confidence = str(recommendation.get("confidence") or "").strip().upper()
-        if confidence not in _ALLOWED_CONFIDENCE:
+        if confidence not in ALLOWED_CONFIDENCE:
             raise AiBriefProviderContractError(
                 "OpenAI output recommendations[].confidence must be LOW, MEDIUM, or HIGH"
             )
@@ -612,7 +607,7 @@ def _validate_provider_issue_list(source_issues: list[dict[str, object]]) -> Non
                 f"OpenAI output source_issues[{idx}].message is required"
             )
         severity = str(issue.get("severity") or "").strip().upper()
-        if severity not in _ALLOWED_ISSUE_SEVERITY:
+        if severity not in ALLOWED_ISSUE_SEVERITY:
             raise AiBriefProviderContractError(
                 "OpenAI output source_issues[].severity must be INFO, WARN, or ERROR"
             )

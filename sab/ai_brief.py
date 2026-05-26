@@ -7,7 +7,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-from .ai_brief_eval_common import normalize_market
+from .ai_brief_eval_common import ALLOWED_MARKETS, normalize_market
 from .ai_brief_providers import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
     MODEL_PROVIDER_FAKE,
@@ -45,7 +45,6 @@ _MODEL_PROVIDER_OPENAI = MODEL_PROVIDER_OPENAI
 _DEFAULT_MODEL_NAME = "fake-ai-brief-v1"
 _DEFAULT_MODEL_TIMEOUT_SECONDS = DEFAULT_MODEL_TIMEOUT_SECONDS
 _PRESELECTION_LIMIT = PRESELECTION_LIMIT
-_ALLOWED_MARKETS = frozenset({"KR", "US"})
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
 _ALLOWED_SOURCE_PROVIDERS = frozenset(
     {
@@ -216,7 +215,7 @@ def _resolve_target_market(
         if market_override is None:
             raise ValueError("MIXED entry report requires --market KR or --market US")
         return market_override
-    if market not in _ALLOWED_MARKETS:
+    if market not in ALLOWED_MARKETS:
         raise ValueError("entry report market must be KR, US, or MIXED")
     if market_override is not None and market_override != market:
         raise ValueError(
