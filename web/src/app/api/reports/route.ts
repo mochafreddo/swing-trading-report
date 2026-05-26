@@ -1,29 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { toErrorMessage } from "@/lib/error-utils";
 import { listReports } from "@/lib/reports-data";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
 import { reportListQuerySchema } from "@/lib/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const REPORTS_CACHE_CONTROL = "private, no-store, max-age=0, must-revalidate";
-
-function jsonWithNoStore(
-  payload: unknown,
-  init?: {
-    status?: number;
-    headers?: HeadersInit;
-  },
-): NextResponse {
-  const headers = new Headers(init?.headers);
-  headers.set("Cache-Control", REPORTS_CACHE_CONTROL);
-  return NextResponse.json(payload, {
-    status: init?.status,
-    headers,
-  });
-}
 
 export async function GET(request: NextRequest) {
   const guardError = await enforceAdminApiGuard(request, jsonWithNoStore);
