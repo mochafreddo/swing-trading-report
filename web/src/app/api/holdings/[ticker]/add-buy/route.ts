@@ -5,6 +5,7 @@ import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingAddBuySchema, holdingTickerSchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
@@ -60,17 +61,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsed = holdingAddBuySchema.safeParse(payload);
+  const parsed = holdingAddBuySchema.safeParse(body.payload);
   if (!parsed.success) {
     return NextResponse.json(
       {

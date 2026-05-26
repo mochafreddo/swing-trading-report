@@ -6,6 +6,7 @@ import {
   decodeHoldingCursor,
   HoldingCursorError,
 } from "@/lib/holdings-pagination";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingCreateSchema, holdingListQuerySchema } from "@/lib/schemas";
 import {
   createHolding,
@@ -69,17 +70,12 @@ export async function POST(request: NextRequest) {
     return guardError;
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsed = holdingCreateSchema.safeParse(payload);
+  const parsed = holdingCreateSchema.safeParse(body.payload);
   if (!parsed.success) {
     return NextResponse.json(
       {

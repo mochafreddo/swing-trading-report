@@ -10,6 +10,7 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
@@ -55,17 +56,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsed = parseLoginPayload(payload);
+  const parsed = parseLoginPayload(body.payload);
   if (!parsed) {
     return NextResponse.json(
       { error: "Invalid login payload" },

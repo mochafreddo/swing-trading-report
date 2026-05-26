@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { toErrorMessage } from "@/lib/error-utils";
 import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import {
   isScanUniverseAllowed,
   PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
@@ -18,17 +19,12 @@ export async function POST(request: NextRequest) {
     return guardError;
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsed = runDispatchSchema.safeParse(payload);
+  const parsed = runDispatchSchema.safeParse(body.payload);
   if (!parsed.success) {
     const details = parsed.error.flatten();
     const firstMessage = parsed.error.issues.find(

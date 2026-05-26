@@ -8,6 +8,7 @@ import {
   HoldingsYamlError,
   parseHoldingsYamlDocument,
 } from "@/lib/holdings-yaml";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingYamlImportRequestSchema } from "@/lib/schemas";
 import {
   fetchAllHoldings,
@@ -53,17 +54,12 @@ export async function POST(request: NextRequest) {
     return guardError;
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsedRequest = holdingYamlImportRequestSchema.safeParse(payload);
+  const parsedRequest = holdingYamlImportRequestSchema.safeParse(body.payload);
   if (!parsedRequest.success) {
     return NextResponse.json(
       {

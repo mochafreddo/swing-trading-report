@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingPatchSchema, holdingTickerSchema } from "@/lib/schemas";
 import {
   deleteHolding,
@@ -40,17 +41,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON" },
-      { status: 400 },
-    );
+  const body = await parseJsonBody(request);
+  if (!body.ok) {
+    return body.response;
   }
 
-  const parsed = holdingPatchSchema.safeParse(payload);
+  const parsed = holdingPatchSchema.safeParse(body.payload);
   if (!parsed.success) {
     return NextResponse.json(
       {
