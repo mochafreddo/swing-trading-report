@@ -4,8 +4,8 @@ on:
   schedule:
     # KR pre-open, 07:30 KST Monday-Friday.
     - cron: "30 22 * * 0-4"
-    # US pre-open, 07:30/08:30 ET Monday-Friday depending on DST.
-    - cron: "30 12 * * 1-5"
+    # US pre-open, 07:07/08:07 ET Monday-Friday depending on DST.
+    - cron: "7 12 * * 1-5"
   workflow_dispatch:
     inputs:
       market:
@@ -169,7 +169,7 @@ jobs:
             is_schedule="true"
             case "${EVENT_SCHEDULE}" in
               "30 22 * * 0-4") scheduled_market="KR" ;;
-              "30 12 * * 1-5") scheduled_market="US" ;;
+              "7 12 * * 1-5") scheduled_market="US" ;;
               *)
                 echo "Unsupported AI brief schedule: ${EVENT_SCHEDULE}" >&2
                 exit 1
@@ -438,6 +438,7 @@ jobs:
           zone_name = "Asia/Seoul" if market == "KR" else "America/New_York"
           now = dt.datetime.now(dt.UTC)
           local_now = now.astimezone(ZoneInfo(zone_name))
+          local_time = local_now.isoformat()
           session_date = local_now.date()
           state_map = resolve_run_session_state_map(
               markets=[market],
@@ -457,6 +458,7 @@ jobs:
               out.write(f"session_state={session_state}\n")
               out.write(f"session_date={session_date.isoformat()}\n")
               out.write(f"trading_session={str(trading_session).lower()}\n")
+              out.write(f"local_time={local_time}\n")
 
           if should_run:
               print(
@@ -467,7 +469,8 @@ jobs:
               print(
                   "Skipping scheduled AI brief: "
                   f"market={market} state={session_state} "
-                  f"date={session_date} trading_session={trading_session}"
+                  f"date={session_date} trading_session={trading_session} "
+                  f"local_time={local_time}"
               )
           PY
 
@@ -478,6 +481,8 @@ jobs:
           SESSION_STATE: ${{ steps.schedule_guard.outputs.session_state }}
           SESSION_DATE: ${{ steps.schedule_guard.outputs.session_date }}
           TRADING_SESSION: ${{ steps.schedule_guard.outputs.trading_session }}
+          EXPECTED_STATE: ${{ steps.params.outputs.entry_mode }}
+          LOCAL_TIME: ${{ steps.schedule_guard.outputs.local_time }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -495,6 +500,8 @@ jobs:
               market=os.environ["MARKET"],
               session_state=os.environ["SESSION_STATE"],
               session_date=os.environ["SESSION_DATE"],
+              expected_state=os.environ["EXPECTED_STATE"],
+              local_time=os.environ["LOCAL_TIME"],
               trading_session=os.environ["TRADING_SESSION"],
               run_url=run_url,
           )

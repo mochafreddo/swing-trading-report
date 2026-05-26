@@ -813,22 +813,42 @@ def test_build_ai_brief_slack_summary_text_falls_back_to_top_level_counts() -> N
     ]
 
 
-def test_build_ai_brief_skipped_telegram_text_explains_not_preopen() -> None:
+def test_build_ai_brief_skipped_telegram_text_explains_delayed_preopen() -> None:
     text = build_ai_brief_skipped_telegram_text(
         market="US",
-        session_state="REGULAR",
+        session_state="INTRADAY",
         session_date="2026-05-22",
+        expected_state="PRE_OPEN",
+        local_time="2026-05-22T09:33:17-04:00",
         trading_session="true",
         run_url="https://github.com/example/repo/actions/runs/800",
     )
 
     assert "[SAB][ai-brief][skipped]" in text
     assert "market=US" in text
-    assert "session_state=REGULAR" in text
+    assert "session_state=INTRADAY" in text
+    assert "expected_state=PRE_OPEN" in text
     assert "session_date=2026-05-22" in text
+    assert "local_time=2026-05-22T09:33:17-04:00" in text
+    assert "trading_session=true" in text
+    assert "GitHub scheduled run이 장전 window 이후 실행되어 AI Brief 건너뜀" in text
+    assert "reason=scheduled_run_after_pre_open_window" in text
+    assert text.endswith("run_url=https://github.com/example/repo/actions/runs/800")
+
+
+def test_build_ai_brief_skipped_telegram_text_explains_wrong_session_state() -> None:
+    text = build_ai_brief_skipped_telegram_text(
+        market="US",
+        session_state="AFTER_CLOSE",
+        session_date="2026-05-22",
+        expected_state="PRE_OPEN",
+        trading_session="true",
+        run_url="https://github.com/example/repo/actions/runs/802",
+    )
+
     assert "trading_session=true" in text
     assert "장전 시간이 아니라 AI Brief 건너뜀" in text
-    assert text.endswith("run_url=https://github.com/example/repo/actions/runs/800")
+    assert "reason=scheduled_run_after_pre_open_window" not in text
 
 
 def test_build_ai_brief_skipped_telegram_text_explains_non_trading_session() -> None:

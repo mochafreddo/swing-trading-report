@@ -13,6 +13,7 @@ from .ai_brief_state import (
 )
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
+_TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -632,32 +633,50 @@ def build_ai_brief_skipped_telegram_text(
     session_state: str,
     session_date: str,
     run_url: str,
+    expected_state: str | None = None,
+    local_time: str | None = None,
     trading_session: object | None = None,
 ) -> str:
+    session_state_text = _safe_str(session_state, default="-")
+    expected_state_text = _safe_str(expected_state)
+    local_time_text = _safe_str(local_time)
     trading_session_text = _safe_str(trading_session)
-    if trading_session_text:
-        is_trading_session = trading_session_text.lower() in {
-            "1",
-            "true",
-            "yes",
-            "open",
-        }
+    skip_reason = ""
+    is_trading_session = (
+        trading_session_text.lower() in _TRADING_SESSION_TRUE_TEXT
+        if trading_session_text
+        else None
+    )
+    is_delayed_pre_open = (
+        is_trading_session is True
+        and expected_state_text.upper() == "PRE_OPEN"
+        and session_state_text.upper() == "INTRADAY"
+    )
+
+    if is_delayed_pre_open:
         skip_message = (
-            "장전 시간이 아니라 AI Brief 건너뜀"
-            if is_trading_session
-            else "거래일이 아니라 AI Brief 건너뜀"
+            "GitHub scheduled run이 장전 window 이후 실행되어 AI Brief 건너뜀"
         )
+        skip_reason = "scheduled_run_after_pre_open_window"
+    elif is_trading_session is False:
+        skip_message = "거래일이 아니라 AI Brief 건너뜀"
     else:
         skip_message = "장전 시간이 아니라 AI Brief 건너뜀"
 
     lines = [
         "[SAB][ai-brief][skipped]",
         f"market={_safe_str(market, default='-')}",
-        f"session_state={_safe_str(session_state, default='-')}",
+        f"session_state={session_state_text}",
         f"session_date={_safe_str(session_date, default='-')}",
     ]
+    if expected_state_text:
+        lines.append(f"expected_state={expected_state_text}")
+    if local_time_text:
+        lines.append(f"local_time={local_time_text}")
     if trading_session_text:
         lines.append(f"trading_session={trading_session_text}")
+    if skip_reason:
+        lines.append(f"reason={skip_reason}")
     lines.extend(
         [
             skip_message,

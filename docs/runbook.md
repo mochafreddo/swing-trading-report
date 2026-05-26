@@ -188,9 +188,9 @@
 - AI Brief 수동/scheduled 실행(GitHub Actions)
   - `.github/workflows/ai-brief.yml`은 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다.
   - 단일 `market=KR|US`에 대해 scan → Supabase holdings snapshot → entry → ai-brief를 순서대로 실행합니다.
-  - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `30 12 * * 1-5` UTC에서 시작합니다.
+  - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `7 12 * * 1-5` UTC에서 시작합니다. US schedule은 GitHub Actions 지연 여유를 두기 위해 EDT 08:07 / EST 07:07에 시작합니다.
   - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
-  - scheduled runtime guard가 막은 실행은 Supabase/Reports artifact를 만들지 않고 Actions summary와 Telegram에 skipped 메시지만 남깁니다. 메시지는 장전 외 실행과 비거래일 skip을 구분합니다.
+  - scheduled runtime guard가 막은 실행은 Supabase/Reports artifact를 만들지 않고 Actions summary와 Telegram에 skipped 메시지만 남깁니다. 메시지는 장전 외 실행과 비거래일 skip을 구분하며, 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - scheduled 실행은 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US` repository variable이 있으면 해당 값을 source provider로 사용합니다. 시장별 값이 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. 수동 실행에서는 `source_provider=none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|marketaux-news|benzinga-news|naver-news` 입력을 사용합니다.
   - 2026-05-23 기준 US scheduled default는 `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`입니다. `POLYGON_API_KEY`와 `BENZINGA_API_TOKEN`도 backup/comparison 후보로 구성되어 있지만, Polygon은 현재 evidence set에서 freshness coverage 부족 및 HTTP 429가 확인됐고 Benzinga는 current candidate raw response가 빈 배열이어서 기본값으로 쓰지 않습니다. 장애 시 `AI_BRIEF_SOURCE_PROVIDER_US`를 unset하거나 다른 검증된 US provider로 바꾼 뒤 live comparison과 recommendation eval을 다시 실행합니다.

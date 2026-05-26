@@ -43,7 +43,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     schedule_crons = [item["cron"] for item in schedules]
 
     assert "workflow_dispatch" in triggers
-    assert schedule_crons == ["30 22 * * 0-4", "30 12 * * 1-5"]
+    assert schedule_crons == ["30 22 * * 0-4", "7 12 * * 1-5"]
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
     assert dispatch_inputs["source_provider"]["options"] == [
@@ -96,7 +96,7 @@ def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> N
         == "${{ vars.AI_BRIEF_SOURCE_API_URL_US }}"
     )
     assert '"30 22 * * 0-4") scheduled_market="KR"' in params_script
-    assert '"30 12 * * 1-5") scheduled_market="US"' in params_script
+    assert '"7 12 * * 1-5") scheduled_market="US"' in params_script
     assert 'model_provider="openai"' in params_script
     assert 'send_notifications="true"' in params_script
     assert (
@@ -127,9 +127,11 @@ def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> N
     assert "is_trading_session" in guard_script
     assert "resolve_run_session_state_map" in guard_script
     assert "Skipping scheduled AI brief" in guard_script
+    assert "local_time = local_now.isoformat()" in guard_script
     assert 'out.write(f"trading_session={str(trading_session).lower()}\\n")' in (
         guard_script
     )
+    assert 'out.write(f"local_time={local_time}\\n")' in guard_script
 
     guarded_steps = [
         "Install dependencies",
@@ -250,6 +252,10 @@ def test_ai_brief_workflow_sends_skipped_message_when_schedule_guard_blocks() ->
     )
     assert build_env.get("TRADING_SESSION") == (
         "${{ steps.schedule_guard.outputs.trading_session }}"
+    )
+    assert build_env.get("EXPECTED_STATE") == "${{ steps.params.outputs.entry_mode }}"
+    assert build_env.get("LOCAL_TIME") == (
+        "${{ steps.schedule_guard.outputs.local_time }}"
     )
     assert send_step.get("continue-on-error") is True
     assert "TELEGRAM_BOT_TOKEN" in str(send_env)
