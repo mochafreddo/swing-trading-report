@@ -313,7 +313,7 @@ def _validate_feed_url(
     parsed = urlparse(url)
     if parsed.scheme.lower() != "https":
         raise ValueError("feed URL must use https")
-    port = _validated_url_port(parsed, field_name="feed URL")
+    port = url_safety.validated_url_port(parsed, field_name="feed URL")
     hostname = parsed.hostname or ""
     hostnames = _feed_url_fetch_hostname_aliases(hostname, field_name="feed URL")
     addrinfos = _resolve_feed_url_addrinfos(hostnames, port, deadline=deadline)
@@ -322,10 +322,6 @@ def _validate_feed_url(
         hostnames=hostnames,
         addrinfos=addrinfos,
     )
-
-
-def _validated_url_port(parsed: Any, *, field_name: str) -> int:
-    return url_safety.validated_url_port(parsed, field_name=field_name)
 
 
 def _feed_url_hostname_aliases(hostname: str) -> tuple[str, ...]:
@@ -751,7 +747,7 @@ def _validate_feed_item_url(
     url = validate_ai_brief_source_url(value)
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
-    port = _validated_url_port(parsed, field_name="url")
+    port = url_safety.validated_url_port(parsed, field_name="url")
     hostnames = _feed_url_hostname_aliases(hostname)
     if _is_blocked_feed_item_hostname(hostname):
         raise ValueError("url must not target local or private hosts")

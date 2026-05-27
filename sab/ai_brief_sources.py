@@ -1522,7 +1522,7 @@ def _validate_source_row_url(
     text = validate_ai_brief_source_url(value, field_name=field_name)
     parsed = urlparse(text)
     hostname = parsed.hostname or ""
-    port = _validated_url_port(parsed, field_name=field_name)
+    port = url_safety.validated_url_port(parsed, field_name=field_name)
     hostnames = _source_api_hostname_aliases(hostname)
     if _is_blocked_source_row_hostname(hostname):
         raise ValueError(f"{field_name} must not target local or private hosts")
@@ -1547,7 +1547,7 @@ def _validate_source_api_request_url(
     if parsed.scheme.lower() != "https":
         raise ValueError("source API URL must use https")
     hostname = parsed.hostname or ""
-    port = _validated_url_port(parsed, field_name="source API URL")
+    port = url_safety.validated_url_port(parsed, field_name="source API URL")
     hostnames = _source_api_fetch_hostname_aliases(
         hostname,
         field_name="source API URL",
@@ -1558,10 +1558,6 @@ def _validate_source_api_request_url(
         hostnames=hostnames,
         addrinfos=addrinfos,
     )
-
-
-def _validated_url_port(parsed: Any, *, field_name: str) -> int:
-    return url_safety.validated_url_port(parsed, field_name=field_name)
 
 
 def _source_api_token_for_url(url: str) -> str:
