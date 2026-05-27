@@ -1148,6 +1148,56 @@ def test_swing_breakout_volume_check_uses_pre_breakout_average() -> None:
     assert context["swing_high"] == 101.0
 
 
+def test_swing_breakout_requires_finite_rsi() -> None:
+    settings = _settings(min_history=2)
+    settings.breakout_consolidation_min_bars = 5
+    settings.breakout_consolidation_max_bars = 10
+    settings.volume_lookback_days = 5
+
+    candles = [
+        {
+            "date": f"202501{idx + 1:02d}",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        }
+        for idx in range(5)
+    ]
+    candles.append(
+        {
+            "date": "20250106",
+            "open": 101.0,
+            "high": 103.0,
+            "low": 100.0,
+            "close": 102.0,
+            "volume": 300.0,
+        }
+    )
+
+    closes = [100.0] * (len(candles) - 1) + [102.0]
+    sma_trend = [95.0] * len(candles)
+    ema_short = [101.0] * len(candles)
+    ema_mid = [100.0] * len(candles)
+    rsi_vals = [55.0] * (len(candles) - 1) + [math.nan]
+
+    ok, reasons, pattern, _ = _detect_swing_high_breakout(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+        "USD",
+    )
+
+    assert ok is False
+    assert reasons == ["Indicator data unavailable for breakout"]
+    assert pattern is None
+
+
 def test_hybrid_candidate_formats_usd_price_with_decimals(monkeypatch):
     candles = _simple_candles(10, base=123.45)
     monkeypatch.setattr(

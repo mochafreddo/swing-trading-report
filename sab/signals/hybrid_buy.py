@@ -271,6 +271,15 @@ def _resolve_swing_high_breakout_bar(
 ) -> tuple[bool, list[str], dict[str, Any]]:
     idx = len(closes) - 1
     close = closes[idx]
+    breakout_inputs = (
+        close,
+        ema_short[idx],
+        ema_mid[idx],
+        sma_trend[idx],
+        rsi_vals[idx],
+    )
+    if not all(math.isfinite(value) for value in breakout_inputs):
+        return False, ["Indicator data unavailable for breakout"], {}
     if not (ema_short[idx] > ema_mid[idx] > sma_trend[idx]):
         return False, ["EMAs not aligned for uptrend"], {}
     if rsi_vals[idx] >= 60:
