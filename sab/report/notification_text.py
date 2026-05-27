@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
+from ..utils.numeric import to_int as _safe_int
 from .ai_brief_state import (
     BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
     BRIEF_REASON_WEAK_NEWS_COVERAGE,
@@ -22,19 +23,6 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def _safe_int(value: Any, *, default: int = 0) -> int:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    try:
-        return int(float(str(value).strip()))
-    except TypeError, ValueError:
-        return default
 
 
 def _safe_float(value: Any) -> float | None:

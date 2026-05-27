@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from ..utils.numeric import to_int as _safe_int
+
 BRIEF_STATE_NO_SIGNAL = "NO_SIGNAL"
 BRIEF_STATE_FINAL_JUDGMENT = "FINAL_JUDGMENT"
 BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS = "NEEDS_REVIEW_WEAK_NEWS"
@@ -126,19 +128,6 @@ def _mapping_rows(value: object) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, Mapping)]
-
-
-def _safe_int(value: object, *, default: int = 0) -> int:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    try:
-        return int(float(str(value).strip()))
-    except TypeError, ValueError:
-        return default
 
 
 def _count_with_row_floor(
