@@ -19,7 +19,7 @@ from .data.pykrx_client import (
 from .data.us_calendar import load_us_trading_calendar
 from .fx import SUFFIX_TO_EXCD
 from .market_data_common import Candle
-from .utils.market_time import us_early_close_time
+from .utils.market_time import ensure_aware_now, us_early_close_time
 
 type _LegacyCacheKeysFn = Callable[[str, str, str | None], list[str]]
 
@@ -181,14 +181,6 @@ def _build_cache_key(base_symbol: str, exchange: str | None, *, adjusted: bool) 
     if exchange:
         return f"candles_overseas_{adjusted_prefix}_{exchange}_{base_symbol}"
     return f"candles_{adjusted_prefix}_{base_symbol}"
-
-
-def _ensure_aware_now(now: dt.datetime | None) -> dt.datetime:
-    if now is None:
-        return dt.datetime.now(dt.UTC)
-    if now.tzinfo is None:
-        return now.replace(tzinfo=dt.UTC)
-    return now
 
 
 def _parse_session_date(value: object) -> dt.date | None:
@@ -958,7 +950,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
     if runtime.kis_client is None:
         return
 
-    now = _ensure_aware_now(now_fn() if now_fn else None)
+    now = ensure_aware_now(now_fn() if now_fn else None)
     holiday_dates_by_market: dict[str, set[dt.date]] = {}
 
     for ticker in request.tickers:
@@ -1188,7 +1180,7 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
     if runtime.pykrx_client is None:
         return
 
-    now = _ensure_aware_now(now_fn() if now_fn else None)
+    now = ensure_aware_now(now_fn() if now_fn else None)
     closed_dates = _load_market_holiday_dates(runtime.cfg.data_dir, "KR")
 
     for ticker in request.tickers:

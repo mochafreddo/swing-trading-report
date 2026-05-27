@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 from zoneinfo import ZoneInfo
 
 from ..data.trading_sessions import is_trading_session
-from ..utils.market_time import us_session_info
+from ..utils.market_time import ensure_aware_now, us_session_info
 
 _KR_ZONE = ZoneInfo("Asia/Seoul")
 _US_SESSION_STATE_MAP = {
@@ -15,14 +15,6 @@ _US_SESSION_STATE_MAP = {
     "closed": "AFTER_CLOSE",
 }
 _ALLOWED_SESSION_STATES = {"PRE_OPEN", "INTRADAY", "AFTER_CLOSE"}
-
-
-def _ensure_aware_now(now: dt.datetime | None) -> dt.datetime:
-    if now is None:
-        return dt.datetime.now(dt.UTC)
-    if now.tzinfo is None:
-        return now.replace(tzinfo=dt.UTC)
-    return now
 
 
 def _normalize_markets(markets: Iterable[str] | None) -> list[str]:
@@ -145,7 +137,7 @@ def resolve_run_session_state_map(
     if not normalized_markets:
         return {}
 
-    aware_now = _ensure_aware_now(now)
+    aware_now = ensure_aware_now(now)
     states: dict[str, str] = {}
     for market in normalized_markets:
         if market == "US":

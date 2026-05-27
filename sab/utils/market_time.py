@@ -471,6 +471,20 @@ def _parse_us_early_close_time(note: str | None) -> dt.time | None:
     return selected.parsed_time if selected is not None else None
 
 
+def ensure_aware_now(now: dt.datetime | None) -> dt.datetime:
+    """``now``를 timezone-aware datetime으로 보정한다.
+
+    ``None``이면 현재 UTC 시각을, naive datetime이면 UTC로 간주해 tzinfo를
+    채운다. 이미 aware면 그대로 반환한다.
+    """
+
+    if now is None:
+        return dt.datetime.now(dt.UTC)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=dt.UTC)
+    return now
+
+
 def us_early_close_time(
     session_date: dt.date,
     *,
@@ -562,6 +576,7 @@ __all__ = [
     "STATE_CLOSED",
     "STATE_INTRADAY",
     "STATE_PRE_OPEN",
+    "ensure_aware_now",
     "is_us_market_open",
     "us_early_close_time",
     "us_market_status",

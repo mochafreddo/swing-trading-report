@@ -7,6 +7,7 @@ from sab.utils.market_time import (
     STATE_CLOSED,
     STATE_INTRADAY,
     STATE_PRE_OPEN,
+    ensure_aware_now,
     is_us_market_open,
     us_market_status,
     us_session_info,
@@ -265,3 +266,22 @@ def test_us_early_close_time_reuses_cached_holiday_load(tmp_path, monkeypatch) -
     assert mt.us_early_close_time(day, data_dir=data_dir) == dt.time(13, 0)
     assert mt.us_early_close_time(day, data_dir=data_dir) == dt.time(13, 0)
     assert calls["count"] == 1
+
+
+def test_ensure_aware_now_defaults_to_utc_now() -> None:
+    before = dt.datetime.now(dt.UTC)
+    result = ensure_aware_now(None)
+    after = dt.datetime.now(dt.UTC)
+    assert result.tzinfo is not None
+    assert before <= result <= after
+
+
+def test_ensure_aware_now_assumes_utc_for_naive_input() -> None:
+    naive = dt.datetime(2026, 5, 28, 12, 0, 0)
+    result = ensure_aware_now(naive)
+    assert result == naive.replace(tzinfo=dt.UTC)
+
+
+def test_ensure_aware_now_preserves_existing_timezone() -> None:
+    aware = dt.datetime(2026, 5, 28, 12, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert ensure_aware_now(aware) is aware
