@@ -30,6 +30,7 @@ from .ai_brief_sources import (
     is_ai_brief_source_stale,
     validate_ai_brief_source_url,
 )
+from .utils.closing import close_quietly
 
 SOURCE_FEED_CATALOG_SCHEMA = "sab.ai_brief_source_feed_catalog.v1"
 MAX_FEED_CATALOG_BYTES = 1_000_000
@@ -491,14 +492,14 @@ def _load_feed_url_rows(
 
         status_code = int(getattr(response, "status_code", 0) or 0)
         if 300 <= status_code < 400:
-            _close_response(response)
+            close_quietly(response)
             return _feed_rows_single_issue(
                 ticker=ticker,
                 code="feed_url_redirect",
                 message=f"feed URL redirect was not followed (HTTP {status_code})",
             )
         if status_code >= 400:
-            _close_response(response)
+            close_quietly(response)
             return _feed_rows_single_issue(
                 ticker=ticker,
                 code="feed_url_failed",
@@ -553,7 +554,7 @@ def _load_feed_url_rows(
             message=f"feed URL response item URL timed out: {exc}",
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _rows_from_feed_root(
@@ -658,7 +659,7 @@ def _read_bounded_feed_response_body(response: object, *, deadline: float) -> by
         except requests.RequestException as exc:
             raise _FeedUrlFetchError(_exception_type_name(exc)) from exc
         finally:
-            _close_response(response)
+            close_quietly(response)
         return b"".join(chunks)
 
     try:
@@ -677,19 +678,7 @@ def _read_bounded_feed_response_body(response: object, *, deadline: float) -> by
             )
         return body
     finally:
-        _close_response(response)
-
-
-def _close_response(response: object) -> None:
-    close = getattr(response, "close", None)
-    if callable(close):
-        close()
-
-
-def _close_session(session: object) -> None:
-    close = getattr(session, "close", None)
-    if callable(close):
-        close()
+        close_quietly(response)
 
 
 def _remaining_feed_timeout(deadline: float) -> float:

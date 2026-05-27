@@ -21,6 +21,7 @@ import requests  # type: ignore[import-untyped]
 from . import ai_brief_url_safety as url_safety
 from .ai_brief_eval_common import parse_iso_offset_datetime
 from .tickers import parse_ticker
+from .utils.closing import close_quietly
 
 SOURCE_PROVIDER_NONE = "none"
 SOURCE_PROVIDER_LOCAL_JSON = "local-json"
@@ -249,7 +250,7 @@ def _load_http_json_source_report(
             source_issues=[*report_issues, *result.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_source_api_response_payload(
@@ -270,12 +271,12 @@ def _raise_for_source_response_status(response: Any, *, subject: str) -> None:
     """Reject unfollowed redirects and HTTP error responses, closing the body."""
     status_code = response.status_code
     if 300 <= status_code < 400:
-        _close_response(response)
+        close_quietly(response)
         raise AiBriefSourceProviderError(
             f"{subject} redirect was not followed (HTTP {status_code})"
         )
     if status_code >= 400:
-        _close_response(response)
+        close_quietly(response)
         raise AiBriefSourceProviderError(
             f"{subject} request failed with HTTP {status_code}"
         )
@@ -447,7 +448,7 @@ def _load_finnhub_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_finnhub_response_payload(response: Any, *, deadline: float) -> list[object]:
@@ -562,7 +563,7 @@ def _load_polygon_news_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_polygon_news_response_payload(
@@ -674,7 +675,7 @@ def _load_alpha_vantage_news_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_alpha_vantage_news_response_payload(
@@ -801,7 +802,7 @@ def _load_marketaux_news_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_marketaux_news_response_payload(
@@ -915,7 +916,7 @@ def _load_benzinga_news_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _parse_benzinga_news_response_payload(
@@ -1060,7 +1061,7 @@ def _load_naver_news_source_report(
             source_issues=[*source_issues, *normalized.source_issues],
         )
     finally:
-        _close_session(session)
+        close_quietly(session)
 
 
 def _naver_news_query_for_ticker(
@@ -1158,7 +1159,7 @@ def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
                 f"source API response body failed: {_exception_type_name(exc)}"
             ) from None
         finally:
-            _close_response(response)
+            close_quietly(response)
         return b"".join(chunks)
 
     try:
@@ -1180,19 +1181,7 @@ def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
             )
         return body
     finally:
-        _close_response(response)
-
-
-def _close_response(response: Any) -> None:
-    close = getattr(response, "close", None)
-    if callable(close):
-        close()
-
-
-def _close_session(session: Any) -> None:
-    close = getattr(session, "close", None)
-    if callable(close):
-        close()
+        close_quietly(response)
 
 
 def _remaining_source_timeout(deadline: float) -> float:
