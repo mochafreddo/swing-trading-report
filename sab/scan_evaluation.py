@@ -575,6 +575,21 @@ def _evaluate_candidates(
         enriched.setdefault("strategy_mode", cfg.strategy_mode)
         return enriched
 
+    def _record_result(ticker: str, result: Any) -> None:
+        if result.candidate:
+            runtime.candidates.append(_with_strategy_mode(result.candidate))
+            return
+        if not result.reason:
+            return
+        detail = f"{ticker}: {result.reason}"
+        if _is_system_result(result):
+            runtime.failures.append(detail)
+            runtime.system_issues.append(detail)
+            runtime.logger.warning("%s", detail)
+        else:
+            runtime.screen_outs.append(detail)
+            runtime.logger.info("%s", detail)
+
     eval_settings = EvaluationSettingsCls(
         use_sma200_filter=cfg.use_sma200_filter,
         gap_atr_multiplier=cfg.gap_atr_multiplier,
@@ -654,33 +669,11 @@ def _evaluate_candidates(
                 result_hybrid = evaluate_ticker_hybrid_fn(
                     ticker, ticker_candles, hybrid_settings, meta
                 )
-                if result_hybrid.candidate:
-                    runtime.candidates.append(
-                        _with_strategy_mode(result_hybrid.candidate)
-                    )
-                elif result_hybrid.reason:
-                    detail = f"{ticker}: {result_hybrid.reason}"
-                    if _is_system_result(result_hybrid):
-                        runtime.failures.append(detail)
-                        runtime.system_issues.append(detail)
-                        runtime.logger.warning("%s", detail)
-                    else:
-                        runtime.screen_outs.append(detail)
-                        runtime.logger.info("%s", detail)
+                _record_result(ticker, result_hybrid)
                 continue
 
             result = evaluate_ticker_fn(ticker, ticker_candles, eval_settings, meta)
-            if result.candidate:
-                runtime.candidates.append(_with_strategy_mode(result.candidate))
-            elif result.reason:
-                detail = f"{ticker}: {result.reason}"
-                if _is_system_result(result):
-                    runtime.failures.append(detail)
-                    runtime.system_issues.append(detail)
-                    runtime.logger.warning("%s", detail)
-                else:
-                    runtime.screen_outs.append(detail)
-                    runtime.logger.info("%s", detail)
+            _record_result(ticker, result)
         except Exception as exc:
             detail = (
                 f"{ticker}: Unexpected evaluation error ({type(exc).__name__}: {exc})"
