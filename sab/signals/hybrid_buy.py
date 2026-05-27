@@ -641,13 +641,11 @@ def evaluate_ticker_hybrid(
         close_above_ema = bool(
             pattern_context.get("close_above_ema_short", last_close > ema_short[-1])
         )
-        strong_confirmation = False
-        if close_above_ema and (rsi_val > 50 or pattern_context.get("trigger_rsi50")):
-            strong_confirmation = True
-        if close_above_ema and pattern_context.get("trigger_bullish_vol"):
-            strong_confirmation = True
-        if pattern_context.get("trigger_hammer_near_ema") and rsi_val > 50:
-            strong_confirmation = True
+        strong_confirmation = close_above_ema and (
+            rsi_val > 50
+            or bool(pattern_context.get("trigger_rsi50"))
+            or bool(pattern_context.get("trigger_bullish_vol"))
+        )
 
         if strong_confirmation:
             entry_state = "READY"

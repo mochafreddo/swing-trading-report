@@ -368,6 +368,11 @@ export function parseHoldingsYamlDocument(document: string): HoldingSnapshot[] {
       "entry_price",
       context,
     );
+    if (quantity > 0 && entryPrice <= 0) {
+      throw new HoldingsYamlError(
+        `${context}: 'entry_price' must be > 0 when quantity > 0.`,
+      );
+    }
 
     const explicitCurrency = parseOptionalCurrency(
       row.entry_currency,

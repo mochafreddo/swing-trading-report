@@ -200,6 +200,47 @@ def test_pullback_bounce_watch(monkeypatch):
     assert "Target" in result.candidate["risk_guide"]
 
 
+def test_pullback_bounce_hammer_without_ema_reclaim_stays_watch(monkeypatch):
+    candles = _simple_candles(10)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr", lambda highs, lows, closes, n: [1.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Reversal candle near EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_hammer_near_ema": True,
+                "rsi_val": 51.0,
+                "close_above_ema_short": False,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
+
+    assert result.candidate is not None
+    assert result.candidate["entry_state"] == "WATCH"
+    assert "wait" in result.candidate["entry_state_reason"].lower()
+    assert result.candidate["entry_trigger_price_value"] is None
+
+
 def test_pullback_bounce_ready(monkeypatch):
     candles = _simple_candles(10)
     monkeypatch.setattr(

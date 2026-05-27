@@ -298,6 +298,12 @@ def load_holdings(path: str | None) -> HoldingsData:
             ticker=ticker,
             min_value=0,
         )
+        if quantity > 0 and entry_price <= 0:
+            raise HoldingsLoadError(
+                "Invalid holdings value in "
+                f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_price'): "
+                "active holdings (quantity > 0) require entry_price > 0."
+            )
 
         raw_entry_currency = item.get("entry_currency")
         has_explicit_entry_currency = False

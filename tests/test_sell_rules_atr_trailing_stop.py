@@ -456,6 +456,75 @@ def test_time_stop_skips_when_eval_date_is_invalid(
     assert result.time_stop_triggered is False
 
 
+def test_time_stop_reviews_future_entry_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FixedDate(dt.date):
+        @classmethod
+        def today(cls) -> _FixedDate:
+            return cls(2025, 1, 15)
+
+    monkeypatch.setattr(sr.dt, "date", _FixedDate)
+    monkeypatch.setattr(
+        sr,
+        "choose_eval_index",
+        lambda data, meta=None, provider=None: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(sr, "ema", lambda values, period: [90.0] * len(values))
+    monkeypatch.setattr(sr, "rsi", lambda values, period: [60.0] * len(values))
+    monkeypatch.setattr(
+        sr, "atr", lambda highs, lows, closes, period: [0.0] * len(closes)
+    )
+
+    candles: list[Candle] = [
+        {
+            "date": "20250108",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250109",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-13",
+        "currency": "USD",
+    }
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=3,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert any(
+        "Time stop skipped: entry_date after eval_date" in reason
+        for reason in result.reasons
+    )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+
+
 def test_corporate_action_guard_promotes_hold_to_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

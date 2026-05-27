@@ -313,6 +313,10 @@ def evaluate_sell_signals_hybrid(
             eval_anchor = _parse_eval_date(eval_date)
             if eval_anchor is None:
                 reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
+            elif entry_date > eval_anchor:
+                reasons.append("Time stop skipped: entry_date after eval_date")
+                if action == "HOLD":
+                    action = "REVIEW"
             else:
                 resolved_market = _resolve_holding_market(
                     ticker=ticker, holding=holding

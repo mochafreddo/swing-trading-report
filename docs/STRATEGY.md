@@ -283,6 +283,10 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 
 `READY` 판단은 패턴별로 다르며, “종가가 EMA 위인지”, “RSI 확인(예: RSI>50)”, “볼륨 확인” 등을 조합합니다.
 
+- Trend pullback bounce의 `READY`는 종가가 EMA short 위에 있는 것을 전제로 합니다.
+  - hammer near EMA, RSI>50, volume thrust는 EMA reclaim 이후의 확인 신호로만 사용합니다.
+  - EMA reclaim 전의 hammer near EMA는 `WATCH`입니다.
+
 #### 5.3.4 gap guard(ATR 기반) 계약
 
 - hybrid buy candidate는 ATR 기반 `gap_guard_pct`와 상/하단 가격을 함께 산출합니다.
@@ -331,6 +335,8 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
 Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
 
 - 평가 대상은 `quantity > 0`인 활성 보유분으로 한정합니다(`quantity <= 0`은 평가에서 제외).
+- `entry_date`가 평가 캔들 날짜보다 미래이면 time stop 계산을 건너뛰고 `REVIEW`로 올립니다.
+  - 의도: holdings 날짜/평가일 불일치를 정상 0세션 보유로 해석하지 않고 수동 확인을 요구합니다.
 
 ### 6.1 `sell_mode=generic` (EMA/RSI/ATR 트레일 중심)
 

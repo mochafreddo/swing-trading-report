@@ -112,6 +112,34 @@ holdings:
     ).toThrow(HoldingsYamlError);
   });
 
+  it("rejects active holdings with zero entry price", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: "005930"
+    quantity: 1
+    entry_price: 0
+`),
+    ).toThrow(/entry_price.*quantity > 0/);
+  });
+
+  it("allows inactive holdings with zero entry price", () => {
+    expect(
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: "005930"
+    quantity: 0
+    entry_price: 0
+`),
+    ).toEqual([
+      snapshot({
+        ticker: "005930",
+        quantity: 0,
+        entry_price: 0,
+      }),
+    ]);
+  });
+
   it("builds a replace-all diff summary", () => {
     const summary = buildHoldingsYamlImportSummary(
       [

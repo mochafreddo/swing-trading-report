@@ -227,6 +227,40 @@ def test_load_holdings_raises_on_negative_required_numeric_fields(
     assert f"field='{field_name}'" in message
 
 
+def test_load_holdings_raises_on_zero_entry_price_for_active_holding(
+    tmp_path,
+) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        ("holdings:\n  - ticker: 005930\n    quantity: 1\n    entry_price: 0\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HoldingsLoadError) as exc_info:
+        load_holdings(str(path))
+
+    message = str(exc_info.value)
+    assert "active holdings" in message
+    assert "quantity > 0" in message
+    assert "index 0" in message
+    assert "ticker='005930'" in message
+    assert "field='entry_price'" in message
+
+
+def test_load_holdings_allows_zero_entry_price_for_inactive_holding(tmp_path) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        ("holdings:\n  - ticker: 005930\n    quantity: 0\n    entry_price: 0\n"),
+        encoding="utf-8",
+    )
+
+    loaded = load_holdings(str(path))
+
+    assert len(loaded.holdings) == 1
+    assert loaded.holdings[0].quantity == 0
+    assert loaded.holdings[0].entry_price == 0
+
+
 @pytest.mark.parametrize(
     ("yaml_body", "field_name"),
     [

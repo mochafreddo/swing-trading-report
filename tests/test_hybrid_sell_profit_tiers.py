@@ -192,7 +192,7 @@ def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
         sma_trend_period=2,
         time_stop_days=3,
     )
-    holding = {"entry_price": 100.0, "entry_date": "2025-01-09"}
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-03"}
 
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(100.0), holding, settings
@@ -259,6 +259,30 @@ def test_hybrid_sell_time_stop_skips_when_eval_date_invalid(monkeypatch):
     assert result.action == "HOLD"
     assert any(
         "Time stop skipped: invalid eval_date" in reason for reason in result.reasons
+    )
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+
+
+def test_hybrid_sell_time_stop_reviews_future_entry_date(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=3,
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-10"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(100.0), holding, settings
+    )
+
+    assert result.action == "REVIEW"
+    assert any(
+        "Time stop skipped: entry_date after eval_date" in reason
+        for reason in result.reasons
     )
     assert result.days_in_trade_sessions is None
     assert result.time_stop_triggered is False
