@@ -2,6 +2,7 @@ import datetime as dt
 import json
 import logging
 
+import pytest
 import sab.__main__ as sab_main
 from sab.__main__ import _configure_logging
 
@@ -151,12 +152,9 @@ def test_main_help_accepts_json_log_format(
         sab_main, "load_dotenv_if_available", lambda override=False: None
     )
 
-    try:
+    with pytest.raises(SystemExit) as excinfo:
         sab_main.main(["--help"])
-    except SystemExit as exc:
-        assert exc.code == 0
-    else:  # pragma: no cover - argparse help normally exits
-        raise AssertionError("expected argparse help to exit")
+    assert excinfo.value.code == 0
 
     assert "usage: sab" in capsys.readouterr().out
 

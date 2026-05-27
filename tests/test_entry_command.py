@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sab.entry import (
     _resolve_signal_eval_date,
     _select_latest_buy_report,
@@ -332,12 +333,8 @@ def test_evaluate_entry_candidates_marks_basis_date_mismatch_as_review() -> None
 
 
 def test_select_latest_buy_report_raises_when_missing(tmp_path: Path) -> None:
-    try:
+    with pytest.raises(FileNotFoundError, match="No buy report files"):
         _select_latest_buy_report(tmp_path.as_posix())
-    except FileNotFoundError as exc:
-        assert "No buy report files" in str(exc)
-    else:
-        raise AssertionError("expected FileNotFoundError")
 
 
 def test_select_latest_buy_report_ignores_non_matching_files(tmp_path: Path) -> None:
