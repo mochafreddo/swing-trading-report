@@ -328,6 +328,56 @@ def test_evaluate_candidates_injects_market_benchmark_context() -> None:
     assert runtime.system_issues == []
 
 
+def test_evaluate_candidates_passes_rs_settings_to_hybrid_evaluator() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(
+        runtime.cfg,
+        strategy_mode="sma_ema_hybrid",
+        rs_lookback_days=2,
+        rs_benchmark_return=0.03,
+        rs_benchmark_ticker_us=None,
+    )
+    captured: dict[str, Any] = {}
+
+    def _evaluate_hybrid(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        settings: Any,
+        meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        captured["settings"] = settings
+        captured["meta"] = meta or {}
+        return SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        evaluate_ticker_hybrid_fn=_evaluate_hybrid,
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert captured["settings"].rs_lookback_days == 2
+    assert captured["settings"].rs_benchmark_return == pytest.approx(0.03)
+    assert "rs_benchmark_return" not in captured["meta"]
+
+
 def test_evaluate_candidates_disables_rs_when_benchmark_unavailable() -> None:
     runtime = _build_runtime()
     runtime.cfg = replace(

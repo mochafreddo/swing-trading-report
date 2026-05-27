@@ -44,6 +44,8 @@ class HybridEvaluationSettings:
     min_dollar_volume: float
     us_min_dollar_volume: float | None
     exclude_etf_etn: bool
+    rs_lookback_days: int = 20
+    rs_benchmark_return: float | None = None
 
 
 @dataclass
@@ -639,6 +641,18 @@ def evaluate_ticker_hybrid(
             ticker, None, "Did not meet hybrid signal criteria", "signal"
         )
     pct_change = (last_close - prev_close) / prev_close if prev_close else 0.0
+    benchmark_return = _to_finite_float(meta.get("rs_benchmark_return"))
+    if benchmark_return is None:
+        benchmark_return = _to_finite_float(settings.rs_benchmark_return)
+    benchmark_ticker = str(meta.get("rs_benchmark_ticker") or "").strip() or None
+    rs_return = None
+    rs_diff = None
+    if settings.rs_lookback_days > 0 and len(closes) > settings.rs_lookback_days:
+        base_close = closes[-settings.rs_lookback_days - 1]
+        if base_close > 0:
+            rs_return = (last_close - base_close) / base_close
+            if benchmark_return is not None:
+                rs_diff = rs_return - benchmark_return
 
     # Determine readiness (READY vs WATCH) using close-based confirmations only.
     entry_state = "WATCH"
@@ -868,6 +882,26 @@ def evaluate_ticker_hybrid(
             value=entry_trigger_price_value,
             threshold=entry_trigger_label,
         )
+    if rs_diff is not None:
+        if rs_diff >= 0:
+            add_reason(
+                reason_id="rs_above_benchmark",
+                label="상대강도 양호",
+                kind="filter",
+                points=0.0,
+                value=rs_diff,
+                threshold=0.0,
+            )
+        else:
+            add_reason(
+                reason_id="rs_below_benchmark",
+                label="상대강도 약함",
+                kind="filter",
+                status="warn",
+                points=0.0,
+                value=rs_diff,
+                threshold=0.0,
+            )
 
     sma_trend_value = fmt(sma_trend[-1], 2)
     ema_short_value = fmt(ema_short[-1], 2)
@@ -886,6 +920,15 @@ def evaluate_ticker_hybrid(
         "eval_date": eval_date,
         "pct_change": f"{pct_change * 100:.1f}%",
         "pct_change_value": pct_change,
+        "rs_return": f"{rs_return * 100:.1f}%" if rs_return is not None else "-",
+        "rs_return_value": rs_return,
+        "rs_diff": f"{rs_diff * 100:.1f}%" if rs_diff is not None else "-",
+        "rs_diff_value": rs_diff,
+        "rs_benchmark": (
+            f"{benchmark_return * 100:.1f}%" if benchmark_return is not None else "-"
+        ),
+        "rs_benchmark_value": benchmark_return,
+        "rs_benchmark_ticker": benchmark_ticker,
         "high": fmt(_to_finite_or_default(latest.get("high")), price_digits),
         "low": fmt(_to_finite_or_default(latest.get("low")), price_digits),
         "sma_trend_period": settings.sma_trend_period,

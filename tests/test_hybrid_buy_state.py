@@ -1239,3 +1239,62 @@ def test_hybrid_candidate_formats_usd_price_with_decimals(monkeypatch):
 
     assert result.candidate is not None
     assert "." in result.candidate["price"]
+
+
+def test_hybrid_candidate_includes_relative_strength_fields(monkeypatch):
+    candles = _simple_candles(6, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [1.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    settings = _settings(min_history=2)
+    settings.rs_lookback_days = 2
+    settings.rs_benchmark_return = None
+    benchmark_return = 0.005
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US",
+        candles,
+        settings,
+        {
+            "currency": "USD",
+            "rs_benchmark_return": benchmark_return,
+            "rs_benchmark_ticker": "SPY.AMS",
+        },
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    expected_return = (candidate["close_value"] - float(candles[-3]["close"])) / float(
+        candles[-3]["close"]
+    )
+    assert math.isclose(candidate["rs_return_value"], expected_return)
+    assert math.isclose(candidate["rs_diff_value"], expected_return - benchmark_return)
+    assert candidate["rs_benchmark_value"] == benchmark_return
+    assert candidate["rs_benchmark_ticker"] == "SPY.AMS"
+    assert any(reason["id"] == "rs_above_benchmark" for reason in candidate["reasons"])

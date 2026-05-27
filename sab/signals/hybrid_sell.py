@@ -66,6 +66,57 @@ def _compute_pnl_pct(
         return None
 
 
+def _closes_since_entry(
+    *,
+    candles_eval: list[dict[str, float]],
+    holding: dict[str, Any],
+) -> list[float] | None:
+    entry_date = _parse_eval_date(holding.get("entry_date"))
+    if entry_date is None:
+        return None
+
+    closes_since_entry: list[float] = []
+    for candle in candles_eval:
+        candle_date = _parse_eval_date(candle.get("date"))
+        if candle_date is None or candle_date < entry_date:
+            continue
+        close_price = _to_finite_float(candle.get("close"))
+        if close_price is not None:
+            closes_since_entry.append(close_price)
+    return closes_since_entry
+
+
+def _compute_peak_pnl_pct_since_entry(
+    *,
+    entry_price: float | None,
+    closes_since_entry: list[float] | None,
+    fallback_close: float,
+) -> tuple[float | None, bool]:
+    current_pnl = _compute_pnl_pct(entry_price, fallback_close)
+    if entry_price is None or closes_since_entry is None:
+        return current_pnl, False
+
+    if not closes_since_entry:
+        return None, False
+    return _compute_pnl_pct(entry_price, max(closes_since_entry)), True
+
+
+def _is_breakout_holding(holding: dict[str, Any]) -> bool:
+    markers: list[str] = []
+    for key in ("strategy", "pattern", "entry_pattern", "signal_pattern"):
+        value = holding.get(key)
+        if value is not None:
+            markers.append(str(value))
+
+    tags = holding.get("tags")
+    if isinstance(tags, list | tuple | set):
+        markers.extend(str(tag) for tag in tags)
+    elif tags is not None:
+        markers.append(str(tags))
+
+    return any("breakout" in marker.strip().lower() for marker in markers)
+
+
 _US_EXCHANGE_CODES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
 
 
@@ -155,7 +206,16 @@ def evaluate_sell_signals_hybrid(
     reasons: list[str] = []
     flags: list[str] = []
     action = "HOLD"
+    closes_since_entry = _closes_since_entry(
+        candles_eval=candles_eval,
+        holding=holding,
+    )
     corporate_action_move = detect_corporate_action_move(closes)
+    if corporate_action_move is None and closes_since_entry:
+        corporate_action_move = detect_corporate_action_move(
+            closes_since_entry,
+            lookback_bars=len(closes_since_entry),
+        )
 
     entry_price = _to_finite_float(holding.get("entry_price"))
     stop_override = _to_finite_float(holding.get("stop_override"))
@@ -181,14 +241,28 @@ def evaluate_sell_signals_hybrid(
         target_price = entry_price * (1.0 + settings.profit_target_high)
 
     profit_protection_stop: float | None = None
-    if entry_price is not None and pnl_pct is not None:
-        if pnl_pct >= settings.partial_profit_floor:
+    profit_protection_high_armed = False
+    if corporate_action_move:
+        profit_basis_pnl, profit_basis_uses_peak = pnl_pct, False
+    else:
+        profit_basis_pnl, profit_basis_uses_peak = _compute_peak_pnl_pct_since_entry(
+            entry_price=entry_price,
+            closes_since_entry=closes_since_entry,
+            fallback_close=last_close,
+        )
+    if entry_price is not None and profit_basis_pnl is not None:
+        profit_label = (
+            f"peak {profit_basis_pnl * 100:.1f}%"
+            if profit_basis_uses_peak
+            else f"{profit_basis_pnl * 100:.1f}%"
+        )
+        if profit_basis_pnl >= settings.partial_profit_floor:
             profit_protection_stop = entry_price
             reasons.append(
                 "Profit protection armed at break-even "
-                f"({pnl_pct * 100:.1f}% ≥ {settings.partial_profit_floor * 100:.1f}%)"
+                f"({profit_label} ≥ {settings.partial_profit_floor * 100:.1f}%)"
             )
-        if pnl_pct >= settings.profit_target_low:
+        if profit_basis_pnl >= settings.profit_target_low:
             tightened_stop = entry_price * (1.0 + settings.partial_profit_floor)
             profit_protection_stop = max(
                 profit_protection_stop or tightened_stop,
@@ -196,9 +270,10 @@ def evaluate_sell_signals_hybrid(
             )
             reasons.append(
                 "Profit protection tightened above entry "
-                f"({pnl_pct * 100:.1f}% ≥ {settings.profit_target_low * 100:.1f}%)"
+                f"({profit_label} ≥ {settings.profit_target_low * 100:.1f}%)"
             )
-        if pnl_pct >= settings.profit_target_high:
+        if profit_basis_pnl >= settings.profit_target_high:
+            profit_protection_high_armed = True
             extended_stop = entry_price * (1.0 + settings.profit_target_low)
             profit_protection_stop = max(
                 profit_protection_stop or extended_stop,
@@ -206,13 +281,13 @@ def evaluate_sell_signals_hybrid(
             )
             reasons.append(
                 "High-target profit protection activated "
-                f"({pnl_pct * 100:.1f}% ≥ {settings.profit_target_high * 100:.1f}%)"
+                f"({profit_label} ≥ {settings.profit_target_high * 100:.1f}%)"
             )
     if profit_protection_stop is not None and stop_override is None:
         stop_price = max(stop_price or profit_protection_stop, profit_protection_stop)
         if last_close <= stop_price:
             reasons.append("Price closed below profit protection stop")
-            if pnl_pct is not None and pnl_pct >= settings.profit_target_high:
+            if profit_protection_high_armed:
                 action = "SELL"
             elif action != "SELL":
                 action = "REVIEW"
@@ -261,11 +336,10 @@ def evaluate_sell_signals_hybrid(
 
     # --- 3) Failed breakout ---
     # If holding strategy is breakout-like, consider a sharp drop > failed_breakout_drop_pct
-    strategy_tag = str(holding.get("strategy") or "").lower()
     if (
         entry_price is not None
         and pnl_pct is not None
-        and "breakout" in strategy_tag
+        and _is_breakout_holding(holding)
         and pnl_pct <= -settings.failed_breakout_drop_pct
     ):
         reasons.append(

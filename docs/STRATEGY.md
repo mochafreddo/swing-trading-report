@@ -303,6 +303,13 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
   - 기준 미달이면 `SKIP`입니다.
   - 레거시 리포트처럼 trigger guard 필드가 없으면 기존 호환성을 위해 `entry_state=READY` 판단을 유지합니다.
 
+#### 5.3.6 상대강도(RS) 계약
+
+- hybrid buy candidate도 `ema_cross`와 동일하게 `rs_return_value`, `rs_diff_value`, `rs_benchmark_value`, `rs_benchmark_ticker`를 포함합니다.
+- `rs_return_value`는 candidate 종목의 adjusted 완료 일봉 종가와 `rs_lookback_days` 기준으로 계산합니다.
+- `rs_benchmark_value`는 scan 단계가 주입한 같은 시장 benchmark 수익률을 우선 사용하고, 없으면 정적 `strategy.rs_benchmark_return`을 사용합니다.
+- `rs_diff_value = rs_return_value - rs_benchmark_value`이며, 전체 후보 정렬의 tie-breaker에 사용됩니다(5.2.4 참고).
+
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
 
 buy candidate는 기존 문자열 필드(`score_notes`, `pattern_reasons`, `entry_state_reason`)를 유지하면서,
@@ -323,6 +330,7 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
   - `pattern_*`, `entry_state_*`
   - 패턴 트리거(`trigger_*`)
   - 리스크 가드(`gap_guard_atr`, 필요 시 `breakout_extended`)
+  - RS 비교(`rs_above_benchmark` 또는 `rs_below_benchmark`)
 
 운영/호환성 원칙:
 
@@ -366,14 +374,21 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 #### 6.2.1 주요 규칙(요약)
 
 - 이익실현 티어:
+  - `entry_date`가 유효하면 진입일 이후 완료 일봉의 최고 종가 기준 P&L로 보호 stop 티어를 활성화합니다.
+  - `entry_date`가 없거나 유효하지 않으면 기존 호환성을 위해 평가일 현재 P&L만 사용합니다.
+  - `entry_date`가 유효하지만 평가 구간에 진입일 이후 완료봉이 없으면, pre-entry 가격으로 profit protection을 활성화하지 않습니다.
   - partial profit zone 도달 시 break-even 보호 stop을 제안하고 기본 action은 `HOLD`
   - low target 도달 시 보호 stop을 추가로 강화하고 기본 action은 `HOLD`
-  - high target 도달 시 더 강한 보호 stop을 제안하되, 즉시 `SELL`하지는 않습니다
+  - high target 도달 시 더 강한 보호 stop을 제안하되, stop 이탈 전에는 즉시 `SELL`하지 않습니다.
+  - high target 보호 stop이 활성화된 뒤 종가가 해당 stop 아래로 내려오면 `SELL`, 그보다 낮은 티어의 보호 stop 이탈은 `REVIEW`입니다.
+  - corporate action 의심 구간에서는 분할/병합 전 가격 피크가 왜곡될 수 있으므로 과거 피크 기반 profit protection을 쓰지 않고 수동 확인 경로를 우선합니다.
+  - corporate action 의심 여부는 최근 봉뿐 아니라 `entry_date` 이후 평가 구간 전체의 split-like 변동도 확인합니다.
 - 추세 붕괴:
   - EMA/SMA 이탈, EMA short<EMA mid 교차, RSI<50/40 등으로 `REVIEW/SELL`
   - 보호 stop 이탈이나 강한 reversal evidence가 있을 때만 강한 청산으로 이어집니다
 - failed breakout:
-  - holdings의 `strategy` 태그에 `breakout`이 포함된 경우 손실 임계로 `SELL`
+  - holdings의 `strategy` 또는 `tags` 중 하나에 `breakout`이 포함된 경우 손실 임계로 `SELL`
+  - 하위 hybrid sell evaluator는 `pattern`, `entry_pattern`, `signal_pattern` marker도 인식하지만, 현재 holdings 로더/매도 평가 경계가 공개 입력으로 전달하는 필드는 `strategy`와 `tags`입니다.
 - 하드 스탑 밴드(기본 3–5%):
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:

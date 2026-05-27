@@ -34,6 +34,35 @@ def _simple_candles(last_close: float) -> list[dict]:
     ]
 
 
+def _profit_trail_candles(*, peak_close: float, last_close: float) -> list[dict]:
+    return [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1,
+        },
+        {
+            "date": "20250102",
+            "open": peak_close,
+            "high": peak_close,
+            "low": peak_close,
+            "close": peak_close,
+            "volume": 1,
+        },
+        {
+            "date": "20250103",
+            "open": last_close,
+            "high": last_close,
+            "low": last_close,
+            "close": last_close,
+            "volume": 1,
+        },
+    ]
+
+
 def _patch_indicators(monkeypatch):
     monkeypatch.setattr(
         "sab.signals.hybrid_sell.choose_eval_index",
@@ -63,6 +92,94 @@ def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatc
     assert result.action == "HOLD"
     assert result.stop_price == 105.0
     assert any("High-target profit protection activated" in r for r in result.reasons)
+
+
+def test_hybrid_sell_profit_protection_uses_peak_since_entry(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-01"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US",
+        _profit_trail_candles(peak_close=112.0, last_close=104.0),
+        holding,
+        settings,
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 105.0
+    assert any("peak" in reason.lower() for reason in result.reasons)
+    assert "Price closed below profit protection stop" in result.reasons
+
+
+def test_hybrid_sell_profit_protection_checks_stale_corporate_action_since_entry(
+    monkeypatch,
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 50.0, "entry_date": "2025-01-01"}
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 50.0,
+            "low": 50.0,
+            "close": 50.0,
+            "volume": 1,
+        },
+        *[
+            {
+                "date": f"202501{day:02d}",
+                "open": 51.0,
+                "high": 51.0,
+                "low": 51.0,
+                "close": 51.0,
+                "volume": 1,
+            }
+            for day in range(3, 9)
+        ],
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "REVIEW"
+    assert result.stop_price is None
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert not any(
+        "Price closed below profit protection stop" in r for r in result.reasons
+    )
+
+
+def test_hybrid_sell_profit_protection_skips_future_entry_without_post_entry_candle(
+    monkeypatch,
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 100.0, "entry_date": "2025-01-10"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(112.0), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert result.stop_price is None
+    assert not any("Profit protection" in reason for reason in result.reasons)
 
 
 def test_hybrid_sell_profit_target_zone_tightens_stop_without_review(monkeypatch):
@@ -130,6 +247,26 @@ def test_hybrid_sell_loss_between_min_and_max_sets_review(monkeypatch):
 
     assert result.action == "REVIEW"
     assert any("within hard stop band" in r for r in result.reasons)
+
+
+def test_hybrid_sell_failed_breakout_accepts_entry_tags(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+    holding = {"entry_price": 100.0, "tags": ["swing_high_breakout"]}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "SELL"
+    assert any("Failed breakout" in reason for reason in result.reasons)
 
 
 def test_hybrid_sell_stop_override_triggers_sell(monkeypatch):

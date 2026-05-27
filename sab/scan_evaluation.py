@@ -612,6 +612,8 @@ def _evaluate_candidates(
         min_dollar_volume=cfg.min_dollar_volume,
         us_min_dollar_volume=cfg.us_min_dollar_volume,
         exclude_etf_etn=cfg.exclude_etf_etn,
+        rs_lookback_days=cfg.rs_lookback_days,
+        rs_benchmark_return=cfg.rs_benchmark_return,
     )
 
     for ticker in runtime.tickers:
