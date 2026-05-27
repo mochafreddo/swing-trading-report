@@ -9,6 +9,7 @@ from ..data.trading_sessions import count_trading_sessions
 from ..utils.numeric import to_finite_float as _to_finite_float
 from ._candle_dates import normalize_candle_date as _normalize_candle_date
 from ._candle_dates import parse_eval_date as _parse_eval_date
+from ._holding_market import resolve_holding_market as _resolve_holding_market
 from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import atr, ema, rsi, sma
@@ -21,33 +22,6 @@ class Candle(TypedDict):
     low: float
     close: float
     volume: float
-
-
-_US_EXCHANGE_CODES = {"US", "NASDAQ", "NASD", "NAS", "NYSE", "NYS", "AMEX", "AMS"}
-
-
-def _resolve_holding_market(*, ticker: str, holding: dict[str, Any]) -> str | None:
-    exchange_raw = str(holding.get("exchange") or "").strip().upper()
-    if exchange_raw in _US_EXCHANGE_CODES:
-        return "US"
-
-    currency_raw = (
-        str(holding.get("entry_currency") or holding.get("currency") or "")
-        .strip()
-        .upper()
-    )
-    if currency_raw == "USD":
-        return "US"
-    if currency_raw == "KRW":
-        return "KR"
-
-    normalized_ticker = str(ticker or "").strip().upper()
-    if "." in normalized_ticker:
-        suffix = normalized_ticker.rsplit(".", 1)[1].strip().upper()
-        if suffix in _US_EXCHANGE_CODES:
-            return "US"
-
-    return None
 
 
 def _to_finite_series(values: list[Any]) -> list[float] | None:
