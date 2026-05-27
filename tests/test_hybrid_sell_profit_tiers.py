@@ -336,7 +336,63 @@ def test_hybrid_sell_corporate_action_guard_promotes_hold_to_review(
     )
 
 
-def test_hybrid_sell_corporate_action_guard_downgrades_sell_to_review(
+def test_hybrid_sell_corporate_action_guard_preserves_existing_review(
+    monkeypatch,
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        time_stop_days=1,
+    )
+    holding = {
+        "entry_price": 50.0,
+        "entry_date": "2025-01-10",
+    }
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250103",
+            "open": 51.0,
+            "high": 52.0,
+            "low": 50.0,
+            "close": 51.0,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "REVIEW"
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert any("entry_date after eval_date" in reason for reason in result.reasons)
+    assert any("Potential corporate action" in reason for reason in result.reasons)
+    assert not any(
+        "manual review required before sell decision" in reason
+        for reason in result.reasons
+    )
+
+
+def test_hybrid_sell_corporate_action_guard_preserves_sell_with_flag(
     monkeypatch,
 ):
     _patch_indicators(monkeypatch)
@@ -379,7 +435,7 @@ def test_hybrid_sell_corporate_action_guard_downgrades_sell_to_review(
         "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
     )
 
-    assert result.action == "REVIEW"
+    assert result.action == "SELL"
     assert "Price hit custom stop override" in result.reasons
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)

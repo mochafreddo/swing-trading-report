@@ -1,6 +1,6 @@
-# Spec — Swing Trading Report v1.3 (Backlog)
+# Spec — Swing Trading Report v1.3
 
-상태: Backlog (2026-03-28)  
+상태: Backlog (partially implemented, 2026-05-27)
 목적: `docs/STRATEGY.md`의 개선 여지를 “다음 구현” 가능한 단위로 쪼개 **명확한 인터페이스/계약/수용 기준(acceptance)** 으로 정의합니다.
 
 현재 계약 source of truth는 [Spec v1.1](spec-v1.1.md), [전략 문서](STRATEGY.md), [아키텍처 문서](ARCHITECTURE.md)입니다. 이 문서는 남은 backlog와 작성 당시 원안을 함께 보존합니다.
@@ -11,7 +11,7 @@
 
 - D1 `sab entry` 서브커맨드, entry JSON 아티팩트, Storage/`report_index` 연동은 현재 구현되었습니다.
 - D2 buy candidate numeric 필드(`close_value`, `gap_guard_*`, `entry_reference_close_raw_value`)와 D3 `ema_cross` 점수 계약은 현재 구현되었습니다.
-- D5 sell time stop의 trading sessions 계산과 D6 리포트 재현 메타(`run_ts_utc`, `git_sha`, `eval_context`, `config_snapshot`)는 현재 구현되었습니다.
+- D4 corporate action flag 우선순위, D5 sell time stop의 trading sessions 계산과 D6 리포트 재현 메타(`run_ts_utc`, `git_sha`, `eval_context`, `config_snapshot`)는 현재 구현되었습니다.
 
 ### 실험
 
@@ -19,7 +19,6 @@
 
 ### 백로그
 
-- D4 corporate action 의심 시 `flags`만 승격하고 자동 `REVIEW` 강등을 제거하는 계약은 아직 구현되지 않았습니다.
 - 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로를 추가하는 작업은 이 문서의 인접 backlog로 유지합니다.
 
 ### 폐기 후보
@@ -56,7 +55,7 @@
 - D1. `sab entry` 서브커맨드 추가(현재 제공)
 - D2. buy candidate 공통 필드 확장(현재 제공)
 - D3. ema_cross 점수/노트 계약 정합성 수정(현재 제공)
-- D4. sell: corporate action 의심은 **action을 덮지 않고 flag로 승격**(백로그)
+- D4. sell: corporate action 의심은 기존 `SELL`을 보존하고, `SELL`이 아닌 action은 `REVIEW`로 보정하며, 항상 flag로 승격(현재 제공)
 - D5. sell: time stop의 단위를 명시 + 리포트에 계산값 노출(현재 제공)
 - D6. 리포트 메타데이터(재현성) 표준 필드 추가(현재 제공)
 
@@ -150,7 +149,7 @@ Entry는 “진입 가능성”을 세 단계로 분류합니다.
 
 `entry_price`는 “갭/가드 판단을 위한 기준 가격”이며, **조회 불가 시 `null` + `REVIEW`(우선순위 1)** 로 처리합니다.
 
-- `PRE_OPEN`: 장 시작 전 스냅샷 기준의 “예상 체결/indicative” 가격(가능한 경우). 불가하면 `null`.
+- `PRE_OPEN`: 장 시작 전 스냅샷 기준의 “예상 체결/indicative” 가격(가능한 경우). KIS live 상세 응답에 날짜/시각 계열 스냅샷 marker가 없으면 stale/ambiguous snapshot으로 보고 `null` 처리한다.
 - `INTRADAY`: 장중 스냅샷 기준의 “현재가/체결가(last)” 가격. 불가하면 `null`.
 - `AFTER_CLOSE`: 해당 세션의 “종가(EOD close)” 가격.
   - `pykrx` provider는 이 모드에서만 허용합니다.
@@ -177,9 +176,10 @@ v1.3 계약:
 
 v1.3 계약:
 
-- corporate action 의심은 **action을 덮어쓰지 않는다.**
+- corporate action 의심은 기존 `SELL` action을 덮어쓰지 않는다.
   - 예: 하드 스탑/커스텀 스탑으로 `SELL`인 경우, corporate action 의심이 있어도 `SELL`은 유지한다.
-- 대신 별도 필드로 “플래그”를 올린다.
+- `SELL`이 아닌 action은 `REVIEW`로 보정해 수동 확인을 우선한다.
+- 별도 필드로 “플래그”를 올린다.
   - 제안: `flags: ["CORPORATE_ACTION_SUSPECT"]`
 - UI/운영에서는 “수량/단가 조정 여부 확인 후 실행”을 안내한다.
 

@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-05-23
+최종 확인: 2026-05-27
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -11,7 +11,7 @@
 ### 현재 제공
 
 - `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
-- corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기고 최종 action을 `REVIEW`로 보정합니다.
+- corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
 
 ### 실험
 
@@ -20,7 +20,6 @@
 ### 백로그
 
 - hybrid buy의 volume 누락/0 처리 일관화
-- corporate action을 `flags`만 승격하고 자동 `REVIEW` 강등을 제거하는 계약은 [Spec v1.3](spec-v1.3.md)의 backlog로 남아 있습니다.
 
 ### 폐기 후보
 
@@ -88,7 +87,7 @@
   - `entry_reference_close_raw_value`는 시그널 평가 후 후보 티커만 raw 캔들을 배치 warmup한 다음, 동일 `eval_date`의 raw 종가를 후처리로 붙여 이후 entry 판단이 adjusted/raw 혼용 없이 raw 기준으로만 비교되도록 합니다.
 - sell(`sab sell`)
   - 캔들 수집은 기본 `adjusted=false`로 동작합니다.
-  - 의도: 보유(진입단가/손절/타깃) 판단을 **원시 가격 기준**으로 해석하고, corporate action은 “자동 결론”이 아닌 `REVIEW`로 올려 수동 확인을 유도합니다(6장 참고).
+  - 의도: 보유(진입단가/손절/타깃) 판단을 **원시 가격 기준**으로 해석하고, corporate action은 플래그로 노출해 수동 확인을 유도합니다. 단, 하드 스탑 등으로 이미 `SELL`인 결론은 보존합니다(6장 참고).
 - 운영 유의:
   - 같은 티커라도 scan vs sell에서 adjusted 정책이 다르므로, 지표/가격 레벨의 절대값이 일치하지 않을 수 있습니다.
   - `sab entry`는 adjusted 신호 종가를 직접 쓰지 않고, buy report에 저장된 raw reference close와 entry 시점 raw/live price만 비교합니다.
@@ -358,7 +357,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - `time_stop_days`는 달력일이 아닌 **trading sessions** 기준으로 계산합니다.
   - `time_stop_days` 경과 시 `REVIEW`(단, 이미 `SELL`이면 유지)
 - corporate action 의심(분할 유사 급변) 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다.
-  - 감지 시 최종 action은 `REVIEW`로 강등/승격되어 자동 `SELL/HOLD`를 막고 수동 확인을 우선합니다.
+  - 기존 action이 `SELL`이면 보존하고, `HOLD` 등 `SELL`이 아닌 action만 `REVIEW`로 보정해 수동 확인을 우선합니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 
@@ -379,7 +378,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
-- corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가하고 최종 action은 `REVIEW`로 조정합니다.
+- corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다. 기존 action이 `SELL`이면 보존하고, `SELL`이 아닌 action만 `REVIEW`로 조정합니다.
 
 ### 6.3 corporate action(분할/역분할 등) 감지 계약
 
@@ -387,8 +386,9 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 - 최근 N봉(기본 5) 내에 **전일 대비 비정상 급변(기본 ±45% 이상)** 이 발생했고,
   - 그 비율이 split-like ratio(2:1, 3:1, 1:2 등)로 보이면 corporate action 가능성을 기록합니다.
-- 이 경우 `CORPORATE_ACTION_SUSPECT` 플래그를 기록하고 최종 action을 `REVIEW`로 조정해,
-  - “단가/수량/데이터 조정 여부”를 먼저 확인하도록 합니다.
+- 이 경우 `CORPORATE_ACTION_SUSPECT` 플래그를 기록합니다.
+  - 기존 action이 `SELL`이면 보존해 하드 스탑/커스텀 스탑을 corporate action 플래그가 덮지 않습니다.
+  - `SELL`이 아닌 action은 `REVIEW`로 조정해 “단가/수량/데이터 조정 여부”를 먼저 확인하도록 합니다.
 
 ### 6.4 sell의 히스토리 길이(target_bars) 정책(요약)
 
@@ -410,11 +410,14 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 포함합니다.
 - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
+- `PRE_OPEN`에서 KIS live 상세 응답이 날짜/시각 계열 스냅샷 marker(`xymd`, `stck_cntg_hour` 등)를 제공하지 않으면 `entry_price=null`로 fail closed 처리하고 `REVIEW`로 남깁니다.
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
   - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard/entry trigger guard 관련 필드를 포함합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
 - `sab entry`는 종목별 판정이 끝난 뒤 포트폴리오 가드(`portfolio.max_active_holdings`, `portfolio.max_new_entries_per_market`)를 최종 `ENTER` 후보에만 적용합니다.
+  - `max_active_holdings`는 기존 활성 보유와 이번 run에서 승인된 신규 진입을 합산합니다.
+  - `max_new_entries_per_market`은 이번 run에서 승인된 신규 진입만 세며, 기존 활성 보유 수는 시장별 신규 진입 한도에 포함하지 않습니다.
   - 포트폴리오 차단은 system issue가 아니라 정책 결과로 취급하며, `entries[].reasons`와 `summary.portfolio_blocked_*`에만 반영합니다.
   - `REVIEW`/`SKIP` 후보는 포트폴리오 규율로 승격하지 않습니다.
 - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
@@ -463,4 +466,3 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 ## 9. 백로그 메모
 
 - volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
-- corporate action `flags` 전용 승격 계약 검토: `docs/spec-v1.3.md`

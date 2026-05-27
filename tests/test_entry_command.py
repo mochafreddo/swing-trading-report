@@ -450,7 +450,7 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -524,6 +524,74 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
     assert any(
         "provider not configured" in issue.lower() for issue in payload["system_issues"]
     )
+
+
+def test_run_entry_e2e_reviews_pre_open_kis_price_without_datetime_marker(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD")],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0", "entry_snapshot_state": "PRE_OPEN"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 1
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["action"] == "REVIEW"
+    assert payload["entries"][0]["entry_price"] is None
+    assert any(
+        "price snapshot unavailable" in reason
+        for reason in payload["entries"][0]["reasons"]
+    )
+    assert payload["summary"]["missing_entry_price_count"] == 1
 
 
 def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
@@ -632,7 +700,7 @@ def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -697,7 +765,7 @@ def test_run_entry_e2e_skips_gap_guard_when_filter_disabled(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -767,7 +835,7 @@ def test_run_entry_e2e_uses_source_report_gap_guard_disabled_config(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -833,7 +901,10 @@ def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert exchange == "NAS"
-            return {"last": "101.0" if symbol == "AAPL" else "101.2"}
+            return {
+                "last": "101.0" if symbol == "AAPL" else "101.2",
+                "xymd": "20260226",
+            }
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -895,7 +966,10 @@ def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert exchange == "NAS"
-            return {"last": "101.0" if symbol == "AAPL" else "101.2"}
+            return {
+                "last": "101.0" if symbol == "AAPL" else "101.2",
+                "xymd": "20260226",
+            }
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -963,7 +1037,7 @@ def test_run_entry_e2e_uses_report_level_strategy_mode_for_legacy_candidates(
 
         def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
             assert ticker == "005930"
-            return {"stck_prpr": "101.0"}
+            return {"stck_prpr": "101.0", "stck_cntg_hour": "090001"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1027,14 +1101,14 @@ def test_run_entry_e2e_handles_mixed_market_buy_report(
 
         def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
             assert ticker == "005930"
-            return {"stck_prpr": "101.2"}
+            return {"stck_prpr": "101.2", "stck_cntg_hour": "090001"}
 
         def overseas_price_detail(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1116,7 +1190,7 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1237,7 +1311,7 @@ def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.5"}
+            return {"last": "101.5", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1294,7 +1368,7 @@ def test_run_entry_e2e_uses_kis_kr_snapshot_price_intraday(
 
         def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
             assert ticker == "005930"
-            return {"stck_prpr": "101.2"}
+            return {"stck_prpr": "101.2", "stck_cntg_hour": "090001"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1479,7 +1553,7 @@ def test_run_entry_e2e_applies_max_active_holdings_portfolio_guard(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1556,7 +1630,7 @@ holdings:
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1625,13 +1699,13 @@ def test_run_entry_e2e_applies_market_portfolio_guard_without_touching_review_ro
 
         def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
             assert ticker == "005930"
-            return {"stck_prpr": "101.0"}
+            return {"stck_prpr": "101.0", "stck_cntg_hour": "090001"}
 
         def overseas_price_detail(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1697,14 +1771,14 @@ def test_run_entry_e2e_preserves_buy_report_order_for_mixed_portfolio_guard(
 
         def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
             assert ticker == "005930"
-            return {"stck_prpr": "101.0"}
+            return {"stck_prpr": "101.0", "stck_cntg_hour": "090001"}
 
         def overseas_price_detail(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1771,7 +1845,7 @@ def test_run_entry_e2e_blocks_second_us_entry_when_market_cap_reached(
             self, *, symbol: str, exchange: str
         ) -> dict[str, str]:
             assert exchange == "NAS"
-            return {"last": "101.0"}
+            return {"last": "101.0", "xymd": "20260226"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -1790,4 +1864,71 @@ def test_run_entry_e2e_blocks_second_us_entry_when_market_cap_reached(
     assert payload["entries"][1]["action"] == "SKIP"
     assert "portfolio market cap reached (US)" in payload["entries"][1]["reasons"]
     assert payload["summary"]["portfolio_blocked_count"] == 1
+    assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}
+
+
+def test_run_entry_e2e_market_new_entry_cap_excludes_existing_holdings(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    _entry_candidate("AAPL.NASD", gap_guard_value=0.05),
+                    _entry_candidate("NVDA.NASD", gap_guard_value=0.05),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([Holding(ticker="MSFT.NASD", quantity=1)]),
+        portfolio=_portfolio_config(max_new_entries_us=1),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0", "xymd": "20260226"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    by_ticker = {row["ticker"]: row for row in payload["entries"]}
+    assert by_ticker["AAPL.NASD"]["action"] == "ENTER"
+    assert by_ticker["NVDA.NASD"]["action"] == "SKIP"
+    assert "portfolio market cap reached (US)" in by_ticker["NVDA.NASD"]["reasons"]
     assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}

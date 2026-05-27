@@ -573,7 +573,56 @@ def test_corporate_action_guard_promotes_hold_to_review(
     )
 
 
-def test_corporate_action_guard_downgrades_sell_action_to_review(
+def test_corporate_action_guard_preserves_existing_review_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250101",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250102",
+            "open": 50,
+            "high": 51,
+            "low": 49,
+            "close": 50,
+            "volume": 1000,
+        },
+        {
+            "date": "20250103",
+            "open": 51,
+            "high": 52,
+            "low": 50,
+            "close": 51,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-10",
+        "stop_override": 1.0,
+    }
+    settings = SellSettings(require_sma200=False, min_bars=3, time_stop_days=1)
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert any("entry_date after eval_date" in reason for reason in result.reasons)
+    assert any("Potential corporate action" in reason for reason in result.reasons)
+    assert not any(
+        "manual review required before sell decision" in reason
+        for reason in result.reasons
+    )
+
+
+def test_corporate_action_guard_preserves_sell_action_with_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_atr_only(monkeypatch)
@@ -612,7 +661,7 @@ def test_corporate_action_guard_downgrades_sell_action_to_review(
 
     result = evaluate_sell_signals("TEST", candles, holding, settings)
 
-    assert result.action == "REVIEW"
+    assert result.action == "SELL"
     assert "Price hit custom stop override" in result.reasons
     assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
     assert any("Potential corporate action" in reason for reason in result.reasons)

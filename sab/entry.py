@@ -7,7 +7,7 @@ import math
 import os
 import re
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -50,6 +50,20 @@ _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
 _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO = 1.0
 _PORTFOLIO_BLOCK_REASON_TOTAL = "portfolio max active holdings reached"
+_PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
+    "stck_cntg_hour",
+    "xymd",
+    "stck_bsop_date",
+    "bsop_date",
+    "trade_date",
+    "trade_time",
+    "timestamp",
+    "local_time",
+    "quote_time",
+    "as_of",
+    "asof",
+    "entry_snapshot_at",
+)
 
 
 def _to_positive_price(value: Any) -> float | None:
@@ -57,6 +71,12 @@ def _to_positive_price(value: Any) -> float | None:
     if parsed is None or parsed <= 0:
         return None
     return parsed
+
+
+def _has_pre_open_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
+    return any(
+        str(detail.get(key) or "").strip() for key in _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS
+    )
 
 
 def _normalize_ticker(ticker: Any) -> str:
@@ -739,6 +759,8 @@ def _make_price_lookup(
                 detail = kis_client.overseas_price_detail(
                     symbol=symbol, exchange=exchange
                 )
+                if mode == "PRE_OPEN" and not _has_pre_open_price_snapshot_time(detail):
+                    return None
                 for key in (
                     "last",
                     "last_price",
@@ -753,6 +775,8 @@ def _make_price_lookup(
 
             symbol, _ = _split_symbol_and_exchange(ticker)
             detail = kis_client.domestic_price_detail(ticker=symbol)
+            if mode == "PRE_OPEN" and not _has_pre_open_price_snapshot_time(detail):
+                return None
             # Use only live traded price for KR PRE_OPEN/INTRADAY.
             # Fallback fields (prev close/open/high/low) can misclassify gap guard.
             live_price = _to_positive_price(detail.get("stck_prpr"))
@@ -858,29 +882,18 @@ def _is_active_holding(holding: Holding | Any) -> bool:
     return quantity is not None and quantity > 0
 
 
-def _build_active_holding_counts(
-    holdings_data: HoldingsData | Any,
-) -> tuple[int, dict[str, int]]:
-    active_total = 0
-    active_by_market = {"KR": 0, "US": 0}
-
-    for holding in getattr(holdings_data, "holdings", []):
-        if not _is_active_holding(holding):
-            continue
-        market = _infer_market_from_ticker(
-            _normalize_ticker(getattr(holding, "ticker", ""))
-        )
-        active_total += 1
-        active_by_market[market] = active_by_market.get(market, 0) + 1
-
-    return active_total, active_by_market
+def _build_active_holding_count(holdings_data: HoldingsData | Any) -> int:
+    return sum(
+        1
+        for holding in getattr(holdings_data, "holdings", [])
+        if _is_active_holding(holding)
+    )
 
 
 def _apply_portfolio_guards(
     rows: list[EntryReportRow],
     *,
     active_total: int,
-    active_by_market: dict[str, int],
     max_active_holdings: int | None,
     max_new_entries_per_market: dict[str, int | None],
 ) -> dict[str, int]:
@@ -903,10 +916,8 @@ def _apply_portfolio_guards(
             continue
 
         market_cap = max_new_entries_per_market.get(market)
-        current_market_total = active_by_market.get(
-            market, 0
-        ) + accepted_new_entries_by_market.get(market, 0)
-        if market_cap is not None and current_market_total >= market_cap:
+        accepted_market_entries = accepted_new_entries_by_market.get(market, 0)
+        if market_cap is not None and accepted_market_entries >= market_cap:
             row.action = "SKIP"
             row.reasons.append(f"portfolio market cap reached ({market})")
             blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
@@ -1069,12 +1080,11 @@ def run_entry(
     )
     system_issues = list(dict.fromkeys(system_issues))
 
-    active_total, active_by_market = _build_active_holding_counts(holdings_data)
+    active_total = _build_active_holding_count(holdings_data)
     portfolio_settings = getattr(cfg, "portfolio", None)
     portfolio_blocked_by_market = _apply_portfolio_guards(
         rows,
         active_total=active_total,
-        active_by_market=active_by_market,
         max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
         max_new_entries_per_market={
             "KR": getattr(portfolio_settings, "max_new_entries_kr", None),
