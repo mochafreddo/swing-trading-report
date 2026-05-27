@@ -75,3 +75,11 @@ def parse_iso_offset_datetime(
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{field_name} must include a UTC offset")
     return parsed
+
+
+def parse_eval_now(value: str) -> dt.datetime:
+    """평가 CLI의 ``--now`` 값을 UTC offset 포함 datetime으로 파싱한다."""
+
+    return parse_iso_offset_datetime(
+        value, field_name="now", empty_message="now must not be empty"
+    )

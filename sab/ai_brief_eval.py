@@ -13,6 +13,7 @@ from .ai_brief_eval_common import (
     AiBriefEvalStatus,
     normalize_market,
     optional_text,
+    parse_eval_now,
     string_list,
 )
 from .ai_brief_providers import PRESELECTION_LIMIT
@@ -556,19 +557,6 @@ def _int_value(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
-
-
-def parse_eval_now(value: str) -> dt.datetime:
-    text = value.strip()
-    if not text:
-        raise ValueError("now must not be empty")
-    try:
-        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("now must be an ISO 8601 datetime") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("now must include a UTC offset")
-    return parsed
 
 
 __all__ = [
