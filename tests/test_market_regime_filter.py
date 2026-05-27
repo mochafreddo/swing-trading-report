@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -38,11 +39,13 @@ def _candles(
     close_step: float = 1.0,
 ) -> list[dict[str, float | str]]:
     rows: list[dict[str, float | str]] = []
+    base_date = dt.date(2024, 1, start_date)
     for index in range(count):
         close = close_start + (index * close_step)
+        session_date = base_date + dt.timedelta(days=index)
         rows.append(
             {
-                "date": f"202401{start_date + index:02d}",
+                "date": session_date.strftime("%Y%m%d"),
                 "open": close - 0.5,
                 "high": close + 1.0,
                 "low": close - 1.0,
@@ -108,6 +111,8 @@ strategy:
 
 def test_resolve_market_regime_context_marks_bullish_market() -> None:
     runtime = _build_runtime(tickers=["AAPL.NAS"])
+    benchmark_rows = _candles(205, close_start=100.0, close_step=1.0)
+    runtime.latest_dates = {"AAPL.NAS": str(benchmark_rows[-1]["date"])}
 
     class _FakeKISClient:
         def overseas_daily_candles(
@@ -122,7 +127,7 @@ def test_resolve_market_regime_context_marks_bullish_market() -> None:
             assert exchange == "AMS"
             assert adjusted is True
             assert count >= 200
-            return _candles(205, close_start=100.0, close_step=1.0)
+            return benchmark_rows
 
     runtime.kis_client = cast(Any, _FakeKISClient())
 

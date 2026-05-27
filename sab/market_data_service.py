@@ -21,6 +21,7 @@ type _PykrxClientKwargsFn[TRuntime] = Callable[[TRuntime], dict[str, str | None]
 _US_HOLIDAY_REFRESH_TTL = dt.timedelta(hours=12)
 _US_HOLIDAY_REFRESH_WINDOW_DAYS = 10
 _ENTRY_REFERENCE_RAW_LOOKBACK_BARS = 10
+_INCOMPLETE_TAIL_BUFFER_BARS = 1
 
 
 def _current_utc_time() -> dt.datetime:
@@ -212,7 +213,9 @@ class ScanMarketData(_BaseMarketDataService[_ScanRuntime]):
         )
 
     def collect_market_data(self, runtime: _ScanRuntime) -> None:
-        target_bars = max(runtime.cfg.min_history_bars, 200)
+        target_bars = (
+            max(runtime.cfg.min_history_bars, 200) + _INCOMPLETE_TAIL_BUFFER_BARS
+        )
         tickers = list(runtime.tickers)
         provider = runtime.cfg.data_provider
         collector = self._provider_collectors.get(provider)

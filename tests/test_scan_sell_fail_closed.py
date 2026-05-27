@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +18,7 @@ from sab.holdings_loader import (
 )
 from sab.report.supabase_storage import SupabaseReportIndexError
 from sab.scan import run_scan
-from sab.sell import run_sell
+from sab.sell import _resolve_sell_target_bars, run_sell
 from sab.signals.sell_rules import SellEvaluation
 
 
@@ -58,6 +58,12 @@ def test_run_scan_returns_1_when_watchlist_loading_fails() -> None:
         )
 
     assert code == 1
+
+
+def test_resolve_sell_target_bars_requests_tail_trim_buffer() -> None:
+    runtime = SimpleNamespace(cfg=replace(Config(), min_history_bars=200), holdings=[])
+
+    assert _resolve_sell_target_bars(cast(Any, runtime)) == 201
 
 
 def test_run_scan_returns_1_when_watchlist_file_missing_in_watchlist_universe(
@@ -550,7 +556,9 @@ def test_run_sell_expands_target_bars_for_long_held_positions(tmp_path: Path) ->
 
     assert code == 0
     assert captured_target_bars
-    assert captured_target_bars[0] > 200
+    estimated_sessions = int((dt.date.today() - dt.date(2020, 1, 2)).days * (5 / 7))
+    expected_target_bars = min(estimated_sessions + 30, 4000) + 1
+    assert captured_target_bars[0] == expected_target_bars
 
 
 def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:

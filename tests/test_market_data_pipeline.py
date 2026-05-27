@@ -1604,6 +1604,34 @@ def test_scan_market_data_wires_pykrx_cache_hooks(
     assert request.exchange_from_suffix_fn("NASD") == "NAS"
 
 
+def test_scan_market_data_requests_tail_trim_buffer() -> None:
+    captured: dict[str, Any] = {}
+    deps = build_market_data_dependencies(
+        load_json_fn=lambda *_: None,
+        save_json_fn=lambda *_: None,
+    )
+    service = ScanMarketData(deps=deps)
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(data_provider="kis", min_history_bars=200),
+        tickers=["005930"],
+        failures=[],
+        fatal_failure=False,
+    )
+
+    def _fake_collect(runtime_arg: Any, tickers: list[str], target_bars: int) -> None:
+        captured["runtime"] = runtime_arg
+        captured["tickers"] = tickers
+        captured["target_bars"] = target_bars
+
+    service._provider_collectors["kis"] = _fake_collect
+
+    service.collect_market_data(cast(Any, runtime))
+
+    assert captured["runtime"] is runtime
+    assert captured["tickers"] == ["005930"]
+    assert captured["target_bars"] == 201
+
+
 def test_scan_market_data_collects_candidate_raw_data_without_overwriting_adjusted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -17,6 +17,8 @@ from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_s
 from .signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
 from .signals.sell_rules import SellSettings, evaluate_sell_signals
 
+_INCOMPLETE_TAIL_BUFFER_BARS = 1
+
 
 def _build_sell_runtime(
     cfg: Config, logger: logging.Logger, *, holdings: HoldingsData
@@ -91,17 +93,14 @@ def _resolve_sell_target_bars(runtime: _SellRuntime) -> int:
         if oldest_entry_date is None or entry_date < oldest_entry_date:
             oldest_entry_date = entry_date
 
-    if oldest_entry_date is None:
-        return base_target_bars
-
+    target_bars = base_target_bars
     today = dt.date.today()
-    if oldest_entry_date >= today:
-        return base_target_bars
-
-    # Calendar days -> trading sessions approximation with conservative buffer.
-    holding_days = (today - oldest_entry_date).days
-    estimated_sessions = int(holding_days * (5 / 7)) + 30
-    return max(base_target_bars, min(estimated_sessions, 4000))
+    if oldest_entry_date is not None and oldest_entry_date < today:
+        # Calendar days -> trading sessions approximation with conservative buffer.
+        holding_days = (today - oldest_entry_date).days
+        estimated_sessions = int(holding_days * (5 / 7)) + 30
+        target_bars = max(base_target_bars, min(estimated_sessions, 4000))
+    return target_bars + _INCOMPLETE_TAIL_BUFFER_BARS
 
 
 def _mark_missing_sell_market_data(runtime: _SellRuntime) -> None:

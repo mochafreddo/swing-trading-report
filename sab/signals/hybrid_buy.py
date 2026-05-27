@@ -896,6 +896,9 @@ def evaluate_ticker_hybrid(
         "entry_state": entry_state,
         "entry_state_reason": entry_state_reason,
         "entry_trigger_price_value": entry_trigger_price_value,
+        "entry_trigger_price_basis": "adjusted"
+        if entry_trigger_price_value is not None
+        else None,
         "entry_trigger_operator": entry_trigger_operator,
         "entry_trigger_label": entry_trigger_label,
         "atr14": fmt(atr_value),

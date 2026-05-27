@@ -134,6 +134,39 @@ def test_evaluate_entry_candidates_skips_hybrid_ready_on_trigger_fail() -> None:
     assert issues == []
 
 
+def test_evaluate_entry_candidates_normalizes_adjusted_hybrid_trigger_to_raw_reference() -> (
+    None
+):
+    candidates = [
+        _entry_candidate(
+            "005930",
+            raw_close=200.0,
+            gap_guard_value=0.03,
+            strategy_mode="sma_ema_hybrid",
+            entry_state="READY",
+            pattern="swing_high_breakout",
+            entry_trigger_price_value=102.0,
+            entry_trigger_price_basis="adjusted",
+            entry_trigger_operator="gte",
+            entry_trigger_label="swing high",
+        )
+    ]
+
+    rows, issues = evaluate_entry_candidates(
+        candidates=candidates,
+        price_lookup_fn=lambda _ticker: 203.0,
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "SKIP"
+    assert any(
+        "hybrid trigger guard failed (203.00 < swing high 204.00)" in reason
+        for reason in rows[0].reasons
+    )
+    assert issues == []
+
+
 def test_evaluate_entry_candidates_reviews_malformed_hybrid_trigger_guard() -> None:
     candidates = [
         _entry_candidate(

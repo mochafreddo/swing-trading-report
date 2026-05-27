@@ -247,8 +247,25 @@ def _extract_gap_guard(
     return pct, up, down
 
 
+def _extract_adjusted_signal_close(candidate: dict[str, Any]) -> float | None:
+    close_value = _to_positive_price(candidate.get("signal_close_adjusted_value"))
+    if close_value is not None:
+        return close_value
+
+    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    if signal_basis != "adjusted":
+        return None
+
+    close_value = _to_positive_price(candidate.get("close_value"))
+    if close_value is not None:
+        return close_value
+    return _to_positive_price(candidate.get("price_value"))
+
+
 def _extract_entry_trigger_guard(
     candidate: dict[str, Any],
+    *,
+    signal_close: float | None = None,
 ) -> tuple[float | None, str | None, str | None, str | None]:
     raw_trigger_price = candidate.get("entry_trigger_price_value")
     if raw_trigger_price is None or raw_trigger_price == "":
@@ -262,7 +279,32 @@ def _extract_entry_trigger_guard(
 
     operator = str(candidate.get("entry_trigger_operator") or "gte").strip().lower()
     label = str(candidate.get("entry_trigger_label") or "trigger").strip()
-    return trigger_price, operator, label or "trigger", None
+    resolved_label = label or "trigger"
+    trigger_basis = (
+        str(candidate.get("entry_trigger_price_basis") or "").strip().lower()
+    )
+    if not trigger_basis:
+        trigger_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+
+    if trigger_basis in {"", "raw"}:
+        return trigger_price, operator, resolved_label, None
+    if trigger_basis != "adjusted":
+        return None, operator, resolved_label, "hybrid trigger guard basis invalid"
+
+    adjusted_signal_close = _extract_adjusted_signal_close(candidate)
+    if adjusted_signal_close is None or signal_close is None:
+        return (
+            None,
+            operator,
+            resolved_label,
+            "hybrid trigger guard raw basis unavailable",
+        )
+    return (
+        trigger_price * signal_close / adjusted_signal_close,
+        operator,
+        resolved_label,
+        None,
+    )
 
 
 def _normalize_strategy_mode(value: Any) -> str | None:
@@ -330,7 +372,7 @@ def evaluate_entry_candidates(
         entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
         pattern = str(candidate.get("pattern") or "").strip() or None
         trigger_price, trigger_operator, trigger_label, trigger_issue = (
-            _extract_entry_trigger_guard(candidate)
+            _extract_entry_trigger_guard(candidate, signal_close=signal_close)
         )
 
         if signal_close is None:

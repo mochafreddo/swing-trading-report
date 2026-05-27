@@ -54,6 +54,7 @@
 - `date`는 `YYYYMMDD` 형태의 문자열이어야 합니다.
 - OHLC는 **finite float**(NaN/inf 불가)이어야 합니다.
 - volume은 모드별로 처리 정책이 다릅니다(3.3 참고).
+- scan/sell 수집은 장중 미완성 tail candle이 제거되어도 평가에 필요한 완성봉 수가 남도록 기본 요청 수에 1봉 버퍼를 더합니다.
 
 ### 3.2 시장 구분(통화 기반)
 
@@ -195,7 +196,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 
 - `min_history_bars` 이상(기본 120)의 완성 캔들이 있어야 합니다.
 - `use_sma200_filter=true`를 사용하려면, **평가 시점 기준 200봉 이상**이 필요합니다.
-  - scan은 기본적으로 `max(min_history_bars, 200)`봉을 수집하려고 시도합니다.
+  - scan은 기본적으로 `max(min_history_bars, 200) + 1`봉을 수집하려고 시도합니다. 추가 1봉은 장중 미완성 tail candle 제거 후에도 200개 완성봉을 유지하기 위한 버퍼입니다.
   - 신규상장/데이터 부족으로 200봉이 확보되지 않으면 SMA200이 NaN이 되어 필터가 사실상 통과하지 않습니다.
 
 #### 5.2.2 계산 지표
@@ -237,6 +238,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - `rs_diff_value`는 “종목 룩백 수익률 - 시장 benchmark 룩백 수익률”입니다.
   - benchmark는 `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 지정합니다.
   - benchmark 수익률은 종목과 동일하게 adjusted 시계열 + `choose_eval_index()` + `rs_lookback_days` 기준으로 계산합니다.
+  - dynamic benchmark는 같은 시장의 후보 데이터 최신 평가일과 정렬되어야 합니다. benchmark가 그 날짜보다 뒤처지면 stale system 이슈로 처리하고 해당 시장의 dynamic RS 점수를 비활성화합니다.
   - benchmark를 구하지 못하면 RS 점수는 부여하지 않고, scan report `system_issues`에 경고를 남깁니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
@@ -290,9 +292,11 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 #### 5.3.5 entry trigger guard 계약
 
 - hybrid buy candidate는 다음 entry 단계에서 재확인할 트리거 기준을 `entry_trigger_price_value`, `entry_trigger_operator`, `entry_trigger_label`로 기록할 수 있습니다.
+- `entry_trigger_price_basis`는 트리거 가격 기준을 표시합니다. 현재 hybrid buy는 adjusted 신호 캔들에서 트리거를 계산하므로 `adjusted`를 기록합니다.
 - Swing high breakout은 원래 박스권 `swing_high`를 `gte` 기준으로 기록합니다.
 - EMA 회복을 전제로 한 pullback/reversal 후보는 EMA short 값을 `gte` 기준으로 기록할 수 있습니다.
 - `sab entry`는 이 필드가 있는 `READY` 후보에 한해 raw/live entry 가격이 트리거 기준을 유지하는지 재확인합니다.
+  - 트리거가 adjusted 기준이면 entry 단계에서 `entry_reference_close_raw_value / signal_close_adjusted_value` 비율로 raw 기준 트리거로 환산한 뒤 live/raw 가격과 비교합니다.
   - 기준 미달이면 `SKIP`입니다.
   - 레거시 리포트처럼 trigger guard 필드가 없으면 기존 호환성을 위해 `entry_state=READY` 판단을 유지합니다.
 
@@ -385,8 +389,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 근거 코드: `sab/sell.py`
 
 - sell은 “보유 기간(최초 진입일)”을 기준으로, 평가에 필요한 히스토리 길이(target bars)를 동적으로 늘릴 수 있습니다.
-  - 기본값: `max(min_history_bars, 200)`
-  - 보유 기간이 길면: 달력 일수를 trading sessions로 근사해 추가 버퍼를 더하고(상한 4000), 가능한 한 entry 이후 구간을 포함하도록 합니다.
+  - 기본값: `max(min_history_bars, 200) + 1`
+  - 보유 기간이 길면: 달력 일수를 trading sessions로 근사해 추가 버퍼를 더하고(상한 4000), 마지막에 미완성 tail candle 제거용 1봉 버퍼를 더해 가능한 한 entry 이후 구간을 포함하도록 합니다.
 - 의도: ATR 트레일 등 “entry 이후 구간 기반” 룰이 충분한 히스토리에서 동작하도록 보장합니다.
 
 ## 7. 출력(리포트) 계약(요약)

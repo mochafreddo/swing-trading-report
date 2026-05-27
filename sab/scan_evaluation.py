@@ -31,6 +31,7 @@ _SYSTEM_REASON_PREFIXES = (
 )
 _MARKET_REGIME_SMA_PERIOD = 200
 _RS_BENCHMARK_LOOKBACK_BUFFER_BARS = 2
+_INCOMPLETE_TAIL_BUFFER_BARS = 1
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,81 @@ def _record_system_issue(
     runtime.system_issues.append(message)
     if warn:
         runtime.logger.warning("%s", message)
+
+
+def _latest_market_data_date_key(runtime: _ScanRuntime, market: str) -> str | None:
+    date_keys: list[str] = []
+    for ticker in runtime.tickers:
+        if infer_market_from_ticker(ticker) != market:
+            continue
+
+        date_key = _normalize_eval_date_key(runtime.latest_dates.get(ticker))
+        if date_key is not None:
+            date_keys.append(date_key)
+            continue
+
+        for row in reversed(runtime.market_data.get(ticker, [])):
+            row_date_key = _normalize_eval_date_key(row.get("date"))
+            if row_date_key is not None:
+                date_keys.append(row_date_key)
+                break
+
+    return max(date_keys) if date_keys else None
+
+
+def _normalize_benchmark_rows(
+    runtime: _ScanRuntime,
+    *,
+    ticker: str,
+    market: str,
+    rows: list[dict[str, Any]],
+    unavailable_label: str,
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        date_key = _normalize_eval_date_key(row.get("date"))
+        if date_key is None:
+            continue
+        normalized_row = dict(row)
+        normalized_row["date"] = date_key
+        normalized_rows.append(normalized_row)
+
+    if not normalized_rows:
+        return [], None
+
+    normalized_rows.sort(key=lambda row: str(row.get("date") or ""))
+    market_date_key = _latest_market_data_date_key(runtime, market)
+    if market_date_key is None:
+        return normalized_rows, None
+
+    aligned_rows = [
+        row for row in normalized_rows if str(row.get("date") or "") <= market_date_key
+    ]
+    latest_aligned_date = (
+        str(aligned_rows[-1].get("date") or "") if aligned_rows else None
+    )
+    if latest_aligned_date != market_date_key:
+        if latest_aligned_date is None:
+            return (
+                None,
+                f"{ticker}: {unavailable_label} unavailable "
+                f"(benchmark candles do not cover market {market_date_key})",
+            )
+        return (
+            None,
+            f"{ticker}: {unavailable_label} unavailable "
+            f"(stale benchmark candles; latest {latest_aligned_date} < market {market_date_key})",
+        )
+
+    dropped_future_count = len(normalized_rows) - len(aligned_rows)
+    if dropped_future_count > 0:
+        runtime.logger.info(
+            "%s: Trimmed %s benchmark candle(s) after market date %s",
+            ticker,
+            dropped_future_count,
+            market_date_key,
+        )
+    return aligned_rows, None
 
 
 def _resolve_raw_entry_reference_close(
@@ -158,7 +234,13 @@ def _resolve_adjusted_benchmark_candles(
                 )
         except KISClientError as exc:
             return None, f"{ticker}: {unavailable_label} unavailable ({exc})"
-        return rows, None
+        return _normalize_benchmark_rows(
+            runtime,
+            ticker=ticker,
+            market=market,
+            rows=rows,
+            unavailable_label=unavailable_label,
+        )
 
     if provider == "pykrx":
         if market == "US":
@@ -179,7 +261,13 @@ def _resolve_adjusted_benchmark_candles(
             )
         except PykrxClientError as exc:
             return None, f"{ticker}: {unavailable_label} unavailable ({exc})"
-        return rows, None
+        return _normalize_benchmark_rows(
+            runtime,
+            ticker=ticker,
+            market=market,
+            rows=rows,
+            unavailable_label=unavailable_label,
+        )
 
     return (
         None,
@@ -194,9 +282,12 @@ def _compute_rs_benchmark_return(
     market: str,
 ) -> tuple[float | None, str | None]:
     lookback_days = runtime.cfg.rs_lookback_days
-    target_bars = max(
-        runtime.cfg.min_history_bars,
-        lookback_days + _RS_BENCHMARK_LOOKBACK_BUFFER_BARS,
+    target_bars = (
+        max(
+            runtime.cfg.min_history_bars,
+            lookback_days + _RS_BENCHMARK_LOOKBACK_BUFFER_BARS,
+        )
+        + _INCOMPLETE_TAIL_BUFFER_BARS
     )
     rows, issue = _resolve_adjusted_benchmark_candles(
         runtime,
@@ -310,7 +401,10 @@ def _compute_market_regime_context(
     ticker: str,
     market: str,
 ) -> tuple[MarketRegimeContext | None, str | None]:
-    target_bars = max(runtime.cfg.min_history_bars, _MARKET_REGIME_SMA_PERIOD)
+    target_bars = (
+        max(runtime.cfg.min_history_bars, _MARKET_REGIME_SMA_PERIOD)
+        + _INCOMPLETE_TAIL_BUFFER_BARS
+    )
     rows, issue = _resolve_adjusted_benchmark_candles(
         runtime,
         ticker=ticker,

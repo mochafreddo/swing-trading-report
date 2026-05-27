@@ -395,6 +395,79 @@ def test_evaluate_candidates_disables_rs_when_benchmark_unavailable() -> None:
     ]
 
 
+def test_evaluate_candidates_disables_rs_when_benchmark_lags_market_data_date() -> None:
+    runtime = _build_runtime()
+    runtime.latest_dates = {"AAPL.NAS": "20250110"}
+    runtime.cfg = replace(
+        runtime.cfg,
+        rs_lookback_days=2,
+        min_history_bars=2,
+        rs_benchmark_return=None,
+        rs_benchmark_ticker_us="SPY.AMS",
+    )
+
+    class _FakeKISClient:
+        def overseas_daily_candles(
+            self,
+            *,
+            symbol: str,
+            exchange: str,
+            count: int,
+            adjusted: bool,
+        ) -> list[dict[str, Any]]:
+            if symbol == "SPY" and exchange == "AMS" and adjusted is True:
+                return [
+                    {"date": "20250107", "close": 100.0},
+                    {"date": "20250108", "close": 102.0},
+                    {"date": "20250109", "close": 105.0},
+                ]
+            if symbol == "AAPL" and exchange == "NAS" and adjusted is False:
+                return [{"date": "20250110", "close": 100.0}]
+            raise AssertionError((symbol, exchange, count, adjusted))
+
+    runtime.kis_client = cast(Any, _FakeKISClient())
+    captured: dict[str, Any] = {}
+
+    def _evaluate(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        captured.update(meta or {})
+        return SimpleNamespace(
+            candidate={
+                "ticker": "AAPL.NAS",
+                "score_value": 1.0,
+                "close_value": 105.0,
+                "price_value": 105.0,
+                "eval_date": "20250110",
+            },
+            reason=None,
+        )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=_evaluate,
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+    )
+
+    assert "rs_benchmark_return" not in captured
+    assert runtime.system_issues == [
+        "RS benchmark disabled: SPY.AMS: RS benchmark unavailable "
+        "(stale benchmark candles; latest 20250109 < market 20250110)"
+    ]
+
+
 def test_evaluate_candidates_prefers_reason_kind_over_text_prefix() -> None:
     runtime = _build_runtime()
 

@@ -755,6 +755,7 @@ def test_hybrid_breakout_candidate_exposes_entry_trigger_guard(monkeypatch):
 
     assert result.candidate is not None
     assert result.candidate["entry_trigger_price_value"] == 100.0
+    assert result.candidate["entry_trigger_price_basis"] == "adjusted"
     assert result.candidate["entry_trigger_operator"] == "gte"
     assert result.candidate["entry_trigger_label"] == "swing_high"
 
