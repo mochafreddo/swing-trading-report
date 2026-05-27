@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.32.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.1...v1.32.2) (2026-05-27)
+
+
+### Bug Fixes
+
+* **ai-brief:** 미국 장전 스케줄 지연 대응 ([22e50ff](https://github.com/mochafreddo/swing-trading-report/commit/22e50ffe981f023dc10993006a275727d2b5e7ea))
+* **signals:** 스윙 돌파 RSI 미산출 후보를 차단 ([62df475](https://github.com/mochafreddo/swing-trading-report/commit/62df4751e3a29498663f020ebb017b80bcd899c6))
+* **strategy:** 스윙 로직 경계 검증 강화 ([c62fd8c](https://github.com/mochafreddo/swing-trading-report/commit/c62fd8c8bbeb9c35b66316f6f743930ce936e010))
+* **strategy:** 스윙 로직 데이터 기준 보정 ([a9bc17e](https://github.com/mochafreddo/swing-trading-report/commit/a9bc17ef1f725f9d81f031cb8c8695dde4320bd1))
+* **strategy:** 스윙 진입 신호 가드 보강 ([8764926](https://github.com/mochafreddo/swing-trading-report/commit/8764926480fca3442ff0f974234606988759f8f8))
+
+
+### Documentation
+
+* **config:** 하이브리드 전략 샘플 설정을 정리 ([3897b8f](https://github.com/mochafreddo/swing-trading-report/commit/3897b8f28aacb2b0fd7b2aa8eef58696128acc05))
+
 ## [1.32.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.0...v1.32.1) (2026-05-23)
 
 
