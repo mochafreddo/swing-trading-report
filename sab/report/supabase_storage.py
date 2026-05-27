@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import requests  # type: ignore[import-untyped]
 
+from ..env_loader import env_flag
 from .storage_key import build_report_storage_key
 
 _DEFAULT_BUCKET = "reports"
@@ -69,13 +70,6 @@ class _HttpResponseData:
 
 def _is_github_actions() -> bool:
     return os.getenv("GITHUB_ACTIONS", "").strip().lower() == "true"
-
-
-def _env_flag(name: str, *, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _env_value(name: str) -> str | None:
@@ -645,7 +639,7 @@ def maybe_upload_report_artifact(
 ) -> str | None:
     required, enabled = _resolve_upload_mode(
         github_actions=_is_github_actions(),
-        upload_flag=_env_flag("SAB_UPLOAD_REPORTS", default=False),
+        upload_flag=env_flag("SAB_UPLOAD_REPORTS", default=False),
         force=force,
     )
     if not enabled:

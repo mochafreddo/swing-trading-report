@@ -120,3 +120,16 @@ def _unquote_value(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def env_flag(name: str, *, default: bool = False) -> bool:
+    """환경변수 ``name``을 불리언 플래그로 해석한다.
+
+    값이 없으면 ``default``를 반환하고, 있으면 ``1/true/yes/y/on``(대소문자
+    무시)을 참으로 본다.
+    """
+
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}

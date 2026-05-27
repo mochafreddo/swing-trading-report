@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config_loader import ConfigLoadError, load_yaml_config
-from .env_loader import load_dotenv_if_available
+from .env_loader import env_flag, load_dotenv_if_available
 from .holdings_loader import HoldingsData, load_holdings
 from .tickers import (
     parse_ticker,
@@ -277,15 +277,8 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
-def _env_flag(name: str, *, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _is_strict_config_mode() -> bool:
-    if _env_flag("GITHUB_ACTIONS") or _env_flag("CI"):
+    if env_flag("GITHUB_ACTIONS") or env_flag("CI"):
         return True
 
     explicit = os.getenv("SAB_CONFIG_STRICT")

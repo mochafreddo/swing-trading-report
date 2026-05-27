@@ -53,3 +53,25 @@ def test_fallback_parser_respects_override_flag(
 
     env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=True)
     assert os.getenv("KIS_APP_KEY") == "from-file"
+
+
+def test_env_flag_returns_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SAB_TEST_FLAG", raising=False)
+    assert env_loader.env_flag("SAB_TEST_FLAG") is False
+    assert env_loader.env_flag("SAB_TEST_FLAG", default=True) is True
+
+
+@pytest.mark.parametrize("raw", ["1", "true", "TRUE", "yes", "y", "on", "  On  "])
+def test_env_flag_recognizes_truthy_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("SAB_TEST_FLAG", raw)
+    assert env_loader.env_flag("SAB_TEST_FLAG") is True
+
+
+@pytest.mark.parametrize("raw", ["0", "false", "no", "", "maybe"])
+def test_env_flag_treats_other_values_as_false(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("SAB_TEST_FLAG", raw)
+    assert env_loader.env_flag("SAB_TEST_FLAG") is False
