@@ -10,6 +10,7 @@ from .data.kis_client import KISClientError
 from .data.pykrx_client import PykrxClientError
 from .report.run_meta import build_run_meta
 from .report.session_state import (
+    resolve_eval_markets,
     resolve_run_session_state,
     resolve_run_session_state_map,
 )
@@ -783,13 +784,7 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
             if str(market).strip()
         }
     )
-    if len(markets) == 1 and markets[0] in {"KR", "US"}:
-        eval_market = markets[0]
-        eval_markets = None
-    else:
-        eval_market = "MIXED"
-        eval_markets = [m for m in markets if m in {"KR", "US"}] or None
-    state_markets = [eval_market] if eval_market in {"KR", "US"} else eval_markets
+    eval_market, eval_markets, state_markets = resolve_eval_markets(markets)
     session_state_by_market = resolve_run_session_state_map(
         markets=state_markets,
         data_dir=runtime.cfg.data_dir,

@@ -93,6 +93,26 @@ def _resolve_us_session_state(
     return _US_SESSION_STATE_MAP.get(raw_state, "AFTER_CLOSE")
 
 
+def resolve_eval_markets(
+    markets: list[str],
+) -> tuple[str, list[str] | None, list[str] | None]:
+    """정렬된 시장 목록을 단일/혼합(MIXED) 기준으로 분류한다.
+
+    KR/US 단일 시장이면 그 시장을, 그 외(혼합·해외 등)는 ``MIXED``로 분류한다.
+    반환값은 ``(eval_market, eval_markets, state_markets)``이며 ``state_markets``는
+    세션 상태 조회(:func:`resolve_run_session_state`)에 넘길 시장 목록이다.
+    """
+
+    if len(markets) == 1 and markets[0] in {"KR", "US"}:
+        eval_market = markets[0]
+        eval_markets: list[str] | None = None
+    else:
+        eval_market = "MIXED"
+        eval_markets = [m for m in markets if m in {"KR", "US"}] or None
+    state_markets = [eval_market] if eval_market in {"KR", "US"} else eval_markets
+    return eval_market, eval_markets, state_markets
+
+
 def resolve_run_session_state(
     *,
     markets: Iterable[str] | None,
@@ -135,4 +155,8 @@ def resolve_run_session_state_map(
     return states
 
 
-__all__ = ["resolve_run_session_state", "resolve_run_session_state_map"]
+__all__ = [
+    "resolve_eval_markets",
+    "resolve_run_session_state",
+    "resolve_run_session_state_map",
+]
