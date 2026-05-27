@@ -202,10 +202,33 @@ def evaluate_sell_signals_hybrid(
     ema_mid = ema(closes, settings.ema_mid_period)
     sma_trend = sma(closes, settings.sma_trend_period)
     rsi_values = rsi(closes, settings.rsi_period)
+    ema_s = _to_finite_float(ema_short[-1]) if ema_short else None
+    ema_m = _to_finite_float(ema_mid[-1]) if ema_mid else None
+    sma_t = _to_finite_float(sma_trend[-1]) if sma_trend else None
+    rsi_today = _to_finite_float(rsi_values[-1]) if rsi_values else None
+    ema_s_prev = _to_finite_float(ema_short[-2]) if len(ema_short) >= 2 else None
+    ema_m_prev = _to_finite_float(ema_mid[-2]) if len(ema_mid) >= 2 else None
 
     reasons: list[str] = []
     flags: list[str] = []
     action = "HOLD"
+    missing_indicators = [
+        label
+        for label, value in (
+            ("EMA short", ema_s),
+            ("EMA mid", ema_m),
+            ("SMA trend", sma_t),
+            ("RSI", rsi_today),
+        )
+        if value is None
+    ]
+    if missing_indicators:
+        reasons.append(
+            "Indicator data unavailable for hybrid sell: "
+            + ", ".join(missing_indicators)
+        )
+        action = "REVIEW"
+
     closes_since_entry = _closes_since_entry(
         candles_eval=candles_eval,
         holding=holding,
@@ -293,26 +316,24 @@ def evaluate_sell_signals_hybrid(
                 action = "REVIEW"
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
-    ema_s = ema_short[-1]
-    sma_t = sma_trend[-1]
-    rsi_today = rsi_values[-1]
-
     # Price relative to EMA/SMA
-    if last_close < ema_s:
+    if ema_s is not None and last_close < ema_s:
         reasons.append("Close below EMA short")
         if action != "SELL":
             action = "REVIEW"
-    if last_close < sma_t:
+    if sma_t is not None and last_close < sma_t:
         reasons.append("Close below SMA trend (SMA20)")
         if action != "SELL":
             action = "REVIEW"
 
     # Momentum shift: EMA short falling below EMA mid
     if (
-        len(ema_short) >= 2
-        and len(ema_mid) >= 2
-        and ema_short[-1] < ema_mid[-1]
-        and ema_short[-2] >= ema_mid[-2]
+        ema_s is not None
+        and ema_m is not None
+        and ema_s_prev is not None
+        and ema_m_prev is not None
+        and ema_s < ema_m
+        and ema_s_prev >= ema_m_prev
     ):
         reasons.append("EMA short crossed below EMA mid (momentum down)")
         action = "SELL"
@@ -326,11 +347,11 @@ def evaluate_sell_signals_hybrid(
             action = "REVIEW"
 
     # RSI breakdowns
-    if rsi_today < 50.0:
+    if rsi_today is not None and rsi_today < 50.0:
         reasons.append("RSI dropped below 50")
         if action != "SELL":
             action = "REVIEW"
-    if rsi_today < 40.0:
+    if rsi_today is not None and rsi_today < 40.0:
         reasons.append("RSI dropped into oversold zone (<40)")
         action = "SELL"
 
@@ -435,7 +456,12 @@ def evaluate_sell_signals_hybrid(
         and action != "SELL"
     ):
         pnl_ok = pnl_pct is not None and pnl_pct >= time_stop_profit_floor
-        trend_ok = last_close >= sma_t and ema_short[-1] >= ema_mid[-1]
+        if sma_t is None or ema_s is None or ema_m is None:
+            trend_available = False
+            trend_ok = False
+        else:
+            trend_available = True
+            trend_ok = last_close >= sma_t and ema_s >= ema_m
         weak_bits = []
         if not pnl_ok:
             if pnl_pct is None:
@@ -444,10 +470,15 @@ def evaluate_sell_signals_hybrid(
                 weak_bits.append(
                     f"P&L {pnl_pct * 100:.1f}% < floor {time_stop_profit_floor * 100:.1f}%"
                 )
-        if not trend_ok:
+        if trend_available and not trend_ok:
             weak_bits.append("trend below SMA/EMA")
+        elif not trend_available and not pnl_ok:
+            weak_bits.append("trend indicators unavailable")
 
-        if not pnl_ok or not trend_ok:
+        should_sell_for_extended_time_stop = not pnl_ok or (
+            trend_available and not trend_ok
+        )
+        if should_sell_for_extended_time_stop:
             reason_detail = "; ".join(weak_bits) if weak_bits else "weak trend/return"
             reasons.append(
                 f"Extended time stop: {days_in_trade_sessions} sessions ≥ "

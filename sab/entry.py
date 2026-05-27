@@ -882,18 +882,31 @@ def _is_active_holding(holding: Holding | Any) -> bool:
     return quantity is not None and quantity > 0
 
 
-def _build_active_holding_count(holdings_data: HoldingsData | Any) -> int:
-    return sum(
-        1
-        for holding in getattr(holdings_data, "holdings", [])
-        if _is_active_holding(holding)
-    )
+def _canonical_ticker(ticker: Any) -> str:
+    normalized = _normalize_ticker(ticker)
+    if not normalized:
+        return ""
+    return parse_ticker(normalized).ticker
+
+
+def _build_active_holding_state(
+    holdings_data: HoldingsData | Any,
+) -> tuple[int, set[str]]:
+    active_total = 0
+    active_tickers: set[str] = set()
+    for holding in getattr(holdings_data, "holdings", []):
+        if not _is_active_holding(holding):
+            continue
+        active_total += 1
+        active_tickers.add(_canonical_ticker(getattr(holding, "ticker", None)))
+    return active_total, active_tickers
 
 
 def _apply_portfolio_guards(
     rows: list[EntryReportRow],
     *,
     active_total: int,
+    active_tickers: set[str],
     max_active_holdings: int | None,
     max_new_entries_per_market: dict[str, int | None],
 ) -> dict[str, int]:
@@ -903,6 +916,9 @@ def _apply_portfolio_guards(
 
     for row in rows:
         if row.action != "ENTER":
+            continue
+
+        if _canonical_ticker(row.ticker) in active_tickers:
             continue
 
         market = _infer_market_from_ticker(row.ticker)
@@ -1080,11 +1096,12 @@ def run_entry(
     )
     system_issues = list(dict.fromkeys(system_issues))
 
-    active_total = _build_active_holding_count(holdings_data)
+    active_total, active_tickers = _build_active_holding_state(holdings_data)
     portfolio_settings = getattr(cfg, "portfolio", None)
     portfolio_blocked_by_market = _apply_portfolio_guards(
         rows,
         active_total=active_total,
+        active_tickers=active_tickers,
         max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
         max_new_entries_per_market={
             "KR": getattr(portfolio_settings, "max_new_entries_kr", None),

@@ -385,6 +385,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - corporate action 의심 여부는 최근 봉뿐 아니라 `entry_date` 이후 평가 구간 전체의 split-like 변동도 확인합니다.
 - 추세 붕괴:
   - EMA/SMA 이탈, EMA short<EMA mid 교차, RSI<50/40 등으로 `REVIEW/SELL`
+  - 최신 EMA short/EMA mid/SMA trend/RSI 중 필요한 지표가 NaN이면 `HOLD`로 두지 않고 `REVIEW`로 fail closed 처리합니다.
   - 보호 stop 이탈이나 강한 reversal evidence가 있을 때만 강한 청산으로 이어집니다
 - failed breakout:
   - holdings의 `strategy` 또는 `tags` 중 하나에 `breakout`이 포함된 경우 손실 임계로 `SELL`
@@ -393,6 +394,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
+  - 수익 조건은 충족했지만 추세 지표가 부족한 경우, 지표 부족만으로 `SELL`하지 않고 `REVIEW`를 유지합니다.
 - corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다. 기존 action이 `SELL`이면 보존하고, `SELL`이 아닌 action만 `REVIEW`로 조정합니다.
 
 ### 6.3 corporate action(분할/역분할 등) 감지 계약
