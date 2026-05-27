@@ -69,16 +69,16 @@ checksum = "sha256:313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85
 url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip"
 
 [[tools.pnpm]]
-version = "10.32.1"
+version = "10.33.4"
 backend = "aqua:pnpm/pnpm"
 
 [tools.pnpm."platforms.linux-x64"]
-checksum = "sha256:c5607a86bfb948297e96b393a53c90107766fe56329e62967b1f239d861d4363"
-url = "https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-linux-x64"
+checksum = "sha256:ff1795595535a10d0dfe327303f3dd02377be141190b1f5756de68edde2cf813"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.33.4/pnpm-linux-x64"
 
 [tools.pnpm."platforms.macos-arm64"]
-checksum = "sha256:b0904b4e0cf36704fcdc24bcdb5f03388799a631510d1fb0d459ea69c7b1e2d9"
-url = "https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-macos-arm64"
+checksum = "sha256:7aae186a04e1ffaa0047d43cd07d68a98dec303304f28be52234ba955d26c671"
+url = "https://github.com/pnpm/pnpm/releases/download/v10.33.4/pnpm-macos-arm64"
 
 [[tools.python]]
 version = "3.14.3"
