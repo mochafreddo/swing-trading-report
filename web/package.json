@@ -19,18 +19,18 @@
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "yaml": "2.8.4",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "25.6.2",
+    "@types/node": "25.7.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitest/coverage-v8": "4.1.6",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "jsdom": "29.1.1",
-    "knip": "6.11.0",
+    "knip": "6.13.1",
     "prettier": "3.8.3",
     "typescript": "5.9.3",
     "vitest": "4.1.6"
