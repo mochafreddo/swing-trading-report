@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .paths import ensure_dir, next_report_path
 from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
 
@@ -12,28 +13,11 @@ _ARTIFACT_SCHEMA = "sab.report.v1"
 _ALLOWED_REPORT_TYPES = frozenset({"buy", "sell"})
 
 
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
 def _normalize_report_type(report_type: str) -> str:
     normalized = report_type.strip().lower()
     if normalized not in _ALLOWED_REPORT_TYPES:
         raise ValueError("report_type must be one of: buy, sell")
     return normalized
-
-
-def _next_report_path(report_dir: str, date: str, report_type: str) -> str:
-    suffix = f".{report_type}.json"
-    base = os.path.join(report_dir, f"{date}{suffix}")
-    if not os.path.exists(base):
-        return base
-    i = 1
-    while True:
-        path = os.path.join(report_dir, f"{date}-{i}{suffix}")
-        if not os.path.exists(path):
-            return path
-        i += 1
 
 
 def _collect_tickers(candidates: list[dict[str, Any]]) -> list[str]:
@@ -82,7 +66,7 @@ def write_report(
     run_meta: dict[str, Any] | None = None,
     artifact_date: str | None = None,
 ) -> str:
-    _ensure_dir(report_dir)
+    ensure_dir(report_dir)
     today, now_str, tz_label = resolve_report_timestamp(artifact_date=artifact_date)
     normalized_report_type = _normalize_report_type(report_type)
 
@@ -136,7 +120,7 @@ def write_report(
 
     lock_path = os.path.join(report_dir, f".{normalized_report_type}.report.lock")
     with advisory_path_lock(lock_path):
-        out_path = _next_report_path(report_dir, today, normalized_report_type)
+        out_path = next_report_path(report_dir, today, normalized_report_type)
         atomic_write_json(out_path, artifact, ensure_ascii=False, indent=2)
 
     return out_path

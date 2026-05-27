@@ -22,6 +22,7 @@ from .ai_brief_state import (
     validate_optional_ai_brief_state_fields,
     with_inferred_ai_brief_state,
 )
+from .paths import ensure_dir, next_report_path
 from .time_label import normalize_artifact_date
 
 _ARTIFACT_SCHEMA = "sab.ai_brief.v1"
@@ -41,23 +42,6 @@ _AUTOMATED_ORDER_PHRASES = (
 
 class AiBriefValidationError(ValueError):
     """Raised when an AI brief artifact violates the local JSON contract."""
-
-
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-def _next_report_path(report_dir: str, date: str) -> str:
-    suffix = ".ai-brief.json"
-    base = os.path.join(report_dir, f"{date}{suffix}")
-    if not os.path.exists(base):
-        return base
-    i = 1
-    while True:
-        path = os.path.join(report_dir, f"{date}-{i}{suffix}")
-        if not os.path.exists(path):
-            return path
-        i += 1
 
 
 def _offset_iso(now: dt.datetime | None = None) -> str:
@@ -350,7 +334,7 @@ def write_ai_brief_report(
     now: dt.datetime | None = None,
     artifact_date: object | None = None,
 ) -> str:
-    _ensure_dir(report_dir)
+    ensure_dir(report_dir)
     generated_at = str(artifact.get("generated_at") or _offset_iso(now)).strip()
     report_date = _report_date_from_generated_at(generated_at, artifact_date)
     validation_now = (
@@ -377,7 +361,7 @@ def write_ai_brief_report(
 
     lock_path = os.path.join(report_dir, ".ai-brief.report.lock")
     with advisory_path_lock(lock_path):
-        out_path = _next_report_path(report_dir, report_date)
+        out_path = next_report_path(report_dir, report_date, "ai-brief")
         atomic_write_json(out_path, payload, ensure_ascii=False, indent=2)
 
     return out_path

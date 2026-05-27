@@ -7,27 +7,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .paths import ensure_dir, next_report_path
 from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
 
 _ARTIFACT_SCHEMA = "sab.report.v1"
-
-
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-def _next_report_path(report_dir: str, date: str) -> str:
-    suffix = ".sell.json"
-    base = os.path.join(report_dir, f"{date}{suffix}")
-    if not os.path.exists(base):
-        return base
-    i = 1
-    while True:
-        path = os.path.join(report_dir, f"{date}-{i}{suffix}")
-        if not os.path.exists(path):
-            return path
-        i += 1
 
 
 @dataclass
@@ -120,7 +104,7 @@ def write_sell_report(
 ) -> str:
     del quantity_digits  # Legacy formatting option kept for API compatibility.
 
-    _ensure_dir(report_dir)
+    ensure_dir(report_dir)
     today, now_str, tz_label = resolve_report_timestamp(artifact_date=artifact_date)
 
     rows = [asdict(row) for row in evaluated]
@@ -185,7 +169,7 @@ def write_sell_report(
 
     lock_path = os.path.join(report_dir, ".sell.report.lock")
     with advisory_path_lock(lock_path):
-        out_path = _next_report_path(report_dir, today)
+        out_path = next_report_path(report_dir, today, "sell")
         atomic_write_json(out_path, artifact, ensure_ascii=False, indent=2)
 
     return out_path
