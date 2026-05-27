@@ -83,6 +83,11 @@ def _pattern_reason_id_label(reason: str) -> tuple[str, str]:
             "trigger_breakout_above_swing_high_with_volume",
             "전고점 돌파(거래량 확인)",
         )
+    if reason.startswith("Confirmed second close above prior breakout swing high"):
+        return (
+            "trigger_confirmed_second_close_above_swing_high",
+            "전고점 돌파 2차 종가 확인",
+        )
     if reason == "Reversal off EMA short/mid with volume":
         return (
             "trigger_reversal_off_ema_support_with_volume",
@@ -235,6 +240,56 @@ def _avg_volume_excluding_latest(
     return sum(window) / len(window) if window else 0.0
 
 
+def _resolve_consolidation_swing_high(
+    pre_breakout: list[dict[str, Any]],
+    settings: HybridEvaluationSettings,
+) -> tuple[float | None, list[str], dict[str, Any]]:
+    min_bars = settings.breakout_consolidation_min_bars
+    max_bars = settings.breakout_consolidation_max_bars
+    window = pre_breakout[-max_bars:] if len(pre_breakout) >= max_bars else pre_breakout
+    if len(window) < min_bars:
+        return None, ["Not enough bars for consolidation"], {}
+
+    highs = [_to_finite_or_default(c.get("high")) for c in window]
+    lows = [_to_finite_or_default(c.get("low")) for c in window]
+    swing_high = max(highs)
+    range_pct = (max(highs) - min(lows)) / swing_high if swing_high else 0.0
+    context = {"swing_high": swing_high}
+    if range_pct > 0.1:
+        return None, ["Consolidation range too wide"], context
+    return swing_high, [], context
+
+
+def _resolve_swing_high_breakout_bar(
+    closes: list[float],
+    sma_trend: list[float],
+    ema_short: list[float],
+    ema_mid: list[float],
+    rsi_vals: list[float],
+    candles: list[dict[str, Any]],
+    settings: HybridEvaluationSettings,
+) -> tuple[bool, list[str], dict[str, Any]]:
+    idx = len(closes) - 1
+    close = closes[idx]
+    if not (ema_short[idx] > ema_mid[idx] > sma_trend[idx]):
+        return False, ["EMAs not aligned for uptrend"], {}
+    if rsi_vals[idx] >= 60:
+        return False, ["RSI too extended for breakout"], {}
+
+    swing_high, blockers, context = _resolve_consolidation_swing_high(
+        candles[:-1], settings
+    )
+    if swing_high is None:
+        return False, blockers, context
+
+    avg_vol = _avg_volume_excluding_latest(candles, settings.volume_lookback_days)
+    today_volume, _ = _to_volume_and_invalid(candles[-1].get("volume"))
+    if not (close > swing_high and today_volume > avg_vol):
+        return False, ["No confirmed breakout over swing high"], context
+
+    return True, [], {"swing_high": swing_high, "avg_vol": avg_vol}
+
+
 def _detect_trend_pullback_bounce(
     closes: list[float],
     sma_trend: list[float],
@@ -348,40 +403,52 @@ def _detect_swing_high_breakout(
     close = closes[idx]
     reasons: list[str] = []
 
-    if not (ema_short[idx] > ema_mid[idx] > sma_trend[idx]):
-        return False, ["EMAs not aligned for uptrend"], None, {}
-    if rsi_vals[idx] >= 60:
-        return False, ["RSI too extended for breakout"], None, {}
+    if (
+        currency != "USD"
+        and settings.kr_breakout_requires_confirmation
+        and len(candles) >= 3
+    ):
+        prior_ok, _, prior_context = _resolve_swing_high_breakout_bar(
+            closes[:-1],
+            sma_trend[:-1],
+            ema_short[:-1],
+            ema_mid[:-1],
+            rsi_vals[:-1],
+            candles[:-1],
+            settings,
+        )
+        prior_swing_high = _to_finite_float(prior_context.get("swing_high"))
+        if prior_ok and prior_swing_high is not None and close > prior_swing_high:
+            reasons.append("Confirmed second close above prior breakout swing high")
+            return (
+                True,
+                reasons,
+                HybridPattern.SWING_HIGH_BREAKOUT,
+                {
+                    "swing_high": prior_swing_high,
+                    "avg_vol": prior_context.get("avg_vol"),
+                    "confirmed_breakout": True,
+                },
+            )
 
-    # Consolidation: price staying within a relatively tight range.
-    # Use only pre-breakout bars for consolidation range; including the
-    # breakout bar itself makes strong breakouts look "too wide".
-    min_bars = settings.breakout_consolidation_min_bars
-    max_bars = settings.breakout_consolidation_max_bars
-    pre_breakout = candles[:-1]
-    window = pre_breakout[-max_bars:] if len(pre_breakout) >= max_bars else pre_breakout
-    if len(window) < min_bars:
-        return False, ["Not enough bars for consolidation"], None, {}
-
-    highs = [_to_finite_or_default(c.get("high")) for c in window]
-    lows = [_to_finite_or_default(c.get("low")) for c in window]
-    swing_high = max(highs)
-    range_pct = (max(highs) - min(lows)) / swing_high if swing_high else 0.0
-    if range_pct > 0.1:
-        return False, ["Consolidation range too wide"], None, {"swing_high": swing_high}
-
-    today = candles[-1]
-    avg_vol = _avg_volume_excluding_latest(candles, settings.volume_lookback_days)
-    today_volume, _ = _to_volume_and_invalid(today.get("volume"))
-    if not (close > swing_high and today_volume > avg_vol):
+    ok, blockers, context = _resolve_swing_high_breakout_bar(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+    if not ok:
         return (
             False,
-            ["No confirmed breakout over swing high"],
+            blockers,
             None,
-            {"swing_high": swing_high},
+            context,
         )
 
-    # KR-specific confirmation can be applied later in entry logic; for now we only mark pattern.
+    # KR-specific first-close confirmation is handled above; this is a fresh breakout bar.
     reasons.append(
         "Close broke above recent swing high with volume > "
         f"{settings.volume_lookback_days}d avg (excluding breakout bar)"
@@ -391,8 +458,8 @@ def _detect_swing_high_breakout(
         reasons,
         HybridPattern.SWING_HIGH_BREAKOUT,
         {
-            "swing_high": swing_high,
-            "avg_vol": avg_vol,
+            "swing_high": context.get("swing_high"),
+            "avg_vol": context.get("avg_vol"),
         },
     )
 
@@ -689,6 +756,10 @@ def evaluate_ticker_hybrid(
     price_digits = 2 if currency == "USD" else 0
     # Gap guard prices should carry decimals for precise order reference, regardless of currency.
     gap_price_digits = 2
+    sma_trend_key = f"sma{settings.sma_trend_period}"
+    ema_short_key = f"ema{settings.ema_short_period}"
+    ema_mid_key = f"ema{settings.ema_mid_period}"
+    rsi_key = f"rsi{settings.rsi_period}"
 
     risk_guide = "-"
     if not math.isnan(atr_value):
@@ -708,6 +779,32 @@ def evaluate_ticker_hybrid(
         gap_guard_pct = settings.gap_atr_multiplier * atr_value / last_close
         gap_guard_up_price = last_close * (1 + gap_guard_pct)
         gap_guard_down_price = last_close * (1 - gap_guard_pct)
+
+    entry_trigger_price_value: float | None = None
+    entry_trigger_operator: str | None = None
+    entry_trigger_label: str | None = None
+    if pattern == HybridPattern.SWING_HIGH_BREAKOUT:
+        trigger_swing_high = _to_finite_float(pattern_context.get("swing_high"))
+        if trigger_swing_high is not None and trigger_swing_high > 0:
+            entry_trigger_price_value = trigger_swing_high
+            entry_trigger_operator = "gte"
+            entry_trigger_label = "swing_high"
+    elif pattern == HybridPattern.TREND_PULLBACK_BOUNCE:
+        ema_trigger = ema_short[-1]
+        if (
+            not math.isnan(ema_trigger)
+            and ema_trigger > 0
+            and pattern_context.get("close_above_ema_short")
+        ):
+            entry_trigger_price_value = ema_trigger
+            entry_trigger_operator = "gte"
+            entry_trigger_label = ema_short_key
+    elif pattern == HybridPattern.RSI_OVERSOLD_REVERSAL:
+        ema_trigger = ema_short[-1]
+        if not math.isnan(ema_trigger) and ema_trigger > 0:
+            entry_trigger_price_value = ema_trigger
+            entry_trigger_operator = "gte"
+            entry_trigger_label = ema_short_key
 
     add_reason(
         reason_id=f"pattern_{pattern.value}",
@@ -755,11 +852,16 @@ def evaluate_ticker_hybrid(
             points=0.0,
             value=gap_guard_pct,
         )
+    if entry_trigger_price_value is not None:
+        add_reason(
+            reason_id="entry_trigger_guard",
+            label="진입 트리거 재확인 기준",
+            kind="risk",
+            points=0.0,
+            value=entry_trigger_price_value,
+            threshold=entry_trigger_label,
+        )
 
-    sma_trend_key = f"sma{settings.sma_trend_period}"
-    ema_short_key = f"ema{settings.ema_short_period}"
-    ema_mid_key = f"ema{settings.ema_mid_period}"
-    rsi_key = f"rsi{settings.rsi_period}"
     sma_trend_value = fmt(sma_trend[-1], 2)
     ema_short_value = fmt(ema_short[-1], 2)
     ema_mid_value = fmt(ema_mid[-1], 2)
@@ -793,6 +895,9 @@ def evaluate_ticker_hybrid(
         "pattern_reasons": ", ".join(pattern_reasons),
         "entry_state": entry_state,
         "entry_state_reason": entry_state_reason,
+        "entry_trigger_price_value": entry_trigger_price_value,
+        "entry_trigger_operator": entry_trigger_operator,
+        "entry_trigger_label": entry_trigger_label,
         "atr14": fmt(atr_value),
         "atr14_value": None if math.isnan(atr_value) else atr_value,
         "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%"

@@ -60,6 +60,87 @@ def _settings(min_history: int = 5) -> HybridEvaluationSettings:
     )
 
 
+def _kr_breakout_confirmation_candles(
+    *,
+    second_open: float = 101.2,
+    second_high: float = 102.0,
+    second_low: float = 100.8,
+    second_close: float = 101.5,
+    second_volume: float = 55.0,
+) -> list[dict]:
+    candles = [
+        {
+            "date": f"202501{idx + 1:02d}",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 50.0,
+        }
+        for idx in range(5)
+    ]
+    candles.append(
+        {
+            "date": "20250106",
+            "open": 101.0,
+            "high": 104.0,
+            "low": 100.5,
+            "close": 102.0,
+            "volume": 80.0,
+        }
+    )
+    candles.append(
+        {
+            "date": "20250107",
+            "open": second_open,
+            "high": second_high,
+            "low": second_low,
+            "close": second_close,
+            "volume": second_volume,
+        }
+    )
+    return candles
+
+
+def _patch_kr_breakout_confirmation_indicators(
+    monkeypatch,
+    *,
+    rsi_tail: tuple[float, float] | None = None,
+    atr_value: float = 1.0,
+) -> None:
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.sma", lambda values, n: [95.0] * len(values)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.ema",
+        lambda values, n: [101.0] * len(values) if n == 2 else [100.0] * len(values),
+    )
+
+    def rsi_values(values, n):
+        if rsi_tail is None:
+            return [55.0] * len(values)
+        tail = list(rsi_tail)[-len(values) :]
+        return [55.0] * max(len(values) - len(tail), 0) + tail
+
+    monkeypatch.setattr("sab.signals.hybrid_buy.rsi", rsi_values)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [atr_value] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+
 def test_pullback_bounce_watch(monkeypatch):
     candles = _simple_candles(10)
 
@@ -634,6 +715,107 @@ def test_hybrid_kr_breakout_confirmation_watch(monkeypatch):
     assert result.candidate is not None
     assert result.candidate["entry_state"] == "WATCH"
     assert "confirmation" in result.candidate["entry_state_reason"].lower()
+
+
+def test_hybrid_breakout_candidate_exposes_entry_trigger_guard(monkeypatch):
+    candles = _simple_candles(6, base=90.0)
+    candles[-2]["close"] = 99.0
+    candles[-1]["open"] = 100.0
+    candles[-1]["close"] = 100.5
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [1.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *args, **kwargs: (
+            True,
+            ["breakout"],
+            HybridPattern.SWING_HIGH_BREAKOUT,
+            {"swing_high": 100.0},
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    settings = _settings(min_history=3)
+    settings.kr_breakout_requires_confirmation = False
+    result = evaluate_ticker_hybrid("FAKE.KR", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is not None
+    assert result.candidate["entry_trigger_price_value"] == 100.0
+    assert result.candidate["entry_trigger_operator"] == "gte"
+    assert result.candidate["entry_trigger_label"] == "swing_high"
+
+
+def test_hybrid_kr_breakout_second_close_confirms_original_swing_high(monkeypatch):
+    candles = _kr_breakout_confirmation_candles()
+    _patch_kr_breakout_confirmation_indicators(monkeypatch)
+
+    settings = _settings(min_history=5)
+    settings.kr_breakout_requires_confirmation = True
+    result = evaluate_ticker_hybrid("005930", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is not None
+    assert result.candidate["pattern"] == HybridPattern.SWING_HIGH_BREAKOUT
+    assert result.candidate["entry_state"] == "READY"
+    assert result.candidate["entry_trigger_price_value"] == 101.0
+    assert "confirmed" in result.candidate["pattern_reasons"].lower()
+
+
+def test_hybrid_kr_breakout_second_close_prefers_original_swing_high(monkeypatch):
+    candles = _kr_breakout_confirmation_candles(
+        second_open=104.2,
+        second_high=105.0,
+        second_low=103.8,
+        second_close=104.5,
+        second_volume=100.0,
+    )
+    _patch_kr_breakout_confirmation_indicators(monkeypatch, atr_value=10.0)
+
+    settings = _settings(min_history=5)
+    settings.kr_breakout_requires_confirmation = True
+    result = evaluate_ticker_hybrid("005930", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is not None
+    assert result.candidate["entry_state"] == "READY"
+    assert result.candidate["entry_trigger_price_value"] == 101.0
+    assert "confirmed" in result.candidate["pattern_reasons"].lower()
+
+
+def test_hybrid_kr_breakout_confirmation_requires_prior_bar_eligibility(monkeypatch):
+    candles = _kr_breakout_confirmation_candles()
+    _patch_kr_breakout_confirmation_indicators(monkeypatch, rsi_tail=(65.0, 55.0))
+
+    settings = _settings(min_history=5)
+    settings.kr_breakout_requires_confirmation = True
+    result = evaluate_ticker_hybrid("005930", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is None
+
+
+def test_hybrid_kr_breakout_confirmation_uses_prior_bar_rsi_cap(monkeypatch):
+    candles = _kr_breakout_confirmation_candles()
+    _patch_kr_breakout_confirmation_indicators(monkeypatch, rsi_tail=(55.0, 65.0))
+
+    settings = _settings(min_history=5)
+    settings.kr_breakout_requires_confirmation = True
+    result = evaluate_ticker_hybrid("005930", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is not None
+    assert result.candidate["entry_state"] == "READY"
+    assert result.candidate["entry_trigger_price_value"] == 101.0
 
 
 def test_hybrid_kr_breakout_confirmation_disabled_allows_ready(monkeypatch):

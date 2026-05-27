@@ -247,6 +247,24 @@ def _extract_gap_guard(
     return pct, up, down
 
 
+def _extract_entry_trigger_guard(
+    candidate: dict[str, Any],
+) -> tuple[float | None, str | None, str | None, str | None]:
+    raw_trigger_price = candidate.get("entry_trigger_price_value")
+    if raw_trigger_price is None or raw_trigger_price == "":
+        raw_trigger_price = candidate.get("entry_trigger_price")
+    if raw_trigger_price is None or raw_trigger_price == "":
+        return None, None, None, None
+
+    trigger_price = _to_positive_price(raw_trigger_price)
+    if trigger_price is None:
+        return None, None, None, "hybrid trigger guard invalid"
+
+    operator = str(candidate.get("entry_trigger_operator") or "gte").strip().lower()
+    label = str(candidate.get("entry_trigger_label") or "trigger").strip()
+    return trigger_price, operator, label or "trigger", None
+
+
 def _normalize_strategy_mode(value: Any) -> str | None:
     normalized = str(value or "").strip().lower()
     if normalized in _SUPPORTED_STRATEGY_MODES:
@@ -274,6 +292,13 @@ def _resolve_report_strategy_mode(report: dict[str, Any]) -> str | None:
     if isinstance(config_snapshot, dict):
         return _normalize_strategy_mode(config_snapshot.get("strategy_mode"))
     return None
+
+
+def _resolve_report_gap_atr_multiplier(report: dict[str, Any]) -> float | None:
+    config_snapshot = report.get("config_snapshot")
+    if not isinstance(config_snapshot, dict):
+        return None
+    return _to_finite_float(config_snapshot.get("gap_atr_multiplier"))
 
 
 def evaluate_entry_candidates(
@@ -304,12 +329,18 @@ def evaluate_entry_candidates(
         )
         entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
         pattern = str(candidate.get("pattern") or "").strip() or None
+        trigger_price, trigger_operator, trigger_label, trigger_issue = (
+            _extract_entry_trigger_guard(candidate)
+        )
 
         if signal_close is None:
             signal_issue = _signal_close_issue(candidate)
             issue = f"{ticker}: {signal_issue}"
             reasons.append(signal_issue)
             system_issues.append(issue)
+        if trigger_issue is not None:
+            reasons.append(trigger_issue)
+            system_issues.append(f"{ticker}: {trigger_issue}")
 
         entry_price = price_lookup_fn(ticker)
         if entry_price is not None and entry_price <= 0:
@@ -338,9 +369,26 @@ def evaluate_entry_candidates(
                 "gap guard exceeded "
                 f"({gap_pct * 100:.2f}% vs {gap_guard_pct * 100:.2f}%)"
             )
+        elif trigger_issue is not None:
+            action = "REVIEW"
         elif strategy_mode == "sma_ema_hybrid":
             if entry_state == "READY":
-                action = "ENTER"
+                if trigger_price is None:
+                    action = "ENTER"
+                elif trigger_operator != "gte":
+                    action = "REVIEW"
+                    reasons.append(
+                        "hybrid trigger guard unsupported "
+                        f"({trigger_label} operator {trigger_operator})"
+                    )
+                elif entry_price is not None and entry_price < trigger_price:
+                    action = "SKIP"
+                    reasons.append(
+                        "hybrid trigger guard failed "
+                        f"({entry_price:.2f} < {trigger_label} {trigger_price:.2f})"
+                    )
+                else:
+                    action = "ENTER"
             else:
                 action = "REVIEW"
                 reasons.append("hybrid entry_state requires manual review")
@@ -710,13 +758,22 @@ def _is_missing_price_ratio_fatal(
     return missing_price_ratio >= fatal_missing_price_ratio
 
 
-def _build_config_snapshot(cfg: Config, *, provider: str, mode: str) -> dict[str, Any]:
+def _build_config_snapshot(
+    cfg: Config,
+    *,
+    provider: str,
+    mode: str,
+    effective_gap_atr_multiplier: float | None = None,
+    source_report_gap_atr_multiplier: float | None = None,
+) -> dict[str, Any]:
     portfolio = getattr(cfg, "portfolio", None)
     return {
         "provider": provider,
         "mode": mode,
         "strategy_mode": cfg.strategy_mode,
         "gap_atr_multiplier": cfg.gap_atr_multiplier,
+        "effective_gap_atr_multiplier": effective_gap_atr_multiplier,
+        "source_report_gap_atr_multiplier": source_report_gap_atr_multiplier,
         "min_history_bars": cfg.min_history_bars,
         "portfolio": {
             "max_active_holdings": getattr(portfolio, "max_active_holdings", None),
@@ -933,8 +990,15 @@ def run_entry(
     system_issues: list[str] = []
     market_rows_by_market: dict[str, list[EntryReportRow]] = {}
     report_strategy_mode = _resolve_report_strategy_mode(source_report)
-    gap_atr_multiplier = _to_finite_float(getattr(cfg, "gap_atr_multiplier", None))
-    allow_missing_gap_guard = gap_atr_multiplier is not None and gap_atr_multiplier <= 0
+    source_gap_atr_multiplier = _resolve_report_gap_atr_multiplier(source_report)
+    effective_gap_atr_multiplier = source_gap_atr_multiplier
+    if effective_gap_atr_multiplier is None:
+        effective_gap_atr_multiplier = _to_finite_float(
+            getattr(cfg, "gap_atr_multiplier", None)
+        )
+    allow_missing_gap_guard = (
+        effective_gap_atr_multiplier is not None and effective_gap_atr_multiplier <= 0
+    )
     for candidate_market in resolved_markets:
         market_candidates = candidates_by_market[candidate_market]
         if not market_candidates:
@@ -1057,7 +1121,11 @@ def run_entry(
         session_state=normalized_mode,
         eval_index_policy="entry_snapshot:v1",
         config_snapshot=_build_config_snapshot(
-            cfg, provider=normalized_provider, mode=normalized_mode
+            cfg,
+            provider=normalized_provider,
+            mode=normalized_mode,
+            effective_gap_atr_multiplier=effective_gap_atr_multiplier,
+            source_report_gap_atr_multiplier=source_gap_atr_multiplier,
         ),
     )
     artifact_dates = [

@@ -268,6 +268,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - 의도: 돌파 당일 변동폭이 큰 정상 breakout이 “박스권 과대”로 오탐지되어 탈락하는 것을 방지합니다.
 - Swing high breakout의 볼륨 확인은 **돌파 신호봉을 제외한 직전 N일 평균 거래량** 대비로 평가합니다.
   - 의도: `volume > Nd avg` 해석을 신호봉 포함 평균과 분리해 룰 의미를 고정합니다.
+- KR breakout confirmation이 켜진 경우 첫 돌파 종가는 `WATCH`가 될 수 있습니다.
+  - 다음 완성 일봉이 **원래 박스권 swing high** 위에서 한 번 더 마감하면 `READY`로 승격할 수 있습니다.
+  - 이때 직전 돌파봉의 고점을 새 swing high로 잘못 재계산하지 않고, 돌파 전 박스권의 swing high를 유지합니다.
 
 #### 5.3.3 `entry_state` 계약(READY vs WATCH)
 
@@ -283,6 +286,15 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 - hybrid buy candidate는 ATR 기반 `gap_guard_pct`와 상/하단 가격을 함께 산출합니다.
 - gap guard는 **신호봉 종가 시점의 ATR(t)** 를 사용해 다음 세션 entry 판단에 필요한 최신 변동성 가이드를 제공합니다.
 - 이는 “다음 거래일 시초 갭” 해석을 위한 **가드 값**이며, `sab entry` 단계에서 `ENTER|REVIEW|SKIP` 판정에 사용됩니다.
+
+#### 5.3.5 entry trigger guard 계약
+
+- hybrid buy candidate는 다음 entry 단계에서 재확인할 트리거 기준을 `entry_trigger_price_value`, `entry_trigger_operator`, `entry_trigger_label`로 기록할 수 있습니다.
+- Swing high breakout은 원래 박스권 `swing_high`를 `gte` 기준으로 기록합니다.
+- EMA 회복을 전제로 한 pullback/reversal 후보는 EMA short 값을 `gte` 기준으로 기록할 수 있습니다.
+- `sab entry`는 이 필드가 있는 `READY` 후보에 한해 raw/live entry 가격이 트리거 기준을 유지하는지 재확인합니다.
+  - 기준 미달이면 `SKIP`입니다.
+  - 레거시 리포트처럼 trigger guard 필드가 없으면 기존 호환성을 위해 `entry_state=READY` 판단을 유지합니다.
 
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
 
@@ -389,7 +401,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
-- hybrid buy는 추가로 pattern/entry_state/gap_guard 관련 필드를 포함합니다.
+  - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
+- hybrid buy는 추가로 pattern/entry_state/gap_guard/entry trigger guard 관련 필드를 포함합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
 - `sab entry`는 종목별 판정이 끝난 뒤 포트폴리오 가드(`portfolio.max_active_holdings`, `portfolio.max_new_entries_per_market`)를 최종 `ENTER` 후보에만 적용합니다.
   - 포트폴리오 차단은 system issue가 아니라 정책 결과로 취급하며, `entries[].reasons`와 `summary.portfolio_blocked_*`에만 반영합니다.

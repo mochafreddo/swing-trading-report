@@ -107,6 +107,60 @@ def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
     assert issues == []
 
 
+def test_evaluate_entry_candidates_skips_hybrid_ready_on_trigger_fail() -> None:
+    candidates = [
+        _entry_candidate(
+            "005930",
+            raw_close=100.0,
+            gap_guard_value=0.03,
+            strategy_mode="sma_ema_hybrid",
+            entry_state="READY",
+            pattern="swing_high_breakout",
+            entry_trigger_price_value=102.0,
+            entry_trigger_operator="gte",
+            entry_trigger_label="swing high",
+        )
+    ]
+
+    rows, issues = evaluate_entry_candidates(
+        candidates=candidates,
+        price_lookup_fn=lambda _ticker: 101.0,
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "SKIP"
+    assert any("hybrid trigger guard failed" in reason for reason in rows[0].reasons)
+    assert issues == []
+
+
+def test_evaluate_entry_candidates_reviews_malformed_hybrid_trigger_guard() -> None:
+    candidates = [
+        _entry_candidate(
+            "005930",
+            raw_close=100.0,
+            gap_guard_value=0.03,
+            strategy_mode="sma_ema_hybrid",
+            entry_state="READY",
+            pattern="swing_high_breakout",
+            entry_trigger_price_value="bad",
+            entry_trigger_operator="gte",
+            entry_trigger_label="swing high",
+        )
+    ]
+
+    rows, issues = evaluate_entry_candidates(
+        candidates=candidates,
+        price_lookup_fn=lambda _ticker: 101.0,
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "REVIEW"
+    assert any("hybrid trigger guard invalid" in reason for reason in rows[0].reasons)
+    assert issues == ["005930: hybrid trigger guard invalid"]
+
+
 def test_evaluate_entry_candidates_marks_review_on_missing_data() -> None:
     candidates = [
         _entry_candidate(
@@ -631,6 +685,75 @@ def test_run_entry_e2e_skips_gap_guard_when_filter_disabled(
     assert not any(
         "gap guard unavailable" in issue for issue in payload["system_issues"]
     )
+
+
+def test_run_entry_e2e_uses_source_report_gap_guard_disabled_config(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    candidate = _entry_candidate("AAPL.NASD", gap_guard_value=None)
+    candidate.pop("gap_guard_pct_value", None)
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "report_date": "2026-02-26",
+                "eval_context": {"market": "US"},
+                "config_snapshot": {"gap_atr_multiplier": 0.0},
+                "candidates": [candidate],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    out_files = sorted(report_dir.glob("*.entry.json"))
+    assert len(out_files) == 1
+    payload = json.loads(out_files[0].read_text(encoding="utf-8"))
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["config_snapshot"]["gap_atr_multiplier"] == 1.0
+    assert payload["config_snapshot"]["effective_gap_atr_multiplier"] == 0.0
+    assert payload["config_snapshot"]["source_report_gap_atr_multiplier"] == 0.0
+    assert "gap guard unavailable" not in payload["entries"][0]["reasons"]
 
 
 def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
