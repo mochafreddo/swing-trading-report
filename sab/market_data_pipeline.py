@@ -390,6 +390,23 @@ def _is_adjusted_kwarg_type_error(exc: TypeError) -> bool:
     return "unexpected keyword argument" in message and "adjusted" in message
 
 
+def _daily_candles_with_optional_adjusted(
+    client: KISClient | PykrxClient,
+    symbol: str,
+    *,
+    count: int,
+    adjusted: bool,
+) -> list[Candle]:
+    try:
+        return client.daily_candles(symbol, count=count, adjusted=adjusted)
+    except TypeError as type_exc:
+        if not _is_adjusted_kwarg_type_error(type_exc):
+            raise
+        # Backward compatibility for stub/test clients that do not yet
+        # expose the adjusted kwarg.
+        return client.daily_candles(symbol, count=count)
+
+
 def _trim_incomplete_candle_tail(
     candles: list[Candle],
     *,
@@ -1000,21 +1017,12 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                         count=request.target_bars,
                     )
             else:
-                try:
-                    candles = runtime.kis_client.daily_candles(
-                        target.base_symbol,
-                        count=request.target_bars,
-                        adjusted=request.adjusted,
-                    )
-                except TypeError as type_exc:
-                    if not _is_adjusted_kwarg_type_error(type_exc):
-                        raise
-                    # Backward compatibility for stub/test clients that
-                    # do not yet expose the adjusted kwarg.
-                    candles = runtime.kis_client.daily_candles(
-                        target.base_symbol,
-                        count=request.target_bars,
-                    )
+                candles = _daily_candles_with_optional_adjusted(
+                    runtime.kis_client,
+                    target.base_symbol,
+                    count=request.target_bars,
+                    adjusted=request.adjusted,
+                )
             provider_result = _normalize_provider_result(
                 runtime,
                 ticker=ticker,
@@ -1095,21 +1103,12 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
             fallback_error = request.get_pykrx_error_fn(runtime)
             if fallback_client is not None and target.exchange is None:
                 try:
-                    try:
-                        fallback_candles = fallback_client.daily_candles(
-                            target.base_symbol,
-                            count=request.target_bars,
-                            adjusted=request.adjusted,
-                        )
-                    except TypeError as type_exc:
-                        if not _is_adjusted_kwarg_type_error(type_exc):
-                            raise
-                        # Backward compatibility for stub/test clients that
-                        # do not yet expose the adjusted kwarg.
-                        fallback_candles = fallback_client.daily_candles(
-                            target.base_symbol,
-                            count=request.target_bars,
-                        )
+                    fallback_candles = _daily_candles_with_optional_adjusted(
+                        fallback_client,
+                        target.base_symbol,
+                        count=request.target_bars,
+                        adjusted=request.adjusted,
+                    )
                 except PykrxClientError as py_exc:
                     fallback_client = None
                     fallback_error = str(py_exc)
@@ -1228,21 +1227,12 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
             continue
 
         try:
-            try:
-                candles = runtime.pykrx_client.daily_candles(
-                    target.base_symbol,
-                    count=request.target_bars,
-                    adjusted=request.adjusted,
-                )
-            except TypeError as type_exc:
-                if not _is_adjusted_kwarg_type_error(type_exc):
-                    raise
-                # Backward compatibility for stub/test clients that do not
-                # expose the adjusted kwarg.
-                candles = runtime.pykrx_client.daily_candles(
-                    target.base_symbol,
-                    count=request.target_bars,
-                )
+            candles = _daily_candles_with_optional_adjusted(
+                runtime.pykrx_client,
+                target.base_symbol,
+                count=request.target_bars,
+                adjusted=request.adjusted,
+            )
         except request.PykrxClientErrorCls as exc:
             _handle_provider_rejection(
                 runtime,
