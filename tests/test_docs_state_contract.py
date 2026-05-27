@@ -99,12 +99,16 @@ def test_operational_docs_include_document_state_sections() -> None:
 
 def test_archive_collections_are_exempt_from_document_state_section_contract() -> None:
     required_paths = set(DOC_STATE_SECTION_DOCS)
-    for archive_dir in ARCHIVE_DOC_DIRS:
-        for path in (REPO_ROOT / archive_dir).rglob("*.md"):
-            rel_path = path.relative_to(REPO_ROOT)
-            assert rel_path not in required_paths, (
-                f"{rel_path} should stay outside operational 문서 상태 section contract"
-            )
+    archive_docs = [
+        path.relative_to(REPO_ROOT)
+        for archive_dir in ARCHIVE_DOC_DIRS
+        for path in (REPO_ROOT / archive_dir).rglob("*.md")
+    ]
+    assert archive_docs, f"no archive docs found under {ARCHIVE_DOC_DIRS}"
+    for rel_path in archive_docs:
+        assert rel_path not in required_paths, (
+            f"{rel_path} should stay outside operational 문서 상태 section contract"
+        )
 
 
 def test_docs_index_declares_archive_and_artifact_categories() -> None:
@@ -120,9 +124,14 @@ def test_docs_index_declares_archive_and_artifact_categories() -> None:
 
 
 def test_index_docs_link_existing_files() -> None:
-    for doc_path in INDEX_DOCS:
-        for resolved in _resolve_local_links(doc_path):
-            assert resolved.exists(), f"{doc_path} links missing file: {resolved}"
+    links = [
+        (doc_path, resolved)
+        for doc_path in INDEX_DOCS
+        for resolved in _resolve_local_links(doc_path)
+    ]
+    assert links, "no local links found across index docs"
+    for doc_path, resolved in links:
+        assert resolved.exists(), f"{doc_path} links missing file: {resolved}"
 
 
 def test_artifact_globs_are_centrally_declared() -> None:
