@@ -36,7 +36,9 @@
     - 기본값은 `.envrc`에서 관리, 개인 오버라이드는 `.envrc.local` 사용(`.envrc.local.example` 참고)
     - `.env`는 direnv가 아니라 애플리케이션(`sab`)이 로드
   - 설정:
-    - `config.yaml` 생성(기본값은 `config.example.yaml` 참고)
+    - `config.yaml` 생성:
+      - 권장 샘플은 `config.example.yaml` 참고
+      - 생략/invalid mode의 런타임 폴백은 하위 호환 기본값 사용
     - `.env`에는 v1.1 필수 키를 작성:
       - KIS: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) `KIS_BASE_URL`
       - Supabase: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`(권장), `SUPABASE_SERVICE_ROLE_KEY`(레거시 폴백)

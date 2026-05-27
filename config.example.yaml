@@ -44,8 +44,10 @@ screener:
   us_limit: 20  # US top-N (CLI --screener-limit 지정 시 KR/US 모두 CLI 값 우선)
 
 strategy:
-  # Buy strategy mode: 'ema_cross' (current EMA20/50) or 'sma_ema_hybrid' (SMA20 + EMA10/21 hybrid, planned)
-  mode: ema_cross
+  # Buy strategy mode: 'sma_ema_hybrid' (SMA20 + EMA10/21 hybrid)
+  # Legacy option: 'ema_cross' (EMA20/50)
+  # Note: omitted/invalid modes still fall back to legacy defaults for compatibility.
+  mode: sma_ema_hybrid
   use_sma200_filter: true
   use_market_regime_filter: false  # benchmark가 SMA200 아래면 해당 시장 scan 후보를 차단
   require_slope_up: true
@@ -75,8 +77,10 @@ strategy:
     kr_breakout_requires_confirmation: true  # require confirmation candle for KR breakouts
 
 sell:
-  # Sell mode: 'generic' (ATR/EMA20/50-based) or 'sma_ema_hybrid' (profit band + SMA20/EMA10/21 rules)
-  mode: generic
+  # Sell mode: 'sma_ema_hybrid' (profit band + SMA20/EMA10/21 rules)
+  # Legacy option: 'generic' (ATR/EMA20/50-based)
+  # Note: omitted/invalid modes still fall back to legacy defaults for compatibility.
+  mode: sma_ema_hybrid
   atr_trail_multiplier: 1.0  # > 0
   time_stop_days: 10         # >= 0
   require_sma200: true
