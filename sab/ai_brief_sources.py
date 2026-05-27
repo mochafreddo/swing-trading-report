@@ -10,7 +10,7 @@ import re
 import socket
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -222,16 +222,7 @@ def _load_http_json_source_report(
                 f"source API request failed: {_exception_type_name(exc)}"
             ) from None
 
-        if 300 <= response.status_code < 400:
-            _close_response(response)
-            raise AiBriefSourceProviderError(
-                f"source API redirect was not followed (HTTP {response.status_code})"
-            )
-        if response.status_code >= 400:
-            _close_response(response)
-            raise AiBriefSourceProviderError(
-                f"source API request failed with HTTP {response.status_code}"
-            )
+        _raise_for_source_response_status(response, subject="source API")
         payload = _parse_source_api_response_payload(response, deadline=deadline)
         report_issues = _normalize_source_report_issues(
             payload,
@@ -266,19 +257,28 @@ def _parse_source_api_response_payload(
     *,
     deadline: float,
 ) -> Mapping[str, Any]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "source API response was not valid JSON"
-        ) from exc
+    payload = _decode_json_response(response, deadline=deadline, subject="source API")
     if not isinstance(payload, Mapping):
         raise AiBriefSourceProviderError(
             "source API response must contain a JSON object"
         )
     _validate_source_report_contract(payload, subject="source API response")
     return payload
+
+
+def _raise_for_source_response_status(response: Any, *, subject: str) -> None:
+    """Reject unfollowed redirects and HTTP error responses, closing the body."""
+    status_code = response.status_code
+    if 300 <= status_code < 400:
+        _close_response(response)
+        raise AiBriefSourceProviderError(
+            f"{subject} redirect was not followed (HTTP {status_code})"
+        )
+    if status_code >= 400:
+        _close_response(response)
+        raise AiBriefSourceProviderError(
+            f"{subject} request failed with HTTP {status_code}"
+        )
 
 
 def _get_vendor_source_response(
@@ -313,17 +313,62 @@ def _get_vendor_source_response(
             f"{source_subject} request failed: {_exception_type_name(exc)}"
         ) from None
 
-    if 300 <= response.status_code < 400:
-        _close_response(response)
-        raise AiBriefSourceProviderError(
-            f"{source_subject} redirect was not followed (HTTP {response.status_code})"
-        )
-    if response.status_code >= 400:
-        _close_response(response)
-        raise AiBriefSourceProviderError(
-            f"{source_subject} request failed with HTTP {response.status_code}"
-        )
+    _raise_for_source_response_status(response, subject=source_subject)
     return response
+
+
+def _decode_json_response(response: Any, *, deadline: float, subject: str) -> Any:
+    """Read the bounded body and decode it as JSON, or raise a provider error."""
+    body = _read_bounded_response_body(response, deadline=deadline)
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AiBriefSourceProviderError(
+            f"{subject} response was not valid JSON"
+        ) from exc
+
+
+def _expect_json_array(payload: Any, *, subject: str) -> list[object]:
+    if not isinstance(payload, list):
+        raise AiBriefSourceProviderError(
+            f"{subject} response must contain a JSON array"
+        )
+    return payload
+
+
+def _extract_list_field(payload: Any, *, key: str, subject: str) -> list[object]:
+    if not isinstance(payload, Mapping):
+        raise AiBriefSourceProviderError(
+            f"{subject} response must contain a JSON object"
+        )
+    field_value = payload.get(key)
+    if not isinstance(field_value, list):
+        raise AiBriefSourceProviderError(f"{subject} response {key} must be a list")
+    return field_value
+
+
+def _normalize_news_rows(
+    ticker: str,
+    payload: list[object],
+    *,
+    extract: Callable[[Mapping[str, Any]], tuple[str, str, str]],
+) -> list[dict[str, object]]:
+    """Build normalized source rows, emitting an empty row for non-mapping items."""
+    rows: list[dict[str, object]] = []
+    for item in payload:
+        if isinstance(item, Mapping):
+            title, url, published_at = extract(item)
+        else:
+            title, url, published_at = "", "", ""
+        rows.append(
+            {
+                "ticker": ticker,
+                "title": title,
+                "url": url,
+                "published_at": published_at,
+            }
+        )
+    return rows
 
 
 def _load_finnhub_source_report(
@@ -406,45 +451,25 @@ def _load_finnhub_source_report(
 
 
 def _parse_finnhub_response_payload(response: Any, *, deadline: float) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Finnhub source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, list):
-        raise AiBriefSourceProviderError(
-            "Finnhub source response must contain a JSON array"
-        )
-    return payload
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Finnhub source"
+    )
+    return _expect_json_array(payload, subject="Finnhub source")
 
 
 def _normalize_finnhub_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": str(item.get("headline") or "").strip(),
-                "url": str(item.get("url") or "").strip(),
-                "published_at": _finnhub_published_at_iso(item.get("datetime")),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            str(item.get("headline") or "").strip(),
+            str(item.get("url") or "").strip(),
+            _finnhub_published_at_iso(item.get("datetime")),
+        ),
+    )
 
 
 def _finnhub_published_at_iso(value: object) -> str:
@@ -545,50 +570,25 @@ def _parse_polygon_news_response_payload(
     *,
     deadline: float,
 ) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Polygon News source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, Mapping):
-        raise AiBriefSourceProviderError(
-            "Polygon News source response must contain a JSON object"
-        )
-    results = payload.get("results")
-    if not isinstance(results, list):
-        raise AiBriefSourceProviderError(
-            "Polygon News source response results must be a list"
-        )
-    return results
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Polygon News source"
+    )
+    return _extract_list_field(payload, key="results", subject="Polygon News source")
 
 
 def _normalize_polygon_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": str(item.get("title") or "").strip(),
-                "url": str(item.get("article_url") or "").strip(),
-                "published_at": str(item.get("published_utc") or "").strip(),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            str(item.get("title") or "").strip(),
+            str(item.get("article_url") or "").strip(),
+            str(item.get("published_utc") or "").strip(),
+        ),
+    )
 
 
 def _load_alpha_vantage_news_source_report(
@@ -682,52 +682,25 @@ def _parse_alpha_vantage_news_response_payload(
     *,
     deadline: float,
 ) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Alpha Vantage News source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, Mapping):
-        raise AiBriefSourceProviderError(
-            "Alpha Vantage News source response must contain a JSON object"
-        )
-    feed = payload.get("feed")
-    if not isinstance(feed, list):
-        raise AiBriefSourceProviderError(
-            "Alpha Vantage News source response feed must be a list"
-        )
-    return feed
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Alpha Vantage News source"
+    )
+    return _extract_list_field(payload, key="feed", subject="Alpha Vantage News source")
 
 
 def _normalize_alpha_vantage_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": str(item.get("title") or "").strip(),
-                "url": str(item.get("url") or "").strip(),
-                "published_at": _alpha_vantage_news_published_at_iso(
-                    item.get("time_published")
-                ),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            str(item.get("title") or "").strip(),
+            str(item.get("url") or "").strip(),
+            _alpha_vantage_news_published_at_iso(item.get("time_published")),
+        ),
+    )
 
 
 def _alpha_vantage_news_published_at_iso(value: object) -> str:
@@ -836,50 +809,25 @@ def _parse_marketaux_news_response_payload(
     *,
     deadline: float,
 ) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Marketaux News source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, Mapping):
-        raise AiBriefSourceProviderError(
-            "Marketaux News source response must contain a JSON object"
-        )
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise AiBriefSourceProviderError(
-            "Marketaux News source response data must be a list"
-        )
-    return data
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Marketaux News source"
+    )
+    return _extract_list_field(payload, key="data", subject="Marketaux News source")
 
 
 def _normalize_marketaux_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": str(item.get("title") or "").strip(),
-                "url": str(item.get("url") or "").strip(),
-                "published_at": str(item.get("published_at") or "").strip(),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            str(item.get("title") or "").strip(),
+            str(item.get("url") or "").strip(),
+            str(item.get("published_at") or "").strip(),
+        ),
+    )
 
 
 def _load_benzinga_news_source_report(
@@ -975,47 +923,25 @@ def _parse_benzinga_news_response_payload(
     *,
     deadline: float,
 ) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Benzinga News source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, list):
-        raise AiBriefSourceProviderError(
-            "Benzinga News source response must contain a JSON array"
-        )
-    return payload
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Benzinga News source"
+    )
+    return _expect_json_array(payload, subject="Benzinga News source")
 
 
 def _normalize_benzinga_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": str(item.get("title") or "").strip(),
-                "url": str(item.get("url") or "").strip(),
-                "published_at": _benzinga_news_published_at_iso(
-                    _benzinga_news_publication_value(item)
-                ),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            str(item.get("title") or "").strip(),
+            str(item.get("url") or "").strip(),
+            _benzinga_news_published_at_iso(_benzinga_news_publication_value(item)),
+        ),
+    )
 
 
 def _benzinga_news_publication_value(item: Mapping[str, Any]) -> object:
@@ -1152,50 +1078,25 @@ def _parse_naver_news_response_payload(
     *,
     deadline: float,
 ) -> list[object]:
-    body = _read_bounded_response_body(response, deadline=deadline)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AiBriefSourceProviderError(
-            "Naver News source response was not valid JSON"
-        ) from exc
-    if not isinstance(payload, Mapping):
-        raise AiBriefSourceProviderError(
-            "Naver News source response must contain a JSON object"
-        )
-    items = payload.get("items")
-    if not isinstance(items, list):
-        raise AiBriefSourceProviderError(
-            "Naver News source response items must be a list"
-        )
-    return items
+    payload = _decode_json_response(
+        response, deadline=deadline, subject="Naver News source"
+    )
+    return _extract_list_field(payload, key="items", subject="Naver News source")
 
 
 def _normalize_naver_news_rows(
     ticker: str,
     payload: list[object],
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if not isinstance(item, Mapping):
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "title": "",
-                    "url": "",
-                    "published_at": "",
-                }
-            )
-            continue
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": _clean_naver_news_text(item.get("title")),
-                "url": _naver_news_url(item),
-                "published_at": _naver_news_published_at_iso(item.get("pubDate")),
-            }
-        )
-    return rows
+    return _normalize_news_rows(
+        ticker,
+        payload,
+        extract=lambda item: (
+            _clean_naver_news_text(item.get("title")),
+            _naver_news_url(item),
+            _naver_news_published_at_iso(item.get("pubDate")),
+        ),
+    )
 
 
 def _clean_naver_news_text(value: object) -> str:
