@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.32.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.2...v1.32.3) (2026-05-27)
+
+
+### Bug Fixes
+
+* **strategy:** 스윙 로직 보강 ([cd38e57](https://github.com/mochafreddo/swing-trading-report/commit/cd38e57105701eac971d16f8a0cd4bdb5dab82bf))
+* **strategy:** 스윙 진입·매도 가드 정정 ([224e753](https://github.com/mochafreddo/swing-trading-report/commit/224e753b997450d07d97a0170785409adec33c27))
+
 ## [1.32.2](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.1...v1.32.2) (2026-05-27)
 
 
