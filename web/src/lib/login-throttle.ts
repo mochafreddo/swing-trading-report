@@ -114,26 +114,25 @@ function shouldResetAttemptState(
   );
 }
 
+function readNonNegativeInteger(value: unknown): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    return null;
+  }
+  return value;
+}
+
 function parseLoginAttemptState(
   payload: Record<string, unknown>,
 ): LoginAttemptState | null {
-  const failures = payload.failures;
-  const windowStartedAt = payload.windowStartedAt;
-  const blockedUntil = payload.blockedUntil;
-  if (
-    typeof failures !== "number" ||
-    !Number.isFinite(failures) ||
-    !Number.isInteger(failures) ||
-    failures < 0 ||
-    typeof windowStartedAt !== "number" ||
-    !Number.isFinite(windowStartedAt) ||
-    !Number.isInteger(windowStartedAt) ||
-    windowStartedAt < 0 ||
-    typeof blockedUntil !== "number" ||
-    !Number.isFinite(blockedUntil) ||
-    !Number.isInteger(blockedUntil) ||
-    blockedUntil < 0
-  ) {
+  const failures = readNonNegativeInteger(payload.failures);
+  const windowStartedAt = readNonNegativeInteger(payload.windowStartedAt);
+  const blockedUntil = readNonNegativeInteger(payload.blockedUntil);
+  if (failures === null || windowStartedAt === null || blockedUntil === null) {
     return null;
   }
 
