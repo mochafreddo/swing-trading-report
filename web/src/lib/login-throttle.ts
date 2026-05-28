@@ -99,6 +99,10 @@ function isAttemptStateExpired(
   return windowExpired && blockExpired;
 }
 
+function calcRetryAfterSeconds(blockedUntil: number, now: number): number {
+  return Math.max(1, Math.ceil((blockedUntil - now) / 1000));
+}
+
 function shouldResetAttemptState(
   state: LoginAttemptState,
   now: number,
@@ -154,9 +158,7 @@ function cleanupPerUserAttempts(
   config: LoginThrottleConfig,
 ): void {
   for (const [key, state] of perUserAttempts) {
-    const windowExpired = now - state.windowStartedAt > config.windowMs;
-    const blockExpired = state.blockedUntil <= now;
-    if (windowExpired && blockExpired) {
+    if (isAttemptStateExpired(state, now, config)) {
       perUserAttempts.delete(key);
     }
   }
@@ -185,11 +187,9 @@ function assertLoginAttemptAllowedInMemory(key: string, now: number): void {
   }
 
   if (state.blockedUntil > now) {
-    const retryAfterSeconds = Math.max(
-      1,
-      Math.ceil((state.blockedUntil - now) / 1000),
+    throw new LoginThrottleError(
+      calcRetryAfterSeconds(state.blockedUntil, now),
     );
-    throw new LoginThrottleError(retryAfterSeconds);
   }
 
   if (shouldResetAttemptState(state, now, config)) {
@@ -210,11 +210,9 @@ function recordLoginAttemptFailureInMemory(key: string, now: number): void {
     ? globalAttemptState
     : perUserAttempts.get(key);
   if (current && current.blockedUntil > now) {
-    const retryAfterSeconds = Math.max(
-      1,
-      Math.ceil((current.blockedUntil - now) / 1000),
+    throw new LoginThrottleError(
+      calcRetryAfterSeconds(current.blockedUntil, now),
     );
-    throw new LoginThrottleError(retryAfterSeconds);
   }
   const windowExpired =
     !current || shouldResetAttemptState(current, now, config);
@@ -292,11 +290,9 @@ async function assertLoginAttemptAllowedInSupabase(
   }
 
   if (state.blockedUntil > now) {
-    const retryAfterSeconds = Math.max(
-      1,
-      Math.ceil((state.blockedUntil - now) / 1000),
+    throw new LoginThrottleError(
+      calcRetryAfterSeconds(state.blockedUntil, now),
     );
-    throw new LoginThrottleError(retryAfterSeconds);
   }
 }
 
