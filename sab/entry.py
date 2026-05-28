@@ -193,8 +193,19 @@ def _parse_guard_percent_text(value: Any) -> float | None:
     return parsed / 100.0
 
 
+def _normalize_signal_basis(candidate: dict[str, Any]) -> str:
+    return str(candidate.get("signal_price_basis") or "").strip().lower()
+
+
+def _normalize_trigger_basis(candidate: dict[str, Any]) -> str:
+    primary = str(candidate.get("entry_trigger_price_basis") or "").strip().lower()
+    if primary:
+        return primary
+    return _normalize_signal_basis(candidate)
+
+
 def _extract_signal_close(candidate: dict[str, Any]) -> float | None:
-    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    signal_basis = _normalize_signal_basis(candidate)
     candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
     reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
     raw_reference_close = _to_positive_price(
@@ -224,7 +235,7 @@ def _extract_signal_close(candidate: dict[str, Any]) -> float | None:
 
 
 def _signal_close_issue(candidate: dict[str, Any]) -> str:
-    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    signal_basis = _normalize_signal_basis(candidate)
     candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
     reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
     raw_reference_close = _to_positive_price(
@@ -272,7 +283,7 @@ def _extract_adjusted_signal_close(candidate: dict[str, Any]) -> float | None:
     if close_value is not None:
         return close_value
 
-    signal_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    signal_basis = _normalize_signal_basis(candidate)
     if signal_basis != "adjusted":
         return None
 
@@ -300,11 +311,7 @@ def _extract_entry_trigger_guard(
     operator = str(candidate.get("entry_trigger_operator") or "gte").strip().lower()
     label = str(candidate.get("entry_trigger_label") or "trigger").strip()
     resolved_label = label or "trigger"
-    trigger_basis = (
-        str(candidate.get("entry_trigger_price_basis") or "").strip().lower()
-    )
-    if not trigger_basis:
-        trigger_basis = str(candidate.get("signal_price_basis") or "").strip().lower()
+    trigger_basis = _normalize_trigger_basis(candidate)
 
     if trigger_basis in {"", "raw"}:
         return trigger_price, operator, resolved_label, None
