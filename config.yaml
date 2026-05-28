@@ -38,7 +38,7 @@ strategy:
   mode: sma_ema_hybrid # ema_cross | sma_ema_hybrid
   use_sma200_filter: false
   use_market_regime_filter: true
-  require_slope_up: true
+  require_slope_up: false # applies to ema_cross mode only
   gap_atr_multiplier: 1.0
   min_history_bars: 200
   exclude_etf_etn: true
@@ -57,6 +57,7 @@ strategy:
     pullback_max_bars: 10
     breakout_consolidation_min_bars: 5
     breakout_consolidation_max_bars: 15
+    breakout_consolidation_max_range_pct: 0.10
     volume_lookback_days: 5
     max_gap_pct: 0.05
     use_sma60_filter: false

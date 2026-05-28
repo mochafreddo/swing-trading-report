@@ -103,6 +103,7 @@ def _normalize_benchmark_rows(
     market: str,
     rows: list[dict[str, Any]],
     unavailable_label: str,
+    market_date_key: str | None = None,
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
     normalized_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -117,27 +118,27 @@ def _normalize_benchmark_rows(
         return [], None
 
     normalized_rows.sort(key=lambda row: str(row.get("date") or ""))
-    market_date_key = _latest_market_data_date_key(runtime, market)
-    if market_date_key is None:
+    target_date_key = market_date_key or _latest_market_data_date_key(runtime, market)
+    if target_date_key is None:
         return normalized_rows, None
 
     aligned_rows = [
-        row for row in normalized_rows if str(row.get("date") or "") <= market_date_key
+        row for row in normalized_rows if str(row.get("date") or "") <= target_date_key
     ]
     latest_aligned_date = (
         str(aligned_rows[-1].get("date") or "") if aligned_rows else None
     )
-    if latest_aligned_date != market_date_key:
+    if latest_aligned_date != target_date_key:
         if latest_aligned_date is None:
             return (
                 None,
                 f"{ticker}: {unavailable_label} unavailable "
-                f"(benchmark candles do not cover market {market_date_key})",
+                f"(benchmark candles do not cover market {target_date_key})",
             )
         return (
             None,
             f"{ticker}: {unavailable_label} unavailable "
-            f"(stale benchmark candles; latest {latest_aligned_date} < market {market_date_key})",
+            f"(stale benchmark candles; latest {latest_aligned_date} < market {target_date_key})",
         )
 
     dropped_future_count = len(normalized_rows) - len(aligned_rows)
@@ -146,7 +147,7 @@ def _normalize_benchmark_rows(
             "%s: Trimmed %s benchmark candle(s) after market date %s",
             ticker,
             dropped_future_count,
-            market_date_key,
+            target_date_key,
         )
     return aligned_rows, None
 
@@ -204,6 +205,7 @@ def _resolve_adjusted_benchmark_candles(
     market: str,
     count: int,
     unavailable_label: str = "RS benchmark",
+    market_date_key: str | None = None,
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
     provider = runtime.cfg.data_provider
     parsed = parse_ticker(ticker)
@@ -241,6 +243,7 @@ def _resolve_adjusted_benchmark_candles(
             market=market,
             rows=rows,
             unavailable_label=unavailable_label,
+            market_date_key=market_date_key,
         )
 
     if provider == "pykrx":
@@ -268,6 +271,7 @@ def _resolve_adjusted_benchmark_candles(
             market=market,
             rows=rows,
             unavailable_label=unavailable_label,
+            market_date_key=market_date_key,
         )
 
     return (
@@ -281,6 +285,7 @@ def _compute_rs_benchmark_return(
     *,
     ticker: str,
     market: str,
+    market_date_key: str | None = None,
 ) -> tuple[float | None, str | None]:
     lookback_days = runtime.cfg.rs_lookback_days
     target_bars = (
@@ -295,6 +300,7 @@ def _compute_rs_benchmark_return(
         ticker=ticker,
         market=market,
         count=target_bars,
+        market_date_key=market_date_key,
     )
     if rows is None:
         return None, issue
@@ -321,17 +327,71 @@ def _compute_rs_benchmark_return(
     return (latest_close - base_close) / base_close, None
 
 
-def _resolve_rs_benchmark_context(
+def _build_candidate_meta(
     runtime: _ScanRuntime,
+    ticker: str,
+    *,
+    split_overseas_fn: Any,
+    excd_from_suffix_fn: Any,
+) -> dict[str, Any]:
+    cfg = runtime.cfg
+    meta = dict(runtime.screener_meta_map.get(ticker, {}))
+    meta["currency"] = runtime.ticker_currency.get(ticker, "KRW")
+    _, suffix = split_overseas_fn(ticker)
+    if "exchange" not in meta:
+        meta["exchange"] = excd_from_suffix_fn(suffix)
+    data_source = runtime.ticker_data_source.get(ticker, cfg.data_provider)
+    meta["data_source"] = data_source
+    meta["provider"] = data_source
+    meta["data_dir"] = cfg.data_dir
+    if runtime.fx_rate is not None:
+        meta["usd_krw_rate"] = runtime.fx_rate
+    return meta
+
+
+def _resolve_ticker_eval_date_keys(
+    runtime: _ScanRuntime,
+    *,
+    split_overseas_fn: Any,
+    excd_from_suffix_fn: Any,
+) -> dict[str, str]:
+    eval_date_by_ticker: dict[str, str] = {}
+    for ticker in runtime.tickers:
+        ticker_candles = runtime.market_data.get(ticker)
+        if not ticker_candles:
+            continue
+
+        meta = _build_candidate_meta(
+            runtime,
+            ticker,
+            split_overseas_fn=split_overseas_fn,
+            excd_from_suffix_fn=excd_from_suffix_fn,
+        )
+        idx_eval, _ = choose_eval_index(ticker_candles, meta=meta)
+        if idx_eval < 0 or idx_eval >= len(ticker_candles):
+            continue
+        eval_date_key = _normalize_eval_date_key(ticker_candles[idx_eval].get("date"))
+        if eval_date_key is not None:
+            eval_date_by_ticker[ticker] = eval_date_key
+    return eval_date_by_ticker
+
+
+def _resolve_rs_benchmark_context_by_ticker(
+    runtime: _ScanRuntime,
+    *,
+    eval_date_by_ticker: dict[str, str],
 ) -> tuple[dict[str, float], dict[str, str], bool]:
     runtime.rs_benchmark_requested_count = 0
     runtime.rs_benchmark_unavailable_count = 0
     if runtime.cfg.rs_lookback_days <= 0:
         return {}, {}, False
 
-    active_markets = sorted(
-        {infer_market_from_ticker(ticker) for ticker in runtime.tickers if ticker}
-    )
+    ticker_markets = [
+        (ticker, infer_market_from_ticker(ticker))
+        for ticker in runtime.tickers
+        if ticker
+    ]
+    active_markets = sorted({market for _, market in ticker_markets})
     if not active_markets:
         return {}, {}, False
 
@@ -342,11 +402,13 @@ def _resolve_rs_benchmark_context(
     requested_markets = {
         market for market in active_markets if configured_benchmarks.get(market)
     }
-    runtime.rs_benchmark_requested_count = sum(
-        1
-        for ticker in runtime.tickers
-        if infer_market_from_ticker(ticker) in requested_markets
-    )
+    requested_ticker_markets = [
+        (ticker, market)
+        for ticker, market in ticker_markets
+        if market in requested_markets
+    ]
+    runtime.rs_benchmark_requested_count = len(requested_ticker_markets)
+
     dynamic_requested = any(
         configured_benchmarks.get(market) for market in active_markets
     )
@@ -355,30 +417,48 @@ def _resolve_rs_benchmark_context(
 
     benchmark_returns: dict[str, float] = {}
     benchmark_tickers: dict[str, str] = {}
-    unavailable_markets: set[str] = set()
+    benchmark_cache: dict[tuple[str, str], tuple[float | None, str | None]] = {}
+    unavailable_tickers: set[str] = set()
     issues: list[str] = []
-    for market in active_markets:
-        benchmark_ticker = configured_benchmarks.get(market)
-        if not benchmark_ticker:
-            issues.append(f"{market}: benchmark ticker not configured")
-            continue
-        benchmark_return, issue = _compute_rs_benchmark_return(
-            runtime,
-            ticker=benchmark_ticker,
-            market=market,
-        )
-        if benchmark_return is None:
-            unavailable_markets.add(market)
-            issues.append(issue or f"{market}: benchmark return unavailable")
-            continue
-        benchmark_returns[market] = benchmark_return
-        benchmark_tickers[market] = benchmark_ticker
 
-    runtime.rs_benchmark_unavailable_count = sum(
-        1
-        for ticker in runtime.tickers
-        if infer_market_from_ticker(ticker) in unavailable_markets
-    )
+    def _append_issue(issue: str) -> None:
+        if issue not in issues:
+            issues.append(issue)
+
+    for market in active_markets:
+        if not configured_benchmarks.get(market):
+            _append_issue(f"{market}: benchmark ticker not configured")
+
+    for ticker, ticker_market in requested_ticker_markets:
+        benchmark_ticker = configured_benchmarks.get(ticker_market)
+        if not benchmark_ticker:
+            continue
+
+        eval_date_key = eval_date_by_ticker.get(ticker)
+        if eval_date_key is None:
+            unavailable_tickers.add(ticker)
+            _append_issue(f"{ticker}: RS benchmark unavailable (eval_date unavailable)")
+            continue
+
+        cache_key = (ticker_market, eval_date_key)
+        if cache_key not in benchmark_cache:
+            benchmark_cache[cache_key] = _compute_rs_benchmark_return(
+                runtime,
+                ticker=benchmark_ticker,
+                market=ticker_market,
+                market_date_key=eval_date_key,
+            )
+        benchmark_return, issue = benchmark_cache[cache_key]
+        if benchmark_return is None:
+            unavailable_tickers.add(ticker)
+            _append_issue(
+                issue or f"{benchmark_ticker}: RS benchmark return unavailable"
+            )
+            continue
+        benchmark_returns[ticker] = benchmark_return
+        benchmark_tickers[ticker] = benchmark_ticker
+
+    runtime.rs_benchmark_unavailable_count = len(unavailable_tickers)
 
     if issues:
         issue_label = (
@@ -565,11 +645,19 @@ def _evaluate_candidates(
 ) -> None:
     cfg = runtime.cfg
     market_regimes_by_market = _resolve_market_regime_context(runtime)
+    eval_date_by_ticker = _resolve_ticker_eval_date_keys(
+        runtime,
+        split_overseas_fn=split_overseas_fn,
+        excd_from_suffix_fn=excd_from_suffix_fn,
+    )
     (
-        benchmark_returns_by_market,
-        benchmark_tickers_by_market,
+        benchmark_returns_by_ticker,
+        benchmark_tickers_by_ticker,
         _dynamic_rs_requested,
-    ) = _resolve_rs_benchmark_context(runtime)
+    ) = _resolve_rs_benchmark_context_by_ticker(
+        runtime,
+        eval_date_by_ticker=eval_date_by_ticker,
+    )
 
     def _with_strategy_mode(candidate: dict[str, Any]) -> dict[str, Any]:
         enriched = dict(candidate)
@@ -616,6 +704,9 @@ def _evaluate_candidates(
         pullback_max_bars=cfg.hybrid.pullback_max_bars,
         breakout_consolidation_min_bars=cfg.hybrid.breakout_consolidation_min_bars,
         breakout_consolidation_max_bars=cfg.hybrid.breakout_consolidation_max_bars,
+        breakout_consolidation_max_range_pct=(
+            cfg.hybrid.breakout_consolidation_max_range_pct
+        ),
         volume_lookback_days=cfg.hybrid.volume_lookback_days,
         max_gap_pct=cfg.hybrid.max_gap_pct,
         use_sma60_filter=cfg.hybrid.use_sma60_filter,
@@ -637,17 +728,12 @@ def _evaluate_candidates(
         if not ticker_candles:
             continue
 
-        meta = dict(runtime.screener_meta_map.get(ticker, {}))
-        meta["currency"] = runtime.ticker_currency.get(ticker, "KRW")
-        _, suffix = split_overseas_fn(ticker)
-        if "exchange" not in meta:
-            meta["exchange"] = excd_from_suffix_fn(suffix)
-        data_source = runtime.ticker_data_source.get(ticker, cfg.data_provider)
-        meta["data_source"] = data_source
-        meta["provider"] = data_source
-        meta["data_dir"] = cfg.data_dir
-        if runtime.fx_rate is not None:
-            meta["usd_krw_rate"] = runtime.fx_rate
+        meta = _build_candidate_meta(
+            runtime,
+            ticker,
+            split_overseas_fn=split_overseas_fn,
+            excd_from_suffix_fn=excd_from_suffix_fn,
+        )
         ticker_market = "US" if meta["currency"].upper() == "USD" else "KR"
         regime_context = market_regimes_by_market.get(ticker_market)
         if regime_context is not None and not regime_context.is_bullish:
@@ -660,10 +746,10 @@ def _evaluate_candidates(
             runtime.screen_outs.append(detail)
             runtime.logger.info("%s", detail)
             continue
-        benchmark_return = benchmark_returns_by_market.get(ticker_market)
+        benchmark_return = benchmark_returns_by_ticker.get(ticker)
         if benchmark_return is not None:
             meta["rs_benchmark_return"] = benchmark_return
-            meta["rs_benchmark_ticker"] = benchmark_tickers_by_market.get(ticker_market)
+            meta["rs_benchmark_ticker"] = benchmark_tickers_by_ticker.get(ticker)
 
         try:
             if cfg.strategy_mode == "sma_ema_hybrid":
@@ -799,7 +885,6 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         "strategy_mode": runtime.cfg.strategy_mode,
         "use_sma200_filter": runtime.cfg.use_sma200_filter,
         "use_market_regime_filter": runtime.cfg.use_market_regime_filter,
-        "require_slope_up": runtime.cfg.require_slope_up,
         "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
         "min_history_bars": runtime.cfg.min_history_bars,
         "rs_lookback_days": runtime.cfg.rs_lookback_days,
@@ -812,6 +897,8 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         "exclude_etf_etn": runtime.cfg.exclude_etf_etn,
         "universe_markets": runtime.cfg.universe_markets,
     }
+    if runtime.cfg.strategy_mode == "ema_cross":
+        config_snapshot["require_slope_up"] = runtime.cfg.require_slope_up
     if runtime.cfg.rs_benchmark_return is not None:
         config_snapshot["rs_benchmark_return"] = runtime.cfg.rs_benchmark_return
     if runtime.cfg.strategy_mode == "sma_ema_hybrid":

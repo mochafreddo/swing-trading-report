@@ -58,6 +58,7 @@ def test_scan_replay_hybrid_report_preserves_hybrid_config_snapshot(
     pullback_max_bars: 7
     breakout_consolidation_min_bars: 4
     breakout_consolidation_max_bars: 12
+    breakout_consolidation_max_range_pct: 0.08
     volume_lookback_days: 3
     max_gap_pct: 0.04
     use_sma60_filter: true
@@ -88,6 +89,7 @@ def test_scan_replay_hybrid_report_preserves_hybrid_config_snapshot(
         "pullback_max_bars": 7,
         "breakout_consolidation_min_bars": 4,
         "breakout_consolidation_max_bars": 12,
+        "breakout_consolidation_max_range_pct": 0.08,
         "volume_lookback_days": 3,
         "max_gap_pct": 0.04,
         "use_sma60_filter": True,

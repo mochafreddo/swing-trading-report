@@ -214,7 +214,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - (옵션) 추세 필터:
   - SMA200 위(가격/EMA들이 SMA200 위).
 - (옵션) 기울기 필터:
-  - EMA20/EMA50이 전일 대비 상승.
+  - EMA20/EMA50이 전일 대비 상승(`require_slope_up`).
 - 갭 필터:
   - 평가 캔들의 `open`과 전일 `close`로 갭을 계산하고(= **신호일 당일 갭**),
   - `gap_atr_multiplier > 0`이면 `|gap| ≤ (gap_atr_multiplier × ATR(t-1) / 전일종가)`를 만족해야 합니다(기본 multiplier 1.0).
@@ -237,7 +237,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - `rs_diff_value`는 “종목 룩백 수익률 - 시장 benchmark 룩백 수익률”입니다.
   - benchmark는 `strategy.rs_benchmark_ticker_kr` / `strategy.rs_benchmark_ticker_us`로 지정합니다.
   - benchmark 수익률은 종목과 동일하게 adjusted 시계열 + `choose_eval_index()` + `rs_lookback_days` 기준으로 계산합니다.
-  - dynamic benchmark는 같은 시장의 후보 데이터 최신 평가일과 정렬되어야 합니다. benchmark가 그 날짜보다 뒤처지면 stale system 이슈로 처리하고 해당 시장의 dynamic RS 점수를 비활성화합니다.
+  - dynamic benchmark는 각 후보의 평가일과 정렬되어야 합니다. 같은 시장 안에서도 후보 평가일이 다르면 해당 평가일별 benchmark 수익률을 따로 계산합니다. benchmark가 후보 평가일보다 뒤처지면 stale system 이슈로 처리하고 해당 후보의 dynamic RS 점수를 비활성화합니다.
   - benchmark를 구하지 못하면 RS 점수는 부여하지 않고, scan report `system_issues`에 경고를 남깁니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
@@ -268,6 +268,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 
 - Swing high breakout의 박스권(consolidation) 폭 계산은 **돌파 신호봉을 제외한 직전 구간**으로 평가합니다.
   - 의도: 돌파 당일 변동폭이 큰 정상 breakout이 “박스권 과대”로 오탐지되어 탈락하는 것을 방지합니다.
+  - 허용 박스권 폭은 `strategy.hybrid.breakout_consolidation_max_range_pct`로 설정하며 기본값은 `0.10`(10%)입니다.
 - Swing high breakout의 볼륨 확인은 **돌파 신호봉을 제외한 직전 N일 평균 거래량** 대비로 평가합니다.
   - 의도: `volume > Nd avg` 해석을 신호봉 포함 평균과 분리해 룰 의미를 고정합니다.
 - KR breakout confirmation이 켜진 경우 첫 돌파 종가는 `WATCH`가 될 수 있습니다.

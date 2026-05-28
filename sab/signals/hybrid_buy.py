@@ -31,6 +31,7 @@ class HybridEvaluationSettings:
     pullback_max_bars: int
     breakout_consolidation_min_bars: int
     breakout_consolidation_max_bars: int
+    breakout_consolidation_max_range_pct: float
     volume_lookback_days: int
     max_gap_pct: float
     use_sma60_filter: bool
@@ -257,7 +258,7 @@ def _resolve_consolidation_swing_high(
     swing_high = max(highs)
     range_pct = (max(highs) - min(lows)) / swing_high if swing_high else 0.0
     context = {"swing_high": swing_high}
-    if range_pct > 0.1:
+    if range_pct > settings.breakout_consolidation_max_range_pct:
         return None, ["Consolidation range too wide"], context
     return swing_high, [], context
 

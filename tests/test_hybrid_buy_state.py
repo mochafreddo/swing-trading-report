@@ -45,6 +45,7 @@ def _settings(min_history: int = 5) -> HybridEvaluationSettings:
         pullback_max_bars=5,
         breakout_consolidation_min_bars=2,
         breakout_consolidation_max_bars=5,
+        breakout_consolidation_max_range_pct=0.10,
         volume_lookback_days=2,
         max_gap_pct=0.1,
         use_sma60_filter=False,
@@ -1067,6 +1068,57 @@ def test_swing_breakout_uses_pre_breakout_consolidation_range() -> None:
     assert ok is True
     assert reasons
     assert pattern == HybridPattern.SWING_HIGH_BREAKOUT
+
+
+def test_swing_breakout_uses_configured_consolidation_max_range_pct() -> None:
+    settings = _settings(min_history=2)
+    settings.breakout_consolidation_min_bars = 5
+    settings.breakout_consolidation_max_bars = 5
+    settings.breakout_consolidation_max_range_pct = 0.05
+
+    candles = [
+        {
+            "date": f"202501{idx + 1:02d}",
+            "open": 100.0,
+            "high": 104.0,
+            "low": 96.0,
+            "close": 100.0,
+            "volume": 1_000_000.0,
+        }
+        for idx in range(5)
+    ]
+    candles.append(
+        {
+            "date": "20250106",
+            "open": 104.0,
+            "high": 106.0,
+            "low": 103.0,
+            "close": 105.0,
+            "volume": 2_000_000.0,
+        }
+    )
+
+    closes = [100.0] * 5 + [105.0]
+    sma_trend = [95.0] * len(candles)
+    ema_short = [101.0] * len(candles)
+    ema_mid = [100.0] * len(candles)
+    rsi_vals = [55.0] * len(candles)
+
+    ok, reasons, pattern, context = _detect_swing_high_breakout(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+        "USD",
+    )
+
+    assert ok is False
+    assert reasons == ["Consolidation range too wide"]
+    assert pattern is None
+    assert context["swing_high"] == 104.0
 
 
 def test_swing_breakout_volume_check_uses_pre_breakout_average() -> None:

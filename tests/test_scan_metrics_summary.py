@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from sab.config import Config
 from sab.scan_evaluation import (
-    _resolve_rs_benchmark_context,
+    _resolve_rs_benchmark_context_by_ticker,
     _write_scan_report,
 )
 from sab.scan_types import _ScanRuntime
@@ -35,7 +35,7 @@ def _build_runtime(*, tickers: list[str], cfg: Config | None = None) -> _ScanRun
     return runtime
 
 
-def test_resolve_rs_benchmark_context_tracks_requested_and_unavailable_tickers(
+def test_resolve_rs_benchmark_context_by_ticker_tracks_summary_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _build_runtime(tickers=["AAPL.NAS", "MSFT.NAS", "005930"])
@@ -45,8 +45,9 @@ def test_resolve_rs_benchmark_context_tracks_requested_and_unavailable_tickers(
         *,
         ticker: str,
         market: str,
+        market_date_key: str | None = None,
     ) -> tuple[float | None, str | None]:
-        del runtime_obj, ticker
+        del runtime_obj, ticker, market_date_key
         if market == "US":
             return (
                 None,
@@ -60,12 +61,19 @@ def test_resolve_rs_benchmark_context_tracks_requested_and_unavailable_tickers(
     )
 
     benchmark_returns, benchmark_tickers, dynamic_requested = (
-        _resolve_rs_benchmark_context(runtime)
+        _resolve_rs_benchmark_context_by_ticker(
+            runtime,
+            eval_date_by_ticker={
+                "AAPL.NAS": "20260105",
+                "MSFT.NAS": "20260105",
+                "005930": "20260105",
+            },
+        )
     )
 
     assert dynamic_requested is True
-    assert benchmark_returns == {"KR": 0.12}
-    assert benchmark_tickers == {"KR": "069500"}
+    assert benchmark_returns == {"005930": 0.12}
+    assert benchmark_tickers == {"005930": "069500"}
     assert runtime.rs_benchmark_requested_count == 3
     assert runtime.rs_benchmark_unavailable_count == 2
     assert runtime.system_issues == [

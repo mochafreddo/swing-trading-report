@@ -31,6 +31,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "HYBRID_RSI_ZONE_HIGH",
         "HYBRID_RSI_OVERSOLD_LOW",
         "HYBRID_RSI_OVERSOLD_HIGH",
+        "HYBRID_BREAKOUT_CONS_MAX_RANGE_PCT",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -390,6 +391,30 @@ def test_load_config_normalizes_rs_benchmark_tickers(
     assert cfg.rs_benchmark_ticker_us == "SPY.AMS"
 
 
+def test_load_config_parses_hybrid_breakout_max_range_pct(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+strategy:
+  hybrid:
+    breakout_consolidation_max_range_pct: 0.08
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert cfg.hybrid.breakout_consolidation_max_range_pct == 0.08
+
+
 @pytest.mark.parametrize(
     ("yaml_text", "error_path"),
     [
@@ -463,6 +488,22 @@ def test_load_config_rejects_invalid_rs_benchmark_tickers(
             "strategy:\n  hybrid:\n    rsi_oversold_high: 100.1\n",
             "strategy.hybrid.rsi_oversold_high",
         ),
+        (
+            "strategy:\n  hybrid:\n    breakout_consolidation_max_range_pct: 0\n",
+            "strategy.hybrid.breakout_consolidation_max_range_pct",
+        ),
+        (
+            "strategy:\n  hybrid:\n    breakout_consolidation_max_range_pct: .nan\n",
+            "strategy.hybrid.breakout_consolidation_max_range_pct",
+        ),
+        (
+            "strategy:\n  hybrid:\n    breakout_consolidation_max_range_pct: .inf\n",
+            "strategy.hybrid.breakout_consolidation_max_range_pct",
+        ),
+        (
+            "strategy:\n  hybrid:\n    max_gap_pct: .nan\n",
+            "strategy.hybrid.max_gap_pct",
+        ),
         ("strategy:\n  min_history_bars: 0\n", "strategy.min_history_bars"),
         ("sell:\n  rsi_period: 0\n", "sell.rsi_period"),
     ],
@@ -483,6 +524,26 @@ def test_load_config_rejects_invalid_risk_ranges_even_when_not_strict(
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
     with pytest.raises(ConfigLoadError, match=error_path):
+        load_config()
+
+
+def test_load_config_rejects_non_finite_hybrid_breakout_max_range_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("HYBRID_BREAKOUT_CONS_MAX_RANGE_PCT", "nan")
+
+    with pytest.raises(
+        ConfigLoadError,
+        match=r"strategy\.hybrid\.breakout_consolidation_max_range_pct",
+    ):
         load_config()
 
 

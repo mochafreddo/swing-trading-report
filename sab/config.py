@@ -86,6 +86,10 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
         "HYBRID_BREAKOUT_CONS_MAX_BARS",
         "strategy.hybrid.breakout_consolidation_max_bars",
     ),
+    (
+        "HYBRID_BREAKOUT_CONS_MAX_RANGE_PCT",
+        "strategy.hybrid.breakout_consolidation_max_range_pct",
+    ),
     ("HYBRID_VOLUME_LOOKBACK_DAYS", "strategy.hybrid.volume_lookback_days"),
     ("HYBRID_MAX_GAP_PCT", "strategy.hybrid.max_gap_pct"),
     ("HYBRID_USE_SMA60_FILTER", "strategy.hybrid.use_sma60_filter"),
@@ -150,6 +154,7 @@ class HybridStrategyConfig:
     pullback_max_bars: int = 10
     breakout_consolidation_min_bars: int = 5
     breakout_consolidation_max_bars: int = 15
+    breakout_consolidation_max_range_pct: float = 0.10
     volume_lookback_days: int = 5
     max_gap_pct: float = 0.05
     use_sma60_filter: bool = False
@@ -660,6 +665,11 @@ def _build_hybrid_strategy_config(parser: _ConfigParser) -> HybridStrategyConfig
             "strategy.hybrid.breakout_consolidation_max_bars",
             15,
         ),
+        breakout_consolidation_max_range_pct=parser.env_float(
+            "HYBRID_BREAKOUT_CONS_MAX_RANGE_PCT",
+            "strategy.hybrid.breakout_consolidation_max_range_pct",
+            0.10,
+        ),
         volume_lookback_days=parser.env_int(
             "HYBRID_VOLUME_LOOKBACK_DAYS", "strategy.hybrid.volume_lookback_days", 5
         ),
@@ -958,11 +968,15 @@ def _raise_range_error(path: str, detail: str) -> None:
 
 
 def _validate_positive(path: str, value: float) -> None:
+    if not math.isfinite(value):
+        _raise_range_error(path, f"must be finite (got {value!r})")
     if value <= 0:
         _raise_range_error(path, f"must be > 0 (got {value!r})")
 
 
 def _validate_non_negative(path: str, value: float) -> None:
+    if not math.isfinite(value):
+        _raise_range_error(path, f"must be finite (got {value!r})")
     if value < 0:
         _raise_range_error(path, f"must be >= 0 (got {value!r})")
 
@@ -1083,6 +1097,10 @@ def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> 
             "strategy.hybrid.breakout_consolidation_min_bars",
             "must be <= strategy.hybrid.breakout_consolidation_max_bars",
         )
+    _validate_positive(
+        "strategy.hybrid.breakout_consolidation_max_range_pct",
+        hybrid_strategy.breakout_consolidation_max_range_pct,
+    )
     _validate_int_min(
         "strategy.hybrid.volume_lookback_days", hybrid_strategy.volume_lookback_days
     )
