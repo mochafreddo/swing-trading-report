@@ -76,6 +76,17 @@ function parseNonNegativeNumber(
   return parsed;
 }
 
+function parseOptionalNonNegativeNumber(
+  value: unknown,
+  fieldName: string,
+  context: string,
+): number | null {
+  if (value == null) {
+    return null;
+  }
+  return parseNonNegativeNumber(value, fieldName, context);
+}
+
 function parseOptionalText(value: unknown): string | null {
   if (value == null) {
     return null;
@@ -400,6 +411,7 @@ export function parseHoldingsYamlDocument(document: string): HoldingSnapshot[] {
     const normalizedEntryCurrency =
       market === "KR" && entryCurrency === "KRW" ? null : entryCurrency;
 
+    const tags = normalizeStringList(row.tags);
     return {
       ticker,
       quantity,
@@ -408,22 +420,17 @@ export function parseHoldingsYamlDocument(document: string): HoldingSnapshot[] {
       entry_date: parseOptionalDate(row.entry_date, "entry_date", context),
       strategy: parseOptionalText(row.strategy) ?? settings.default_strategy,
       notes: parseOptionalText(row.notes),
-      tags:
-        normalizeStringList(row.tags).length > 0
-          ? normalizeStringList(row.tags)
-          : [...settings.default_tags],
-      stop_override:
-        row.stop_override == null
-          ? null
-          : parseNonNegativeNumber(row.stop_override, "stop_override", context),
-      target_override:
-        row.target_override == null
-          ? null
-          : parseNonNegativeNumber(
-              row.target_override,
-              "target_override",
-              context,
-            ),
+      tags: tags.length > 0 ? tags : [...settings.default_tags],
+      stop_override: parseOptionalNonNegativeNumber(
+        row.stop_override,
+        "stop_override",
+        context,
+      ),
+      target_override: parseOptionalNonNegativeNumber(
+        row.target_override,
+        "target_override",
+        context,
+      ),
     } satisfies HoldingSnapshot;
   });
 
