@@ -679,12 +679,30 @@ def _build_hybrid_strategy_config(parser: _ConfigParser) -> HybridStrategyConfig
     )
 
 
+def _resolve_mode_string(
+    parser: _ConfigParser,
+    env_key: str,
+    yaml_path: str,
+    default: str,
+) -> str:
+    """Resolve a mode-like string from env > YAML > literal default.
+
+    Normalizes the result with ``str(...).strip().lower()`` so callers can pass
+    it straight to ``_normalize_choice`` validators.
+    """
+
+    raw: Any = os.getenv(env_key)
+    if raw is None:
+        raw = parser.from_yaml(yaml_path, default)
+    if raw is None:
+        raw = default
+    return str(raw).strip().lower()
+
+
 def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
-    strategy_mode_raw = os.getenv("STRATEGY_MODE")
-    if strategy_mode_raw is None:
-        strategy_mode_raw = parser.from_yaml("strategy.mode", "ema_cross")
-    if strategy_mode_raw is None:
-        strategy_mode_raw = "ema_cross"
+    strategy_mode = _resolve_mode_string(
+        parser, "STRATEGY_MODE", "strategy.mode", "ema_cross"
+    )
     us_min_price = parser.yaml_optional_float("screener.us.min_price")
     us_min_dollar_volume = parser.yaml_optional_float("screener.us.min_dollar_volume")
     rs_benchmark_ticker_kr = _normalize_strategy_benchmark_ticker(
@@ -707,7 +725,7 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
     )
 
     return _StrategySection(
-        strategy_mode=str(strategy_mode_raw).strip().lower(),
+        strategy_mode=strategy_mode,
         use_sma200_filter=parser.env_bool(
             "USE_SMA200_FILTER", "strategy.use_sma200_filter", False
         ),
@@ -797,13 +815,9 @@ def _build_hybrid_sell_config(parser: _ConfigParser) -> HybridSellConfig:
 
 
 def _parse_sell_section(parser: _ConfigParser) -> _SellSection:
-    sell_mode_raw = os.getenv("SELL_MODE")
-    if sell_mode_raw is None:
-        sell_mode_raw = parser.from_yaml("sell.mode", "generic")
-    if sell_mode_raw is None:
-        sell_mode_raw = "generic"
+    sell_mode = _resolve_mode_string(parser, "SELL_MODE", "sell.mode", "generic")
     return _SellSection(
-        sell_mode=str(sell_mode_raw).strip().lower(),
+        sell_mode=sell_mode,
         sell_atr_multiplier=parser.env_float(
             "SELL_ATR_MULTIPLIER", "sell.atr_trail_multiplier", 1.0
         ),
@@ -826,15 +840,11 @@ def _parse_sell_section(parser: _ConfigParser) -> _SellSection:
 
 
 def _parse_fx_section(parser: _ConfigParser) -> _FxSection:
-    fx_mode_raw = os.getenv("FX_MODE")
-    if fx_mode_raw is None:
-        fx_mode_raw = parser.from_yaml("fx.mode", "manual")
-    if fx_mode_raw is None:
-        fx_mode_raw = "manual"
+    fx_mode = _resolve_mode_string(parser, "FX_MODE", "fx.mode", "manual")
     fx_kis_symbol_raw = parser.env_str("FX_KIS_SYMBOL", "fx.kis_symbol", None)
     return _FxSection(
         usd_krw_rate=parser.env_optional_float("USD_KRW_RATE", "fx.usdkrw"),
-        fx_mode=str(fx_mode_raw).strip().lower(),
+        fx_mode=fx_mode,
         fx_cache_ttl_minutes=parser.env_float(
             "FX_CACHE_TTL", "fx.cache_ttl_minutes", 10.0
         ),
