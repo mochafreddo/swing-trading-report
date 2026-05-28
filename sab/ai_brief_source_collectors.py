@@ -780,10 +780,6 @@ def _is_blocked_feed_item_hostname(hostname: str) -> bool:
     )
 
 
-def _is_blocked_feed_url_hostname(normalized_hostname: str) -> bool:
-    return url_safety.is_blocked_hostname(normalized_hostname)
-
-
 def _reject_unsafe_xml_declarations(data: bytes) -> None:
     parser = expat.ParserCreate()
 
