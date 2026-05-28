@@ -129,6 +129,30 @@ export function buildReportDetailRequestPath(
   return `/api/reports/detail?${params.toString()}`;
 }
 
+interface ReportsStateQueryInput {
+  reportType: ReportsFilterType;
+  appliedQuery: string;
+  selectedKey: string | null;
+  showRaw: boolean;
+}
+
+function buildReportsStateQueryString(input: ReportsStateQueryInput): string {
+  const params = new URLSearchParams();
+  if (input.reportType !== "all") {
+    params.set("type", input.reportType);
+  }
+  if (input.appliedQuery) {
+    params.set("q", input.appliedQuery);
+  }
+  if (input.selectedKey) {
+    params.set("key", input.selectedKey);
+  }
+  if (input.showRaw) {
+    params.set("raw", "1");
+  }
+  return params.toString();
+}
+
 async function fetchReportsListCached(
   reportType: ReportsFilterType,
   appliedQuery: string,
@@ -304,43 +328,27 @@ export function useReportsState(initialState?: ReportsInitialState) {
       : null,
   );
 
-  const desiredQueryString = useMemo(() => {
-    const params = new URLSearchParams();
-    if (reportType !== "all") {
-      params.set("type", reportType);
-    }
-    if (appliedQuery) {
-      params.set("q", appliedQuery);
-    }
-    if (selectedKey) {
-      params.set("key", selectedKey);
-    }
-    if (showRaw) {
-      params.set("raw", "1");
-    }
-    return params.toString();
-  }, [appliedQuery, reportType, selectedKey, showRaw]);
+  const desiredQueryString = useMemo(
+    () =>
+      buildReportsStateQueryString({
+        reportType,
+        appliedQuery,
+        selectedKey,
+        showRaw,
+      }),
+    [appliedQuery, reportType, selectedKey, showRaw],
+  );
 
-  const currentQueryString = useMemo(() => {
-    const params = new URLSearchParams();
-    const currentType = parseReportType(searchParams.get("type"));
-    const currentQuery = (searchParams.get("q") ?? "").trim();
-    const currentKey = searchParams.get("key");
-    const currentRaw = searchParams.get("raw") === "1";
-    if (currentType !== "all") {
-      params.set("type", currentType);
-    }
-    if (currentQuery) {
-      params.set("q", currentQuery);
-    }
-    if (currentKey) {
-      params.set("key", currentKey);
-    }
-    if (currentRaw) {
-      params.set("raw", "1");
-    }
-    return params.toString();
-  }, [searchParams]);
+  const currentQueryString = useMemo(
+    () =>
+      buildReportsStateQueryString({
+        reportType: parseReportType(searchParams.get("type")),
+        appliedQuery: (searchParams.get("q") ?? "").trim(),
+        selectedKey: searchParams.get("key"),
+        showRaw: searchParams.get("raw") === "1",
+      }),
+    [searchParams],
+  );
 
   /* eslint-disable react-hooks/set-state-in-effect -- URL search params are an external source; this reconciles browser navigation with optimistic local report state. */
   useEffect(() => {
