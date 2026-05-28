@@ -1046,7 +1046,7 @@ def test_rsi_oversold_reversal_handles_zero_close_without_crash() -> None:
 
 
 def test_hybrid_candidate_exposes_configured_indicator_period_keys(monkeypatch):
-    candles = _simple_candles(10)
+    candles = _simple_candles(40)
     monkeypatch.setattr(
         "sab.signals.hybrid_buy.choose_eval_index",
         lambda data, **_: (len(data) - 1, False),

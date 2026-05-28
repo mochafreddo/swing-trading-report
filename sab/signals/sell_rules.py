@@ -133,8 +133,11 @@ def evaluate_sell_signals(
     # SMA200 context (optional)
     if settings.require_sma200:
         sma200 = sma(closes, 200)
-        sma_val = sma200[-1]
-        if not (
+        sma_val = _to_finite_float(sma200[-1])
+        if sma_val is None:
+            reasons.append("Indicator data unavailable for sell evaluation: SMA200")
+            action = "REVIEW"
+        elif not (
             close_today > sma_val and ema_short[-1] > sma_val and ema_long[-1] > sma_val
         ):
             reasons.append("Below SMA200 context")

@@ -320,6 +320,14 @@ def test_evaluate_ticker_hybrid_uses_eval_index(monkeypatch):
 
     candles = [
         {
+            "date": "20250107",
+            "open": 9.5,
+            "high": 10.5,
+            "low": 9.0,
+            "close": 9.5,
+            "volume": 1_900_000.0,
+        },
+        {
             "date": "20250108",
             "open": 10.0,
             "high": 11.0,

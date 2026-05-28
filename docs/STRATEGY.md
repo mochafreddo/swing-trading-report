@@ -267,6 +267,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 
 패턴이 하나도 성립하지 않으면 후보에서 제외됩니다.
 
+- SMA trend/EMA/RSI 등 패턴 판단에 필요한 핵심 지표가 계산되지 않으면 일반 신호 탈락이 아니라 **system 이슈**로 처리합니다.
+- `use_sma60_filter=true`인데 SMA60이 계산되지 않으면 필터 실패가 아니라 **system 이슈**로 처리합니다.
+
 - Swing high breakout의 박스권(consolidation) 폭 계산은 **돌파 신호봉을 제외한 직전 구간**으로 평가합니다.
   - 의도: 돌파 당일 변동폭이 큰 정상 breakout이 “박스권 과대”로 오탐지되어 탈락하는 것을 방지합니다.
   - 허용 박스권 폭은 `strategy.hybrid.breakout_consolidation_max_range_pct`로 설정하며 기본값은 `0.10`(10%)입니다.
@@ -355,6 +358,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 #### 6.1.1 주요 규칙(요약)
 
 - (옵션) SMA200 컨텍스트 이탈 시 `REVIEW`
+  - SMA200이 계산되지 않으면 일반 컨텍스트 이탈이 아니라 system 이슈 reason과 함께 `REVIEW`
 - EMA 되크로스(Short EMA가 Long EMA 아래로 교차) 시 `SELL`
 - 종가가 두 EMA 아래면 `REVIEW`
 - RSI 붕괴:

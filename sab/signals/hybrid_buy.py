@@ -132,6 +132,32 @@ _INVALID_VOLUME_REASON = "Invalid candle data: non-finite volume values"
 _ZERO_VOLUME_REASON = "Avg dollar volume is zero; volume data required"
 
 
+def _indicator_unavailable_reason(labels: list[str]) -> str:
+    return "Indicator data unavailable for hybrid buy: " + ", ".join(labels)
+
+
+def _core_indicator_data_issue(
+    *,
+    sma_trend: list[float],
+    ema_short: list[float],
+    ema_mid: list[float],
+    rsi_vals: list[float],
+) -> str | None:
+    unavailable: list[str] = []
+    for label, series in (
+        ("SMA trend", sma_trend),
+        ("EMA short", ema_short),
+        ("EMA mid", ema_mid),
+        ("RSI", rsi_vals),
+    ):
+        latest = series[-1] if series else float("nan")
+        if _to_finite_float(latest) is None:
+            unavailable.append(label)
+    if not unavailable:
+        return None
+    return _indicator_unavailable_reason(unavailable)
+
+
 def _volume_data_issue(candles: list[dict[str, Any]]) -> str | None:
     has_invalid_volume = False
     for candle in candles:
@@ -596,6 +622,14 @@ def evaluate_ticker_hybrid(
     rsi_vals = rsi(closes, settings.rsi_period)
     atr_vals = atr(highs, lows, closes, 14)
     atr_value = atr_vals[-1] if atr_vals else float("nan")
+    indicator_issue = _core_indicator_data_issue(
+        sma_trend=sma_trend,
+        ema_short=ema_short,
+        ema_mid=ema_mid,
+        rsi_vals=rsi_vals,
+    )
+    if indicator_issue is not None:
+        return HybridEvaluationResult(ticker, None, indicator_issue, "system")
     latest = candles[idx_eval]
     eval_date_raw = str(latest.get("date") or "").strip()
     eval_date = eval_date_raw or None
@@ -614,8 +648,15 @@ def evaluate_ticker_hybrid(
 
     if settings.use_sma60_filter:
         sma60_vals = sma(closes, settings.sma60_period)
-        sma60 = sma60_vals[-1] if sma60_vals else float("nan")
-        if math.isnan(sma60) or last_close <= sma60:
+        sma60 = _to_finite_float(sma60_vals[-1]) if sma60_vals else None
+        if sma60 is None:
+            return HybridEvaluationResult(
+                ticker,
+                None,
+                _indicator_unavailable_reason(["SMA60"]),
+                "system",
+            )
+        if last_close <= sma60:
             return HybridEvaluationResult(
                 ticker,
                 None,

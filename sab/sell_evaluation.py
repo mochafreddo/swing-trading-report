@@ -23,6 +23,8 @@ _SYSTEM_REASON_PREFIXES = (
     "not enough completed candles",
     "not enough completed candles for hybrid sell",
     "invalid candle data:",
+    "indicator data unavailable for sell evaluation:",
+    "indicator data unavailable for hybrid sell:",
     "time stop skipped: unable to resolve holding market",
 )
 
