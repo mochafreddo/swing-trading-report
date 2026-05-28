@@ -57,6 +57,34 @@ def _ensure_list(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _invalid_holdings_value(
+    p: Path,
+    detail: str,
+    *,
+    field_name: str,
+    item_index: int | None = None,
+    ticker: str | None = None,
+) -> HoldingsLoadError:
+    if item_index is None:
+        location = f"field='{field_name}'"
+    else:
+        location = f"index {item_index}, ticker='{ticker or ''}', field='{field_name}'"
+    return HoldingsLoadError(f"Invalid holdings value in '{p}' ({location}): {detail}")
+
+
+def _missing_holdings_field(
+    p: Path,
+    *,
+    item_index: int,
+    ticker: str,
+    field_name: str,
+) -> HoldingsLoadError:
+    return HoldingsLoadError(
+        f"Missing required holdings field in "
+        f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}')."
+    )
+
+
 def load_holdings(path: str | None) -> HoldingsData:
     if not path:
         return HoldingsData(path=None, settings=HoldingSettings(), holdings=[])
@@ -108,21 +136,21 @@ def load_holdings(path: str | None) -> HoldingsData:
     if settings.default_currency is not None:
         raw_default_currency = settings.default_currency
         if isinstance(raw_default_currency, bool):  # type: ignore[unreachable]
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (field='settings.default_currency'): "
+            raise _invalid_holdings_value(
+                p,
                 f"unsupported settings.default_currency {raw_default_currency!r}; "
-                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}."
+                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+                field_name="settings.default_currency",
             )
         normalized_default_currency = str(raw_default_currency).strip().upper()
         if not normalized_default_currency:
             settings.default_currency = None
         elif normalized_default_currency not in SUPPORTED_ENTRY_CURRENCIES:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (field='settings.default_currency'): "
+            raise _invalid_holdings_value(
+                p,
                 f"unsupported settings.default_currency {raw_default_currency!r}; "
-                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}."
+                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+                field_name="settings.default_currency",
             )
         else:
             settings.default_currency = normalized_default_currency
@@ -148,30 +176,38 @@ def load_holdings(path: str | None) -> HoldingsData:
         min_value: float | None = None,
     ) -> float:
         if isinstance(value, bool):
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
-                f"expected a finite number, got {value!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"expected a finite number, got {value!r}.",
+                field_name=field_name,
+                item_index=item_index,
+                ticker=ticker,
             )
         try:
             parsed = float(value)
         except (TypeError, ValueError) as exc:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
-                f"expected a number, got {value!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"expected a number, got {value!r}.",
+                field_name=field_name,
+                item_index=item_index,
+                ticker=ticker,
             ) from exc
         if not math.isfinite(parsed):
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
-                f"expected a finite number, got {value!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"expected a finite number, got {value!r}.",
+                field_name=field_name,
+                item_index=item_index,
+                ticker=ticker,
             )
         if min_value is not None and parsed < min_value:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}'): "
-                f"expected a number >= {min_value:g}, got {value!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"expected a number >= {min_value:g}, got {value!r}.",
+                field_name=field_name,
+                item_index=item_index,
+                ticker=ticker,
             )
         return parsed
 
@@ -183,9 +219,11 @@ def load_holdings(path: str | None) -> HoldingsData:
         ticker: str,
     ) -> Any:
         if field_name not in item:
-            raise HoldingsLoadError(
-                "Missing required holdings field in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='{field_name}')."
+            raise _missing_holdings_field(
+                p,
+                item_index=item_index,
+                ticker=ticker,
+                field_name=field_name,
             )
         return item[field_name]
 
@@ -197,33 +235,41 @@ def load_holdings(path: str | None) -> HoldingsData:
             ticker="",
         )
         if isinstance(raw_ticker, bool) or raw_ticker is None:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='', field='ticker'): "
-                f"expected a non-empty ticker string, got {raw_ticker!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"expected a non-empty ticker string, got {raw_ticker!r}.",
+                field_name="ticker",
+                item_index=item_index,
+                ticker="",
             )
         if not isinstance(raw_ticker, str):
             hint = ""
             if isinstance(raw_ticker, int):
                 hint = " quote numeric codes like '000660' to preserve leading zeros."
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='', field='ticker'): "
-                f"expected a ticker string, got {raw_ticker!r}.{hint}"
+            raise _invalid_holdings_value(
+                p,
+                f"expected a ticker string, got {raw_ticker!r}.{hint}",
+                field_name="ticker",
+                item_index=item_index,
+                ticker="",
             )
         ticker = raw_ticker
         parsed = ticker.strip()
         if not parsed:
-            raise HoldingsLoadError(
-                "Missing required holdings field in "
-                f"'{p}' (index {item_index}, ticker='', field='ticker')."
+            raise _missing_holdings_field(
+                p,
+                item_index=item_index,
+                ticker="",
+                field_name="ticker",
             )
         ticker_issue = validate_strict_holdings_ticker(parsed)
         if ticker_issue is not None:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{parsed}', field='ticker'): "
-                f"{ticker_issue}."
+            raise _invalid_holdings_value(
+                p,
+                f"{ticker_issue}.",
+                field_name="ticker",
+                item_index=item_index,
+                ticker=parsed,
             )
         return parse_ticker(parsed).ticker
 
@@ -245,11 +291,11 @@ def load_holdings(path: str | None) -> HoldingsData:
     mixed_market_holdings = has_kr_ticker and has_us_ticker
 
     if mixed_market_holdings and settings.default_currency is not None:
-        raise HoldingsLoadError(
-            "Invalid holdings value in "
-            f"'{p}' (field='settings.default_currency'): "
+        raise _invalid_holdings_value(
+            p,
             "Mixed KR/US holdings cannot use settings.default_currency; "
-            "set entry_currency per row."
+            "set entry_currency per row.",
+            field_name="settings.default_currency",
         )
     if (
         has_us_ticker
@@ -260,16 +306,16 @@ def load_holdings(path: str | None) -> HoldingsData:
             "USD",
         )
     ):
-        raise HoldingsLoadError(
-            "Invalid holdings value in "
-            f"'{p}' (field='settings.default_currency'): "
-            "US-only holdings require settings.default_currency to be USD or unset."
+        raise _invalid_holdings_value(
+            p,
+            "US-only holdings require settings.default_currency to be USD or unset.",
+            field_name="settings.default_currency",
         )
     if has_kr_ticker and not has_us_ticker and settings.default_currency == "USD":
-        raise HoldingsLoadError(
-            "Invalid holdings value in "
-            f"'{p}' (field='settings.default_currency'): "
-            "KR-only holdings cannot set settings.default_currency=USD."
+        raise _invalid_holdings_value(
+            p,
+            "KR-only holdings cannot set settings.default_currency=USD.",
+            field_name="settings.default_currency",
         )
 
     holdings_list: list[Holding] = []
@@ -299,10 +345,12 @@ def load_holdings(path: str | None) -> HoldingsData:
             min_value=0,
         )
         if quantity > 0 and entry_price <= 0:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_price'): "
-                "active holdings (quantity > 0) require entry_price > 0."
+            raise _invalid_holdings_value(
+                p,
+                "active holdings (quantity > 0) require entry_price > 0.",
+                field_name="entry_price",
+                item_index=item_index,
+                ticker=ticker,
             )
 
         raw_entry_currency = item.get("entry_currency")
@@ -310,43 +358,53 @@ def load_holdings(path: str | None) -> HoldingsData:
         entry_currency: str | None
         if raw_entry_currency is not None:
             if isinstance(raw_entry_currency, bool):
-                raise HoldingsLoadError(
-                    "Invalid holdings value in "
-                    f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_currency'): "
+                raise _invalid_holdings_value(
+                    p,
                     f"unsupported entry_currency {raw_entry_currency!r}; "
-                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}."
+                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+                    field_name="entry_currency",
+                    item_index=item_index,
+                    ticker=ticker,
                 )
             has_explicit_entry_currency = str(raw_entry_currency).strip() != ""
         if has_explicit_entry_currency:
             entry_currency = str(raw_entry_currency).strip().upper()
             if entry_currency not in SUPPORTED_ENTRY_CURRENCIES:
-                raise HoldingsLoadError(
-                    "Invalid holdings value in "
-                    f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_currency'): "
+                raise _invalid_holdings_value(
+                    p,
                     f"unsupported entry_currency {raw_entry_currency!r}; "
-                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}."
+                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+                    field_name="entry_currency",
+                    item_index=item_index,
+                    ticker=ticker,
                 )
         else:
             entry_currency = settings.default_currency
 
         if mixed_market_holdings and not has_explicit_entry_currency:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_currency'): "
-                "Mixed KR/US holdings require explicit entry_currency per row."
+            raise _invalid_holdings_value(
+                p,
+                "Mixed KR/US holdings require explicit entry_currency per row.",
+                field_name="entry_currency",
+                item_index=item_index,
+                ticker=ticker,
             )
         is_us_ticker = market == "US"
         if is_us_ticker and entry_currency != "USD":
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_currency'): "
-                f"US ticker entry_currency must be USD, got {entry_currency!r}."
+            raise _invalid_holdings_value(
+                p,
+                f"US ticker entry_currency must be USD, got {entry_currency!r}.",
+                field_name="entry_currency",
+                item_index=item_index,
+                ticker=ticker,
             )
         if entry_currency == "USD" and not is_us_ticker:
-            raise HoldingsLoadError(
-                "Invalid holdings value in "
-                f"'{p}' (index {item_index}, ticker='{ticker}', field='entry_currency'): "
-                "entry_currency USD requires US ticker suffix."
+            raise _invalid_holdings_value(
+                p,
+                "entry_currency USD requires US ticker suffix.",
+                field_name="entry_currency",
+                item_index=item_index,
+                ticker=ticker,
             )
 
         strategy = item.get("strategy") or settings.default_strategy
