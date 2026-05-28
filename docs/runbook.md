@@ -269,6 +269,7 @@
 
 - 토큰 오류/401: `KIS_APP_KEY/SECRET/BASE_URL` 확인, `data/kis_token_`* 삭제로 강제 갱신(24시간 정책 유의)
 - 레이트리밋 `EGW00201`: `KIS_MIN_INTERVAL_MS`(예: 500–1000) 증가 후 재시도. 스크리너 TTL도 호출 수 절감에 도움
+- KR KIS 스크리너 서버 오류(예: `volume-rank` `EGW00316`): `--universe both`에서는 KR 스크리너를 건너뛰고 watchlist/US 평가를 계속합니다. `--universe screener`에서는 후보 소스가 없어질 수 있으므로 fail-closed로 실패합니다.
 - 히스토리 부족: `MIN_HISTORY_BARS=200+` 권장, 누적 수집으로 보완. 신규상장 등은 기준 미달 가능
 - US 심볼: `SYMBOL.NAS/NYS/AMS`(또는 동의어 `NASDAQ/NYSE/AMEX`)처럼 거래소를 명시해 사용. `.US`는 입력에서 허용되지 않음. US에는 PyKRX 폴백이 적용되지 않음
 - US 클래스 심볼: `BRK.B.NYS`가 캐노니컬이며, `BRK/B.NYS` 입력은 내부에서 `BRK.B.NYS`로 정규화

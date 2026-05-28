@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import sab.scan_screener as ss
+from sab.data.kis_client import KISApiError
 from sab.screener.kis_screener import KISScreener, ScreenRequest
 
 
@@ -21,17 +22,21 @@ class _Logger:
 def _runtime(
     *,
     tickers: list[str] | None = None,
+    universe_markets: list[str] | None = None,
     us_screener_mode: str = "defaults",
     us_screener_limit: int = 2,
     screener_seeded: bool = False,
 ) -> Any:
     cfg = SimpleNamespace(
-        universe_markets=["US"],
+        universe_markets=universe_markets or ["US"],
         us_screener_mode=us_screener_mode,
         us_screener_defaults=["AAPL.NAS", "MSFT.NAS", "NVDA.NAS"],
         us_screener_limit=us_screener_limit,
         us_screener_metric="volume",
         data_dir="data",
+        min_price=0,
+        min_dollar_volume=0,
+        screener_cache_ttl_minutes=5,
     )
     return SimpleNamespace(
         cfg=cfg,
@@ -129,6 +134,60 @@ def test_run_screeners_screener_only_ignores_watchlist_baseline(
 
     assert captured_baseline["tickers"] == []
     assert runtime.tickers == ["AAPL.NAS"]
+
+
+def test_run_screeners_continues_us_when_kr_kis_screener_fails_in_both_mode() -> None:
+    runtime = _runtime(universe_markets=["KR", "US"], us_screener_mode="defaults")
+
+    class _KRScreener:
+        def __init__(
+            self,
+            _client: object,
+            *,
+            cache_dir: str | None = None,
+            cache_ttl_minutes: float = 5.0,
+        ) -> None:
+            pass
+
+        def screen(self, _request: object) -> Any:
+            raise KISApiError(
+                "Volume rank HTTP 500",
+                msg_cd="EGW00316",
+                msg1="조회 처리 중 오류 발생하였습니다.",
+                http_status=500,
+                context="volume_rank",
+            )
+
+    class _USRequest:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+    class _DefaultsScreener:
+        def __init__(self, defaults: list[str]) -> None:
+            self.defaults = defaults
+
+        def screen(self, request: _USRequest) -> Any:
+            return SimpleNamespace(tickers=self.defaults[: request.limit], metadata={})
+
+    ss._run_screeners(
+        runtime,
+        screener_enabled=True,
+        screener_only=False,
+        screener_limit=5,
+        ScreenRequestCls=ScreenRequest,
+        KISScreenerCls=_KRScreener,
+        KUSCls=object,
+        KUSReqCls=object,
+        USScreenerCls=_DefaultsScreener,
+        USScreenRequestCls=_USRequest,
+        us_session_info_fn=_session_info,
+        coerce_nday_fn=int,
+        format_ny_now_for_log_fn=lambda _session: "-",
+    )
+
+    assert runtime.fatal_failure is False
+    assert runtime.tickers == ["AAPL.NAS", "MSFT.NAS"]
+    assert any("KR KIS screener failed" in message for message in runtime.failures)
 
 
 def test_run_us_screener_direct_call_clears_watchlist_in_screener_only() -> None:

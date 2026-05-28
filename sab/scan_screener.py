@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import Config
+from .data.kis_client import KISClientError
 from .scan_types import _ScanRuntime
 from .tickers import parse_ticker, validate_strict_us_ticker
 
@@ -115,7 +116,20 @@ def _run_kr_screener(
         cache_dir=runtime.cfg.data_dir,
         cache_ttl_minutes=runtime.cfg.screener_cache_ttl_minutes,
     )
-    screen_result = screener.screen(req)
+    try:
+        screen_result = screener.screen(req)
+    except KISClientError as exc:
+        message = f"KR KIS screener failed ({exc})"
+        runtime.failures.append(message)
+        if screener_only:
+            runtime.logger.error(message)
+            runtime.fatal_failure = True
+        else:
+            runtime.logger.warning(
+                "KR KIS screener failed; skipping KR screener for safety (%s)",
+                exc,
+            )
+        return 0
     kr_tickers = screen_result.tickers
     runtime.screener_meta_map.update(screen_result.metadata.get("by_ticker", {}))
     cache_status = screen_result.metadata.get("cache_status", "refresh")
@@ -331,6 +345,8 @@ def _run_screeners(
         ScreenRequestCls=ScreenRequestCls,
         KISScreenerCls=KISScreenerCls,
     )
+    if runtime.fatal_failure:
+        return
     total_added += _run_us_screener(
         runtime,
         screener_limit=screener_limit,
