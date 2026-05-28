@@ -386,14 +386,10 @@ def _load_finnhub_source_report(
             "--source-provider finnhub requires FINNHUB_API_KEY"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            FINNHUB_COMPANY_NEWS_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=FINNHUB_COMPANY_NEWS_URL,
+    )
 
     now_utc = now.astimezone(dt.UTC)
     from_date = (now_utc - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)).date()
@@ -499,14 +495,10 @@ def _load_polygon_news_source_report(
             "--source-provider polygon-news requires POLYGON_API_KEY"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            POLYGON_NEWS_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=POLYGON_NEWS_URL,
+    )
 
     headers = {
         "Accept": "application/json",
@@ -606,14 +598,10 @@ def _load_alpha_vantage_news_source_report(
             "--source-provider alpha-vantage-news requires ALPHA_VANTAGE_API_KEY"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            ALPHA_VANTAGE_NEWS_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=ALPHA_VANTAGE_NEWS_URL,
+    )
 
     time_from = now.astimezone(dt.UTC) - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)
     time_from_text = time_from.strftime("%Y%m%dT%H%M")
@@ -731,14 +719,10 @@ def _load_marketaux_news_source_report(
             "--source-provider marketaux-news requires MARKETAUX_API_TOKEN"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            MARKETAUX_NEWS_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=MARKETAUX_NEWS_URL,
+    )
 
     published_after = (
         now.astimezone(dt.UTC) - dt.timedelta(hours=SOURCE_FRESHNESS_HOURS)
@@ -845,14 +829,10 @@ def _load_benzinga_news_source_report(
             "--source-provider benzinga-news requires BENZINGA_API_TOKEN"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            BENZINGA_NEWS_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=BENZINGA_NEWS_URL,
+    )
 
     published_since = int(
         (
@@ -994,14 +974,10 @@ def _load_naver_news_source_report(
             "NAVER_CLIENT_SECRET"
         )
 
-    deadline = time.monotonic() + source_timeout_seconds
-    try:
-        validated_source_api_url = _validate_source_api_request_url(
-            NAVER_NEWS_SEARCH_URL,
-            deadline=deadline,
-        )
-    except ValueError as exc:
-        raise AiBriefSourceProviderError(str(exc)) from exc
+    deadline, validated_source_api_url = _create_vendor_deadline_and_url(
+        source_timeout_seconds=source_timeout_seconds,
+        api_url=NAVER_NEWS_SEARCH_URL,
+    )
 
     headers = {
         "Accept": "application/json",
@@ -1547,6 +1523,22 @@ def _validate_source_api_request_url(
         hostnames=hostnames,
         addrinfos=addrinfos,
     )
+
+
+def _create_vendor_deadline_and_url(
+    *,
+    source_timeout_seconds: float,
+    api_url: str,
+) -> tuple[float, _ValidatedSourceApiUrl]:
+    deadline = time.monotonic() + source_timeout_seconds
+    try:
+        validated_source_api_url = _validate_source_api_request_url(
+            api_url,
+            deadline=deadline,
+        )
+    except ValueError as exc:
+        raise AiBriefSourceProviderError(str(exc)) from exc
+    return deadline, validated_source_api_url
 
 
 def _source_api_token_for_url(url: str) -> str:
