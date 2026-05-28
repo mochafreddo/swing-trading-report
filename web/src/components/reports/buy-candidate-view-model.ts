@@ -133,14 +133,10 @@ function parseCsvTokens(raw: string | null): string[] {
     .filter(Boolean);
 }
 
-function parsePatternReasons(raw: string | null): string[] {
-  if (!raw) {
-    return [];
-  }
-  return raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function translatedPatternReasons(row: ReportJson): string[] {
+  return parseCsvTokens(readString(row.pattern_reasons)).map(
+    translatePatternReason,
+  );
 }
 
 function truncateLabel(value: string, maxLength: number): string {
@@ -263,9 +259,7 @@ function buildHybridChips(row: ReportJson): ReasonChip[] {
   if (entryState && ENTRY_STATE_LABEL[entryState]) {
     chips.push(ENTRY_STATE_LABEL[entryState]);
   }
-  const translatedReasons = parsePatternReasons(
-    readString(row.pattern_reasons),
-  ).map(translatePatternReason);
+  const translatedReasons = translatedPatternReasons(row);
   for (const reason of translatedReasons.slice(0, 2)) {
     chips.push({ label: reason, tone: "neutral" });
   }
@@ -304,9 +298,7 @@ function buildHybridSummary(row: ReportJson): string {
   const entryState = readString(row.entry_state);
   const entryStateLabel =
     (entryState && ENTRY_STATE_LABEL[entryState]?.label) ?? "상태 미정";
-  const translated = parsePatternReasons(readString(row.pattern_reasons)).map(
-    translatePatternReason,
-  );
+  const translated = translatedPatternReasons(row);
   if (translated.length > 0) {
     return `${patternLabel} / ${entryStateLabel} · ${translated
       .slice(0, 2)
@@ -372,10 +364,7 @@ function buildReasonDetailLines(
   if (entryStateReason) {
     lines.push(entryStateReason);
   }
-  const patternReasons = parsePatternReasons(
-    readString(row.pattern_reasons),
-  ).map(translatePatternReason);
-  lines.push(...patternReasons);
+  lines.push(...translatedPatternReasons(row));
   if (lines.length === 0) {
     lines.push(reasonSummary);
   }
