@@ -204,63 +204,49 @@ def _normalize_trigger_basis(candidate: dict[str, Any]) -> str:
     return _normalize_signal_basis(candidate)
 
 
-def _extract_signal_close(candidate: dict[str, Any]) -> float | None:
+def _resolve_signal_close(
+    candidate: dict[str, Any],
+) -> tuple[float | None, str | None]:
     signal_basis = _normalize_signal_basis(candidate)
     candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
     reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
     raw_reference_close = _to_positive_price(
         candidate.get("entry_reference_close_raw_value")
     )
+
     if raw_reference_close is not None:
         if candidate_eval_date is not None:
             if reference_eval_date is None:
-                return None
+                return None, "entry reference eval_date unavailable"
             if reference_eval_date != candidate_eval_date:
-                return None
-        return raw_reference_close
+                return None, (
+                    "entry reference eval_date mismatch "
+                    f"({reference_eval_date} vs {candidate_eval_date})"
+                )
+        return raw_reference_close, None
 
     if signal_basis == "raw":
         close_value = _to_finite_float(candidate.get("close_value"))
         if close_value is not None and close_value > 0:
-            return close_value
+            return close_value, None
         price_value = _to_finite_float(candidate.get("price_value"))
         if price_value is not None and price_value > 0:
-            return price_value
-        return None
+            return price_value, None
+        return None, "signal close unavailable"
 
     if signal_basis:
-        return None
+        return None, "raw entry reference unavailable"
+    return None, "signal price basis unavailable"
 
-    return None
+
+def _extract_signal_close(candidate: dict[str, Any]) -> float | None:
+    close_value, _ = _resolve_signal_close(candidate)
+    return close_value
 
 
 def _signal_close_issue(candidate: dict[str, Any]) -> str:
-    signal_basis = _normalize_signal_basis(candidate)
-    candidate_eval_date = _parse_report_date(candidate.get("eval_date"))
-    reference_eval_date = _parse_report_date(candidate.get("entry_reference_eval_date"))
-    raw_reference_close = _to_positive_price(
-        candidate.get("entry_reference_close_raw_value")
-    )
-
-    if raw_reference_close is not None:
-        if candidate_eval_date is not None and reference_eval_date is None:
-            return "entry reference eval_date unavailable"
-        if (
-            candidate_eval_date is not None
-            and reference_eval_date is not None
-            and reference_eval_date != candidate_eval_date
-        ):
-            return (
-                "entry reference eval_date mismatch "
-                f"({reference_eval_date} vs {candidate_eval_date})"
-            )
-        return "signal close unavailable"
-
-    if signal_basis == "raw":
-        return "signal close unavailable"
-    if signal_basis:
-        return "raw entry reference unavailable"
-    return "signal price basis unavailable"
+    _, issue = _resolve_signal_close(candidate)
+    return issue or ""
 
 
 def _extract_gap_guard(
