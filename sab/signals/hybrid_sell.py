@@ -171,6 +171,7 @@ def evaluate_sell_signals_hybrid(
     latest = candles_eval[-1]
     last_close = closes[-1]
     eval_date = str(latest.get("date") or "") or None
+    eval_anchor = _parse_eval_date(eval_date)
 
     ema_short = ema(closes, settings.ema_short_period)
     ema_mid = ema(closes, settings.ema_mid_period)
@@ -186,6 +187,20 @@ def evaluate_sell_signals_hybrid(
     reasons: list[str] = []
     flags: list[str] = []
     action = "HOLD"
+    entry_date_str = holding.get("entry_date")
+    entry_date: dt.date | None = None
+    entry_date_invalid = False
+    entry_date_after_eval = False
+    if entry_date_str:
+        try:
+            entry_date = dt.date.fromisoformat(str(entry_date_str))
+        except ValueError:
+            entry_date_invalid = True
+        else:
+            if eval_anchor is not None and entry_date > eval_anchor:
+                entry_date_after_eval = True
+                reasons.append("Time stop skipped: entry_date after eval_date")
+                action = "REVIEW"
     missing_indicators = [
         label
         for label, value in (
@@ -240,7 +255,10 @@ def evaluate_sell_signals_hybrid(
     profit_protection_stop: float | None = None
     profit_protection_high_armed = False
     if corporate_action_move:
-        profit_basis_pnl, profit_basis_uses_peak = pnl_pct, False
+        if entry_date_after_eval:
+            profit_basis_pnl, profit_basis_uses_peak = None, False
+        else:
+            profit_basis_pnl, profit_basis_uses_peak = pnl_pct, False
     else:
         profit_basis_pnl, profit_basis_uses_peak = _compute_peak_pnl_pct_since_entry(
             entry_price=entry_price,
@@ -370,56 +388,45 @@ def evaluate_sell_signals_hybrid(
     time_stop_days = settings.time_stop_days
     time_stop_grace_days = settings.time_stop_grace_days
     time_stop_profit_floor = settings.time_stop_profit_floor
-    entry_date_str = holding.get("entry_date")
     days_in_trade_sessions: int | None = None
     time_stop_triggered = False
     if entry_date_str and time_stop_days > 0:
-        try:
-            entry_date = dt.date.fromisoformat(str(entry_date_str))
-        except ValueError:
+        if entry_date_invalid:
             reasons.append("Entry date missing/invalid; time stop skipped")
-        else:
-            eval_anchor = _parse_eval_date(eval_date)
-            if eval_anchor is None:
-                reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
-            elif entry_date > eval_anchor:
-                reasons.append("Time stop skipped: entry_date after eval_date")
+        elif eval_anchor is None:
+            reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
+        elif entry_date_after_eval:
+            pass
+        elif entry_date is not None:
+            resolved_market = _resolve_holding_market(ticker=ticker, holding=holding)
+            if resolved_market is None:
+                reasons.append("Time stop skipped: unable to resolve holding market")
                 if action == "HOLD":
                     action = "REVIEW"
             else:
-                resolved_market = _resolve_holding_market(
-                    ticker=ticker, holding=holding
+                days_in_trade_sessions = max(
+                    count_trading_sessions(
+                        entry_date,
+                        eval_anchor,
+                        market=resolved_market,
+                        inclusive=True,
+                        data_dir=(
+                            str(holding.get("data_dir"))
+                            if holding.get("data_dir")
+                            else None
+                        ),
+                    )
+                    - 1,
+                    0,
                 )
-                if resolved_market is None:
+                if days_in_trade_sessions >= time_stop_days:
+                    time_stop_triggered = True
                     reasons.append(
-                        "Time stop skipped: unable to resolve holding market"
+                        "Time stop: "
+                        f"{days_in_trade_sessions} sessions ≥ {time_stop_days} sessions"
                     )
-                    if action == "HOLD":
+                    if action != "SELL":
                         action = "REVIEW"
-                else:
-                    days_in_trade_sessions = max(
-                        count_trading_sessions(
-                            entry_date,
-                            eval_anchor,
-                            market=resolved_market,
-                            inclusive=True,
-                            data_dir=(
-                                str(holding.get("data_dir"))
-                                if holding.get("data_dir")
-                                else None
-                            ),
-                        )
-                        - 1,
-                        0,
-                    )
-                    if days_in_trade_sessions >= time_stop_days:
-                        time_stop_triggered = True
-                        reasons.append(
-                            "Time stop: "
-                            f"{days_in_trade_sessions} sessions ≥ {time_stop_days} sessions"
-                        )
-                        if action != "SELL":
-                            action = "REVIEW"
 
     # Extended time stop: only if a grace window is configured
     if (

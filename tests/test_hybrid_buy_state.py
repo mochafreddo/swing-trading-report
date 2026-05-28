@@ -918,6 +918,79 @@ def test_hybrid_rejects_non_finite_volume_as_system_issue(monkeypatch):
     assert result.reason_kind == "system"
 
 
+def test_hybrid_rejects_historical_non_finite_volume_as_system_issue(monkeypatch):
+    candles = _simple_candles(25)
+    candles[0]["volume"] = "N/A"
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is None
+    assert result.reason == "Invalid candle data: non-finite volume values"
+    assert result.reason_kind == "system"
+
+
+def test_hybrid_rejects_missing_volume_as_system_issue(monkeypatch):
+    candles = _simple_candles(10)
+    candles[-1]["volume"] = None
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {"rsi_val": 55.0, "close_above_ema_short": True},
+        ),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is None
+    assert result.reason == "Invalid candle data: missing volume values"
+    assert result.reason_kind == "system"
+
+
+def test_hybrid_rejects_zero_volume_when_liquidity_filter_disabled(monkeypatch):
+    candles = _simple_candles(10)
+    for candle in candles:
+        candle["volume"] = 0.0
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {"rsi_val": 55.0, "close_above_ema_short": True},
+        ),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is None
+    assert result.reason == "Avg dollar volume is zero; volume data required"
+    assert result.reason_kind == "signal"
+
+
 def test_pullback_bounce_handles_zero_close_without_crash() -> None:
     settings = _settings()
     closes = [1.0, 0.0]

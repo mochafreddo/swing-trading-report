@@ -207,8 +207,8 @@ def _evaluate_holdings(
             for reason in getattr(evaluation, "reasons", [])
             if reason is not None
         ]
-        has_invalid_candle_data = any(
-            reason.startswith("invalid candle data") for reason in reason_messages
+        has_untrusted_market_data = any(
+            reason.startswith("invalid candle data:") for reason in reason_messages
         )
         system_issues = _extract_system_issues_from_reasons(
             ticker,
@@ -221,7 +221,7 @@ def _evaluate_holdings(
             seen_failures.add(issue)
 
         eval_price = getattr(evaluation, "eval_price", None)
-        if eval_price is None and ticker_candles and not has_invalid_candle_data:
+        if eval_price is None and ticker_candles and not has_untrusted_market_data:
             eval_price = ticker_candles[-1].get("close")
         try:
             last_price = float(eval_price) if eval_price is not None else None
@@ -242,7 +242,7 @@ def _evaluate_holdings(
                 pnl_pct = None
 
         eval_date = getattr(evaluation, "eval_date", None)
-        if eval_date is None and ticker_candles:
+        if eval_date is None and ticker_candles and not has_untrusted_market_data:
             raw_date = ticker_candles[-1].get("date")
             if raw_date:
                 eval_date = str(raw_date)

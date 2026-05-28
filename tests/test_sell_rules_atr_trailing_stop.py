@@ -525,6 +525,58 @@ def test_time_stop_reviews_future_entry_date(
     assert result.time_stop_triggered is False
 
 
+def test_future_entry_date_reviews_when_time_stop_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_atr_only(monkeypatch)
+    candles: list[Candle] = [
+        {
+            "date": "20250108",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250109",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+        {
+            "date": "20250110",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100,
+            "volume": 1000,
+        },
+    ]
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-13",
+        "currency": "USD",
+    }
+    settings = SellSettings(
+        require_sma200=False,
+        min_bars=2,
+        ema_lengths=(2, 3),
+        time_stop_days=0,
+    )
+
+    result = evaluate_sell_signals("TEST", candles, holding, settings)
+
+    assert result.action == "REVIEW"
+    assert any("entry_date after eval_date" in reason for reason in result.reasons)
+    assert result.stop_price is None
+    assert not any("ATR trail" in reason for reason in result.reasons)
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+
+
 def test_corporate_action_guard_promotes_hold_to_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

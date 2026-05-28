@@ -19,7 +19,7 @@
 
 ### 백로그
 
-- hybrid buy의 volume 누락/0 처리 일관화
+- 현재 없음.
 
 ### 폐기 후보
 
@@ -70,9 +70,10 @@
   - 유동성 필터에서 volume은 **필수 데이터**입니다.
   - volume이 non-finite(파싱 불가/NaN/inf)이면 **system 이슈**로 처리하고 평가에서 제외합니다.
 - `strategy_mode=sma_ema_hybrid`
-  - volume이 `null`/빈 문자열이면 `0`으로 간주(유효)합니다.
-  - 다만 “값이 있는데 파싱이 불가능한” volume은 **system 이슈**로 처리하고 평가에서 제외합니다.
-  - `min_dollar_volume=0`이면, volume 누락(=0) 종목이 유동성 필터를 통과할 수 있으므로 운영에서는 최소 거래대금 임계치를 양수로 두는 것을 권장합니다.
+  - volume은 **필수 데이터**입니다.
+  - volume이 `null`/빈 문자열이면 **system 이슈**로 처리하고 평가에서 제외합니다.
+  - volume이 non-finite(파싱 불가/NaN/inf)이면 **system 이슈**로 처리하고 평가에서 제외합니다.
+  - finite `0` volume은 데이터 값으로는 허용하지만, 평가 구간의 평균 거래대금이 `0`이면 `min_dollar_volume=0`이어도 후보에서 제외합니다.
 - Sell(`sell_mode=generic|sma_ema_hybrid`)
   - 현재 sell 평가 로직은 volume을 직접 사용하지 않습니다.
 
@@ -486,4 +487,4 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 ## 9. 백로그 메모
 
-- volume 누락/0 처리 정책의 일관화(특히 hybrid buy)
+- 현재 없음.

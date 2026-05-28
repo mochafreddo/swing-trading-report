@@ -127,22 +127,36 @@ def _has_non_finite_ohlc(candles: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _avg_dollar_volume(
-    candles: list[dict[str, Any]], window: int
-) -> tuple[float, bool]:
+_MISSING_VOLUME_REASON = "Invalid candle data: missing volume values"
+_INVALID_VOLUME_REASON = "Invalid candle data: non-finite volume values"
+_ZERO_VOLUME_REASON = "Avg dollar volume is zero; volume data required"
+
+
+def _volume_data_issue(candles: list[dict[str, Any]]) -> str | None:
+    has_invalid_volume = False
+    for candle in candles:
+        raw_volume = candle.get("volume")
+        if raw_volume is None or raw_volume == "":
+            return _MISSING_VOLUME_REASON
+        _, invalid_volume = _to_volume_and_invalid(raw_volume)
+        has_invalid_volume = has_invalid_volume or invalid_volume
+    if has_invalid_volume:
+        return _INVALID_VOLUME_REASON
+    return None
+
+
+def _avg_dollar_volume(candles: list[dict[str, Any]], window: int) -> float:
     if not candles:
-        return 0.0, False
+        return 0.0
     sub = candles[-window:] if len(candles) >= window else candles
     total = 0.0
     count = 0
-    has_invalid_volume = False
     for c in sub:
         price = _to_finite_or_default(c.get("close"))
-        volume, invalid_volume = _to_volume_and_invalid(c.get("volume"))
-        has_invalid_volume = has_invalid_volume or invalid_volume
+        volume, _ = _to_volume_and_invalid(c.get("volume"))
         total += price * volume
         count += 1
-    return (total / count if count else 0.0), has_invalid_volume
+    return total / count if count else 0.0
 
 
 def _basic_filters(
@@ -187,13 +201,23 @@ def _basic_filters(
             0.0,
         )
 
-    avg_dv, has_invalid_volume = _avg_dollar_volume(candles[: idx + 1], 20)
-    if has_invalid_volume:
+    completed_candles = candles[: idx + 1]
+    volume_issue = _volume_data_issue(completed_candles)
+    if volume_issue is not None:
         return (
             False,
-            "Invalid candle data: non-finite volume values",
+            volume_issue,
             "system",
             close,
+            0.0,
+        )
+    avg_dv = _avg_dollar_volume(completed_candles, 20)
+    if avg_dv <= 0:
+        return (
+            False,
+            _ZERO_VOLUME_REASON,
+            "signal",
+            0.0,
             avg_dv,
         )
     eff_min_dv = settings.min_dollar_volume

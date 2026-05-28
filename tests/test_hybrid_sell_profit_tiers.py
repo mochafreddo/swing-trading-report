@@ -164,7 +164,7 @@ def test_hybrid_sell_profit_protection_checks_stale_corporate_action_since_entry
     )
 
 
-def test_hybrid_sell_profit_protection_skips_future_entry_without_post_entry_candle(
+def test_hybrid_sell_reviews_future_entry_without_post_entry_candle(
     monkeypatch,
 ):
     _patch_indicators(monkeypatch)
@@ -177,8 +177,55 @@ def test_hybrid_sell_profit_protection_skips_future_entry_without_post_entry_can
         "FAKE.US", _simple_candles(112.0), holding, settings
     )
 
-    assert result.action == "HOLD"
+    assert result.action == "REVIEW"
     assert result.stop_price is None
+    assert any("entry_date after eval_date" in reason for reason in result.reasons)
+    assert not any("Profit protection" in reason for reason in result.reasons)
+
+
+def test_hybrid_sell_future_entry_ignores_corporate_action_current_pnl(
+    monkeypatch,
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {"entry_price": 50.0, "entry_date": "2025-01-10"}
+    candles = [
+        {
+            "date": "20250101",
+            "open": 50.0,
+            "high": 50.0,
+            "low": 50.0,
+            "close": 50.0,
+            "volume": 1,
+        },
+        {
+            "date": "20250102",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1,
+        },
+        {
+            "date": "20250103",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", cast(list[dict[str, float]], candles), holding, settings
+    )
+
+    assert result.action == "REVIEW"
+    assert result.stop_price is None
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert any("entry_date after eval_date" in reason for reason in result.reasons)
     assert not any("Profit protection" in reason for reason in result.reasons)
 
 

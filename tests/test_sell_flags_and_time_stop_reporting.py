@@ -182,7 +182,7 @@ def test_evaluate_holdings_collects_invalid_candle_data_into_failures() -> None:
             stop_price=None,
             target_price=None,
             eval_price=None,
-            eval_date="20250113",
+            eval_date=None,
             flags=None,
             days_in_trade_sessions=None,
             time_stop_triggered=False,
@@ -200,6 +200,9 @@ def test_evaluate_holdings_collects_invalid_candle_data_into_failures() -> None:
     )
 
     assert len(rows) == 1
+    assert rows[0].last_price is None
+    assert rows[0].pnl_pct is None
+    assert rows[0].eval_date is None
     assert runtime.failures == [
         "AAPL.NASD: Invalid candle data: non-finite OHLC values"
     ]
@@ -215,7 +218,7 @@ def test_evaluate_holdings_collects_insufficient_history_into_failures() -> None
             stop_price=None,
             target_price=None,
             eval_price=None,
-            eval_date="20250113",
+            eval_date=None,
             flags=None,
             days_in_trade_sessions=None,
             time_stop_triggered=False,
@@ -233,6 +236,9 @@ def test_evaluate_holdings_collects_insufficient_history_into_failures() -> None
     )
 
     assert len(rows) == 1
+    assert rows[0].last_price == 100.0
+    assert rows[0].pnl_pct == 0.0
+    assert rows[0].eval_date == "20250113"
     assert runtime.failures == [
         "AAPL.NASD: Insufficient completed candles for hybrid sell"
     ]

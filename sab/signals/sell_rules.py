@@ -108,11 +108,26 @@ def evaluate_sell_signals(
     latest = candles_eval[-1]
     close_today = closes[-1]
     eval_date = str(latest.get("date") or "") or None
+    eval_anchor = _parse_eval_date(eval_date)
     atr_today = atr_values[-1]
 
     reasons: list[str] = []
     flags: list[str] = []
     action = "HOLD"
+    entry_date_str = holding.get("entry_date")
+    entry_date: dt.date | None = None
+    entry_date_invalid = False
+    entry_date_after_eval = False
+    if entry_date_str:
+        try:
+            entry_date = dt.date.fromisoformat(str(entry_date_str))
+        except ValueError:
+            entry_date_invalid = True
+        else:
+            if eval_anchor is not None and entry_date > eval_anchor:
+                entry_date_after_eval = True
+                reasons.append("Time stop skipped: entry_date after eval_date")
+                action = "REVIEW"
     corporate_action_move = detect_corporate_action_move(closes)
 
     # SMA200 context (optional)
@@ -144,7 +159,6 @@ def evaluate_sell_signals(
 
     # ATR trailing stop
     stop_price = None
-    entry_date_str = holding.get("entry_date")
     if stop_override is not None:
         parsed_stop_override = _to_finite_float(stop_override)
         if parsed_stop_override is None:
@@ -156,11 +170,14 @@ def evaluate_sell_signals(
             if close_today <= stop_price:
                 reasons.append("Price hit custom stop override")
                 action = "SELL"
-    elif atr_today > 0:
+    elif atr_today > 0 and not entry_date_after_eval:
         start_idx = max(0, len(closes) - settings.min_bars)
         if entry_date_str:
-            try:
-                entry_date = dt.date.fromisoformat(str(entry_date_str))
+            if entry_date_invalid:
+                reasons.append(
+                    "Entry date missing/invalid; ATR trail uses recent window"
+                )
+            elif entry_date is not None:
                 entry_yyyymmdd = entry_date.strftime("%Y%m%d")
                 for idx, candle in enumerate(candles_eval):
                     candle_date = _normalize_candle_date(candle.get("date"))
@@ -169,13 +186,6 @@ def evaluate_sell_signals(
                         break
                 else:
                     start_idx = len(closes) - 1
-                    reasons.append(
-                        "Entry date is after latest candle; ATR trail uses latest close"
-                    )
-            except ValueError:
-                reasons.append(
-                    "Entry date missing/invalid; ATR trail uses recent window"
-                )
         else:
             reasons.append("Entry date missing/invalid; ATR trail uses recent window")
 
@@ -213,51 +223,41 @@ def evaluate_sell_signals(
     days_in_trade_sessions: int | None = None
     time_stop_triggered = False
     if entry_date_str and time_stop_days > 0:
-        try:
-            entry_date = dt.date.fromisoformat(str(entry_date_str))
-        except ValueError:
+        if entry_date_invalid:
             reasons.append("Entry date missing/invalid; time stop skipped")
-        else:
-            eval_anchor = _parse_eval_date(eval_date)
-            if eval_anchor is None:
-                reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
-            elif entry_date > eval_anchor:
-                reasons.append("Time stop skipped: entry_date after eval_date")
+        elif eval_anchor is None:
+            reasons.append(f"Time stop skipped: invalid eval_date {eval_date!r}")
+        elif entry_date_after_eval:
+            pass
+        elif entry_date is not None:
+            resolved_market = _resolve_holding_market(ticker=ticker, holding=holding)
+            if resolved_market is None:
+                reasons.append("Time stop skipped: unable to resolve holding market")
                 if action == "HOLD":
                     action = "REVIEW"
             else:
-                resolved_market = _resolve_holding_market(
-                    ticker=ticker, holding=holding
+                days_in_trade_sessions = max(
+                    count_trading_sessions(
+                        entry_date,
+                        eval_anchor,
+                        market=resolved_market,
+                        inclusive=True,
+                        data_dir=(
+                            str(holding.get("data_dir"))
+                            if holding.get("data_dir")
+                            else None
+                        ),
+                    )
+                    - 1,
+                    0,
                 )
-                if resolved_market is None:
+                if days_in_trade_sessions >= time_stop_days:
+                    time_stop_triggered = True
                     reasons.append(
-                        "Time stop skipped: unable to resolve holding market"
+                        "Time stop: "
+                        f"{days_in_trade_sessions} sessions >= {time_stop_days} sessions"
                     )
-                    if action == "HOLD":
-                        action = "REVIEW"
-                else:
-                    days_in_trade_sessions = max(
-                        count_trading_sessions(
-                            entry_date,
-                            eval_anchor,
-                            market=resolved_market,
-                            inclusive=True,
-                            data_dir=(
-                                str(holding.get("data_dir"))
-                                if holding.get("data_dir")
-                                else None
-                            ),
-                        )
-                        - 1,
-                        0,
-                    )
-                    if days_in_trade_sessions >= time_stop_days:
-                        time_stop_triggered = True
-                        reasons.append(
-                            "Time stop: "
-                            f"{days_in_trade_sessions} sessions >= {time_stop_days} sessions"
-                        )
-                        action = "REVIEW" if action != "SELL" else action
+                    action = "REVIEW" if action != "SELL" else action
 
     if corporate_action_move is not None:
         reasons.append(
