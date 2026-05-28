@@ -14,6 +14,15 @@ def to_finite_float(value: Any) -> float | None:
     return parsed
 
 
+def to_positive_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    parsed = to_finite_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
 def to_int(value: Any, *, default: int = 0) -> int:
     if value is None:
         return default

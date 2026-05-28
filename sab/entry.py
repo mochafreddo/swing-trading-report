@@ -35,7 +35,12 @@ from .tickers import (
     validate_strict_holdings_ticker,
     validate_strict_us_ticker,
 )
-from .utils.numeric import to_finite_float as _to_finite_float
+from .utils.numeric import (
+    to_finite_float as _to_finite_float,
+)
+from .utils.numeric import (
+    to_positive_float as _to_positive_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +69,6 @@ _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
     "asof",
     "entry_snapshot_at",
 )
-
-
-def _to_positive_price(value: Any) -> float | None:
-    parsed = _to_finite_float(value)
-    if parsed is None or parsed <= 0:
-        return None
-    return parsed
 
 
 def _has_pre_open_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
@@ -226,11 +224,11 @@ def _resolve_signal_close(
         return raw_reference_close, None
 
     if signal_basis == "raw":
-        close_value = _to_finite_float(candidate.get("close_value"))
-        if close_value is not None and close_value > 0:
+        close_value = _to_positive_price(candidate.get("close_value"))
+        if close_value is not None:
             return close_value, None
-        price_value = _to_finite_float(candidate.get("price_value"))
-        if price_value is not None and price_value > 0:
+        price_value = _to_positive_price(candidate.get("price_value"))
+        if price_value is not None:
             return price_value, None
         return None, "signal close unavailable"
 
