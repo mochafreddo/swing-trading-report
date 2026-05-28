@@ -143,6 +143,16 @@ function readSummaryCount(
   );
 }
 
+// Reported counts must never fall below the count actually observed in the
+// payload, so clamp the summary value up to the observed floor.
+function readCountAtLeast(
+  detail: ReportJson | null,
+  key: string,
+  floor: number,
+): number {
+  return Math.max(readSummaryCount(detail, key, floor), floor);
+}
+
 function recommendationHasSources(row: ReportJson): boolean {
   return asRecordArray(row.sources).length > 0;
 }
@@ -157,12 +167,9 @@ function resolveAiBriefState(detail: ReportJson | null): AiBriefStateView {
     : [];
   const sourceIssues = asRecordArray(detail?.source_issues);
   const systemIssues = asRecordArray(detail?.system_issues);
-  const recommendationCount = Math.max(
-    readSummaryCount(
-      detail,
-      "recommendation_count",
-      shownRecommendations.length,
-    ),
+  const recommendationCount = readCountAtLeast(
+    detail,
+    "recommendation_count",
     shownRecommendations.length,
   );
   const preselectedFloor = Math.max(
@@ -170,16 +177,19 @@ function resolveAiBriefState(detail: ReportJson | null): AiBriefStateView {
     shownRecommendations.length,
     recommendationCount,
   );
-  const preselectedCount = Math.max(
-    readSummaryCount(detail, "preselected_count", preselectedFloor),
+  const preselectedCount = readCountAtLeast(
+    detail,
+    "preselected_count",
     preselectedFloor,
   );
-  const sourceIssueCount = Math.max(
-    readSummaryCount(detail, "source_issue_count", sourceIssues.length),
+  const sourceIssueCount = readCountAtLeast(
+    detail,
+    "source_issue_count",
     sourceIssues.length,
   );
-  const systemIssueCount = Math.max(
-    readSummaryCount(detail, "system_issue_count", systemIssues.length),
+  const systemIssueCount = readCountAtLeast(
+    detail,
+    "system_issue_count",
     systemIssues.length,
   );
   const missingSources = shownRecommendations.some(
