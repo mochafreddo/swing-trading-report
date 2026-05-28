@@ -32,6 +32,70 @@ def test_scan_replay_cases_match_expected_artifact(
     assert result.normalized_actual == result.expected
 
 
+def test_scan_replay_hybrid_report_preserves_hybrid_config_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_config = (
+        _SCAN_REPLAY_ROOT / "kr_ema_cross_baseline" / "config.yaml"
+    ).read_text(encoding="utf-8")
+    config_text = base_config.replace(
+        "  mode: ema_cross\n",
+        "  mode: sma_ema_hybrid\n",
+    ).replace(
+        "  rs_lookback_days: 5\n",
+        """  rs_lookback_days: 5
+  rs_benchmark_return: 0.07
+  hybrid:
+    sma_trend_period: 20
+    ema_short_period: 10
+    ema_mid_period: 21
+    rsi_period: 14
+    rsi_zone_low: 40
+    rsi_zone_high: 58
+    rsi_oversold_low: 25
+    rsi_oversold_high: 38
+    pullback_max_bars: 7
+    breakout_consolidation_min_bars: 4
+    breakout_consolidation_max_bars: 12
+    volume_lookback_days: 3
+    max_gap_pct: 0.04
+    use_sma60_filter: true
+    sma60_period: 55
+    kr_breakout_requires_confirmation: false
+""",
+    )
+    result = run_scan_replay_case(
+        _SCAN_REPLAY_ROOT / "kr_ema_cross_baseline",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        config_text=config_text,
+    )
+
+    snapshot = result.normalized_actual["config_snapshot"]
+    assert result.exit_code == 0
+    assert snapshot["strategy_mode"] == "sma_ema_hybrid"
+    assert snapshot["rs_benchmark_return"] == 0.07
+    assert snapshot["hybrid"] == {
+        "sma_trend_period": 20,
+        "ema_short_period": 10,
+        "ema_mid_period": 21,
+        "rsi_period": 14,
+        "rsi_zone_low": 40.0,
+        "rsi_zone_high": 58.0,
+        "rsi_oversold_low": 25.0,
+        "rsi_oversold_high": 38.0,
+        "pullback_max_bars": 7,
+        "breakout_consolidation_min_bars": 4,
+        "breakout_consolidation_max_bars": 12,
+        "volume_lookback_days": 3,
+        "max_gap_pct": 0.04,
+        "use_sma60_filter": True,
+        "sma60_period": 55,
+        "kr_breakout_requires_confirmation": False,
+    }
+
+
 def test_normalize_scan_artifact_drops_volatile_meta_and_preserves_candidate_order() -> (
     None
 ):

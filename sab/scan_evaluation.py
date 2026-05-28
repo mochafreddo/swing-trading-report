@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from .data.holiday_cache import HolidayEntry
@@ -739,7 +739,7 @@ def _decorate_candidates(
     runtime.candidates.sort(
         key=lambda candidate: (
             -_metric(candidate, "score_value", fallback_key="score", default=0.0),
-            -_metric(candidate, "rs_diff_value", default=0.0),
+            -_metric(candidate, "rs_diff_value", default=float("-inf")),
             -_liquidity_metric(candidate),
             -_metric(candidate, "pct_change_value"),
             str(candidate.get("ticker", "")),
@@ -794,6 +794,28 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         data_dir=runtime.cfg.data_dir,
         session_state_by_market=session_state_by_market,
     )
+    hybrid_cfg = runtime.cfg.hybrid
+    config_snapshot: dict[str, Any] = {
+        "strategy_mode": runtime.cfg.strategy_mode,
+        "use_sma200_filter": runtime.cfg.use_sma200_filter,
+        "use_market_regime_filter": runtime.cfg.use_market_regime_filter,
+        "require_slope_up": runtime.cfg.require_slope_up,
+        "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
+        "min_history_bars": runtime.cfg.min_history_bars,
+        "rs_lookback_days": runtime.cfg.rs_lookback_days,
+        "rs_benchmark_ticker_kr": runtime.cfg.rs_benchmark_ticker_kr,
+        "rs_benchmark_ticker_us": runtime.cfg.rs_benchmark_ticker_us,
+        "min_price": runtime.cfg.min_price,
+        "us_min_price": runtime.cfg.us_min_price,
+        "min_dollar_volume": runtime.cfg.min_dollar_volume,
+        "us_min_dollar_volume": runtime.cfg.us_min_dollar_volume,
+        "exclude_etf_etn": runtime.cfg.exclude_etf_etn,
+        "universe_markets": runtime.cfg.universe_markets,
+    }
+    if runtime.cfg.rs_benchmark_return is not None:
+        config_snapshot["rs_benchmark_return"] = runtime.cfg.rs_benchmark_return
+    if runtime.cfg.strategy_mode == "sma_ema_hybrid":
+        config_snapshot["hybrid"] = asdict(hybrid_cfg)
     run_meta = build_run_meta(
         market=eval_market,
         markets=eval_markets,
@@ -802,23 +824,7 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
             session_state_by_market if eval_market == "MIXED" else None
         ),
         eval_index_policy="choose_eval_index:v1",
-        config_snapshot={
-            "strategy_mode": runtime.cfg.strategy_mode,
-            "use_sma200_filter": runtime.cfg.use_sma200_filter,
-            "use_market_regime_filter": runtime.cfg.use_market_regime_filter,
-            "require_slope_up": runtime.cfg.require_slope_up,
-            "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
-            "min_history_bars": runtime.cfg.min_history_bars,
-            "rs_lookback_days": runtime.cfg.rs_lookback_days,
-            "rs_benchmark_ticker_kr": runtime.cfg.rs_benchmark_ticker_kr,
-            "rs_benchmark_ticker_us": runtime.cfg.rs_benchmark_ticker_us,
-            "min_price": runtime.cfg.min_price,
-            "us_min_price": runtime.cfg.us_min_price,
-            "min_dollar_volume": runtime.cfg.min_dollar_volume,
-            "us_min_dollar_volume": runtime.cfg.us_min_dollar_volume,
-            "exclude_etf_etn": runtime.cfg.exclude_etf_etn,
-            "universe_markets": runtime.cfg.universe_markets,
-        },
+        config_snapshot=config_snapshot,
     )
     artifact_dates = sorted(
         {

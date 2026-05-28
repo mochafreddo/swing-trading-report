@@ -27,6 +27,10 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RS_BENCHMARK_RETURN",
         "RS_BENCHMARK_TICKER_KR",
         "RS_BENCHMARK_TICKER_US",
+        "HYBRID_RSI_ZONE_LOW",
+        "HYBRID_RSI_ZONE_HIGH",
+        "HYBRID_RSI_OVERSOLD_LOW",
+        "HYBRID_RSI_OVERSOLD_HIGH",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -434,6 +438,30 @@ def test_load_config_rejects_invalid_rs_benchmark_tickers(
         (
             "sell:\n  hybrid:\n    failed_breakout_drop_pct: -0.01\n",
             "sell.hybrid.failed_breakout_drop_pct",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_zone_low: 61\n    rsi_zone_high: 60\n",
+            "strategy.hybrid.rsi_zone_low",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_oversold_low: 41\n    rsi_oversold_high: 40\n",
+            "strategy.hybrid.rsi_oversold_low",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_zone_low: .nan\n",
+            "strategy.hybrid.rsi_zone_low",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_zone_high: .inf\n",
+            "strategy.hybrid.rsi_zone_high",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_oversold_low: 101\n",
+            "strategy.hybrid.rsi_oversold_low",
+        ),
+        (
+            "strategy:\n  hybrid:\n    rsi_oversold_high: 100.1\n",
+            "strategy.hybrid.rsi_oversold_high",
         ),
         ("strategy:\n  min_history_bars: 0\n", "strategy.min_history_bars"),
         ("sell:\n  rsi_period: 0\n", "sell.rsi_period"),

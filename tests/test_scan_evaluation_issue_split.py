@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sab.config import Config
+from sab.config import Config, HybridStrategyConfig
 from sab.scan_evaluation import (
     _decorate_candidates,
     _evaluate_candidates,
@@ -680,6 +680,62 @@ def test_write_scan_report_emits_split_issue_fields_with_legacy_issues() -> None
     ]
 
 
+def test_write_scan_report_records_hybrid_strategy_config_snapshot() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(
+        runtime.cfg,
+        strategy_mode="sma_ema_hybrid",
+        rs_benchmark_return=0.07,
+        hybrid=HybridStrategyConfig(
+            sma_trend_period=30,
+            ema_short_period=8,
+            ema_mid_period=34,
+            rsi_period=10,
+            rsi_zone_low=40.0,
+            rsi_zone_high=58.0,
+            rsi_oversold_low=25.0,
+            rsi_oversold_high=38.0,
+            pullback_max_bars=7,
+            breakout_consolidation_min_bars=4,
+            breakout_consolidation_max_bars=12,
+            volume_lookback_days=3,
+            max_gap_pct=0.04,
+            use_sma60_filter=True,
+            sma60_period=55,
+            kr_breakout_requires_confirmation=False,
+        ),
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_scan_report(runtime, write_report_fn=_fake_write_report)
+
+    snapshot = captured["run_meta"]["config_snapshot"]  # type: ignore[index]
+    assert snapshot["rs_benchmark_return"] == 0.07
+    assert snapshot["hybrid"] == {
+        "sma_trend_period": 30,
+        "ema_short_period": 8,
+        "ema_mid_period": 34,
+        "rsi_period": 10,
+        "rsi_zone_low": 40.0,
+        "rsi_zone_high": 58.0,
+        "rsi_oversold_low": 25.0,
+        "rsi_oversold_high": 38.0,
+        "pullback_max_bars": 7,
+        "breakout_consolidation_min_bars": 4,
+        "breakout_consolidation_max_bars": 12,
+        "volume_lookback_days": 3,
+        "max_gap_pct": 0.04,
+        "use_sma60_filter": True,
+        "sma60_period": 55,
+        "kr_breakout_requires_confirmation": False,
+    }
+
+
 def test_write_scan_report_uses_resolved_session_state(monkeypatch: Any) -> None:
     runtime = _build_runtime()
     runtime.failures = []
@@ -885,7 +941,7 @@ def test_decorate_candidates_breaks_score_ties_with_quality_metrics() -> None:
     ]
 
 
-def test_decorate_candidates_treats_missing_rs_as_neutral() -> None:
+def test_decorate_candidates_ranks_known_rs_before_missing_rs() -> None:
     runtime = _build_runtime()
     runtime.candidates = [
         {
@@ -915,8 +971,8 @@ def test_decorate_candidates_treats_missing_rs_as_neutral() -> None:
     )
 
     assert [candidate["ticker"] for candidate in runtime.candidates] == [
-        "MISSING.KR",
         "NEGATIVE.KR",
+        "MISSING.KR",
     ]
 
 

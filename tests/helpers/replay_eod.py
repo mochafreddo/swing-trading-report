@@ -169,8 +169,11 @@ def run_scan_replay_case(
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    config_text: str | None = None,
 ) -> ReplayScanResult:
     workspace_dir = prepare_scan_replay_workspace(case_dir, tmp_path)
+    if config_text is not None:
+        (workspace_dir / "config.yaml").write_text(config_text, encoding="utf-8")
     adjusted_market_data = load_scan_market_data(
         workspace_dir / "adjusted_market_data.json"
     )

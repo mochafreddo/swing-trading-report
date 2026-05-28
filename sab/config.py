@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -966,6 +967,13 @@ def _validate_non_negative(path: str, value: float) -> None:
         _raise_range_error(path, f"must be >= 0 (got {value!r})")
 
 
+def _validate_rsi_threshold(path: str, value: float) -> None:
+    if not math.isfinite(value):
+        _raise_range_error(path, f"must be finite (got {value!r})")
+    if value < 0 or value > 100:
+        _raise_range_error(path, f"must be between 0 and 100 (got {value!r})")
+
+
 def _validate_int_min(path: str, value: int, minimum: int = 1) -> None:
     if value < minimum:
         _raise_range_error(path, f"must be >= {minimum} (got {value!r})")
@@ -1034,16 +1042,28 @@ def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> 
     )
     _validate_int_min("strategy.hybrid.ema_mid_period", hybrid_strategy.ema_mid_period)
     _validate_int_min("strategy.hybrid.rsi_period", hybrid_strategy.rsi_period)
-    _validate_non_negative("strategy.hybrid.rsi_zone_low", hybrid_strategy.rsi_zone_low)
-    _validate_non_negative(
+    _validate_rsi_threshold(
+        "strategy.hybrid.rsi_zone_low", hybrid_strategy.rsi_zone_low
+    )
+    _validate_rsi_threshold(
         "strategy.hybrid.rsi_zone_high", hybrid_strategy.rsi_zone_high
     )
-    _validate_non_negative(
+    _validate_rsi_threshold(
         "strategy.hybrid.rsi_oversold_low", hybrid_strategy.rsi_oversold_low
     )
-    _validate_non_negative(
+    _validate_rsi_threshold(
         "strategy.hybrid.rsi_oversold_high", hybrid_strategy.rsi_oversold_high
     )
+    if hybrid_strategy.rsi_zone_low > hybrid_strategy.rsi_zone_high:
+        _raise_range_error(
+            "strategy.hybrid.rsi_zone_low",
+            "must be <= strategy.hybrid.rsi_zone_high",
+        )
+    if hybrid_strategy.rsi_oversold_low > hybrid_strategy.rsi_oversold_high:
+        _raise_range_error(
+            "strategy.hybrid.rsi_oversold_low",
+            "must be <= strategy.hybrid.rsi_oversold_high",
+        )
     _validate_int_min(
         "strategy.hybrid.pullback_max_bars", hybrid_strategy.pullback_max_bars
     )

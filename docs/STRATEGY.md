@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-05-27
+최종 확인: 2026-05-28
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -241,6 +241,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - benchmark를 구하지 못하면 RS 점수는 부여하지 않고, scan report `system_issues`에 경고를 남깁니다.
 - 최종 후보 정렬은 다음 키를 우선합니다.
   - `score_value` desc → `rs_diff_value` desc → `avg_dollar_volume_value` desc → `pct_change_value` desc → ticker.
+  - `rs_diff_value`가 없는 후보는 “0% 중립”이 아니라 알 수 없는 값으로 취급해, 유한한 `rs_diff_value`가 있는 후보보다 뒤에 둡니다.
   - KR/US mixed run에서는 USD 후보의 거래대금을 FX로 환산해 유동성 tie-breaker를 비교합니다.
   - mixed run에서 FX를 구하지 못하면, 유동성 tie-breaker는 비활성화하고 다음 키(`pct_change_value`, ticker)로만 정렬합니다.
 
@@ -431,6 +432,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
   - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard/entry trigger guard 관련 필드를 포함합니다.
+- `sma_ema_hybrid` buy report의 `config_snapshot`은 공통 전략 설정과 함께 `strategy.hybrid.*` 값을 기록해, hybrid 후보 평가 파라미터를 사후 재현할 수 있게 합니다.
+- static `strategy.rs_benchmark_return`이 설정된 buy report는 `config_snapshot.rs_benchmark_return`도 기록해 RS tie-breaker 입력을 사후 재현할 수 있게 합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
 - `sab entry`는 종목별 판정이 끝난 뒤 포트폴리오 가드(`portfolio.max_active_holdings`, `portfolio.max_new_entries_per_market`)를 최종 `ENTER` 후보에만 적용합니다.
   - `max_active_holdings`는 기존 활성 보유와 이번 run에서 승인된 신규 진입을 합산합니다.
