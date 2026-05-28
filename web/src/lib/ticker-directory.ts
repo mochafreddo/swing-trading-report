@@ -320,6 +320,19 @@ function mergeCandidatesFromReport(
   }
 }
 
+async function tryLoadBuyReportCandidates(
+  bucket: string,
+  reportKey: string,
+): Promise<TickerDirectoryCandidate[] | null> {
+  let report: Record<string, unknown>;
+  try {
+    report = await downloadStorageJson(bucket, reportKey);
+  } catch {
+    return null;
+  }
+  return extractBuyCandidatesFromReport(report);
+}
+
 async function collectRecentBuyRows(
   limitReports: number,
 ): Promise<ReportIndexRow[]> {
@@ -431,21 +444,14 @@ async function refreshDirectory(
     : rows;
 
   for (const row of rowsToMerge) {
-    let report: Record<string, unknown>;
-    try {
-      report = await downloadStorageJson(
-        env.SUPABASE_REPORTS_BUCKET,
-        row.report_key,
-      );
-    } catch {
+    const candidates = await tryLoadBuyReportCandidates(
+      env.SUPABASE_REPORTS_BUCKET,
+      row.report_key,
+    );
+    if (!candidates) {
       continue;
     }
-    mergeCandidatesFromReport(
-      entries,
-      row,
-      extractBuyCandidatesFromReport(report),
-      nowMs,
-    );
+    mergeCandidatesFromReport(entries, row, candidates, nowMs);
   }
 
   const payload: TickerDirectoryPayloadV1 = {
@@ -576,19 +582,14 @@ export async function listRecentBuyCandidates(
   const rows = await collectRecentBuyRows(limitReports);
 
   for (const row of rows) {
-    let report: Record<string, unknown>;
-    try {
-      report = await downloadStorageJson(
-        env.SUPABASE_REPORTS_BUCKET,
-        row.report_key,
-      );
-    } catch {
+    const allCandidates = await tryLoadBuyReportCandidates(
+      env.SUPABASE_REPORTS_BUCKET,
+      row.report_key,
+    );
+    if (!allCandidates) {
       continue;
     }
-    const candidates = extractBuyCandidatesFromReport(report).slice(
-      0,
-      limitCandidates,
-    );
+    const candidates = allCandidates.slice(0, limitCandidates);
     if (candidates.length <= 0) {
       continue;
     }
