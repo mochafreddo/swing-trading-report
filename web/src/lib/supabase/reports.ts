@@ -80,6 +80,10 @@ function quotePostgrestValue(value: string): string {
   return `"${escaped}"`;
 }
 
+function trimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
@@ -91,16 +95,14 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
     report_key?: unknown;
   };
 
-  const reportDate =
-    typeof raw.report_date === "string" ? raw.report_date.trim() : "";
+  const reportDate = trimmedString(raw.report_date);
   const duplicateIndex =
     typeof raw.duplicate_index === "number" &&
     Number.isFinite(raw.duplicate_index) &&
     Number.isInteger(raw.duplicate_index)
       ? raw.duplicate_index
       : null;
-  const reportKey =
-    typeof raw.report_key === "string" ? raw.report_key.trim() : "";
+  const reportKey = trimmedString(raw.report_key);
 
   if (
     !reportDate ||
@@ -145,8 +147,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
       tickers_hydrated?: unknown;
     };
 
-    const reportKey =
-      typeof raw.report_key === "string" ? raw.report_key.trim() : "";
+    const reportKey = trimmedString(raw.report_key);
     const reportType =
       raw.report_type === "buy" ||
       raw.report_type === "sell" ||
@@ -154,8 +155,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
       raw.report_type === "ai-brief"
         ? raw.report_type
         : null;
-    const reportDate =
-      typeof raw.report_date === "string" ? raw.report_date.trim() : "";
+    const reportDate = trimmedString(raw.report_date);
     const duplicateIndex =
       typeof raw.duplicate_index === "number" &&
       Number.isFinite(raw.duplicate_index)
