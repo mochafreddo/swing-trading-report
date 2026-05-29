@@ -23,7 +23,7 @@
 - `sab entry`: buy 리포트 후보를 다음 세션 진입 관점으로 재평가합니다.
 - `sab ai-brief`: entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약합니다.
 - 결과물: `reports/YYYY-MM-DD(-n).{buy|sell|entry}.json`, `reports/YYYY-MM-DD(-n).ai-brief.json`
-- GitHub Actions: `scan.yml`/`sell.yml` 자동·수동 실행, `ai-brief.yml` 수동·scheduled artifact 생성 + 알림 발송
+- GitHub Actions: `scan.yml`/`sell.yml` 자동·수동 실행, `ai-brief.yml` 수동 artifact 생성 + 알림 발송(scheduled AI Brief는 로컬 Docker primary, GitHub은 US canary monitor/fallback — ADR-0012)
 - 로컬 UI: `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 
 ## Requirements
@@ -65,7 +65,7 @@
 
 - 원칙:
   - `.env`는 **시크릿/환경별 값만** 둡니다(커밋 금지).
-  - 비시크릿 설정은 `config.yaml`로 관리합니다(샘플: `config.example.yaml`).
+  - 비시크릿 설정은 `config.yaml`로 관리합니다(샘플: `config.example.yaml`). 이 저장소는 기본 `config.yaml`을 **버전관리에 포함**하며, 기본값은 실전 KIS 엔드포인트(`kis.base_url: https://openapi.koreainvestment.com:9443`)와 `screener.us_mode: kis`입니다. 모의투자/다른 임계치를 쓰려면 `config.yaml`을 직접 조정하거나 `config.local.yaml` + `SAB_CONFIG`로 분리하세요(아래 참조).
   - `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패).
   - 로컬 전용 설정이 필요하면 `config.local.yaml`을 만들고 `SAB_CONFIG=config.local.yaml`로 지정하세요(파일은 커밋하지 않기).
 - 최소 예시(필수):
@@ -153,7 +153,7 @@
   - `ai-brief`도 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
   - `ai-brief.yml` workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남기고, AI Brief 리포트도 Supabase Storage/report_index에 업로드합니다.
   - 수동 `ai-brief.yml` 실행은 `send_notifications=true`를 선택했을 때만 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
-  - scheduled `ai-brief.yml` 실행은 KR/US 장전 schedule과 런타임 가드를 사용하며, 장일+PRE_OPEN일 때만 scan/entry/ai-brief와 알림 발송을 진행합니다. US schedule은 GitHub Actions 지연 여유를 두기 위해 `7 12 * * 1-5` UTC(EDT 08:07 / EST 07:07)에 시작합니다.
+  - scheduled AI Brief는 ADR-0012에 따라 **로컬 Docker primary**(macOS `launchd` → 1회성 Docker scheduler)가 담당하고, `ai-brief.yml` 스케줄은 US canary 구간에서 `early-monitor`/`github-fallback`/`cutoff-alert` monitor·fallback 역할만 수행합니다. 장일+PRE_OPEN window일 때만 scan/entry/ai-brief와 알림 발송을 진행하며, KR은 US canary 이후 롤아웃 대상입니다. schedule cron·역할·운영 절차 상세는 `docs/runbook.md`와 `docs/ARCHITECTURE.md`를 참고하세요.
   - scheduled `ai-brief.yml`에서 watchlist와 screener가 모두 빈 결과를 만들면 실패 대신 빈 buy/entry/ai-brief artifact를 생성해 "후보 없음" 상태로 남깁니다. 다른 scan 오류는 계속 실패합니다.
 
 ## 실행/입력 정책
@@ -260,6 +260,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
+| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief-scheduled --market <KR\|US> --schedule-role <role> --runner-role <role> --scheduled-tick <HHMM>` | runtime_state 멱등 가드 기반 scheduled AI Brief 실행(주로 launchd/Docker scheduler가 호출, 운영 절차는 `docs/runbook.md` 참고) |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
@@ -302,11 +303,12 @@
 ## 파일/폴더 구조
 
 - `sab/` - Python 애플리케이션 코드
-  - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry` / `sab ai-brief`)
+  - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry` / `sab ai-brief` / `sab ai-brief-scheduled`)
   - `scan.py`, `scan_screener.py`, `scan_evaluation.py` - Scan 오케스트레이션
   - `sell.py`, `sell_evaluation.py`, `sell_runtime.py` - Sell 오케스트레이션
   - `entry.py` - Entry 후보 산출
-  - `ai_brief.py`, `ai_brief_sources.py`, `ai_brief_providers.py`, `ai_brief_source_collectors.py`, `ai_brief_source_eval.py`, `ai_brief_source_live_compare.py`, `ai_brief_eval.py` - AI Brief 오케스트레이션/소스/평가
+  - `ai_brief.py`, `ai_brief_sources.py`, `ai_brief_providers.py`, `ai_brief_source_collectors.py`, `ai_brief_source_eval.py`, `ai_brief_source_live_compare.py`, `ai_brief_eval.py`, `ai_brief_eval_common.py`, `ai_brief_url_safety.py` - AI Brief 오케스트레이션/소스/평가/URL 안전성
+  - `sab/scheduler/` - scheduled AI Brief runner(runtime_state 멱등 가드, holdings snapshot, role window) — `ai-brief-scheduled` 진입점
   - `sab/data/` - KIS/PyKRX 커넥터(`sab/data/kis/` 서브패키지로 분리), 캐시 어댑터
   - `sab/signals/` - EMA/RSI/ATR 계산
   - `sab/report/` - 리포트 아티팩트(JSON) 생성, AI Brief 판단 상태 결정(`ai_brief_state.py`)
@@ -323,7 +325,8 @@
 ## 전략(요약)
 
 - 상세 계약/모드별 규칙: `docs/STRATEGY.md`
-- 코어: EMA20/50 골든크로스 + RSI14 30 상향 재돌파(+ RSI<70)
+- 현재 배포 기본 모드는 `sma_ema_hybrid`(SMA20 + EMA10/21 + RSI 스윙존; `config.yaml`/`config.example.yaml`의 `strategy.mode`)입니다. 아래 코어 요약은 레거시 `ema_cross` 모드 기준이며, 모드별 정확한 계약·기본값은 `docs/STRATEGY.md`를 참조하세요.
+- (레거시 `ema_cross`) 코어: EMA20/50 골든크로스 + RSI14 30 상향 재돌파(+ RSI<70)
 - 장기 필터(옵션): 가격/EMA20/EMA50 모두 SMA200 위
 - 갭 필터: ATR 기반(|갭| <= ATR×배수 / 전일종가), 기본 배수 1.0 권장
 - 품질: 최소 거래대금(최근 20일 평균), 신규상장/저유동 제외, ETF/ETN/레버리지 제외 옵션
@@ -457,7 +460,7 @@
 - Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
-- GitHub Actions `ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule로 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in 또는 scheduled 기본값으로 Telegram/Slack 알림을 발송할 수 있습니다. source provider(`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`)는 수동 `source_provider=...` 입력 또는 시장별 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`로 선택하며, provider별 secret·시장 제약(US/KR-only)·`AI_BRIEF_SOURCE_API_TOKEN` 전달 조건·scheduled fallback 순서는 위 "설정 파일 원칙과 `.env`"·"실행/입력 정책" 절과 `docs/ARCHITECTURE.md`·`docs/runbook.md`를 참고하세요.
+- GitHub Actions `ai-brief.yml`의 수동 `workflow_dispatch`는 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in으로 Telegram/Slack 알림을 발송할 수 있습니다. scheduled 실행은 ADR-0012에 따라 로컬 Docker primary가 담당하고, `ai-brief.yml` 스케줄은 US canary monitor/fallback 역할만 수행합니다(상세: `docs/runbook.md`, `docs/ARCHITECTURE.md`). source provider(`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`)는 수동 `source_provider=...` 입력 또는 시장별 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`로 선택하며, provider별 secret·시장 제약(US/KR-only)·`AI_BRIEF_SOURCE_API_TOKEN` 전달 조건·scheduled fallback 순서는 위 "설정 파일 원칙과 `.env`"·"실행/입력 정책" 절과 `docs/ARCHITECTURE.md`·`docs/runbook.md`를 참고하세요.
 - 새 AI Brief artifact는 `brief_state`/`brief_reason`을 포함합니다. Telegram/Slack과 Reports 상세는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 상태를 같은 규칙으로 표시하고, scheduled runtime guard가 막은 실행은 Reports artifact 없이 Actions summary와 skipped Telegram 메시지만 남깁니다. 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
 - RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교하며, provider별 `duration_ms`를 함께 남깁니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
 

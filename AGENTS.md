@@ -8,14 +8,14 @@ Default loop: **understand -> scope -> change -> test -> review -> refactor if n
 `swing-trading-report` — KR/US 시장용 on-demand 스윙 트레이딩 시그널 스캐너 및 리포트 생성기. Python `sab` 패키지가 스캔을 실행해 JSON 리포트를 쓰고, 로컬 Next.js UI가 이를 열람하며, Supabase가 보유목록/리포트/실행이력을 저장하고, GitHub Actions가 스케줄 스캔 + 텔레그램/슬랙 알림을 수행. 툴체인 버전은 `mise.toml`에 고정(Python 3.14, uv, node, pnpm, just, direnv).
 
 ```
-sab/         # Python 패키지; 엔트리포인트 `python -m sab` (scan | sell | entry | ai-brief)
-             #   signals/ screener/ report/ data/ utils/ + scan/sell/entry/ai_brief 모듈
+sab/         # Python 패키지; 엔트리포인트 `python -m sab` (scan | sell | entry | ai-brief | ai-brief-scheduled)
+             #   signals/ screener/ report/ data/ scheduler/ utils/ + scan/sell/entry/ai_brief 모듈
 web/         # 로컬 UI: Next.js 16 + React 19 + TypeScript (`docker compose up -d --build web`로 기동)
 tests/       # pytest 스위트 (~83개 테스트 파일)
 scripts/     # 유지보수/평가 스크립트 (`uv run python scripts/...`로 실행)
 docs/        # STRATEGY.md(전략 로직), ARCHITECTURE.md(컴포넌트 흐름), PRD.md, runbook.md, adr/
 reports/     # 생성 산출물: YYYY-MM-DD(-n).{buy|sell|entry|ai-brief}.json
-config.yaml, holdings.yaml   # 런타임 설정 + 보유목록 (*.example.yaml에서 복사)
+config.yaml, holdings.yaml   # 런타임 설정(config.yaml은 저장소에 기본값 포함) + 보유목록(holdings.yaml은 gitignore, holdings.example.yaml에서 복사)
 ```
 
 이 파일은 `AGENTS.md`이며 `CLAUDE.md`는 이를 가리키는 심링크(다른 에이전트와 공유). `AGENTS.md`를 제자리에서 편집할 것 — 새 파일로 교체하면 심링크가 깨짐.
