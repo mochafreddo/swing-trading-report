@@ -51,7 +51,6 @@
 - [KIS 설정 가이드](kis-setup.md)
 - [holdings.yaml 스키마](holdings-schema.md)
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)
-- [Codex Systematic Equities Team](codex-systematic-equities-team.md)
 
 ## 저장소 운영 문서
 
@@ -60,6 +59,7 @@
 - [변경 이력](../CHANGELOG.md)
 - [TODO](../TODOS.md)
 - [에이전트 작업 지침](../AGENTS.md)
+- [Codex Systematic Equities Team](codex-systematic-equities-team.md) — 저장소 로컬 Codex plugin/skill 사용 가이드(개발 보조)
 
 ## 설계 기록
 
