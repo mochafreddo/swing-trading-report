@@ -116,6 +116,13 @@
   - `Reports`: Storage 리포트 목록/상세/검색
   - `Holdings`: Supabase `holdings` CRUD
   - `Run`: scan/sell `workflow_dispatch` 실행 트리거
+- 헬스체크/복구 확인:
+  - 컨테이너 상태: `docker compose ps`(`sab-web`가 `running`인지) / 상세는 `docker inspect sab-web`
+  - liveness 프로브: `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT}/login` → `200` 기대. `/login`만 비인증 접근 가능하며, 보호 라우트(`/api/*`, 콘솔 페이지)는 인증 없으면 302 redirect 또는 401이므로 liveness 용도로 쓰지 않습니다.
+  - 로그: `docker compose logs -f web`(에러/기동 완료 로그 확인)
+  - 재시작: `docker compose up -d --build web`(문제 시 강제 재생성은 위 "강제 재생성" 절차)
+  - 복구 확인: 위 liveness 프로브가 다시 `200`을 반환하고, 브라우저에서 `/login` 로그인 후 `Reports`가 로드되는지 확인
+  - 참고: 현재 `web` 서비스에는 전용 health 엔드포인트와 compose `healthcheck:` 블록이 없습니다. 따라서 `docker compose ps`는 `healthy`가 아닌 `running`만 표시하며, 실제 정상 여부는 위 `/login` 프로브로 판단합니다.
 
 ## 보유 목록(holdings)
 
@@ -280,8 +287,8 @@
 - `enforce_admins=true`로 관리자 우회를 차단합니다.
 - `allow_force_pushes=false`, `allow_deletions=false`는 유지합니다.
 - PR 기반 운영으로 복귀 시 `docs/governance/main-branch-protection.stage1.payload.json`을 적용하고,
-- 아래 4개 Required status checks를 복원합니다:
-  - `Ruff + Mypy + Pytest (Python 3.14)`
+- 아래 4개 Required status checks를 복원합니다(실제 CI job 이름과 정확히 일치해야 함):
+  - `Ruff + Mypy + Pytest`
   - `Next.js Web (Lint + Typecheck + Test + Build)`
   - `workflow_audit`
   - `security_audit`
@@ -312,6 +319,18 @@
 - 휴장일: 미국 휴일 정보는 KIS `countries-holiday` API를 조회해 `data/holidays_us.json`에 캐시합니다.
   - 파일이 없거나 12시간 TTL을 넘긴 경우에만 재조회하며, 기본 refresh 구간은 10일입니다.
   - 파일을 삭제하면 다음 실행 시 자동 갱신됩니다.
+
+## 컴포넌트별 빠른 장애 참조
+
+장애 시 "어디를 보고 / 어떻게 되살리고 / 무엇으로 복구를 확인하는지"의 진입점입니다. 상세 절차는 각 행이 가리키는 위 섹션을 따릅니다.
+
+| 컴포넌트 | 로그 위치 | 헬스체크 | 재시작/재실행 | 복구 확인 | 담당 |
+| --- | --- | --- | --- | --- | --- |
+| 웹 UI (`sab-web`) | `docker compose logs -f web` | `curl .../login` → `200`, `docker compose ps` | `docker compose up -d --build web` | `/login` 재진입 + `Reports` 로드 | 로컬(단일 사용자) |
+| scheduled AI Brief (로컬 primary) | `logs/launchd/US-local-primary.cmd.log`, plist `StandardOut/ErrorPath`, `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml logs scheduler` | Telegram 발송 + Supabase `runtime_state` marker(`success`/`notification:sent`) | `launchctl bootout`/`bootstrap` 또는 `just ai-brief-scheduled-docker ... --dry-run` | Supabase Storage/`report_index` artifact + Telegram 본문 | macOS `launchd`(호스트) |
+| GitHub Actions (`scan`/`sell`/`cleanup`, ai-brief monitor/fallback) | Actions run logs + run summary | Actions run 상태(성공/실패), `github-fallback` lock marker | 웹 `Run` 탭 또는 GitHub `workflow_dispatch` 재실행 | Supabase 업로드 + `report_index` upsert 성공 | GitHub Actions |
+| Supabase (Postgres/Storage/`runtime_state`) | Supabase 대시보드 로그, `cron.job_run_details` | 위 "보유 목록" 절의 SQL Editor 점검 쿼리 | managed(재기동 대상 아님) | `supabase migration list`, `db dump`, marker 쿼리 | 원격 Supabase 프로젝트 |
+| CLI (`scan`/`sell`/`entry`/`ai-brief`) | stdout(`LOG_LEVEL`로 상세도 조정) | 종료 코드 + `reports/*.json` 생성 여부 | `just scan`/`sell`/`entry` 또는 `uv run -m sab ...` 재실행 | `reports/YYYY-MM-DD.*.json` 생성 + (업로드 시) Storage 반영 | 로컬 |
 
 ## 확장
 
