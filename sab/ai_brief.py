@@ -439,6 +439,7 @@ def run_ai_brief(
     source_report_path: str | None = None,
     source_api_url: str | None = None,
     source_timeout_seconds: float | None = None,
+    report_date: str | None = None,
     upload: bool = False,
 ) -> int:
     try:
@@ -596,6 +597,7 @@ def run_ai_brief(
         out_path = write_ai_brief_report(
             report_dir=cfg.report_dir,
             artifact=artifact,
+            artifact_date=report_date,
         )
     except AiBriefValidationError as exc:
         logger.error("AI brief validation failed: %s", exc)

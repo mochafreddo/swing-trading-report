@@ -70,6 +70,7 @@
 
 - [PRD](PRD.md)
 - [Spec v1.3 backlog 스펙](spec-v1.3.md)
+- [로컬 Docker scheduler 전환 계획](local-docker-scheduler-plan.md)
 
 ## archive
 
@@ -94,3 +95,4 @@
 - ADR: `docs/adr/ADR-XXXX-<slug>.md`
 - 리뷰: `docs/reviews/YYYY/review-YYYY-MM-DD.md`
 - 버전 스펙/계획: `spec-vX.Y*.md`, `plan-vX.Y.md`
+- 운영 전환 계획: `docs/<topic>-plan.md`

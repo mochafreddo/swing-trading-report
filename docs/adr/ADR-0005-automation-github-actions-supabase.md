@@ -23,3 +23,8 @@
   - KIS API가 IP 제한/정책을 요구하면 GitHub Actions 환경에서 실패할 수 있음
     - 이 경우 고정 IP 환경(VPS 등)으로 전환이 필요할 수 있음
   - 런너가 매 실행마다 초기 상태이므로, 토큰/캐시(호출 수 절감)는 Supabase에 저장하거나 별도 캐시 전략이 필요
+
+### 후속 결정
+
+- 2026-05-28 [ADR-0012](ADR-0012-local-docker-scheduled-runs.md)가 시간 민감한 장전 AI Brief scheduled 실행에 한해 이 결정을 부분 대체했습니다.
+- `scan`/`sell` 및 비시간 민감 자동화는 별도 ADR 전까지 이 결정의 GitHub Actions + Supabase 구조를 유지합니다.

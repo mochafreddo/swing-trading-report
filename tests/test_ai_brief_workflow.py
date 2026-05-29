@@ -27,6 +27,13 @@ def _steps(workflow: dict[Any, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def _job_steps(workflow: dict[Any, Any], job_name: str) -> list[dict[str, Any]]:
+    steps = workflow["jobs"][job_name]["steps"]
+    if not isinstance(steps, list):
+        raise AssertionError(f"{job_name} steps must be a list")
+    return steps
+
+
 def _find_step_by_name(steps: list[dict[str, Any]], name: str) -> dict[str, Any]:
     for step in steps:
         if step.get("name") == name:
@@ -43,7 +50,14 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     schedule_crons = [item["cron"] for item in schedules]
 
     assert "workflow_dispatch" in triggers
-    assert schedule_crons == ["30 22 * * 0-4", "7 12 * * 1-5"]
+    assert schedule_crons == [
+        "30 12 * * 1-5",
+        "30 13 * * 1-5",
+        "55 12 * * 1-5",
+        "55 13 * * 1-5",
+        "26 13 * * 1-5",
+        "26 14 * * 1-5",
+    ]
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
     assert dispatch_inputs["source_provider"]["options"] == [
@@ -61,95 +75,94 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     assert "source_timeout_seconds" in dispatch_inputs
 
 
-def test_ai_brief_workflow_scheduled_runs_have_defaults_and_runtime_guard() -> None:
+def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
-    steps = _steps(workflow)
+    jobs = workflow["jobs"]
 
-    params_step = _find_step_by_name(steps, "Resolve workflow inputs")
-    params_script = str(params_step.get("run") or "")
-    params_env = params_step.get("env") or {}
+    assert workflow.get("concurrency") is None
+    assert "resolve_context" in jobs
+    assert "scheduled_ai_brief" in jobs
+    assert jobs["ai_brief"].get("if") == "github.event_name != 'schedule'"
 
-    assert params_env.get("EVENT_NAME") == "${{ github.event_name }}"
-    assert params_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
-    assert (
-        params_env.get("DEFAULT_SOURCE_PROVIDER")
-        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER }}"
-    )
-    assert (
-        params_env.get("DEFAULT_SOURCE_PROVIDER_KR")
-        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_KR }}"
-    )
-    assert (
-        params_env.get("DEFAULT_SOURCE_PROVIDER_US")
-        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_US }}"
-    )
-    assert (
-        params_env.get("DEFAULT_SOURCE_API_URL")
-        == "${{ vars.AI_BRIEF_SOURCE_API_URL }}"
-    )
-    assert (
-        params_env.get("DEFAULT_SOURCE_API_URL_KR")
-        == "${{ vars.AI_BRIEF_SOURCE_API_URL_KR }}"
-    )
-    assert (
-        params_env.get("DEFAULT_SOURCE_API_URL_US")
-        == "${{ vars.AI_BRIEF_SOURCE_API_URL_US }}"
-    )
-    assert '"30 22 * * 0-4") scheduled_market="KR"' in params_script
-    assert '"7 12 * * 1-5") scheduled_market="US"' in params_script
-    assert 'model_provider="openai"' in params_script
-    assert 'send_notifications="true"' in params_script
-    assert (
-        'market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_KR,,}"'
-        in params_script
-    )
-    assert (
-        'market_default_source_provider="${DEFAULT_SOURCE_PROVIDER_US,,}"'
-        in params_script
-    )
-    assert (
-        'market_default_source_api_url="${DEFAULT_SOURCE_API_URL_KR}"' in params_script
-    )
-    assert (
-        'market_default_source_api_url="${DEFAULT_SOURCE_API_URL_US}"' in params_script
-    )
-    assert 'source_provider="${market_default_source_provider}"' in params_script
-    assert 'default_source_provider="${DEFAULT_SOURCE_PROVIDER,,}"' in params_script
-    assert 'source_provider="${default_source_provider}"' in params_script
-    assert 'source_api_url="${market_default_source_api_url}"' in params_script
-    assert 'echo "is_schedule=${is_schedule}"' in params_script
-    assert 'echo "scheduled_market=${scheduled_market}"' in params_script
+    resolve_steps = _job_steps(workflow, "resolve_context")
+    resolve_step = _find_step_by_name(resolve_steps, "Resolve schedule context")
+    resolve_script = str(resolve_step.get("run") or "")
+    resolve_env = resolve_step.get("env") or {}
 
-    guard_step = _find_step_by_name(steps, "Check scheduled runtime guard")
-    guard_script = str(guard_step.get("run") or "")
-
-    assert guard_step.get("if") == "github.event_name == 'schedule'"
-    assert "is_trading_session" in guard_script
-    assert "resolve_run_session_state_map" in guard_script
-    assert "Skipping scheduled AI brief" in guard_script
-    assert "local_time = local_now.isoformat()" in guard_script
-    assert 'out.write(f"trading_session={str(trading_session).lower()}\\n")' in (
-        guard_script
+    assert resolve_env.get("EVENT_NAME") == "${{ github.event_name }}"
+    assert resolve_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
+    assert '"30 12 * * 1-5": ("US", "early-monitor", "monitor-only", "0830")' in (
+        resolve_script
     )
-    assert 'out.write(f"local_time={local_time}\\n")' in guard_script
+    assert '"55 12 * * 1-5": ("US", "github-fallback", "github-fallback", "0855")' in (
+        resolve_script
+    )
+    assert '"26 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926")' in (
+        resolve_script
+    )
+    assert 'out.write(f"session_date={session_date}\\n")' in resolve_script
+    assert 'out.write(f"schedule_role={schedule_role}\\n")' in resolve_script
+    assert 'out.write(f"runner_role={runner_role}\\n")' in resolve_script
 
-    guarded_steps = [
-        "Install dependencies",
-        "Ensure watchlist file",
-        "Validate pykrx watchlist",
-        "Run scan",
-        "Load holdings from Supabase",
-        "Run entry",
-        "Run AI brief",
-        "Build notification preview",
-        "Upload generated AI brief artifacts",
-        "Send Telegram notification",
-        "Send Slack notification",
-    ]
-    expected_guard = "steps.schedule_guard.outputs.should_run == 'true'"
-    for name in guarded_steps:
-        step = _find_step_by_name(steps, name)
-        assert expected_guard in str(step.get("if") or ""), name
+    scheduled_job = jobs["scheduled_ai_brief"]
+    assert scheduled_job.get("needs") == "resolve_context"
+    assert scheduled_job.get("if") == (
+        "github.event_name == 'schedule' && "
+        "needs.resolve_context.outputs.should_run == 'true'"
+    )
+    concurrency = scheduled_job.get("concurrency") or {}
+    assert "needs.resolve_context.outputs.market" in str(concurrency.get("group"))
+    assert "needs.resolve_context.outputs.session_date" in str(concurrency.get("group"))
+    assert "needs.resolve_context.outputs.schedule_role" in str(
+        concurrency.get("group")
+    )
+    assert concurrency.get("cancel-in-progress") is False
+
+    scheduled_steps = _job_steps(workflow, "scheduled_ai_brief")
+    run_step = _find_step_by_name(scheduled_steps, "Run scheduled AI Brief monitor")
+    run_script = str(run_step.get("run") or "")
+    run_env = run_step.get("env") or {}
+    assert "uv run python -m sab ai-brief-scheduled" in run_script
+    assert "--schedule-role" in run_script
+    assert "--runner-role" in run_script
+    assert "--attempt-id" in run_script
+    assert run_env.get("SUPABASE_URL") == "${{ secrets.SUPABASE_URL }}"
+    assert run_env.get("TELEGRAM_BOT_TOKEN") == "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+    assert run_env.get("KIS_APP_KEY") == "${{ secrets.KIS_APP_KEY }}"
+    assert run_env.get("KIS_APP_SECRET") == "${{ secrets.KIS_APP_SECRET }}"
+    assert run_env.get("KIS_BASE_URL") == "${{ vars.KIS_BASE_URL }}"
+    assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'http-json' && "
+        "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
+    )
+    assert run_env.get("FINNHUB_API_KEY") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'finnhub' && "
+        "secrets.FINNHUB_API_KEY || '' }}"
+    )
+    assert run_env.get("POLYGON_API_KEY") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'polygon-news' && "
+        "secrets.POLYGON_API_KEY || '' }}"
+    )
+    assert run_env.get("ALPHA_VANTAGE_API_KEY") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' && "
+        "secrets.ALPHA_VANTAGE_API_KEY || '' }}"
+    )
+    assert run_env.get("MARKETAUX_API_TOKEN") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'marketaux-news' && "
+        "secrets.MARKETAUX_API_TOKEN || '' }}"
+    )
+    assert run_env.get("BENZINGA_API_TOKEN") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'benzinga-news' && "
+        "secrets.BENZINGA_API_TOKEN || '' }}"
+    )
+    assert run_env.get("NAVER_CLIENT_ID") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'naver-news' && "
+        "secrets.NAVER_CLIENT_ID || '' }}"
+    )
+    assert run_env.get("NAVER_CLIENT_SECRET") == (
+        "${{ needs.resolve_context.outputs.source_provider == 'naver-news' && "
+        "secrets.NAVER_CLIENT_SECRET || '' }}"
+    )
 
 
 def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
@@ -224,41 +237,10 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 
-def test_ai_brief_workflow_sends_skipped_message_when_schedule_guard_blocks() -> None:
+def test_ai_brief_workflow_top_level_concurrency_does_not_cancel_monitor_runs() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
-    steps = _steps(workflow)
 
-    build_step = _find_step_by_name(steps, "Build skipped scheduled notification")
-    send_step = _find_step_by_name(steps, "Send skipped Telegram notification")
-    build_if = str(build_step.get("if") or "")
-    send_if = str(send_step.get("if") or "")
-    build_script = str(build_step.get("run") or "")
-    build_env = build_step.get("env") or {}
-    send_env = send_step.get("env") or {}
-
-    assert "github.event_name == 'schedule'" in build_if
-    assert "steps.schedule_guard.outputs.should_run != 'true'" in build_if
-    assert "github.event_name == 'schedule'" in send_if
-    assert "steps.schedule_guard.outputs.should_run != 'true'" in send_if
-    assert "steps.params.outputs.send_notifications == 'true'" in send_if
-    assert "build_ai_brief_skipped_telegram_text" in build_script
-    assert "ai-brief.skipped.telegram.txt" in build_script
-    assert "GITHUB_STEP_SUMMARY" in build_script
-    assert build_env.get("SESSION_STATE") == (
-        "${{ steps.schedule_guard.outputs.session_state }}"
-    )
-    assert build_env.get("SESSION_DATE") == (
-        "${{ steps.schedule_guard.outputs.session_date }}"
-    )
-    assert build_env.get("TRADING_SESSION") == (
-        "${{ steps.schedule_guard.outputs.trading_session }}"
-    )
-    assert build_env.get("EXPECTED_STATE") == "${{ steps.params.outputs.entry_mode }}"
-    assert build_env.get("LOCAL_TIME") == (
-        "${{ steps.schedule_guard.outputs.local_time }}"
-    )
-    assert send_step.get("continue-on-error") is True
-    assert "TELEGRAM_BOT_TOKEN" in str(send_env)
+    assert workflow.get("concurrency") is None
 
 
 def test_ai_brief_workflow_keeps_freeform_inputs_out_of_shell_templates() -> None:

@@ -1,0 +1,19 @@
+services:
+  scheduler:
+    image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    container_name: sab-ai-brief-scheduler
+    restart: "no"
+    working_dir: /workspace
+    env_file:
+      - ${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}
+    environment:
+      UV_CACHE_DIR: /workspace/.uv-cache
+      PYTHONUNBUFFERED: "1"
+      LOG_FORMAT: json
+      LOG_TZ: utc
+    volumes:
+      - .:/workspace
+      - ./.uv-cache:/workspace/.uv-cache
+      - ./data:/workspace/data
+      - ./reports:/workspace/reports
+    command: uv run python -m sab ai-brief-scheduled

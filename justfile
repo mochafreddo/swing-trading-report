@@ -41,6 +41,12 @@ sell *args:
 entry *args:
   uv run python -m sab entry {{args}}
 
+ai-brief-scheduled-local *args:
+  uv run python -m sab ai-brief-scheduled {{args}}
+
+ai-brief-scheduled-docker *args:
+  docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled {{args}}
+
 ai-brief-source-eval *args:
   uv run python scripts/eval_ai_brief_sources.py {{args}}
 

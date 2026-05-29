@@ -11,6 +11,7 @@ from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .scan import run_scan
+from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
 from .sell import run_sell
 
 
@@ -253,6 +254,29 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upload AI brief report to Supabase Storage/report_index",
     )
+    ai_brief.add_argument(
+        "--report-date",
+        type=str,
+        default=None,
+        help="Override AI brief artifact report_date (YYYY-MM-DD)",
+    )
+
+    scheduled = sub.add_parser(
+        "ai-brief-scheduled",
+        help="Run scheduled AI Brief with runtime_state idempotency guards",
+    )
+    scheduled.add_argument("--market", required=True, choices=["KR", "US"])
+    scheduled.add_argument("--schedule-role", required=True)
+    scheduled.add_argument("--runner-role", required=True)
+    scheduled.add_argument("--scheduled-tick", required=True)
+    scheduled.add_argument("--attempt-id", default=None)
+    scheduled.add_argument("--run-url", default="")
+    scheduled.add_argument("--source-provider", default=None)
+    scheduled.add_argument(
+        "--model-provider", default="openai", choices=["fake", "openai"]
+    )
+    scheduled.add_argument("--dry-run", action="store_true")
+    scheduled.add_argument("--guard-only", action="store_true")
     return p
 
 
@@ -297,7 +321,24 @@ def main(argv: list[str] | None = None) -> int:
             source_report_path=ns.source_report,
             source_api_url=ns.source_api_url,
             source_timeout_seconds=ns.source_timeout_seconds,
+            report_date=ns.report_date,
             upload=ns.upload,
+        )
+
+    if ns.cmd == "ai-brief-scheduled":
+        return run_scheduled_ai_brief(
+            request=ScheduledAiBriefRequest(
+                market=ns.market,
+                schedule_role=ns.schedule_role,
+                runner_role=ns.runner_role,
+                scheduled_tick=ns.scheduled_tick,
+                attempt_id=ns.attempt_id,
+                dry_run=ns.dry_run,
+                run_url=ns.run_url,
+                source_provider=ns.source_provider,
+                model_provider=ns.model_provider,
+            ),
+            guard_only=ns.guard_only,
         )
 
     parser.print_help()

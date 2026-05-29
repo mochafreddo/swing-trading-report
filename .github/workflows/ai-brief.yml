@@ -2,10 +2,15 @@ name: AI Brief pipeline
 
 on:
   schedule:
-    # KR pre-open, 07:30 KST Monday-Friday.
-    - cron: "30 22 * * 0-4"
-    # US pre-open, 07:07/08:07 ET Monday-Friday depending on DST.
-    - cron: "7 12 * * 1-5"
+    # US canary early monitor, 08:30 ET Monday-Friday across EDT/EST.
+    - cron: "30 12 * * 1-5"
+    - cron: "30 13 * * 1-5"
+    # US canary GitHub fallback, 08:55 ET Monday-Friday across EDT/EST.
+    - cron: "55 12 * * 1-5"
+    - cron: "55 13 * * 1-5"
+    # US canary cutoff alert, 09:26 ET Monday-Friday across EDT/EST.
+    - cron: "26 13 * * 1-5"
+    - cron: "26 14 * * 1-5"
   workflow_dispatch:
     inputs:
       market:
@@ -99,10 +104,6 @@ on:
           - "false"
           - "true"
 
-concurrency:
-  group: ai-brief-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -111,7 +112,159 @@ env:
   PYTHONUNBUFFERED: "1"
 
 jobs:
+  resolve_context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.context.outputs.should_run }}
+      is_schedule: ${{ steps.context.outputs.is_schedule }}
+      market: ${{ steps.context.outputs.market }}
+      session_date: ${{ steps.context.outputs.session_date }}
+      schedule_role: ${{ steps.context.outputs.schedule_role }}
+      runner_role: ${{ steps.context.outputs.runner_role }}
+      scheduled_tick: ${{ steps.context.outputs.scheduled_tick }}
+      source_provider: ${{ steps.context.outputs.source_provider }}
+
+    steps:
+      - name: Resolve schedule context
+        id: context
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          RAW_MARKET: ${{ github.event.inputs.market }}
+          DEFAULT_SOURCE_PROVIDER: ${{ vars.AI_BRIEF_SOURCE_PROVIDER }}
+          DEFAULT_SOURCE_PROVIDER_US: ${{ vars.AI_BRIEF_SOURCE_PROVIDER_US }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime as dt
+          import os
+          from zoneinfo import ZoneInfo
+
+          schedule_map = {
+              "30 12 * * 1-5": ("US", "early-monitor", "monitor-only", "0830"),
+              "30 13 * * 1-5": ("US", "early-monitor", "monitor-only", "0830"),
+              "55 12 * * 1-5": ("US", "github-fallback", "github-fallback", "0855"),
+              "55 13 * * 1-5": ("US", "github-fallback", "github-fallback", "0855"),
+              "26 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926"),
+              "26 14 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926"),
+          }
+
+          is_schedule = os.environ["EVENT_NAME"] == "schedule"
+          if is_schedule:
+              try:
+                  market, schedule_role, runner_role, scheduled_tick = schedule_map[
+                      os.environ["EVENT_SCHEDULE"]
+                  ]
+              except KeyError as exc:
+                  raise SystemExit(
+                      f"Unsupported AI brief schedule: {os.environ['EVENT_SCHEDULE']}"
+                  ) from exc
+          else:
+              market = (os.environ.get("RAW_MARKET") or "KR").strip().upper()
+              schedule_role = "manual"
+              runner_role = "manual"
+              scheduled_tick = "manual"
+
+          zone = ZoneInfo("Asia/Seoul" if market == "KR" else "America/New_York")
+          session_date = dt.datetime.now(dt.UTC).astimezone(zone).date().isoformat()
+          source_provider = (
+              os.environ.get("DEFAULT_SOURCE_PROVIDER_US")
+              or os.environ.get("DEFAULT_SOURCE_PROVIDER")
+              or ""
+          ).strip().lower()
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("should_run=true\n")
+              out.write(f"is_schedule={str(is_schedule).lower()}\n")
+              out.write(f"market={market}\n")
+              out.write(f"session_date={session_date}\n")
+              out.write(f"schedule_role={schedule_role}\n")
+              out.write(f"runner_role={runner_role}\n")
+              out.write(f"scheduled_tick={scheduled_tick}\n")
+              out.write(f"source_provider={source_provider}\n")
+          PY
+
+  scheduled_ai_brief:
+    needs: resolve_context
+    if: github.event_name == 'schedule' && needs.resolve_context.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: ai-brief-${{ needs.resolve_context.outputs.market }}-${{ needs.resolve_context.outputs.session_date }}-${{ needs.resolve_context.outputs.schedule_role }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up mise toolchain
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          version: 2026.3.1
+          cache: true
+          install_args: --locked
+          working_directory: .
+
+      - name: Restore uv cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-${{ runner.os }}-${{ hashFiles('mise.toml', 'uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run scheduled AI Brief monitor
+        env:
+          MARKET: ${{ needs.resolve_context.outputs.market }}
+          SCHEDULE_ROLE: ${{ needs.resolve_context.outputs.schedule_role }}
+          RUNNER_ROLE: ${{ needs.resolve_context.outputs.runner_role }}
+          SCHEDULED_TICK: ${{ needs.resolve_context.outputs.scheduled_tick }}
+          SOURCE_PROVIDER: ${{ needs.resolve_context.outputs.source_provider }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_BASE_URL: ${{ vars.KIS_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
+          AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          AI_BRIEF_SOURCE_API_TOKEN: ${{ needs.resolve_context.outputs.source_provider == 'http-json' && secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}
+          FINNHUB_API_KEY: ${{ needs.resolve_context.outputs.source_provider == 'finnhub' && secrets.FINNHUB_API_KEY || '' }}
+          POLYGON_API_KEY: ${{ needs.resolve_context.outputs.source_provider == 'polygon-news' && secrets.POLYGON_API_KEY || '' }}
+          ALPHA_VANTAGE_API_KEY: ${{ needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' && secrets.ALPHA_VANTAGE_API_KEY || '' }}
+          MARKETAUX_API_TOKEN: ${{ needs.resolve_context.outputs.source_provider == 'marketaux-news' && secrets.MARKETAUX_API_TOKEN || '' }}
+          BENZINGA_API_TOKEN: ${{ needs.resolve_context.outputs.source_provider == 'benzinga-news' && secrets.BENZINGA_API_TOKEN || '' }}
+          NAVER_CLIENT_ID: ${{ needs.resolve_context.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_ID || '' }}
+          NAVER_CLIENT_SECRET: ${{ needs.resolve_context.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_SECRET || '' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          attempt_id="${SCHEDULED_TICK}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cmd=(
+            uv run python -m sab ai-brief-scheduled
+            --market "${MARKET}"
+            --schedule-role "${SCHEDULE_ROLE}"
+            --runner-role "${RUNNER_ROLE}"
+            --scheduled-tick "${SCHEDULED_TICK}"
+            --attempt-id "${attempt_id}"
+            --run-url "${run_url}"
+          )
+          if [[ -n "${SOURCE_PROVIDER}" && "${SOURCE_PROVIDER}" != "none" ]]; then
+            cmd+=(--source-provider "${SOURCE_PROVIDER}")
+          fi
+          "${cmd[@]}"
+
   ai_brief:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 

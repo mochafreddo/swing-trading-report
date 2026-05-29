@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup`/`ai-brief` 연결이 현재 제공 범위입니다.
 
 ### 실험
@@ -28,7 +28,7 @@
 - Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, entry 결과를 로컬 `ai-brief` JSON으로 요약합니다.
 - Next.js 웹(`web`)은 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
-- GitHub Actions는 스케줄/수동 실행 시 파이프라인(`scan`/`sell`/`cleanup`/`ai-brief`)을 담당합니다.
+- GitHub Actions는 `scan`/`sell`/`cleanup` 스케줄과 수동 AI Brief 실행을 담당하고, scheduled AI Brief에서는 로컬 Docker primary를 감시하거나 fallback을 수행합니다.
 
 ## 2. 시스템 컨텍스트
 
@@ -39,6 +39,8 @@ flowchart LR
   W -->|리포트 목록/상세| SST["Supabase Storage (reports)"]
   W -->|workflow_dispatch| GHA["GitHub Actions (scan/sell/cleanup/ai-brief)"]
   U -->|manual workflow_dispatch| GHA
+  LD["macOS launchd"] --> DK["One-shot Docker scheduler"]
+  DK --> P
 
   GHA --> P["Python Engine (sab scan/sell/entry/ai-brief)"]
   P --> KIS["KIS Open API"]
@@ -48,7 +50,8 @@ flowchart LR
   P -->|업로드 + 인덱스 upsert| SST
   P -->|report_index / runtime_state| SDB
 
-  GHA --> TG["Telegram / Slack (schedule + manual opt-in)"]
+  GHA --> TG["Telegram / Slack (monitor/fallback + manual opt-in)"]
+  DK --> TG
 ```
 
 ## 3. 런타임 컴포넌트
@@ -59,6 +62,7 @@ flowchart LR
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py`(엔트리), `sab/scan_screener.py`, `sab/scan_evaluation.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py`(엔트리), `sab/sell_evaluation.py`, `sab/sell_runtime.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, `ENTER` 후보 preselection, `local-json`/`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news` source context, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_sources.py`, `sab/ai_brief_providers.py` |
+| Scheduled AI Brief runner | market/session/role guard, runtime_state lock/marker, 로컬 one-shot scan→entry→ai-brief 실행, notification reconciliation, GitHub monitor/fallback 공통 entrypoint | `sab/scheduler/*`, `docker-compose.scheduler.yml`, `scripts/launchd/*`, `.github/workflows/ai-brief.yml` |
 | AI Brief source 수집 보조 | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `http-json`/`local-json` 호환 `sources[]` payload로 변환 | `sab/ai_brief_source_collectors.py`, `scripts/collect_ai_brief_sources.py` |
 | AI Brief source 품질 평가/비교 | 수집한 `http-json` 호환 source payload는 네트워크/secret 없이 기존 source 정규화 규칙으로 평가/비교하고, live provider capture는 provider 호출 후 저장된 payload를 같은 evaluator로 비교하며 provider별 `duration_ms`를 남김 | `sab/ai_brief_source_eval.py`, `sab/ai_brief_source_live_compare.py`, `scripts/eval_ai_brief_sources.py`, `scripts/compare_ai_brief_live_sources.py` |
 | AI Brief recommendation 품질 평가 | 생성된 `*.ai-brief.json`을 네트워크/secret 없이 entry 후보 기준으로 검증하고 source-backed ratio/confidence 안전성을 평가 | `sab/ai_brief_eval.py`, `scripts/eval_ai_brief_recommendations.py` |
@@ -70,7 +74,7 @@ flowchart LR
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
-| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동/scheduled AI brief artifact 생성과 알림 발송 | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
+| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동 AI Brief artifact 생성, scheduled AI Brief monitor/fallback | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
 
 ## 4. 핵심 플로우
 
@@ -129,10 +133,10 @@ flowchart LR
 7. writer는 새 artifact에 top-level `brief_state`/`brief_reason`을 주입합니다. 상태는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 중 하나이며, entry preselection count, recommendation source coverage, source/system issue count만으로 결정합니다.
 8. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다. Telegram은 `NO_SIGNAL`이면 휴식 문구, `FINAL_JUDGMENT`이면 source-backed 후보, `NEEDS_REVIEW_WEAK_NEWS`이면 downgraded copy와 issue 요약을 보여줍니다.
 9. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
-10. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.
-11. `.github/workflows/ai-brief.yml`은 수동 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다. 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload`을 실행하고 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 업로드합니다.
-12. scheduled 실행은 KR `30 22 * * 0-4` UTC, US `7 12 * * 1-5` UTC에서 시작하고, 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install 이후 scan/entry/ai-brief/알림 단계를 진행합니다. US schedule은 GitHub Actions 지연 여유를 두기 위해 EDT 08:07 / EST 07:07에 시작합니다. 가드가 막은 scheduled run은 Supabase/Reports artifact를 만들지 않고 Actions summary와 Telegram skipped 메시지만 남기며, 장전 window를 놓친 경우 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 표시합니다.
-13. scheduled 실행 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다. Scheduled source provider는 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`가 우선이고, 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. `finnhub` scheduled 실행은 `FINNHUB_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `polygon-news` scheduled 실행은 `POLYGON_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `alpha-vantage-news` scheduled 실행은 `ALPHA_VANTAGE_API_KEY` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `marketaux-news` scheduled 실행은 `MARKETAUX_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `benzinga-news` scheduled 실행은 `BENZINGA_API_TOKEN` secret이 필요하며 v1은 US ticker만 source request 대상으로 삼습니다. `naver-news` scheduled 실행은 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` secrets가 필요하며 v1은 KR ticker만 source request 대상으로 삼습니다. 수동 실행은 `send_notifications=false`가 기본이며, `true`를 명시했을 때만 Telegram/Slack preview 텍스트를 실제로 발송합니다.
+10. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때 Supabase Storage 업로드 + `report_index` upsert를 수행합니다. Scheduled runner는 `sab ai-brief --report-date <sessionDate>`로 artifact date를 session date에 고정한 뒤 직접 AI Brief upload와 marker 기록을 수행합니다.
+11. `.github/workflows/ai-brief.yml`의 수동 `workflow_dispatch`는 기존 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload` 흐름을 유지합니다.
+12. Scheduled AI Brief primary는 macOS `launchd`가 host wrapper를 실행하고, wrapper가 role window guard 통과 후 one-shot Docker scheduler를 실행하는 구조입니다. Runner는 `runtime_state`에 `attempt`, `lock`, `artifact`, `notification:claim`, `notification:sent`, `success`, `late-alert:*` marker를 기록해 같은 시장/session date 리포트와 알림을 dedupe합니다.
+13. GitHub Actions schedule은 US canary 기간에 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `resolve_context` job이 market/session_date/schedule_role/runner_role을 산출하고, scheduled job concurrency는 `market + session_date + schedule_role` 기준으로 묶되 cancel은 하지 않습니다. `github-fallback`은 같은 runtime_state lock/artifact marker를 사용하므로 로컬 primary와 동시 실행되어도 새 report 생성은 한 runner만 진행합니다.
 
 ### 4.4 웹 리포트 조회 플로우
 
@@ -209,7 +213,7 @@ flowchart LR
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
   - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`
   - `ai-brief.summary`: `entry_count`, `preselected_count`, `recommendation_count`, `source_issue_count`, `system_issue_count`; artifact top-level에는 `brief_state`, `brief_reason`이 함께 저장됩니다.
-- `runtime_state`: 로그인 시도 제한 상태 등 단기 런타임 상태(기본 저장소)
+- `runtime_state`: 로그인 시도 제한 상태와 scheduled AI Brief idempotency/lock/notification marker 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 - 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=strict`(기본)에서는 Supabase 장애 시 즉시 실패하고, `degrade`에서만 메모리 스로틀로 폴백합니다.
 
@@ -252,6 +256,7 @@ flowchart LR
 - 운영 자동화
   - `cleanup.yml`이 보관기간 초과 리포트를 정리
   - schedule 실행에서만 알림(텔레그램/슬랙) 전송
+  - scheduled AI Brief는 로컬 Docker primary가 Telegram delivery를 성공해야 `success` marker를 기록합니다. Slack은 secret이 있을 때 best-effort입니다.
 
 ## 8. 설정 계층
 
@@ -293,7 +298,7 @@ flowchart LR
   - recommendation eval은 생성된 AI Brief artifact의 품질 게이트이며, runtime provider나 매매 신호를 추가하지 않습니다.
   - 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 Storage, `report_index`, 웹 Reports UI와 연동됩니다.
-  - 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링하며, 수동 opt-in 또는 scheduled 기본값으로 실제 발송까지 수행할 수 있습니다.
+  - 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링합니다. Scheduled path는 runtime_state notification sent marker로 Telegram 중복을 줄이고, artifact만 있고 sent marker가 없으면 report를 재생성하지 않고 notification reconciliation을 수행합니다.
 
 ## 10. 관련 문서
 

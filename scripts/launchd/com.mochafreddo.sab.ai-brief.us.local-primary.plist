@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mochafreddo.sab.ai-brief.us.local-primary</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/mochafreddo/GitHub/swing-trading-report/scripts/launchd/sab-ai-brief-wrapper.sh</string>
+    <string>--repo-root</string>
+    <string>/Users/mochafreddo/GitHub/swing-trading-report</string>
+    <string>--env-file</string>
+    <string>/Users/mochafreddo/GitHub/swing-trading-report/.env.scheduler.local</string>
+    <string>--market</string>
+    <string>US</string>
+    <string>--schedule-role</string>
+    <string>local-primary</string>
+    <string>--runner-role</string>
+    <string>local-primary</string>
+    <string>--scheduled-tick</string>
+    <string>0810</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>22</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>22</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>22</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>22</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>22</integer><key>Minute</key><integer>10</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/mochafreddo/GitHub/swing-trading-report/logs/launchd/us.local-primary.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/mochafreddo/GitHub/swing-trading-report/logs/launchd/us.local-primary.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,1158 @@
+from __future__ import annotations
+
+import datetime as dt
+import json
+import logging
+import os
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+from urllib.parse import quote, urlencode
+from zoneinfo import ZoneInfo
+
+import requests  # type: ignore[import-untyped]
+
+from ..ai_brief import run_ai_brief
+from ..config import load_config
+from ..data.trading_sessions import is_trading_session
+from ..entry import run_entry
+from ..report.ai_brief_report import validate_ai_brief_artifact
+from ..report.notification_text import (
+    build_ai_brief_slack_summary_text,
+    build_ai_brief_telegram_report_text,
+    split_telegram_message_text,
+)
+from ..report.session_state import resolve_run_session_state_map
+from ..report.supabase_storage import (
+    SupabaseStorageConfig,
+    _auth_headers,
+    _load_storage_config,
+    upload_report_artifact,
+)
+from ..scan import run_scan
+from .holdings import (
+    SupabaseHoldingsExportConfig,
+    export_active_holdings_snapshot,
+    temporary_holdings_file,
+)
+from .state import (
+    RuntimeStateEntry,
+    RuntimeStateLockClaim,
+    SchedulerStateError,
+    SupabaseRuntimeStateClient,
+    build_scheduler_state_key,
+)
+
+_KR_ZONE = ZoneInfo("Asia/Seoul")
+_US_ZONE = ZoneInfo("America/New_York")
+_LOCK_TTL_SECONDS = 25 * 60
+_NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
+_LATE_ALERT_CLAIM_TTL_SECONDS = 10 * 60
+_SUCCESS_TTL_SECONDS = 48 * 60 * 60
+_ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
+_PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
+_FAILED_STATUSES = {
+    "attempt_marker_failed",
+    "guard_failed",
+    "guard_failed_before_upload",
+    "guard_failed_before_notification",
+    "pipeline_failed",
+    "upload_failed",
+}
+_LOGGER = logging.getLogger(__name__)
+
+_ROLE_WINDOWS: dict[str, dict[str, tuple[dt.time, dt.time]]] = {
+    "KR": {
+        "local-primary": (dt.time(7, 25), dt.time(8, 5)),
+        "local-retry": (dt.time(8, 5), dt.time(8, 55)),
+        "cutoff-alert": (dt.time(8, 55), dt.time(9, 20)),
+    },
+    "US": {
+        "local-primary": (dt.time(8, 5), dt.time(8, 30)),
+        "early-monitor": (dt.time(8, 30), dt.time(8, 45)),
+        "local-retry": (dt.time(8, 40), dt.time(8, 55)),
+        "github-fallback": (dt.time(8, 55), dt.time(9, 25)),
+        "cutoff-alert": (dt.time(9, 25), dt.time(10, 0)),
+    },
+}
+
+
+@dataclass(frozen=True)
+class GuardSnapshot:
+    trading_session: bool
+    session_state: str
+    session_date: str
+    local_time: str
+
+
+@dataclass(frozen=True)
+class ScheduledAiBriefRequest:
+    market: str
+    schedule_role: str
+    runner_role: str
+    scheduled_tick: str
+    attempt_id: str | None = None
+    dry_run: bool = False
+    run_url: str = ""
+    source_provider: str | None = None
+    model_provider: str = "openai"
+
+
+@dataclass(frozen=True)
+class ScheduledAiBriefResult:
+    status: str
+    session_date: str | None = None
+    storage_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledPipelineResult:
+    ai_brief_report_path: str
+
+
+class SchedulerStateStore(Protocol):
+    def preflight(self) -> None: ...
+
+    def get_entry(self, key: str) -> RuntimeStateEntry | None: ...
+
+    def list_entries(
+        self, *, prefix: str, limit: int = 20
+    ) -> list[RuntimeStateEntry]: ...
+
+    def upsert_marker(
+        self,
+        *,
+        key: str,
+        payload: dict[str, object],
+        ttl_seconds: int,
+        now: dt.datetime | None = None,
+    ) -> None: ...
+
+    def claim_lock(
+        self,
+        *,
+        key: str,
+        owner_token: str,
+        ttl_seconds: int,
+        now: dt.datetime | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> RuntimeStateLockClaim: ...
+
+    def release_lock(self, key: str, *, owner_token: str) -> bool: ...
+
+    def renew_lock(self, key: str, *, owner_token: str, ttl_seconds: int) -> bool: ...
+
+    def check_ownership(self, key: str, *, owner_token: str) -> bool: ...
+
+
+class SchedulerPipeline(Protocol):
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult: ...
+
+
+class SchedulerStorage(Protocol):
+    def upload_ai_brief(self, report_path: str, *, report_date: str) -> str: ...
+
+    def download_json(self, storage_key: str) -> dict[str, object]: ...
+
+    def list_ai_brief_report_index(self, *, report_date: str) -> list[str]: ...
+
+
+class SchedulerNotifier(Protocol):
+    def require_telegram(self) -> None: ...
+
+    def send_schedule(self, *, report: dict[str, object], storage_key: str) -> None: ...
+
+    def send_late_alert(self, *, reason: str, context: dict[str, object]) -> None: ...
+
+
+def _normalize_market(market: str) -> str:
+    normalized = str(market or "").strip().upper()
+    if normalized not in {"KR", "US"}:
+        raise ValueError("market must be KR or US")
+    return normalized
+
+
+def _normalize_role(role: str, *, field_name: str) -> str:
+    normalized = str(role or "").strip().lower()
+    if not normalized:
+        raise ValueError(f"{field_name} must not be blank")
+    return normalized
+
+
+def _local_zone(market: str) -> ZoneInfo:
+    return _KR_ZONE if market == "KR" else _US_ZONE
+
+
+def _is_within_role_window(
+    *, market: str, schedule_role: str, now: dt.datetime
+) -> bool:
+    windows = _ROLE_WINDOWS.get(market, {})
+    window = windows.get(schedule_role)
+    if window is None:
+        return False
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.UTC)
+    local_time = now.astimezone(_local_zone(market)).time().replace(tzinfo=None)
+    start, end = window
+    return start <= local_time < end
+
+
+def _guard_allows_pipeline(guard: GuardSnapshot) -> bool:
+    return guard.trading_session and guard.session_state == "PRE_OPEN"
+
+
+def _guard_context(
+    *, market: str, session_date: str, guard: GuardSnapshot
+) -> dict[str, object]:
+    return {
+        "market": market,
+        "sessionDate": session_date,
+        "sessionState": guard.session_state,
+        "tradingSession": guard.trading_session,
+        "localTime": guard.local_time,
+    }
+
+
+def _runner_origin(runner_role: str) -> str:
+    if runner_role.startswith("local-"):
+        return "local"
+    if runner_role.startswith("github-"):
+        return "github"
+    return "monitor"
+
+
+def _attempt_prefix(
+    *, market: str, session_date: str, runner_role: str | None = None
+) -> str:
+    base = f"scheduled-ai-brief:attempt:{market}:{session_date}"
+    return f"{base}:{runner_role}:" if runner_role else f"{base}:"
+
+
+def build_attempt_id(
+    *,
+    scheduled_tick: str,
+    started_at: dt.datetime,
+    suffix: str | None = None,
+) -> str:
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=dt.UTC)
+    utc_started_at = started_at.astimezone(dt.UTC)
+    base = f"{scheduled_tick}-{utc_started_at.strftime('%Y%m%dT%H%M%SZ')}"
+    return f"{base}-{suffix}" if suffix else base
+
+
+def _default_guard_snapshot(market: str, now: dt.datetime) -> GuardSnapshot:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.UTC)
+    zone = _local_zone(market)
+    local_now = now.astimezone(zone)
+    session_state = resolve_run_session_state_map(
+        markets=[market],
+        data_dir="data",
+        now=now,
+    ).get(market, "AFTER_CLOSE")
+    trading_session = is_trading_session(
+        local_now.date(),
+        market=market,
+        data_dir="data",
+    )
+    return GuardSnapshot(
+        trading_session=trading_session,
+        session_state=session_state,
+        session_date=local_now.date().isoformat(),
+        local_time=local_now.isoformat(),
+    )
+
+
+def _state_payload(
+    *,
+    market: str,
+    session_date: str,
+    schedule_role: str,
+    runner_role: str,
+    scheduled_tick: str,
+    attempt_id: str,
+    run_url: str,
+    runner: str,
+    started_at: dt.datetime,
+) -> dict[str, object]:
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=dt.UTC)
+    return {
+        "market": market,
+        "sessionDate": session_date,
+        "scheduleRole": schedule_role,
+        "runnerRole": runner_role,
+        "runner": runner,
+        "scheduledTick": scheduled_tick,
+        "attemptId": attempt_id,
+        "runUrl": run_url,
+        "startedAt": started_at.astimezone(dt.UTC).replace(microsecond=0).isoformat(),
+    }
+
+
+class ScheduledAiBriefRunner:
+    def __init__(
+        self,
+        *,
+        state_store: SchedulerStateStore,
+        pipeline: SchedulerPipeline,
+        storage: SchedulerStorage,
+        notifier: SchedulerNotifier,
+        now_fn: Callable[[], dt.datetime] | None = None,
+        guard_resolver: Callable[[str, dt.datetime], GuardSnapshot] | None = None,
+    ) -> None:
+        self._state_store = state_store
+        self._pipeline = pipeline
+        self._storage = storage
+        self._notifier = notifier
+        self._now_fn = now_fn or (lambda: dt.datetime.now(dt.UTC))
+        self._guard_resolver = guard_resolver or _default_guard_snapshot
+
+    def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
+        now = self._now_fn()
+        market = _normalize_market(request.market)
+        schedule_role = _normalize_role(
+            request.schedule_role, field_name="schedule_role"
+        )
+        runner_role = _normalize_role(request.runner_role, field_name="runner_role")
+        if not _is_within_role_window(
+            market=market, schedule_role=schedule_role, now=now
+        ):
+            return ScheduledAiBriefResult(status="off_window_noop")
+
+        guard = self._guard_resolver(market, now)
+        session_date = guard.session_date
+        attempt_id = request.attempt_id or build_attempt_id(
+            scheduled_tick=request.scheduled_tick,
+            started_at=now,
+            suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
+        )
+
+        self._state_store.preflight()
+        if request.dry_run:
+            return ScheduledAiBriefResult(status="dry_run", session_date=session_date)
+
+        if runner_role in _PIPELINE_RUNNER_ROLES:
+            try:
+                self._state_store.upsert_marker(
+                    key=build_scheduler_state_key(
+                        kind="attempt",
+                        market=market,
+                        session_date=session_date,
+                        runner_role=runner_role,
+                        attempt_id=attempt_id,
+                    ),
+                    payload=_state_payload(
+                        market=market,
+                        session_date=session_date,
+                        schedule_role=schedule_role,
+                        runner_role=runner_role,
+                        scheduled_tick=request.scheduled_tick,
+                        attempt_id=attempt_id,
+                        run_url=request.run_url,
+                        runner=_runner_origin(runner_role),
+                        started_at=now,
+                    ),
+                    ttl_seconds=_ATTEMPT_TTL_SECONDS,
+                    now=now,
+                )
+            except Exception:
+                return ScheduledAiBriefResult(
+                    status="attempt_marker_failed",
+                    session_date=session_date,
+                )
+
+        success_key = build_scheduler_state_key(
+            kind="success", market=market, session_date=session_date
+        )
+        if self._state_store.get_entry(success_key) is not None:
+            return ScheduledAiBriefResult(
+                status="success_marker_skip",
+                session_date=session_date,
+            )
+
+        artifact_key = build_scheduler_state_key(
+            kind="artifact", market=market, session_date=session_date
+        )
+        artifact_entry = self._state_store.get_entry(artifact_key)
+        if artifact_entry is None:
+            artifact_entry = self._repair_artifact_marker_from_report_index(
+                market=market,
+                session_date=session_date,
+                report_date=session_date,
+                artifact_key=artifact_key,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=request.run_url,
+                now=now,
+            )
+        if artifact_entry is not None:
+            return self._reconcile_notification(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                artifact_entry=artifact_entry,
+                require_main_lock=False,
+                main_lock_key=None,
+                main_owner_token=None,
+            )
+
+        if runner_role == "monitor-only":
+            return self._monitor_local_primary(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                now=now,
+            )
+
+        if runner_role == "cutoff-alert":
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="cutoff_missing_ai_brief",
+                context={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "scheduleRole": schedule_role,
+                },
+                now=now,
+            )
+            return ScheduledAiBriefResult(
+                status="late_alert_sent",
+                session_date=session_date,
+            )
+
+        if not _guard_allows_pipeline(guard):
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="pre_open_guard_failed",
+                context=_guard_context(
+                    market=market,
+                    session_date=session_date,
+                    guard=guard,
+                ),
+                now=now,
+            )
+            return ScheduledAiBriefResult(
+                status="guard_failed",
+                session_date=session_date,
+            )
+
+        self._notifier.require_telegram()
+        owner_token = f"{attempt_id}-{uuid.uuid4().hex}"
+        lock_key = build_scheduler_state_key(
+            kind="lock", market=market, session_date=session_date
+        )
+        claim = self._state_store.claim_lock(
+            key=lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+            now=now,
+            payload={
+                "attemptId": attempt_id,
+                "market": market,
+                "sessionDate": session_date,
+                "runnerRole": runner_role,
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            return ScheduledAiBriefResult(
+                status="lock_held_skip",
+                session_date=session_date,
+            )
+
+        try:
+            pipeline_result = self._pipeline.run(
+                market=market,
+                session_date=session_date,
+                report_date=session_date,
+                source_provider=request.source_provider,
+                model_provider=request.model_provider,
+                dry_run=False,
+            )
+        except Exception:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="pipeline_failed",
+                context={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "attemptId": attempt_id,
+                },
+                now=self._now_fn(),
+            )
+            return ScheduledAiBriefResult(
+                status="pipeline_failed",
+                session_date=session_date,
+            )
+
+        if not self._state_store.renew_lock(
+            lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+        ):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+        pre_upload_guard = self._guard_resolver(market, self._now_fn())
+        if not _guard_allows_pipeline(pre_upload_guard):
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="pre_upload_guard_failed",
+                context=_guard_context(
+                    market=market,
+                    session_date=session_date,
+                    guard=pre_upload_guard,
+                ),
+                now=self._now_fn(),
+            )
+            return ScheduledAiBriefResult(
+                status="guard_failed_before_upload",
+                session_date=session_date,
+            )
+
+        try:
+            storage_key = self._storage.upload_ai_brief(
+                pipeline_result.ai_brief_report_path,
+                report_date=session_date,
+            )
+        except Exception:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="upload_failed",
+                context={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "attemptId": attempt_id,
+                },
+                now=self._now_fn(),
+            )
+            return ScheduledAiBriefResult(
+                status="upload_failed",
+                session_date=session_date,
+            )
+        self._state_store.upsert_marker(
+            key=artifact_key,
+            payload={
+                "storageKey": storage_key,
+                "market": market,
+                "sessionDate": session_date,
+                "reportDate": session_date,
+                "runner": _runner_origin(runner_role),
+                "attemptId": attempt_id,
+                "runUrl": request.run_url,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=now,
+        )
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            return ScheduledAiBriefResult(
+                status="artifact_uploaded_notification_deferred",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+
+        try:
+            result = self._reconcile_notification(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                artifact_entry=RuntimeStateEntry(
+                    state_key=artifact_key,
+                    state_payload={"storageKey": storage_key},
+                    expires_at="",
+                ),
+                require_main_lock=True,
+                main_lock_key=lock_key,
+                main_owner_token=owner_token,
+            )
+        finally:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+        if result.status == "notification_reconciled":
+            return ScheduledAiBriefResult(
+                status="completed",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        return result
+
+    def _reconcile_notification(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        artifact_entry: RuntimeStateEntry,
+        require_main_lock: bool,
+        main_lock_key: str | None,
+        main_owner_token: str | None,
+    ) -> ScheduledAiBriefResult:
+        sent_key = build_scheduler_state_key(
+            kind="notification:sent",
+            market=market,
+            session_date=session_date,
+        )
+        if self._state_store.get_entry(sent_key) is not None:
+            self._state_store.upsert_marker(
+                key=build_scheduler_state_key(
+                    kind="success", market=market, session_date=session_date
+                ),
+                payload={"market": market, "sessionDate": session_date},
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            )
+            return ScheduledAiBriefResult(
+                status="completion_repaired",
+                session_date=session_date,
+            )
+
+        if require_main_lock and not self._owns_main_lock(
+            main_lock_key=main_lock_key,
+            main_owner_token=main_owner_token,
+        ):
+            return ScheduledAiBriefResult(
+                status="artifact_uploaded_notification_deferred",
+                session_date=session_date,
+            )
+
+        self._notifier.require_telegram()
+        storage_key = str(artifact_entry.state_payload.get("storageKey") or "").strip()
+        if not storage_key:
+            return ScheduledAiBriefResult(
+                status="artifact_marker_invalid",
+                session_date=session_date,
+            )
+        claim_key = build_scheduler_state_key(
+            kind="notification:claim",
+            market=market,
+            session_date=session_date,
+        )
+        notification_owner_token = f"{attempt_id}-notification-{uuid.uuid4().hex}"
+        claim = self._state_store.claim_lock(
+            key=claim_key,
+            owner_token=notification_owner_token,
+            ttl_seconds=_NOTIFICATION_CLAIM_TTL_SECONDS,
+            payload={
+                "attemptId": attempt_id,
+                "market": market,
+                "sessionDate": session_date,
+                "runnerRole": runner_role,
+                "scheduleRole": schedule_role,
+                "channel": "telegram",
+                "notificationType": "schedule",
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            return ScheduledAiBriefResult(
+                status="notification_claim_held",
+                session_date=session_date,
+            )
+        if require_main_lock and not self._owns_main_lock(
+            main_lock_key=main_lock_key,
+            main_owner_token=main_owner_token,
+        ):
+            self._state_store.release_lock(
+                claim_key,
+                owner_token=notification_owner_token,
+            )
+            return ScheduledAiBriefResult(
+                status="artifact_uploaded_notification_deferred",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+
+        pre_notification_guard = self._guard_resolver(market, self._now_fn())
+        if not _guard_allows_pipeline(pre_notification_guard):
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="pre_notification_guard_failed",
+                context={
+                    **_guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=pre_notification_guard,
+                    ),
+                    "attemptId": attempt_id,
+                    "storageKey": storage_key,
+                },
+                now=self._now_fn(),
+            )
+            self._state_store.release_lock(
+                claim_key,
+                owner_token=notification_owner_token,
+            )
+            return ScheduledAiBriefResult(
+                status="guard_failed_before_notification",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        report = self._storage.download_json(storage_key)
+        validate_ai_brief_artifact(report, now=dt.datetime.now(dt.UTC))
+        self._notifier.send_schedule(report=report, storage_key=storage_key)
+        self._state_store.upsert_marker(
+            key=sent_key,
+            payload={
+                "market": market,
+                "sessionDate": session_date,
+                "storageKey": storage_key,
+                "attemptId": attempt_id,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+        )
+        self._state_store.upsert_marker(
+            key=build_scheduler_state_key(
+                kind="success", market=market, session_date=session_date
+            ),
+            payload={
+                "market": market,
+                "sessionDate": session_date,
+                "storageKey": storage_key,
+                "attemptId": attempt_id,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+        )
+        self._state_store.release_lock(
+            claim_key,
+            owner_token=notification_owner_token,
+        )
+        return ScheduledAiBriefResult(
+            status="notification_reconciled",
+            session_date=session_date,
+            storage_key=storage_key,
+        )
+
+    def _owns_main_lock(
+        self,
+        *,
+        main_lock_key: str | None,
+        main_owner_token: str | None,
+    ) -> bool:
+        if not main_lock_key or not main_owner_token:
+            return False
+        return self._state_store.check_ownership(
+            main_lock_key,
+            owner_token=main_owner_token,
+        )
+
+    def _monitor_local_primary(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
+        attempt_entries = self._state_store.list_entries(
+            prefix=_attempt_prefix(
+                market=market,
+                session_date=session_date,
+                runner_role="local-primary",
+            ),
+            limit=10,
+        )
+        if attempt_entries:
+            return ScheduledAiBriefResult(
+                status="monitor_local_primary_started",
+                session_date=session_date,
+            )
+
+        self._send_late_alert_once(
+            market=market,
+            session_date=session_date,
+            reason="local_primary_missing",
+            context={
+                "market": market,
+                "sessionDate": session_date,
+                "scheduleRole": schedule_role,
+            },
+            now=now,
+        )
+        return ScheduledAiBriefResult(
+            status="monitor_local_primary_missing",
+            session_date=session_date,
+        )
+
+    def _repair_artifact_marker_from_report_index(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        artifact_key: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        now: dt.datetime,
+    ) -> RuntimeStateEntry | None:
+        for storage_key in self._storage.list_ai_brief_report_index(
+            report_date=report_date
+        ):
+            try:
+                report = self._storage.download_json(storage_key)
+                validate_ai_brief_artifact(report, now=now)
+            except Exception:
+                continue
+            if str(report.get("market") or "").strip().upper() != market:
+                continue
+            if str(report.get("report_date") or "").strip() != report_date:
+                continue
+
+            payload = {
+                "storageKey": storage_key,
+                "market": market,
+                "sessionDate": session_date,
+                "reportDate": report_date,
+                "runner": _runner_origin(runner_role),
+                "scheduleRole": schedule_role,
+                "attemptId": attempt_id,
+                "runUrl": run_url,
+                "verifiedGeneratedAt": report.get("generated_at"),
+                "repairedAt": now.replace(microsecond=0).isoformat(),
+                "repairedFromReportIndex": True,
+            }
+            self._state_store.upsert_marker(
+                key=artifact_key,
+                payload=payload,
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+            return RuntimeStateEntry(
+                state_key=artifact_key,
+                state_payload=payload,
+                expires_at="",
+            )
+        return None
+
+    def _send_late_alert_once(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        reason: str,
+        context: dict[str, object],
+        now: dt.datetime,
+    ) -> str:
+        sent_key = (
+            build_scheduler_state_key(
+                kind="late-alert:sent",
+                market=market,
+                session_date=session_date,
+            )
+            + f":{reason}"
+        )
+        if self._state_store.get_entry(sent_key) is not None:
+            return "late_alert_already_sent"
+
+        claim_key = (
+            build_scheduler_state_key(
+                kind="late-alert:claim",
+                market=market,
+                session_date=session_date,
+            )
+            + f":{reason}"
+        )
+        owner_token = f"{reason}-{uuid.uuid4().hex}"
+        claim = self._state_store.claim_lock(
+            key=claim_key,
+            owner_token=owner_token,
+            ttl_seconds=_LATE_ALERT_CLAIM_TTL_SECONDS,
+            now=now,
+            payload={
+                "market": market,
+                "sessionDate": session_date,
+                "reason": reason,
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            return "late_alert_claim_held"
+        try:
+            if self._state_store.get_entry(sent_key) is not None:
+                return "late_alert_already_sent"
+            self._notifier.send_late_alert(reason=reason, context=context)
+            self._state_store.upsert_marker(
+                key=sent_key,
+                payload={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "reason": reason,
+                },
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+            return "late_alert_sent"
+        finally:
+            self._state_store.release_lock(claim_key, owner_token=owner_token)
+
+
+def _latest_report(report_dir: str, suffix: str) -> str:
+    paths = sorted(
+        Path(report_dir).glob(f"*.{suffix}.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    if not paths:
+        raise RuntimeError(f"{suffix} report not found under {report_dir}")
+    return paths[0].as_posix()
+
+
+class DefaultScheduledPipeline:
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult:
+        del session_date, dry_run
+        cfg = load_config(provider_override="kis", markets_override=[market])
+        scan_status = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider="kis",
+            universe="both",
+            markets=market,
+        )
+        if scan_status != 0:
+            raise RuntimeError("scheduled scan failed")
+        buy_report_path = _latest_report(cfg.report_dir, "buy")
+        holdings_path = (
+            Path("data") / "scheduler" / (f"holdings.{market}.{report_date}.yaml")
+        )
+        export_active_holdings_snapshot(
+            output_path=holdings_path,
+            config=SupabaseHoldingsExportConfig.from_env(),
+        )
+        with temporary_holdings_file(holdings_path):
+            entry_status = run_entry(
+                buy_report_path=buy_report_path,
+                provider="kis",
+                mode="PRE_OPEN",
+                market=market,
+                upload=False,
+            )
+        if entry_status != 0:
+            raise RuntimeError("scheduled entry failed")
+        entry_report_path = _latest_report(cfg.report_dir, "entry")
+        ai_status = run_ai_brief(
+            entry_report_path=entry_report_path,
+            buy_report_path=buy_report_path,
+            market=market,
+            model_provider=model_provider,
+            model_name="fake-ai-brief-v1",
+            source_provider=source_provider,
+            report_date=report_date,
+            upload=False,
+        )
+        if ai_status != 0:
+            raise RuntimeError("scheduled ai-brief failed")
+        return ScheduledPipelineResult(
+            ai_brief_report_path=_latest_report(cfg.report_dir, "ai-brief")
+        )
+
+
+class DefaultScheduledStorage:
+    def __init__(self, config: SupabaseStorageConfig) -> None:
+        self._config = config
+
+    @classmethod
+    def from_env(cls) -> DefaultScheduledStorage:
+        config = _load_storage_config(required=True)
+        if config is None:
+            raise SchedulerStateError("Supabase storage config is required")
+        return cls(config)
+
+    def upload_ai_brief(self, report_path: str, *, report_date: str) -> str:
+        return upload_report_artifact(
+            local_path=report_path,
+            run_type="ai-brief",
+            report_date=dt.date.fromisoformat(report_date),
+            config=self._config,
+        )
+
+    def download_json(self, storage_key: str) -> dict[str, object]:
+        quoted_key = quote(storage_key, safe="/")
+        url = f"{self._config.url}/storage/v1/object/{self._config.bucket}/{quoted_key}"
+        response = requests.get(
+            url,
+            headers=_auth_headers(self._config),
+            timeout=self._config.timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"failed to download '{storage_key}': {response.text}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"storage object '{storage_key}' must be JSON object")
+        return payload
+
+    def list_ai_brief_report_index(self, *, report_date: str) -> list[str]:
+        query = urlencode(
+            {
+                "select": "report_key",
+                "report_type": "eq.ai-brief",
+                "report_date": f"eq.{report_date}",
+                "order": "generated_at.desc,created_at.desc",
+                "limit": "10",
+            }
+        )
+        url = f"{self._config.url}/rest/v1/report_index?{query}"
+        response = requests.get(
+            url,
+            headers={**_auth_headers(self._config), "Accept": "application/json"},
+            timeout=self._config.timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                "failed to list report_index ai-brief candidates: "
+                f"HTTP {response.status_code} {response.text}"
+            )
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("report_index response must be a JSON array")
+
+        storage_keys: list[str] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            report_key = row.get("report_key")
+            if isinstance(report_key, str) and report_key.strip():
+                storage_keys.append(report_key.strip())
+        return storage_keys
+
+
+class DefaultScheduledNotifier:
+    def require_telegram(self) -> None:
+        if not os.getenv("TELEGRAM_BOT_TOKEN") or not os.getenv("TELEGRAM_CHAT_ID"):
+            raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+
+    def _post_telegram_message(self, text: str) -> None:
+        bot_token = str(os.environ["TELEGRAM_BOT_TOKEN"])
+        chat_id = str(os.environ["TELEGRAM_CHAT_ID"])
+        response = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": "true",
+            },
+            timeout=10,
+        )
+        if response.status_code >= 300:
+            raise RuntimeError(f"Telegram send failed: HTTP {response.status_code}")
+
+    def send_schedule(self, *, report: dict[str, object], storage_key: str) -> None:
+        self.require_telegram()
+        text = build_ai_brief_telegram_report_text(
+            report=report,
+            run_url=os.getenv("SAB_RUN_URL", ""),
+            storage_key=storage_key,
+        )
+        for part in split_telegram_message_text(text):
+            self._post_telegram_message(part)
+        slack_webhook_url = str(os.getenv("SLACK_WEBHOOK_URL") or "").strip()
+        if slack_webhook_url:
+            slack_text = build_ai_brief_slack_summary_text(
+                report=report,
+                repo=os.getenv("GITHUB_REPOSITORY", "local"),
+                run_url=os.getenv("SAB_RUN_URL", ""),
+                storage_key=storage_key,
+            )
+            try:
+                response = requests.post(
+                    slack_webhook_url,
+                    json={"text": slack_text},
+                    timeout=10,
+                )
+                if response.status_code >= 300:
+                    _LOGGER.warning(
+                        "Slack webhook returned HTTP %s for scheduled AI brief",
+                        response.status_code,
+                    )
+            except Exception as exc:
+                _LOGGER.warning("Slack webhook failed for scheduled AI brief: %s", exc)
+
+    def send_late_alert(self, *, reason: str, context: dict[str, object]) -> None:
+        if not os.getenv("TELEGRAM_BOT_TOKEN") or not os.getenv("TELEGRAM_CHAT_ID"):
+            return
+        text = "\n".join(
+            [
+                "[SAB][ai-brief][late-alert]",
+                f"reason={reason}",
+                *[f"{key}={value}" for key, value in sorted(context.items())],
+            ]
+        )
+        self._post_telegram_message(text)
+
+
+def run_scheduled_ai_brief(
+    *,
+    request: ScheduledAiBriefRequest,
+    guard_only: bool = False,
+) -> int:
+    now = dt.datetime.now(dt.UTC)
+    market = _normalize_market(request.market)
+    schedule_role = _normalize_role(request.schedule_role, field_name="schedule_role")
+    if guard_only:
+        return (
+            0
+            if _is_within_role_window(
+                market=market, schedule_role=schedule_role, now=now
+            )
+            else 75
+        )
+
+    runner = ScheduledAiBriefRunner(
+        state_store=SupabaseRuntimeStateClient.from_env(),
+        pipeline=DefaultScheduledPipeline(),
+        storage=DefaultScheduledStorage.from_env(),
+        notifier=DefaultScheduledNotifier(),
+    )
+    result = runner.run(request)
+    print(json.dumps({"status": result.status, "storage_key": result.storage_key}))
+    return 0 if result.status not in _FAILED_STATUSES else 1
+
+
+__all__ = [
+    "GuardSnapshot",
+    "ScheduledAiBriefRequest",
+    "ScheduledAiBriefResult",
+    "ScheduledAiBriefRunner",
+    "ScheduledPipelineResult",
+    "build_attempt_id",
+    "run_scheduled_ai_brief",
+]

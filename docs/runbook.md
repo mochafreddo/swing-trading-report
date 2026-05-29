@@ -52,6 +52,7 @@
         - `0.0`은 누락이 1건이라도 있으면 실패로 해석
       - Web 로컬 실행(선택): `WEB_HOST_PORT`(prod, 기본 `55300`), `WEB_DEV_HOST_PORT`(dev, 기본 `55301`)
       - Notify(자동 실행/AI Brief 수동 opt-in 및 schedule): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`
+      - 로컬 scheduled AI Brief wrapper(비시크릿): `SAB_SCHEDULER_ENV_FILE=.env.scheduler.local`
       - AI Brief OpenAI provider(scheduled AI Brief는 필요): `OPENAI_API_KEY`, `OPENAI_AI_BRIEF_MODEL`, `AI_BRIEF_MODEL_TIMEOUT_SECONDS`
       - AI Brief 외부 source API provider(선택): `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US`, `AI_BRIEF_SOURCE_API_TOKEN`, `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`
       - AI Brief Finnhub source provider(선택, US-only): `FINNHUB_API_KEY`
@@ -187,12 +188,8 @@
   - 알림은 자동 실행일 때만 전송합니다.
   - 텔레그램: 리포트 본문(scan 진입 가능 후보 전체를 Telegram 한도에 맞춰 분할 전송, sell 매도·점검 후보 상위 5건 + 나머지 개수)을 전송합니다.
   - 슬랙: 기존 key=value 요약 포맷을 유지합니다.
-- AI Brief 수동/scheduled 실행(GitHub Actions)
-  - `.github/workflows/ai-brief.yml`은 `workflow_dispatch`와 KR/US 장전 schedule을 지원합니다.
-  - 단일 `market=KR|US`에 대해 scan → Supabase holdings snapshot → entry → ai-brief를 순서대로 실행합니다.
-  - scheduled 실행은 KR `30 22 * * 0-4` UTC, US `7 12 * * 1-5` UTC에서 시작합니다. US schedule은 GitHub Actions 지연 여유를 두기 위해 EDT 08:07 / EST 07:07에 시작합니다.
-  - scheduled 실행은 장일+`PRE_OPEN` 런타임 가드가 통과할 때만 dependency install, scan, entry, ai-brief, 알림 단계를 진행합니다.
-  - scheduled runtime guard가 막은 실행은 Supabase/Reports artifact를 만들지 않고 Actions summary와 Telegram에 skipped 메시지만 남깁니다. 메시지는 장전 외 실행과 비거래일 skip을 구분하며, 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
+- AI Brief 수동 실행(GitHub Actions)
+  - `.github/workflows/ai-brief.yml`의 `workflow_dispatch`는 단일 `market=KR|US`에 대해 scan → Supabase holdings snapshot → entry → ai-brief를 순서대로 실행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - scheduled 실행은 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US` repository variable이 있으면 해당 값을 source provider로 사용합니다. 시장별 값이 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다. 수동 실행에서는 `source_provider=none|local-json|http-json|finnhub|polygon-news|alpha-vantage-news|marketaux-news|benzinga-news|naver-news` 입력을 사용합니다.
   - 2026-05-23 기준 US scheduled default는 `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`입니다. `POLYGON_API_KEY`와 `BENZINGA_API_TOKEN`도 backup/comparison 후보로 구성되어 있지만, Polygon은 현재 evidence set에서 freshness coverage 부족 및 HTTP 429가 확인됐고 Benzinga는 current candidate raw response가 빈 배열이어서 기본값으로 쓰지 않습니다. 장애 시 `AI_BRIEF_SOURCE_PROVIDER_US`를 unset하거나 다른 검증된 US provider로 바꾼 뒤 live comparison과 recommendation eval을 다시 실행합니다.
@@ -215,6 +212,40 @@
   - 수동 실행에서 `send_notifications=true`를 선택하면 생성된 preview 텍스트를 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
   - 관련 secret이 없으면 발송 단계는 skip하며 workflow 자체는 계속 성공할 수 있습니다.
   - `provider=pykrx`는 `market=KR`, `universe=watchlist`, `entry_mode=AFTER_CLOSE` 조합에서만 허용합니다.
+- AI Brief scheduled 실행(로컬 Docker primary + GitHub monitor/fallback)
+  - US canary 기준 primary는 로컬 Mac의 `launchd` → `scripts/launchd/sab-ai-brief-wrapper.sh` → `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler ...` 순서로 실행합니다.
+  - wrapper는 `sab ai-brief-scheduled --guard-only`로 role window를 먼저 확인합니다. Window 밖 candidate는 env file, Docker daemon, secret preflight, 실패 알림 없이 exit 0입니다.
+  - Docker one-shot runner 수동 dry-run:
+    - `SAB_SCHEDULER_ENV_FILE=.env.scheduler.local just ai-brief-scheduled-docker --market US --schedule-role local-primary --runner-role local-primary --scheduled-tick 0810 --dry-run`
+  - 로컬 Python runner 수동 dry-run:
+    - `just ai-brief-scheduled-local --market US --schedule-role local-primary --runner-role local-primary --scheduled-tick 0810 --dry-run`
+  - launchd plist 후보는 `scripts/launchd/com.mochafreddo.sab.ai-brief.us.*.plist`입니다. 서로 다른 role은 서로 다른 plist를 사용하고, 같은 role의 EDT/EST candidate tick만 한 plist에 함께 둡니다.
+  - 설치 전 검증:
+    - plist의 absolute repo/env/log path를 현재 머신에 맞게 확인합니다.
+    - `scripts/launchd/verify-sab-ai-brief.sh`
+    - `plutil -lint scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-primary.plist`
+    - `.env.scheduler.local`이 아직 없으면 compose 구조 검증에는 `SAB_SCHEDULER_ENV_FILE=.env.example docker compose -f docker-compose.yml -f docker-compose.scheduler.yml config`를 사용합니다.
+  - enable:
+    - `launchctl bootstrap gui/$(id -u) scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-primary.plist`
+    - retry/cutoff plist도 같은 방식으로 bootstrap합니다.
+    - `launchctl print gui/$(id -u)/com.mochafreddo.sab.ai-brief.us.local-primary`
+  - disable:
+    - `launchctl bootout gui/$(id -u)/com.mochafreddo.sab.ai-brief.us.local-primary`
+    - retry/cutoff plist도 같은 방식으로 bootout합니다.
+  - 로그:
+    - wrapper command log: `logs/launchd/US-local-primary.cmd.log`
+    - stdout/stderr: plist의 `StandardOutPath`/`StandardErrorPath`
+    - Docker job: `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml logs scheduler`
+  - 수동 재실행:
+    - 같은 session date에 `success` marker가 있으면 runner는 조용히 skip합니다.
+    - artifact marker만 있고 notification sent marker가 없으면 report를 재생성하지 않고 Telegram reconciliation만 시도합니다.
+    - 강제 재처리는 Supabase `runtime_state` marker 삭제가 필요하므로 먼저 storage object와 Telegram 중복 발송 가능성을 확인합니다.
+  - GitHub scheduled job은 US canary 동안 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `github-fallback`도 같은 `runtime_state` lock/artifact/notification marker를 사용합니다.
+  - rollback:
+    1. launchd job을 `bootout`합니다.
+    2. `docker ps`로 실행 중 scheduler container가 없는지 확인합니다.
+    3. `.github/workflows/ai-brief.yml` schedule을 이전 primary schedule로 되돌립니다.
+    4. 당일 `runtime_state`의 lock/claim marker는 owner/TTL을 확인하고, notification sent/success marker는 중복 발송 여부를 판단한 뒤 유지/삭제합니다.
 - Audit 실행(GitHub Actions)
   - 감사 워크플로: `.github/workflows/audit.yml`
   - 트리거: `pull_request`, `workflow_dispatch`, 매주 월요일 11:00 UTC(`0 11 * * 1`)
