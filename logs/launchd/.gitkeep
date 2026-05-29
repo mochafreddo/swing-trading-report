@@ -1,0 +1,1 @@
+# Keep launchd log paths present before launchctl opens stdout/stderr files.

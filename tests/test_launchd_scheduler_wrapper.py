@@ -41,6 +41,10 @@ def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:
         assert all("Hour" in item and "Minute" in item for item in intervals)
 
 
+def test_launchd_log_directory_exists_before_bootstrap() -> None:
+    assert Path("logs/launchd/.gitkeep").is_file()
+
+
 def test_scheduler_compose_has_one_shot_runner_service() -> None:
     compose = Path("docker-compose.scheduler.yml").read_text(encoding="utf-8")
 

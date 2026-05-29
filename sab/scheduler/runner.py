@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import logging
 import os
+import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 import requests  # type: ignore[import-untyped]
 
 from ..ai_brief import run_ai_brief
+from ..ai_brief_eval_common import parse_iso_offset_datetime
 from ..config import load_config
 from ..data.trading_sessions import is_trading_session
 from ..entry import run_entry
@@ -48,6 +50,7 @@ from .state import (
 _KR_ZONE = ZoneInfo("Asia/Seoul")
 _US_ZONE = ZoneInfo("America/New_York")
 _LOCK_TTL_SECONDS = 25 * 60
+_LOCK_RENEW_INTERVAL_SECONDS = 5 * 60
 _NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
 _LATE_ALERT_CLAIM_TTL_SECONDS = 10 * 60
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
@@ -60,6 +63,8 @@ _FAILED_STATUSES = {
     "guard_failed_before_notification",
     "pipeline_failed",
     "upload_failed",
+    "artifact_marker_failed",
+    "artifact_marker_invalid",
 }
 _LOGGER = logging.getLogger(__name__)
 
@@ -239,6 +244,47 @@ def _attempt_prefix(
     return f"{base}:{runner_role}:" if runner_role else f"{base}:"
 
 
+def _parse_artifact_generated_at(value: object) -> dt.datetime | None:
+    try:
+        return parse_iso_offset_datetime(value, field_name="generated_at")
+    except ValueError:
+        return None
+
+
+def _is_generated_during_scheduled_window(
+    *, market: str, session_date: str, generated_at: object
+) -> bool:
+    parsed = _parse_artifact_generated_at(generated_at)
+    if parsed is None:
+        return False
+    local_generated_at = parsed.astimezone(_local_zone(market))
+    if local_generated_at.date().isoformat() != session_date:
+        return False
+
+    primary_window = _ROLE_WINDOWS[market]["local-primary"]
+    cutoff_window = _ROLE_WINDOWS[market]["cutoff-alert"]
+    local_time = local_generated_at.time().replace(tzinfo=None)
+    return primary_window[0] <= local_time < cutoff_window[0]
+
+
+def _is_scheduled_artifact_for_session(
+    report: dict[str, object],
+    *,
+    market: str,
+    session_date: str,
+    report_date: str,
+) -> bool:
+    if str(report.get("market") or "").strip().upper() != market:
+        return False
+    if str(report.get("report_date") or "").strip() != report_date:
+        return False
+    return _is_generated_during_scheduled_window(
+        market=market,
+        session_date=session_date,
+        generated_at=report.get("generated_at"),
+    )
+
+
 def build_attempt_id(
     *,
     scheduled_tick: str,
@@ -302,6 +348,58 @@ def _state_payload(
     }
 
 
+class _MainLockRenewer:
+    def __init__(
+        self,
+        *,
+        state_store: SchedulerStateStore,
+        lock_key: str,
+        owner_token: str,
+        ttl_seconds: int,
+        interval_seconds: float,
+    ) -> None:
+        self._state_store = state_store
+        self._lock_key = lock_key
+        self._owner_token = owner_token
+        self._ttl_seconds = ttl_seconds
+        self._interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._interval_seconds <= 0:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name="sab-scheduled-ai-brief-lock-renewer",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval_seconds):
+            try:
+                renewed = self._state_store.renew_lock(
+                    self._lock_key,
+                    owner_token=self._owner_token,
+                    ttl_seconds=self._ttl_seconds,
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "scheduled AI brief main lock renewal failed: %s",
+                    exc,
+                )
+                continue
+            if not renewed:
+                _LOGGER.warning("scheduled AI brief main lock renewal lost ownership")
+                return
+
+
 class ScheduledAiBriefRunner:
     def __init__(
         self,
@@ -312,6 +410,7 @@ class ScheduledAiBriefRunner:
         notifier: SchedulerNotifier,
         now_fn: Callable[[], dt.datetime] | None = None,
         guard_resolver: Callable[[str, dt.datetime], GuardSnapshot] | None = None,
+        lock_renew_interval_seconds: float | None = None,
     ) -> None:
         self._state_store = state_store
         self._pipeline = pipeline
@@ -319,6 +418,11 @@ class ScheduledAiBriefRunner:
         self._notifier = notifier
         self._now_fn = now_fn or (lambda: dt.datetime.now(dt.UTC))
         self._guard_resolver = guard_resolver or _default_guard_snapshot
+        self._lock_renew_interval_seconds = (
+            _LOCK_RENEW_INTERVAL_SECONDS
+            if lock_renew_interval_seconds is None
+            else lock_renew_interval_seconds
+        )
 
     def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
         now = self._now_fn()
@@ -343,6 +447,10 @@ class ScheduledAiBriefRunner:
         self._state_store.preflight()
         if request.dry_run:
             return ScheduledAiBriefResult(status="dry_run", session_date=session_date)
+        if not guard.trading_session:
+            return ScheduledAiBriefResult(
+                status="guard_noop", session_date=session_date
+            )
 
         if runner_role in _PIPELINE_RUNNER_ROLES:
             try:
@@ -477,6 +585,16 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
 
+        lock_renewer = _MainLockRenewer(
+            state_store=self._state_store,
+            lock_key=lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+            interval_seconds=self._lock_renew_interval_seconds,
+        )
+        lock_renewer.start()
+        pipeline_result: ScheduledPipelineResult | None = None
+        pipeline_failed = False
         try:
             pipeline_result = self._pipeline.run(
                 market=market,
@@ -487,6 +605,11 @@ class ScheduledAiBriefRunner:
                 dry_run=False,
             )
         except Exception:
+            pipeline_failed = True
+        finally:
+            lock_renewer.stop()
+
+        if pipeline_failed or pipeline_result is None:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
             self._send_late_alert_once(
                 market=market,
@@ -559,20 +682,40 @@ class ScheduledAiBriefRunner:
                 status="upload_failed",
                 session_date=session_date,
             )
-        self._state_store.upsert_marker(
-            key=artifact_key,
-            payload={
-                "storageKey": storage_key,
-                "market": market,
-                "sessionDate": session_date,
-                "reportDate": session_date,
-                "runner": _runner_origin(runner_role),
-                "attemptId": attempt_id,
-                "runUrl": request.run_url,
-            },
-            ttl_seconds=_SUCCESS_TTL_SECONDS,
-            now=now,
-        )
+        try:
+            self._state_store.upsert_marker(
+                key=artifact_key,
+                payload={
+                    "storageKey": storage_key,
+                    "market": market,
+                    "sessionDate": session_date,
+                    "reportDate": session_date,
+                    "runner": _runner_origin(runner_role),
+                    "attemptId": attempt_id,
+                    "runUrl": request.run_url,
+                },
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+        except Exception:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="artifact_marker_failed",
+                context={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "attemptId": attempt_id,
+                    "storageKey": storage_key,
+                },
+                now=self._now_fn(),
+            )
+            return ScheduledAiBriefResult(
+                status="artifact_marker_failed",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
         if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
             return ScheduledAiBriefResult(
                 status="artifact_uploaded_notification_deferred",
@@ -720,6 +863,21 @@ class ScheduledAiBriefRunner:
             )
         report = self._storage.download_json(storage_key)
         validate_ai_brief_artifact(report, now=dt.datetime.now(dt.UTC))
+        if not _is_scheduled_artifact_for_session(
+            report,
+            market=market,
+            session_date=session_date,
+            report_date=session_date,
+        ):
+            self._state_store.release_lock(
+                claim_key,
+                owner_token=notification_owner_token,
+            )
+            return ScheduledAiBriefResult(
+                status="artifact_marker_invalid",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
         self._notifier.send_schedule(report=report, storage_key=storage_key)
         self._state_store.upsert_marker(
             key=sent_key,
@@ -788,6 +946,15 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
 
+        lock_key = build_scheduler_state_key(
+            kind="lock", market=market, session_date=session_date
+        )
+        if self._state_store.get_entry(lock_key) is not None:
+            return ScheduledAiBriefResult(
+                status="monitor_local_primary_lock_active",
+                session_date=session_date,
+            )
+
         self._send_late_alert_once(
             market=market,
             session_date=session_date,
@@ -825,9 +992,12 @@ class ScheduledAiBriefRunner:
                 validate_ai_brief_artifact(report, now=now)
             except Exception:
                 continue
-            if str(report.get("market") or "").strip().upper() != market:
-                continue
-            if str(report.get("report_date") or "").strip() != report_date:
+            if not _is_scheduled_artifact_for_session(
+                report,
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+            ):
                 continue
 
             payload = {
@@ -958,6 +1128,9 @@ class DefaultScheduledPipeline:
             output_path=holdings_path,
             config=SupabaseHoldingsExportConfig.from_env(),
         )
+        entry_guard = _default_guard_snapshot(market, dt.datetime.now(dt.UTC))
+        if not _guard_allows_pipeline(entry_guard):
+            raise RuntimeError("scheduled pre-open guard failed before entry")
         with temporary_holdings_file(holdings_path):
             entry_status = run_entry(
                 buy_report_path=buy_report_path,

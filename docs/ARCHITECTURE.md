@@ -314,4 +314,5 @@ flowchart LR
   - 웹 리포트 캐싱: `docs/adr/ADR-0009-web-reports-caching.md`
   - Add Buy 멱등성: `docs/adr/ADR-0010-holdings-add-buy.md`
   - 시세 캐시 정책: `docs/adr/ADR-0011-market-data-cache-policy.md`
+  - 로컬 Docker scheduled runs: `docs/adr/ADR-0012-local-docker-scheduled-runs.md`
 - 전략/로직 설계(신호/리스크): `docs/STRATEGY.md`

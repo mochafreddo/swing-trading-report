@@ -123,6 +123,38 @@ def test_docs_index_declares_archive_and_artifact_categories() -> None:
         assert heading in text
 
 
+def test_docs_index_lists_local_scheduler_plan_as_accepted_design() -> None:
+    text = _read(Path("docs/README.md"))
+    design_section = text.split("## 설계 기록", 1)[1].split("## backlog", 1)[0]
+    backlog_section = text.split("## backlog spec / roadmap", 1)[1].split(
+        "## archive", 1
+    )[0]
+
+    assert "[로컬 Docker scheduler 전환 계획](local-docker-scheduler-plan.md)" in (
+        design_section
+    )
+    assert "local-docker-scheduler-plan.md" not in backlog_section
+
+
+def test_architecture_links_local_scheduler_adr() -> None:
+    text = _read(Path("docs/ARCHITECTURE.md"))
+
+    assert "docs/adr/ADR-0012-local-docker-scheduled-runs.md" in text
+
+
+def test_runbook_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> None:
+    text = _read(Path("docs/runbook.md"))
+    manual_section = text.split("- AI Brief 수동 실행(GitHub Actions)", 1)[1].split(
+        "- AI Brief scheduled 실행", 1
+    )[0]
+    scheduled_section = text.split("- AI Brief scheduled 실행", 1)[1].split(
+        "- Audit 실행", 1
+    )[0]
+
+    assert "scheduled 기본값" not in manual_section
+    assert "AI_BRIEF_SOURCE_PROVIDER_US" in scheduled_section
+
+
 def test_index_docs_link_existing_files() -> None:
     links = [
         (doc_path, resolved)

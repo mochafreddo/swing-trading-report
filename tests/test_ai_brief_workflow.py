@@ -103,6 +103,11 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert 'out.write(f"session_date={session_date}\\n")' in resolve_script
     assert 'out.write(f"schedule_role={schedule_role}\\n")' in resolve_script
     assert 'out.write(f"runner_role={runner_role}\\n")' in resolve_script
+    assert "role_windows" in resolve_script
+    assert "should_run = _is_within_role_window(" in resolve_script
+    assert 'out.write(f"should_run={str(should_run).lower()}\\n")' in resolve_script
+    assert 'out.write("should_run=true\\n")' not in resolve_script
+    assert 'out.write(f"source_api_url={source_api_url}\\n")' in resolve_script
 
     scheduled_job = jobs["scheduled_ai_brief"]
     assert scheduled_job.get("needs") == "resolve_context"
@@ -134,6 +139,10 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
         "${{ needs.resolve_context.outputs.source_provider == 'http-json' && "
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
+    )
+    assert (
+        run_env.get("AI_BRIEF_SOURCE_API_URL")
+        == "${{ needs.resolve_context.outputs.source_api_url }}"
     )
     assert run_env.get("FINNHUB_API_KEY") == (
         "${{ needs.resolve_context.outputs.source_provider == 'finnhub' && "

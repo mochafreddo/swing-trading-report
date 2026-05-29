@@ -65,12 +65,12 @@
 
 - [Holdings 추가매수 입력 설계](holdings-add-buy.md)
 - [Holdings 티커 검색/선택 UX 설계](holdings-ticker-lookup.md)
+- [로컬 Docker scheduler 전환 계획](local-docker-scheduler-plan.md)
 
 ## backlog spec / roadmap
 
 - [PRD](PRD.md)
 - [Spec v1.3 backlog 스펙](spec-v1.3.md)
-- [로컬 Docker scheduler 전환 계획](local-docker-scheduler-plan.md)
 
 ## archive
 

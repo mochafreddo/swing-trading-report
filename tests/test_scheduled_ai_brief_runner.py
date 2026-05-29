@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from dataclasses import dataclass, field
 
 import pytest
+import sab.scheduler.runner as scheduler_runner
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
+    DefaultScheduledPipeline,
     GuardSnapshot,
     ScheduledAiBriefRequest,
     ScheduledAiBriefRunner,
@@ -29,7 +32,9 @@ class _FakeStateStore:
     ownership_results: list[bool] = field(default_factory=lambda: [True, True, True])
     preflight_calls: int = 0
     fail_attempt_upsert: bool = False
+    fail_artifact_upsert: bool = False
     claim_results: list[bool] = field(default_factory=list)
+    renewed_event: threading.Event | None = None
 
     def preflight(self) -> None:
         self.preflight_calls += 1
@@ -51,6 +56,8 @@ class _FakeStateStore:
     ) -> None:
         if ":attempt:" in key and self.fail_attempt_upsert:
             raise RuntimeError("attempt write failed")
+        if ":artifact:" in key and self.fail_artifact_upsert:
+            raise RuntimeError("artifact write failed")
         self.upserts.append((key, payload))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
@@ -77,6 +84,8 @@ class _FakeStateStore:
 
     def renew_lock(self, key: str, *, owner_token: str, ttl_seconds: int) -> bool:
         self.renewals.append(key)
+        if self.renewed_event is not None:
+            self.renewed_event.set()
         return True
 
     def check_ownership(self, key: str, *, owner_token: str) -> bool:
@@ -90,7 +99,7 @@ class _FakePipeline:
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     fail: bool = False
 
-    def run(
+    def _record_call(
         self,
         *,
         market: str,
@@ -99,7 +108,7 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
-    ) -> ScheduledPipelineResult:
+    ) -> None:
         self.calls.append(
             (
                 "run",
@@ -113,8 +122,58 @@ class _FakePipeline:
                 },
             )
         )
+
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult:
+        self._record_call(
+            market=market,
+            session_date=session_date,
+            report_date=report_date,
+            source_provider=source_provider,
+            model_provider=model_provider,
+            dry_run=dry_run,
+        )
         if self.fail:
             raise RuntimeError("pipeline failed")
+        return ScheduledPipelineResult(
+            ai_brief_report_path="reports/2026-05-28.ai-brief.json"
+        )
+
+
+@dataclass
+class _BlockingPipeline(_FakePipeline):
+    started_event: threading.Event = field(default_factory=threading.Event)
+    finish_event: threading.Event = field(default_factory=threading.Event)
+
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult:
+        self._record_call(
+            market=market,
+            session_date=session_date,
+            report_date=report_date,
+            source_provider=source_provider,
+            model_provider=model_provider,
+            dry_run=dry_run,
+        )
+        self.started_event.set()
+        if not self.finish_event.wait(timeout=1):
+            raise AssertionError("pipeline was not released by the test")
         return ScheduledPipelineResult(
             ai_brief_report_path="reports/2026-05-28.ai-brief.json"
         )
@@ -125,6 +184,7 @@ class _FakeStorage:
     uploads: list[str] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     repair_candidates: list[str] = field(default_factory=list)
+    payload_by_key: dict[str, dict[str, object]] = field(default_factory=dict)
     payload: dict[str, object] = field(
         default_factory=lambda: {
             "schema": "sab.ai_brief.v1",
@@ -153,11 +213,16 @@ class _FakeStorage:
         self.uploads.append(report_path)
         if self.fail_upload:
             raise RuntimeError("upload failed")
-        return "2026/05/2026-05-28.ai-brief.json"
+        storage_key = "2026/05/2026-05-28.ai-brief.json"
+        self.payload_by_key[storage_key] = {
+            **self.payload,
+            "generated_at": "2026-05-28T08:15:00-04:00",
+        }
+        return storage_key
 
     def download_json(self, storage_key: str) -> dict[str, object]:
         self.downloads.append(storage_key)
-        return dict(self.payload)
+        return dict(self.payload_by_key.get(storage_key, self.payload))
 
     def list_ai_brief_report_index(self, *, report_date: str) -> list[str]:
         del report_date
@@ -203,6 +268,7 @@ def _runner(
     now: dt.datetime | None = None,
     guard: GuardSnapshot | None = None,
     guard_sequence: list[GuardSnapshot] | None = None,
+    lock_renew_interval_seconds: float | None = None,
 ) -> tuple[
     ScheduledAiBriefRunner,
     _FakeStateStore,
@@ -229,6 +295,7 @@ def _runner(
         notifier=notifier,
         now_fn=lambda: now or dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
         guard_resolver=resolve_guard,
+        lock_renew_interval_seconds=lock_renew_interval_seconds,
     )
     return runner, state, pipeline, storage, notifier
 
@@ -475,6 +542,56 @@ def test_artifact_only_reconciliation_uses_notification_claim_without_main_lock(
     assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
 
 
+def test_artifact_only_reconciliation_rejects_payload_outside_scheduled_window() -> (
+    None
+):
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        entries={
+            artifact_key: RuntimeStateEntry(
+                state_key=artifact_key,
+                state_payload={
+                    "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                    "market": "US",
+                    "sessionDate": "2026-05-28",
+                    "reportDate": "2026-05-28",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        }
+    )
+    storage = _FakeStorage()
+    storage.payload = {
+        **storage.payload,
+        "generated_at": "2026-05-28T10:15:00-04:00",
+    }
+    runner, state, pipeline, storage, notifier = _runner(
+        state=state,
+        storage=storage,
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-retry",
+            runner_role="local-retry",
+            scheduled_tick="0845",
+            attempt_id="attempt-artifact-invalid-window",
+        )
+    )
+
+    assert result.status == "artifact_marker_invalid"
+    assert pipeline.calls == []
+    assert storage.downloads == ["2026/05/2026-05-28.ai-brief.json"]
+    assert notifier.sent == []
+    assert any(":notification:claim:" in key for key in state.releases)
+    assert not any(":notification:sent:" in key for key, _payload in state.upserts)
+    assert not any(":success:" in key for key, _payload in state.upserts)
+
+
 def test_report_index_repair_happens_before_new_pipeline() -> None:
     state = _FakeStateStore()
     storage = _FakeStorage()
@@ -503,6 +620,40 @@ def test_report_index_repair_happens_before_new_pipeline() -> None:
     assert artifact_upserts
     assert artifact_upserts[0]["repairedFromReportIndex"] is True
     assert artifact_upserts[0]["storageKey"] == "2026/05/2026-05-28.ai-brief.json"
+
+
+def test_report_index_repair_rejects_generated_at_outside_scheduled_window() -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage()
+    storage.repair_candidates = ["2026/05/2026-05-28.ai-brief.json"]
+    storage.payload = {
+        **storage.payload,
+        "generated_at": "2026-05-28T10:15:00-04:00",
+    }
+    runner, state, pipeline, storage, _notifier = _runner(
+        state=state,
+        storage=storage,
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-retry",
+            runner_role="local-retry",
+            scheduled_tick="0845",
+            attempt_id="attempt-repair-outside-window",
+        )
+    )
+
+    assert result.status == "completed"
+    assert len(pipeline.calls) == 1
+    repaired_artifacts = [
+        payload
+        for key, payload in state.upserts
+        if ":artifact:" in key and payload.get("repairedFromReportIndex") is True
+    ]
+    assert repaired_artifacts == []
 
 
 def test_runner_aborts_without_upload_when_lock_is_lost_before_upload() -> None:
@@ -597,6 +748,43 @@ def test_runner_renews_main_lock_after_pipeline_before_upload() -> None:
     assert any(":lock:" in key for key in state.renewals)
 
 
+def test_runner_renews_main_lock_while_pipeline_is_running() -> None:
+    renewed = threading.Event()
+    state = _FakeStateStore(renewed_event=renewed)
+    pipeline = _BlockingPipeline()
+    runner, _state, _pipeline, storage, _notifier = _runner(
+        state=state,
+        pipeline=pipeline,
+        lock_renew_interval_seconds=0.01,
+    )
+    results: list[str] = []
+
+    thread = threading.Thread(
+        target=lambda: results.append(
+            runner.run(
+                ScheduledAiBriefRequest(
+                    market="US",
+                    schedule_role="local-primary",
+                    runner_role="local-primary",
+                    scheduled_tick="0810",
+                    attempt_id="attempt-renew-during-pipeline",
+                )
+            ).status
+        )
+    )
+
+    thread.start()
+    assert pipeline.started_event.wait(timeout=1)
+    assert renewed.wait(timeout=1)
+    assert storage.uploads == []
+
+    pipeline.finish_event.set()
+    thread.join(timeout=1)
+
+    assert results == ["completed"]
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+
+
 def test_runner_passes_session_date_as_ai_brief_report_date() -> None:
     runner, _state, pipeline, _storage, _notifier = _runner()
 
@@ -653,6 +841,153 @@ def test_runner_releases_main_lock_when_upload_fails() -> None:
     assert result.status == "upload_failed"
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["upload_failed"]
+
+
+def test_runner_releases_main_lock_when_artifact_marker_write_fails() -> None:
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=_FakeStateStore(fail_artifact_upsert=True)
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-artifact-marker-fail",
+        )
+    )
+
+    assert result.status == "artifact_marker_failed"
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert any(":lock:" in key for key in state.releases)
+    assert "artifact_marker_failed" in notifier.sent
+
+
+def test_invalid_artifact_marker_is_failed_scheduler_status() -> None:
+    assert "artifact_marker_invalid" in scheduler_runner._FAILED_STATUSES
+
+
+def test_default_pipeline_rechecks_pre_open_guard_before_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "sab.scheduler.runner.load_config",
+        lambda **_kwargs: type("Config", (), {"report_dir": "reports"})(),
+    )
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        "sab.scheduler.runner._latest_report",
+        lambda _report_dir, suffix: f"reports/2026-05-28.{suffix}.json",
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="INTRADAY"),
+    )
+
+    def fake_run_entry(**_kwargs: object) -> int:
+        entry_calls.append("entry")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    with pytest.raises(RuntimeError, match="pre-open guard failed before entry"):
+        DefaultScheduledPipeline().run(
+            market="US",
+            session_date="2026-05-28",
+            report_date="2026-05-28",
+            source_provider=None,
+            model_provider="fake",
+            dry_run=False,
+        )
+
+    assert entry_calls == []
+
+
+@pytest.mark.parametrize(
+    ("schedule_role", "runner_role", "now"),
+    [
+        (
+            "early-monitor",
+            "monitor-only",
+            dt.datetime(2026, 5, 28, 12, 35, tzinfo=dt.UTC),
+        ),
+        (
+            "cutoff-alert",
+            "cutoff-alert",
+            dt.datetime(2026, 5, 28, 13, 30, tzinfo=dt.UTC),
+        ),
+    ],
+)
+def test_monitor_and_cutoff_do_not_alert_when_trading_session_guard_fails(
+    schedule_role: str,
+    runner_role: str,
+    now: dt.datetime,
+) -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        now=now,
+        guard=_guard(trading_session=False),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            scheduled_tick="0830" if runner_role == "monitor-only" else "0926",
+            attempt_id="attempt-non-trading",
+        )
+    )
+
+    assert result.status == "guard_noop"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert not any(":late-alert:" in key for key in state.claims)
+
+
+def test_monitor_only_classifies_local_primary_lock_without_alerting() -> None:
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        entries={
+            lock_key: RuntimeStateEntry(
+                state_key=lock_key,
+                state_payload={"runnerRole": "local-primary"},
+                expires_at="2026-05-28T13:05:00Z",
+            )
+        }
+    )
+    runner, _state, pipeline, storage, notifier = _runner(
+        state=state,
+        now=dt.datetime(2026, 5, 28, 12, 35, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="early-monitor",
+            runner_role="monitor-only",
+            scheduled_tick="0830",
+            attempt_id="attempt-monitor-lock",
+        )
+    )
+
+    assert result.status == "monitor_local_primary_lock_active"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
 
 
 def test_default_notifier_treats_slack_failure_as_best_effort(
