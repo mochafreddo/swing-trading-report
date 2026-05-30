@@ -15,6 +15,60 @@ from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
 from .sell import run_sell
 
 
+def _normalize_log_timezone(value: str | None) -> str:
+    log_tz = (value or "local").strip().lower()
+    if log_tz in {"local", "utc"}:
+        return log_tz
+    return "local"
+
+
+def _format_record_time(
+    record: logging.LogRecord, *, datefmt: str | None, tz: str
+) -> str:
+    if tz == "utc":
+        ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
+    else:
+        ts = dt.datetime.fromtimestamp(record.created).astimezone()
+
+    if datefmt:
+        return ts.strftime(datefmt)
+    return ts.isoformat(timespec="milliseconds")
+
+
+class _TZFormatter(logging.Formatter):
+    def __init__(self, fmt: str, *, datefmt: str | None, tz: str) -> None:
+        super().__init__(fmt=fmt, datefmt=datefmt)
+        self._tz = tz
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        return _format_record_time(record, datefmt=datefmt or self.datefmt, tz=self._tz)
+
+
+class _JsonFormatter(logging.Formatter):
+    def __init__(self, *, datefmt: str | None, tz: str) -> None:
+        super().__init__(datefmt=datefmt)
+        self._tz = tz
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": _format_record_time(record, datefmt=self.datefmt, tz=self._tz),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_log_formatter(
+    *, log_format: str, datefmt: str | None, tz: str
+) -> logging.Formatter:
+    if log_format.strip().lower() == "json":
+        return _JsonFormatter(datefmt=datefmt, tz=tz)
+    return _TZFormatter(log_format, datefmt=datefmt, tz=tz)
+
+
 def _configure_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -24,57 +78,12 @@ def _configure_logging() -> None:
         "%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
     log_datefmt = os.getenv("LOG_DATEFMT") or None
-    log_tz = (os.getenv("LOG_TZ") or "local").strip().lower()
-    if log_tz not in {"local", "utc"}:
-        log_tz = "local"
-
-    def _format_record_time(
-        record: logging.LogRecord, *, datefmt: str | None, tz: str
-    ) -> str:
-        if tz == "utc":
-            ts = dt.datetime.fromtimestamp(record.created, tz=dt.UTC)
-        else:
-            ts = dt.datetime.fromtimestamp(record.created).astimezone()
-
-        if datefmt:
-            return ts.strftime(datefmt)
-        return ts.isoformat(timespec="milliseconds")
-
-    class _TZFormatter(logging.Formatter):
-        def __init__(self, fmt: str, *, datefmt: str | None, tz: str) -> None:
-            super().__init__(fmt=fmt, datefmt=datefmt)
-            self._tz = tz
-
-        def formatTime(
-            self, record: logging.LogRecord, datefmt: str | None = None
-        ) -> str:
-            return _format_record_time(
-                record, datefmt=datefmt or self.datefmt, tz=self._tz
-            )
-
-    class _JsonFormatter(logging.Formatter):
-        def __init__(self, *, datefmt: str | None, tz: str) -> None:
-            super().__init__(datefmt=datefmt)
-            self._tz = tz
-
-        def format(self, record: logging.LogRecord) -> str:
-            payload = {
-                "timestamp": _format_record_time(
-                    record, datefmt=self.datefmt, tz=self._tz
-                ),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-            }
-            if record.exc_info:
-                payload["exception"] = self.formatException(record.exc_info)
-            return json.dumps(payload, ensure_ascii=False)
+    log_tz = _normalize_log_timezone(os.getenv("LOG_TZ"))
 
     handler = logging.StreamHandler()
-    if log_format.strip().lower() == "json":
-        formatter: logging.Formatter = _JsonFormatter(datefmt=log_datefmt, tz=log_tz)
-    else:
-        formatter = _TZFormatter(log_format, datefmt=log_datefmt, tz=log_tz)
+    formatter = _build_log_formatter(
+        log_format=log_format, datefmt=log_datefmt, tz=log_tz
+    )
     handler.setFormatter(formatter)
     logging.basicConfig(level=level, handlers=[handler], force=True)
 

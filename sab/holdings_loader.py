@@ -49,6 +49,9 @@ class HoldingsData:
     holdings: list[Holding]
 
 
+type _ParsedHoldingRow = tuple[int, dict[str, Any], str, str]
+
+
 def _ensure_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value]
@@ -85,14 +88,7 @@ def _missing_holdings_field(
     )
 
 
-def load_holdings(path: str | None) -> HoldingsData:
-    if not path:
-        return HoldingsData(path=None, settings=HoldingSettings(), holdings=[])
-
-    p = Path(path)
-    if not p.exists():
-        raise HoldingsLoadError(f"Holdings file '{p}' does not exist.")
-
+def _load_yaml_root(p: Path) -> dict[str, Any]:
     if yaml is None:
         raise HoldingsLoadError(
             f"Holdings file '{p}' exists but PyYAML is unavailable. "
@@ -115,165 +111,184 @@ def load_holdings(path: str | None) -> HoldingsData:
             f"'{p}' must have a mapping (object) at YAML root, got "
             f"{type(raw).__name__}."
         )
+    return raw
 
+
+def _settings_mapping(p: Path, raw: dict[str, Any]) -> dict[str, Any]:
     settings_value = raw.get("settings")
     if settings_value is None:
-        settings_raw: dict[str, Any] = {}
-    elif not isinstance(settings_value, dict):
+        return {}
+    if not isinstance(settings_value, dict):
         raise HoldingsLoadError(
             "Holdings file "
             f"'{p}' field 'settings' must have a mapping (object), got "
             f"{type(settings_value).__name__}."
         )
-    else:
-        settings_raw = settings_value
+    return settings_value
 
-    settings = HoldingSettings(
-        default_currency=settings_raw.get("default_currency"),
+
+def _normalize_default_currency(p: Path, value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise _invalid_holdings_value(
+            p,
+            f"unsupported settings.default_currency {value!r}; "
+            f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+            field_name="settings.default_currency",
+        )
+    normalized = str(value).strip().upper()
+    if not normalized:
+        return None
+    if normalized not in SUPPORTED_ENTRY_CURRENCIES:
+        raise _invalid_holdings_value(
+            p,
+            f"unsupported settings.default_currency {value!r}; "
+            f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+            field_name="settings.default_currency",
+        )
+    return normalized
+
+
+def _parse_settings(p: Path, raw: dict[str, Any]) -> HoldingSettings:
+    settings_raw = _settings_mapping(p, raw)
+    return HoldingSettings(
+        default_currency=_normalize_default_currency(
+            p, settings_raw.get("default_currency")
+        ),
         default_strategy=settings_raw.get("default_strategy"),
         default_tags=_ensure_list(settings_raw.get("default_tags")),
     )
-    if settings.default_currency is not None:
-        raw_default_currency = settings.default_currency
-        if isinstance(raw_default_currency, bool):  # type: ignore[unreachable]
-            raise _invalid_holdings_value(
-                p,
-                f"unsupported settings.default_currency {raw_default_currency!r}; "
-                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
-                field_name="settings.default_currency",
-            )
-        normalized_default_currency = str(raw_default_currency).strip().upper()
-        if not normalized_default_currency:
-            settings.default_currency = None
-        elif normalized_default_currency not in SUPPORTED_ENTRY_CURRENCIES:
-            raise _invalid_holdings_value(
-                p,
-                f"unsupported settings.default_currency {raw_default_currency!r}; "
-                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
-                field_name="settings.default_currency",
-            )
-        else:
-            settings.default_currency = normalized_default_currency
 
+
+def _holdings_list(p: Path, raw: dict[str, Any]) -> list[Any]:
     holdings_value = raw.get("holdings")
     if holdings_value is None:
-        holdings_raw: list[Any] = []
-    elif not isinstance(holdings_value, list):
+        return []
+    if not isinstance(holdings_value, list):
         raise HoldingsLoadError(
             "Holdings file "
             f"'{p}' field 'holdings' must have a list (array), got "
             f"{type(holdings_value).__name__}."
         )
-    else:
-        holdings_raw = holdings_value
+    return holdings_value
 
-    def _parse_float_or_raise(
-        *,
-        value: Any,
-        field_name: str,
-        item_index: int,
-        ticker: str,
-        min_value: float | None = None,
-    ) -> float:
-        if isinstance(value, bool):
-            raise _invalid_holdings_value(
-                p,
-                f"expected a finite number, got {value!r}.",
-                field_name=field_name,
-                item_index=item_index,
-                ticker=ticker,
-            )
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError) as exc:
-            raise _invalid_holdings_value(
-                p,
-                f"expected a number, got {value!r}.",
-                field_name=field_name,
-                item_index=item_index,
-                ticker=ticker,
-            ) from exc
-        if not math.isfinite(parsed):
-            raise _invalid_holdings_value(
-                p,
-                f"expected a finite number, got {value!r}.",
-                field_name=field_name,
-                item_index=item_index,
-                ticker=ticker,
-            )
-        if min_value is not None and parsed < min_value:
-            raise _invalid_holdings_value(
-                p,
-                f"expected a number >= {min_value:g}, got {value!r}.",
-                field_name=field_name,
-                item_index=item_index,
-                ticker=ticker,
-            )
-        return parsed
 
-    def _required_field_or_raise(
-        *,
-        item: dict[str, Any],
-        field_name: str,
-        item_index: int,
-        ticker: str,
-    ) -> Any:
-        if field_name not in item:
-            raise _missing_holdings_field(
-                p,
-                item_index=item_index,
-                ticker=ticker,
-                field_name=field_name,
-            )
-        return item[field_name]
+def _parse_float_or_raise(
+    p: Path,
+    *,
+    value: Any,
+    field_name: str,
+    item_index: int,
+    ticker: str,
+    min_value: float | None = None,
+) -> float:
+    if isinstance(value, bool):
+        raise _invalid_holdings_value(
+            p,
+            f"expected a finite number, got {value!r}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _invalid_holdings_value(
+            p,
+            f"expected a number, got {value!r}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        ) from exc
+    if not math.isfinite(parsed):
+        raise _invalid_holdings_value(
+            p,
+            f"expected a finite number, got {value!r}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    if min_value is not None and parsed < min_value:
+        raise _invalid_holdings_value(
+            p,
+            f"expected a number >= {min_value:g}, got {value!r}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    return parsed
 
-    def _parse_ticker_or_raise(*, item: dict[str, Any], item_index: int) -> str:
-        raw_ticker = _required_field_or_raise(
-            item=item,
+
+def _required_field_or_raise(
+    p: Path,
+    *,
+    item: dict[str, Any],
+    field_name: str,
+    item_index: int,
+    ticker: str,
+) -> Any:
+    if field_name not in item:
+        raise _missing_holdings_field(
+            p,
+            item_index=item_index,
+            ticker=ticker,
+            field_name=field_name,
+        )
+    return item[field_name]
+
+
+def _parse_ticker_or_raise(p: Path, *, item: dict[str, Any], item_index: int) -> str:
+    raw_ticker = _required_field_or_raise(
+        p,
+        item=item,
+        field_name="ticker",
+        item_index=item_index,
+        ticker="",
+    )
+    if isinstance(raw_ticker, bool) or raw_ticker is None:
+        raise _invalid_holdings_value(
+            p,
+            f"expected a non-empty ticker string, got {raw_ticker!r}.",
             field_name="ticker",
             item_index=item_index,
             ticker="",
         )
-        if isinstance(raw_ticker, bool) or raw_ticker is None:
-            raise _invalid_holdings_value(
-                p,
-                f"expected a non-empty ticker string, got {raw_ticker!r}.",
-                field_name="ticker",
-                item_index=item_index,
-                ticker="",
-            )
-        if not isinstance(raw_ticker, str):
-            hint = ""
-            if isinstance(raw_ticker, int):
-                hint = " quote numeric codes like '000660' to preserve leading zeros."
-            raise _invalid_holdings_value(
-                p,
-                f"expected a ticker string, got {raw_ticker!r}.{hint}",
-                field_name="ticker",
-                item_index=item_index,
-                ticker="",
-            )
-        ticker = raw_ticker
-        parsed = ticker.strip()
-        if not parsed:
-            raise _missing_holdings_field(
-                p,
-                item_index=item_index,
-                ticker="",
-                field_name="ticker",
-            )
-        ticker_issue = validate_strict_holdings_ticker(parsed)
-        if ticker_issue is not None:
-            raise _invalid_holdings_value(
-                p,
-                f"{ticker_issue}.",
-                field_name="ticker",
-                item_index=item_index,
-                ticker=parsed,
-            )
-        return parse_ticker(parsed).ticker
+    if not isinstance(raw_ticker, str):
+        hint = ""
+        if isinstance(raw_ticker, int):
+            hint = " quote numeric codes like '000660' to preserve leading zeros."
+        raise _invalid_holdings_value(
+            p,
+            f"expected a ticker string, got {raw_ticker!r}.{hint}",
+            field_name="ticker",
+            item_index=item_index,
+            ticker="",
+        )
+    parsed = raw_ticker.strip()
+    if not parsed:
+        raise _missing_holdings_field(
+            p,
+            item_index=item_index,
+            ticker="",
+            field_name="ticker",
+        )
+    ticker_issue = validate_strict_holdings_ticker(parsed)
+    if ticker_issue is not None:
+        raise _invalid_holdings_value(
+            p,
+            f"{ticker_issue}.",
+            field_name="ticker",
+            item_index=item_index,
+            ticker=parsed,
+        )
+    return parse_ticker(parsed).ticker
 
-    parsed_rows: list[tuple[int, dict[str, Any], str, str]] = []
+
+def _parse_holding_row_headers(
+    p: Path, holdings_raw: list[Any]
+) -> list[_ParsedHoldingRow]:
+    parsed_rows: list[_ParsedHoldingRow] = []
     for item_index, item in enumerate(holdings_raw):
         if not isinstance(item, dict):
             raise HoldingsLoadError(
@@ -281,10 +296,15 @@ def load_holdings(path: str | None) -> HoldingsData:
                 f"'{p}' (index {item_index}): expected an object, got "
                 f"{type(item).__name__}."
             )
-        ticker = _parse_ticker_or_raise(item=item, item_index=item_index)
+        ticker = _parse_ticker_or_raise(p, item=item, item_index=item_index)
         market = parse_ticker(ticker).market
         parsed_rows.append((item_index, item, ticker, market))
+    return parsed_rows
 
+
+def _validate_default_currency_for_markets(
+    p: Path, *, settings: HoldingSettings, parsed_rows: list[_ParsedHoldingRow]
+) -> bool:
     markets_in_holdings = {market for _, _, _, market in parsed_rows}
     has_kr_ticker = "KR" in markets_in_holdings
     has_us_ticker = "US" in markets_in_holdings
@@ -317,144 +337,241 @@ def load_holdings(path: str | None) -> HoldingsData:
             "KR-only holdings cannot set settings.default_currency=USD.",
             field_name="settings.default_currency",
         )
+    return mixed_market_holdings
 
-    holdings_list: list[Holding] = []
-    for item_index, item, ticker, market in parsed_rows:
-        quantity = _parse_float_or_raise(
-            value=_required_field_or_raise(
-                item=item,
-                field_name="quantity",
+
+def _parse_entry_currency(
+    p: Path,
+    *,
+    raw_entry_currency: Any,
+    settings: HoldingSettings,
+    item_index: int,
+    ticker: str,
+) -> tuple[str | None, bool]:
+    has_explicit_entry_currency = False
+    if raw_entry_currency is not None:
+        if isinstance(raw_entry_currency, bool):
+            raise _invalid_holdings_value(
+                p,
+                f"unsupported entry_currency {raw_entry_currency!r}; "
+                f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+                field_name="entry_currency",
                 item_index=item_index,
                 ticker=ticker,
-            ),
+            )
+        has_explicit_entry_currency = str(raw_entry_currency).strip() != ""
+    if not has_explicit_entry_currency:
+        return settings.default_currency, False
+
+    entry_currency = str(raw_entry_currency).strip().upper()
+    if entry_currency not in SUPPORTED_ENTRY_CURRENCIES:
+        raise _invalid_holdings_value(
+            p,
+            f"unsupported entry_currency {raw_entry_currency!r}; "
+            f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
+            field_name="entry_currency",
+            item_index=item_index,
+            ticker=ticker,
+        )
+    return entry_currency, True
+
+
+def _validate_entry_currency_for_market(
+    p: Path,
+    *,
+    entry_currency: str | None,
+    has_explicit_entry_currency: bool,
+    mixed_market_holdings: bool,
+    market: str,
+    item_index: int,
+    ticker: str,
+) -> None:
+    if mixed_market_holdings and not has_explicit_entry_currency:
+        raise _invalid_holdings_value(
+            p,
+            "Mixed KR/US holdings require explicit entry_currency per row.",
+            field_name="entry_currency",
+            item_index=item_index,
+            ticker=ticker,
+        )
+    is_us_ticker = market == "US"
+    if is_us_ticker and entry_currency != "USD":
+        raise _invalid_holdings_value(
+            p,
+            f"US ticker entry_currency must be USD, got {entry_currency!r}.",
+            field_name="entry_currency",
+            item_index=item_index,
+            ticker=ticker,
+        )
+    if entry_currency == "USD" and not is_us_ticker:
+        raise _invalid_holdings_value(
+            p,
+            "entry_currency USD requires US ticker suffix.",
+            field_name="entry_currency",
+            item_index=item_index,
+            ticker=ticker,
+        )
+
+
+def _parse_optional_non_negative_float(
+    p: Path,
+    *,
+    item: dict[str, Any],
+    field_name: str,
+    item_index: int,
+    ticker: str,
+) -> float | None:
+    raw_value = item.get(field_name)
+    if raw_value is None:
+        return None
+    return _parse_float_or_raise(
+        p,
+        value=raw_value,
+        field_name=field_name,
+        item_index=item_index,
+        ticker=ticker,
+        min_value=0,
+    )
+
+
+def _parse_entry_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
+def _parse_holding(
+    p: Path,
+    *,
+    item_index: int,
+    item: dict[str, Any],
+    ticker: str,
+    market: str,
+    settings: HoldingSettings,
+    mixed_market_holdings: bool,
+) -> Holding:
+    quantity = _parse_float_or_raise(
+        p,
+        value=_required_field_or_raise(
+            p,
+            item=item,
             field_name="quantity",
             item_index=item_index,
             ticker=ticker,
-            min_value=0,
-        )
-        entry_price = _parse_float_or_raise(
-            value=_required_field_or_raise(
-                item=item,
-                field_name="entry_price",
-                item_index=item_index,
-                ticker=ticker,
-            ),
+        ),
+        field_name="quantity",
+        item_index=item_index,
+        ticker=ticker,
+        min_value=0,
+    )
+    entry_price = _parse_float_or_raise(
+        p,
+        value=_required_field_or_raise(
+            p,
+            item=item,
             field_name="entry_price",
             item_index=item_index,
             ticker=ticker,
-            min_value=0,
-        )
-        if quantity > 0 and entry_price <= 0:
-            raise _invalid_holdings_value(
-                p,
-                "active holdings (quantity > 0) require entry_price > 0.",
-                field_name="entry_price",
-                item_index=item_index,
-                ticker=ticker,
-            )
-
-        raw_entry_currency = item.get("entry_currency")
-        has_explicit_entry_currency = False
-        entry_currency: str | None
-        if raw_entry_currency is not None:
-            if isinstance(raw_entry_currency, bool):
-                raise _invalid_holdings_value(
-                    p,
-                    f"unsupported entry_currency {raw_entry_currency!r}; "
-                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
-                    field_name="entry_currency",
-                    item_index=item_index,
-                    ticker=ticker,
-                )
-            has_explicit_entry_currency = str(raw_entry_currency).strip() != ""
-        if has_explicit_entry_currency:
-            entry_currency = str(raw_entry_currency).strip().upper()
-            if entry_currency not in SUPPORTED_ENTRY_CURRENCIES:
-                raise _invalid_holdings_value(
-                    p,
-                    f"unsupported entry_currency {raw_entry_currency!r}; "
-                    f"expected one of {sorted(SUPPORTED_ENTRY_CURRENCIES)}.",
-                    field_name="entry_currency",
-                    item_index=item_index,
-                    ticker=ticker,
-                )
-        else:
-            entry_currency = settings.default_currency
-
-        if mixed_market_holdings and not has_explicit_entry_currency:
-            raise _invalid_holdings_value(
-                p,
-                "Mixed KR/US holdings require explicit entry_currency per row.",
-                field_name="entry_currency",
-                item_index=item_index,
-                ticker=ticker,
-            )
-        is_us_ticker = market == "US"
-        if is_us_ticker and entry_currency != "USD":
-            raise _invalid_holdings_value(
-                p,
-                f"US ticker entry_currency must be USD, got {entry_currency!r}.",
-                field_name="entry_currency",
-                item_index=item_index,
-                ticker=ticker,
-            )
-        if entry_currency == "USD" and not is_us_ticker:
-            raise _invalid_holdings_value(
-                p,
-                "entry_currency USD requires US ticker suffix.",
-                field_name="entry_currency",
-                item_index=item_index,
-                ticker=ticker,
-            )
-
-        strategy = item.get("strategy") or settings.default_strategy
-        tags = _ensure_list(item.get("tags", settings.default_tags))
-
-        stop_override_raw = item.get("stop_override")
-        stop_override = (
-            _parse_float_or_raise(
-                value=stop_override_raw,
-                field_name="stop_override",
-                item_index=item_index,
-                ticker=ticker,
-                min_value=0,
-            )
-            if stop_override_raw is not None
-            else None
-        )
-        target_override_raw = item.get("target_override")
-        target_override = (
-            _parse_float_or_raise(
-                value=target_override_raw,
-                field_name="target_override",
-                item_index=item_index,
-                ticker=ticker,
-                min_value=0,
-            )
-            if target_override_raw is not None
-            else None
-        )
-
-        entry_date = item.get("entry_date")
-        if entry_date is not None:
-            if hasattr(entry_date, "isoformat"):
-                entry_date = entry_date.isoformat()
-            else:
-                entry_date = str(entry_date)
-
-        holding = Holding(
+        ),
+        field_name="entry_price",
+        item_index=item_index,
+        ticker=ticker,
+        min_value=0,
+    )
+    if quantity > 0 and entry_price <= 0:
+        raise _invalid_holdings_value(
+            p,
+            "active holdings (quantity > 0) require entry_price > 0.",
+            field_name="entry_price",
+            item_index=item_index,
             ticker=ticker,
-            quantity=quantity,
-            entry_price=entry_price,
-            entry_currency=entry_currency,
-            entry_date=entry_date,
-            strategy=strategy,
-            notes=item.get("notes"),
-            tags=tags,
-            stop_override=stop_override,
-            target_override=target_override,
         )
 
-        holdings_list.append(holding)
+    entry_currency, has_explicit_entry_currency = _parse_entry_currency(
+        p,
+        raw_entry_currency=item.get("entry_currency"),
+        settings=settings,
+        item_index=item_index,
+        ticker=ticker,
+    )
+    _validate_entry_currency_for_market(
+        p,
+        entry_currency=entry_currency,
+        has_explicit_entry_currency=has_explicit_entry_currency,
+        mixed_market_holdings=mixed_market_holdings,
+        market=market,
+        item_index=item_index,
+        ticker=ticker,
+    )
+
+    return Holding(
+        ticker=ticker,
+        quantity=quantity,
+        entry_price=entry_price,
+        entry_currency=entry_currency,
+        entry_date=_parse_entry_date(item.get("entry_date")),
+        strategy=item.get("strategy") or settings.default_strategy,
+        notes=item.get("notes"),
+        tags=_ensure_list(item.get("tags", settings.default_tags)),
+        stop_override=_parse_optional_non_negative_float(
+            p,
+            item=item,
+            field_name="stop_override",
+            item_index=item_index,
+            ticker=ticker,
+        ),
+        target_override=_parse_optional_non_negative_float(
+            p,
+            item=item,
+            field_name="target_override",
+            item_index=item_index,
+            ticker=ticker,
+        ),
+    )
+
+
+def _parse_holdings(
+    p: Path,
+    *,
+    settings: HoldingSettings,
+    parsed_rows: list[_ParsedHoldingRow],
+    mixed_market_holdings: bool,
+) -> list[Holding]:
+    return [
+        _parse_holding(
+            p,
+            item_index=item_index,
+            item=item,
+            ticker=ticker,
+            market=market,
+            settings=settings,
+            mixed_market_holdings=mixed_market_holdings,
+        )
+        for item_index, item, ticker, market in parsed_rows
+    ]
+
+
+def load_holdings(path: str | None) -> HoldingsData:
+    if not path:
+        return HoldingsData(path=None, settings=HoldingSettings(), holdings=[])
+
+    p = Path(path)
+    if not p.exists():
+        raise HoldingsLoadError(f"Holdings file '{p}' does not exist.")
+
+    raw = _load_yaml_root(p)
+    settings = _parse_settings(p, raw)
+    parsed_rows = _parse_holding_row_headers(p, _holdings_list(p, raw))
+    mixed_market_holdings = _validate_default_currency_for_markets(
+        p, settings=settings, parsed_rows=parsed_rows
+    )
+    holdings_list = _parse_holdings(
+        p,
+        settings=settings,
+        parsed_rows=parsed_rows,
+        mixed_market_holdings=mixed_market_holdings,
+    )
 
     return HoldingsData(path=p, settings=settings, holdings=holdings_list)
