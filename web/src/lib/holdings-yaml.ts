@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types";
 
 const SUPPORTED_ENTRY_CURRENCIES = new Set(["KRW", "USD"]);
+const NUMERIC_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 interface HoldingsYamlSettings {
   default_currency: string | null;
@@ -65,8 +66,23 @@ function parseNonNegativeNumber(
     );
   }
 
-  const parsed =
-    typeof value === "number" ? value : Number.parseFloat(String(value));
+  let parsed: number;
+  if (typeof value === "number") {
+    parsed = value;
+  } else if (typeof value === "string") {
+    const text = value.trim();
+    if (!NUMERIC_TEXT_PATTERN.test(text)) {
+      throw new HoldingsYamlError(
+        `${context}: '${fieldName}' must be a finite number >= 0.`,
+      );
+    }
+    parsed = Number(text);
+  } else {
+    throw new HoldingsYamlError(
+      `${context}: '${fieldName}' must be a finite number >= 0.`,
+    );
+  }
+
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new HoldingsYamlError(
       `${context}: '${fieldName}' must be a finite number >= 0.`,

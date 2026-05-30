@@ -123,6 +123,26 @@ holdings:
     ).toThrow(/entry_price.*quantity > 0/);
   });
 
+  it("rejects malformed numeric strings instead of partially parsing them", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: "005930"
+    quantity: "10 shares"
+    entry_price: 70000
+`),
+    ).toThrow(/quantity.*finite number/);
+
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: "005930"
+    quantity: 1
+    entry_price: "70,000"
+`),
+    ).toThrow(/entry_price.*finite number/);
+  });
+
   it("allows inactive holdings with zero entry price", () => {
     expect(
       parseHoldingsYamlDocument(`
