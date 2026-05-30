@@ -78,6 +78,7 @@ def load_kr_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
     year_range = dynamic_holiday_year_range(
         today=today,
         max_static_year=max_static_year,
+        supplement_static_years=True,
     )
     if year_range is not None:
         merged.update(_maybe_pandas_holidays(*year_range))

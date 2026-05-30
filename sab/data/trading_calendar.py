@@ -77,9 +77,11 @@ def dynamic_holiday_year_range(
     *,
     today: date,
     max_static_year: int,
+    supplement_static_years: bool = False,
 ) -> tuple[int, int] | None:
     if today.year > max_static_year:
         return today.year, today.year + 5
     if today.year >= 2024:
-        return max_static_year + 1, max_static_year + 5
+        start_year = today.year if supplement_static_years else max_static_year + 1
+        return start_year, max_static_year + 5
     return None
