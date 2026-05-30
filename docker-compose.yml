@@ -24,6 +24,7 @@ services:
       <<: *web-env
       NODE_ENV: production
       WEB_BIND_HOST: 0.0.0.0
+      SAB_ALLOW_NON_LOOPBACK_BIND: "1"
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-55300}:3000"
 
@@ -38,6 +39,7 @@ services:
       <<: *web-env
       NODE_ENV: development
       WEB_BIND_HOST: 0.0.0.0
+      SAB_ALLOW_NON_LOOPBACK_BIND: "1"
     ports:
       - "127.0.0.1:${WEB_DEV_HOST_PORT:-55301}:3000"
     volumes:

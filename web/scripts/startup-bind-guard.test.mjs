@@ -18,21 +18,30 @@ describe("startup bind guard", () => {
     });
   });
 
-  it("warns when binding beyond loopback with the local-request guard enabled", () => {
+  it("refuses non-loopback binds without an explicit unsafe override", () => {
+    expect(() =>
+      enforceStartupBindGuard({
+        WEB_BIND_HOST: "0.0.0.0",
+        SAB_ENFORCE_LOCAL_REQUEST: "1",
+      }),
+    ).toThrow(/SAB_ALLOW_NON_LOOPBACK_BIND=1/);
+  });
+
+  it("warns when an explicit unsafe override allows binding beyond loopback", () => {
     const logger = { warn: vi.fn() };
 
     expect(() =>
       enforceStartupBindGuard(
         {
           WEB_BIND_HOST: "0.0.0.0",
-          SAB_ENFORCE_LOCAL_REQUEST: "1",
+          SAB_ALLOW_NON_LOOPBACK_BIND: "1",
         },
         logger,
       ),
     ).not.toThrow();
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Docker Compose localhost publishing"),
+      expect.stringContaining("SAB_ALLOW_NON_LOOPBACK_BIND=1"),
     );
   });
 

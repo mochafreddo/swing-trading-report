@@ -81,8 +81,8 @@
 - 기본 운영 기준:
   - `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
   - 당분간 운영 범위는 `localhost/127.0.0.1` 단일 사용자 노출만 지원합니다(외부 공개 배포 비대상).
-  - direct 실행에서 `SAB_ENFORCE_LOCAL_REQUEST=0`와 non-loopback bind를 함께 쓰면 시작 단계에서 차단됩니다.
-  - Docker Compose의 `WEB_BIND_HOST=0.0.0.0`는 컨테이너 내부 바인딩일 뿐이며, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`이면 지원 경로입니다.
+  - direct 실행에서 non-loopback bind는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없이 시작 단계에서 차단됩니다.
+  - Docker Compose의 `WEB_BIND_HOST=0.0.0.0`는 명시적 override가 필요한 컨테이너 내부 바인딩이며, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`이면 지원 경로입니다.
   - 로컬 Supabase는 idle 리소스 절감을 위해 최소 프로필(`realtime`, `studio`, `inbucket`, `analytics` 비활성화)을 기본값으로 둡니다.
 - 전환 직후 1회 정리:
   - `docker compose down --remove-orphans && docker compose up -d --build web`

@@ -219,8 +219,8 @@
 
 - 직접 실행(선택): `cd web && pnpm install && pnpm run dev`
 - 직접 실행 기본 바인딩: `WEB_BIND_HOST` 미지정 시 `127.0.0.1`
-- 직접 실행에서 `SAB_ENFORCE_LOCAL_REQUEST=0`와 non-loopback bind(`0.0.0.0`, 사설 IP 등)를 함께 쓰면 시작 단계에서 차단됩니다.
-- Docker Compose는 컨테이너 내부 `0.0.0.0` bind를 쓰더라도 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`이면 지원 경로입니다.
+- 직접 실행에서 non-loopback bind(`0.0.0.0`, 사설 IP 등)는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없이 시작 단계에서 차단됩니다.
+- Docker Compose는 컨테이너 내부 `0.0.0.0` bind를 명시적으로 허용하지만, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`인 경우만 지원 경로입니다.
 - 직접 실행 시 Node 버전은 `web/Dockerfile`/`web/Dockerfile.dev`의 `FROM node:<version>`과 동일하게 맞춥니다.
 - 웹 패키지 매니저: `pnpm` (고정)
 
@@ -247,7 +247,7 @@
   - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
   - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
   - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/`*, `/api/holdings*`, `/api/reports*`, `/api/run`)
-  - 시작 가드: direct bind가 loopback 밖으로 열려 있고 동시에 `SAB_ENFORCE_LOCAL_REQUEST=0`이면 서버는 시작하지 않습니다.
+  - 시작 가드: `WEB_BIND_HOST`가 loopback 밖으로 열려 있으면 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없이 서버는 시작하지 않습니다.
   - 운영 가정: 당분간 웹은 `localhost/127.0.0.1` 단일 사용자 노출만 지원하며, local-request 가드는 원격 노출의 완전한 보안 경계로 간주하지 않습니다.
 
 ## CLI 서브커맨드

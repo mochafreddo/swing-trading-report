@@ -25,9 +25,14 @@ function isLocalRequestGuardEnabled(env) {
   return env.SAB_ENFORCE_LOCAL_REQUEST !== "0";
 }
 
+function isNonLoopbackBindAllowed(env) {
+  return env.SAB_ALLOW_NON_LOOPBACK_BIND === "1";
+}
+
 export function evaluateStartupBindGuard(env = process.env) {
   const bindHost = normalizeBindHost(env.WEB_BIND_HOST);
   const guardEnabled = isLocalRequestGuardEnabled(env);
+  const nonLoopbackAllowed = isNonLoopbackBindAllowed(env);
 
   if (isLoopbackBindHost(bindHost)) {
     return {
@@ -41,21 +46,25 @@ export function evaluateStartupBindGuard(env = process.env) {
     `WEB_BIND_HOST=${bindHost} binds the web server beyond loopback. ` +
     "This project only supports localhost-only exposure.";
 
-  if (!guardEnabled) {
+  if (!nonLoopbackAllowed) {
     return {
       bindHost,
       warning: null,
       error:
-        `${scopeMessage} Refusing to start because ` +
-        "SAB_ENFORCE_LOCAL_REQUEST=0 disables the local-request guard. " +
-        "Re-enable the guard or bind to 127.0.0.1/localhost/::1.",
+        `${scopeMessage} Refusing to start without ` +
+        "SAB_ALLOW_NON_LOOPBACK_BIND=1. Bind to 127.0.0.1/localhost/::1, " +
+        "or set the override only when a trusted outer boundary restricts access.",
     };
   }
 
+  const guardMessage = guardEnabled
+    ? "The local-request guard remains enabled."
+    : "SAB_ENFORCE_LOCAL_REQUEST=0 also disables the local-request guard.";
   return {
     bindHost,
     warning:
-      `${scopeMessage} Docker Compose localhost publishing ` +
+      `${scopeMessage} SAB_ALLOW_NON_LOOPBACK_BIND=1 is set. ` +
+      `${guardMessage} Docker Compose localhost publishing ` +
       "(127.0.0.1:PORT:3000) remains supported even when the container " +
       "binds 0.0.0.0 internally.",
     error: null,

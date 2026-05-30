@@ -227,7 +227,7 @@ flowchart LR
   - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
   - `middleware.ts`는 페이지 라우트 접근 제어/리다이렉트 전용으로 유지
   - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
-  - 시작 가드는 `SAB_ENFORCE_LOCAL_REQUEST=0` 상태의 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다.
+  - 시작 가드는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없는 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다.
 - 비밀키 보호
   - Supabase/GitHub 키는 서버 코드(`server-only`)에서만 사용
   - publishable key(`sb_publishable_*`)는 서버 경로에서 거부
