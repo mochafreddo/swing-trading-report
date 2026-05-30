@@ -353,6 +353,11 @@ describe("claimRuntimeStateLock", () => {
       "/rest/v1/rpc/claim_runtime_state_lock",
     );
     expect(init?.method).toBe("POST");
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : null;
+    expect(body?.p_now).toBeNull();
   });
 });
 

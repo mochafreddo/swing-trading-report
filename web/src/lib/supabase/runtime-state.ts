@@ -254,7 +254,8 @@ export async function claimRuntimeStateLock(
     }),
     body: JSON.stringify({
       p_state_key: input.key,
-      p_now: new Date(input.now).toISOString(),
+      // Keep p_now for older RPC signatures; lock expiry uses DB now().
+      p_now: null,
       p_ttl_seconds: Math.max(1, Math.floor(input.ttlSeconds)),
       p_state_payload: input.payload ?? {},
     }),

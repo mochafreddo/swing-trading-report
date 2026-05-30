@@ -11,7 +11,7 @@ returns table (
 language plpgsql
 as $$
 declare
-  v_now timestamptz := coalesce(p_now, now());
+  v_now timestamptz := now();
   v_ttl_seconds integer := greatest(1, p_ttl_seconds);
   v_expires_at timestamptz := v_now + make_interval(secs => v_ttl_seconds);
   v_existing_expires_at timestamptz;

@@ -109,6 +109,7 @@ def test_client_claim_lock_posts_owner_token_payload() -> None:
     call = session.post_calls[0]
     assert str(call["url"]).endswith("/rest/v1/rpc/claim_runtime_state_lock")
     body = json.loads(cast(bytes, call["data"]))
+    assert body["p_now"] is None
     assert body["p_ttl_seconds"] == 1500
     assert body["p_state_payload"] == {
         "attemptId": "attempt-1",
@@ -163,6 +164,8 @@ def test_runtime_state_scheduler_rpc_migration_rejects_blank_owner_tokens() -> N
     assert "create or replace function public.renew_runtime_state_lock" in sql
     assert "create or replace function public.check_runtime_state_lock_owner" in sql
     assert "p_state_payload ->> 'ownerToken'" in sql
+    assert "v_now timestamptz := now();" in sql
+    assert "coalesce(p_now" not in sql
     assert "btrim(coalesce(p_owner_token, '')) = ''" in sql
     assert "state_payload ->> 'ownerToken'" in sql
     assert "owner token must not be blank" in sql

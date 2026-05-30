@@ -277,7 +277,8 @@ class SupabaseRuntimeStateClient:
         state_payload = {**(payload or {}), "ownerToken": normalized_owner_token}
         body = {
             "p_state_key": key,
-            "p_now": (now or _utc_now()).isoformat(),
+            # Keep p_now for older RPC signatures; lock expiry uses DB now().
+            "p_now": None,
             "p_ttl_seconds": max(1, int(ttl_seconds)),
             "p_state_payload": state_payload,
         }
