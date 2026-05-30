@@ -1,3 +1,5 @@
+import "server-only";
+
 import { toErrorMessage } from "@/lib/error-utils";
 import {
   consumeLoginThrottleAttempt,

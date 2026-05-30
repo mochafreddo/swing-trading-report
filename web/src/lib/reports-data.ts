@@ -1,3 +1,5 @@
+import "server-only";
+
 import { getSupabaseEnv } from "@/lib/env.server";
 import { toErrorMessage } from "@/lib/error-utils";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
