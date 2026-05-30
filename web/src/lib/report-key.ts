@@ -1,7 +1,13 @@
-import type { ReportListItem, ReportType } from "@/lib/types";
+import {
+  REPORT_TYPE_PATTERN,
+  isReportType,
+  type ReportListItem,
+  type ReportType,
+} from "@/lib/types";
 
-const REPORT_KEY_PATTERN =
-  /^(?<year>\d{4})\/(?<month>\d{2})\/(?<date>\d{4}-\d{2}-\d{2})(?:-(?<dup>\d+))?\.(?<type>buy|sell|entry|ai-brief)\.json$/;
+const REPORT_KEY_PATTERN = new RegExp(
+  `^(?<year>\\d{4})\\/(?<month>\\d{2})\\/(?<date>\\d{4}-\\d{2}-\\d{2})(?:-(?<dup>\\d+))?\\.(?<type>${REPORT_TYPE_PATTERN})\\.json$`,
+);
 
 export interface ParsedReportStorageKey {
   key: string;
@@ -41,6 +47,7 @@ export function parseReportStorageKey(
   }
 
   const date = match.groups.date;
+  const reportType = match.groups.type;
   const year = Number.parseInt(match.groups.year, 10);
   const month = Number.parseInt(match.groups.month, 10);
   const [dateYearText, dateMonthText, dateDayText] = date.split("-");
@@ -65,9 +72,13 @@ export function parseReportStorageKey(
     return null;
   }
 
+  if (!isReportType(reportType)) {
+    return null;
+  }
+
   return {
     key: normalized,
-    type: match.groups.type as ReportType,
+    type: reportType,
     reportDate: date,
     duplicateIndex,
     year,

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Final
 
-_ALLOWED_RUN_TYPES: Final[tuple[str, ...]] = ("buy", "sell", "entry", "ai-brief")
-_ALLOWED_RUN_TYPE_SET: Final[frozenset[str]] = frozenset(_ALLOWED_RUN_TYPES)
+REPORT_RUN_TYPES: Final[tuple[str, ...]] = ("buy", "sell", "entry", "ai-brief")
+REPORT_RUN_TYPE_PATTERN: Final[str] = (
+    "(?:" + "|".join(re.escape(run_type) for run_type in REPORT_RUN_TYPES) + ")"
+)
+_ALLOWED_RUN_TYPE_SET: Final[frozenset[str]] = frozenset(REPORT_RUN_TYPES)
+
+
+def normalize_report_run_type(run_type: str) -> str:
+    normalized_run_type = run_type.strip().lower()
+    if normalized_run_type not in _ALLOWED_RUN_TYPE_SET:
+        allowed = ", ".join(REPORT_RUN_TYPES)
+        raise ValueError(f"run_type must be one of: {allowed}")
+    return normalized_run_type
 
 
 def build_report_storage_key(
@@ -13,10 +25,7 @@ def build_report_storage_key(
     run_type: str,
     duplicate_index: int = 0,
 ) -> str:
-    normalized_run_type = run_type.strip().lower()
-    if normalized_run_type not in _ALLOWED_RUN_TYPE_SET:
-        allowed = ", ".join(_ALLOWED_RUN_TYPES)
-        raise ValueError(f"run_type must be one of: {allowed}")
+    normalized_run_type = normalize_report_run_type(run_type)
 
     if isinstance(duplicate_index, bool) or not isinstance(duplicate_index, int):
         raise TypeError("duplicate_index must be an int >= 0")
@@ -31,4 +40,9 @@ def build_report_storage_key(
     return f"{year_part}/{month_part}/{date_part}{suffix}.{normalized_run_type}.json"
 
 
-__all__ = ["build_report_storage_key"]
+__all__ = [
+    "REPORT_RUN_TYPES",
+    "REPORT_RUN_TYPE_PATTERN",
+    "build_report_storage_key",
+    "normalize_report_run_type",
+]

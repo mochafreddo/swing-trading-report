@@ -4,11 +4,14 @@ import {
   isScanUniverseAllowed,
   PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
 } from "@/lib/run-dispatch-policy";
+import { REPORT_TYPES } from "@/lib/types";
 import {
   KR_TICKER_PATTERN,
   normalizeHoldingTickerForMutation,
   US_TICKER_PATTERN,
 } from "@/lib/holding-ticker";
+
+const REPORT_LIST_TYPES = ["all", ...REPORT_TYPES] as const;
 
 const toNullableTrimmedString = (maxLength: number) =>
   z.preprocess((value) => {
@@ -134,7 +137,7 @@ const entryDateSchema = z.preprocess(
 );
 
 export const reportListQuerySchema = z.object({
-  type: z.enum(["all", "buy", "sell", "entry", "ai-brief"]).default("all"),
+  type: z.enum(REPORT_LIST_TYPES).default("all"),
   q: z.string().trim().default(""),
   limit: z.coerce.number().int().min(1).max(200).default(30),
   refresh: toBooleanRefreshFlag,

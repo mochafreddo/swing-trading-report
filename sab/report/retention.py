@@ -4,8 +4,10 @@ import datetime as dt
 import re
 from collections.abc import Iterable
 
+from .storage_key import REPORT_RUN_TYPE_PATTERN
+
 _REPORT_KEY_PATTERN = re.compile(
-    r"^\d{4}/\d{2}/(?P<report_date>\d{4}-\d{2}-\d{2})(?:-\d+)?\.(buy|sell|entry|ai-brief)\.json$"
+    rf"^\d{{4}}/\d{{2}}/(?P<report_date>\d{{4}}-\d{{2}}-\d{{2}})(?:-\d+)?\.{REPORT_RUN_TYPE_PATTERN}\.json$"
 )
 
 

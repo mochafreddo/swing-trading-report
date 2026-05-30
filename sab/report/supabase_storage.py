@@ -15,7 +15,11 @@ from urllib.parse import quote
 import requests  # type: ignore[import-untyped]
 
 from ..env_loader import env_flag
-from .storage_key import build_report_storage_key
+from .storage_key import (
+    REPORT_RUN_TYPE_PATTERN,
+    build_report_storage_key,
+    normalize_report_run_type,
+)
 
 _DEFAULT_BUCKET = "reports"
 _MAX_DUPLICATE_INDEX = 999
@@ -23,7 +27,7 @@ _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS = 3
 _REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS = 0.2
 _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _REPORT_KEY_PATTERN = re.compile(
-    r"\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-(\d+))?\.(buy|sell|entry|ai-brief)\.json$"
+    rf"\d{{4}}/\d{{2}}/\d{{4}}-\d{{2}}-\d{{2}}(?:-(\d+))?\.{REPORT_RUN_TYPE_PATTERN}\.json$"
 )
 
 
@@ -410,13 +414,14 @@ def _build_report_index_row(
     report_date: dt.date,
     report_payload: dict[str, object],
 ) -> dict[str, object]:
+    report_type = normalize_report_run_type(run_type)
     generated_at = report_payload.get("generated_at")
     summary = report_payload.get("summary")
     tickers = _extract_report_tickers(report_payload)
 
     return {
         "report_key": storage_key,
-        "report_type": run_type,
+        "report_type": report_type,
         "report_date": report_date.isoformat(),
         "duplicate_index": _extract_duplicate_index(storage_key),
         "generated_at": generated_at if isinstance(generated_at, str) else None,

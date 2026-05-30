@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getSupabaseEnv } from "@/lib/env.server";
-import type { ReportType } from "@/lib/types";
+import { isReportType, type ReportType } from "@/lib/types";
 import {
   buildAuthHeaders,
   fetchSupabase,
@@ -148,13 +148,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     };
 
     const reportKey = trimmedString(raw.report_key);
-    const reportType =
-      raw.report_type === "buy" ||
-      raw.report_type === "sell" ||
-      raw.report_type === "entry" ||
-      raw.report_type === "ai-brief"
-        ? raw.report_type
-        : null;
+    const reportType = isReportType(raw.report_type) ? raw.report_type : null;
     const reportDate = trimmedString(raw.report_date);
     const duplicateIndex =
       typeof raw.duplicate_index === "number" &&

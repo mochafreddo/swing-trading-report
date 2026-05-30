@@ -299,6 +299,36 @@ def test_upload_report_artifact_uses_base_key_when_available(tmp_path: Path) -> 
     assert key == "2026/02/2026-02-13.sell.json"
 
 
+def test_upload_report_artifact_normalizes_report_type_for_index_row(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type=" BUY ",
+        report_date=date(2026, 2, 13),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/02/2026-02-13.buy.json"
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert b'"report_type": "buy"' in index_payload
+
+
 def test_upload_report_artifact_treats_400_not_found_as_missing(
     tmp_path: Path,
 ) -> None:
