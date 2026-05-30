@@ -106,15 +106,24 @@ def _normalize_model_name(*, provider: str, value: str | None) -> str:
     return model_name
 
 
+def _read_env_float(name: str, *, error_message: str) -> float | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(error_message) from exc
+
+
 def _normalize_model_timeout_seconds(value: float | None) -> float:
     if value is None:
-        raw = os.getenv("AI_BRIEF_MODEL_TIMEOUT_SECONDS")
-        if raw is None or not raw.strip():
+        value = _read_env_float(
+            "AI_BRIEF_MODEL_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_MODEL_TIMEOUT_SECONDS must be a number",
+        )
+        if value is None:
             return _DEFAULT_MODEL_TIMEOUT_SECONDS
-        try:
-            value = float(raw)
-        except ValueError as exc:
-            raise ValueError("AI_BRIEF_MODEL_TIMEOUT_SECONDS must be a number") from exc
     if value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
@@ -176,15 +185,12 @@ def _normalize_source_timeout_seconds(
             )
         return None
     if value is None:
-        raw = os.getenv("AI_BRIEF_SOURCE_TIMEOUT_SECONDS")
-        if raw is None or not raw.strip():
+        value = _read_env_float(
+            "AI_BRIEF_SOURCE_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_SOURCE_TIMEOUT_SECONDS must be a number",
+        )
+        if value is None:
             return DEFAULT_SOURCE_TIMEOUT_SECONDS
-        try:
-            value = float(raw)
-        except ValueError as exc:
-            raise ValueError(
-                "AI_BRIEF_SOURCE_TIMEOUT_SECONDS must be a number"
-            ) from exc
     if not math.isfinite(value) or value <= 0:
         raise ValueError("source_timeout_seconds must be positive")
     return float(value)

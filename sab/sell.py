@@ -6,7 +6,7 @@ import logging
 from . import sell_evaluation, sell_runtime
 from .config import Config, load_config
 from .config_loader import ConfigLoadError
-from .data_coverage_policy import MIN_DATA_COVERAGE, is_data_coverage_fatal
+from .data_coverage_policy import summarize_missing_market_data
 from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsData, HoldingsLoadError, load_holdings
 from .market_data_common import build_market_data_dependencies
@@ -104,31 +104,20 @@ def _resolve_sell_target_bars(runtime: _SellRuntime) -> int:
 
 
 def _mark_missing_sell_market_data(runtime: _SellRuntime) -> None:
-    if not runtime.unique_tickers:
-        return
-    total = len(runtime.unique_tickers)
-    missing = [
-        ticker for ticker in runtime.unique_tickers if ticker not in runtime.market_data
-    ]
-    if not missing:
-        return
-    missing_count = len(missing)
-    covered_count = total - missing_count
-    data_coverage = covered_count / total if total > 0 else 0.0
-    preview = ", ".join(missing[:10])
-    if missing_count > 10:
-        preview = f"{preview}, +{missing_count - 10} more"
-    message = (
-        "Missing market data for "
-        f"{missing_count}/{total} holdings (coverage={data_coverage:.2f}, "
-        f"required>={MIN_DATA_COVERAGE:.2f}): {preview}"
+    summary = summarize_missing_market_data(
+        requested=runtime.unique_tickers,
+        available=runtime.market_data,
+        subject="holdings",
     )
-    runtime.failures.append(message)
-    if is_data_coverage_fatal(data_coverage):
-        runtime.fatal_failure = True
-        runtime.logger.error("%s", message)
+    if summary is None:
         return
-    runtime.logger.warning("%s", message)
+
+    runtime.failures.append(summary.message)
+    if summary.fatal:
+        runtime.fatal_failure = True
+        runtime.logger.error("%s", summary.message)
+        return
+    runtime.logger.warning("%s", summary.message)
 
 
 def _resolve_sell_holdings(cfg: Config) -> HoldingsData:
