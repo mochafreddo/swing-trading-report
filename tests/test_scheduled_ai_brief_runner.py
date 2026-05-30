@@ -892,10 +892,14 @@ def test_runner_passes_session_date_as_ai_brief_report_date() -> None:
     assert pipeline.calls[0][1]["report_date"] == "2026-05-28"
 
 
-def test_runner_releases_main_lock_when_pipeline_fails() -> None:
+def test_runner_releases_main_lock_when_pipeline_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runner, state, _pipeline, _storage, notifier = _runner(
         pipeline=_FakePipeline(fail=True)
     )
+
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
 
     result = runner.run(
         ScheduledAiBriefRequest(
@@ -910,6 +914,8 @@ def test_runner_releases_main_lock_when_pipeline_fails() -> None:
     assert result.status == "pipeline_failed"
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["pipeline_failed"]
+    assert "scheduled AI brief pipeline failed" in caplog.text
+    assert "pipeline failed" in caplog.text
 
 
 def test_runner_releases_main_lock_when_upload_fails() -> None:

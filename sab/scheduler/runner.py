@@ -604,6 +604,7 @@ class ScheduledAiBriefRunner:
                 dry_run=False,
             )
         except Exception:
+            _LOGGER.exception("scheduled AI brief pipeline failed")
             pipeline_failed = True
         finally:
             lock_renewer.stop()

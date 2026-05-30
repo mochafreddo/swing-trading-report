@@ -12,6 +12,40 @@ import {
 } from "@/lib/holding-ticker";
 
 const REPORT_LIST_TYPES = ["all", ...REPORT_TYPES] as const;
+const ISO_CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function isValidIsoCalendarDate(value: string): boolean {
+  const match = ISO_CALENDAR_DATE_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const daysByMonth = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysByMonth[month - 1];
+}
+
+const isoCalendarDateSchema = z.string().refine(isValidIsoCalendarDate, {
+  message: "Date must be a valid YYYY-MM-DD date",
+});
 
 const toNullableTrimmedString = (maxLength: number) =>
   z.preprocess((value) => {
@@ -120,21 +154,15 @@ const holdingMutationTickerSchema = holdingTickerSchema.transform((ticker) =>
   normalizeHoldingTickerForMutation(ticker),
 );
 
-const entryDateSchema = z.preprocess(
-  (value) => {
-    if (value === "" || value == null) {
-      return null;
-    }
-    if (typeof value === "string") {
-      return value.trim();
-    }
-    return value;
-  },
-  z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable(),
-);
+const entryDateSchema = z.preprocess((value) => {
+  if (value === "" || value == null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  return value;
+}, isoCalendarDateSchema.nullable());
 
 export const reportListQuerySchema = z.object({
   type: z.enum(REPORT_LIST_TYPES).default("all"),
@@ -212,22 +240,16 @@ export const holdingPatchSchema = z
     message: "At least one field must be provided",
   });
 
-const addBuyDateSchema = z.preprocess(
-  (value) => {
-    if (value == null) {
-      return undefined;
-    }
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      return trimmed ? trimmed : undefined;
-    }
-    return value;
-  },
-  z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-);
+const addBuyDateSchema = z.preprocess((value) => {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  return value;
+}, isoCalendarDateSchema.optional());
 
 export const holdingAddBuySchema = z
   .object({

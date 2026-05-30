@@ -220,6 +220,17 @@ describe("holding schemas", () => {
     ).toBe(true);
   });
 
+  it("rejects create payload with invalid calendar entry_date", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 172.5,
+      entry_date: "2026-02-31",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("requires at least one patch field", () => {
     const parsed = holdingPatchSchema.safeParse({});
     expect(parsed.success).toBe(false);
@@ -299,6 +310,16 @@ describe("holding schemas", () => {
       buy_quantity: 1,
       buy_price: 100,
     });
+  });
+
+  it("rejects add-buy payload with invalid calendar buy_date", () => {
+    const parsed = holdingAddBuySchema.safeParse({
+      buy_quantity: 1,
+      buy_price: 100,
+      buy_date: "2026-02-31",
+    });
+
+    expect(parsed.success).toBe(false);
   });
 });
 

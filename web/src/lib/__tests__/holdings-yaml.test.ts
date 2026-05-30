@@ -143,6 +143,18 @@ holdings:
     ).toThrow(/entry_price.*finite number/);
   });
 
+  it("rejects invalid calendar entry_date values", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: "005930"
+    quantity: 1
+    entry_price: 70000
+    entry_date: 2026-02-31
+`),
+    ).toThrow(/entry_date.*valid YYYY-MM-DD date/);
+  });
+
   it("allows inactive holdings with zero entry price", () => {
     expect(
       parseHoldingsYamlDocument(`

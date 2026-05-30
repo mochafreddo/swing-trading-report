@@ -19,6 +19,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "MARKET_CACHE_STALE_SESSIONS_KR",
         "MARKET_CACHE_STALE_SESSIONS_US",
         "STRATEGY_MODE",
+        "USE_MARKET_REGIME_FILTER",
         "SELL_MODE",
         "FX_MODE",
         "GITHUB_ACTIONS",
@@ -93,6 +94,48 @@ def test_load_config_strict_mode_rejects_invalid_numeric_threshold(
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("MIN_DOLLAR_VOLUME", "not-a-number")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_strict_mode_rejects_invalid_boolean_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("USE_MARKET_REGIME_FILTER", "maybe")
+
+    with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_strict_mode_rejects_invalid_boolean_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+strategy:
+  use_market_regime_filter: maybe
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
 
     with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
         load_config()

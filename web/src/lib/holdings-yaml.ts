@@ -13,6 +13,7 @@ import type {
 
 const SUPPORTED_ENTRY_CURRENCIES = new Set(["KRW", "USD"]);
 const NUMERIC_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+const ISO_CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 interface HoldingsYamlSettings {
   default_currency: string | null;
@@ -139,6 +140,35 @@ function parseOptionalCurrency(
   return text;
 }
 
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function isValidIsoCalendarDate(value: string): boolean {
+  const match = ISO_CALENDAR_DATE_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const daysByMonth = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysByMonth[month - 1];
+}
+
 function parseOptionalDate(
   value: unknown,
   fieldName: string,
@@ -158,9 +188,9 @@ function parseOptionalDate(
   if (!text) {
     return null;
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+  if (!isValidIsoCalendarDate(text)) {
     throw new HoldingsYamlError(
-      `${context}: '${fieldName}' must use YYYY-MM-DD format.`,
+      `${context}: '${fieldName}' must be a valid YYYY-MM-DD date.`,
     );
   }
   return text;

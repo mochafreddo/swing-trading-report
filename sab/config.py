@@ -273,14 +273,50 @@ def _normalize_kis_base(url: str | None) -> str | None:
     return normalized.rstrip("/")
 
 
-def _parse_bool(value: Any, default: bool = False) -> bool:
+_BOOL_TRUE_VALUES = frozenset({"1", "true", "yes", "y", "on"})
+_BOOL_FALSE_VALUES = frozenset({"0", "false", "no", "n", "off"})
+
+
+def _parse_bool_literal(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        normalized = value.strip().lower()
+        if normalized in _BOOL_TRUE_VALUES:
+            return True
+        if normalized in _BOOL_FALSE_VALUES:
+            return False
+    return None
+
+
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    parsed = _parse_bool_literal(value)
+    if parsed is not None:
+        return parsed
+    if isinstance(value, str):
+        return False
     if value is None:
         return default
     return bool(value)
+
+
+def _parse_bool_strict(
+    value: Any,
+    *,
+    default: bool,
+    source: str,
+    provided: bool,
+) -> bool:
+    if value is None:
+        return default
+    parsed = _parse_bool_literal(value)
+    if parsed is not None:
+        return parsed
+    if provided:
+        raise ConfigLoadError(
+            f"Strict config parsing failed: {source} must be a boolean, got {value!r}."
+        )
+    return default
 
 
 def _is_strict_config_mode() -> bool:
@@ -343,8 +379,23 @@ class _ConfigParser:
     def env_bool(self, key: str, path: str, default: bool) -> bool:
         env_val = os.getenv(key)
         if env_val is not None:
+            if self._strict:
+                return _parse_bool_strict(
+                    env_val,
+                    default=default,
+                    source=f"environment variable '{key}'",
+                    provided=True,
+                )
             return _parse_bool(env_val, default)
-        return _parse_bool(self.from_yaml(path, default), default)
+        raw = self.from_yaml(path, default)
+        if self._strict:
+            return _parse_bool_strict(
+                raw,
+                default=default,
+                source=f"config.yaml '{path}'",
+                provided=self.has_yaml_path(path),
+            )
+        return _parse_bool(raw, default)
 
     def env_int(self, key: str, path: str, default: int) -> int:
         parsed = self._coerce_numeric_or_default(
