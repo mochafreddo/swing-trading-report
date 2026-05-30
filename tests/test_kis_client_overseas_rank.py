@@ -1,8 +1,8 @@
 import datetime as dt
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-from sab.data.kis_client import KISApiError, KISClient, KISCredentials
+from sab.data.kis_client import KISApiError, KISClient, KISClientError, KISCredentials
 
 
 class KISClientOverseasTradeValueRankTests(unittest.TestCase):
@@ -183,6 +183,133 @@ class KISClientOverseasRankPaginationTests(unittest.TestCase):
         assert request_mock.call_count == 1
         self.assertEqual(ctx.exception.msg_cd, "EGW93222")
         self.assertIn("msg_cd=EGW93222", str(ctx.exception))
+
+    def test_fetch_overseas_rank_items_rejects_non_object_payload(self) -> None:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {}
+        resp.json.return_value = ["not", "an", "object"]
+        self.client._max_attempts = 1
+
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(return_value=resp)
+            ) as request_mock,
+            self.assertRaisesRegex(
+                KISClientError,
+                "Overseas rank response payload is not an object",
+            ),
+        ):
+            self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS"},
+                limit=1,
+            )
+
+        assert request_mock.call_count == 1
+
+    def test_fetch_overseas_rank_items_refreshes_token_on_body_egw00123(
+        self,
+    ) -> None:
+        token_values = ["Bearer initial-token", "Bearer refreshed-token"]
+        token_call_count = {"value": 0}
+
+        def fake_ensure_token() -> None:
+            idx = token_call_count["value"]
+            self.client._access_token = token_values[min(idx, len(token_values) - 1)]
+            self.client._token_expiry = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+            token_call_count["value"] += 1
+
+        token_error = MagicMock()
+        token_error.status_code = 200
+        token_error.headers = {}
+        token_error.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW00123",
+            "msg1": "expired",
+        }
+
+        success = MagicMock()
+        success.status_code = 200
+        success.headers = {}
+        success.json.return_value = {
+            "rt_cd": "0",
+            "output2": [{"SYMB": "AAPL"}],
+        }
+
+        responses = iter([token_error, success])
+        seen_authorizations: list[str] = []
+
+        def request_side_effect(*_args: object, **kwargs: object) -> MagicMock:
+            headers = kwargs.get("headers") or {}
+            assert isinstance(headers, dict)
+            seen_authorizations.append(str(headers.get("authorization") or ""))
+            return next(responses)
+
+        self.client._max_attempts = 2
+        self.client._min_interval = 0
+        with (
+            patch.object(
+                self.client, "ensure_token", MagicMock(side_effect=fake_ensure_token)
+            ) as ensure_token_mock,
+            patch.object(
+                self.client, "_request", MagicMock(side_effect=request_side_effect)
+            ) as request_mock,
+            patch("sab.data.kis.ranking.time.sleep") as sleep_mock,
+        ):
+            result = self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS"},
+                limit=1,
+            )
+
+        self.assertEqual(result, [{"SYMB": "AAPL"}])
+        self.assertEqual(ensure_token_mock.call_count, 2)
+        self.assertEqual(request_mock.call_count, 2)
+        self.assertEqual(
+            seen_authorizations,
+            ["Bearer initial-token", "Bearer refreshed-token"],
+        )
+        self.assertEqual(sleep_mock.call_args_list, [call(1.0)])
+
+    def test_fetch_overseas_rank_items_retries_on_body_rate_limit(self) -> None:
+        rate_limited = MagicMock()
+        rate_limited.status_code = 200
+        rate_limited.headers = {}
+        rate_limited.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW00201",
+            "msg1": "rate limit",
+        }
+
+        success = MagicMock()
+        success.status_code = 200
+        success.headers = {}
+        success.json.return_value = {
+            "rt_cd": "0",
+            "output2": [{"SYMB": "MSFT"}],
+        }
+
+        self.client._max_attempts = 2
+        self.client._min_interval = 0
+        with (
+            patch.object(
+                self.client, "_request", MagicMock(side_effect=[rate_limited, success])
+            ) as request_mock,
+            patch("sab.data.kis.ranking.time.sleep") as sleep_mock,
+        ):
+            result = self.client._fetch_overseas_rank_items(
+                url="https://example.com/rank",
+                tr_id="TESTTR",
+                params={"EXCD": "NAS"},
+                limit=1,
+            )
+
+        self.assertEqual(result, [{"SYMB": "MSFT"}])
+        self.assertEqual(request_mock.call_count, 2)
+        self.assertEqual(sleep_mock.call_args_list, [call(1.0)])
 
 
 if __name__ == "__main__":

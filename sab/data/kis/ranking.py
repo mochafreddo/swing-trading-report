@@ -8,8 +8,76 @@ import requests  # type: ignore[import-untyped]
 from .common import KISApiError, KISClientError, _KISClientState
 
 
+def _format_positive_int_filter(
+    value: float | None, *, empty_when_missing: bool = False
+) -> str:
+    if value is None or value <= 0:
+        return "" if empty_when_missing else "0"
+    return str(int(value))
+
+
+def _json_or_none(response: requests.Response) -> Any | None:
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+def _payload_dict(value: Any | None) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _error_fields(payload: dict[str, Any] | None) -> tuple[str, str]:
+    if payload is None:
+        return "", "Unknown error"
+    msg_cd = str(payload.get("msg_cd") or "")
+    msg1 = str(payload.get("msg1") or msg_cd or "Unknown error")
+    return msg_cd, msg1
+
+
+def _rank_items(payload: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
+    raw_items: Any = []
+    for key in keys:
+        value = payload.get(key)
+        if value:
+            raw_items = value
+            break
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, dict)]
+
+
+def _pagination_key(payload: dict[str, Any]) -> Any:
+    output1 = payload.get("output1") or {}
+    if isinstance(output1, list) and output1:
+        output1 = output1[0]
+    if not isinstance(output1, dict):
+        output1 = {}
+    return (
+        payload.get("keyb")
+        or payload.get("KEYB")
+        or output1.get("keyb")
+        or output1.get("KEYB")
+        or ""
+    )
+
+
 class _KISRankingMixin(_KISClientState):
     """Domestic/overseas ranking responsibilities."""
+
+    def _rank_headers(self, tr_id: str) -> dict[str, Any]:
+        return {
+            "Content-Type": "application/json",
+            "authorization": self._access_token,
+            "appkey": self.creds.app_key,
+            "appsecret": self.creds.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P",
+        }
 
     def volume_rank(
         self,
@@ -27,11 +95,6 @@ class _KISRankingMixin(_KISClientState):
 
         self.ensure_token()
 
-        def _fmt(val: float | None) -> str:
-            if val is None or val <= 0:
-                return "0"
-            return str(int(val))
-
         params = {
             "FID_COND_MRKT_DIV_CODE": market,
             "FID_COND_SCR_DIV_CODE": "20171",
@@ -40,20 +103,13 @@ class _KISRankingMixin(_KISClientState):
             "FID_BLNG_CLS_CODE": belonging_code,
             "FID_TRGT_CLS_CODE": "000000000",
             "FID_TRGT_EXLS_CLS_CODE": "0000000000",
-            "FID_INPUT_PRICE_1": _fmt(min_price),
-            "FID_INPUT_PRICE_2": _fmt(max_price),
-            "FID_VOL_CNT": _fmt(min_volume),
+            "FID_INPUT_PRICE_1": _format_positive_int_filter(min_price),
+            "FID_INPUT_PRICE_2": _format_positive_int_filter(max_price),
+            "FID_VOL_CNT": _format_positive_int_filter(min_volume),
             "FID_INPUT_DATE_1": "0",
         }
 
-        headers = {
-            "Content-Type": "application/json",
-            "authorization": self._access_token,
-            "appkey": self.creds.app_key,
-            "appsecret": self.creds.app_secret,
-            "tr_id": self.creds.volume_rank_tr_id,
-            "custtype": "P",
-        }
+        headers = self._rank_headers(self.creds.volume_rank_tr_id)
 
         results: list[dict[str, Any]] = []
         tr_cont = ""
@@ -72,20 +128,11 @@ class _KISRankingMixin(_KISClientState):
                 )
 
                 # Try to parse JSON body even on non-200 to inspect msg_cd
-                try:
-                    data = resp.json()
-                except ValueError:
-                    data = None
+                parsed = _json_or_none(resp)
+                data = _payload_dict(parsed)
 
                 if resp.status_code != 200:
-                    msg_cd = (
-                        str(data.get("msg_cd") or "") if isinstance(data, dict) else ""
-                    )
-                    msg1 = (
-                        (data.get("msg1") or data.get("msg_cd") or "Unknown error")
-                        if isinstance(data, dict)
-                        else "Unknown error"
-                    )
+                    msg_cd, msg1 = _error_fields(data)
                     if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
                         # Token expired on server side: clear, refresh, and retry
                         self._access_token = None
@@ -114,11 +161,14 @@ class _KISRankingMixin(_KISClientState):
                     if attempt < self._max_attempts - 1:
                         time.sleep(1.0)
                         continue
-                    raise KISClientError("Volume rank response is not JSON")
+                    if parsed is None:
+                        raise KISClientError("Volume rank response is not JSON")
+                    raise KISClientError(
+                        "Volume rank response payload is not an object"
+                    )
 
                 if str(data.get("rt_cd")) != "0":
-                    msg_cd = str(data.get("msg_cd") or "")
-                    msg1 = str(data.get("msg1") or "Unknown error")
+                    msg_cd, msg1 = _error_fields(data)
                     if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
                         time.sleep(max(1.0, self._min_interval))
                         continue
@@ -143,16 +193,8 @@ class _KISRankingMixin(_KISClientState):
             if data is None or resp is None:
                 break
 
-            items = data.get("output") or []
-            if isinstance(items, dict):
-                items = [items]
-            if not isinstance(items, list):
-                items = []
-
             parsed_items: list[dict[str, Any]] = []
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
+            for it in _rank_items(data, "output"):
                 parsed_item = self._parse_rank_item(it)
                 if parsed_item is not None:
                     parsed_items.append(parsed_item)
@@ -181,71 +223,88 @@ class _KISRankingMixin(_KISClientState):
         request_params.setdefault("AUTH", "")
         request_params.setdefault("KEYB", "")
 
-        headers_base = {
-            "Content-Type": "application/json",
-            "authorization": self._access_token,
-            "appkey": self.creds.app_key,
-            "appsecret": self.creds.app_secret,
-            "tr_id": tr_id,
-            "custtype": "P",
-        }
+        headers_base = self._rank_headers(tr_id)
 
         results: list[dict[str, Any]] = []
         tr_cont = ""
 
         while len(results) < limit:
-            headers = headers_base.copy()
-            if tr_cont:
-                headers["tr_cont"] = tr_cont
+            data: dict[str, Any] | None = None
+            resp: requests.Response | None = None
 
-            resp = self._request("GET", url, headers=headers, params=request_params)
+            for attempt in range(self._max_attempts):
+                headers = headers_base.copy()
+                if tr_cont:
+                    headers["tr_cont"] = tr_cont
 
-            if resp.status_code != 200:
-                error_body: dict[str, Any] | None = None
-                try:
-                    parsed = resp.json()
-                    if isinstance(parsed, dict):
-                        error_body = parsed
-                except ValueError:
-                    error_body = None
-                msg_cd = str((error_body or {}).get("msg_cd") or "")
-                msg1 = str((error_body or {}).get("msg1") or msg_cd or "Unknown error")
-                if msg_cd:
+                resp = self._request("GET", url, headers=headers, params=request_params)
+                parsed = _json_or_none(resp)
+
+                if resp.status_code != 200:
+                    error_body = _payload_dict(parsed)
+                    msg_cd, msg1 = _error_fields(error_body)
+                    if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                        self._access_token = None
+                        self._token_expiry = None
+                        self.ensure_token()
+                        headers_base["authorization"] = self._access_token or ""
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
+                    if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
+                    if attempt < self._max_attempts - 1:
+                        time.sleep(1.0)
+                        continue
+                    if msg_cd:
+                        raise KISApiError(
+                            f"Overseas rank HTTP {resp.status_code}: {resp.text}",
+                            msg_cd=msg_cd,
+                            msg1=msg1,
+                            http_status=resp.status_code,
+                            context="overseas_rank",
+                        )
+                    raise KISClientError(
+                        f"Overseas rank HTTP {resp.status_code}: {resp.text}"
+                    )
+
+                data = _payload_dict(parsed)
+                if data is None:
+                    if attempt < self._max_attempts - 1:
+                        time.sleep(1.0)
+                        continue
+                    if parsed is None:
+                        raise KISClientError("Overseas rank response is not JSON")
+                    raise KISClientError(
+                        "Overseas rank response payload is not an object"
+                    )
+
+                if str(data.get("rt_cd")) != "0":
+                    msg_cd, msg1 = _error_fields(data)
+                    if msg_cd == "EGW00201" and attempt < self._max_attempts - 1:
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
+                    if msg_cd == "EGW00123" and attempt < self._max_attempts - 1:
+                        self._access_token = None
+                        self._token_expiry = None
+                        self.ensure_token()
+                        headers_base["authorization"] = self._access_token or ""
+                        time.sleep(max(1.0, self._min_interval))
+                        continue
                     raise KISApiError(
-                        f"Overseas rank HTTP {resp.status_code}: {resp.text}",
+                        f"KIS overseas rank error: {msg1}",
                         msg_cd=msg_cd,
                         msg1=msg1,
-                        http_status=resp.status_code,
+                        rt_cd=str(data.get("rt_cd") or ""),
                         context="overseas_rank",
                     )
-                raise KISClientError(
-                    f"Overseas rank HTTP {resp.status_code}: {resp.text}"
-                )
+                break
 
-            try:
-                data = resp.json()
-            except ValueError as exc:
-                raise KISClientError("Overseas rank response is not JSON") from exc
-
-            if str(data.get("rt_cd")) != "0":
-                msg_cd = str(data.get("msg_cd") or "")
-                msg1 = str(data.get("msg1") or msg_cd or "Unknown error")
-                raise KISApiError(
-                    f"KIS overseas rank error: {msg1}",
-                    msg_cd=msg_cd,
-                    msg1=msg1,
-                    rt_cd=str(data.get("rt_cd") or ""),
-                    context="overseas_rank",
-                )
-
-            items = data.get("output2") or data.get("output") or []
-            if isinstance(items, dict):
-                items = [items]
+            if data is None or resp is None:
+                break
 
             added = 0
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
+            for item in _rank_items(data, "output2", "output"):
                 results.append(item)
                 added += 1
                 if len(results) >= limit:
@@ -255,19 +314,7 @@ class _KISRankingMixin(_KISClientState):
                 break
 
             resp_tr_cont = (resp.headers.get("tr_cont") or "").strip().upper()
-            output1 = data.get("output1") or {}
-            if isinstance(output1, list) and output1:
-                output1 = output1[0]
-            if not isinstance(output1, dict):
-                output1 = {}
-            keyb = (
-                data.get("keyb")
-                or data.get("KEYB")
-                or output1.get("keyb")
-                or output1.get("KEYB")
-                or ""
-            )
-            request_params["KEYB"] = keyb
+            request_params["KEYB"] = _pagination_key(data)
 
             # Stop if we cannot make progress.
             if added == 0:
@@ -311,17 +358,12 @@ class _KISRankingMixin(_KISClientState):
         price_min: float | None = None,
         price_max: float | None = None,
     ) -> list[dict[str, Any]]:
-        def _price(val: float | None) -> str:
-            if val is None or val <= 0:
-                return ""
-            return str(int(val))
-
         params: dict[str, Any] = {
             "EXCD": exchange,
             "NDAY": nday,
             "VOL_RANG": volume_filter,
-            "PRC1": _price(price_min),
-            "PRC2": _price(price_max),
+            "PRC1": _format_positive_int_filter(price_min, empty_when_missing=True),
+            "PRC2": _format_positive_int_filter(price_max, empty_when_missing=True),
         }
         return self._fetch_overseas_rank_items(
             url=self.creds.overseas_trade_value_rank_url(),
