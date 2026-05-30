@@ -16,6 +16,7 @@ from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.kis_client import KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError, PykrxNotInstalledError
+from .env_loader import env_flag
 from .holdings_loader import (
     Holding,
     HoldingsData,
@@ -150,6 +151,10 @@ def _normalize_provider(provider: str | None) -> str:
     return normalized
 
 
+def _is_entry_strict_config_mode() -> bool:
+    return env_flag("GITHUB_ACTIONS") or env_flag("CI") or env_flag("SAB_CONFIG_STRICT")
+
+
 def _resolve_entry_fatal_missing_price_ratio() -> float:
     raw = str(
         os.getenv(
@@ -160,7 +165,13 @@ def _resolve_entry_fatal_missing_price_ratio() -> float:
     ).strip()
     try:
         parsed = float(raw)
-    except ValueError:
+    except ValueError as exc:
+        if _is_entry_strict_config_mode():
+            raise ConfigLoadError(
+                "Strict config parsing failed: environment variable "
+                "'ENTRY_FATAL_MISSING_PRICE_RATIO' must be a number between "
+                f"0.0 and 1.0, got {raw!r}."
+            ) from exc
         logger.warning(
             "Invalid ENTRY_FATAL_MISSING_PRICE_RATIO=%r; fallback to %.2f",
             raw,
@@ -169,6 +180,12 @@ def _resolve_entry_fatal_missing_price_ratio() -> float:
         return _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO
 
     if not math.isfinite(parsed) or parsed < 0 or parsed > 1:
+        if _is_entry_strict_config_mode():
+            raise ConfigLoadError(
+                "Strict config parsing failed: environment variable "
+                "'ENTRY_FATAL_MISSING_PRICE_RATIO' must be between 0.0 and "
+                f"1.0, got {raw!r}."
+            )
         logger.warning(
             "ENTRY_FATAL_MISSING_PRICE_RATIO must be between 0.0 and 1.0; got %r. "
             "fallback to %.2f",
@@ -995,6 +1012,11 @@ def run_entry(
     except HoldingsLoadError as exc:
         logger.error("Holdings loading failed: %s", exc)
         return 1
+    try:
+        fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()
+    except ConfigLoadError as exc:
+        logger.error("Configuration loading failed: %s", exc)
+        return 1
 
     try:
         resolved_report_path = _resolve_buy_report_path(
@@ -1206,7 +1228,6 @@ def run_entry(
         artifact_date=max(artifact_dates) if artifact_dates else None,
     )
     missing_price_ratio = float(entry_summary["missing_entry_price_ratio"])
-    fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()
     logger.info(
         "Entry evaluation summary: candidates=%s, missing_price_ratio=%.4f, "
         "fatal_threshold=%.4f, system_issue_count=%s",
@@ -1218,19 +1239,6 @@ def run_entry(
     logger.info("Entry report written to: %s", out_path)
     if report_path_callback is not None:
         report_path_callback(out_path)
-    try:
-        uploaded_key = maybe_upload_report_artifact(
-            artifact_path=out_path,
-            run_type="entry",
-            logger=logger,
-            force=upload,
-        )
-    except SupabaseStorageError as exc:
-        logger.error("Supabase report upload failed: %s", exc)
-        return 1
-    else:
-        if uploaded_key:
-            logger.info("Entry report uploaded to Supabase: %s", uploaded_key)
     if system_issues:
         logger.warning(
             "Entry completed with system issues (%s rows)", len(system_issues)
@@ -1245,6 +1253,19 @@ def run_entry(
             fatal_missing_price_ratio,
         )
         return 1
+    try:
+        uploaded_key = maybe_upload_report_artifact(
+            artifact_path=out_path,
+            run_type="entry",
+            logger=logger,
+            force=upload,
+        )
+    except SupabaseStorageError as exc:
+        logger.error("Supabase report upload failed: %s", exc)
+        return 1
+    else:
+        if uploaded_key:
+            logger.info("Entry report uploaded to Supabase: %s", uploaded_key)
     return 0
 
 

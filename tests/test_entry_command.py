@@ -7,7 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sab.config_loader import ConfigLoadError
 from sab.entry import (
+    _resolve_entry_fatal_missing_price_ratio,
     _resolve_signal_eval_date,
     _select_latest_buy_report,
     evaluate_entry_candidates,
@@ -75,6 +77,16 @@ def test_select_latest_buy_report_prefers_latest_date_and_duplicate(
     selected = _select_latest_buy_report(tmp_path.as_posix())
 
     assert selected.endswith("2026-02-25-1.buy.json")
+
+
+def test_entry_fatal_missing_price_ratio_rejects_invalid_env_in_ci(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "not-a-ratio")
+
+    with pytest.raises(ConfigLoadError, match="ENTRY_FATAL_MISSING_PRICE_RATIO"):
+        _resolve_entry_fatal_missing_price_ratio()
 
 
 def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
