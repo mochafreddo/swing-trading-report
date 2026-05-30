@@ -2,7 +2,7 @@ import type { HoldingRecord } from "@/lib/types";
 
 import type { HoldingFormState } from "./form-state";
 
-export { readApiError, readApiErrorCode } from "@/lib/error-utils";
+export { readApiError } from "@/lib/error-utils";
 
 export const HOLDINGS_PAGE_SIZE = 100;
 

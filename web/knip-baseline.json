@@ -1,7 +1,5 @@
 {
   "knownIssues": [
-    "exports:src/components/holdings/form-state.ts:EMPTY_FORM",
-    "exports:src/components/holdings/helpers.ts:readApiErrorCode",
     "exports:src/lib/admin-api-guard.ts:requireAdminApiGuard",
     "exports:src/lib/admin-api-guard.ts:toAdminApiGuardErrorResponse",
     "exports:src/lib/admin-auth.ts:AdminAuthConfigError",
@@ -10,9 +8,7 @@
     "exports:src/lib/admin-session.ts:AdminSessionConfigError",
     "exports:src/lib/metrics-data.ts:METRICS_LOOKBACK_LIMIT",
     "exports:src/lib/report-key.ts:compareParsedReportKeys",
-    "exports:src/lib/report-key.ts:toReportListItem",
     "exports:src/lib/run-dispatch-policy.ts:SCAN_PROVIDER_UNIVERSE_POLICY",
-    "files:src/components/holdings/import-export.test.ts:src/components/holdings/import-export.test.ts",
     "types:src/components/reports/buy-candidate-view-model.ts:DetailSection",
     "types:src/components/reports/buy-candidate-view-model.ts:ReasonChip",
     "types:src/lib/admin-auth.ts:AdminBasicAuth",

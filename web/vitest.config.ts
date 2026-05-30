@@ -10,6 +10,8 @@ export default defineConfig({
       "src/lib/__tests__/**/*.test.tsx",
       "src/app/**/__tests__/**/*.test.ts",
       "src/app/**/__tests__/**/*.test.tsx",
+      "src/components/**/__tests__/**/*.test.ts",
+      "src/components/**/__tests__/**/*.test.tsx",
     ],
     coverage: {
       provider: "v8",

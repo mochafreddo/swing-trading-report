@@ -31,5 +31,3 @@ export function createEmptyHoldingForm(): HoldingFormState {
     target_override: "",
   };
 }
-
-export const EMPTY_FORM: HoldingFormState = createEmptyHoldingForm();

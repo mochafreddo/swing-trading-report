@@ -1,7 +1,6 @@
 import {
   REPORT_TYPE_PATTERN,
   isReportType,
-  type ReportListItem,
   type ReportType,
 } from "@/lib/types";
 
@@ -108,17 +107,4 @@ export function filterAndSortReportKeys(
 
   parsed.sort(compareParsedReportKeys);
   return parsed;
-}
-
-export function toReportListItem(
-  parsed: ParsedReportStorageKey,
-  extras?: Pick<ReportListItem, "generatedAt" | "summary" | "tickers">,
-): ReportListItem {
-  return {
-    key: parsed.key,
-    type: parsed.type,
-    reportDate: parsed.reportDate,
-    duplicateIndex: parsed.duplicateIndex,
-    ...extras,
-  };
 }
