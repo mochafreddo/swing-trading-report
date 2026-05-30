@@ -1,15 +1,9 @@
+import { readApiError } from "@/lib/error-utils";
+
 type Fetcher = (
   input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
-
-function readApiError(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { error?: unknown }).error;
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
 
 export async function requestLogout(fetcher: Fetcher = fetch): Promise<void> {
   const response = await fetcher("/api/auth/logout", { method: "POST" });

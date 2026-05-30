@@ -2,6 +2,8 @@ import type { ReportListItem } from "@/lib/types";
 
 import type { ReportJson, ReportsFilterType } from "./types";
 
+export { readApiError } from "@/lib/error-utils";
+
 export function parseReportType(value: string | null): ReportsFilterType {
   if (
     value === "buy" ||
@@ -66,14 +68,6 @@ export function formatPnlPercent(value: unknown): string {
   const pct = pnl * 100;
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(1)}%`;
-}
-
-export function readApiError(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { error?: unknown }).error;
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 export function formatDateLabel(item: ReportListItem): string {

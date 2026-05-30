@@ -2,6 +2,8 @@ import type { HoldingRecord } from "@/lib/types";
 
 import type { HoldingFormState } from "./form-state";
 
+export { readApiError, readApiErrorCode } from "@/lib/error-utils";
+
 export const HOLDINGS_PAGE_SIZE = 100;
 
 function numberOrUndefined(value: string): number | undefined {
@@ -52,7 +54,7 @@ export function recordToForm(record: HoldingRecord): HoldingFormState {
   };
 }
 
-export function buildCreatePayload(form: HoldingFormState) {
+function buildHoldingMutationPayload(form: HoldingFormState) {
   return {
     ticker: form.ticker,
     quantity: requiredNumber(form.quantity, "Quantity"),
@@ -65,37 +67,14 @@ export function buildCreatePayload(form: HoldingFormState) {
     stop_override: numberOrNull(form.stop_override),
     target_override: numberOrNull(form.target_override),
   };
+}
+
+export function buildCreatePayload(form: HoldingFormState) {
+  return buildHoldingMutationPayload(form);
 }
 
 export function buildPatchPayload(form: HoldingFormState) {
-  return {
-    ticker: form.ticker,
-    quantity: requiredNumber(form.quantity, "Quantity"),
-    entry_price: requiredNumber(form.entry_price, "Entry Price"),
-    entry_currency: stringOrNull(form.entry_currency),
-    entry_date: stringOrNull(form.entry_date),
-    strategy: stringOrNull(form.strategy),
-    notes: stringOrNull(form.notes),
-    tags: form.tags,
-    stop_override: numberOrNull(form.stop_override),
-    target_override: numberOrNull(form.target_override),
-  };
-}
-
-export function readApiError(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { error?: unknown }).error;
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-export function readApiErrorCode(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const value = (payload as { code?: unknown }).code;
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return buildHoldingMutationPayload(form);
 }
 
 export function mergeHoldingsByTicker(

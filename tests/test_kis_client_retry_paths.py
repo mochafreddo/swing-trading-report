@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call, patch
@@ -309,6 +310,43 @@ def test_daily_candles_accumulates_and_sorts_rows_from_chunk_fetches() -> None:
     assert [row["date"] for row in rows] == ["20240102", "20240103"]
     assert ensure_token_mock.call_count == 1
     assert fetch_candle_chunk_mock.call_count == 2
+
+
+def test_candle_parsers_normalize_commas_and_invalid_numbers() -> None:
+    domestic = KISClient._parse_candle(
+        {
+            "stck_bsop_date": "20240103",
+            "stck_oprc": "1,234.5",
+            "stck_hgpr": "bad",
+            "stck_lwpr": "",
+            "stck_clpr": "1200",
+            "acml_vol": "2,000",
+            "prdy_vrss": None,
+        }
+    )
+    overseas = KISClient._parse_overseas_candle(
+        {
+            "xymd": "2024-01-03",
+            "open": "1,234.5",
+            "high": "bad",
+            "low": "",
+            "close": "1200",
+            "tvol": "2,000",
+        }
+    )
+
+    assert domestic is not None
+    assert overseas is not None
+    assert domestic["open"] == 1234.5
+    assert domestic["volume"] == 2000.0
+    assert math.isnan(domestic["high"])
+    assert math.isnan(domestic["low"])
+    assert math.isnan(domestic["prev_close_diff"])
+    assert overseas["date"] == "20240103"
+    assert overseas["open"] == 1234.5
+    assert overseas["volume"] == 2000.0
+    assert math.isnan(overseas["high"])
+    assert math.isnan(overseas["low"])
 
 
 def test_overseas_price_detail_refreshes_token_on_egw00123() -> None:

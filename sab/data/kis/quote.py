@@ -14,6 +14,15 @@ _CLASS_SLASH_SYMBOL_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)/([ABC])$")
 _OVERSEAS_INVALID_SYMBOL_MSG_CDS = frozenset({"SYMB0001"})
 
 
+def _to_float_or_nan(value: Any) -> float:
+    if value is None or value == "":
+        return float("nan")
+    try:
+        return float(str(value).replace(",", ""))
+    except ValueError:
+        return float("nan")
+
+
 class _KISQuoteMixin(_KISClientState):
     """Domestic/overseas quote and candle responsibilities."""
 
@@ -667,32 +676,24 @@ class _KISQuoteMixin(_KISClientState):
         if not item:
             return None
 
-        def _to_float(val: Any) -> float:
-            if val is None or val == "":
-                return float("nan")
-            try:
-                return float(str(val).replace(",", ""))
-            except ValueError:
-                return float("nan")
-
         # Overseas fields typically: xymd, open, high, low, close/last, volume/tvol
         return {
             "date": str(item.get("xymd") or item.get("stck_bsop_date") or "").replace(
                 "-", ""
             ),
-            "open": _to_float(item.get("open") or item.get("stck_oprc")),
-            "high": _to_float(item.get("high") or item.get("stck_hgpr")),
-            "low": _to_float(item.get("low") or item.get("stck_lwpr")),
-            "close": _to_float(
+            "open": _to_float_or_nan(item.get("open") or item.get("stck_oprc")),
+            "high": _to_float_or_nan(item.get("high") or item.get("stck_hgpr")),
+            "low": _to_float_or_nan(item.get("low") or item.get("stck_lwpr")),
+            "close": _to_float_or_nan(
                 item.get("close")
                 or item.get("last")
                 or item.get("clos")
                 or item.get("stck_clpr")
             ),
-            "volume": _to_float(
+            "volume": _to_float_or_nan(
                 item.get("volume") or item.get("tvol") or item.get("acml_vol")
             ),
-            "prev_close_diff": _to_float(item.get("prdy_vrss") or 0),
+            "prev_close_diff": _to_float_or_nan(item.get("prdy_vrss") or 0),
         }
 
     @staticmethod
@@ -700,20 +701,12 @@ class _KISQuoteMixin(_KISClientState):
         if not item:
             return None
 
-        def _to_float(val: Any) -> float:
-            if val is None or val == "":
-                return float("nan")
-            try:
-                return float(str(val).replace(",", ""))
-            except ValueError:
-                return float("nan")
-
         return {
             "date": item.get("stck_bsop_date"),
-            "open": _to_float(item.get("stck_oprc")),
-            "high": _to_float(item.get("stck_hgpr")),
-            "low": _to_float(item.get("stck_lwpr")),
-            "close": _to_float(item.get("stck_clpr")),
-            "volume": _to_float(item.get("acml_vol")),
-            "prev_close_diff": _to_float(item.get("prdy_vrss")),
+            "open": _to_float_or_nan(item.get("stck_oprc")),
+            "high": _to_float_or_nan(item.get("stck_hgpr")),
+            "low": _to_float_or_nan(item.get("stck_lwpr")),
+            "close": _to_float_or_nan(item.get("stck_clpr")),
+            "volume": _to_float_or_nan(item.get("acml_vol")),
+            "prev_close_diff": _to_float_or_nan(item.get("prdy_vrss")),
         }
