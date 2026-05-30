@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .metadata import collect_row_tickers, infer_market_from_currency
 from .paths import ensure_dir, next_report_path
 from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
@@ -18,36 +19,6 @@ def _normalize_report_type(report_type: str) -> str:
     if normalized not in _ALLOWED_REPORT_TYPES:
         raise ValueError("report_type must be one of: buy, sell")
     return normalized
-
-
-def _collect_tickers(candidates: list[dict[str, Any]]) -> list[str]:
-    seen: set[str] = set()
-    tickers: list[str] = []
-    for candidate in candidates:
-        ticker_raw = candidate.get("ticker")
-        if ticker_raw is None:
-            continue
-        ticker = str(ticker_raw).strip()
-        if not ticker or ticker in seen:
-            continue
-        seen.add(ticker)
-        tickers.append(ticker)
-    return tickers
-
-
-def _infer_market(candidates: list[dict[str, Any]]) -> tuple[str, list[str] | None]:
-    markets: set[str] = set()
-    for candidate in candidates:
-        currency = str(candidate.get("currency") or "").strip().upper()
-        if currency == "USD":
-            markets.add("US")
-        elif currency:
-            markets.add("KR")
-    if not markets:
-        return "MIXED", None
-    if len(markets) == 1:
-        return next(iter(markets)), None
-    return "MIXED", sorted(markets)
 
 
 def write_report(
@@ -83,7 +54,7 @@ def write_report(
     }
     if summary_fields:
         summary.update(summary_fields)
-    inferred_market, inferred_markets = _infer_market(cand_list)
+    inferred_market, inferred_markets = infer_market_from_currency(cand_list)
     default_run_meta = build_run_meta(
         market=inferred_market,
         markets=inferred_markets,
@@ -107,7 +78,7 @@ def write_report(
             "count": universe_count,
         },
         "summary": summary,
-        "tickers": _collect_tickers(cand_list),
+        "tickers": collect_row_tickers(cand_list),
         "candidates": cand_list,
         "issues": failures_list,
         "system_issues": system_issues_list,

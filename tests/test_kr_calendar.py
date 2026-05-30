@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+import tempfile
 import types
 import unittest
 import warnings
@@ -16,6 +18,19 @@ class KRCalendarTests(unittest.TestCase):
         self.assertEqual(cal["20240606"], "Memorial Day")
         self.assertIn("20240815", cal)  # Liberation Day 2024
         self.assertEqual(cal["20240815"], "Liberation Day")
+
+    def test_override_file_normalizes_date_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(
+                os.path.join(tmpdir, "kr_trading_calendar.json"),
+                "w",
+                encoding="utf-8",
+            ) as fp:
+                json.dump({"2027-01-03": {"note": "Special closure"}}, fp)
+
+            cal = load_kr_trading_calendar(tmpdir)
+
+        self.assertEqual(cal["20270103"], "Special closure")
 
     def test_pmc_discontinued_break_warning_is_suppressed(self) -> None:
         message = "['break_end', 'break_start'] are discontinued"

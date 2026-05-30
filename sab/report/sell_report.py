@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from .metadata import collect_row_tickers, infer_market_from_currency
 from .paths import ensure_dir, next_report_path
 from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
@@ -33,36 +34,6 @@ class SellReportRow:
     flags: list[str] | None = None
     days_in_trade_sessions: int | None = None
     time_stop_triggered: bool = False
-
-
-def _infer_market(rows: list[dict[str, Any]]) -> tuple[str, list[str] | None]:
-    markets: set[str] = set()
-    for row in rows:
-        currency = str(row.get("currency") or "").strip().upper()
-        if currency == "USD":
-            markets.add("US")
-        elif currency:
-            markets.add("KR")
-    if not markets:
-        return "MIXED", None
-    if len(markets) == 1:
-        return next(iter(markets)), None
-    return "MIXED", sorted(markets)
-
-
-def _collect_tickers(rows: list[dict[str, Any]]) -> list[str]:
-    seen: set[str] = set()
-    tickers: list[str] = []
-    for row in rows:
-        ticker_raw = row.get("ticker")
-        if ticker_raw is None:
-            continue
-        ticker = str(ticker_raw).strip()
-        if not ticker or ticker in seen:
-            continue
-        seen.add(ticker)
-        tickers.append(ticker)
-    return tickers
 
 
 def _build_rules_payload(
@@ -122,7 +93,7 @@ def write_sell_report(
     if summary_fields:
         summary.update(summary_fields)
 
-    inferred_market, inferred_markets = _infer_market(rows)
+    inferred_market, inferred_markets = infer_market_from_currency(rows)
     default_run_meta = build_run_meta(
         market=inferred_market,
         markets=inferred_markets,
@@ -144,7 +115,7 @@ def write_sell_report(
         "report_date": today,
         "provider": provider,
         "summary": summary,
-        "tickers": _collect_tickers(rows),
+        "tickers": collect_row_tickers(rows),
         "evaluated": rows,
         "issues": failures_list,
     }

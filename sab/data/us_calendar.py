@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import json
-import os
 from datetime import date
 
-from .calendar_warnings import suppress_pmc_discontinued_break_warning
+from .trading_calendar import (
+    dynamic_holiday_year_range,
+    load_calendar_override_file,
+    maybe_pandas_holidays,
+)
 
 # Built-in US market holiday dates (NYSE/NASDAQ) for 2024–2026.
 # Keys are YYYYMMDD, values are human-readable notes.
@@ -46,62 +48,16 @@ _BUILTIN_US_HOLIDAYS: dict[str, str] = {
 
 
 def _load_override_file(data_dir: str | None) -> dict[str, str]:
-    if not data_dir:
-        return {}
-    path = os.path.join(data_dir, "us_trading_calendar.json")
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fp:
-            raw = json.load(fp)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[str, str] = {}
-    for key, val in raw.items():
-        key_str = str(key or "").replace("-", "")
-        if not key_str:
-            continue
-        note = None
-        if isinstance(val, dict):
-            note = val.get("note")
-        elif isinstance(val, str):
-            note = val
-        out[key_str] = note or ""
-    return out
+    return load_calendar_override_file(data_dir, "us_trading_calendar.json")
 
 
 def _maybe_pandas_holidays(start_year: int, end_year: int) -> dict[str, str]:
-    use_pandas = os.getenv("SAB_USE_PMC_CALENDAR", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-    }
-    if not use_pandas:
-        return {}
-    try:
-        import pandas_market_calendars as pmc  # type: ignore
-    except Exception:
-        return {}
-
-    try:
-        with suppress_pmc_discontinued_break_warning():
-            cal = pmc.get_calendar("XNYS")
-            holidays = cal.holidays()
-    except Exception:
-        return {}
-    start_dt = date.fromisoformat(f"{start_year}-01-01")
-    end_dt = date.fromisoformat(f"{end_year}-12-31")
-    out: dict[str, str] = {}
-    for ts in getattr(holidays, "holidays", []):
-        try:
-            d = ts.date()
-        except Exception:
-            continue
-        if start_dt <= d <= end_dt:
-            out[d.strftime("%Y%m%d")] = "US Market Holiday"
-    return out
+    return maybe_pandas_holidays(
+        calendar_name="XNYS",
+        holiday_note="US Market Holiday",
+        start_year=start_year,
+        end_year=end_year,
+    )
 
 
 def load_us_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
@@ -112,12 +68,12 @@ def load_us_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
     # Auto-generate future years using pandas_market_calendars if available.
     today = date.today()
     max_static_year = 2026
-    if today.year > max_static_year:
-        dyn = _maybe_pandas_holidays(today.year, today.year + 5)
-        merged.update(dyn)
-    elif today.year >= 2024:
-        dyn = _maybe_pandas_holidays(max_static_year + 1, max_static_year + 5)
-        merged.update(dyn)
+    year_range = dynamic_holiday_year_range(
+        today=today,
+        max_static_year=max_static_year,
+    )
+    if year_range is not None:
+        merged.update(_maybe_pandas_holidays(*year_range))
 
     merged.update(overrides)
     return merged
