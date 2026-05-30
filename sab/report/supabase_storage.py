@@ -315,12 +315,18 @@ def _storage_delete_request(
     return _response_to_data(response)
 
 
-def _safe_json_dict(payload: bytes) -> dict[str, object]:
+def _decode_report_json_object(*, payload: bytes, local_path: str) -> dict[str, object]:
     try:
         decoded = json.loads(payload.decode("utf-8"))
-    except UnicodeDecodeError, json.JSONDecodeError:
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SupabaseStorageError(
+            f"report artifact '{local_path}' is not a valid JSON object"
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise SupabaseStorageError(
+            f"report artifact '{local_path}' is not a valid JSON object"
+        )
+    return decoded
 
 
 def _normalize_ticker(value: object) -> str | None:
@@ -575,7 +581,10 @@ def upload_report_artifact(
     session: requests.Session | None = None,
 ) -> str:
     payload = Path(local_path).read_bytes()
-    report_payload = _safe_json_dict(payload)
+    report_payload = _decode_report_json_object(
+        payload=payload,
+        local_path=local_path,
+    )
 
     active_session = session or requests.Session()
     should_close_session = session is None

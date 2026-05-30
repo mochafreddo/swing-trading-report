@@ -361,6 +361,35 @@ def test_upload_report_artifact_treats_400_not_found_as_missing(
     assert key == "2026/02/2026-02-13.buy.json"
 
 
+@pytest.mark.parametrize("payload", ["{bad json", '["not", "object"]'])
+def test_upload_report_artifact_rejects_invalid_report_json_before_network(
+    tmp_path: Path,
+    payload: str,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(payload, encoding="utf-8")
+
+    session = _FakeSession(get_responses=[], post_responses=[])
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseStorageError, match="valid JSON object"):
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.get_calls == []
+    assert session.post_calls == []
+    assert session.delete_calls == []
+
+
 def test_upload_report_artifact_indexes_tickers_from_candidates_fallback(
     tmp_path: Path,
 ) -> None:

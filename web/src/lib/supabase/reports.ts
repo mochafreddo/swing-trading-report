@@ -316,7 +316,7 @@ export async function downloadStorageJson(
   const text = await response.text();
   try {
     const payload = JSON.parse(text) as unknown;
-    if (payload && typeof payload === "object") {
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       return payload as Record<string, unknown>;
     }
   } catch {

@@ -11,6 +11,7 @@ import {
 import {
   addBuyToHolding,
   claimRuntimeStateLock,
+  downloadStorageJson,
   fetchReportIndexPage,
   fetchAllHoldings,
   createHolding,
@@ -352,6 +353,25 @@ describe("claimRuntimeStateLock", () => {
       "/rest/v1/rpc/claim_runtime_state_lock",
     );
     expect(init?.method).toBe("POST");
+  });
+});
+
+describe("downloadStorageJson", () => {
+  it("rejects JSON arrays because report artifacts must be objects", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      downloadStorageJson("reports", "2026/02/2026-02-14.buy.json"),
+    ).rejects.toMatchObject({
+      status: 500,
+      message:
+        "Report '2026/02/2026-02-14.buy.json' is not a valid JSON object",
+    } satisfies Partial<SupabaseApiError>);
   });
 });
 
