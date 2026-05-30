@@ -25,10 +25,8 @@ def save_json(base_dir: str, key: str, obj: Any) -> str:
 
 def load_json(base_dir: str, key: str) -> Any | None:
     p = json_path(base_dir, key)
-    if not os.path.exists(p):
-        return None
     try:
         with open(p, encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None

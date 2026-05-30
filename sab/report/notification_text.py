@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
+from ..utils.numeric import to_finite_float as _to_finite_float
 from ..utils.numeric import to_int as _safe_int
 from .ai_brief_state import (
     BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
@@ -26,14 +27,9 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _safe_float(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
+    if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(str(value).strip())
-    except TypeError, ValueError:
-        return None
+    return _to_finite_float(value)
 
 
 def _safe_str(value: Any, *, default: str = "") -> str:

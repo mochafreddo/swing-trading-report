@@ -32,6 +32,30 @@ describe("createMemoryTtlLruCache", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it("caches null values as valid payloads", async () => {
+    const cache = createMemoryTtlLruCache<number | null>({
+      maxEntries: 10,
+    });
+    const loader = vi.fn(async () => null);
+
+    await expect(
+      cache.getOrLoad({
+        key: "nullable",
+        ttlMs: 1000,
+        load: loader,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      cache.getOrLoad({
+        key: "nullable",
+        ttlMs: 1000,
+        load: loader,
+      }),
+    ).resolves.toBeNull();
+
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
   it("reloads value after TTL expiration", async () => {
     let nowMs = 2000;
     const cache = createMemoryTtlLruCache<number>({

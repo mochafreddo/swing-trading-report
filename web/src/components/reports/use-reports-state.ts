@@ -8,6 +8,7 @@ import {
   REPORT_LIST_CACHE_TTL_MS,
   REPORT_SEARCH_CACHE_TTL_MS,
 } from "@/lib/reports-cache-config";
+import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
 import type {
   ReportListItem,
   ReportsListResponse,
@@ -29,11 +30,6 @@ import type {
 
 const PAGE_LIMIT = 30;
 
-interface TimedCacheEntry<T> {
-  value: T;
-  expiresAt: number;
-}
-
 type ReportDetailResponse = { key: string; report: ReportJson };
 
 interface ReportsListRequestPathOptions {
@@ -48,48 +44,13 @@ interface ReportDetailRequestPathOptions {
   refresh?: boolean;
 }
 
-const reportListCache = new Map<string, TimedCacheEntry<ReportsListResponse>>();
-const reportListInFlight = new Map<string, Promise<ReportsListResponse>>();
-const reportDetailCache = new Map<
-  string,
-  TimedCacheEntry<ReportDetailResponse>
->();
-const reportDetailInFlight = new Map<string, Promise<ReportDetailResponse>>();
+const reportListCache = createMemoryTtlLruCache<ReportsListResponse>({
+  maxEntries: REPORT_LIST_CACHE_MAX_ENTRIES,
+});
 
-function readTimedCache<T>(
-  cache: Map<string, TimedCacheEntry<T>>,
-  key: string,
-): T | null {
-  const entry = cache.get(key);
-  if (!entry) {
-    return null;
-  }
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    return null;
-  }
-  return entry.value;
-}
-
-function writeTimedCache<T>(
-  cache: Map<string, TimedCacheEntry<T>>,
-  key: string,
-  value: T,
-  ttlMs: number,
-  maxEntries: number,
-): void {
-  cache.set(key, {
-    value,
-    expiresAt: Date.now() + ttlMs,
-  });
-  while (cache.size > maxEntries) {
-    const oldestKey = cache.keys().next().value;
-    if (typeof oldestKey !== "string") {
-      break;
-    }
-    cache.delete(oldestKey);
-  }
-}
+const reportDetailCache = createMemoryTtlLruCache<ReportDetailResponse>({
+  maxEntries: REPORT_DETAIL_CACHE_MAX_ENTRIES,
+});
 
 function resolveListCacheTtlMs(query: string): number {
   return query.trim() ? REPORT_SEARCH_CACHE_TTL_MS : REPORT_LIST_CACHE_TTL_MS;
@@ -159,109 +120,56 @@ async function fetchReportsListCached(
   refresh = false,
 ): Promise<ReportsListResponse> {
   const cacheKey = buildListCacheKey(reportType, appliedQuery);
-  if (!refresh) {
-    const cached = readTimedCache(reportListCache, cacheKey);
-    if (cached) {
-      return cached;
-    }
 
-    const inFlight = reportListInFlight.get(cacheKey);
-    if (inFlight) {
-      return inFlight;
-    }
-  }
+  return reportListCache.getOrLoad({
+    key: cacheKey,
+    ttlMs: resolveListCacheTtlMs(appliedQuery),
+    refresh,
+    load: async () => {
+      const path = buildReportsListRequestPath({
+        type: reportType,
+        limit: PAGE_LIMIT,
+        query: appliedQuery,
+        refresh,
+      });
+      const response = await fetch(path, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        throw new Error(readApiError(payload) || "Failed to load reports");
+      }
 
-  const load = async () => {
-    const path = buildReportsListRequestPath({
-      type: reportType,
-      limit: PAGE_LIMIT,
-      query: appliedQuery,
-      refresh,
-    });
-    const response = await fetch(path, {
-      cache: "no-store",
-    });
-    const payload = (await response.json()) as unknown;
-    if (!response.ok) {
-      throw new Error(readApiError(payload) || "Failed to load reports");
-    }
-
-    const typed = payload as ReportsListResponse;
-    writeTimedCache(
-      reportListCache,
-      cacheKey,
-      typed,
-      resolveListCacheTtlMs(appliedQuery),
-      REPORT_LIST_CACHE_MAX_ENTRIES,
-    );
-    return typed;
-  };
-
-  if (refresh) {
-    return load();
-  }
-
-  const loadPromise = load();
-
-  reportListInFlight.set(cacheKey, loadPromise);
-  try {
-    return await loadPromise;
-  } finally {
-    reportListInFlight.delete(cacheKey);
-  }
+      return payload as ReportsListResponse;
+    },
+  });
 }
 
 async function fetchReportDetailCached(
   key: string,
   refresh = false,
 ): Promise<ReportDetailResponse> {
-  if (!refresh) {
-    const cached = readTimedCache(reportDetailCache, key);
-    if (cached) {
-      return cached;
-    }
-
-    const inFlight = reportDetailInFlight.get(key);
-    if (inFlight) {
-      return inFlight;
-    }
-  }
-
-  const load = async () => {
-    const path = buildReportDetailRequestPath({
-      key,
-      refresh,
-    });
-    const response = await fetch(path, {
-      cache: "no-store",
-    });
-    const payload = (await response.json()) as unknown;
-    if (!response.ok) {
-      throw new Error(readApiError(payload) || "Failed to load report detail");
-    }
-    const typed = payload as ReportDetailResponse;
-    writeTimedCache(
-      reportDetailCache,
-      key,
-      typed,
-      REPORT_DETAIL_CACHE_TTL_MS,
-      REPORT_DETAIL_CACHE_MAX_ENTRIES,
-    );
-    return typed;
-  };
-
-  if (refresh) {
-    return load();
-  }
-
-  const loadPromise = load();
-
-  reportDetailInFlight.set(key, loadPromise);
-  try {
-    return await loadPromise;
-  } finally {
-    reportDetailInFlight.delete(key);
-  }
+  return reportDetailCache.getOrLoad({
+    key,
+    ttlMs: REPORT_DETAIL_CACHE_TTL_MS,
+    refresh,
+    load: async () => {
+      const path = buildReportDetailRequestPath({
+        key,
+        refresh,
+      });
+      const response = await fetch(path, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        throw new Error(
+          readApiError(payload) || "Failed to load report detail",
+        );
+      }
+      return payload as ReportDetailResponse;
+    },
+  });
 }
 
 export function useReportsState(initialState?: ReportsInitialState) {

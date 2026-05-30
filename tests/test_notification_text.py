@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from sab.report import notification_text
 from sab.report.notification_text import (
     build_ai_brief_skipped_telegram_text,
@@ -251,6 +252,40 @@ def test_build_sell_telegram_report_text_handles_hold_only() -> None:
 
     assert "대상: 0건 (매도 0, 점검 0, 보유 2 제외)" in text
     assert "매도/점검 대상 없음" in text
+
+
+@pytest.mark.parametrize(
+    "pnl_pct",
+    [float("nan"), float("inf"), "-inf", True, False],
+)
+def test_build_sell_telegram_report_text_treats_invalid_pnl_as_missing(
+    pnl_pct: object,
+) -> None:
+    report = {
+        "generated_at": "2026-02-11 21:00 KST",
+        "summary": {
+            "evaluated_count": 1,
+            "issue_count": 0,
+            "action_counts": {"REVIEW": 1},
+        },
+        "evaluated": [
+            {
+                "ticker": "AAPL.NAS",
+                "action": "REVIEW",
+                "pnl_pct": pnl_pct,
+                "reasons": ["Needs manual review"],
+            }
+        ],
+    }
+
+    text = build_sell_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+        provider="kis",
+        include_actions=("REVIEW",),
+    )
+
+    assert "AAPL.NAS | 점검 | - | Needs manual review" in text
 
 
 def test_build_scan_telegram_report_text_keeps_all_ready_candidates() -> None:

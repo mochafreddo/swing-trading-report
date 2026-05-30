@@ -24,7 +24,7 @@ def _resolve_git_sha() -> str | None:
             text=True,
             timeout=2.0,
         )
-    except Exception:
+    except OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired:
         return None
 
     resolved = completed.stdout.strip()

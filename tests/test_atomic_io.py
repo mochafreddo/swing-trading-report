@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sab.data.cache import save_json
+from sab.data.cache import load_json, save_json
 from sab.utils import atomic_io
 from sab.utils.atomic_io import atomic_write_json
 
@@ -43,3 +43,14 @@ def test_atomic_write_json_cleans_temp_file_on_success(tmp_path: Path) -> None:
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
     assert _tmp_files_for(target) == []
+
+
+def test_load_json_returns_none_for_missing_file(tmp_path: Path) -> None:
+    assert load_json(tmp_path.as_posix(), "missing") is None
+
+
+def test_load_json_returns_none_for_invalid_json(tmp_path: Path) -> None:
+    target = tmp_path / "broken.json"
+    target.write_text("{not-json", encoding="utf-8")
+
+    assert load_json(tmp_path.as_posix(), "broken") is None

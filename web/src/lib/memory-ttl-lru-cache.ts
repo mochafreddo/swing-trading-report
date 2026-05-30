@@ -15,6 +15,8 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
+const CACHE_MISS = Symbol("cache-miss");
+
 export interface MemoryTtlLruCache<T> {
   getOrLoad(options: MemoryTtlLruLoadOptions<T>): Promise<T>;
   clear(): void;
@@ -38,11 +40,11 @@ export function createMemoryTtlLruCache<T>(
     }
   }
 
-  function getCachedValue(key: string): T | null {
+  function getCachedValue(key: string): T | typeof CACHE_MISS {
     evictExpiredEntry(key);
     const existing = values.get(key);
     if (!existing) {
-      return null;
+      return CACHE_MISS;
     }
     values.delete(key);
     values.set(key, existing);
@@ -73,7 +75,7 @@ export function createMemoryTtlLruCache<T>(
       const { key, ttlMs, refresh, load } = loadOptions;
       if (!refresh) {
         const cachedValue = getCachedValue(key);
-        if (cachedValue !== null) {
+        if (cachedValue !== CACHE_MISS) {
           return cachedValue;
         }
         const pending = inFlight.get(key);

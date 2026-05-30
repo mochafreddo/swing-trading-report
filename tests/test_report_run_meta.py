@@ -32,6 +32,28 @@ def test_build_run_meta_uses_env_sha_and_fixed_timestamp(monkeypatch) -> None:
     assert meta["config_snapshot"] == {"strategy_mode": "ema_cross"}
 
 
+def test_build_run_meta_keeps_git_sha_optional_when_git_is_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+    def _raise_os_error(*_args, **_kwargs):
+        raise OSError("git unavailable")
+
+    monkeypatch.setattr("sab.report.run_meta.subprocess.run", _raise_os_error)
+
+    meta = build_run_meta(
+        market="KR",
+        session_state="AFTER_CLOSE",
+        eval_index_policy="choose_eval_index:v1",
+        config_snapshot=None,
+        now=datetime(2026, 2, 25, 12, 0, tzinfo=UTC),
+        run_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    assert meta["git_sha"] is None
+
+
 def test_write_buy_report_includes_standard_run_meta(tmp_path: Path) -> None:
     out_path = write_report(
         report_dir=tmp_path.as_posix(),
