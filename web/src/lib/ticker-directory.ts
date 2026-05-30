@@ -320,6 +320,17 @@ function mergeCandidatesFromReport(
   }
 }
 
+function pruneEntriesOutsideReportKeys(
+  entries: Map<string, MutableTickerDirectoryEntry>,
+  reportKeys: Set<string>,
+): void {
+  for (const [ticker, entry] of entries) {
+    if (!entry.lastSeenReportKey || !reportKeys.has(entry.lastSeenReportKey)) {
+      entries.delete(ticker);
+    }
+  }
+}
+
 async function tryLoadBuyReportCandidates(
   bucket: string,
   reportKey: string,
@@ -437,8 +448,12 @@ async function refreshDirectory(
   const nowMs = Date.now();
   const env = getSupabaseEnv();
   const rows = await collectRecentBuyRows(DIRECTORY_BUILD_REPORT_LIMIT);
+  const rowKeys = rows.map((row) => row.report_key);
   const entries = toMutableEntryMap(cached?.entries ?? []);
   const knownKeys = new Set(cached?.source.buyReportKeys ?? []);
+  const scannedKeys = new Set(
+    rowKeys.filter((reportKey) => knownKeys.has(reportKey)),
+  );
   const rowsToMerge = cached
     ? rows.filter((row) => !knownKeys.has(row.report_key))
     : rows;
@@ -452,14 +467,19 @@ async function refreshDirectory(
       continue;
     }
     mergeCandidatesFromReport(entries, row, candidates, nowMs);
+    scannedKeys.add(row.report_key);
   }
+  const scannedReportKeys = rowKeys.filter((reportKey) =>
+    scannedKeys.has(reportKey),
+  );
+  pruneEntriesOutsideReportKeys(entries, new Set(rowKeys));
 
   const payload: TickerDirectoryPayloadV1 = {
     version: 1,
     builtAtMs: nowMs,
     source: {
-      buyReportsScanned: rows.length,
-      buyReportKeys: rows.map((row) => row.report_key),
+      buyReportsScanned: scannedReportKeys.length,
+      buyReportKeys: scannedReportKeys,
     },
     entries: Array.from(entries.values())
       .map((entry) => ({
