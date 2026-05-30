@@ -19,7 +19,9 @@ on:
         description: "Supabase Storage bucket"
         required: false
         default: "reports"
-        type: string
+        type: choice
+        options:
+          - reports
 
 permissions:
   contents: read
@@ -48,12 +50,30 @@ jobs:
 
       - name: Resolve cleanup inputs
         id: params
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RAW_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          RAW_RETENTION_DAYS: ${{ github.event.inputs.retention_days }}
+          RAW_BUCKET: ${{ github.event.inputs.bucket }}
         run: |
           set -euo pipefail
 
-          dry_run="${{ github.event.inputs.dry_run }}"
-          retention_days="${{ github.event.inputs.retention_days }}"
-          bucket="${{ github.event.inputs.bucket }}"
+          dry_run="${RAW_DRY_RUN:-}"
+          retention_days="${RAW_RETENTION_DAYS:-}"
+          bucket="${RAW_BUCKET:-}"
+
+          require_single_line() {
+            local name="$1"
+            local value="$2"
+            if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+              echo "${name} must be a single-line value" >&2
+              exit 1
+            fi
+          }
+
+          require_single_line "dry_run" "${dry_run}"
+          require_single_line "retention_days" "${retention_days}"
+          require_single_line "bucket" "${bucket}"
 
           if [[ -z "${dry_run}" ]]; then
             dry_run="true"
@@ -65,7 +85,7 @@ jobs:
             bucket="reports"
           fi
 
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+          if [[ "${EVENT_NAME}" == "schedule" ]]; then
             dry_run="false"
           fi
 
@@ -80,10 +100,18 @@ jobs:
             exit 1
           fi
 
+          case "${bucket}" in
+            reports) ;;
+            *)
+              echo "Unsupported cleanup bucket: ${bucket}" >&2
+              exit 1
+              ;;
+          esac
+
           {
-            echo "dry_run=${dry_run}"
-            echo "retention_days=${retention_days}"
-            echo "bucket=${bucket}"
+            printf 'dry_run=%s\n' "${dry_run}"
+            printf 'retention_days=%s\n' "${retention_days}"
+            printf 'bucket=%s\n' "${bucket}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Cleanup expired report objects
@@ -120,6 +148,8 @@ jobs:
               )
 
           bucket = (os.environ.get("BUCKET") or "reports").strip()
+          if bucket != "reports":
+              raise SystemExit(f"Unsupported cleanup bucket: {bucket}")
           retention_days = int(os.environ["RETENTION_DAYS"])
           dry_run = (os.environ.get("DRY_RUN") or "true").strip().lower() == "true"
           index_cleanup_enabled = bucket == "reports"
