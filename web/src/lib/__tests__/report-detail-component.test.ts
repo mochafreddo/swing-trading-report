@@ -139,6 +139,7 @@ describe("ReportDetail component", () => {
     expect(html).toContain("Entries (1)");
     expect(html).toContain("AAPL.NASD");
     expect(html).toContain("ENTER");
+    expect(html).toContain("+1.5%");
     expect(html).toContain("2026-02-25.buy.json");
   });
 

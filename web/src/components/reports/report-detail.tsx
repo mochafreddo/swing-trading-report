@@ -13,6 +13,7 @@ import {
   asRecord,
   asRecordArray,
   formatPnlPercent,
+  formatRatioPercent,
   readNumber,
   readNumberLike,
   readString,
@@ -267,16 +268,6 @@ function formatNullableNumber(value: unknown): string {
     return "-";
   }
   return String(parsed);
-}
-
-function formatRatioPercent(value: unknown): string {
-  const parsed = readNumberLike(value);
-  if (parsed === null) {
-    return "-";
-  }
-  const pct = parsed * 100;
-  const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toFixed(1)}%`;
 }
 
 function formatScoreValue(row: ReportJson): string {

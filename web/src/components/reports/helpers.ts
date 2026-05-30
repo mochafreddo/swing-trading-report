@@ -60,14 +60,21 @@ export function readString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-export function formatPnlPercent(value: unknown): string {
-  const pnl = readNumber(value);
-  if (pnl === null) {
+function formatPercentFromRatio(ratio: number | null): string {
+  if (ratio === null) {
     return "-";
   }
-  const pct = pnl * 100;
+  const pct = ratio * 100;
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(1)}%`;
+}
+
+export function formatPnlPercent(value: unknown): string {
+  return formatPercentFromRatio(readNumber(value));
+}
+
+export function formatRatioPercent(value: unknown): string {
+  return formatPercentFromRatio(readNumberLike(value));
 }
 
 export function formatDateLabel(item: ReportListItem): string {
