@@ -971,6 +971,7 @@ def run_entry(
     mode: str | None,
     market: str | None,
     upload: bool = False,
+    report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
     try:
         normalized_provider = _normalize_provider(provider)
@@ -1215,6 +1216,8 @@ def run_entry(
         len(system_issues),
     )
     logger.info("Entry report written to: %s", out_path)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
     try:
         uploaded_key = maybe_upload_report_artifact(
             artifact_path=out_path,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 from . import scan_evaluation, scan_screener
 from .config import Config, load_config, load_watchlist
@@ -171,6 +172,7 @@ def run_scan(
     screener_limit: int | None = None,
     universe: str | None = None,
     markets: str | None = None,
+    report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
     markets_override: list[str] | None = None
@@ -265,6 +267,8 @@ def run_scan(
 
     out_path = _render_scan_report(runtime)
     runtime.logger.info("Buy report written to: %s", out_path)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
     try:
         uploaded_key = maybe_upload_report_artifact(
             artifact_path=out_path,

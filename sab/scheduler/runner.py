@@ -17,7 +17,6 @@ import requests  # type: ignore[import-untyped]
 
 from ..ai_brief import run_ai_brief
 from ..ai_brief_eval_common import parse_iso_offset_datetime
-from ..config import load_config
 from ..data.trading_sessions import is_trading_session
 from ..entry import run_entry
 from ..report.ai_brief_report import validate_ai_brief_artifact
@@ -821,95 +820,85 @@ class ScheduledAiBriefRunner:
                 status="notification_claim_held",
                 session_date=session_date,
             )
-        if require_main_lock and not self._owns_main_lock(
-            main_lock_key=main_lock_key,
-            main_owner_token=main_owner_token,
-        ):
-            self._state_store.release_lock(
-                claim_key,
-                owner_token=notification_owner_token,
-            )
-            return ScheduledAiBriefResult(
-                status="artifact_uploaded_notification_deferred",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
+        try:
+            if require_main_lock and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
 
-        pre_notification_guard = self._guard_resolver(market, self._now_fn())
-        if not _guard_allows_pipeline(pre_notification_guard):
-            self._send_late_alert_once(
+            pre_notification_guard = self._guard_resolver(market, self._now_fn())
+            if not _guard_allows_pipeline(pre_notification_guard):
+                self._send_late_alert_once(
+                    market=market,
+                    session_date=session_date,
+                    reason="pre_notification_guard_failed",
+                    context={
+                        **_guard_context(
+                            market=market,
+                            session_date=session_date,
+                            guard=pre_notification_guard,
+                        ),
+                        "attemptId": attempt_id,
+                        "storageKey": storage_key,
+                    },
+                    now=self._now_fn(),
+                )
+                return ScheduledAiBriefResult(
+                    status="guard_failed_before_notification",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            report = self._storage.download_json(storage_key)
+            validate_ai_brief_artifact(report, now=dt.datetime.now(dt.UTC))
+            if not _is_scheduled_artifact_for_session(
+                report,
                 market=market,
                 session_date=session_date,
-                reason="pre_notification_guard_failed",
-                context={
-                    **_guard_context(
-                        market=market,
-                        session_date=session_date,
-                        guard=pre_notification_guard,
-                    ),
-                    "attemptId": attempt_id,
+                report_date=session_date,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_marker_invalid",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            self._notifier.send_schedule(report=report, storage_key=storage_key)
+            self._state_store.upsert_marker(
+                key=sent_key,
+                payload={
+                    "market": market,
+                    "sessionDate": session_date,
                     "storageKey": storage_key,
+                    "attemptId": attempt_id,
                 },
-                now=self._now_fn(),
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
             )
+            self._state_store.upsert_marker(
+                key=build_scheduler_state_key(
+                    kind="success", market=market, session_date=session_date
+                ),
+                payload={
+                    "market": market,
+                    "sessionDate": session_date,
+                    "storageKey": storage_key,
+                    "attemptId": attempt_id,
+                },
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            )
+            return ScheduledAiBriefResult(
+                status="notification_reconciled",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        finally:
             self._state_store.release_lock(
                 claim_key,
                 owner_token=notification_owner_token,
             )
-            return ScheduledAiBriefResult(
-                status="guard_failed_before_notification",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
-        report = self._storage.download_json(storage_key)
-        validate_ai_brief_artifact(report, now=dt.datetime.now(dt.UTC))
-        if not _is_scheduled_artifact_for_session(
-            report,
-            market=market,
-            session_date=session_date,
-            report_date=session_date,
-        ):
-            self._state_store.release_lock(
-                claim_key,
-                owner_token=notification_owner_token,
-            )
-            return ScheduledAiBriefResult(
-                status="artifact_marker_invalid",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
-        self._notifier.send_schedule(report=report, storage_key=storage_key)
-        self._state_store.upsert_marker(
-            key=sent_key,
-            payload={
-                "market": market,
-                "sessionDate": session_date,
-                "storageKey": storage_key,
-                "attemptId": attempt_id,
-            },
-            ttl_seconds=_SUCCESS_TTL_SECONDS,
-        )
-        self._state_store.upsert_marker(
-            key=build_scheduler_state_key(
-                kind="success", market=market, session_date=session_date
-            ),
-            payload={
-                "market": market,
-                "sessionDate": session_date,
-                "storageKey": storage_key,
-                "attemptId": attempt_id,
-            },
-            ttl_seconds=_SUCCESS_TTL_SECONDS,
-        )
-        self._state_store.release_lock(
-            claim_key,
-            owner_token=notification_owner_token,
-        )
-        return ScheduledAiBriefResult(
-            status="notification_reconciled",
-            session_date=session_date,
-            storage_key=storage_key,
-        )
 
     def _owns_main_lock(
         self,
@@ -1087,15 +1076,12 @@ class ScheduledAiBriefRunner:
             self._state_store.release_lock(claim_key, owner_token=owner_token)
 
 
-def _latest_report(report_dir: str, suffix: str) -> str:
-    paths = sorted(
-        Path(report_dir).glob(f"*.{suffix}.json"),
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
-    if not paths:
-        raise RuntimeError(f"{suffix} report not found under {report_dir}")
-    return paths[0].as_posix()
+def _require_single_report_path(paths: list[str], *, report_type: str) -> str:
+    if len(paths) != 1:
+        raise RuntimeError(
+            f"scheduled {report_type} step reported {len(paths)} artifact paths"
+        )
+    return paths[0]
 
 
 class DefaultScheduledPipeline:
@@ -1110,17 +1096,20 @@ class DefaultScheduledPipeline:
         dry_run: bool,
     ) -> ScheduledPipelineResult:
         del session_date, dry_run
-        cfg = load_config(provider_override="kis", markets_override=[market])
+        buy_report_paths: list[str] = []
         scan_status = run_scan(
             limit=None,
             watchlist_path=None,
             provider="kis",
             universe="both",
             markets=market,
+            report_path_callback=buy_report_paths.append,
         )
         if scan_status != 0:
             raise RuntimeError("scheduled scan failed")
-        buy_report_path = _latest_report(cfg.report_dir, "buy")
+        buy_report_path = _require_single_report_path(
+            buy_report_paths, report_type="buy"
+        )
         holdings_path = (
             Path("data") / "scheduler" / (f"holdings.{market}.{report_date}.yaml")
         )
@@ -1131,6 +1120,7 @@ class DefaultScheduledPipeline:
         entry_guard = _default_guard_snapshot(market, dt.datetime.now(dt.UTC))
         if not _guard_allows_pipeline(entry_guard):
             raise RuntimeError("scheduled pre-open guard failed before entry")
+        entry_report_paths: list[str] = []
         with temporary_holdings_file(holdings_path):
             entry_status = run_entry(
                 buy_report_path=buy_report_path,
@@ -1138,10 +1128,14 @@ class DefaultScheduledPipeline:
                 mode="PRE_OPEN",
                 market=market,
                 upload=False,
+                report_path_callback=entry_report_paths.append,
             )
         if entry_status != 0:
             raise RuntimeError("scheduled entry failed")
-        entry_report_path = _latest_report(cfg.report_dir, "entry")
+        entry_report_path = _require_single_report_path(
+            entry_report_paths, report_type="entry"
+        )
+        ai_brief_report_paths: list[str] = []
         ai_status = run_ai_brief(
             entry_report_path=entry_report_path,
             buy_report_path=buy_report_path,
@@ -1151,11 +1145,15 @@ class DefaultScheduledPipeline:
             source_provider=source_provider,
             report_date=report_date,
             upload=False,
+            report_path_callback=ai_brief_report_paths.append,
         )
         if ai_status != 0:
             raise RuntimeError("scheduled ai-brief failed")
         return ScheduledPipelineResult(
-            ai_brief_report_path=_latest_report(cfg.report_dir, "ai-brief")
+            ai_brief_report_path=_require_single_report_path(
+                ai_brief_report_paths,
+                report_type="ai-brief",
+            )
         )
 
 

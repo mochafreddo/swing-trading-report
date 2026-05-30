@@ -33,6 +33,7 @@ class _FakeStateStore:
     preflight_calls: int = 0
     fail_attempt_upsert: bool = False
     fail_artifact_upsert: bool = False
+    fail_notification_sent_upsert: bool = False
     claim_results: list[bool] = field(default_factory=list)
     renewed_event: threading.Event | None = None
 
@@ -58,6 +59,8 @@ class _FakeStateStore:
             raise RuntimeError("attempt write failed")
         if ":artifact:" in key and self.fail_artifact_upsert:
             raise RuntimeError("artifact write failed")
+        if ":notification:sent:" in key and self.fail_notification_sent_upsert:
+            raise RuntimeError("notification sent write failed")
         self.upserts.append((key, payload))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
@@ -208,6 +211,7 @@ class _FakeStorage:
         }
     )
     fail_upload: bool = False
+    fail_download: bool = False
 
     def upload_ai_brief(self, report_path: str, *, report_date: str) -> str:
         self.uploads.append(report_path)
@@ -222,6 +226,8 @@ class _FakeStorage:
 
     def download_json(self, storage_key: str) -> dict[str, object]:
         self.downloads.append(storage_key)
+        if self.fail_download:
+            raise RuntimeError("download failed")
         return dict(self.payload_by_key.get(storage_key, self.payload))
 
     def list_ai_brief_report_index(self, *, report_date: str) -> list[str]:
@@ -592,6 +598,89 @@ def test_artifact_only_reconciliation_rejects_payload_outside_scheduled_window()
     assert not any(":success:" in key for key, _payload in state.upserts)
 
 
+def test_artifact_only_reconciliation_releases_notification_claim_when_download_fails() -> (
+    None
+):
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        entries={
+            artifact_key: RuntimeStateEntry(
+                state_key=artifact_key,
+                state_payload={
+                    "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                    "market": "US",
+                    "sessionDate": "2026-05-28",
+                    "reportDate": "2026-05-28",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        }
+    )
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        storage=_FakeStorage(fail_download=True),
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    with pytest.raises(RuntimeError, match="download failed"):
+        runner.run(
+            ScheduledAiBriefRequest(
+                market="US",
+                schedule_role="local-retry",
+                runner_role="local-retry",
+                scheduled_tick="0845",
+                attempt_id="attempt-download-fail",
+            )
+        )
+
+    assert storage.downloads == ["2026/05/2026-05-28.ai-brief.json"]
+    assert notifier.sent == []
+    assert any(":notification:claim:" in key for key in state.releases)
+
+
+def test_artifact_only_reconciliation_releases_notification_claim_when_sent_marker_fails() -> (
+    None
+):
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        fail_notification_sent_upsert=True,
+        entries={
+            artifact_key: RuntimeStateEntry(
+                state_key=artifact_key,
+                state_payload={
+                    "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                    "market": "US",
+                    "sessionDate": "2026-05-28",
+                    "reportDate": "2026-05-28",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        },
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        state=state,
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    with pytest.raises(RuntimeError, match="notification sent write failed"):
+        runner.run(
+            ScheduledAiBriefRequest(
+                market="US",
+                schedule_role="local-retry",
+                runner_role="local-retry",
+                scheduled_tick="0845",
+                attempt_id="attempt-sent-marker-fail",
+            )
+        )
+
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
+    assert any(":notification:claim:" in key for key in state.releases)
+
+
 def test_report_index_repair_happens_before_new_pipeline() -> None:
     state = _FakeStateStore()
     storage = _FakeStorage()
@@ -873,15 +962,13 @@ def test_default_pipeline_rechecks_pre_open_guard_before_entry(
 ) -> None:
     entry_calls: list[str] = []
 
-    monkeypatch.setattr(
-        "sab.scheduler.runner.load_config",
-        lambda **_kwargs: type("Config", (), {"report_dir": "reports"})(),
-    )
-    monkeypatch.setattr("sab.scheduler.runner.run_scan", lambda **_kwargs: 0)
-    monkeypatch.setattr(
-        "sab.scheduler.runner._latest_report",
-        lambda _report_dir, suffix: f"reports/2026-05-28.{suffix}.json",
-    )
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/2026-05-28.buy.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
     monkeypatch.setattr(
         "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
         lambda: object(),
@@ -912,6 +999,68 @@ def test_default_pipeline_rechecks_pre_open_guard_before_entry(
         )
 
     assert entry_calls == []
+
+
+def test_default_pipeline_uses_report_paths_returned_by_each_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_buy_paths: list[str] = []
+    ai_brief_inputs: list[dict[str, object]] = []
+
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        entry_buy_paths.append(str(kwargs["buy_report_path"]))
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        ai_brief_inputs.append(dict(kwargs))
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.ai-brief.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner._latest_report",
+        lambda _report_dir, suffix: f"reports/stale.{suffix}.json",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+
+    result = DefaultScheduledPipeline().run(
+        market="US",
+        session_date="2026-05-28",
+        report_date="2026-05-28",
+        source_provider=None,
+        model_provider="fake",
+        dry_run=False,
+    )
+
+    assert entry_buy_paths == ["reports/current.buy.json"]
+    assert ai_brief_inputs[0]["buy_report_path"] == "reports/current.buy.json"
+    assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
+    assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
 @pytest.mark.parametrize(

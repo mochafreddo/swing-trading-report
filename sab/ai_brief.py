@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .ai_brief_eval_common import ALLOWED_MARKETS, normalize_market
@@ -441,6 +441,7 @@ def run_ai_brief(
     source_timeout_seconds: float | None = None,
     report_date: str | None = None,
     upload: bool = False,
+    report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
     try:
         source_api_url_input = str(source_api_url or "").strip() or None
@@ -604,6 +605,8 @@ def run_ai_brief(
         return 1
 
     logger.info("AI brief written to: %s", out_path)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
     try:
         uploaded_key = maybe_upload_report_artifact(
             artifact_path=out_path,
