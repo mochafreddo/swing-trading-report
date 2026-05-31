@@ -343,8 +343,25 @@ def _resolve_feed_url_addrinfos(
     *,
     deadline: float | None,
 ) -> tuple[Any, ...]:
+    return _resolve_feed_addrinfos(
+        hostnames,
+        port,
+        deadline=deadline,
+        field_name="feed URL",
+        timeout_message="feed URL DNS resolution timed out",
+    )
+
+
+def _resolve_feed_addrinfos(
+    hostnames: tuple[str, ...],
+    port: int,
+    *,
+    deadline: float | None,
+    field_name: str,
+    timeout_message: str,
+) -> tuple[Any, ...]:
     if any(url_safety.is_blocked_hostname(hostname) for hostname in hostnames):
-        raise ValueError("feed URL must not target local or private hosts")
+        raise ValueError(f"{field_name} must not target local or private hosts")
     resolution_hostname = hostnames[-1] if hostnames else ""
     try:
         with _feed_dns_pin_lock(deadline):
@@ -354,13 +371,13 @@ def _resolve_feed_url_addrinfos(
                 timeout=_feed_dns_timeout(deadline),
             )
     except TimeoutError as exc:
-        raise _FeedUrlTimeoutError("feed URL DNS resolution timed out") from exc
+        raise _FeedUrlTimeoutError(timeout_message) from exc
     except OSError as exc:
-        raise ValueError("feed URL hostname could not be resolved") from exc
+        raise ValueError(f"{field_name} hostname could not be resolved") from exc
     if not addrinfos:
-        raise ValueError("feed URL hostname could not be resolved")
+        raise ValueError(f"{field_name} hostname could not be resolved")
     if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
-        raise ValueError("feed URL must not target local or private hosts")
+        raise ValueError(f"{field_name} must not target local or private hosts")
     return tuple(addrinfos)
 
 
@@ -706,7 +723,7 @@ def _pin_feed_url_dns(
         lock=SOURCE_DNS_PIN_LOCK,
         deadline=deadline,
         remaining_timeout=_remaining_feed_timeout,
-        timeout_error=lambda: _FeedUrlTimeoutError("feed URL DNS pin lock timed out"),
+        timeout_error=_feed_dns_pin_timeout_error,
         socket_module=socket,
     ):
         yield
@@ -718,9 +735,13 @@ def _feed_dns_pin_lock(deadline: float | None) -> Iterator[None]:
         SOURCE_DNS_PIN_LOCK,
         deadline=deadline,
         remaining_timeout=_remaining_feed_timeout,
-        timeout_error=lambda: _FeedUrlTimeoutError("feed URL DNS pin lock timed out"),
+        timeout_error=_feed_dns_pin_timeout_error,
     ):
         yield
+
+
+def _feed_dns_pin_timeout_error() -> _FeedUrlTimeoutError:
+    return _FeedUrlTimeoutError("feed URL DNS pin lock timed out")
 
 
 def _exception_type_name(exc: BaseException) -> str:
@@ -752,25 +773,13 @@ def _resolve_feed_item_addrinfos(
     *,
     deadline: float | None,
 ) -> tuple[Any, ...]:
-    if any(url_safety.is_blocked_hostname(hostname) for hostname in hostnames):
-        raise ValueError("url must not target local or private hosts")
-    resolution_hostname = hostnames[-1] if hostnames else ""
-    try:
-        with _feed_dns_pin_lock(deadline):
-            addrinfos = _getaddrinfo_with_timeout(
-                resolution_hostname,
-                port,
-                timeout=_feed_dns_timeout(deadline),
-            )
-    except TimeoutError as exc:
-        raise _FeedUrlTimeoutError("feed item URL DNS resolution timed out") from exc
-    except OSError as exc:
-        raise ValueError("url hostname could not be resolved") from exc
-    if not addrinfos:
-        raise ValueError("url hostname could not be resolved")
-    if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
-        raise ValueError("url must not target local or private hosts")
-    return tuple(addrinfos)
+    return _resolve_feed_addrinfos(
+        hostnames,
+        port,
+        deadline=deadline,
+        field_name="url",
+        timeout_message="feed item URL DNS resolution timed out",
+    )
 
 
 def _is_blocked_feed_item_hostname(hostname: str) -> bool:
