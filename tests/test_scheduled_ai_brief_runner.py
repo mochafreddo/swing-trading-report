@@ -185,6 +185,7 @@ class _BlockingPipeline(_FakePipeline):
 @dataclass
 class _FakeStorage:
     uploads: list[str] = field(default_factory=list)
+    skip_uploads: list[str] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     repair_candidates: list[str] = field(default_factory=list)
     payload_by_key: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -211,6 +212,7 @@ class _FakeStorage:
         }
     )
     fail_upload: bool = False
+    fail_skip_upload: bool = False
     fail_download: bool = False
 
     def upload_ai_brief(self, report_path: str, *, report_date: str) -> str:
@@ -223,6 +225,12 @@ class _FakeStorage:
             "generated_at": "2026-05-28T08:15:00-04:00",
         }
         return storage_key
+
+    def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
+        self.skip_uploads.append(report_path)
+        if self.fail_skip_upload:
+            raise RuntimeError("skip upload failed")
+        return f"2026/05/{report_date}.ai-brief-skip.json"
 
     def download_json(self, storage_key: str) -> dict[str, object]:
         self.downloads.append(storage_key)
@@ -785,8 +793,12 @@ def test_runner_rechecks_pre_open_guard_before_upload() -> None:
     )
 
     assert result.status == "guard_failed_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
     assert len(pipeline.calls) == 1
     assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert any(":skip-artifact:US:" in key for key, _payload in state.upserts)
+    assert any(":skip-artifact:claim:US:" in key for key in state.claims)
     assert any(":lock:" in key for key in state.releases)
     assert "pre_upload_guard_failed" in notifier.sent
 
@@ -1109,6 +1121,173 @@ def test_monitor_and_cutoff_do_not_alert_when_trading_session_guard_fails(
     assert storage.uploads == []
     assert notifier.sent == []
     assert not any(":late-alert:" in key for key in state.claims)
+
+
+def test_pipeline_runner_persists_non_trading_guard_skip_artifact() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        guard=_guard(trading_session=False, session_date="2026-05-25"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-non-trading-artifact",
+            run_url="https://github.com/owner/repo/actions/runs/1",
+        )
+    )
+
+    assert result.status == "guard_noop"
+    assert result.storage_key == "2026/05/2026-05-25.ai-brief-skip.json"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert storage.skip_uploads[0].endswith(".ai-brief-skip.json")
+    assert any(":skip-artifact:US:2026-05-25" in key for key, _payload in state.upserts)
+    assert any(":skip-artifact:claim:US:2026-05-25" in key for key in state.claims)
+    assert notifier.sent == []
+
+
+def test_pipeline_runner_reuses_existing_non_trading_guard_skip_artifact() -> None:
+    skip_key = build_scheduler_state_key(
+        kind="skip-artifact", market="US", session_date="2026-05-25"
+    )
+    runner, _state, pipeline, storage, notifier = _runner(
+        state=_FakeStateStore(
+            entries={
+                skip_key: RuntimeStateEntry(
+                    state_key=skip_key,
+                    state_payload={
+                        "storageKey": "2026/05/2026-05-25.ai-brief-skip.json"
+                    },
+                    expires_at="2026-05-27T00:00:00Z",
+                )
+            }
+        ),
+        guard=_guard(trading_session=False, session_date="2026-05-25"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-non-trading-artifact-reuse",
+        )
+    )
+
+    assert result.status == "guard_noop"
+    assert result.storage_key == "2026/05/2026-05-25.ai-brief-skip.json"
+    assert pipeline.calls == []
+    assert storage.skip_uploads == []
+    assert notifier.sent == []
+
+
+def test_pipeline_runner_does_not_write_skip_after_success_marker() -> None:
+    success_key = build_scheduler_state_key(
+        kind="success", market="US", session_date="2026-05-25"
+    )
+    runner, _state, pipeline, storage, notifier = _runner(
+        state=_FakeStateStore(
+            entries={
+                success_key: RuntimeStateEntry(
+                    state_key=success_key,
+                    state_payload={"market": "US", "sessionDate": "2026-05-25"},
+                    expires_at="2026-05-27T00:00:00Z",
+                )
+            }
+        ),
+        guard=_guard(trading_session=False, session_date="2026-05-25"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-non-trading-success",
+        )
+    )
+
+    assert result.status == "success_marker_skip"
+    assert pipeline.calls == []
+    assert storage.skip_uploads == []
+    assert notifier.sent == []
+
+
+def test_pipeline_runner_noops_when_skip_artifact_claim_is_held() -> None:
+    runner, _state, pipeline, storage, notifier = _runner(
+        state=_FakeStateStore(claim_results=[False]),
+        guard=_guard(trading_session=False, session_date="2026-05-25"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-non-trading-claim-held",
+        )
+    )
+
+    assert result.status == "skip_artifact_claim_held"
+    assert pipeline.calls == []
+    assert storage.skip_uploads == []
+    assert notifier.sent == []
+
+
+def test_pipeline_runner_reports_skip_artifact_upload_failure() -> None:
+    runner, _state, pipeline, storage, notifier = _runner(
+        guard=_guard(trading_session=False, session_date="2026-05-25"),
+    )
+    storage.fail_skip_upload = True
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-non-trading-artifact-fail",
+        )
+    )
+
+    assert result.status == "skip_artifact_upload_failed"
+    assert result.storage_key is None
+    assert pipeline.calls == []
+    assert len(storage.skip_uploads) == 1
+    assert notifier.sent == []
+    assert "skip_artifact_upload_failed" in scheduler_runner._FAILED_STATUSES
+    assert any(":skip-artifact:claim:US:2026-05-25" in key for key in _state.releases)
+
+
+def test_pipeline_runner_persists_pre_open_guard_failure_artifact() -> None:
+    runner, _state, pipeline, storage, notifier = _runner(
+        guard=_guard(session_state="INTRADAY"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-pre-open-guard-artifact",
+            run_url="https://github.com/owner/repo/actions/runs/2",
+        )
+    )
+
+    assert result.status == "guard_failed"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert "pre_open_guard_failed" in notifier.sent
 
 
 def test_monitor_only_classifies_local_primary_lock_without_alerting() -> None:

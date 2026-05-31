@@ -463,6 +463,45 @@ def test_upload_report_artifact_indexes_ai_brief_tickers(tmp_path: Path) -> None
     assert b'"tickers": ["AAPL.NAS", "MSFT.NAS"]' in index_payload
 
 
+def test_upload_report_artifact_indexes_ai_brief_skip_artifact(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-05-05.ai-brief-skip.json"
+    report_path.write_text(
+        (
+            '{"schema":"sab.ai_brief_skip.v1","type":"ai_brief_skip",'
+            '"generated_at":"2026-05-05T08:40:00+00:00",'
+            '"summary":{"skip_reason":"non_trading_session"}}'
+        ),
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="ai-brief-skip",
+        report_date=date(2026, 5, 5),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/05/2026-05-05.ai-brief-skip.json"
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert b'"report_type": "ai-brief-skip"' in index_payload
+    assert b'"summary": {"skip_reason": "non_trading_session"}' in index_payload
+    assert b'"tickers": []' in index_payload
+
+
 def test_upload_report_artifact_raises_index_error_when_upsert_fails(
     tmp_path: Path,
 ) -> None:

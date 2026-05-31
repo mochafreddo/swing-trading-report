@@ -249,6 +249,7 @@
     - artifact marker만 있고 notification sent marker가 없으면 report를 재생성하지 않고 Telegram reconciliation만 시도합니다.
     - 강제 재처리는 Supabase `runtime_state` marker 삭제가 필요하므로 먼저 storage object와 Telegram 중복 발송 가능성을 확인합니다.
   - GitHub scheduled job은 US canary 동안 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `github-fallback`도 같은 `runtime_state` lock/artifact/notification marker를 사용합니다.
+  - Pipeline runner가 거래일/세션 runtime guard에서 중단되면 `reports/YYYY-MM-DD(.n).ai-brief-skip.json`을 만들고 Supabase Storage/`report_index`에 `ai-brief-skip` 타입으로 업로드합니다. 이 artifact는 `skip_state=RUNTIME_GUARD_SKIPPED`, `skip_reason`, `session_state`, `expected_state`, `trading_session`, `local_time`, `run_url`을 남기며 정상 `ai-brief` 판단 상태와 분리됩니다. 같은 session date의 중복 skip artifact는 `runtime_state`의 `skip-artifact` marker와 `skip-artifact:claim` lock으로 막습니다.
   - rollback:
     1. launchd job을 `bootout`합니다.
     2. `docker ps`로 실행 중 scheduler container가 없는지 확인합니다.
@@ -296,8 +297,8 @@
 
 ## 파일/경로
 
-- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`(중복 시 `-1`)
-- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`(중복 시 `-1`, `-2`, ...)
+- 로컬 리포트(개발/디버그): `reports/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`, `...ai-brief-skip.json`(중복 시 `-1`)
+- Storage 오브젝트 키(공식 보관): `YYYY/MM/YYYY-MM-DD.buy.json`, `...sell.json`, `...entry.json`, `...ai-brief.json`, `...ai-brief-skip.json`(중복 시 `-1`, `-2`, ...)
 - Storage 업로드 MIME: `contentType=application/json`으로 고정(`reports` 버킷 정책)
 - 키 규칙 구현: `sab/report/storage_key.py`의 `build_report_storage_key`
 - 캐시/상태: `data/`(KIS 토큰, 캔들, 스크리너 캐시)

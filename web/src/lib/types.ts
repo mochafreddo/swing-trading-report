@@ -1,7 +1,13 @@
 export type Provider = "kis" | "pykrx";
 export type ScanUniverse = "KR" | "US" | "both";
 
-export const REPORT_TYPES = ["buy", "sell", "entry", "ai-brief"] as const;
+export const REPORT_TYPES = [
+  "buy",
+  "sell",
+  "entry",
+  "ai-brief",
+  "ai-brief-skip",
+] as const;
 export const REPORT_TYPE_PATTERN = REPORT_TYPES.join("|");
 export type ReportType = (typeof REPORT_TYPES)[number];
 

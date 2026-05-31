@@ -215,6 +215,35 @@ describe("ReportDetail component", () => {
     expect(html).toContain("openai_no_external_sources");
   });
 
+  it("renders AI brief skip guard state without recommendation rows", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief_skip.v1",
+      type: "ai_brief_skip",
+      generated_at: "2026-05-28T13:31:00+00:00",
+      report_date: "2026-05-28",
+      market: "US",
+      skip_state: "RUNTIME_GUARD_SKIPPED",
+      skip_reason: "scheduled_run_after_pre_open_window",
+      session_state: "INTRADAY",
+      expected_state: "PRE_OPEN",
+      trading_session: true,
+      summary: {
+        skip_reason: "scheduled_run_after_pre_open_window",
+      },
+    };
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("skip_state");
+    expect(html).toContain("RUNTIME_GUARD_SKIPPED");
+    expect(html).toContain("skip_reason");
+    expect(html).toContain("scheduled_run_after_pre_open_window");
+    expect(html).toContain("expected_state");
+    expect(html).toContain("PRE_OPEN");
+    expect(html).toContain("AI Brief Skip");
+    expect(html).not.toContain("Recommendations (");
+  });
+
   it("infers AI brief state for legacy artifacts without explicit fields", () => {
     const detail: ReportJson = {
       schema: "sab.ai_brief.v1",

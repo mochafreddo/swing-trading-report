@@ -20,6 +20,10 @@ from ..ai_brief_eval_common import parse_iso_offset_datetime
 from ..data.trading_sessions import is_trading_session
 from ..entry import run_entry
 from ..report.ai_brief_report import validate_ai_brief_artifact
+from ..report.ai_brief_skip_report import (
+    AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
+    write_ai_brief_skip_report,
+)
 from ..report.notification_text import (
     build_ai_brief_slack_summary_text,
     build_ai_brief_telegram_report_text,
@@ -52,6 +56,7 @@ _LOCK_TTL_SECONDS = 25 * 60
 _LOCK_RENEW_INTERVAL_SECONDS = 5 * 60
 _NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
 _LATE_ALERT_CLAIM_TTL_SECONDS = 10 * 60
+_SKIP_ARTIFACT_CLAIM_TTL_SECONDS = 10 * 60
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
 _ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
 _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
@@ -64,6 +69,7 @@ _FAILED_STATUSES = {
     "upload_failed",
     "artifact_marker_failed",
     "artifact_marker_invalid",
+    "skip_artifact_upload_failed",
 }
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +122,10 @@ class ScheduledPipelineResult:
     ai_brief_report_path: str
 
 
+class _SkipArtifactClaimHeld(RuntimeError):
+    """Raised when another runner is already persisting the skip artifact."""
+
+
 class SchedulerStateStore(Protocol):
     def preflight(self) -> None: ...
 
@@ -166,6 +176,8 @@ class SchedulerPipeline(Protocol):
 
 class SchedulerStorage(Protocol):
     def upload_ai_brief(self, report_path: str, *, report_date: str) -> str: ...
+
+    def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str: ...
 
     def download_json(self, storage_key: str) -> dict[str, object]: ...
 
@@ -241,6 +253,13 @@ def _attempt_prefix(
 ) -> str:
     base = f"scheduled-ai-brief:attempt:{market}:{session_date}"
     return f"{base}:{runner_role}:" if runner_role else f"{base}:"
+
+
+def _runtime_state_storage_key(entry: RuntimeStateEntry | None) -> str | None:
+    if entry is None:
+        return None
+    storage_key = str(entry.state_payload.get("storageKey") or "").strip()
+    return storage_key or None
 
 
 def _parse_artifact_generated_at(value: object) -> dt.datetime | None:
@@ -447,6 +466,53 @@ class ScheduledAiBriefRunner:
         if request.dry_run:
             return ScheduledAiBriefResult(status="dry_run", session_date=session_date)
         if not guard.trading_session:
+            if runner_role in _PIPELINE_RUNNER_ROLES:
+                success_key = build_scheduler_state_key(
+                    kind="success", market=market, session_date=session_date
+                )
+                if self._state_store.get_entry(success_key) is not None:
+                    return ScheduledAiBriefResult(
+                        status="success_marker_skip",
+                        session_date=session_date,
+                    )
+                artifact_key = build_scheduler_state_key(
+                    kind="artifact", market=market, session_date=session_date
+                )
+                artifact_entry = self._state_store.get_entry(artifact_key)
+                if artifact_entry is not None:
+                    return self._reconcile_notification(
+                        market=market,
+                        session_date=session_date,
+                        schedule_role=schedule_role,
+                        runner_role=runner_role,
+                        attempt_id=attempt_id,
+                        artifact_entry=artifact_entry,
+                        require_main_lock=False,
+                        main_lock_key=None,
+                        main_owner_token=None,
+                    )
+                try:
+                    skip_key = self._persist_runtime_guard_skip(
+                        market=market,
+                        session_date=session_date,
+                        guard=guard,
+                        run_url=request.run_url,
+                    )
+                except _SkipArtifactClaimHeld:
+                    return ScheduledAiBriefResult(
+                        status="skip_artifact_claim_held",
+                        session_date=session_date,
+                    )
+                except Exception:
+                    return ScheduledAiBriefResult(
+                        status="skip_artifact_upload_failed",
+                        session_date=session_date,
+                    )
+                return ScheduledAiBriefResult(
+                    status="guard_noop",
+                    session_date=session_date,
+                    storage_key=skip_key,
+                )
             return ScheduledAiBriefResult(
                 status="guard_noop", session_date=session_date
             )
@@ -545,6 +611,34 @@ class ScheduledAiBriefRunner:
             )
 
         if not _guard_allows_pipeline(guard):
+            try:
+                skip_key = self._persist_runtime_guard_skip(
+                    market=market,
+                    session_date=session_date,
+                    guard=guard,
+                    run_url=request.run_url,
+                )
+            except _SkipArtifactClaimHeld:
+                return ScheduledAiBriefResult(
+                    status="skip_artifact_claim_held",
+                    session_date=session_date,
+                )
+            except Exception:
+                self._send_late_alert_once(
+                    market=market,
+                    session_date=session_date,
+                    reason="pre_open_guard_failed",
+                    context=_guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=guard,
+                    ),
+                    now=now,
+                )
+                return ScheduledAiBriefResult(
+                    status="skip_artifact_upload_failed",
+                    session_date=session_date,
+                )
             self._send_late_alert_once(
                 market=market,
                 session_date=session_date,
@@ -559,6 +653,7 @@ class ScheduledAiBriefRunner:
             return ScheduledAiBriefResult(
                 status="guard_failed",
                 session_date=session_date,
+                storage_key=skip_key,
             )
 
         self._notifier.require_telegram()
@@ -643,6 +738,36 @@ class ScheduledAiBriefRunner:
             )
         pre_upload_guard = self._guard_resolver(market, self._now_fn())
         if not _guard_allows_pipeline(pre_upload_guard):
+            try:
+                skip_key = self._persist_runtime_guard_skip(
+                    market=market,
+                    session_date=session_date,
+                    guard=pre_upload_guard,
+                    run_url=request.run_url,
+                )
+            except _SkipArtifactClaimHeld:
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
+                return ScheduledAiBriefResult(
+                    status="skip_artifact_claim_held",
+                    session_date=session_date,
+                )
+            except Exception:
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
+                self._send_late_alert_once(
+                    market=market,
+                    session_date=session_date,
+                    reason="pre_upload_guard_failed",
+                    context=_guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=pre_upload_guard,
+                    ),
+                    now=self._now_fn(),
+                )
+                return ScheduledAiBriefResult(
+                    status="skip_artifact_upload_failed",
+                    session_date=session_date,
+                )
             self._state_store.release_lock(lock_key, owner_token=owner_token)
             self._send_late_alert_once(
                 market=market,
@@ -658,6 +783,7 @@ class ScheduledAiBriefRunner:
             return ScheduledAiBriefResult(
                 status="guard_failed_before_upload",
                 session_date=session_date,
+                storage_key=skip_key,
             )
 
         try:
@@ -749,6 +875,96 @@ class ScheduledAiBriefRunner:
             )
         return result
 
+    def _persist_runtime_guard_skip(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        guard: GuardSnapshot,
+        run_url: str,
+    ) -> str:
+        skip_artifact_key = build_scheduler_state_key(
+            kind="skip-artifact",
+            market=market,
+            session_date=session_date,
+        )
+        existing_storage_key = _runtime_state_storage_key(
+            self._state_store.get_entry(skip_artifact_key)
+        )
+        if existing_storage_key:
+            return existing_storage_key
+
+        claim_key = build_scheduler_state_key(
+            kind="skip-artifact:claim",
+            market=market,
+            session_date=session_date,
+        )
+        owner_token = f"skip-artifact-{uuid.uuid4().hex}"
+        now = self._now_fn()
+        claim = self._state_store.claim_lock(
+            key=claim_key,
+            owner_token=owner_token,
+            ttl_seconds=_SKIP_ARTIFACT_CLAIM_TTL_SECONDS,
+            now=now,
+            payload={
+                "market": market,
+                "sessionDate": session_date,
+                "skipState": AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            existing_storage_key = _runtime_state_storage_key(
+                self._state_store.get_entry(skip_artifact_key)
+            )
+            if existing_storage_key:
+                return existing_storage_key
+            raise _SkipArtifactClaimHeld("skip artifact claim is held")
+
+        try:
+            existing_storage_key = _runtime_state_storage_key(
+                self._state_store.get_entry(skip_artifact_key)
+            )
+            if existing_storage_key:
+                return existing_storage_key
+            report_path = write_ai_brief_skip_report(
+                report_dir="reports",
+                market=market,
+                session_date=session_date,
+                session_state=guard.session_state,
+                expected_state="PRE_OPEN",
+                trading_session=guard.trading_session,
+                local_time=guard.local_time,
+                run_url=run_url,
+                source="scheduled-runtime-guard",
+                now=now,
+            )
+            storage_key = self._storage.upload_ai_brief_skip(
+                report_path,
+                report_date=session_date,
+            )
+            self._state_store.upsert_marker(
+                key=skip_artifact_key,
+                payload={
+                    "storageKey": storage_key,
+                    "market": market,
+                    "sessionDate": session_date,
+                    "skipState": AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
+                    "skipReason": "runtime_guard_skipped",
+                    "runUrl": run_url,
+                },
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+            return storage_key
+        except Exception as exc:
+            _LOGGER.exception(
+                "scheduled AI brief skip artifact upload failed: %s",
+                exc,
+            )
+            raise
+        finally:
+            self._state_store.release_lock(claim_key, owner_token=owner_token)
+
     def _reconcile_notification(
         self,
         *,
@@ -790,7 +1006,7 @@ class ScheduledAiBriefRunner:
             )
 
         self._notifier.require_telegram()
-        storage_key = str(artifact_entry.state_payload.get("storageKey") or "").strip()
+        storage_key = _runtime_state_storage_key(artifact_entry)
         if not storage_key:
             return ScheduledAiBriefResult(
                 status="artifact_marker_invalid",
@@ -1173,6 +1389,14 @@ class DefaultScheduledStorage:
         return upload_report_artifact(
             local_path=report_path,
             run_type="ai-brief",
+            report_date=dt.date.fromisoformat(report_date),
+            config=self._config,
+        )
+
+    def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
+        return upload_report_artifact(
+            local_path=report_path,
+            run_type="ai-brief-skip",
             report_date=dt.date.fromisoformat(report_date),
             config=self._config,
         )

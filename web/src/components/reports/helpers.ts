@@ -1,19 +1,11 @@
-import type { ReportListItem } from "@/lib/types";
+import { isReportType, type ReportListItem } from "@/lib/types";
 
 import type { ReportJson, ReportsFilterType } from "./types";
 
 export { readApiError } from "@/lib/error-utils";
 
 export function parseReportType(value: string | null): ReportsFilterType {
-  if (
-    value === "buy" ||
-    value === "sell" ||
-    value === "entry" ||
-    value === "ai-brief"
-  ) {
-    return value;
-  }
-  return "all";
+  return isReportType(value) ? value : "all";
 }
 
 export function asRecord(value: unknown): ReportJson | null {

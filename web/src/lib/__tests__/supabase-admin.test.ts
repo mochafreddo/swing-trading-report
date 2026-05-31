@@ -131,43 +131,59 @@ describe("fetchReportIndexPage", () => {
     expect(result.nextCursor).toBeNull();
   });
 
-  it("accepts AI brief report index rows", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      reportIndexResponse(
-        [
-          {
-            report_key: "2026/05/2026-05-05.ai-brief.json",
-            report_type: "ai-brief",
-            report_date: "2026-05-05",
-            duplicate_index: 0,
-            generated_at: "2026-05-05T00:00:00Z",
-            summary: { recommendation_count: 1 },
-            tickers: ["AAPL.NAS"],
-            tickers_hydrated: true,
-          },
-        ],
-        1,
-      ),
-    );
+  it.each([
+    {
+      key: "2026/05/2026-05-05.ai-brief.json",
+      type: "ai-brief" as const,
+      summary: { recommendation_count: 1 },
+      tickers: ["AAPL.NAS"],
+    },
+    {
+      key: "2026/05/2026-05-05.ai-brief-skip.json",
+      type: "ai-brief-skip" as const,
+      summary: { skip_reason: "non_trading_session" },
+      tickers: [],
+    },
+  ])(
+    "accepts $type report index rows",
+    async ({ key, type, summary, tickers }) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        reportIndexResponse(
+          [
+            {
+              report_key: key,
+              report_type: type,
+              report_date: "2026-05-05",
+              duplicate_index: 0,
+              generated_at: "2026-05-05T00:00:00Z",
+              summary,
+              tickers,
+              tickers_hydrated: true,
+            },
+          ],
+          1,
+        ),
+      );
 
-    const result = await fetchReportIndexPage({
-      type: "ai-brief",
-      limit: 10,
-    });
+      const result = await fetchReportIndexPage({
+        type,
+        limit: 10,
+      });
 
-    expect(result.items).toEqual([
-      {
-        report_key: "2026/05/2026-05-05.ai-brief.json",
-        report_type: "ai-brief",
-        report_date: "2026-05-05",
-        duplicate_index: 0,
-        generated_at: "2026-05-05T00:00:00Z",
-        summary: { recommendation_count: 1 },
-        tickers: ["AAPL.NAS"],
-        tickers_hydrated: true,
-      },
-    ]);
-  });
+      expect(result.items).toEqual([
+        {
+          report_key: key,
+          report_type: type,
+          report_date: "2026-05-05",
+          duplicate_index: 0,
+          generated_at: "2026-05-05T00:00:00Z",
+          summary,
+          tickers,
+          tickers_hydrated: true,
+        },
+      ]);
+    },
+  );
 
   it("uses keyset pagination without exact count when includeTotal is false", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(

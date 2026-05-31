@@ -312,10 +312,16 @@ export function ReportDetail({
   const isEntryReport = reportType === "entry";
   const isAiBriefReport =
     reportType === "ai_brief" || reportType === "ai-brief";
+  const isAiBriefSkipReport =
+    reportType === "ai_brief_skip" || reportType === "ai-brief-skip";
   const strategyMode = readString(detail?.strategy_mode);
   const evalContext = asRecord(detail?.eval_context);
   const evalMarket = readString(evalContext?.market);
   const evalSessionState = readString(evalContext?.session_state);
+  const skipSessionState = readString(detail?.session_state);
+  const expectedState = readString(detail?.expected_state);
+  const skipState = readString(detail?.skip_state);
+  const skipReason = readString(detail?.skip_reason);
   const sourceBuyReport = readString(detail?.source_buy_report);
   const sourceEntryReport = readString(detail?.source_entry_report);
   const aiBriefMarket = readString(detail?.market);
@@ -445,6 +451,18 @@ export function ReportDetail({
                 <dd>{aiBriefState?.reason ?? "-"}</dd>
               </div>
             )}
+            {isAiBriefSkipReport && (
+              <div>
+                <dt>skip_state</dt>
+                <dd>{skipState ?? "-"}</dd>
+              </div>
+            )}
+            {isAiBriefSkipReport && (
+              <div>
+                <dt>skip_reason</dt>
+                <dd>{skipReason ?? "-"}</dd>
+              </div>
+            )}
             <div>
               <dt>strategy_mode</dt>
               <dd>{strategyMode ?? "-"}</dd>
@@ -455,8 +473,14 @@ export function ReportDetail({
             </div>
             <div>
               <dt>session_state</dt>
-              <dd>{evalSessionState ?? "-"}</dd>
+              <dd>{evalSessionState ?? skipSessionState ?? "-"}</dd>
             </div>
+            {isAiBriefSkipReport && (
+              <div>
+                <dt>expected_state</dt>
+                <dd>{expectedState ?? "-"}</dd>
+              </div>
+            )}
             {isEntryReport && (
               <div>
                 <dt>source_buy_report</dt>
@@ -525,6 +549,12 @@ export function ReportDetail({
             <p className={styles.infoNote}>
               AI Brief는 entry 리포트의 ENTER 후보를 모델 provider로 요약한 수동
               검토용 결과입니다.
+            </p>
+          )}
+          {isAiBriefSkipReport && (
+            <p className={styles.infoNote}>
+              AI Brief Skip은 scheduled 실행이 runtime guard에서 중단된 이력을
+              기록한 운영용 결과입니다.
             </p>
           )}
 

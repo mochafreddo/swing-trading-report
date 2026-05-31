@@ -4,7 +4,13 @@ import re
 from datetime import date
 from typing import Final
 
-REPORT_RUN_TYPES: Final[tuple[str, ...]] = ("buy", "sell", "entry", "ai-brief")
+REPORT_RUN_TYPES: Final[tuple[str, ...]] = (
+    "buy",
+    "sell",
+    "entry",
+    "ai-brief",
+    "ai-brief-skip",
+)
 REPORT_RUN_TYPE_PATTERN: Final[str] = (
     "(?:" + "|".join(re.escape(run_type) for run_type in REPORT_RUN_TYPES) + ")"
 )
