@@ -27,7 +27,9 @@
 ## 설치/준비
 
 - uv 설치: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv lock -U && UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+- 의존성 동기화: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
+- 잠금 파일 갱신(필요할 때만): `UV_CACHE_DIR=.uv-cache uv lock`
+- 의존성 버전 상향(업그레이드 목적일 때만): `UV_CACHE_DIR=.uv-cache uv lock --upgrade`
 - (선택) 반복 명령 실행기: `just --list`
 - toolchain 동기화: `mise install` (도구 버전 변경 시 `mise lock --platform linux-x64,macos-arm64 && mise install`)
   - (선택) direnv 사용:
@@ -36,7 +38,9 @@
     - 기본값은 `.envrc`에서 관리, 개인 오버라이드는 `.envrc.local` 사용(`.envrc.local.example` 참고)
     - `.env`는 direnv가 아니라 애플리케이션(`sab`)이 로드
   - 설정:
-    - `config.yaml` 생성:
+    - `config.yaml` 확인:
+      - 이 저장소는 기본 `config.yaml`을 버전관리에 포함합니다.
+      - 다른 엔드포인트/임계치를 쓰는 로컬 실험은 `config.local.yaml` + `SAB_CONFIG=config.local.yaml`처럼 분리합니다.
       - 권장 샘플은 `config.example.yaml` 참고
       - 생략/invalid mode의 런타임 폴백은 하위 호환 기본값 사용
     - `.env`에는 v1.1 필수 키를 작성:
@@ -261,8 +265,8 @@
   - Job:
     - `workflow_audit`: `rhysd/actionlint`로 워크플로 YAML 정합성 검사
     - `security_audit`: `aquasecurity/trivy-action`으로 `vuln,secret` 통합 검사
-  - 차단 기준: `HIGH,CRITICAL` 발견 시 실패(`ignore-unfixed=true`)
-  - 산출물: `trivy-results.json` 아티팩트(성공/실패와 무관하게 업로드)
+  - 차단 기준: `HIGH,CRITICAL` 발견 시 실패(`ignore-unfixed=false`)
+  - 산출물: `trivy-gate-results-<run_id>` / `trivy-report-results-<run_id>` 아티팩트(성공/실패와 무관하게 업로드)
 - 로컬 CLI 업로드(선택)
   - 기본은 로컬 파일 생성만 수행합니다.
   - `scan`/`sell`을 로컬에서 Supabase로 올리려면 `SAB_UPLOAD_REPORTS=true`를 설정합니다.
@@ -274,7 +278,7 @@
 - 빠른 점검:
   - `trivy fs .`
 - CI 동일 정책 점검:
-  - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --format json --output trivy-results.json .`
+  - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed=false --format json --output trivy-gate-results.json .`
 - 취약점 예외:
   - `.trivyignore`에 임시 예외만 등록
   - 항목별 만료일/사유 주석 필수

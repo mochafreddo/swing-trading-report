@@ -1,4 +1,4 @@
-# Swing Trading Report (KR, On-Demand)
+# Swing Trading Report (KR/US, On-Demand)
 
 상태: Accepted (프로젝트 진입점)
 
@@ -8,7 +8,7 @@
 
 - 로컬 UI: Next.js(로컬 Docker)
 - 데이터: Supabase(Postgres/Storage) - 보유 목록/리포트/실행 이력
-- 자동 실행: GitHub Actions `schedule` (자동 실행일 때만 알림 전송)
+- 자동 실행: GitHub Actions `schedule`(scan/sell) + 로컬 Docker primary(scheduled AI Brief)
   - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보) 전송
   - 슬랙: 기존 요약 포맷 유지
 
@@ -16,13 +16,24 @@
 
 상세 문서 인덱스는 [docs/README.md](docs/README.md), 배경/요구사항은 [docs/PRD.md](docs/PRD.md)를 참고하세요.
 
+## 어디서부터 읽을까
+
+| 질문 | 시작점 |
+| --- | --- |
+| 로컬에서 바로 실행하려면? | 이 README의 [Quickstart](#quickstart-uv-기반), [웹 UI 빠른 시작](#4-웹-ui-빠른-시작) |
+| 개발/커밋/검증 흐름은? | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 시스템 구조와 데이터 흐름은? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 운영 중 장애를 보면? | [docs/runbook.md](docs/runbook.md)의 문제 해결/장애 참조 |
+| 전략 신호와 리스크 규칙은? | [docs/STRATEGY.md](docs/STRATEGY.md) |
+| 환경변수와 시크릿은? | [.env.example](.env.example), [docs/config-reference.md](docs/config-reference.md), [SECURITY.md](SECURITY.md) |
+
 ## 한눈에 보기
 
 - `sab scan`: KR/US 후보를 수집하고 buy 리포트를 생성합니다.
 - `sab sell`: 보유 종목을 매도/점검 규칙으로 평가합니다.
 - `sab entry`: buy 리포트 후보를 다음 세션 진입 관점으로 재평가합니다.
 - `sab ai-brief`: entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약합니다.
-- 결과물: `reports/YYYY-MM-DD(-n).{buy|sell|entry}.json`, `reports/YYYY-MM-DD(-n).ai-brief.json`
+- 결과물: `reports/YYYY-MM-DD(-n).{buy|sell|entry}.json`, `reports/YYYY-MM-DD(-n).ai-brief.json`, scheduled guard skip 시 `reports/YYYY-MM-DD(-n).ai-brief-skip.json`
 - GitHub Actions: `scan.yml`/`sell.yml` 자동·수동 실행, `ai-brief.yml` 수동 artifact 생성 + 알림 발송(scheduled AI Brief는 로컬 Docker primary, GitHub은 US canary monitor/fallback — ADR-0012)
 - 로컬 UI: `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 
@@ -105,7 +116,7 @@
   - `NAVER_CLIENT_ID=...`
   - `NAVER_CLIENT_SECRET=...`
   - scheduled `ai-brief.yml`에서 KR 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`와 secrets `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`을 설정
-- 전체 키 목록/설명은 `.env.example`을 참고하세요.
+- 런타임 시크릿과 주요 환경변수 설명은 `.env.example`을 참고하세요. 전체 env/config override reference는 `docs/config-reference.md`에 둡니다. 비시크릿 전략/스크리너/캐시 설정은 기본적으로 `config.yaml`에 둡니다.
 
 ### 3. 핵심 실행
 
@@ -419,12 +430,12 @@
 - 감사 정책:
   - 엔진: Trivy(`vuln,secret`)
   - 차단 심각도: `HIGH,CRITICAL`
-  - 미패치 취약점: `ignore-unfixed=true`
-  - 결과물: `trivy-results.json` 아티팩트 업로드(성공/실패 모두)
+  - 미패치 취약점도 차단 대상에 포함(`ignore-unfixed=false`)
+  - 결과물: `trivy-gate-results-<run_id>` / `trivy-report-results-<run_id>` 아티팩트 업로드(성공/실패 모두)
 - 로컬 수동 점검:
   - 빠른 점검: `trivy fs .`
   - CI 동일 정책 점검:
-    - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --format json --output trivy-results.json .`
+    - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed=false --format json --output trivy-gate-results.json .`
 - 취약점 예외는 `.trivyignore`에서 관리합니다.
   - 임시 예외만 허용
   - 각 항목에 만료일/사유 주석 필수
@@ -447,7 +458,7 @@
   - Web: `web/package.json`, `web/pnpm-lock.yaml`
   - CI/런타임: `.github/workflows/*.yml`, `docker-compose.yml`, `web/Dockerfile`, `web/Dockerfile.dev`
 - 안정성 우선 정책:
-  - `.pre-commit-config.yaml`은 Renovate 업데이트 대상에서 제외
+  - `.pre-commit-config.yaml`도 Renovate 관리 대상이며, control-plane 변경은 수동 검토 대상으로 둠
   - 잠금 파일 유지보수 PR(lock file maintenance)은 자동 머지를 비활성화
   - 메이저 업데이트 PR에는 `major` 라벨을 추가
 
@@ -461,7 +472,7 @@
 - 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
 - GitHub Actions `ai-brief.yml`의 수동 `workflow_dispatch`는 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in으로 Telegram/Slack 알림을 발송할 수 있습니다. scheduled 실행은 ADR-0012에 따라 로컬 Docker primary가 담당하고, `ai-brief.yml` 스케줄은 US canary monitor/fallback 역할만 수행합니다(상세: `docs/runbook.md`, `docs/ARCHITECTURE.md`). source provider(`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`)는 수동 `source_provider=...` 입력 또는 시장별 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`로 선택하며, provider별 secret·시장 제약(US/KR-only)·`AI_BRIEF_SOURCE_API_TOKEN` 전달 조건·scheduled fallback 순서는 위 "설정 파일 원칙과 `.env`"·"실행/입력 정책" 절과 `docs/ARCHITECTURE.md`·`docs/runbook.md`를 참고하세요.
-- 새 AI Brief artifact는 `brief_state`/`brief_reason`을 포함합니다. Telegram/Slack과 Reports 상세는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 상태를 같은 규칙으로 표시하고, scheduled runtime guard가 막은 실행은 Reports artifact 없이 Actions summary와 skipped Telegram 메시지만 남깁니다. 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
+- 새 AI Brief artifact는 `brief_state`/`brief_reason`을 포함합니다. Telegram/Slack과 Reports 상세는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 상태를 같은 규칙으로 표시합니다. scheduled runtime guard가 막은 실행은 정상 `ai-brief`와 분리된 `ai-brief-skip` Reports artifact와 skipped Telegram 메시지를 남깁니다. 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
 - RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교하며, provider별 `duration_ms`를 함께 남깁니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
 
 ### 실험

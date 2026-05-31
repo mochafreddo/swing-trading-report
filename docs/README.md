@@ -15,9 +15,23 @@
 | 실행·디버그·장애 대응(운영) | [런북](runbook.md) |
 | 시스템 구조·컴포넌트·데이터 흐름 | [아키텍처](ARCHITECTURE.md) |
 | 신호/리스크 전략 로직 | [전략](STRATEGY.md) |
-| 환경변수·시크릿 설정 | [`.env.example`](../.env.example), [보안 정책](../SECURITY.md) |
+| 환경변수·시크릿 설정 | [`.env.example`](../.env.example), [config/env reference](config-reference.md), [보안 정책](../SECURITY.md) |
 | KIS 데이터 연동 설정 | [KIS 설정 가이드](kis-setup.md) |
 | 현재 저장소 계약(스토리지/인덱스/런타임 상태) | [Spec v1.1](spec-v1.1.md) |
+
+## 문서 지도
+
+새 문서를 만들기 전에 아래 기존 문서에 넣을 수 있는지 먼저 확인합니다. 이 저장소는 문서를 잘게 나누기보다, 유지보수자가 바로 찾을 수 있는 소수의 진입점을 유지합니다.
+
+| 역할 | 현재 위치 | 비고 |
+| --- | --- | --- |
+| Getting started / local setup | [프로젝트 README](../README.md), [기여 가이드](../CONTRIBUTING.md) | 빠른 실행은 README, 개발 검증 흐름은 CONTRIBUTING |
+| Development guide | [기여 가이드](../CONTRIBUTING.md), [에이전트 작업 지침](../AGENTS.md) | 사람 기여자는 CONTRIBUTING, 자동화 에이전트는 AGENTS |
+| Architecture | [아키텍처](ARCHITECTURE.md), [ADR 인덱스](adr/README.md) | 현재 구조는 ARCHITECTURE, 결정 이력은 ADR |
+| Deployment / operations | [런북](runbook.md), [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md) | 로컬 Docker, GitHub Actions, Supabase 운영 절차 |
+| Troubleshooting | [런북](runbook.md#문제-해결), [컴포넌트별 빠른 장애 참조](runbook.md#컴포넌트별-빠른-장애-참조) | 장애 시작점은 runbook으로 통일 |
+| Config / env reference | [config/env reference](config-reference.md), [`.env.example`](../.env.example) | 전체 override 표는 reference, 시크릿 템플릿은 `.env.example` |
+| Strategy logic | [전략](STRATEGY.md) | 신호/리스크 로직 변경 시 함께 갱신 |
 
 ## 문서 상태
 
@@ -50,6 +64,7 @@
 - [Spec v1.1 현재 계약](spec-v1.1.md)
 - [KIS 설정 가이드](kis-setup.md)
 - [holdings.yaml 스키마](holdings-schema.md)
+- [config/env reference](config-reference.md)
 - [main 브랜치 보호 운영 가이드](governance/main-branch-protection.md)
 
 ## 저장소 운영 문서

@@ -23,6 +23,8 @@
 
 ### 기본 품질 체크
 
+- [ ] `just quality` (Python-only 변경 권장)
+- [ ] `just ci-web` (`web/` 변경 권장)
 - [ ] `UV_CACHE_DIR=.uv-cache uv run ruff check .`
 - [ ] `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
 - [ ] `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
@@ -37,6 +39,8 @@
 - [ ] `PRE_COMMIT_HOME=.pre-commit-cache UV_CACHE_DIR=.uv-cache uv run pre-commit run --all-files`
 - [ ] `pnpm --dir web run lint` (`web/` 변경 시)
 - [ ] `pnpm --dir web run format:check` (`web/` 변경 시)
+- [ ] `pnpm --dir web run typecheck` (`web/` route/API/type 변경 시)
+- [ ] `pnpm --dir web run test:coverage` (`web/` 동작 변경 시)
 
 ### 검증 결과 요약
 

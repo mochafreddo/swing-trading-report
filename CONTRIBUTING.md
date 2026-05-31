@@ -24,6 +24,7 @@ Use the same toolchain below to reproduce local and CI behavior.
 - Python 3.14+
 - `uv`
 - (웹 변경 시) Node.js + `pnpm`
+- 권장: `mise install`로 `mise.toml`/`mise.lock`에 고정된 Python, uv, Node.js, pnpm, just 버전을 맞춥니다.
 
 표준 의존성 동기화 명령:
 
@@ -53,6 +54,20 @@ UV_CACHE_DIR=.uv-cache uv lock --upgrade
 
 커밋 전에 아래 검증을 순서대로 실행하는 것을 권장합니다.  
 Run these checks before committing to avoid CI-only failures.
+
+Python-only 변경의 기본 게이트:
+
+```bash
+just quality
+```
+
+웹 변경의 기본 게이트:
+
+```bash
+just ci-web
+```
+
+직접 실행이 필요하면 아래 명령을 사용합니다.
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run ruff check .
@@ -174,12 +189,15 @@ Documentation changes should follow the same consistency standards as code chang
   - 버전 스펙/계획: `spec-vX.Y*.md`, `plan-vX.Y.md`
 - 문서 추가/이동 시 관련 인덱스 링크를 함께 갱신합니다.
 
-## Public API / Interface / Type 변경 사항
+## 9) Public API / Interface / Type 변경 기준
 
-- 이 기여 가이드 추가는 코드 레벨 Public API/인터페이스/타입 변경을 포함하지 않습니다.
-- 문서 인터페이스 변경만 발생합니다: `CONTRIBUTING.md` 신규 추가.
+Public API, CLI 옵션, 리포트 JSON 스키마, Supabase 스키마, 웹 API route, 환경변수, 설정 키가 바뀌면 PR 본문에 영향 범위와 마이그레이션/호환성 판단을 적습니다.
 
-## 문서 검증 체크리스트 (Validation Scenarios)
+- CLI/리포트/전략 계약 변경: `README.md`, `docs/STRATEGY.md`, `docs/ARCHITECTURE.md`, 관련 테스트를 함께 확인합니다.
+- Supabase/운영 변경: `docs/runbook.md`, `docs/spec-v1.1.md`, migration/CI 영향 범위를 함께 확인합니다.
+- 웹 API/UI 변경: `README.md`의 웹 UI 설명, route/static check, web lint/typecheck/test/build 흐름을 함께 확인합니다.
+
+## 10) 문서 검증 체크리스트 (Validation Scenarios)
 
 아래 체크를 통과하면 문서 목적을 충족한 것으로 봅니다.  
 Use this checklist to validate that the guide is complete and actionable.
