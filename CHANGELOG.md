@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.33.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.3...v1.33.0) (2026-05-31)
+
+
+### Features
+
+* **ai-brief:** runtime guard skip 아티팩트 저장 ([9b0009d](https://github.com/mochafreddo/swing-trading-report/commit/9b0009d1bf0cfffd800939bf70a9f40f67dfbbf3))
+* **scheduler:** 로컬 Docker AI Brief 스케줄러 구현 ([d538546](https://github.com/mochafreddo/swing-trading-report/commit/d538546464a613a9b595f42908feaa4f555ecb1c))
+
+
+### Bug Fixes
+
+* **calendar:** KR 휴장일 현재연도 보강 누락 수정 ([24ffe27](https://github.com/mochafreddo/swing-trading-report/commit/24ffe277f59e840ac06b1c4817035223658d9d70))
+* **ci:** cleanup 워크플로 입력 검증 강화 ([898af8a](https://github.com/mochafreddo/swing-trading-report/commit/898af8ab43e3182f933a68a24672a35268d11596))
+* **entry:** 치명적 가격 누락 리포트 업로드 방지 ([97d0c7e](https://github.com/mochafreddo/swing-trading-report/commit/97d0c7e20e9e03683719a12ea65fe9a076445b37))
+* **report:** 잘못된 리포트 JSON 업로드 차단 ([4b80c47](https://github.com/mochafreddo/swing-trading-report/commit/4b80c471570bb96ddede75e147df66567aabd430))
+* **scan:** KR KIS 스크리너 장애 시 평가 계속 ([8f4eae1](https://github.com/mochafreddo/swing-trading-report/commit/8f4eae10779ed0bac95ff693b1267cb63102a152))
+* **scan:** 스윙 로직 경계와 리포트 재현성 보강 ([a1f714a](https://github.com/mochafreddo/swing-trading-report/commit/a1f714a842bb9db496f8282fda8936cd573404e6))
+* **scan:** 스윙 평가 기준 정렬 ([b1f292e](https://github.com/mochafreddo/swing-trading-report/commit/b1f292ed27813a585b9051a61992942640d8fdef))
+* **scheduler:** Docker 실행 이미지와 venv 격리 수정 ([61b7e6c](https://github.com/mochafreddo/swing-trading-report/commit/61b7e6cc3d6a5a3ba49c3068ea056f09fb6ed7db))
+* **scheduler:** 런타임 락 만료 기준을 DB 시간으로 고정 ([822fbb3](https://github.com/mochafreddo/swing-trading-report/commit/822fbb3e78ab2bcb37db35349a13bf90196618f5))
+* **scheduler:** 로컬 Docker 스케줄러 리뷰 이슈 해결 ([35851d0](https://github.com/mochafreddo/swing-trading-report/commit/35851d0a797abf4578bc0e0726b84b31fec713de))
+* **scheduler:** 예약 AI Brief 산출물 경로를 명시적으로 추적 ([f4535bc](https://github.com/mochafreddo/swing-trading-report/commit/f4535bccbbcaf4b1226d740677d57b81d70654fc))
+* **signals:** 스윙 평가 경계 조건 보정 ([4f8b179](https://github.com/mochafreddo/swing-trading-report/commit/4f8b1795e8388472a30b2aae70ea71aa057bdd1d))
+* **signals:** 지표 미계산을 시스템 이슈로 분리 ([bbc7589](https://github.com/mochafreddo/swing-trading-report/commit/bbc75894af18331b55b18be40fcb71cb4e94b0a2))
+* **strategy:** 스윙 가드 경계 조건 보정 ([74c5d12](https://github.com/mochafreddo/swing-trading-report/commit/74c5d12ad93b20ecae9b01ea3699460a78b18be6))
+* **validation:** 리뷰 findings를 해결한다 ([783ff06](https://github.com/mochafreddo/swing-trading-report/commit/783ff06b577633ed5ea935d9ef7cf40d64565026))
+* **web:** 로컬 바인딩 가드와 폰트 빌드를 결정적으로 정리 ([92c0da8](https://github.com/mochafreddo/swing-trading-report/commit/92c0da88d15f980ddbbe61aa0514b9dbef7b0474))
+* **web:** 보유목록 YAML 숫자 검증 강화 ([0cd5dbd](https://github.com/mochafreddo/swing-trading-report/commit/0cd5dbd5f86b57274feefd49df33e5512db8176c))
+* **web:** 티커 디렉터리 캐시 갱신 보정 ([9f3a710](https://github.com/mochafreddo/swing-trading-report/commit/9f3a71094dfdebc2708eef27dd4fe3f04b35c7cc))
+
+
+### Documentation
+
+* **agents:** AGENTS.md에 Project Overview 추가 ([a57a42f](https://github.com/mochafreddo/swing-trading-report/commit/a57a42f41c19d9846606ade1434d1a38a0cc6087))
+* **env:** MIN_HISTORY_BARS env 오버라이드 예시 추가 ([2efb784](https://github.com/mochafreddo/swing-trading-report/commit/2efb784b1ab9f8f0b657c9989aa6a01dbd1a49f5))
+* **index:** Codex 팀 가이드를 저장소 운영 문서로 재분류 ([90ab06c](https://github.com/mochafreddo/swing-trading-report/commit/90ab06ce4583caa8d3525450698bce74c8541e97))
+* **index:** docs/README.md에 독자별 시작 지점 안내 추가 ([c34b8bc](https://github.com/mochafreddo/swing-trading-report/commit/c34b8bc584db20fbc3035ecea60b9c878da7e238))
+* **readme:** AI Brief provider 중복 문단 축약 ([2b1b55c](https://github.com/mochafreddo/swing-trading-report/commit/2b1b55c426d5be5f2fa011d8b315823816a2e27f))
+* **runbook:** 분기 보호 체크명 정정과 웹 헬스체크·장애 참조 보강 ([a520bf5](https://github.com/mochafreddo/swing-trading-report/commit/a520bf588727aac50b2df743a9e506a4d88779e8))
+* scheduled AI Brief·CLI·전략 문서를 현재 구현과 동기화 ([6311312](https://github.com/mochafreddo/swing-trading-report/commit/6311312bfcb5f031739d7fba29d8d2a8a6f76b5e))
+* **todo:** 리팩토링 후속 과제 기록 ([8454610](https://github.com/mochafreddo/swing-trading-report/commit/845461062b6074d526f6d41075b923891e4bdfda))
+
 ## [1.32.3](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.2...v1.32.3) (2026-05-27)
 
 
