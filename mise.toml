@@ -9,7 +9,7 @@ precompiled_flavor = "install_only_stripped"
 # - pyproject.toml (requires-python, ruff target-version, mypy python_version)
 # - web/Dockerfile (Node.js version)
 # - web/package.json#packageManager (pnpm version)
-python = "3.14"
+python = "3.14.5"
 uv = "0.11.1"
 node = "24.14.0"
 pnpm = "10.33.4"
