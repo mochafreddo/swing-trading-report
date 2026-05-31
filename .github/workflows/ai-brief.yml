@@ -245,7 +245,7 @@ jobs:
       - name: Set up mise toolchain
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
-          version: 2026.3.1
+          version: 2026.5.16
           cache: true
           install_args: --locked
           working_directory: .
@@ -320,7 +320,7 @@ jobs:
       - name: Set up mise toolchain
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
-          version: 2026.3.1
+          version: 2026.5.16
           cache: true
           install_args: --locked
           working_directory: .
