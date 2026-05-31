@@ -10,7 +10,7 @@ precompiled_flavor = "install_only_stripped"
 # - web/Dockerfile (Node.js version)
 # - web/package.json#packageManager (pnpm version)
 python = "3.14.5"
-uv = "0.11.1"
+uv = "0.11.17"
 node = "24.14.0"
 pnpm = "10.33.4"
 just = "1.48.0"
