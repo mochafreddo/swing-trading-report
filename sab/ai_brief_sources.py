@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
-import email.utils
-import html
 import json
 import math
 import os
-import re
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,6 +17,14 @@ import requests  # type: ignore[import-untyped]
 
 from . import ai_brief_url_safety as url_safety
 from .ai_brief_eval_common import parse_iso_offset_datetime
+from .ai_brief_source_normalizers import (
+    normalize_alpha_vantage_news_rows,
+    normalize_benzinga_news_rows,
+    normalize_finnhub_news_rows,
+    normalize_marketaux_news_rows,
+    normalize_naver_news_rows,
+    normalize_polygon_news_rows,
+)
 from .tickers import parse_ticker
 from .utils.closing import close_quietly
 
@@ -56,7 +61,6 @@ NAVER_NEWS_DISPLAY_COUNT = 10
 _ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
 SOURCE_DNS_PIN_LOCK = threading.RLock()
 _SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORKERS)
-_HTML_TAG_RE = re.compile(r"<[^>]*>")
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
@@ -348,30 +352,6 @@ def _extract_list_field(payload: Any, *, key: str, subject: str) -> list[object]
     return field_value
 
 
-def _normalize_news_rows(
-    ticker: str,
-    payload: list[object],
-    *,
-    extract: Callable[[Mapping[str, Any]], tuple[str, str, str]],
-) -> list[dict[str, object]]:
-    """Build normalized source rows, emitting an empty row for non-mapping items."""
-    rows: list[dict[str, object]] = []
-    for item in payload:
-        if isinstance(item, Mapping):
-            title, url, published_at = extract(item)
-        else:
-            title, url, published_at = "", "", ""
-        rows.append(
-            {
-                "ticker": ticker,
-                "title": title,
-                "url": url,
-                "published_at": published_at,
-            }
-        )
-    return rows
-
-
 def _load_finnhub_source_report(
     *,
     source_timeout_seconds: float,
@@ -428,7 +408,7 @@ def _load_finnhub_source_report(
                 source_subject="Finnhub source",
             )
             payload = _parse_finnhub_response_payload(response, deadline=deadline)
-            source_rows.extend(_normalize_finnhub_news_rows(ticker, payload))
+            source_rows.extend(normalize_finnhub_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -452,33 +432,6 @@ def _parse_finnhub_response_payload(response: Any, *, deadline: float) -> list[o
         response, deadline=deadline, subject="Finnhub source"
     )
     return _expect_json_array(payload, subject="Finnhub source")
-
-
-def _normalize_finnhub_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            str(item.get("headline") or "").strip(),
-            str(item.get("url") or "").strip(),
-            _finnhub_published_at_iso(item.get("datetime")),
-        ),
-    )
-
-
-def _finnhub_published_at_iso(value: object) -> str:
-    if isinstance(value, bool):
-        return ""
-    try:
-        timestamp = float(str(value).strip())
-    except TypeError, ValueError:
-        return ""
-    if not math.isfinite(timestamp):
-        return ""
-    return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
 
 
 def _load_polygon_news_source_report(
@@ -539,7 +492,7 @@ def _load_polygon_news_source_report(
                 source_subject="Polygon News source",
             )
             payload = _parse_polygon_news_response_payload(response, deadline=deadline)
-            source_rows.extend(_normalize_polygon_news_rows(ticker, payload))
+            source_rows.extend(normalize_polygon_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -567,21 +520,6 @@ def _parse_polygon_news_response_payload(
         response, deadline=deadline, subject="Polygon News source"
     )
     return _extract_list_field(payload, key="results", subject="Polygon News source")
-
-
-def _normalize_polygon_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            str(item.get("title") or "").strip(),
-            str(item.get("article_url") or "").strip(),
-            str(item.get("published_utc") or "").strip(),
-        ),
-    )
 
 
 def _load_alpha_vantage_news_source_report(
@@ -647,7 +585,7 @@ def _load_alpha_vantage_news_source_report(
                 response,
                 deadline=deadline,
             )
-            source_rows.extend(_normalize_alpha_vantage_news_rows(ticker, payload))
+            source_rows.extend(normalize_alpha_vantage_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -675,34 +613,6 @@ def _parse_alpha_vantage_news_response_payload(
         response, deadline=deadline, subject="Alpha Vantage News source"
     )
     return _extract_list_field(payload, key="feed", subject="Alpha Vantage News source")
-
-
-def _normalize_alpha_vantage_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            str(item.get("title") or "").strip(),
-            str(item.get("url") or "").strip(),
-            _alpha_vantage_news_published_at_iso(item.get("time_published")),
-        ),
-    )
-
-
-def _alpha_vantage_news_published_at_iso(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    for date_format in ("%Y%m%dT%H%M%S", "%Y%m%dT%H%M"):
-        try:
-            parsed = dt.datetime.strptime(text, date_format)
-        except ValueError:
-            continue
-        return parsed.replace(tzinfo=dt.UTC).isoformat()
-    return ""
 
 
 def _load_marketaux_news_source_report(
@@ -770,7 +680,7 @@ def _load_marketaux_news_source_report(
                 response,
                 deadline=deadline,
             )
-            source_rows.extend(_normalize_marketaux_news_rows(ticker, payload))
+            source_rows.extend(normalize_marketaux_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -798,21 +708,6 @@ def _parse_marketaux_news_response_payload(
         response, deadline=deadline, subject="Marketaux News source"
     )
     return _extract_list_field(payload, key="data", subject="Marketaux News source")
-
-
-def _normalize_marketaux_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            str(item.get("title") or "").strip(),
-            str(item.get("url") or "").strip(),
-            str(item.get("published_at") or "").strip(),
-        ),
-    )
 
 
 def _load_benzinga_news_source_report(
@@ -880,7 +775,7 @@ def _load_benzinga_news_source_report(
                 response,
                 deadline=deadline,
             )
-            source_rows.extend(_normalize_benzinga_news_rows(ticker, payload))
+            source_rows.extend(normalize_benzinga_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -908,53 +803,6 @@ def _parse_benzinga_news_response_payload(
         response, deadline=deadline, subject="Benzinga News source"
     )
     return _expect_json_array(payload, subject="Benzinga News source")
-
-
-def _normalize_benzinga_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            str(item.get("title") or "").strip(),
-            str(item.get("url") or "").strip(),
-            _benzinga_news_published_at_iso(_benzinga_news_publication_value(item)),
-        ),
-    )
-
-
-def _benzinga_news_publication_value(item: Mapping[str, Any]) -> object:
-    created = item.get("created")
-    if created is not None and str(created).strip():
-        return created
-    return item.get("updated")
-
-
-def _benzinga_news_published_at_iso(value: object) -> str:
-    if isinstance(value, bool) or value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    try:
-        timestamp = float(text)
-    except ValueError:
-        pass
-    else:
-        if math.isfinite(timestamp):
-            return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).isoformat()
-    try:
-        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        try:
-            parsed = email.utils.parsedate_to_datetime(text)
-        except TypeError, ValueError:
-            return ""
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=dt.UTC)
-    return parsed.isoformat()
 
 
 def _load_naver_news_source_report(
@@ -1021,7 +869,7 @@ def _load_naver_news_source_report(
                 source_subject="Naver News source",
             )
             payload = _parse_naver_news_response_payload(response, deadline=deadline)
-            source_rows.extend(_normalize_naver_news_rows(ticker, payload))
+            source_rows.extend(normalize_naver_news_rows(ticker, payload))
 
         normalized = _normalize_source_rows(
             rows=source_rows,
@@ -1059,48 +907,6 @@ def _parse_naver_news_response_payload(
         response, deadline=deadline, subject="Naver News source"
     )
     return _extract_list_field(payload, key="items", subject="Naver News source")
-
-
-def _normalize_naver_news_rows(
-    ticker: str,
-    payload: list[object],
-) -> list[dict[str, object]]:
-    return _normalize_news_rows(
-        ticker,
-        payload,
-        extract=lambda item: (
-            _clean_naver_news_text(item.get("title")),
-            _naver_news_url(item),
-            _naver_news_published_at_iso(item.get("pubDate")),
-        ),
-    )
-
-
-def _clean_naver_news_text(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    return _HTML_TAG_RE.sub("", html.unescape(text)).strip()
-
-
-def _naver_news_url(item: Mapping[str, Any]) -> str:
-    originallink = str(item.get("originallink") or "").strip()
-    if originallink:
-        return originallink
-    return str(item.get("link") or "").strip()
-
-
-def _naver_news_published_at_iso(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    try:
-        parsed = email.utils.parsedate_to_datetime(text)
-    except TypeError, ValueError:
-        return ""
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return ""
-    return parsed.isoformat()
 
 
 def _read_bounded_response_body(response: Any, *, deadline: float) -> bytes:
