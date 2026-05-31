@@ -173,6 +173,148 @@ def test_ema_cross_candidate_exposes_structured_reasons(
     assert statuses.issubset({"pass", "warn"})
 
 
+def test_ema_cross_candidate_contract_fields_are_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], _candles()),
+        ev.EvaluationSettings(
+            min_history_bars=2,
+            use_sma200_filter=True,
+            require_slope_up=True,
+            gap_atr_multiplier=1.0,
+            rs_lookback_days=1,
+            rs_benchmark_return=0.01,
+        ),
+        {"currency": "USD", "name": "Apple Inc."},
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["ticker"] == "AAPL.NASD"
+    assert candidate["name"] == "Apple Inc."
+    assert candidate["currency"] == "USD"
+    assert candidate["eval_date"] == "20250110"
+    assert (
+        candidate["score_notes"] == "ema_cross, rsi, sma200, slope, gap, liquidity, rs"
+    )
+    assert candidate["score_value"] == pytest.approx(7.0)
+    assert candidate["gap"] == "0.0%"
+    assert candidate["gap_threshold"] == "9.5%"
+    assert candidate["risk_guide"] == "Stop 10 / Target 13 (~1:2)"
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert [reason["id"] for reason in candidate["reasons"]] == [
+        "ema_cross",
+        "rsi_rebound",
+        "sma200_trend_filter",
+        "ema_slope_up",
+        "gap_within_limit",
+        "liquidity",
+        "rs_above_benchmark",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_reason", "expected_kind"),
+    [
+        ("history", "Not enough completed history (<4 bars)", "system"),
+        ("ohlc", "Invalid candle data: non-finite OHLC values", "system"),
+        ("volume", "Invalid candle data: non-finite volume values", "system"),
+        (
+            "gap_unavailable",
+            "Gap filter unavailable: ATR/price inputs invalid",
+            "system",
+        ),
+        ("price", "Price 11 < MIN_PRICE 20", "signal"),
+        ("sma200", "Below SMA200 filter", "signal"),
+        ("slope", "EMA slope not rising", "signal"),
+        ("liquidity", "Avg dollar volume 11,583,333 < 999,999,999,999", "signal"),
+        ("etf", "ETF/ETN excluded", "signal"),
+    ],
+)
+def test_ema_cross_failure_reason_kind_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    expected_reason: str,
+    expected_kind: str,
+) -> None:
+    candles = _candles()
+    settings = ev.EvaluationSettings(
+        min_history_bars=2,
+        use_sma200_filter=False,
+        require_slope_up=False,
+        gap_atr_multiplier=1.0,
+        min_price=0.0,
+        min_dollar_volume=0.0,
+        exclude_etf_etn=False,
+    )
+    meta = {"currency": "USD", "name": "Apple Inc."}
+
+    if case == "history":
+        settings.min_history_bars = 4
+    elif case == "ohlc":
+        candles[-1]["high"] = float("nan")
+    elif case == "volume":
+        candles[-1]["volume"] = "N/A"
+    elif case == "gap_unavailable":
+        monkeypatch.setattr(
+            ev, "atr", lambda highs, lows, closes, period: [1.0, float("nan"), 1.0]
+        )
+    elif case == "price":
+        settings.min_price = 20.0
+    elif case == "sma200":
+        settings.use_sma200_filter = True
+        monkeypatch.setattr(ev, "sma", lambda values, period: [99.0] * len(values))
+    elif case == "slope":
+        settings.require_slope_up = True
+
+        def _ema_slope_fail(values: list[float], period: int) -> list[float]:
+            if period == 20:
+                return [3.0, 3.0, 3.1]
+            return [2.0, 3.0, 2.9]
+
+        monkeypatch.setattr(ev, "ema", _ema_slope_fail)
+    elif case == "liquidity":
+        settings.min_dollar_volume = 999_999_999_999.0
+    elif case == "etf":
+        settings.exclude_etf_etn = True
+        meta["name"] = "Vanguard Total Market ETF"
+
+    if case not in {"slope"}:
+        _patch_positive_signal_indicators(monkeypatch, slope_up=True)
+    else:
+        monkeypatch.setattr(
+            ev,
+            "choose_eval_index",
+            lambda data, meta=None, provider=None: (len(data) - 1, True),
+        )
+        monkeypatch.setattr(ev, "rsi", lambda values, period: [25.0, 30.0, 50.0])
+        monkeypatch.setattr(
+            ev, "atr", lambda highs, lows, closes, period: [1.0] * len(closes)
+        )
+        monkeypatch.setattr(ev, "sma", lambda values, period: [0.5] * len(values))
+
+    if case == "gap_unavailable":
+        monkeypatch.setattr(
+            ev, "atr", lambda highs, lows, closes, period: [1.0, float("nan"), 1.0]
+        )
+    if case == "sma200":
+        monkeypatch.setattr(ev, "sma", lambda values, period: [99.0] * len(values))
+
+    result = ev.evaluate_ticker(
+        "AAPL.NASD",
+        cast(list[dict[str, float]], candles),
+        settings,
+        meta,
+    )
+
+    assert result.candidate is None
+    assert result.reason == expected_reason
+    assert result.reason_kind == expected_kind
+
+
 def test_ema_cross_uses_market_benchmark_from_meta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

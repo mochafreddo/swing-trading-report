@@ -115,18 +115,6 @@ def _to_volume_and_invalid(value: Any) -> tuple[float, bool]:
     return parsed, False
 
 
-def _has_non_finite_ohlc(candles: list[dict[str, Any]]) -> bool:
-    for candle in candles:
-        if (
-            _to_finite_float(candle.get("open")) is None
-            or _to_finite_float(candle.get("high")) is None
-            or _to_finite_float(candle.get("low")) is None
-            or _to_finite_float(candle.get("close")) is None
-        ):
-            return True
-    return False
-
-
 _MISSING_VOLUME_REASON = "Invalid candle data: missing volume values"
 _INVALID_VOLUME_REASON = "Invalid candle data: non-finite volume values"
 _ZERO_VOLUME_REASON = "Avg dollar volume is zero; volume data required"
@@ -585,150 +573,170 @@ def _detect_rsi_oversold_reversal(
     return False, ["Reversal not near EMA support"], None, {}
 
 
-def evaluate_ticker_hybrid(
-    ticker: str,
-    candles: list[dict[str, Any]],
+@dataclass(frozen=True)
+class _HybridSeries:
+    closes: list[float]
+    highs: list[float]
+    lows: list[float]
+
+
+@dataclass(frozen=True)
+class _HybridIndicators:
+    sma_trend: list[float]
+    ema_short: list[float]
+    ema_mid: list[float]
+    rsi_vals: list[float]
+    atr_value: float
+
+
+@dataclass(frozen=True)
+class _PatternMatch:
+    pattern: HybridPattern
+    reasons: list[str]
+    context: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _EntryStateResult:
+    state: str
+    reason: str
+    extended_breakout: bool
+
+
+@dataclass(frozen=True)
+class _HybridScore:
+    value: float
+    notes: str
+    entry_state_score: float
+    pattern_weight: float
+    volume_confirmation_bonus: float
+    extended_penalty: float
+    has_volume_confirmation: bool
+
+
+@dataclass(frozen=True)
+class _GapGuard:
+    pct: float | None
+    up_price: float | None
+    down_price: float | None
+
+
+@dataclass(frozen=True)
+class _EntryTriggerGuard:
+    price_value: float | None
+    operator: str | None
+    label: str | None
+
+
+def _format_hybrid_value(value: float, digits: int = 2) -> str:
+    if digits == 0:
+        return f"{value:,.0f}"
+    return f"{value:,.{digits}f}"
+
+
+def _extract_hybrid_series(candles_eval: list[dict[str, Any]]) -> _HybridSeries | None:
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    for candle in candles_eval:
+        open_price = _to_finite_float(candle.get("open"))
+        high_price = _to_finite_float(candle.get("high"))
+        low_price = _to_finite_float(candle.get("low"))
+        close_price = _to_finite_float(candle.get("close"))
+        if (
+            open_price is None
+            or high_price is None
+            or low_price is None
+            or close_price is None
+        ):
+            return None
+        highs.append(high_price)
+        lows.append(low_price)
+        closes.append(close_price)
+    return _HybridSeries(closes=closes, highs=highs, lows=lows)
+
+
+def _compute_hybrid_indicators(
+    series: _HybridSeries,
     settings: HybridEvaluationSettings,
-    meta: dict[str, Any] | None = None,
-) -> HybridEvaluationResult:
-    meta = meta or {}
-    currency = str(meta.get("currency", "KRW")).upper()
-
-    idx_eval, _ = choose_eval_index(candles, meta=meta)
-    if idx_eval < 0:
-        return HybridEvaluationResult(ticker, None, "No candle data", "system")
-
-    candles_eval = candles[: idx_eval + 1]
-    if _has_non_finite_ohlc(candles_eval):
-        return HybridEvaluationResult(
-            ticker,
-            None,
-            "Invalid candle data: non-finite OHLC values",
-            "system",
-        )
-
-    ok, reason, reason_kind, last_close, avg_dv = _basic_filters(
-        ticker, candles, settings, meta, idx_eval
+) -> _HybridIndicators:
+    atr_vals = atr(series.highs, series.lows, series.closes, 14)
+    return _HybridIndicators(
+        sma_trend=sma(series.closes, settings.sma_trend_period),
+        ema_short=ema(series.closes, settings.ema_short_period),
+        ema_mid=ema(series.closes, settings.ema_mid_period),
+        rsi_vals=rsi(series.closes, settings.rsi_period),
+        atr_value=atr_vals[-1] if atr_vals else float("nan"),
     )
-    if not ok:
-        return HybridEvaluationResult(ticker, None, reason, reason_kind or "signal")
 
-    closes = [float(c.get("close") or 0.0) for c in candles_eval]
-    highs = [float(c.get("high") or 0.0) for c in candles_eval]
-    lows = [float(c.get("low") or 0.0) for c in candles_eval]
-    sma_trend = sma(closes, settings.sma_trend_period)
-    ema_short = ema(closes, settings.ema_short_period)
-    ema_mid = ema(closes, settings.ema_mid_period)
-    rsi_vals = rsi(closes, settings.rsi_period)
-    atr_vals = atr(highs, lows, closes, 14)
-    atr_value = atr_vals[-1] if atr_vals else float("nan")
-    indicator_issue = _core_indicator_data_issue(
-        sma_trend=sma_trend,
-        ema_short=ema_short,
-        ema_mid=ema_mid,
-        rsi_vals=rsi_vals,
-    )
-    if indicator_issue is not None:
-        return HybridEvaluationResult(ticker, None, indicator_issue, "system")
-    latest = candles[idx_eval]
-    eval_date_raw = str(latest.get("date") or "").strip()
-    eval_date = eval_date_raw or None
-    prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
-    prev_close = float(prev.get("close") or 0.0)
-    gap_pct = 0.0
-    if prev_close > 0:
-        gap_pct = (float(latest.get("open") or 0.0) - prev_close) / prev_close
-    if settings.max_gap_pct > 0 and abs(gap_pct) > settings.max_gap_pct:
-        return HybridEvaluationResult(
-            ticker,
-            None,
-            f"Gap {gap_pct * 100:.1f}% exceeds HYBRID_MAX_GAP_PCT {settings.max_gap_pct * 100:.1f}%",
-            "signal",
-        )
 
-    if settings.use_sma60_filter:
-        sma60_vals = sma(closes, settings.sma60_period)
-        sma60 = _to_finite_float(sma60_vals[-1]) if sma60_vals else None
-        if sma60 is None:
-            return HybridEvaluationResult(
-                ticker,
-                None,
-                _indicator_unavailable_reason(["SMA60"]),
-                "system",
-            )
-        if last_close <= sma60:
-            return HybridEvaluationResult(
-                ticker,
-                None,
-                f"Close {last_close:.2f} <= SMA{settings.sma60_period} {sma60:.2f}",
-                "signal",
-            )
-
-    pattern: HybridPattern | None = None
-    pattern_reasons: list[str] = []
-    pattern_context: dict[str, Any] = {}
-
-    # 1) Trend continuation + pullback bounce (highest priority)
+def _detect_hybrid_pattern(
+    *,
+    series: _HybridSeries,
+    indicators: _HybridIndicators,
+    candles_eval: list[dict[str, Any]],
+    settings: HybridEvaluationSettings,
+    currency: str,
+) -> _PatternMatch | None:
     ok_pb, reasons_pb, pat_pb, ctx_pb = _detect_trend_pullback_bounce(
-        closes, sma_trend, ema_short, ema_mid, rsi_vals, candles_eval, settings
+        series.closes,
+        indicators.sma_trend,
+        indicators.ema_short,
+        indicators.ema_mid,
+        indicators.rsi_vals,
+        candles_eval,
+        settings,
     )
     if ok_pb and pat_pb:
-        pattern = pat_pb
-        pattern_reasons = reasons_pb
-        pattern_context = ctx_pb
-    else:
-        # 2) Swing high breakout
-        ok_bo, reasons_bo, pat_bo, ctx_bo = _detect_swing_high_breakout(
-            closes,
-            sma_trend,
-            ema_short,
-            ema_mid,
-            rsi_vals,
-            candles_eval,
-            settings,
-            currency,
-        )
-        if ok_bo and pat_bo:
-            pattern = pat_bo
-            pattern_reasons = reasons_bo
-            pattern_context = ctx_bo
-        else:
-            # 3) RSI oversold reversal
-            ok_rsi, reasons_rsi, pat_rsi, ctx_rsi = _detect_rsi_oversold_reversal(
-                closes, sma_trend, ema_short, ema_mid, rsi_vals, candles_eval, settings
-            )
-            if ok_rsi and pat_rsi:
-                pattern = pat_rsi
-                pattern_reasons = reasons_rsi
-                pattern_context = ctx_rsi
+        return _PatternMatch(pat_pb, reasons_pb, ctx_pb)
 
-    if not pattern:
-        return HybridEvaluationResult(
-            ticker, None, "Did not meet hybrid signal criteria", "signal"
-        )
-    pct_change = (last_close - prev_close) / prev_close if prev_close else 0.0
-    benchmark_return = _to_finite_float(meta.get("rs_benchmark_return"))
-    if benchmark_return is None:
-        benchmark_return = _to_finite_float(settings.rs_benchmark_return)
-    benchmark_ticker = str(meta.get("rs_benchmark_ticker") or "").strip() or None
-    rs_return = None
-    rs_diff = None
-    if settings.rs_lookback_days > 0 and len(closes) > settings.rs_lookback_days:
-        base_close = closes[-settings.rs_lookback_days - 1]
-        if base_close > 0:
-            rs_return = (last_close - base_close) / base_close
-            if benchmark_return is not None:
-                rs_diff = rs_return - benchmark_return
+    ok_bo, reasons_bo, pat_bo, ctx_bo = _detect_swing_high_breakout(
+        series.closes,
+        indicators.sma_trend,
+        indicators.ema_short,
+        indicators.ema_mid,
+        indicators.rsi_vals,
+        candles_eval,
+        settings,
+        currency,
+    )
+    if ok_bo and pat_bo:
+        return _PatternMatch(pat_bo, reasons_bo, ctx_bo)
 
-    # Determine readiness (READY vs WATCH) using close-based confirmations only.
+    ok_rsi, reasons_rsi, pat_rsi, ctx_rsi = _detect_rsi_oversold_reversal(
+        series.closes,
+        indicators.sma_trend,
+        indicators.ema_short,
+        indicators.ema_mid,
+        indicators.rsi_vals,
+        candles_eval,
+        settings,
+    )
+    if ok_rsi and pat_rsi:
+        return _PatternMatch(pat_rsi, reasons_rsi, ctx_rsi)
+    return None
+
+
+def _resolve_hybrid_entry_state(
+    *,
+    pattern: HybridPattern,
+    pattern_context: dict[str, Any],
+    settings: HybridEvaluationSettings,
+    currency: str,
+    last_close: float,
+    prev_close: float,
+    indicators: _HybridIndicators,
+) -> _EntryStateResult:
     entry_state = "WATCH"
     entry_state_reason = "Early setup; awaiting confirmation"
     extended_breakout = False
 
     if pattern == HybridPattern.TREND_PULLBACK_BOUNCE:
-        rsi_val = float(pattern_context.get("rsi_val", rsi_vals[-1]))
+        rsi_val = float(pattern_context.get("rsi_val", indicators.rsi_vals[-1]))
         close_above_ema = bool(
-            pattern_context.get("close_above_ema_short", last_close > ema_short[-1])
+            pattern_context.get(
+                "close_above_ema_short", last_close > indicators.ema_short[-1]
+            )
         )
         strong_confirmation = close_above_ema and (
             rsi_val > 50
@@ -747,8 +755,8 @@ def evaluate_ticker_hybrid(
     elif pattern == HybridPattern.SWING_HIGH_BREAKOUT:
         swing_high = float(pattern_context.get("swing_high") or 0.0)
         extended = False
-        if swing_high > 0 and not math.isnan(atr_value):
-            extended = last_close > swing_high + atr_value
+        if swing_high > 0 and not math.isnan(indicators.atr_value):
+            extended = last_close > swing_high + indicators.atr_value
         extended_breakout = extended
         needs_kr_confirmation = (
             currency != "USD"
@@ -771,9 +779,11 @@ def evaluate_ticker_hybrid(
             entry_state_reason = "Breakout close above swing high with volume"
 
     elif pattern == HybridPattern.RSI_OVERSOLD_REVERSAL:
-        rsi_val = float(pattern_context.get("rsi_val", rsi_vals[-1]))
+        rsi_val = float(pattern_context.get("rsi_val", indicators.rsi_vals[-1]))
         close_above_ema = bool(
-            pattern_context.get("close_above_ema_short", last_close > ema_short[-1])
+            pattern_context.get(
+                "close_above_ema_short", last_close > indicators.ema_short[-1]
+            )
         )
         if rsi_val >= 45 and close_above_ema:
             entry_state = "READY"
@@ -783,6 +793,21 @@ def evaluate_ticker_hybrid(
                 "Early reversal; need RSI>=45 and close above EMA short"
             )
 
+    return _EntryStateResult(
+        state=entry_state,
+        reason=entry_state_reason,
+        extended_breakout=extended_breakout,
+    )
+
+
+def _score_hybrid_candidate(
+    *,
+    pattern: HybridPattern,
+    entry_state: str,
+    pattern_context: dict[str, Any],
+    latest: dict[str, Any],
+    extended_breakout: bool,
+) -> _HybridScore:
     pattern_weights = {
         HybridPattern.TREND_PULLBACK_BOUNCE: 0.30,
         HybridPattern.SWING_HIGH_BREAKOUT: 0.25,
@@ -809,36 +834,316 @@ def evaluate_ticker_hybrid(
         f" volume_bonus={volume_confirmation_bonus:.2f},"
         f" extended_penalty={extended_penalty:.2f}"
     )
+    return _HybridScore(
+        value=score_value,
+        notes=score_notes,
+        entry_state_score=entry_state_score,
+        pattern_weight=pattern_weight,
+        volume_confirmation_bonus=volume_confirmation_bonus,
+        extended_penalty=extended_penalty,
+        has_volume_confirmation=has_volume_confirmation,
+    )
+
+
+def _build_hybrid_gap_guard(
+    *,
+    settings: HybridEvaluationSettings,
+    atr_value: float,
+    last_close: float,
+) -> _GapGuard:
+    if (
+        settings.gap_atr_multiplier > 0
+        and not math.isnan(atr_value)
+        and atr_value > 0
+        and last_close > 0
+    ):
+        gap_guard_pct = settings.gap_atr_multiplier * atr_value / last_close
+        return _GapGuard(
+            pct=gap_guard_pct,
+            up_price=last_close * (1 + gap_guard_pct),
+            down_price=last_close * (1 - gap_guard_pct),
+        )
+    return _GapGuard(pct=None, up_price=None, down_price=None)
+
+
+def _build_entry_trigger_guard(
+    *,
+    pattern: HybridPattern,
+    pattern_context: dict[str, Any],
+    indicators: _HybridIndicators,
+    ema_short_key: str,
+) -> _EntryTriggerGuard:
+    if pattern == HybridPattern.SWING_HIGH_BREAKOUT:
+        trigger_swing_high = _to_finite_float(pattern_context.get("swing_high"))
+        if trigger_swing_high is not None and trigger_swing_high > 0:
+            return _EntryTriggerGuard(
+                price_value=trigger_swing_high,
+                operator="gte",
+                label="swing_high",
+            )
+    elif pattern == HybridPattern.TREND_PULLBACK_BOUNCE:
+        ema_trigger = indicators.ema_short[-1]
+        if (
+            not math.isnan(ema_trigger)
+            and ema_trigger > 0
+            and pattern_context.get("close_above_ema_short")
+        ):
+            return _EntryTriggerGuard(
+                price_value=ema_trigger,
+                operator="gte",
+                label=ema_short_key,
+            )
+    elif pattern == HybridPattern.RSI_OVERSOLD_REVERSAL:
+        ema_trigger = indicators.ema_short[-1]
+        if not math.isnan(ema_trigger) and ema_trigger > 0:
+            return _EntryTriggerGuard(
+                price_value=ema_trigger,
+                operator="gte",
+                label=ema_short_key,
+            )
+    return _EntryTriggerGuard(price_value=None, operator=None, label=None)
+
+
+def _add_hybrid_reason(
+    reasons: list[dict[str, Any]],
+    *,
+    reason_id: str,
+    label: str,
+    kind: str,
+    status: str = "pass",
+    points: float | None = None,
+    value: float | str | None = None,
+    threshold: float | str | None = None,
+) -> None:
+    reason: dict[str, Any] = {
+        "id": reason_id,
+        "label": label,
+        "kind": kind,
+        "status": status,
+    }
+    if points is not None:
+        reason["points"] = points
+    if value is not None:
+        reason["value"] = value
+    if threshold is not None:
+        reason["threshold"] = threshold
+    reasons.append(reason)
+
+
+def _build_hybrid_reasons(
+    *,
+    pattern: HybridPattern,
+    pattern_reasons: list[str],
+    entry_state: _EntryStateResult,
+    score: _HybridScore,
+    gap_guard: _GapGuard,
+    entry_trigger: _EntryTriggerGuard,
+    rs_diff: float | None,
+) -> list[dict[str, Any]]:
     reasons: list[dict[str, Any]] = []
+    _add_hybrid_reason(
+        reasons,
+        reason_id=f"pattern_{pattern.value}",
+        label=f"패턴: {_pattern_label(pattern)}",
+        kind="pattern",
+        points=score.pattern_weight,
+    )
+    _add_hybrid_reason(
+        reasons,
+        reason_id=f"entry_state_{entry_state.state.lower()}",
+        label="READY(확인)" if entry_state.state == "READY" else "WATCH(대기)",
+        kind="state",
+        status="pass" if entry_state.state == "READY" else "warn",
+        points=score.entry_state_score,
+        value=entry_state.reason,
+    )
+    for reason_text in pattern_reasons:
+        reason_id, reason_label = _pattern_reason_id_label(reason_text)
+        _add_hybrid_reason(
+            reasons,
+            reason_id=reason_id,
+            label=reason_label,
+            kind="trigger",
+            points=0.0,
+            value=reason_text,
+        )
+    if score.has_volume_confirmation:
+        _add_hybrid_reason(
+            reasons,
+            reason_id="volume_confirmation",
+            label="거래량 확인",
+            kind="trigger",
+            points=score.volume_confirmation_bonus,
+        )
+    if entry_state.extended_breakout:
+        _add_hybrid_reason(
+            reasons,
+            reason_id="breakout_extended",
+            label="돌파 과열 구간",
+            kind="risk",
+            status="warn",
+            points=-score.extended_penalty,
+        )
+    if gap_guard.pct is not None:
+        _add_hybrid_reason(
+            reasons,
+            reason_id="gap_guard_atr",
+            label="ATR 기반 갭 가드",
+            kind="risk",
+            points=0.0,
+            value=gap_guard.pct,
+        )
+    if entry_trigger.price_value is not None:
+        _add_hybrid_reason(
+            reasons,
+            reason_id="entry_trigger_guard",
+            label="진입 트리거 재확인 기준",
+            kind="risk",
+            points=0.0,
+            value=entry_trigger.price_value,
+            threshold=entry_trigger.label,
+        )
+    if rs_diff is not None:
+        if rs_diff >= 0:
+            _add_hybrid_reason(
+                reasons,
+                reason_id="rs_above_benchmark",
+                label="상대강도 양호",
+                kind="filter",
+                points=0.0,
+                value=rs_diff,
+                threshold=0.0,
+            )
+        else:
+            _add_hybrid_reason(
+                reasons,
+                reason_id="rs_below_benchmark",
+                label="상대강도 약함",
+                kind="filter",
+                status="warn",
+                points=0.0,
+                value=rs_diff,
+                threshold=0.0,
+            )
+    return reasons
 
-    def add_reason(
-        *,
-        reason_id: str,
-        label: str,
-        kind: str,
-        status: str = "pass",
-        points: float | None = None,
-        value: float | str | None = None,
-        threshold: float | str | None = None,
-    ) -> None:
-        reason: dict[str, Any] = {
-            "id": reason_id,
-            "label": label,
-            "kind": kind,
-            "status": status,
-        }
-        if points is not None:
-            reason["points"] = points
-        if value is not None:
-            reason["value"] = value
-        if threshold is not None:
-            reason["threshold"] = threshold
-        reasons.append(reason)
 
-    def fmt(value: float, digits: int = 2) -> str:
-        if digits == 0:
-            return f"{value:,.0f}"
-        return f"{value:,.{digits}f}"
+def evaluate_ticker_hybrid(
+    ticker: str,
+    candles: list[dict[str, Any]],
+    settings: HybridEvaluationSettings,
+    meta: dict[str, Any] | None = None,
+) -> HybridEvaluationResult:
+    meta = meta or {}
+    currency = str(meta.get("currency", "KRW")).upper()
+
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
+    if idx_eval < 0:
+        return HybridEvaluationResult(ticker, None, "No candle data", "system")
+
+    candles_eval = candles[: idx_eval + 1]
+    series = _extract_hybrid_series(candles_eval)
+    if series is None:
+        return HybridEvaluationResult(
+            ticker,
+            None,
+            "Invalid candle data: non-finite OHLC values",
+            "system",
+        )
+
+    ok, reason, reason_kind, last_close, avg_dv = _basic_filters(
+        ticker, candles, settings, meta, idx_eval
+    )
+    if not ok:
+        return HybridEvaluationResult(ticker, None, reason, reason_kind or "signal")
+
+    indicators = _compute_hybrid_indicators(series, settings)
+    indicator_issue = _core_indicator_data_issue(
+        sma_trend=indicators.sma_trend,
+        ema_short=indicators.ema_short,
+        ema_mid=indicators.ema_mid,
+        rsi_vals=indicators.rsi_vals,
+    )
+    if indicator_issue is not None:
+        return HybridEvaluationResult(ticker, None, indicator_issue, "system")
+    latest = candles[idx_eval]
+    eval_date_raw = str(latest.get("date") or "").strip()
+    eval_date = eval_date_raw or None
+    prev = candles[idx_eval - 1] if idx_eval >= 1 else latest
+    prev_close = float(prev.get("close") or 0.0)
+    gap_pct = 0.0
+    if prev_close > 0:
+        gap_pct = (float(latest.get("open") or 0.0) - prev_close) / prev_close
+    if settings.max_gap_pct > 0 and abs(gap_pct) > settings.max_gap_pct:
+        return HybridEvaluationResult(
+            ticker,
+            None,
+            f"Gap {gap_pct * 100:.1f}% exceeds HYBRID_MAX_GAP_PCT {settings.max_gap_pct * 100:.1f}%",
+            "signal",
+        )
+
+    if settings.use_sma60_filter:
+        sma60_vals = sma(series.closes, settings.sma60_period)
+        sma60 = _to_finite_float(sma60_vals[-1]) if sma60_vals else None
+        if sma60 is None:
+            return HybridEvaluationResult(
+                ticker,
+                None,
+                _indicator_unavailable_reason(["SMA60"]),
+                "system",
+            )
+        if last_close <= sma60:
+            return HybridEvaluationResult(
+                ticker,
+                None,
+                f"Close {last_close:.2f} <= SMA{settings.sma60_period} {sma60:.2f}",
+                "signal",
+            )
+
+    pattern_match = _detect_hybrid_pattern(
+        series=series,
+        indicators=indicators,
+        candles_eval=candles_eval,
+        settings=settings,
+        currency=currency,
+    )
+    if pattern_match is None:
+        return HybridEvaluationResult(
+            ticker, None, "Did not meet hybrid signal criteria", "signal"
+        )
+    pattern = pattern_match.pattern
+    pattern_reasons = pattern_match.reasons
+    pattern_context = pattern_match.context
+    pct_change = (last_close - prev_close) / prev_close if prev_close else 0.0
+    benchmark_return = _to_finite_float(meta.get("rs_benchmark_return"))
+    if benchmark_return is None:
+        benchmark_return = _to_finite_float(settings.rs_benchmark_return)
+    benchmark_ticker = str(meta.get("rs_benchmark_ticker") or "").strip() or None
+    rs_return = None
+    rs_diff = None
+    if settings.rs_lookback_days > 0 and len(series.closes) > settings.rs_lookback_days:
+        base_close = series.closes[-settings.rs_lookback_days - 1]
+        if base_close > 0:
+            rs_return = (last_close - base_close) / base_close
+            if benchmark_return is not None:
+                rs_diff = rs_return - benchmark_return
+
+    entry_state = _resolve_hybrid_entry_state(
+        pattern=pattern,
+        pattern_context=pattern_context,
+        settings=settings,
+        currency=currency,
+        last_close=last_close,
+        prev_close=prev_close,
+        indicators=indicators,
+    )
+    score = _score_hybrid_candidate(
+        pattern=pattern,
+        entry_state=entry_state.state,
+        pattern_context=pattern_context,
+        latest=latest,
+        extended_breakout=entry_state.extended_breakout,
+    )
 
     price_digits = 2 if currency == "USD" else 0
     # Gap guard prices should carry decimals for precise order reference, regardless of currency.
@@ -849,135 +1154,44 @@ def evaluate_ticker_hybrid(
     rsi_key = f"rsi{settings.rsi_period}"
 
     risk_guide = "-"
-    if not math.isnan(atr_value):
-        stop = max(last_close - atr_value, 0)
-        target = last_close + atr_value * 2
-        risk_guide = f"Stop {fmt(stop, price_digits)} / Target {fmt(target, price_digits)} (~1:2)"
+    if not math.isnan(indicators.atr_value):
+        stop = max(last_close - indicators.atr_value, 0)
+        target = last_close + indicators.atr_value * 2
+        risk_guide = (
+            f"Stop {_format_hybrid_value(stop, price_digits)} / "
+            f"Target {_format_hybrid_value(target, price_digits)} (~1:2)"
+        )
 
-    gap_guard_pct = None
-    gap_guard_up_price = None
-    gap_guard_down_price = None
-    if (
-        settings.gap_atr_multiplier > 0
-        and not math.isnan(atr_value)
-        and atr_value > 0
-        and last_close > 0
-    ):
-        gap_guard_pct = settings.gap_atr_multiplier * atr_value / last_close
-        gap_guard_up_price = last_close * (1 + gap_guard_pct)
-        gap_guard_down_price = last_close * (1 - gap_guard_pct)
-
-    entry_trigger_price_value: float | None = None
-    entry_trigger_operator: str | None = None
-    entry_trigger_label: str | None = None
-    if pattern == HybridPattern.SWING_HIGH_BREAKOUT:
-        trigger_swing_high = _to_finite_float(pattern_context.get("swing_high"))
-        if trigger_swing_high is not None and trigger_swing_high > 0:
-            entry_trigger_price_value = trigger_swing_high
-            entry_trigger_operator = "gte"
-            entry_trigger_label = "swing_high"
-    elif pattern == HybridPattern.TREND_PULLBACK_BOUNCE:
-        ema_trigger = ema_short[-1]
-        if (
-            not math.isnan(ema_trigger)
-            and ema_trigger > 0
-            and pattern_context.get("close_above_ema_short")
-        ):
-            entry_trigger_price_value = ema_trigger
-            entry_trigger_operator = "gte"
-            entry_trigger_label = ema_short_key
-    elif pattern == HybridPattern.RSI_OVERSOLD_REVERSAL:
-        ema_trigger = ema_short[-1]
-        if not math.isnan(ema_trigger) and ema_trigger > 0:
-            entry_trigger_price_value = ema_trigger
-            entry_trigger_operator = "gte"
-            entry_trigger_label = ema_short_key
-
-    add_reason(
-        reason_id=f"pattern_{pattern.value}",
-        label=f"패턴: {_pattern_label(pattern)}",
-        kind="pattern",
-        points=pattern_weight,
+    gap_guard = _build_hybrid_gap_guard(
+        settings=settings,
+        atr_value=indicators.atr_value,
+        last_close=last_close,
     )
-    add_reason(
-        reason_id=f"entry_state_{entry_state.lower()}",
-        label="READY(확인)" if entry_state == "READY" else "WATCH(대기)",
-        kind="state",
-        status="pass" if entry_state == "READY" else "warn",
-        points=entry_state_score,
-        value=entry_state_reason,
+    entry_trigger = _build_entry_trigger_guard(
+        pattern=pattern,
+        pattern_context=pattern_context,
+        indicators=indicators,
+        ema_short_key=ema_short_key,
     )
-    for reason_text in pattern_reasons:
-        reason_id, reason_label = _pattern_reason_id_label(reason_text)
-        add_reason(
-            reason_id=reason_id,
-            label=reason_label,
-            kind="trigger",
-            points=0.0,
-            value=reason_text,
-        )
-    if has_volume_confirmation:
-        add_reason(
-            reason_id="volume_confirmation",
-            label="거래량 확인",
-            kind="trigger",
-            points=volume_confirmation_bonus,
-        )
-    if extended_breakout:
-        add_reason(
-            reason_id="breakout_extended",
-            label="돌파 과열 구간",
-            kind="risk",
-            status="warn",
-            points=-extended_penalty,
-        )
-    if gap_guard_pct is not None:
-        add_reason(
-            reason_id="gap_guard_atr",
-            label="ATR 기반 갭 가드",
-            kind="risk",
-            points=0.0,
-            value=gap_guard_pct,
-        )
-    if entry_trigger_price_value is not None:
-        add_reason(
-            reason_id="entry_trigger_guard",
-            label="진입 트리거 재확인 기준",
-            kind="risk",
-            points=0.0,
-            value=entry_trigger_price_value,
-            threshold=entry_trigger_label,
-        )
-    if rs_diff is not None:
-        if rs_diff >= 0:
-            add_reason(
-                reason_id="rs_above_benchmark",
-                label="상대강도 양호",
-                kind="filter",
-                points=0.0,
-                value=rs_diff,
-                threshold=0.0,
-            )
-        else:
-            add_reason(
-                reason_id="rs_below_benchmark",
-                label="상대강도 약함",
-                kind="filter",
-                status="warn",
-                points=0.0,
-                value=rs_diff,
-                threshold=0.0,
-            )
+    reasons = _build_hybrid_reasons(
+        pattern=pattern,
+        pattern_reasons=pattern_reasons,
+        entry_state=entry_state,
+        score=score,
+        gap_guard=gap_guard,
+        entry_trigger=entry_trigger,
+        rs_diff=rs_diff,
+    )
 
-    sma_trend_value = fmt(sma_trend[-1], 2)
-    ema_short_value = fmt(ema_short[-1], 2)
-    ema_mid_value = fmt(ema_mid[-1], 2)
-    rsi_value = fmt(rsi_vals[-1], 1)
+    sma_trend_value = _format_hybrid_value(indicators.sma_trend[-1], 2)
+    ema_short_value = _format_hybrid_value(indicators.ema_short[-1], 2)
+    ema_mid_value = _format_hybrid_value(indicators.ema_mid[-1], 2)
+    rsi_value = _format_hybrid_value(indicators.rsi_vals[-1], 1)
 
     candidate: dict[str, Any] = {
         "ticker": ticker,
         "name": meta.get("name", ticker),
-        "price": fmt(last_close, price_digits),
+        "price": _format_hybrid_value(last_close, price_digits),
         "price_value": last_close,
         "close_value": last_close,
         "signal_price_basis": "adjusted",
@@ -995,8 +1209,12 @@ def evaluate_ticker_hybrid(
         ),
         "rs_benchmark_value": benchmark_return,
         "rs_benchmark_ticker": benchmark_ticker,
-        "high": fmt(_to_finite_or_default(latest.get("high")), price_digits),
-        "low": fmt(_to_finite_or_default(latest.get("low")), price_digits),
+        "high": _format_hybrid_value(
+            _to_finite_or_default(latest.get("high")), price_digits
+        ),
+        "low": _format_hybrid_value(
+            _to_finite_or_default(latest.get("low")), price_digits
+        ),
         "sma_trend_period": settings.sma_trend_period,
         "ema_short_period": settings.ema_short_period,
         "ema_mid_period": settings.ema_mid_period,
@@ -1005,36 +1223,40 @@ def evaluate_ticker_hybrid(
         "ema_short": ema_short_value,
         "ema_mid": ema_mid_value,
         "rsi": rsi_value,
-        "avg_dollar_volume": fmt(avg_dv, 0),
+        "avg_dollar_volume": _format_hybrid_value(avg_dv, 0),
         "avg_dollar_volume_value": avg_dv,
         "pattern": pattern.value,
         "pattern_reasons": ", ".join(pattern_reasons),
-        "entry_state": entry_state,
-        "entry_state_reason": entry_state_reason,
-        "entry_trigger_price_value": entry_trigger_price_value,
+        "entry_state": entry_state.state,
+        "entry_state_reason": entry_state.reason,
+        "entry_trigger_price_value": entry_trigger.price_value,
         "entry_trigger_price_basis": "adjusted"
-        if entry_trigger_price_value is not None
+        if entry_trigger.price_value is not None
         else None,
-        "entry_trigger_operator": entry_trigger_operator,
-        "entry_trigger_label": entry_trigger_label,
-        "atr14": fmt(atr_value),
-        "atr14_value": None if math.isnan(atr_value) else atr_value,
-        "gap_guard_pct": f"±{gap_guard_pct * 100:.1f}%"
-        if gap_guard_pct is not None
+        "entry_trigger_operator": entry_trigger.operator,
+        "entry_trigger_label": entry_trigger.label,
+        "atr14": _format_hybrid_value(indicators.atr_value),
+        "atr14_value": None
+        if math.isnan(indicators.atr_value)
+        else indicators.atr_value,
+        "gap_guard_pct": f"±{gap_guard.pct * 100:.1f}%"
+        if gap_guard.pct is not None
         else "-",
-        "gap_guard_pct_value": gap_guard_pct,
-        "gap_guard_up_price": fmt(gap_guard_up_price, gap_price_digits)
-        if gap_guard_up_price
+        "gap_guard_pct_value": gap_guard.pct,
+        "gap_guard_up_price": _format_hybrid_value(gap_guard.up_price, gap_price_digits)
+        if gap_guard.up_price
         else "-",
-        "gap_guard_up_price_value": gap_guard_up_price,
-        "gap_guard_down_price": fmt(gap_guard_down_price, gap_price_digits)
-        if gap_guard_down_price
+        "gap_guard_up_price_value": gap_guard.up_price,
+        "gap_guard_down_price": _format_hybrid_value(
+            gap_guard.down_price, gap_price_digits
+        )
+        if gap_guard.down_price
         else "-",
-        "gap_guard_down_price_value": gap_guard_down_price,
+        "gap_guard_down_price_value": gap_guard.down_price,
         "risk_guide": risk_guide,
-        "score_value": score_value,
-        "score": f"{score_value:.2f}",
-        "score_notes": score_notes,
+        "score_value": score.value,
+        "score": f"{score.value:.2f}",
+        "score_notes": score.notes,
         "reasons": reasons,
     }
     candidate[sma_trend_key] = sma_trend_value

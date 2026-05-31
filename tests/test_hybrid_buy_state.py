@@ -1,5 +1,6 @@
 import math
 
+import pytest
 from sab.signals.hybrid_buy import (
     HybridEvaluationSettings,
     HybridPattern,
@@ -325,6 +326,220 @@ def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
         "trigger_close_reclaimed_ema_short",
         "trigger_rsi_crossed_above_50",
     }.issubset(ids)
+
+
+@pytest.mark.parametrize(
+    (
+        "pattern",
+        "pattern_reasons",
+        "pattern_context",
+        "expected_entry_state",
+        "expected_score",
+        "expected_reason_ids",
+    ),
+    [
+        (
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            ["Bullish candle with rising volume"],
+            {
+                "trigger_bullish_vol": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+                "avg_vol": 1_000_000.0,
+            },
+            "READY",
+            2.40,
+            [
+                "pattern_trend_pullback_bounce",
+                "entry_state_ready",
+                "trigger_bullish_candle_rising_volume",
+                "volume_confirmation",
+                "gap_guard_atr",
+                "entry_trigger_guard",
+            ],
+        ),
+        (
+            HybridPattern.SWING_HIGH_BREAKOUT,
+            ["Close broke above recent swing high with volume > 5d avg"],
+            {"swing_high": 104.0, "avg_vol": 1_000_000.0},
+            "READY",
+            2.35,
+            [
+                "pattern_swing_high_breakout",
+                "entry_state_ready",
+                "trigger_breakout_above_swing_high_with_volume",
+                "volume_confirmation",
+                "gap_guard_atr",
+                "entry_trigger_guard",
+            ],
+        ),
+        (
+            HybridPattern.RSI_OVERSOLD_REVERSAL,
+            ["Reversal off EMA short/mid with volume"],
+            {
+                "avg_vol": 1_000_000.0,
+                "rsi_val": 50.0,
+                "close_above_ema_short": True,
+            },
+            "READY",
+            2.30,
+            [
+                "pattern_rsi_oversold_reversal",
+                "entry_state_ready",
+                "trigger_reversal_off_ema_support_with_volume",
+                "volume_confirmation",
+                "gap_guard_atr",
+                "entry_trigger_guard",
+            ],
+        ),
+    ],
+)
+def test_hybrid_candidate_contract_by_pattern(
+    monkeypatch,
+    pattern: HybridPattern,
+    pattern_reasons: list[str],
+    pattern_context: dict[str, float | bool],
+    expected_entry_state: str,
+    expected_score: float,
+    expected_reason_ids: list[str],
+) -> None:
+    candles = _simple_candles(10, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [10.0] * len(closes),
+    )
+
+    def _detector_for(detector_pattern: HybridPattern):
+        if detector_pattern == pattern:
+            return (True, pattern_reasons, detector_pattern, pattern_context)
+        return (False, [], None, {})
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: _detector_for(HybridPattern.TREND_PULLBACK_BOUNCE),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: _detector_for(HybridPattern.SWING_HIGH_BREAKOUT),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: _detector_for(HybridPattern.RSI_OVERSOLD_REVERSAL),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD", "name": "Fake Corp"}
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["ticker"] == "FAKE.US"
+    assert candidate["name"] == "Fake Corp"
+    assert candidate["pattern"] == pattern
+    assert candidate["entry_state"] == expected_entry_state
+    assert candidate["score_value"] == pytest.approx(expected_score)
+    assert candidate["score"] == f"{expected_score:.2f}"
+    assert candidate["pattern_reasons"] == ", ".join(pattern_reasons)
+    assert candidate["signal_price_basis"] == "adjusted"
+    assert candidate["signal_close_adjusted_value"] == candidate["close_value"]
+    assert [reason["id"] for reason in candidate["reasons"]] == expected_reason_ids
+
+
+def test_hybrid_pattern_detection_priority_is_stable(monkeypatch) -> None:
+    candles = _simple_candles(10, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [10.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {"rsi_val": 55.0, "close_above_ema_short": True},
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (
+            True,
+            ["Close broke above recent swing high with volume > 5d avg"],
+            HybridPattern.SWING_HIGH_BREAKOUT,
+            {"swing_high": 104.0, "avg_vol": 1_000_000.0},
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (
+            True,
+            ["Reversal off EMA short/mid with volume"],
+            HybridPattern.RSI_OVERSOLD_REVERSAL,
+            {"rsi_val": 50.0, "close_above_ema_short": True},
+        ),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
+
+    assert result.candidate is not None
+    assert result.candidate["pattern"] == HybridPattern.TREND_PULLBACK_BOUNCE
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(), {"currency": "USD"}
+    )
+
+    assert result.candidate is not None
+    assert result.candidate["pattern"] == HybridPattern.SWING_HIGH_BREAKOUT
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_reason", "expected_kind"),
+    [
+        ("history", "Not enough completed history (<20 bars)", "system"),
+        ("price", "Price 104.70 < MIN_PRICE 200.00", "signal"),
+        ("liquidity", "Avg dollar volume 107,101,500 < 999,999,999,999", "signal"),
+    ],
+)
+def test_hybrid_basic_filter_reason_kind_contract(
+    monkeypatch,
+    case: str,
+    expected_reason: str,
+    expected_kind: str,
+) -> None:
+    candles = _simple_candles(10, base=100.0)
+    settings = _settings()
+    if case == "history":
+        settings.min_history_bars = 20
+    elif case == "price":
+        settings.min_price = 200.0
+    elif case == "liquidity":
+        settings.min_dollar_volume = 999_999_999_999.0
+
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+
+    result = evaluate_ticker_hybrid("FAKE.KR", candles, settings, {"currency": "KRW"})
+
+    assert result.candidate is None
+    assert result.reason == expected_reason
+    assert result.reason_kind == expected_kind
 
 
 def test_hybrid_score_prioritizes_ready_with_confirmation(monkeypatch):

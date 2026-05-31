@@ -2,6 +2,7 @@ import datetime as dt
 from pathlib import Path
 from typing import cast
 
+import pytest
 from sab.signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
 
 
@@ -77,6 +78,108 @@ def _patch_indicators(monkeypatch):
     monkeypatch.setattr(
         "sab.signals.hybrid_sell.rsi", lambda closes, n: [60.0] * len(closes)
     )
+
+
+def _patch_indicator_series(
+    monkeypatch,
+    *,
+    ema_short: list[float] | None = None,
+    ema_mid: list[float] | None = None,
+    sma_trend: list[float] | None = None,
+    rsi_values: list[float] | None = None,
+) -> None:
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
+    )
+
+    def _ema(closes, n):
+        if n == 2:
+            return ema_short or [0.0] * len(closes)
+        return ema_mid or [0.0] * len(closes)
+
+    monkeypatch.setattr("sab.signals.hybrid_sell.ema", _ema)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.sma",
+        lambda closes, n: sma_trend or [0.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.rsi",
+        lambda closes, n: rsi_values or [60.0] * len(closes),
+    )
+
+
+@pytest.mark.parametrize(
+    ("candles", "holding", "indicator_kwargs", "expected_reason"),
+    [
+        (
+            _simple_candles(100.0),
+            {"entry_price": 100.0},
+            {
+                "ema_short": [2.0, 2.0, 1.0],
+                "ema_mid": [1.0, 1.0, 2.0],
+            },
+            "EMA short crossed below EMA mid (momentum down)",
+        ),
+        (
+            _simple_candles(100.0),
+            {"entry_price": 100.0},
+            {"rsi_values": [60.0, 60.0, 39.0]},
+            "RSI dropped into oversold zone (<40)",
+        ),
+        (
+            _simple_candles(94.0),
+            {"entry_price": 100.0},
+            {},
+            "Hit hard stop max",
+        ),
+    ],
+)
+def test_hybrid_sell_strong_exit_rule_contract(
+    monkeypatch,
+    candles: list[dict],
+    holding: dict[str, float],
+    indicator_kwargs: dict[str, list[float]],
+    expected_reason: str,
+) -> None:
+    _patch_indicator_series(monkeypatch, **indicator_kwargs)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=3, sma_trend_period=2
+    )
+
+    result = evaluate_sell_signals_hybrid("FAKE.US", candles, holding, settings)
+
+    assert result.action == "SELL"
+    assert any(expected_reason in reason for reason in result.reasons)
+
+
+def test_hybrid_sell_custom_stop_keeps_stop_price_when_profit_protection_also_arms(
+    monkeypatch,
+) -> None:
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
+    )
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-01",
+        "stop_override": 99.0,
+    }
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US",
+        _profit_trail_candles(peak_close=112.0, last_close=98.0),
+        holding,
+        settings,
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 99.0
+    assert result.reasons[0:2] == [
+        "Custom stop override in effect",
+        "Price hit custom stop override",
+    ]
+    assert any("High-target profit protection activated" in r for r in result.reasons)
 
 
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
