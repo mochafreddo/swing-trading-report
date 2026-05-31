@@ -29,8 +29,22 @@ function isNonLoopbackBindAllowed(env) {
   return env.SAB_ALLOW_NON_LOOPBACK_BIND === "1";
 }
 
-export function evaluateStartupBindGuard(env = process.env) {
-  const bindHost = normalizeBindHost(env.WEB_BIND_HOST);
+export function evaluateStartupBindGuard(env = process.env, options = {}) {
+  if (
+    Object.hasOwn(options, "bindHost") &&
+    typeof options.bindHost === "string" &&
+    !options.bindHost.trim()
+  ) {
+    return {
+      bindHost: "",
+      warning: null,
+      error:
+        "Next.js --hostname must not be empty. Bind to 127.0.0.1/localhost/::1, " +
+        "or set SAB_ALLOW_NON_LOOPBACK_BIND=1 with an explicit trusted hostname.",
+    };
+  }
+
+  const bindHost = normalizeBindHost(options.bindHost ?? env.WEB_BIND_HOST);
   const guardEnabled = isLocalRequestGuardEnabled(env);
   const nonLoopbackAllowed = isNonLoopbackBindAllowed(env);
 
@@ -71,8 +85,12 @@ export function evaluateStartupBindGuard(env = process.env) {
   };
 }
 
-export function enforceStartupBindGuard(env = process.env, log = console) {
-  const result = evaluateStartupBindGuard(env);
+export function enforceStartupBindGuard(
+  env = process.env,
+  log = console,
+  options = {},
+) {
+  const result = evaluateStartupBindGuard(env, options);
 
   if (result.error) {
     throw new Error(result.error);

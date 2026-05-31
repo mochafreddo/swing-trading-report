@@ -62,4 +62,29 @@ describe("startup bind guard", () => {
       }),
     ).not.toThrow();
   });
+
+  it("checks the effective bind host selected by CLI arguments", () => {
+    expect(() =>
+      enforceStartupBindGuard(
+        {
+          WEB_BIND_HOST: "127.0.0.1",
+          SAB_ENFORCE_LOCAL_REQUEST: "1",
+        },
+        console,
+        { bindHost: "0.0.0.0" },
+      ),
+    ).toThrow(/SAB_ALLOW_NON_LOOPBACK_BIND=1/);
+  });
+
+  it("rejects an explicitly empty effective bind host", () => {
+    expect(() =>
+      enforceStartupBindGuard(
+        {
+          WEB_BIND_HOST: "127.0.0.1",
+        },
+        console,
+        { bindHost: "" },
+      ),
+    ).toThrow(/--hostname must not be empty/);
+  });
 });

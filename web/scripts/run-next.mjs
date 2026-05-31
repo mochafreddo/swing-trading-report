@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
+import {
+  hasOption,
+  normalizeEnvValue,
+  resolveEffectiveBindHost,
+} from "./next-args.mjs";
 import { enforceStartupBindGuard } from "./startup-bind-guard.mjs";
 
 const require = createRequire(import.meta.url);
@@ -11,23 +16,6 @@ function resolveCommand(argv) {
     return command;
   }
   return null;
-}
-
-function normalizeEnvValue(value, fallback) {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  const trimmed = value.trim();
-  return trimmed || fallback;
-}
-
-function hasOption(args, longOption, shortOption) {
-  return args.some(
-    (arg) =>
-      arg === longOption ||
-      arg.startsWith(`${longOption}=`) ||
-      (shortOption ? arg === shortOption : false),
-  );
 }
 
 function buildArgs(command, extraArgs) {
@@ -56,7 +44,10 @@ const extraArgs = process.argv.slice(3);
 
 if (command !== "build") {
   try {
-    enforceStartupBindGuard(process.env, console);
+    const bindHost = resolveEffectiveBindHost(extraArgs, process.env);
+    enforceStartupBindGuard(process.env, console, {
+      bindHost,
+    });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
