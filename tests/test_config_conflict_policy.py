@@ -99,3 +99,29 @@ data:
 
     assert cfg.data_provider == "pykrx"
     assert cfg.screen_limit == 12
+
+
+def test_load_config_resolves_sab_config_from_dotenv_before_loading_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.local.yaml"
+    config_path.write_text(
+        """
+data:
+  screen_limit: 42
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        f"SAB_CONFIG={config_path}\n",
+        encoding="utf-8",
+    )
+
+    _reset_conflict_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+
+    cfg = load_config()
+
+    assert cfg.screen_limit == 42

@@ -50,7 +50,7 @@ def load_cached_holidays(cache_dir: str, country_code: str) -> dict[str, Holiday
     try:
         with open(path, encoding="utf-8") as fp:
             data = json.load(fp)
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return {}
     if not isinstance(data, dict):
         logger.warning("Ignoring holiday cache %s: root JSON must be an object", path)
@@ -228,7 +228,7 @@ def lookup_holiday(
 __all__ = [
     "HolidayEntry",
     "load_cached_holidays",
-    "save_holidays",
-    "merge_holidays",
     "lookup_holiday",
+    "merge_holidays",
+    "save_holidays",
 ]

@@ -174,7 +174,7 @@ class _KISAuthMixin(_KISClientState):
 
         try:
             expires_seconds = int(expires_in) if expires_in is not None else 3600
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             expires_seconds = 3600
 
         expiry_dt: dt.datetime | None = None

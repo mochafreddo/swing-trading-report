@@ -127,10 +127,10 @@ def _to_float(value: Any) -> float:
         return float("nan")
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         try:
             return float(str(value).replace(",", ""))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return float("nan")
 
 

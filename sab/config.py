@@ -558,8 +558,8 @@ class _PortfolioSection:
 
 
 def _create_config_parser() -> _ConfigParser:
-    yaml_cfg = load_yaml_config().raw
     load_dotenv_if_available(override=False)
+    yaml_cfg = load_yaml_config().raw
     return _ConfigParser(yaml_cfg, strict=_is_strict_config_mode())
 
 
