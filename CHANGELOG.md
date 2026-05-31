@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.33.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.33.0...v1.33.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **ci:** mise 런타임 버전을 갱신한다 ([39b565e](https://github.com/mochafreddo/swing-trading-report/commit/39b565ecbe6bfd11330d926e386da4797e482d08))
+* **config:** 설정 로드와 Ruff 범위를 바로잡는다 ([546b34e](https://github.com/mochafreddo/swing-trading-report/commit/546b34e1b9d245b5dd5eae7e587450fa61bed53b))
+* **toolchain:** pnpm 11 lockfile을 보강한다 ([b99db2d](https://github.com/mochafreddo/swing-trading-report/commit/b99db2d99f68c0d827f9a3c6aa02aa39ff8d0213))
+* **web:** pnpm override 적용 위치를 바로잡는다 ([2f67b48](https://github.com/mochafreddo/swing-trading-report/commit/2f67b48d8cd191b2abf1ab3c0f38759bc2ae8363))
+* **web:** 웹 의존성 갱신 CI 실패를 복구한다 ([af55300](https://github.com/mochafreddo/swing-trading-report/commit/af553006bf95162543733eed6f4204ac824abd8a))
+* **web:** 직접 실행 바인드 가드 우회를 막는다 ([251b894](https://github.com/mochafreddo/swing-trading-report/commit/251b894b65a210948a437d3251bae34c9d1e0a34))
+
+
+### Documentation
+
+* 문서 구조와 설정 참조 정리 ([a5e1c47](https://github.com/mochafreddo/swing-trading-report/commit/a5e1c4739c893b2a2a703d4bdb544cbd8327b6eb))
+
 ## [1.33.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.32.3...v1.33.0) (2026-05-31)
 
 
