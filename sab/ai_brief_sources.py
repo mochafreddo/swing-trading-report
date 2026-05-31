@@ -4,19 +4,16 @@ import datetime as dt
 import json
 import math
 import os
-import socket
-import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
 
 import requests  # type: ignore[import-untyped]
 
-from . import ai_brief_url_safety as url_safety
-from .ai_brief_eval_common import parse_iso_offset_datetime
+from . import ai_brief_source_report as source_report
+from . import ai_brief_source_url_safety as source_url_safety
 from .ai_brief_source_normalizers import (
     normalize_alpha_vantage_news_rows,
     normalize_benzinga_news_rows,
@@ -37,15 +34,15 @@ SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS = "alpha-vantage-news"
 SOURCE_PROVIDER_MARKETAUX_NEWS = "marketaux-news"
 SOURCE_PROVIDER_BENZINGA_NEWS = "benzinga-news"
 SOURCE_PROVIDER_NAVER_NEWS = "naver-news"
-SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
-SOURCE_REPORT_TYPE = "ai_brief_sources"
-SOURCE_FRESHNESS_HOURS = 72
-SOURCE_FUTURE_SKEW_MINUTES = 15
-MAX_SOURCES_PER_TICKER = 3
+SOURCE_REPORT_SCHEMA = source_report.SOURCE_REPORT_SCHEMA
+SOURCE_REPORT_TYPE = source_report.SOURCE_REPORT_TYPE
+SOURCE_FRESHNESS_HOURS = source_report.SOURCE_FRESHNESS_HOURS
+SOURCE_FUTURE_SKEW_MINUTES = source_report.SOURCE_FUTURE_SKEW_MINUTES
+MAX_SOURCES_PER_TICKER = source_report.MAX_SOURCES_PER_TICKER
 MAX_SOURCE_API_RESPONSE_BYTES = 1_000_000
 DEFAULT_SOURCE_TIMEOUT_SECONDS = 10.0
-SOURCE_ROW_DNS_TIMEOUT_SECONDS = 1.0
-SOURCE_DNS_RESOLVER_WORKERS = 4
+SOURCE_ROW_DNS_TIMEOUT_SECONDS = source_url_safety.SOURCE_ROW_DNS_TIMEOUT_SECONDS
+SOURCE_DNS_RESOLVER_WORKERS = source_url_safety.SOURCE_DNS_RESOLVER_WORKERS
 SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
 FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
 POLYGON_NEWS_URL = "https://api.polygon.io/v2/reference/news"
@@ -58,20 +55,15 @@ BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
 BENZINGA_NEWS_LIMIT = 10
 NAVER_NEWS_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_NEWS_DISPLAY_COUNT = 10
-_ALLOWED_SOURCE_ISSUE_SEVERITIES = frozenset({"INFO", "WARN", "ERROR"})
-SOURCE_DNS_PIN_LOCK = threading.RLock()
-_SOURCE_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(SOURCE_DNS_RESOLVER_WORKERS)
+SOURCE_DNS_PIN_LOCK = source_url_safety.SOURCE_DNS_PIN_LOCK
+_SOURCE_DNS_RESOLVER_SLOTS = source_url_safety._SOURCE_DNS_RESOLVER_SLOTS
+socket = source_url_safety.socket
+threading = source_url_safety.threading
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
 type _SourceQueryParams = Mapping[str, str | int]
-
-
-@dataclass(frozen=True)
-class _ValidatedSourceApiUrl:
-    url: str
-    hostnames: tuple[str, ...]
-    addrinfos: tuple[Any, ...]
+_ValidatedSourceApiUrl = source_url_safety.ValidatedSourceApiUrl
 
 
 @dataclass(frozen=True)
@@ -1027,81 +1019,19 @@ def _normalize_source_rows(
     source_url_deadline: float | None = None,
     resolve_source_url_hostnames: bool = False,
 ) -> AiBriefSourceProviderResult:
-    sources_by_ticker: dict[str, list[dict[str, object]]] = {}
-    source_issues: list[dict[str, object]] = []
-    seen_urls_by_ticker: dict[str, set[str]] = {}
-    for idx, raw_row in enumerate(rows):
-        if not isinstance(raw_row, Mapping):
-            source_issues.append(
-                _source_issue(
-                    ticker=None,
-                    code=f"{issue_prefix}_invalid_row",
-                    message=(f"sources[{idx}] was ignored because it is not an object"),
-                )
-            )
-            continue
-        ticker = str(raw_row.get("ticker") or "").strip()
-        if not ticker:
-            source_issues.append(
-                _source_issue(
-                    ticker=None,
-                    code=f"{issue_prefix}_invalid_row",
-                    message=f"sources[{idx}] was ignored because ticker is required",
-                )
-            )
-            continue
-        if ticker not in eligible_tickers:
-            source_issues.append(
-                _source_issue(
-                    ticker=ticker,
-                    code=f"{issue_prefix}_unknown_ticker",
-                    message=f"{issue_subject} row ignored because ticker is not eligible",
-                )
-            )
-            continue
-
-        normalized, issue = _normalize_source_row(
-            raw_row,
-            ticker=ticker,
-            now=now,
-            issue_prefix=issue_prefix,
-            issue_subject=issue_subject,
-            source_url_deadline=source_url_deadline,
-            resolve_source_url_hostnames=resolve_source_url_hostnames,
-        )
-        if issue is None:
-            source_url = str(normalized.get("url") or "").strip()
-            seen_urls = seen_urls_by_ticker.setdefault(ticker, set())
-            if source_url in seen_urls:
-                source_issues.append(
-                    _source_issue(
-                        ticker=ticker,
-                        code=f"{issue_prefix}_duplicate_url",
-                        message=f"{issue_subject} row ignored because URL is duplicated",
-                    )
-                )
-                continue
-            seen_urls.add(source_url)
-            ticker_sources = sources_by_ticker.setdefault(ticker, [])
-            if len(ticker_sources) >= MAX_SOURCES_PER_TICKER:
-                source_issues.append(
-                    _source_issue(
-                        ticker=ticker,
-                        code=f"{issue_prefix}_cap_exceeded",
-                        message=(
-                            f"{issue_subject} row ignored because ticker already has "
-                            f"{MAX_SOURCES_PER_TICKER} sources"
-                        ),
-                    )
-                )
-                continue
-            ticker_sources.append(normalized)
-        else:
-            source_issues.append(issue)
-
+    result = source_report.normalize_source_rows(
+        rows=rows,
+        eligible_tickers=eligible_tickers,
+        now=now,
+        issue_prefix=issue_prefix,
+        issue_subject=issue_subject,
+        source_url_deadline=source_url_deadline,
+        resolve_source_url_hostnames=resolve_source_url_hostnames,
+        url_validator=_validate_source_row_url,
+    )
     return AiBriefSourceProviderResult(
-        sources_by_ticker=sources_by_ticker,
-        source_issues=source_issues,
+        sources_by_ticker=result.sources_by_ticker,
+        source_issues=result.source_issues,
     )
 
 
@@ -1112,35 +1042,12 @@ def _normalize_source_report_issues(
     issue_subject: str,
     eligible_tickers: set[str],
 ) -> list[dict[str, object]]:
-    issues: list[dict[str, object]] = []
-    for field_name in ("source_issues", "issues"):
-        raw_issues = payload.get(field_name)
-        if raw_issues is None:
-            continue
-        if not isinstance(raw_issues, list):
-            issues.append(
-                _source_issue(
-                    ticker=None,
-                    code=f"{issue_prefix}_invalid_issue",
-                    message=(
-                        f"{issue_subject} {field_name} ignored because it is not a list"
-                    ),
-                )
-            )
-            continue
-        for idx, raw_issue in enumerate(raw_issues):
-            issue = _normalize_source_report_issue(
-                raw_issue,
-                field_name=field_name,
-                idx=idx,
-                issue_prefix=issue_prefix,
-                issue_subject=issue_subject,
-            )
-            ticker = issue.get("ticker")
-            if ticker is not None and str(ticker) not in eligible_tickers:
-                continue
-            issues.append(issue)
-    return issues
+    return source_report.normalize_source_report_issues(
+        payload,
+        issue_prefix=issue_prefix,
+        issue_subject=issue_subject,
+        eligible_tickers=eligible_tickers,
+    )
 
 
 def _validate_source_report_contract(
@@ -1148,135 +1055,17 @@ def _validate_source_report_contract(
     *,
     subject: str,
 ) -> None:
-    schema = str(payload.get("schema") or "").strip()
-    if schema and schema != SOURCE_REPORT_SCHEMA:
-        raise AiBriefSourceProviderError(
-            f"{subject} schema must be {SOURCE_REPORT_SCHEMA!r}"
-        )
-    report_type = str(payload.get("type") or "").strip()
-    if report_type and report_type != SOURCE_REPORT_TYPE:
-        raise AiBriefSourceProviderError(
-            f"{subject} type must be {SOURCE_REPORT_TYPE!r}"
-        )
-
-
-def _normalize_source_report_issue(
-    raw_issue: object,
-    *,
-    field_name: str,
-    idx: int,
-    issue_prefix: str,
-    issue_subject: str,
-) -> dict[str, object]:
-    if not isinstance(raw_issue, Mapping):
-        return _source_issue(
-            ticker=None,
-            code=f"{issue_prefix}_invalid_issue",
-            message=(
-                f"{issue_subject} {field_name}[{idx}] ignored because it is "
-                "not an object"
-            ),
-        )
-    code = str(raw_issue.get("code") or "").strip()
-    message = str(raw_issue.get("message") or "").strip()
-    severity = str(raw_issue.get("severity") or "WARN").strip().upper()
-    if not code or not message:
-        return _source_issue(
-            ticker=None,
-            code=f"{issue_prefix}_invalid_issue",
-            message=(
-                f"{issue_subject} {field_name}[{idx}] ignored because code and "
-                "message are required"
-            ),
-        )
-    if severity not in _ALLOWED_SOURCE_ISSUE_SEVERITIES:
-        return _source_issue(
-            ticker=None,
-            code=f"{issue_prefix}_invalid_issue",
-            message=(
-                f"{issue_subject} {field_name}[{idx}] ignored because severity "
-                f"must be one of {sorted(_ALLOWED_SOURCE_ISSUE_SEVERITIES)}"
-            ),
-        )
-    ticker = raw_issue.get("ticker")
-    return {
-        "ticker": None if ticker is None else str(ticker).strip() or None,
-        "code": code,
-        "severity": severity,
-        "message": message,
-    }
-
-
-def _normalize_source_row(
-    row: Mapping[str, Any],
-    *,
-    ticker: str,
-    now: dt.datetime,
-    issue_prefix: str,
-    issue_subject: str,
-    source_url_deadline: float | None,
-    resolve_source_url_hostnames: bool,
-) -> tuple[dict[str, object], None] | tuple[dict[str, object], dict[str, object]]:
-    title = str(row.get("title") or "").strip()
-    url = str(row.get("url") or "").strip()
-    if not title:
-        return {}, _source_issue(
-            ticker=ticker,
-            code=f"{issue_prefix}_invalid_row",
-            message=f"{issue_subject} row ignored because title is required",
-        )
     try:
-        url = _validate_source_row_url(
-            url,
-            deadline=source_url_deadline,
-            resolve_hostname=resolve_source_url_hostnames,
-        )
+        source_report.validate_source_report_contract(payload, subject=subject)
     except ValueError as exc:
-        return {}, _source_issue(
-            ticker=ticker,
-            code=f"{issue_prefix}_invalid_row",
-            message=f"{issue_subject} row ignored because {exc}",
-        )
-    try:
-        published_at = _parse_offset_datetime(row.get("published_at"))
-    except ValueError as exc:
-        return {}, _source_issue(
-            ticker=ticker,
-            code=f"{issue_prefix}_invalid_row",
-            message=f"{issue_subject} row ignored because {exc}",
-        )
-    if is_ai_brief_source_stale(published_at, now=now):
-        return {}, _source_issue(
-            ticker=ticker,
-            code=f"{issue_prefix}_stale",
-            message=(
-                f"{issue_subject} row ignored because published_at is older than "
-                f"{SOURCE_FRESHNESS_HOURS}h"
-            ),
-        )
-    if is_ai_brief_source_future(published_at, now=now):
-        return {}, _source_issue(
-            ticker=ticker,
-            code=f"{issue_prefix}_future",
-            message=(
-                f"{issue_subject} row ignored because published_at is more than "
-                f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
-            ),
-        )
-    source: dict[str, object] = {
-        "title": title,
-        "url": url,
-        "published_at": published_at.isoformat(),
-    }
-    return source, None
-
-
-def _parse_offset_datetime(value: object) -> dt.datetime:
-    return parse_iso_offset_datetime(value, field_name="published_at")
+        raise AiBriefSourceProviderError(str(exc)) from exc
 
 
 def validate_ai_brief_source_url(value: object, *, field_name: str = "url") -> str:
-    return url_safety.validate_url(value, field_name=field_name)
+    return source_url_safety.validate_ai_brief_source_url(
+        value,
+        field_name=field_name,
+    )
 
 
 def validate_ai_brief_source_api_url(value: object) -> str:
@@ -1290,22 +1079,17 @@ def _validate_source_row_url(
     deadline: float | None = None,
     resolve_hostname: bool = False,
 ) -> str:
-    text = validate_ai_brief_source_url(value, field_name=field_name)
-    parsed = urlparse(text)
-    hostname = parsed.hostname or ""
-    port = url_safety.validated_url_port(parsed, field_name=field_name)
-    hostnames = _source_api_hostname_aliases(hostname)
-    if _is_blocked_source_row_hostname(hostname):
-        raise ValueError(f"{field_name} must not target local or private hosts")
-    if resolve_hostname:
-        hostnames = _source_api_fetch_hostname_aliases(hostname, field_name=field_name)
-        _resolve_public_source_addrinfos(
-            hostnames,
-            port,
+    try:
+        return source_url_safety.validate_source_row_url(
+            value,
             field_name=field_name,
             deadline=deadline,
+            resolve_hostname=resolve_hostname,
+            dns_lock=SOURCE_DNS_PIN_LOCK,
+            resolver_slots=_SOURCE_DNS_RESOLVER_SLOTS,
         )
-    return text
+    except source_url_safety.AiBriefSourceUrlTimeoutError as exc:
+        raise AiBriefSourceProviderTimeoutError(str(exc)) from exc
 
 
 def _validate_source_api_request_url(
@@ -1313,22 +1097,15 @@ def _validate_source_api_request_url(
     *,
     deadline: float | None,
 ) -> _ValidatedSourceApiUrl:
-    text = validate_ai_brief_source_url(value, field_name="source API URL")
-    parsed = urlparse(text)
-    if parsed.scheme.lower() != "https":
-        raise ValueError("source API URL must use https")
-    hostname = parsed.hostname or ""
-    port = url_safety.validated_url_port(parsed, field_name="source API URL")
-    hostnames = _source_api_fetch_hostname_aliases(
-        hostname,
-        field_name="source API URL",
-    )
-    addrinfos = _resolve_source_api_addrinfos(hostnames, port, deadline=deadline)
-    return _ValidatedSourceApiUrl(
-        url=text,
-        hostnames=hostnames,
-        addrinfos=addrinfos,
-    )
+    try:
+        return source_url_safety.validate_source_api_request_url(
+            value,
+            deadline=deadline,
+            dns_lock=SOURCE_DNS_PIN_LOCK,
+            resolver_slots=_SOURCE_DNS_RESOLVER_SLOTS,
+        )
+    except source_url_safety.AiBriefSourceUrlTimeoutError as exc:
+        raise AiBriefSourceProviderTimeoutError(str(exc)) from exc
 
 
 def _create_vendor_deadline_and_url(
@@ -1355,97 +1132,18 @@ def _source_api_token_for_url(url: str) -> str:
     return api_token if url == configured_url else ""
 
 
-def _is_blocked_source_row_hostname(hostname: str) -> bool:
-    return any(
-        url_safety.is_blocked_hostname(alias)
-        for alias in _source_api_hostname_aliases(hostname)
-    )
-
-
-def _source_api_hostname_aliases(hostname: str) -> tuple[str, ...]:
-    return url_safety.hostname_aliases(hostname)
-
-
-def _source_api_fetch_hostname_aliases(
-    hostname: str,
-    *,
-    field_name: str,
-) -> tuple[str, ...]:
-    return url_safety.fetch_hostname_aliases(hostname, field_name=field_name)
-
-
-def _resolve_source_api_addrinfos(
-    hostnames: tuple[str, ...],
-    port: int,
-    *,
-    deadline: float | None,
-) -> tuple[Any, ...]:
-    return _resolve_public_source_addrinfos(
-        hostnames,
-        port,
-        field_name="source API URL",
-        deadline=deadline,
-    )
-
-
-def _resolve_public_source_addrinfos(
-    hostnames: tuple[str, ...],
-    port: int,
-    *,
-    field_name: str,
-    deadline: float | None,
-) -> tuple[Any, ...]:
-    if any(url_safety.is_local_hostname(hostname) for hostname in hostnames):
-        raise ValueError(f"{field_name} must not target local or private hosts")
-    if any(url_safety.is_blocked_ip_text(hostname) for hostname in hostnames):
-        raise ValueError(f"{field_name} must not target local or private hosts")
-    resolution_hostname = hostnames[-1] if hostnames else ""
-    try:
-        with _source_dns_pin_lock(deadline):
-            addrinfos = _getaddrinfo_with_timeout(
-                resolution_hostname,
-                port,
-                timeout=_source_dns_timeout(deadline),
-            )
-    except TimeoutError as exc:
-        raise AiBriefSourceProviderTimeoutError(
-            f"{field_name} DNS resolution timed out"
-        ) from exc
-    except OSError as exc:
-        raise ValueError(f"{field_name} hostname could not be resolved") from exc
-    if not addrinfos:
-        raise ValueError(f"{field_name} hostname could not be resolved")
-    if any(url_safety.is_blocked_addrinfo(addrinfo) for addrinfo in addrinfos):
-        raise ValueError(f"{field_name} must not target local or private hosts")
-    return tuple(addrinfos)
-
-
 def _getaddrinfo_with_timeout(
     hostname: str,
     port: int,
     *,
     timeout: float,
 ) -> list[Any]:
-    return url_safety.getaddrinfo_with_timeout(
+    return source_url_safety.getaddrinfo_with_timeout(
         hostname,
         port,
         timeout=timeout,
-        slots=_SOURCE_DNS_RESOLVER_SLOTS,
-        resolver=socket.getaddrinfo,
-        thread_factory=threading.Thread,
-        monotonic=time.monotonic,
-        thread_name="ai-brief-source-dns",
+        resolver_slots=_SOURCE_DNS_RESOLVER_SLOTS,
     )
-
-
-def _source_dns_timeout(deadline: float | None) -> float:
-    timeout = SOURCE_ROW_DNS_TIMEOUT_SECONDS
-    if deadline is None:
-        return timeout
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError("DNS resolution timed out")
-    return min(timeout, remaining)
 
 
 @contextmanager
@@ -1455,7 +1153,7 @@ def _pin_source_api_dns(
     *,
     deadline: float | None = None,
 ) -> Iterator[None]:
-    with url_safety.pin_dns(
+    with source_url_safety.pin_source_api_dns(
         hostnames,
         addrinfos,
         lock=SOURCE_DNS_PIN_LOCK,
@@ -1465,19 +1163,6 @@ def _pin_source_api_dns(
             "source API DNS pin lock timed out"
         ),
         socket_module=socket,
-    ):
-        yield
-
-
-@contextmanager
-def _source_dns_pin_lock(deadline: float | None) -> Iterator[None]:
-    with url_safety.dns_pin_lock(
-        SOURCE_DNS_PIN_LOCK,
-        deadline=deadline,
-        remaining_timeout=_remaining_source_timeout,
-        timeout_error=lambda: AiBriefSourceProviderTimeoutError(
-            "source API DNS pin lock timed out"
-        ),
     ):
         yield
 
@@ -1492,8 +1177,10 @@ def is_ai_brief_source_stale(
     now: dt.datetime,
     freshness_hours: float = SOURCE_FRESHNESS_HOURS,
 ) -> bool:
-    return now.astimezone(dt.UTC) - published_at.astimezone(dt.UTC) > dt.timedelta(
-        hours=freshness_hours
+    return source_report.is_ai_brief_source_stale(
+        published_at,
+        now=now,
+        freshness_hours=freshness_hours,
     )
 
 
@@ -1502,18 +1189,11 @@ def is_ai_brief_source_future(
     *,
     now: dt.datetime,
 ) -> bool:
-    return published_at.astimezone(dt.UTC) - now.astimezone(dt.UTC) > dt.timedelta(
-        minutes=SOURCE_FUTURE_SKEW_MINUTES
-    )
+    return source_report.is_ai_brief_source_future(published_at, now=now)
 
 
 def _source_issue(*, ticker: str | None, code: str, message: str) -> dict[str, object]:
-    return {
-        "ticker": ticker,
-        "code": code,
-        "severity": "WARN",
-        "message": message,
-    }
+    return source_report.source_issue(ticker=ticker, code=code, message=message)
 
 
 __all__ = [
