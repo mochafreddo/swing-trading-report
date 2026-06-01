@@ -167,11 +167,11 @@
 ## 자주 쓰는 실행
 
 - Buy 스캔(KR+US 스크리너 + 워치리스트)
-  - `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe both`
+  - `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --universe both`
 - Buy 스캔(스크리너만, 상위 20)
-  - `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe screener --screener-limit 20`
+  - `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --universe screener --screener-limit 20`
 - 보유 매도/보류 평가
-  - `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
+  - `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
 - just 레시피(동일 동작)
   - `just scan --universe both`
   - `just sell`
@@ -335,7 +335,7 @@
 | scheduled AI Brief (로컬 primary) | `logs/launchd/US-local-primary.cmd.log`, plist `StandardOut/ErrorPath`, `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml logs scheduler` | Telegram 발송 + Supabase `runtime_state` marker(`success`/`notification:sent`) | `launchctl bootout`/`bootstrap` 또는 `just ai-brief-scheduled-docker ... --dry-run` | Supabase Storage/`report_index` artifact + Telegram 본문 | macOS `launchd`(호스트) |
 | GitHub Actions (`scan`/`sell`/`cleanup`, ai-brief monitor/fallback) | Actions run logs + run summary | Actions run 상태(성공/실패), `github-fallback` lock marker | 웹 `Run` 탭 또는 GitHub `workflow_dispatch` 재실행 | Supabase 업로드 + `report_index` upsert 성공 | GitHub Actions |
 | Supabase (Postgres/Storage/`runtime_state`) | Supabase 대시보드 로그, `cron.job_run_details` | 위 "보유 목록" 절의 SQL Editor 점검 쿼리 | managed(재기동 대상 아님) | `supabase migration list`, `db dump`, marker 쿼리 | 원격 Supabase 프로젝트 |
-| CLI (`scan`/`sell`/`entry`/`ai-brief`) | stdout(`LOG_LEVEL`로 상세도 조정) | 종료 코드 + `reports/*.json` 생성 여부 | `just scan`/`sell`/`entry` 또는 `uv run -m sab ...` 재실행 | `reports/YYYY-MM-DD.*.json` 생성 + (업로드 시) Storage 반영 | 로컬 |
+| CLI (`scan`/`sell`/`entry`/`ai-brief`) | stdout(`LOG_LEVEL`로 상세도 조정) | 종료 코드 + `reports/*.json` 생성 여부 | `just scan`/`sell`/`entry` 또는 `uv run python -m sab ...` 재실행 | `reports/YYYY-MM-DD.*.json` 생성 + (업로드 시) Storage 반영 | 로컬 |
 
 ## 확장
 

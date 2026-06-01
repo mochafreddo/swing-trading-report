@@ -209,7 +209,7 @@
   - `config.yaml`: 비시크릿 설정(시장/전략/필터/입출력/알림 토글 등)
 - 개발도구/의존성 관리
   - uv 기반 프로젝트/의존성/가상환경 관리(`pyproject.toml`, `uv.lock`, `.venv/`).
-  - 실행은 `uv run -m sab scan` 형태로 통일.
+  - 실행은 `uv run python -m sab scan` 형태로 통일.
 
 ---
 
@@ -253,9 +253,10 @@
   - `.env`에 시크릿 입력(예: `KIS_APP_KEY`, `KIS_APP_SECRET`, (선택) 알림 토큰 등)
   - `config.yaml`에 비시크릿 설정 입력(샘플은 `config.example.yaml` 참고). `.env`/`config.yaml`에 동일 키를 중복 정의하지 않는다.
 - 실행 예시(uv run)
-  - 기본 실행: `uv run -m sab scan`
-  - 스크리너 크기: `uv run -m sab scan --limit 30`
-  - 워치리스트 지정: `uv run -m sab scan --watchlist watchlist.txt`
+  - 기본 실행: `uv run python -m sab scan`
+  - 평가 상한: `uv run python -m sab scan --limit 30`
+  - 스크리너 상위 N: `uv run python -m sab scan --screener-limit 30`
+  - 워치리스트 지정: `uv run python -m sab scan --watchlist watchlist.txt`
   - 웹 UI(Next.js): 로컬 Docker로 구동(Compose)
   - 프로젝트 의존성 없이 단독 스크립트 실행(옵션): `uv run --no-project path/to/script.py`
 - 결과: Buy 아티팩트 `reports/YYYY-MM-DD.buy.json` 생성.
@@ -264,11 +265,11 @@
 
 ## 10. 수용 기준(AC)
 
-- AC1: `uv run -m sab scan` 실행 시 오류 없이 Buy 아티팩트(`YYYY-MM-DD.buy.json`)를 생성한다.
+- AC1: `uv run python -m sab scan` 실행 시 오류 없이 Buy 아티팩트(`YYYY-MM-DD.buy.json`)를 생성한다.
 - AC2: KIS로 워치리스트 종목의 일봉을 성공적으로 조회한다(모의/실전 중 택1 환경).
 - AC3: 기본 30개 이하 종목 평가를 2분 내 완료한다(캐시 활용 시).
 - AC4: Buy 아티팩트에 각 후보의 근거(EMA/RSI/ATR/갭) 요약이 포함된다.
-- AC5: `uv run -m sab sell` 실행 시 보유 평가 아티팩트(`YYYY-MM-DD.sell.json`)를 생성한다.
+- AC5: `uv run python -m sab sell` 실행 시 보유 평가 아티팩트(`YYYY-MM-DD.sell.json`)를 생성한다.
 - AC6: 로컬 웹(Next.js)에서 생성된 JSON 리포트를 열람/필터할 수 있다.
 - AC7: 설정 파일만으로 대상 시장(KR/US), 대상 종목 수, 출력 경로, 데이터 제공자(kis/pykrx)를 변경할 수 있다.
 - AC8: GitHub Actions `schedule` 실행으로 비대화형 리포트 생성을 수행한다.

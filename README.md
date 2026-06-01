@@ -120,23 +120,23 @@
 
 ### 3. 핵심 실행
 
-- 기본 실행: `UV_CACHE_DIR=.uv-cache uv run -m sab scan`
-- 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --limit 30`
-- 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run -m sab scan --screener-limit 15`
-- 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
-- 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run -m sab scan --watchlist watchlist.txt`
-- 보유 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab sell`
-- 진입 평가: `UV_CACHE_DIR=.uv-cache uv run -m sab entry`
-- AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
-- OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
-- 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
-- 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
-- Finnhub Company News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub`
-- Polygon News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider polygon-news`
-- Alpha Vantage News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider alpha-vantage-news`
-- Marketaux News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider marketaux-news`
-- Benzinga News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider benzinga-news`
-- Naver News 포함 브리프(선택, KR ticker only): `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --buy-report reports/YYYY-MM-DD.buy.json --source-provider naver-news`
+- 기본 실행: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
+- 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --limit 30`
+- 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --screener-limit 15`
+- 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
+- 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --watchlist watchlist.txt`
+- 보유 평가: `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
+- 진입 평가: `UV_CACHE_DIR=.uv-cache uv run python -m sab entry`
+- AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
+- OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
+- 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
+- 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
+- Finnhub Company News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub`
+- Polygon News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider polygon-news`
+- Alpha Vantage News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider alpha-vantage-news`
+- Marketaux News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider marketaux-news`
+- Benzinga News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider benzinga-news`
+- Naver News 포함 브리프(선택, KR ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --buy-report reports/YYYY-MM-DD.buy.json --source-provider naver-news`
 - RSS/Atom/RDF source payload 생성(개발용, 로컬 파일 또는 live HTTPS feed URL catalog): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
 - 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - 여러 source payload 오프라인 비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report polygon=polygon.sources.json --compare-source-report av=alpha-vantage.sources.json --compare-source-report marketaux=marketaux.sources.json --compare-source-report benzinga=benzinga.sources.json --compare-source-report naver=naver.sources.json`
@@ -149,8 +149,8 @@
 - `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web`
 - 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
 - 로컬 CLI 실행 결과도 웹에서 보고 싶다면 `.env`에 `SAB_UPLOAD_REPORTS=true`를 설정하세요(Supabase 설정 필요).
-- `sab entry`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run -m sab entry --upload`를 사용할 수 있습니다.
-- `sab ai-brief`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --upload`를 사용할 수 있습니다.
+- `sab entry`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run python -m sab entry --upload`를 사용할 수 있습니다.
+- `sab ai-brief`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --upload`를 사용할 수 있습니다.
 
 ### 5. 리포트 아티팩트
 
@@ -180,7 +180,7 @@
   - `--universe watchlist|both`: watchlist를 로드하며, 파일 누락/티커 검증 실패 시 즉시 실패
 - `sab entry` 입력 정책:
   - mixed KR/US buy 리포트도 시장별로 나눠 한 번에 평가합니다.
-  - 특정 시장만 평가하려면 `UV_CACHE_DIR=.uv-cache uv run -m sab entry --market US`처럼 지정합니다.
+  - 특정 시장만 평가하려면 `UV_CACHE_DIR=.uv-cache uv run python -m sab entry --market US`처럼 지정합니다.
   - 치명 열화 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (기본 `1.0`)
     - `entry_price`가 비어 있는 행 비율이 임계치 이상이면 `sab entry`는 `exit 1`로 종료
     - `0.0`은 "누락이 1건이라도 있으면 실패" 정책으로 해석
@@ -267,20 +267,20 @@
 
 | 실행 예 | 설명 |
 | --- | --- |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief-scheduled --market <KR\|US> --schedule-role <role> --runner-role <role> --scheduled-tick <HHMM>` | runtime_state 멱등 가드 기반 scheduled AI Brief 실행(주로 launchd/Docker scheduler가 호출, 운영 절차는 `docs/runbook.md` 참고) |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider finnhub` | Finnhub Company News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider polygon-news` | Polygon News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider alpha-vantage-news` | Alpha Vantage News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider marketaux-news` | Marketaux News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --source-provider benzinga-news` | Benzinga News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run -m sab ai-brief --entry-report <path> --buy-report <path> --source-provider naver-news` | Naver News source context를 포함해 KR AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief-scheduled --market <KR\|US> --schedule-role <role> --runner-role <role> --scheduled-tick <HHMM>` | runtime_state 멱등 가드 기반 scheduled AI Brief 실행(주로 launchd/Docker scheduler가 호출, 운영 절차는 `docs/runbook.md` 참고) |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider finnhub` | Finnhub Company News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider polygon-news` | Polygon News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider alpha-vantage-news` | Alpha Vantage News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider marketaux-news` | Marketaux News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider benzinga-news` | Benzinga News source context를 포함해 US AI brief 생성 |
+| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --buy-report <path> --source-provider naver-news` | Naver News source context를 포함해 KR AI brief 생성 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --compare-source-report finnhub=<path> --compare-source-report polygon=<path> --compare-source-report av=<path> --compare-source-report marketaux=<path> --compare-source-report benzinga=<path> --compare-source-report naver=<path>` | 여러 AI Brief source payload를 같은 entry 후보 기준으로 비교 평가 |

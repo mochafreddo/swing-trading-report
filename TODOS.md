@@ -6,6 +6,12 @@
 
 ## Deferred
 
+- 2026-06-02: Document production/remote Supabase recovery criteria in
+  `docs/runbook.md` after operator confirmation.
+- 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
+  `docs/runbook.md` when recurring failure modes are confirmed.
+- 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
+  promoted from archived evidence to active maintenance docs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first
   steps, starting with `sab/scheduler/runner.py`,
   `sab/signals/hybrid_sell.py`, and `sab/entry.py`.
