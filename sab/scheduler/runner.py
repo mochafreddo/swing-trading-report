@@ -518,34 +518,18 @@ class ScheduledAiBriefRunner:
             )
 
         if runner_role in _PIPELINE_RUNNER_ROLES:
-            try:
-                self._state_store.upsert_marker(
-                    key=build_scheduler_state_key(
-                        kind="attempt",
-                        market=market,
-                        session_date=session_date,
-                        runner_role=runner_role,
-                        attempt_id=attempt_id,
-                    ),
-                    payload=_state_payload(
-                        market=market,
-                        session_date=session_date,
-                        schedule_role=schedule_role,
-                        runner_role=runner_role,
-                        scheduled_tick=request.scheduled_tick,
-                        attempt_id=attempt_id,
-                        run_url=request.run_url,
-                        runner=_runner_origin(runner_role),
-                        started_at=now,
-                    ),
-                    ttl_seconds=_ATTEMPT_TTL_SECONDS,
-                    now=now,
-                )
-            except Exception:
-                return ScheduledAiBriefResult(
-                    status="attempt_marker_failed",
-                    session_date=session_date,
-                )
+            attempt_result = self._record_pipeline_attempt_marker(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                scheduled_tick=request.scheduled_tick,
+                attempt_id=attempt_id,
+                run_url=request.run_url,
+                now=now,
+            )
+            if attempt_result is not None:
+                return attempt_result
 
         success_key = build_scheduler_state_key(
             kind="success", market=market, session_date=session_date
@@ -559,31 +543,18 @@ class ScheduledAiBriefRunner:
         artifact_key = build_scheduler_state_key(
             kind="artifact", market=market, session_date=session_date
         )
-        artifact_entry = self._state_store.get_entry(artifact_key)
-        if artifact_entry is None:
-            artifact_entry = self._repair_artifact_marker_from_report_index(
-                market=market,
-                session_date=session_date,
-                report_date=session_date,
-                artifact_key=artifact_key,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                run_url=request.run_url,
-                now=now,
-            )
-        if artifact_entry is not None:
-            return self._reconcile_notification(
-                market=market,
-                session_date=session_date,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                artifact_entry=artifact_entry,
-                require_main_lock=False,
-                main_lock_key=None,
-                main_owner_token=None,
-            )
+        artifact_result = self._reconcile_existing_or_repaired_artifact(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=request.run_url,
+            now=now,
+            artifact_key=artifact_key,
+        )
+        if artifact_result is not None:
+            return artifact_result
 
         if runner_role == "monitor-only":
             return self._monitor_local_primary(
@@ -874,6 +845,90 @@ class ScheduledAiBriefRunner:
                 storage_key=storage_key,
             )
         return result
+
+    def _record_pipeline_attempt_marker(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        scheduled_tick: str,
+        attempt_id: str,
+        run_url: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult | None:
+        try:
+            self._state_store.upsert_marker(
+                key=build_scheduler_state_key(
+                    kind="attempt",
+                    market=market,
+                    session_date=session_date,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
+                ),
+                payload=_state_payload(
+                    market=market,
+                    session_date=session_date,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    scheduled_tick=scheduled_tick,
+                    attempt_id=attempt_id,
+                    run_url=run_url,
+                    runner=_runner_origin(runner_role),
+                    started_at=now,
+                ),
+                ttl_seconds=_ATTEMPT_TTL_SECONDS,
+                now=now,
+            )
+        except Exception:
+            return ScheduledAiBriefResult(
+                status="attempt_marker_failed",
+                session_date=session_date,
+            )
+        return None
+
+    def _reconcile_existing_or_repaired_artifact(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        now: dt.datetime,
+        artifact_key: str | None = None,
+    ) -> ScheduledAiBriefResult | None:
+        artifact_key = artifact_key or build_scheduler_state_key(
+            kind="artifact", market=market, session_date=session_date
+        )
+        artifact_entry = self._state_store.get_entry(artifact_key)
+        if artifact_entry is None:
+            artifact_entry = self._repair_artifact_marker_from_report_index(
+                market=market,
+                session_date=session_date,
+                report_date=session_date,
+                artifact_key=artifact_key,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=run_url,
+                now=now,
+            )
+        if artifact_entry is None:
+            return None
+        return self._reconcile_notification(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            artifact_entry=artifact_entry,
+            require_main_lock=False,
+            main_lock_key=None,
+            main_owner_token=None,
+        )
 
     def _persist_runtime_guard_skip(
         self,

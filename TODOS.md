@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-02: First test-first scheduler runner refactor step completed:
+  pipeline attempt marker recording and existing/repaired artifact reconciliation
+  split out of `ScheduledAiBriefRunner.run`.
 - 2026-05-31: AI Brief source report validation/row normalization and source URL/DNS safety boundaries split out of `sab/ai_brief_sources.py` with offline/live URL-safety contracts preserved.
 - 2026-05-31: AI Brief vendor source row normalizers split into `sab/ai_brief_source_normalizers.py` with source-provider regression coverage preserved.
 - 2026-05-31: Runtime-guard-skipped scheduled AI Brief runs are persisted as separate `ai-brief-skip` Reports artifacts with Storage/`report_index` writes.

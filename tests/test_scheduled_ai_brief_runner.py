@@ -513,6 +513,35 @@ def test_attempt_marker_failure_stops_before_pipeline_generation() -> None:
     assert pipeline.calls == []
 
 
+def test_pipeline_attempt_marker_helper_records_role_scoped_payload() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner()
+
+    result = runner._record_pipeline_attempt_marker(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        scheduled_tick="0810",
+        attempt_id="attempt-helper",
+        run_url="https://github.com/owner/repo/actions/runs/1",
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    attempt_key = build_scheduler_state_key(
+        kind="attempt",
+        market="US",
+        session_date="2026-05-28",
+        runner_role="local-primary",
+        attempt_id="attempt-helper",
+    )
+    assert result is None
+    assert state.upserts[0][0] == attempt_key
+    assert state.upserts[0][1]["runner"] == "local"
+    assert state.upserts[0][1]["runUrl"] == (
+        "https://github.com/owner/repo/actions/runs/1"
+    )
+
+
 def test_artifact_only_reconciliation_uses_notification_claim_without_main_lock() -> (
     None
 ):
@@ -717,6 +746,41 @@ def test_report_index_repair_happens_before_new_pipeline() -> None:
     assert artifact_upserts
     assert artifact_upserts[0]["repairedFromReportIndex"] is True
     assert artifact_upserts[0]["storageKey"] == "2026/05/2026-05-28.ai-brief.json"
+
+
+def test_existing_artifact_reconciliation_repairs_index_candidate() -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage()
+    storage.repair_candidates = ["2026/05/2026-05-28.ai-brief.json"]
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        storage=storage,
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    result = runner._reconcile_existing_or_repaired_artifact(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-retry",
+        runner_role="local-retry",
+        attempt_id="attempt-repair-helper",
+        run_url="",
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    assert result is not None
+    assert result.status == "notification_reconciled"
+    assert storage.downloads == [
+        "2026/05/2026-05-28.ai-brief.json",
+        "2026/05/2026-05-28.ai-brief.json",
+    ]
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
+    assert not any(":lock:" in key for key in state.claims)
+    assert any(
+        payload.get("repairedFromReportIndex") is True
+        for key, payload in state.upserts
+        if ":artifact:" in key
+    )
 
 
 def test_report_index_repair_rejects_generated_at_outside_scheduled_window() -> None:
