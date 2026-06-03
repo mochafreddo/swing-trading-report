@@ -1,7 +1,27 @@
 from __future__ import annotations
 
 import plistlib
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_plist_timing_check(repo_root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "scripts/launchd/verify_ai_brief_plist_timing.py",
+            "--repo-root",
+            str(repo_root),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
@@ -73,8 +93,32 @@ def test_launchd_verify_script_is_non_destructive() -> None:
     text = script.read_text(encoding="utf-8")
 
     assert "plutil -lint" in text
+    assert "verify_ai_brief_plist_timing.py" in text
     assert "bash -n" in text
     assert "docker compose" in text
     assert "launchctl print" in text
     assert "launchctl bootstrap" not in text
     assert "launchctl bootout" not in text
+
+
+def test_launchd_plist_timing_check_accepts_current_policy() -> None:
+    result = _run_plist_timing_check(REPO_ROOT)
+
+    assert result.returncode == 0, result.stderr
+    assert "launchd plist timing matches shared schedule policy" in result.stdout
+
+
+def test_launchd_plist_timing_check_rejects_drift(tmp_path: Path) -> None:
+    launchd_dir = tmp_path / "scripts" / "launchd"
+    shutil.copytree(REPO_ROOT / "scripts" / "launchd", launchd_dir)
+
+    plist_path = launchd_dir / "com.mochafreddo.sab.ai-brief.us.local-primary.plist"
+    payload = plistlib.loads(plist_path.read_bytes())
+    payload["StartCalendarInterval"][0]["Minute"] = 11
+    plist_path.write_bytes(plistlib.dumps(payload, sort_keys=False))
+
+    result = _run_plist_timing_check(tmp_path)
+
+    assert result.returncode == 1
+    assert "StartCalendarInterval drift" in result.stderr
+    assert "local-primary" in result.stderr

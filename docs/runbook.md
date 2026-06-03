@@ -243,7 +243,8 @@
   - 설치 전 검증:
     - plist의 absolute repo/env/log path를 현재 머신에 맞게 확인합니다.
     - `scripts/launchd/verify-sab-ai-brief.sh`
-    - 시간 정책 drift 확인: `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_scheduled_ai_brief_schedule_policy.py tests/test_ai_brief_workflow.py tests/test_launchd_scheduler_wrapper.py -q`
+    - 위 스크립트는 plist 구문, shared schedule policy 대비 launchd timing drift, wrapper shell syntax, compose 구조를 함께 확인합니다.
+    - 정책 계약 테스트: `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_scheduled_ai_brief_schedule_policy.py tests/test_ai_brief_workflow.py tests/test_launchd_scheduler_wrapper.py -q`
     - `plutil -lint scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-primary.plist`
     - `.env.scheduler.local`이 아직 없으면 compose 구조 검증에는 `SAB_SCHEDULER_ENV_FILE=.env.example docker compose -f docker-compose.yml -f docker-compose.scheduler.yml config`를 사용합니다.
   - enable:

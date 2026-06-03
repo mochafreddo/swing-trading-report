@@ -6,10 +6,6 @@
 
 ## Deferred
 
-- 2026-06-03: Consider generating launchd scheduled AI Brief plist timing from
-  `sab/scheduler/schedule_policy.py`, or extend
-  `scripts/launchd/verify-sab-ai-brief.sh` to compare plist timing against the
-  shared policy before bootstrap.
 - 2026-06-02: Document production/remote Supabase recovery criteria in
   `docs/runbook.md` after operator confirmation.
 - 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
@@ -27,6 +23,9 @@
 
 ## Completed
 
+- 2026-06-03: Extended `scripts/launchd/verify-sab-ai-brief.sh` with a
+  shared-policy launchd timing drift check before bootstrap, backed by
+  regression coverage for matching and intentionally drifted plist schedules.
 - 2026-06-03: Consolidated scheduled AI Brief schedule policy in
   `sab/scheduler/schedule_policy.py` so runner windows, GitHub Actions schedule
   mapping, launchd plist timing, tests, and docs share one policy contract when

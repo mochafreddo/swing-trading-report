@@ -15,6 +15,11 @@ plists=(
 printf '%s\n' "checking launchd plist syntax"
 plutil -lint "${plists[@]}"
 
+printf '%s\n' "checking launchd plist timing policy"
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --no-sync python \
+  "scripts/launchd/verify_ai_brief_plist_timing.py" \
+  --repo-root "${repo_root}"
+
 printf '%s\n' "checking wrapper shell syntax"
 bash -n "scripts/launchd/sab-ai-brief-wrapper.sh"
 
