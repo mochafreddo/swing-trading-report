@@ -610,6 +610,37 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
 
+        return self._run_locked_pipeline(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=request.run_url,
+            source_provider=request.source_provider,
+            model_provider=request.model_provider,
+            lock_key=lock_key,
+            owner_token=owner_token,
+            artifact_key=artifact_key,
+            now=now,
+        )
+
+    def _run_locked_pipeline(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        source_provider: str | None,
+        model_provider: str,
+        lock_key: str,
+        owner_token: str,
+        artifact_key: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
         lock_renewer = _MainLockRenewer(
             state_store=self._state_store,
             lock_key=lock_key,
@@ -625,8 +656,8 @@ class ScheduledAiBriefRunner:
                 market=market,
                 session_date=session_date,
                 report_date=session_date,
-                source_provider=request.source_provider,
-                model_provider=request.model_provider,
+                source_provider=source_provider,
+                model_provider=model_provider,
                 dry_run=False,
             )
         except Exception:
@@ -674,7 +705,7 @@ class ScheduledAiBriefRunner:
                     market=market,
                     session_date=session_date,
                     guard=pre_upload_guard,
-                    run_url=request.run_url,
+                    run_url=run_url,
                 )
             except _SkipArtifactClaimHeld:
                 self._state_store.release_lock(lock_key, owner_token=owner_token)
@@ -749,7 +780,7 @@ class ScheduledAiBriefRunner:
                     "reportDate": session_date,
                     "runner": _runner_origin(runner_role),
                     "attemptId": attempt_id,
-                    "runUrl": request.run_url,
+                    "runUrl": run_url,
                 },
                 ttl_seconds=_SUCCESS_TTL_SECONDS,
                 now=now,

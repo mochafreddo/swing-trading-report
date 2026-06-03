@@ -23,6 +23,10 @@
 
 ## Completed
 
+- 2026-06-03: Extracted the scheduled AI Brief main-lock pipeline/upload/
+  notification path from `ScheduledAiBriefRunner.run`, with characterization
+  coverage for completion, provider propagation, artifact marking, notification,
+  and main-lock release.
 - 2026-06-03: Extracted scheduled AI Brief runtime-guard skip result handling
   from `ScheduledAiBriefRunner.run`, with regression coverage for late-alert
   preservation when skip artifact upload fails.

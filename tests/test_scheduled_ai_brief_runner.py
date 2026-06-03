@@ -1076,6 +1076,39 @@ def test_runner_passes_session_date_as_ai_brief_report_date() -> None:
     assert pipeline.calls[0][1]["report_date"] == "2026-05-28"
 
 
+def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._run_locked_pipeline(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-helper-lock",
+        run_url="https://github.com/owner/repo/actions/runs/3",
+        source_provider="finnhub",
+        model_provider="openai",
+        lock_key=lock_key,
+        owner_token="attempt-helper-lock-owner",
+        artifact_key=artifact_key,
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "finnhub"
+    assert pipeline.calls[0][1]["model_provider"] == "openai"
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
+    assert any(key == artifact_key for key, _payload in state.upserts)
+    assert lock_key in state.releases
+
+
 def test_runner_releases_main_lock_when_pipeline_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
