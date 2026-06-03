@@ -17,7 +17,7 @@
 
 ### 백로그
 
-- `entry` workflow_dispatch와 웹 `Run` 탭 연결
+- standalone `entry` workflow_dispatch와 웹 `Run` 탭 연결
 - branch protection stage1 복귀와 stage2 signed commit 적용
 
 ### 폐기 후보

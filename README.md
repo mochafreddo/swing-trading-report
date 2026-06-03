@@ -14,18 +14,24 @@
 
 로컬 Supabase는 idle Docker CPU/메모리를 줄이기 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화한 최소 프로필을 사용합니다. Studio/Realtime/메일 테스트가 필요한 디버깅 세션에서만 `supabase/config.toml`의 해당 `enabled` 값을 일시적으로 `true`로 바꿔 사용하세요.
 
-상세 문서 인덱스는 [docs/README.md](docs/README.md), 배경/요구사항은 [docs/PRD.md](docs/PRD.md)를 참고하세요.
+상세 문서 인덱스는 [docs/README.md](docs/README.md), 제품 방향과 남은 backlog는 [docs/PRD.md](docs/PRD.md)를 참고하세요.
 
 ## 어디서부터 읽을까
 
 | 질문 | 시작점 |
 | --- | --- |
 | 로컬에서 바로 실행하려면? | 이 README의 [Quickstart](#quickstart-uv-기반), [웹 UI 빠른 시작](#4-웹-ui-빠른-시작) |
+| 문서 전체 지도와 우선순위는? | [docs/README.md](docs/README.md) |
 | 개발/커밋/검증 흐름은? | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 시스템 구조와 데이터 흐름은? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 운영 중 장애를 보면? | [docs/runbook.md](docs/runbook.md)의 문제 해결/장애 참조 |
+| 배포/운영/장애 대응을 보면? | [docs/runbook.md](docs/runbook.md)의 웹 UI 로컬 실행, 자동 실행, 문제 해결/장애 참조 |
 | 전략 신호와 리스크 규칙은? | [docs/STRATEGY.md](docs/STRATEGY.md) |
 | 환경변수와 시크릿은? | [.env.example](.env.example), [docs/config-reference.md](docs/config-reference.md), [SECURITY.md](SECURITY.md) |
+
+현재 동작 기준은 `README.md`, `docs/runbook.md`, `docs/ARCHITECTURE.md`,
+`docs/STRATEGY.md`, `docs/spec-v1.1.md`를 우선합니다. `docs/PRD.md`,
+`docs/spec-v1.3.md`, ADR, 리뷰 문서는 제품/backlog/의사결정 이력으로
+보존되며, 최신 운영 절차와 충돌하면 위 운영 기준 문서를 우선하세요.
 
 ## 한눈에 보기
 
@@ -365,7 +371,7 @@
 
 - 기본 Entry 평가는 이미 `sab entry`로 제공되며, `reports/YYYY-MM-DD(-n).entry.json` 아티팩트를 생성합니다.
 - Entry 리포트를 웹에서 보려면 Supabase 업로드가 필요하며, `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload` 경로를 사용합니다.
-- 웹 `Run` 탭과 GitHub Actions workflow는 아직 `entry` 실행을 직접 트리거하지 않습니다.
+- 웹 `Run` 탭과 GitHub Actions에는 아직 standalone `entry` 전용 트리거가 없습니다. `ai-brief.yml`은 내부 단계로 `entry`를 실행합니다.
 
 ## 데이터 수집(히스토리 누적)
 
@@ -482,7 +488,7 @@
 
 ### 백로그
 
-- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
+- 웹 `Run` 탭과 GitHub Actions workflow에 standalone `entry` 전용 실행 경로 추가
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
 - 추가 유료/벤더별 news/API adapter 운영화
 

@@ -188,6 +188,13 @@ Documentation changes should follow the same consistency standards as code chang
   - 리뷰: `docs/reviews/YYYY/review-YYYY-MM-DD.md`
   - 버전 스펙/계획: `spec-vX.Y*.md`, `plan-vX.Y.md`
 - 문서 추가/이동 시 관련 인덱스 링크를 함께 갱신합니다.
+- 문서 상태, 인덱스 링크, archive/artifact 분류를 바꾸면 아래 검증을 실행합니다.
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q
+```
+
+- 문서만 바꾸는 경우에도 명령어, 파일명, 링크는 실제 `justfile`, `.github/workflows/`, `pyproject.toml`, `web/package.json`, 설정 예시와 대조합니다.
 
 ## 9) Public API / Interface / Type 변경 기준
 
@@ -206,3 +213,4 @@ Use this checklist to validate that the guide is complete and actionable.
 2. 문서의 명령어가 실제 도구체인(`uv`, `pre-commit`, `pnpm --dir web`)과 일치해야 합니다.
 3. 커밋/검증 규칙이 `README.md`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`와 충돌하지 않아야 합니다.
 4. `web/` 변경 시 pre-commit 대상(`lint`, `format:check`), `web/src/app/` 한정 route static check, CI 강제 검사(`typecheck`) 구간이 명확해야 합니다.
+5. 문서 인덱스/상태/로컬 링크 변경 시 `tests/test_docs_state_contract.py`가 통과해야 합니다.

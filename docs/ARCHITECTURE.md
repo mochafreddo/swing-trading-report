@@ -16,7 +16,7 @@
 
 ### 백로그
 
-- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로 추가
+- 웹 `Run` 탭과 GitHub Actions workflow에 standalone `entry` 전용 실행 경로 추가
 - branch protection stage1/stage2 적용은 별도 governance backlog
 
 ### 폐기 후보
@@ -280,7 +280,7 @@ flowchart LR
   - `sell`은 holdings 파일 입력을 요구합니다.
 - `workflow_dispatch` 실행 ref를 `main`에 고정해 운영 단순성을 우선합니다.
 - Entry 파이프라인(`entry`)은 로컬 JSON 리포트(`*.entry.json`)를 생성하고, Storage/`report_index`/웹 Reports UI와 연동됩니다.
-  - 단, 웹 `Run` 탭과 GitHub Actions workflow는 여전히 `scan`/`sell`만 지원합니다.
+  - 단, 웹 `Run` 탭과 GitHub Actions workflow는 standalone `entry` 전용 실행 트리거를 아직 제공하지 않습니다. `ai-brief.yml`은 내부 단계로 `entry`를 실행합니다.
   - buy report candidate는 adjusted 신호 필드와 함께 동일 `eval_date`의 raw entry reference close를 포함하며, 이 raw 기준가는 `scan`의 후보 전용 배치 warmup으로 준비됩니다.
   - `entry`는 이 raw reference와 실시간/raw snapshot만 비교한 뒤, 필요 시 포트폴리오 가드를 후속 적용합니다.
   - mixed KR/US buy report는 시장별로 분리 평가하며, entry artifact는 `market="MIXED"`와 시장별 날짜 메타(`signal_eval_date_by_market`, `entry_session_date_by_market`)를 함께 기록합니다.
@@ -304,7 +304,7 @@ flowchart LR
 
 ## 10. 관련 문서
 
-- 제품/요구사항: `docs/PRD.md`
+- 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`
 - 운영: `docs/runbook.md`, `docs/kis-setup.md`

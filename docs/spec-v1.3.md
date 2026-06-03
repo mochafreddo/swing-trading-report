@@ -19,7 +19,7 @@
 
 ### 백로그
 
-- 웹 `Run` 탭과 GitHub Actions workflow에 `entry` 실행 경로를 추가하는 작업은 이 문서의 인접 backlog로 유지합니다.
+- 웹 `Run` 탭과 GitHub Actions workflow에 standalone `entry` 전용 실행 경로를 추가하는 작업은 이 문서의 인접 backlog로 유지합니다.
 
 ### 폐기 후보
 
@@ -83,7 +83,7 @@
 
 > **DB/웹 UI 연동 여부**
 > - 현재 구현은 `report_index.report_type='entry'`, Storage key `.entry.json`, 웹 Reports 목록/상세 렌더링을 모두 지원합니다.
-> - 단, 웹 `Run` 탭과 GitHub Actions workflow는 아직 `entry` 실행 트리거를 제공하지 않습니다.
+> - 단, 웹 `Run` 탭과 GitHub Actions workflow는 아직 standalone `entry` 전용 실행 트리거를 제공하지 않습니다. `ai-brief.yml`은 내부 단계로 `entry`를 실행합니다.
 
 ### 4.2 Entry 리포트 JSON 스키마(초안)
 

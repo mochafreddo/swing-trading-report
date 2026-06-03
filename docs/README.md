@@ -2,7 +2,7 @@
 
 상태: Accepted (문서 인덱스)
 
-`docs/`의 공식 진입점입니다. 현재 운영 기준 문서, 설계 기록, backlog spec, archive, artifact를 아래 역할로 구분합니다.
+`docs/`의 공식 진입점입니다. 현재 운영 기준 문서, 설계 기록, backlog spec, archive, artifact를 아래 역할로 구분합니다. 최신 동작 확인은 `Accepted` 운영 기준 문서를 우선하고, `Backlog`/`Archive` 문서는 현재 구현과 다를 수 있습니다.
 
 ## 어디서부터 읽을까 (Where to start)
 
@@ -33,6 +33,12 @@
 | Config / env reference | [config/env reference](config-reference.md), [`.env.example`](../.env.example) | 전체 override 표는 reference, 시크릿 템플릿은 `.env.example` |
 | Strategy logic | [전략](STRATEGY.md) | 신호/리스크 로직 변경 시 함께 갱신 |
 
+## 유지보수 규칙
+
+- 현재 동작 기준은 [프로젝트 README](../README.md), [런북](runbook.md), [아키텍처](ARCHITECTURE.md), [전략](STRATEGY.md), [Spec v1.1](spec-v1.1.md)을 우선합니다.
+- [PRD](PRD.md), [Spec v1.3](spec-v1.3.md), ADR, 리뷰 문서는 제품 방향, backlog, 의사결정/검토 이력입니다. 현재 운영 문서와 충돌하면 운영 문서를 우선하고, 필요한 경우 backlog 문서에 `확인 필요`를 남깁니다.
+- 새 문서를 추가하거나 링크/상태를 바꾸면 `tests/test_docs_state_contract.py`를 함께 확인합니다.
+
 ## 문서 상태
 
 ### 현재 제공
@@ -47,7 +53,8 @@
 
 ### 백로그
 
-- 미래 구현 범위와 제품 비전은 [PRD](PRD.md)와 [Spec v1.3](spec-v1.3.md)에서 관리합니다.
+- 미래 구현 범위와 제품 방향은 [Product Backlog](PRD.md)와 [Spec v1.3](spec-v1.3.md)에서 관리합니다.
+- 웹 `Run` 탭과 GitHub Actions workflow의 standalone `entry` 전용 실행 경로는 backlog입니다. `ai-brief.yml`은 내부 단계로 `entry`를 실행합니다.
 - 운영 문서에 남은 vague한 "예정" 항목은 별도 backlog 문서로 이동하는 것을 원칙으로 합니다.
 
 ### 폐기 후보
@@ -84,7 +91,7 @@
 
 ## backlog spec / roadmap
 
-- [PRD](PRD.md)
+- [Product Backlog](PRD.md)
 - [Spec v1.3 backlog 스펙](spec-v1.3.md)
 
 ## archive
