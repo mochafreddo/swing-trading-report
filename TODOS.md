@@ -6,9 +6,6 @@
 
 ## Deferred
 
-- 2026-06-03: Add a local `just` recipe for GitHub Actions workflow validation
-  that wraps the Docker `rhysd/actionlint` command, so workflow edits can be
-  checked without relying on a globally installed `actionlint` binary.
 - 2026-06-03: Consolidate scheduled AI Brief schedule policy so runner windows,
   GitHub Actions schedule mapping, launchd plist timing, tests, and docs cannot
   drift when cutoff/fallback times change.
@@ -32,6 +29,9 @@
 
 ## Completed
 
+- 2026-06-03: Added local `just workflow-audit` for GitHub Actions workflow
+  validation via Docker `rhysd/actionlint:1.7.12`, so workflow edits can be
+  checked without a globally installed `actionlint` binary.
 - 2026-06-03: GitHub Actions `github-fallback` queue-delay policy decided as a
   bounded 4-minute role-window end grace, allowing queued fallback starts before
   09:29 ET while keeping PRE_OPEN and runtime_state duplicate-report guards.

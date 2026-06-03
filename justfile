@@ -13,6 +13,7 @@ ci_github_owner := "ci-owner"
 ci_github_repo := "ci-repo"
 ci_github_pat := "ghp_ci_token"
 web_tool_path := 'PATH="$(mise where node)/bin:$(mise where pnpm):$PATH"'
+actionlint_image := "rhysd/actionlint:1.7.12"
 
 alias qa := quality
 alias pc := precommit
@@ -97,6 +98,10 @@ precommit-validate:
   uv run pre-commit validate-config
 
 prepush: quality
+
+# GitHub Actions quality gates
+workflow-audit *args:
+  docker run --rm -v "$PWD":/work -w /work {{actionlint_image}} {{args}}
 
 # Web quality gates
 web-clean:

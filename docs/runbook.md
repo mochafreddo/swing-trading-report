@@ -284,6 +284,9 @@
 
 ## Audit 수동 점검
 
+- Workflow YAML 점검:
+  - `just workflow-audit`
+  - 로컬 recipe는 CI `workflow_audit`와 맞춘 `rhysd/actionlint:1.7.12` Docker image를 사용합니다.
 - 빠른 점검:
   - `trivy fs .`
 - CI 동일 정책 점검:
