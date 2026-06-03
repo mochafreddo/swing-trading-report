@@ -10,6 +10,11 @@
   `docs/runbook.md` after operator confirmation.
 - 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
   `docs/runbook.md` when recurring failure modes are confirmed.
+- 2026-06-03: Revisit GitHub Actions `github-fallback` queue-delay policy after
+  the runtime_state lock RPC hotfix is applied and smoked. On 2026-06-02,
+  fallback started after the intended role window and skipped, so decide whether
+  fallback should use a bounded grace window, a queued-run marker, or a separate
+  recovery command without weakening duplicate-report guards.
 - 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
   promoted from archived evidence to active maintenance docs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first

@@ -59,6 +59,9 @@ ai-brief-source-collect *args:
 ai-brief-source-live-compare *args:
   uv run python scripts/compare_ai_brief_live_sources.py {{args}}
 
+runtime-state-lock-smoke *args:
+  uv run python scripts/runtime_state_lock_smoke.py {{args}}
+
 # Python quality gates
 ruff:
   uv run ruff check .

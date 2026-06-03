@@ -231,6 +231,12 @@
     - `SAB_SCHEDULER_ENV_FILE=.env.scheduler.local just ai-brief-scheduled-docker --market US --schedule-role local-primary --runner-role local-primary --scheduled-tick 0810 --dry-run`
   - 로컬 Python runner 수동 dry-run:
     - `just ai-brief-scheduled-local --market US --schedule-role local-primary --runner-role local-primary --scheduled-tick 0810 --dry-run`
+  - `--dry-run`은 role window/env/preflight 확인용입니다. `runtime_state` lock/claim RPC를 실제로 호출하지 않으므로 Supabase lock 정상 동작 검증으로 쓰지 않습니다.
+  - 원격 Supabase `runtime_state` lock RPC smoke:
+    - 새 Supabase migration 적용 후, 다음 scheduled window 전 `just runtime-state-lock-smoke`를 실행합니다.
+    - 실행에는 `SUPABASE_URL`과 server-side `SUPABASE_SECRET_KEY` 또는 `SUPABASE_SERVICE_ROLE_KEY`가 필요합니다. 명령은 service-role secret을 출력하지 않아야 합니다.
+    - 성공 기준: synthetic `scheduled-ai-brief:test-lock:*` key로 첫 claim은 `acquired=true`, 중복 claim은 `acquired=false`, wrong-owner `check`/`renew`/`release`는 `false`, correct-owner `check`/`renew`/`release`는 `true`, release 후 re-claim은 다시 `acquired=true`입니다.
+    - script는 실패 중간에도 `finally` cleanup release를 시도합니다. 실패 후 Supabase에 synthetic key가 남아 있으면 owner/TTL을 확인한 뒤 삭제합니다.
   - launchd plist 후보는 `scripts/launchd/com.mochafreddo.sab.ai-brief.us.*.plist`입니다. 서로 다른 role은 서로 다른 plist를 사용하고, 같은 role의 EDT/EST candidate tick만 한 plist에 함께 둡니다.
   - 설치 전 검증:
     - plist의 absolute repo/env/log path를 현재 머신에 맞게 확인합니다.
@@ -259,6 +265,8 @@
     2. `docker ps`로 실행 중 scheduler container가 없는지 확인합니다.
     3. `.github/workflows/ai-brief.yml` schedule을 이전 primary schedule로 되돌립니다.
     4. 당일 `runtime_state`의 lock/claim marker는 owner/TTL을 확인하고, notification sent/success marker는 중복 발송 여부를 판단한 뒤 유지/삭제합니다.
+    5. `runtime_state` lock RPC hotfix 문제가 의심되면 이전 장애 정의(`column reference "expires_at" is ambiguous`)로 되돌리지 말고 alias-qualified `create or replace function` hotfix를 다시 적용합니다.
+    6. 재등록 전 `just runtime-state-lock-smoke`를 통과시켜 claim/duplicate/wrong-owner/correct-owner/release/re-claim 경로를 확인합니다.
 - Audit 실행(GitHub Actions)
   - 감사 워크플로: `.github/workflows/audit.yml`
   - 트리거: `pull_request`, `workflow_dispatch`, 매주 월요일 11:00 UTC(`0 11 * * 1`)
