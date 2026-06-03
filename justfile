@@ -12,6 +12,7 @@ ci_supabase_secret_key := "sb_secret_ci"
 ci_github_owner := "ci-owner"
 ci_github_repo := "ci-repo"
 ci_github_pat := "ghp_ci_token"
+web_tool_path := 'PATH="$(mise where node)/bin:$(mise where pnpm):$PATH"'
 
 alias qa := quality
 alias pc := precommit
@@ -102,27 +103,27 @@ web-clean:
   rm -rf web/coverage
 
 web-install:
-  CI=true pnpm --dir web install --frozen-lockfile
+  CI=true {{web_tool_path}} pnpm --dir web install --frozen-lockfile
 
 web-lint:
-  pnpm --dir web run lint
+  {{web_tool_path}} pnpm --dir web run lint
 
 web-format-check:
-  pnpm --dir web run format:check
+  {{web_tool_path}} pnpm --dir web run format:check
 
 web-typecheck:
-  pnpm --dir web run typecheck
+  {{web_tool_path}} pnpm --dir web run typecheck
 
 web-test:
-  pnpm --dir web run test:coverage
+  {{web_tool_path}} pnpm --dir web run test:coverage
 
 deadcode-web:
-  pnpm --dir web run deadcode
+  {{web_tool_path}} pnpm --dir web run deadcode
 
 deadcode: deadcode-python deadcode-web
 
 web-build:
-  @SAB_BASIC_AUTH_USER='{{ci_sab_basic_auth_user}}' SAB_BASIC_AUTH_PASS='{{ci_sab_basic_auth_pass}}' SAB_SESSION_SECRET='{{ci_sab_session_secret}}' SUPABASE_URL='{{ci_supabase_url}}' SUPABASE_SECRET_KEY='{{ci_supabase_secret_key}}' GITHUB_OWNER='{{ci_github_owner}}' GITHUB_REPO='{{ci_github_repo}}' GITHUB_PAT='{{ci_github_pat}}' pnpm --dir web run build
+  @SAB_BASIC_AUTH_USER='{{ci_sab_basic_auth_user}}' SAB_BASIC_AUTH_PASS='{{ci_sab_basic_auth_pass}}' SAB_SESSION_SECRET='{{ci_sab_session_secret}}' SUPABASE_URL='{{ci_supabase_url}}' SUPABASE_SECRET_KEY='{{ci_supabase_secret_key}}' GITHUB_OWNER='{{ci_github_owner}}' GITHUB_REPO='{{ci_github_repo}}' GITHUB_PAT='{{ci_github_pat}}' {{web_tool_path}} pnpm --dir web run build
 
 ci-python: quality
 

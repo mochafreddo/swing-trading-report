@@ -28,6 +28,10 @@
 
 ## Completed
 
+- 2026-06-03: Codex/local web checks now force the mise-pinned Node.js runtime
+  through a shared `justfile` `web_tool_path` prefix. This avoids Codex Node
+  native addon loading failures for `@rolldown/binding-darwin-arm64` and
+  `@next/swc-darwin-arm64`.
 - 2026-06-02: First test-first scheduler runner refactor step completed:
   pipeline attempt marker recording and existing/repaired artifact reconciliation
   split out of `ScheduledAiBriefRunner.run`.
