@@ -49,6 +49,7 @@ mise.local.lock
 # Local project data
 /.gstack/
 /data/
+/logs/launchd/*.log
 /reports/
 /tmp/
 /tmp-replay/
