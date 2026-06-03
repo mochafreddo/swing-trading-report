@@ -9,7 +9,6 @@ from ..ai_brief_eval_common import (
     ALLOWED_CONFIDENCE,
     ALLOWED_ISSUE_SEVERITY,
     ALLOWED_MARKETS,
-    parse_iso_offset_datetime,
 )
 from ..ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
@@ -18,10 +17,12 @@ from ..ai_brief_sources import (
     validate_ai_brief_source_url,
 )
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from ..utils.datetime import offset_iso
 from .ai_brief_state import (
     validate_optional_ai_brief_state_fields,
     with_inferred_ai_brief_state,
 )
+from .metadata import parse_report_offset_datetime
 from .paths import ensure_dir, next_report_path
 from .time_label import normalize_artifact_date
 
@@ -44,26 +45,12 @@ class AiBriefValidationError(ValueError):
     """Raised when an AI brief artifact violates the local JSON contract."""
 
 
-def _offset_iso(now: dt.datetime | None = None) -> str:
-    if now is None:
-        aware = dt.datetime.now().astimezone()
-    elif now.tzinfo is None:
-        local_tz = dt.datetime.now().astimezone().tzinfo or dt.UTC
-        aware = now.replace(tzinfo=local_tz)
-    else:
-        aware = now
-    return aware.replace(microsecond=0).isoformat(timespec="seconds")
-
-
 def _parse_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
-    try:
-        return parse_iso_offset_datetime(
-            value,
-            field_name=field_name,
-            empty_message=f"{field_name} must be an offset datetime",
-        )
-    except ValueError as exc:
-        raise AiBriefValidationError(str(exc)) from exc
+    return parse_report_offset_datetime(
+        value,
+        field_name=field_name,
+        error_type=AiBriefValidationError,
+    )
 
 
 def _report_date_from_generated_at(
@@ -335,7 +322,7 @@ def write_ai_brief_report(
     artifact_date: object | None = None,
 ) -> str:
     ensure_dir(report_dir)
-    generated_at = str(artifact.get("generated_at") or _offset_iso(now)).strip()
+    generated_at = str(artifact.get("generated_at") or offset_iso(now)).strip()
     report_date = _report_date_from_generated_at(generated_at, artifact_date)
     validation_now = (
         now

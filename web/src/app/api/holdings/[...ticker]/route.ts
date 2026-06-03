@@ -4,24 +4,16 @@ import {
   DELETE as deleteSingleTickerHolding,
   PATCH as patchSingleTickerHolding,
 } from "../[ticker]/route";
+import {
+  type CatchAllTickerRouteContext,
+  joinTickerPath,
+} from "../ticker-route-params";
 
 export const runtime = "nodejs";
 
-type CatchAllRouteContext = {
-  params:
-    | { ticker: string[] }
-    | Promise<{
-        ticker: string[];
-      }>;
-};
-
-function joinTickerPath(segments: string[]): string {
-  return segments.join("/");
-}
-
 export async function PATCH(
   request: NextRequest,
-  context: CatchAllRouteContext,
+  context: CatchAllTickerRouteContext,
 ) {
   const params = await context.params;
   return patchSingleTickerHolding(request, {
@@ -31,7 +23,7 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  context: CatchAllRouteContext,
+  context: CatchAllTickerRouteContext,
 ) {
   const params = await context.params;
   return deleteSingleTickerHolding(request, {

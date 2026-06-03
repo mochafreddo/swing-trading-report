@@ -4,8 +4,10 @@ import datetime as dt
 from collections.abc import Mapping
 from typing import Any
 
-from ..ai_brief_eval_common import ALLOWED_MARKETS, parse_iso_offset_datetime
+from ..ai_brief_eval_common import ALLOWED_MARKETS
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
+from ..utils.datetime import offset_iso
+from .metadata import parse_report_offset_datetime
 from .paths import ensure_dir, next_report_path
 
 _ARTIFACT_SCHEMA = "sab.ai_brief_skip.v1"
@@ -30,26 +32,12 @@ class AiBriefSkipValidationError(ValueError):
     """Raised when an AI Brief skip artifact violates the JSON contract."""
 
 
-def _offset_iso(now: dt.datetime | None = None) -> str:
-    if now is None:
-        aware = dt.datetime.now().astimezone()
-    elif now.tzinfo is None:
-        local_tz = dt.datetime.now().astimezone().tzinfo or dt.UTC
-        aware = now.replace(tzinfo=local_tz)
-    else:
-        aware = now
-    return aware.replace(microsecond=0).isoformat(timespec="seconds")
-
-
 def _parse_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
-    try:
-        return parse_iso_offset_datetime(
-            value,
-            field_name=field_name,
-            empty_message=f"{field_name} must be an offset datetime",
-        )
-    except ValueError as exc:
-        raise AiBriefSkipValidationError(str(exc)) from exc
+    return parse_report_offset_datetime(
+        value,
+        field_name=field_name,
+        error_type=AiBriefSkipValidationError,
+    )
 
 
 def _require_text(payload: Mapping[str, Any], field_name: str) -> str:
@@ -147,7 +135,7 @@ def write_ai_brief_skip_report(
         session_date, field_name="session_date"
     )
     normalized_market = market.strip().upper()
-    generated_at = _offset_iso(now)
+    generated_at = offset_iso(now)
     normalized_session_state = session_state.strip().upper()
     normalized_expected_state = expected_state.strip().upper()
     skip_reason = _infer_skip_reason(

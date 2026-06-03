@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Iterable, Mapping
+
+from ..utils.datetime import parse_iso_offset_datetime
 
 
 def collect_row_tickers(rows: Iterable[Mapping[str, object]]) -> list[str]:
@@ -33,3 +36,19 @@ def infer_market_from_currency(
     if len(markets) == 1:
         return next(iter(markets)), None
     return "MIXED", sorted(markets)
+
+
+def parse_report_offset_datetime(
+    value: object,
+    *,
+    field_name: str,
+    error_type: type[ValueError],
+) -> dt.datetime:
+    try:
+        return parse_iso_offset_datetime(
+            value,
+            field_name=field_name,
+            empty_message=f"{field_name} must be an offset datetime",
+        )
+    except ValueError as exc:
+        raise error_type(str(exc)) from exc
