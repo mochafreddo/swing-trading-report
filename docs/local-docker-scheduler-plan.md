@@ -90,11 +90,11 @@ flowchart LR
 | 시장 | Primary | Retry | Hard cutoff | 기준 |
 | --- | --- | --- | --- | --- |
 | KR | 07:30 KST | 08:10 KST | 08:55 KST | 09:00 KST 개장 전 |
-| US | 08:10 ET | 08:45 ET | 09:25 ET | 09:30 ET 개장 전 |
+| US | 08:10 ET | 08:45 ET | 09:25 ET (`github-fallback` queue grace는 < 09:29 ET) | 09:30 ET 개장 전 |
 
 - Primary는 데이터 신선도와 처리 시간을 같이 고려한 기본 실행입니다.
 - Retry는 success marker가 없을 때만 실행합니다.
-- Hard cutoff 이후에는 `PRE_OPEN` AI Brief를 생성하지 않고 missing/late 알림만 보냅니다.
+- Hard cutoff 이후에는 `PRE_OPEN` AI Brief를 생성하지 않고 missing/late 알림만 보냅니다. 단, GitHub `github-fallback`은 queue delay 보정용 4분 role-window grace 안에서만 hard cutoff 예외로 runner 진입을 허용하며, PRE_OPEN guard는 그대로 적용합니다.
 - host timezone은 KST로 고정합니다. US `launchd` plist는 ET 시각을 직접
   표현하지 않고 KST 기준 candidate tick만 실행합니다.
   - EDT candidate tick: 21:10, 21:45, 22:25 KST.
@@ -122,8 +122,8 @@ ET에 실행될 수 있는데, 이를 먼저 조용히 종료하지 않으면 Do
 | US | `local-primary` | 08:05 <= t < 08:30 ET | 08:10 tick 지연 허용 |
 | US | `early-monitor` | 08:30 <= t < 08:45 ET | GitHub monitor only |
 | US | `local-retry` | 08:40 <= t < 08:55 ET | local retry |
-| US | `github-fallback` | 08:55 <= t < 09:25 ET | lock 획득 후 1회 fallback |
-| US | `cutoff-alert` | 09:25 <= t < 10:00 ET | missing/late alert only |
+| US | `github-fallback` | 08:55 <= t < 09:25 ET, GitHub queue grace < 09:29 ET | lock 획득 후 1회 fallback |
+| US | `cutoff-alert` | 09:29 <= t < 10:00 ET | missing/late alert only |
 
 - Window 밖 candidate는 성공도 실패도 아닌 no-op입니다.
 - Window 통과 후에도 `trading_session=true`와 `session_state=PRE_OPEN` guard를 다시 확인합니다.
@@ -352,7 +352,7 @@ Lock-like row의 release/renew/ownership-check RPC는 database 레벨에서도 e
   - artifact `market`이 대상 market과 같습니다.
   - artifact `report_date`가 대상 `session_date`와 같습니다.
   - artifact `generated_at`이 parse 가능하고, market-local 기준 대상 `session_date`의 scheduled window 안입니다.
-    - scheduled window는 해당 시장의 primary role window 시작부터 hard cutoff 직전까지입니다.
+    - scheduled window는 해당 시장의 primary role window 시작부터 hard cutoff 직전까지입니다. US `github-fallback`은 GitHub queue delay에 한해 09:29 ET 전까지의 4분 bounded grace를 같은 scheduled window로 인정합니다.
 - repair로 쓰는 artifact key payload는 upload 성공 경로와 같은 필드를 가져야 합니다.
   - 필수: `storageKey`, `market`, `sessionDate`, `reportDate`, `runner`, `attemptId`, `runUrl`.
   - repair 전용: `verifiedGeneratedAt`, `repairedAt`, `repairedFromReportIndex: true`.
@@ -362,15 +362,15 @@ Lock-like row의 release/renew/ownership-check RPC는 database 레벨에서도 e
 
 ### 4.6 US canary GitHub monitor schedule
 
-US canary 기간에는 GitHub Actions schedule을 다음 UTC candidate 시각으로 둡니다. 각 run은 실제 실행 시점에 `America/New_York` 기준 role window와 PRE_OPEN/cutoff guard를 다시 확인합니다. EDT/EST를 모두 커버하기 위해 같은 role에 두 개의 UTC candidate를 둡니다. window 밖 candidate는 조용히 종료합니다.
+US canary 기간에는 GitHub Actions schedule을 다음 UTC candidate 시각으로 둡니다. 각 run은 실제 실행 시점에 `America/New_York` 기준 role window와 PRE_OPEN/cutoff guard를 다시 확인합니다. EDT/EST를 모두 커버하기 위해 같은 role에 두 개의 UTC candidate를 둡니다. window 밖 candidate는 조용히 종료합니다. `github-fallback`은 GitHub Actions queue delay가 확인된 경우에만 4분 bounded grace로 09:29 ET 전까지 role guard를 통과할 수 있으며, 이 경우에도 PRE_OPEN/runtime_state guard는 그대로 적용합니다.
 
 | Role | ET | KST candidate | UTC cron candidates | 동작 |
 | --- | --- | --- | --- | --- |
 | `early-monitor` | 08:30 ET | 21:30 KST(EDT), 22:30 KST(EST) | `30 12 * * 1-5`, `30 13 * * 1-5` | local-primary attempt/lock/artifact 상태만 확인하고, local primary 미시작이면 알림 |
-| `github-fallback` | 08:55 ET | 21:55 KST(EDT), 22:55 KST(EST) | `55 12 * * 1-5`, `55 13 * * 1-5` | artifact repair 실패 후에도 artifact key가 없고 PRE_OPEN이면 lock claim 후 1회 fallback 실행 |
-| `cutoff-alert` | 09:26 ET | 22:26 KST(EDT), 23:26 KST(EST) | `26 13 * * 1-5`, `26 14 * * 1-5` | hard cutoff 이후 missing/late 알림만 발송하고 pipeline은 실행하지 않음 |
+| `github-fallback` | 08:55 ET (queue grace < 09:29 ET) | 21:55 KST(EDT), 22:55 KST(EST) | `55 12 * * 1-5`, `55 13 * * 1-5` | artifact repair 실패 후에도 artifact key가 없고 PRE_OPEN이면 lock claim 후 1회 fallback 실행 |
+| `cutoff-alert` | 09:29 ET | 22:29 KST(EDT), 23:29 KST(EST) | `29 13 * * 1-5`, `29 14 * * 1-5` | hard cutoff 이후 missing/late 알림만 발송하고 pipeline은 실행하지 않음 |
 
-GitHub Actions workflow syntax상 `schedule` 항목은 cron 문자열을 여러 개 선언하는 방식으로 표현합니다. workflow는 `github.event.schedule`을 candidate role로 매핑한 뒤, `America/New_York` 기준 현재 시각이 해당 role window 안인지 확인합니다. role window 밖이면 runtime_state write, secret preflight, 알림 없이 조용히 종료합니다.
+GitHub Actions workflow syntax상 `schedule` 항목은 cron 문자열을 여러 개 선언하는 방식으로 표현합니다. workflow는 `github.event.schedule`을 candidate role로 매핑한 뒤, `America/New_York` 기준 현재 시각이 해당 role window 안인지 확인합니다. `github-fallback`은 queue delay 보정용 4분 grace를 window end에만 적용합니다. role window 밖이면 runtime_state write, secret preflight, 알림 없이 조용히 종료합니다.
 
 ## 5. Secrets와 로컬 파일 정책
 

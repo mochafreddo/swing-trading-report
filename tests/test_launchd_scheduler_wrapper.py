@@ -41,6 +41,20 @@ def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:
         assert all("Hour" in item and "Minute" in item for item in intervals)
 
 
+def test_us_cutoff_alert_plist_runs_after_github_fallback_grace() -> None:
+    payload = plistlib.loads(
+        Path(
+            "scripts/launchd/com.mochafreddo.sab.ai-brief.us.cutoff-alert.plist"
+        ).read_bytes()
+    )
+    text = Path(
+        "scripts/launchd/com.mochafreddo.sab.ai-brief.us.cutoff-alert.plist"
+    ).read_text(encoding="utf-8")
+
+    assert "<string>0929</string>" in text
+    assert {item["Minute"] for item in payload["StartCalendarInterval"]} == {29}
+
+
 def test_launchd_log_directory_exists_before_bootstrap() -> None:
     assert Path("logs/launchd/.gitkeep").is_file()
 

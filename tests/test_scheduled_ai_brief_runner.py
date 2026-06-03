@@ -189,6 +189,7 @@ class _FakeStorage:
     downloads: list[str] = field(default_factory=list)
     repair_candidates: list[str] = field(default_factory=list)
     payload_by_key: dict[str, dict[str, object]] = field(default_factory=dict)
+    uploaded_generated_at: str = "2026-05-28T08:15:00-04:00"
     payload: dict[str, object] = field(
         default_factory=lambda: {
             "schema": "sab.ai_brief.v1",
@@ -222,7 +223,7 @@ class _FakeStorage:
         storage_key = "2026/05/2026-05-28.ai-brief.json"
         self.payload_by_key[storage_key] = {
             **self.payload,
-            "generated_at": "2026-05-28T08:15:00-04:00",
+            "generated_at": self.uploaded_generated_at,
         }
         return storage_key
 
@@ -336,6 +337,111 @@ def test_off_window_candidate_exits_before_runtime_state_preflight() -> None:
     assert notifier.sent == []
 
 
+def test_github_fallback_runs_inside_bounded_queue_grace() -> None:
+    storage = _FakeStorage(uploaded_generated_at="2026-05-28T09:27:00-04:00")
+    runner, state, pipeline, storage, notifier = _runner(
+        storage=storage,
+        now=dt.datetime(2026, 5, 28, 13, 27, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="github-fallback",
+            runner_role="github-fallback",
+            scheduled_tick="0855",
+            attempt_id="attempt-github-queued",
+        )
+    )
+
+    assert result.status == "completed"
+    assert len(pipeline.calls) == 1
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
+    assert any(
+        ":attempt:US:2026-05-28:github-fallback:" in key for key, _ in state.upserts
+    )
+
+
+def test_github_fallback_queue_grace_remains_bounded() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        now=dt.datetime(2026, 5, 28, 13, 29, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="github-fallback",
+            runner_role="github-fallback",
+            scheduled_tick="0855",
+            attempt_id="attempt-github-too-late",
+        )
+    )
+
+    assert result.status == "off_window_noop"
+    assert state.preflight_calls == 0
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
+def test_scheduled_artifact_window_ends_at_fallback_grace_boundary() -> None:
+    assert scheduler_runner._is_generated_during_scheduled_window(
+        market="US",
+        session_date="2026-05-28",
+        generated_at="2026-05-28T09:28:59-04:00",
+    )
+    assert not scheduler_runner._is_generated_during_scheduled_window(
+        market="US",
+        session_date="2026-05-28",
+        generated_at="2026-05-28T09:29:00-04:00",
+    )
+
+
+def test_cutoff_alert_waits_until_fallback_grace_expires() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        now=dt.datetime(2026, 5, 28, 13, 26, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="cutoff-alert",
+            runner_role="cutoff-alert",
+            scheduled_tick="0926",
+            attempt_id="attempt-cutoff-too-early",
+        )
+    )
+
+    assert result.status == "off_window_noop"
+    assert state.preflight_calls == 0
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
+def test_cutoff_alert_runs_after_fallback_grace_expires() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        now=dt.datetime(2026, 5, 28, 13, 29, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="cutoff-alert",
+            runner_role="cutoff-alert",
+            scheduled_tick="0929",
+            attempt_id="attempt-cutoff-after-grace",
+        )
+    )
+
+    assert result.status == "late_alert_sent"
+    assert state.preflight_calls == 1
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == ["cutoff_missing_ai_brief"]
+
+
 def test_pipeline_role_records_role_scoped_attempt_after_preflight() -> None:
     success_key = build_scheduler_state_key(
         kind="success", market="US", session_date="2026-05-28"
@@ -391,7 +497,7 @@ def test_non_pipeline_roles_do_not_write_attempt_marker(runner_role: str) -> Non
             if runner_role == "monitor-only"
             else runner_role,
             runner_role=runner_role,
-            scheduled_tick="0830",
+            scheduled_tick="0830" if runner_role == "monitor-only" else "0929",
             attempt_id="attempt-3",
         )
     )
@@ -423,7 +529,7 @@ def test_cutoff_alert_skips_when_success_marker_exists() -> None:
             market="US",
             schedule_role="cutoff-alert",
             runner_role="cutoff-alert",
-            scheduled_tick="0926",
+            scheduled_tick="0929",
             attempt_id="attempt-cutoff",
         )
     )
@@ -1175,7 +1281,7 @@ def test_monitor_and_cutoff_do_not_alert_when_trading_session_guard_fails(
             market="US",
             schedule_role=schedule_role,
             runner_role=runner_role,
-            scheduled_tick="0830" if runner_role == "monitor-only" else "0926",
+            scheduled_tick="0830" if runner_role == "monitor-only" else "0929",
             attempt_id="attempt-non-trading",
         )
     )

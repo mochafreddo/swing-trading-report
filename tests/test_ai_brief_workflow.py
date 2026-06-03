@@ -55,8 +55,8 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
         "30 13 * * 1-5",
         "55 12 * * 1-5",
         "55 13 * * 1-5",
-        "26 13 * * 1-5",
-        "26 14 * * 1-5",
+        "29 13 * * 1-5",
+        "29 14 * * 1-5",
     ]
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
@@ -97,13 +97,14 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert '"55 12 * * 1-5": ("US", "github-fallback", "github-fallback", "0855")' in (
         resolve_script
     )
-    assert '"26 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926")' in (
+    assert '"29 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0929")' in (
         resolve_script
     )
     assert 'out.write(f"session_date={session_date}\\n")' in resolve_script
     assert 'out.write(f"schedule_role={schedule_role}\\n")' in resolve_script
     assert 'out.write(f"runner_role={runner_role}\\n")' in resolve_script
     assert "role_windows" in resolve_script
+    assert '"github-fallback": dt.timedelta(minutes=4)' in resolve_script
     assert "should_run = _is_within_role_window(" in resolve_script
     assert 'out.write(f"should_run={str(should_run).lower()}\\n")' in resolve_script
     assert 'out.write("should_run=true\\n")' not in resolve_script

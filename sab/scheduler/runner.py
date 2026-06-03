@@ -84,7 +84,14 @@ _ROLE_WINDOWS: dict[str, dict[str, tuple[dt.time, dt.time]]] = {
         "early-monitor": (dt.time(8, 30), dt.time(8, 45)),
         "local-retry": (dt.time(8, 40), dt.time(8, 55)),
         "github-fallback": (dt.time(8, 55), dt.time(9, 25)),
-        "cutoff-alert": (dt.time(9, 25), dt.time(10, 0)),
+        "cutoff-alert": (dt.time(9, 29), dt.time(10, 0)),
+    },
+}
+_ROLE_WINDOW_END_GRACE: dict[str, dict[str, dt.timedelta]] = {
+    "US": {
+        # GitHub schedule runs can start after the nominal fallback window.
+        # Keep the grace before regular open; PRE_OPEN guards still decide.
+        "github-fallback": dt.timedelta(minutes=4),
     },
 }
 
@@ -219,9 +226,12 @@ def _is_within_role_window(
         return False
     if now.tzinfo is None:
         now = now.replace(tzinfo=dt.UTC)
-    local_time = now.astimezone(_local_zone(market)).time().replace(tzinfo=None)
+    local_now = now.astimezone(_local_zone(market))
     start, end = window
-    return start <= local_time < end
+    grace = _ROLE_WINDOW_END_GRACE.get(market, {}).get(schedule_role, dt.timedelta())
+    start_at = dt.datetime.combine(local_now.date(), start, tzinfo=local_now.tzinfo)
+    end_at = dt.datetime.combine(local_now.date(), end, tzinfo=local_now.tzinfo)
+    return start_at <= local_now < end_at + grace
 
 
 def _guard_allows_pipeline(guard: GuardSnapshot) -> bool:
@@ -281,8 +291,27 @@ def _is_generated_during_scheduled_window(
 
     primary_window = _ROLE_WINDOWS[market]["local-primary"]
     cutoff_window = _ROLE_WINDOWS[market]["cutoff-alert"]
-    local_time = local_generated_at.time().replace(tzinfo=None)
-    return primary_window[0] <= local_time < cutoff_window[0]
+    fallback_window = _ROLE_WINDOWS.get(market, {}).get("github-fallback")
+    start_at = dt.datetime.combine(
+        local_generated_at.date(),
+        primary_window[0],
+        tzinfo=local_generated_at.tzinfo,
+    )
+    end_at = dt.datetime.combine(
+        local_generated_at.date(),
+        cutoff_window[0],
+        tzinfo=local_generated_at.tzinfo,
+    )
+    if fallback_window is not None:
+        fallback_end_at = dt.datetime.combine(
+            local_generated_at.date(),
+            fallback_window[1],
+            tzinfo=local_generated_at.tzinfo,
+        ) + _ROLE_WINDOW_END_GRACE.get(market, {}).get(
+            "github-fallback", dt.timedelta()
+        )
+        end_at = max(end_at, fallback_end_at)
+    return start_at <= local_generated_at < end_at
 
 
 def _is_scheduled_artifact_for_session(

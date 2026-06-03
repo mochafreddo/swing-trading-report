@@ -8,9 +8,9 @@ on:
     # US canary GitHub fallback, 08:55 ET Monday-Friday across EDT/EST.
     - cron: "55 12 * * 1-5"
     - cron: "55 13 * * 1-5"
-    # US canary cutoff alert, 09:26 ET Monday-Friday across EDT/EST.
-    - cron: "26 13 * * 1-5"
-    - cron: "26 14 * * 1-5"
+    # US canary cutoff alert, 09:29 ET Monday-Friday across EDT/EST.
+    - cron: "29 13 * * 1-5"
+    - cron: "29 14 * * 1-5"
   workflow_dispatch:
     inputs:
       market:
@@ -149,14 +149,19 @@ jobs:
               "30 13 * * 1-5": ("US", "early-monitor", "monitor-only", "0830"),
               "55 12 * * 1-5": ("US", "github-fallback", "github-fallback", "0855"),
               "55 13 * * 1-5": ("US", "github-fallback", "github-fallback", "0855"),
-              "26 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926"),
-              "26 14 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0926"),
+              "29 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0929"),
+              "29 14 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0929"),
           }
           role_windows = {
               "US": {
                   "early-monitor": (dt.time(8, 30), dt.time(8, 45)),
                   "github-fallback": (dt.time(8, 55), dt.time(9, 25)),
-                  "cutoff-alert": (dt.time(9, 25), dt.time(10, 0)),
+                  "cutoff-alert": (dt.time(9, 29), dt.time(10, 0)),
+              },
+          }
+          role_window_end_grace = {
+              "US": {
+                  "github-fallback": dt.timedelta(minutes=4),
               },
           }
 
@@ -170,8 +175,21 @@ jobs:
               if window is None:
                   return False
               start, end = window
-              local_time = local_now.time().replace(tzinfo=None)
-              return start <= local_time < end
+              grace = role_window_end_grace.get(market, {}).get(
+                  schedule_role,
+                  dt.timedelta(),
+              )
+              start_at = dt.datetime.combine(
+                  local_now.date(),
+                  start,
+                  tzinfo=local_now.tzinfo,
+              )
+              end_at = dt.datetime.combine(
+                  local_now.date(),
+                  end,
+                  tzinfo=local_now.tzinfo,
+              )
+              return start_at <= local_now < end_at + grace
 
           is_schedule = os.environ["EVENT_NAME"] == "schedule"
           if is_schedule:

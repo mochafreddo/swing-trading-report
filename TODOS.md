@@ -6,15 +6,19 @@
 
 ## Deferred
 
+- 2026-06-03: Add a local `just` recipe for GitHub Actions workflow validation
+  that wraps the Docker `rhysd/actionlint` command, so workflow edits can be
+  checked without relying on a globally installed `actionlint` binary.
+- 2026-06-03: Consolidate scheduled AI Brief schedule policy so runner windows,
+  GitHub Actions schedule mapping, launchd plist timing, tests, and docs cannot
+  drift when cutoff/fallback times change.
+- 2026-06-03: Clarify the scheduler regression test that intentionally keeps the
+  stale `0926` cutoff tick to prove old cutoff candidates no-op during the
+  GitHub fallback grace period.
 - 2026-06-02: Document production/remote Supabase recovery criteria in
   `docs/runbook.md` after operator confirmation.
 - 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
   `docs/runbook.md` when recurring failure modes are confirmed.
-- 2026-06-03: Revisit GitHub Actions `github-fallback` queue-delay policy after
-  the runtime_state lock RPC hotfix is applied and smoked. On 2026-06-02,
-  fallback started after the intended role window and skipped, so decide whether
-  fallback should use a bounded grace window, a queued-run marker, or a separate
-  recovery command without weakening duplicate-report guards.
 - 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
   promoted from archived evidence to active maintenance docs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first
@@ -28,6 +32,9 @@
 
 ## Completed
 
+- 2026-06-03: GitHub Actions `github-fallback` queue-delay policy decided as a
+  bounded 4-minute role-window end grace, allowing queued fallback starts before
+  09:29 ET while keeping PRE_OPEN and runtime_state duplicate-report guards.
 - 2026-06-03: Codex/local web checks now force the mise-pinned Node.js runtime
   through a shared `justfile` `web_tool_path` prefix. This avoids Codex Node
   native addon loading failures for `@rolldown/binding-darwin-arm64` and
