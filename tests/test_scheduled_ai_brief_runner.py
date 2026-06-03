@@ -403,6 +403,8 @@ def test_cutoff_alert_waits_until_fallback_grace_expires() -> None:
         now=dt.datetime(2026, 5, 28, 13, 26, tzinfo=dt.UTC),
     )
 
+    # Keep the stale 0926 candidate as a regression guard: old cutoff ticks must
+    # no-op while the GitHub fallback role is still inside its bounded grace.
     result = runner.run(
         ScheduledAiBriefRequest(
             market="US",

@@ -42,6 +42,15 @@ from .holdings import (
     export_active_holdings_snapshot,
     temporary_holdings_file,
 )
+from .schedule_policy import (
+    is_within_role_window as _policy_is_within_role_window,
+)
+from .schedule_policy import (
+    market_zone,
+    require_role_window,
+    role_window,
+    role_window_end_grace,
+)
 from .state import (
     RuntimeStateEntry,
     RuntimeStateLockClaim,
@@ -50,8 +59,6 @@ from .state import (
     build_scheduler_state_key,
 )
 
-_KR_ZONE = ZoneInfo("Asia/Seoul")
-_US_ZONE = ZoneInfo("America/New_York")
 _LOCK_TTL_SECONDS = 25 * 60
 _LOCK_RENEW_INTERVAL_SECONDS = 5 * 60
 _NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
@@ -72,28 +79,6 @@ _FAILED_STATUSES = {
     "skip_artifact_upload_failed",
 }
 _LOGGER = logging.getLogger(__name__)
-
-_ROLE_WINDOWS: dict[str, dict[str, tuple[dt.time, dt.time]]] = {
-    "KR": {
-        "local-primary": (dt.time(7, 25), dt.time(8, 5)),
-        "local-retry": (dt.time(8, 5), dt.time(8, 55)),
-        "cutoff-alert": (dt.time(8, 55), dt.time(9, 20)),
-    },
-    "US": {
-        "local-primary": (dt.time(8, 5), dt.time(8, 30)),
-        "early-monitor": (dt.time(8, 30), dt.time(8, 45)),
-        "local-retry": (dt.time(8, 40), dt.time(8, 55)),
-        "github-fallback": (dt.time(8, 55), dt.time(9, 25)),
-        "cutoff-alert": (dt.time(9, 29), dt.time(10, 0)),
-    },
-}
-_ROLE_WINDOW_END_GRACE: dict[str, dict[str, dt.timedelta]] = {
-    "US": {
-        # GitHub schedule runs can start after the nominal fallback window.
-        # Keep the grace before regular open; PRE_OPEN guards still decide.
-        "github-fallback": dt.timedelta(minutes=4),
-    },
-}
 
 
 @dataclass(frozen=True)
@@ -214,24 +199,17 @@ def _normalize_role(role: str, *, field_name: str) -> str:
 
 
 def _local_zone(market: str) -> ZoneInfo:
-    return _KR_ZONE if market == "KR" else _US_ZONE
+    return market_zone(market)
 
 
 def _is_within_role_window(
     *, market: str, schedule_role: str, now: dt.datetime
 ) -> bool:
-    windows = _ROLE_WINDOWS.get(market, {})
-    window = windows.get(schedule_role)
-    if window is None:
-        return False
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=dt.UTC)
-    local_now = now.astimezone(_local_zone(market))
-    start, end = window
-    grace = _ROLE_WINDOW_END_GRACE.get(market, {}).get(schedule_role, dt.timedelta())
-    start_at = dt.datetime.combine(local_now.date(), start, tzinfo=local_now.tzinfo)
-    end_at = dt.datetime.combine(local_now.date(), end, tzinfo=local_now.tzinfo)
-    return start_at <= local_now < end_at + grace
+    return _policy_is_within_role_window(
+        market=market,
+        schedule_role=schedule_role,
+        now=now,
+    )
 
 
 def _guard_allows_pipeline(guard: GuardSnapshot) -> bool:
@@ -289,27 +267,25 @@ def _is_generated_during_scheduled_window(
     if local_generated_at.date().isoformat() != session_date:
         return False
 
-    primary_window = _ROLE_WINDOWS[market]["local-primary"]
-    cutoff_window = _ROLE_WINDOWS[market]["cutoff-alert"]
-    fallback_window = _ROLE_WINDOWS.get(market, {}).get("github-fallback")
+    primary_window = require_role_window(market, "local-primary")
+    cutoff_window = require_role_window(market, "cutoff-alert")
+    fallback_window = role_window(market, "github-fallback")
     start_at = dt.datetime.combine(
         local_generated_at.date(),
-        primary_window[0],
+        primary_window.start,
         tzinfo=local_generated_at.tzinfo,
     )
     end_at = dt.datetime.combine(
         local_generated_at.date(),
-        cutoff_window[0],
+        cutoff_window.start,
         tzinfo=local_generated_at.tzinfo,
     )
     if fallback_window is not None:
         fallback_end_at = dt.datetime.combine(
             local_generated_at.date(),
-            fallback_window[1],
+            fallback_window.end,
             tzinfo=local_generated_at.tzinfo,
-        ) + _ROLE_WINDOW_END_GRACE.get(market, {}).get(
-            "github-fallback", dt.timedelta()
-        )
+        ) + role_window_end_grace(market, "github-fallback")
         end_at = max(end_at, fallback_end_at)
     return start_at <= local_generated_at < end_at
 

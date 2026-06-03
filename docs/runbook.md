@@ -222,6 +222,8 @@
   - `provider=pykrx`는 `market=KR`, `universe=watchlist`, `entry_mode=AFTER_CLOSE` 조합에서만 허용합니다.
 - AI Brief scheduled 실행(로컬 Docker primary + GitHub monitor/fallback)
   - US canary 기준 primary는 로컬 Mac의 `launchd` → `scripts/launchd/sab-ai-brief-wrapper.sh` → `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler ...` 순서로 실행합니다.
+  - scheduled 시간 정책의 단일 소스는 `sab/scheduler/schedule_policy.py`입니다. cutoff/fallback/monitor tick이나 role window를 바꿀 때는 이 파일을 먼저 수정하고, runner guard, GitHub Actions cron mapping, launchd plist timing은 정책 계약 테스트로 맞춥니다.
+  - GitHub Actions `resolve_context` job은 dependency-free boundary로 유지합니다. 이 job은 checkout 후 stdlib-only 정책 모듈만 import해 off-window 후보를 빠르게 no-op 처리하고, `mise`/`uv sync`와 실제 runtime guard는 `scheduled_ai_brief` job에서만 수행합니다.
   - scheduled 기본값은 `provider=kis`, `universe=both`, `entry_mode=PRE_OPEN`, `model_provider=openai`, `send_notifications=true`입니다.
   - scheduled 실행은 시장별 `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US` repository variable이 있으면 해당 값을 source provider로 사용합니다. 시장별 값이 없으면 전역 `AI_BRIEF_SOURCE_PROVIDER`, 시장별 `AI_BRIEF_SOURCE_API_URL_KR`/`AI_BRIEF_SOURCE_API_URL_US`, 전역 `AI_BRIEF_SOURCE_API_URL`, `none` 순서로 fallback합니다.
   - 2026-05-23 기준 US scheduled default는 `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`입니다. `POLYGON_API_KEY`와 `BENZINGA_API_TOKEN`도 backup/comparison 후보로 구성되어 있지만, Polygon은 현재 evidence set에서 freshness coverage 부족 및 HTTP 429가 확인됐고 Benzinga는 current candidate raw response가 빈 배열이어서 기본값으로 쓰지 않습니다. 장애 시 `AI_BRIEF_SOURCE_PROVIDER_US`를 unset하거나 다른 검증된 US provider로 바꾼 뒤 live comparison과 recommendation eval을 다시 실행합니다.
@@ -241,6 +243,7 @@
   - 설치 전 검증:
     - plist의 absolute repo/env/log path를 현재 머신에 맞게 확인합니다.
     - `scripts/launchd/verify-sab-ai-brief.sh`
+    - 시간 정책 drift 확인: `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_scheduled_ai_brief_schedule_policy.py tests/test_ai_brief_workflow.py tests/test_launchd_scheduler_wrapper.py -q`
     - `plutil -lint scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-primary.plist`
     - `.env.scheduler.local`이 아직 없으면 compose 구조 검증에는 `SAB_SCHEDULER_ENV_FILE=.env.example docker compose -f docker-compose.yml -f docker-compose.scheduler.yml config`를 사용합니다.
   - enable:

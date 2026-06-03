@@ -6,12 +6,10 @@
 
 ## Deferred
 
-- 2026-06-03: Consolidate scheduled AI Brief schedule policy so runner windows,
-  GitHub Actions schedule mapping, launchd plist timing, tests, and docs cannot
-  drift when cutoff/fallback times change.
-- 2026-06-03: Clarify the scheduler regression test that intentionally keeps the
-  stale `0926` cutoff tick to prove old cutoff candidates no-op during the
-  GitHub fallback grace period.
+- 2026-06-03: Consider generating launchd scheduled AI Brief plist timing from
+  `sab/scheduler/schedule_policy.py`, or extend
+  `scripts/launchd/verify-sab-ai-brief.sh` to compare plist timing against the
+  shared policy before bootstrap.
 - 2026-06-02: Document production/remote Supabase recovery criteria in
   `docs/runbook.md` after operator confirmation.
 - 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
@@ -29,6 +27,13 @@
 
 ## Completed
 
+- 2026-06-03: Consolidated scheduled AI Brief schedule policy in
+  `sab/scheduler/schedule_policy.py` so runner windows, GitHub Actions schedule
+  mapping, launchd plist timing, tests, and docs share one policy contract when
+  cutoff/fallback times change.
+- 2026-06-03: Clarified the scheduler regression test that intentionally keeps
+  the stale `0926` cutoff tick to prove old cutoff candidates no-op during the
+  GitHub fallback grace period.
 - 2026-06-03: Added local `just workflow-audit` for GitHub Actions workflow
   validation via Docker `rhysd/actionlint:1.7.12`, so workflow edits can be
   checked without a globally installed `actionlint` binary.

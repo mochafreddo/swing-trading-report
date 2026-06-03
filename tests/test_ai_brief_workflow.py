@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from sab.scheduler.schedule_policy import github_schedule_crons
 
 
 def _load_workflow(path: str) -> dict[Any, Any]:
@@ -50,14 +51,7 @@ def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     schedule_crons = [item["cron"] for item in schedules]
 
     assert "workflow_dispatch" in triggers
-    assert schedule_crons == [
-        "30 12 * * 1-5",
-        "30 13 * * 1-5",
-        "55 12 * * 1-5",
-        "55 13 * * 1-5",
-        "29 13 * * 1-5",
-        "29 14 * * 1-5",
-    ]
+    assert schedule_crons == list(github_schedule_crons())
     assert dispatch_inputs["send_notifications"]["default"] == "false"
     assert dispatch_inputs["send_notifications"]["options"] == ["false", "true"]
     assert dispatch_inputs["source_provider"]["options"] == [
@@ -85,27 +79,28 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert jobs["ai_brief"].get("if") == "github.event_name != 'schedule'"
 
     resolve_steps = _job_steps(workflow, "resolve_context")
+    resolve_step_names = [str(step.get("name") or "") for step in resolve_steps]
+    assert resolve_step_names == ["Checkout", "Resolve schedule context"]
+    assert resolve_step_names.index("Checkout") < resolve_step_names.index(
+        "Resolve schedule context"
+    )
     resolve_step = _find_step_by_name(resolve_steps, "Resolve schedule context")
     resolve_script = str(resolve_step.get("run") or "")
     resolve_env = resolve_step.get("env") or {}
 
     assert resolve_env.get("EVENT_NAME") == "${{ github.event_name }}"
     assert resolve_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
-    assert '"30 12 * * 1-5": ("US", "early-monitor", "monitor-only", "0830")' in (
-        resolve_script
-    )
-    assert '"55 12 * * 1-5": ("US", "github-fallback", "github-fallback", "0855")' in (
-        resolve_script
-    )
-    assert '"29 13 * * 1-5": ("US", "cutoff-alert", "cutoff-alert", "0929")' in (
-        resolve_script
-    )
+    assert "from sab.scheduler.schedule_policy import" in resolve_script
+    assert "dispatch_for_github_cron" in resolve_script
+    assert "is_within_role_window" in resolve_script
+    assert "market_zone" in resolve_script
+    assert "schedule_map = {" not in resolve_script
+    assert "role_windows = {" not in resolve_script
+    assert "role_window_end_grace = {" not in resolve_script
     assert 'out.write(f"session_date={session_date}\\n")' in resolve_script
     assert 'out.write(f"schedule_role={schedule_role}\\n")' in resolve_script
     assert 'out.write(f"runner_role={runner_role}\\n")' in resolve_script
-    assert "role_windows" in resolve_script
-    assert '"github-fallback": dt.timedelta(minutes=4)' in resolve_script
-    assert "should_run = _is_within_role_window(" in resolve_script
+    assert "should_run = is_within_role_window(" in resolve_script
     assert 'out.write(f"should_run={str(should_run).lower()}\\n")' in resolve_script
     assert 'out.write("should_run=true\\n")' not in resolve_script
     assert 'out.write(f"source_api_url={source_api_url}\\n")' in resolve_script
