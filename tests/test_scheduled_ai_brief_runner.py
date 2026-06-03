@@ -1076,6 +1076,39 @@ def test_runner_passes_session_date_as_ai_brief_report_date() -> None:
     assert pipeline.calls[0][1]["report_date"] == "2026-05-28"
 
 
+def test_artifact_marker_helper_records_upload_payload() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner()
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+
+    runner._record_ai_brief_artifact_marker(
+        artifact_key=artifact_key,
+        storage_key="2026/05/2026-05-28.ai-brief.json",
+        market="US",
+        session_date="2026-05-28",
+        runner_role="github-fallback",
+        attempt_id="attempt-artifact-helper",
+        run_url="https://github.com/owner/repo/actions/runs/3",
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert state.upserts == [
+        (
+            artifact_key,
+            {
+                "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "reportDate": "2026-05-28",
+                "runner": "github",
+                "attemptId": "attempt-artifact-helper",
+                "runUrl": "https://github.com/owner/repo/actions/runs/3",
+            },
+        )
+    ]
+
+
 def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
     runner, state, pipeline, storage, notifier = _runner()
     lock_key = build_scheduler_state_key(

@@ -23,6 +23,9 @@
 
 ## Completed
 
+- 2026-06-03: Extracted scheduled AI Brief artifact marker recording from the
+  locked pipeline path, with characterization coverage for storage key,
+  runner-origin, attempt, report-date, and run-url marker payload.
 - 2026-06-03: Extracted the scheduled AI Brief main-lock pipeline/upload/
   notification path from `ScheduledAiBriefRunner.run`, with characterization
   coverage for completion, provider propagation, artifact marking, notification,

@@ -771,18 +771,14 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
         try:
-            self._state_store.upsert_marker(
-                key=artifact_key,
-                payload={
-                    "storageKey": storage_key,
-                    "market": market,
-                    "sessionDate": session_date,
-                    "reportDate": session_date,
-                    "runner": _runner_origin(runner_role),
-                    "attemptId": attempt_id,
-                    "runUrl": run_url,
-                },
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            self._record_ai_brief_artifact_marker(
+                artifact_key=artifact_key,
+                storage_key=storage_key,
+                market=market,
+                session_date=session_date,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=run_url,
                 now=now,
             )
         except Exception:
@@ -878,6 +874,33 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
         return None
+
+    def _record_ai_brief_artifact_marker(
+        self,
+        *,
+        artifact_key: str,
+        storage_key: str,
+        market: str,
+        session_date: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        now: dt.datetime,
+    ) -> None:
+        self._state_store.upsert_marker(
+            key=artifact_key,
+            payload={
+                "storageKey": storage_key,
+                "market": market,
+                "sessionDate": session_date,
+                "reportDate": session_date,
+                "runner": _runner_origin(runner_role),
+                "attemptId": attempt_id,
+                "runUrl": run_url,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=now,
+        )
 
     def _persist_runtime_guard_skip_result(
         self,
