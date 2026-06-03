@@ -496,27 +496,12 @@ class ScheduledAiBriefRunner:
                         main_lock_key=None,
                         main_owner_token=None,
                     )
-                try:
-                    skip_key = self._persist_runtime_guard_skip(
-                        market=market,
-                        session_date=session_date,
-                        guard=guard,
-                        run_url=request.run_url,
-                    )
-                except _SkipArtifactClaimHeld:
-                    return ScheduledAiBriefResult(
-                        status="skip_artifact_claim_held",
-                        session_date=session_date,
-                    )
-                except Exception:
-                    return ScheduledAiBriefResult(
-                        status="skip_artifact_upload_failed",
-                        session_date=session_date,
-                    )
-                return ScheduledAiBriefResult(
-                    status="guard_noop",
+                return self._persist_runtime_guard_skip_result(
+                    market=market,
                     session_date=session_date,
-                    storage_key=skip_key,
+                    guard=guard,
+                    run_url=request.run_url,
+                    success_status="guard_noop",
                 )
             return ScheduledAiBriefResult(
                 status="guard_noop", session_date=session_date
@@ -587,49 +572,19 @@ class ScheduledAiBriefRunner:
             )
 
         if not _guard_allows_pipeline(guard):
-            try:
-                skip_key = self._persist_runtime_guard_skip(
-                    market=market,
-                    session_date=session_date,
-                    guard=guard,
-                    run_url=request.run_url,
-                )
-            except _SkipArtifactClaimHeld:
-                return ScheduledAiBriefResult(
-                    status="skip_artifact_claim_held",
-                    session_date=session_date,
-                )
-            except Exception:
-                self._send_late_alert_once(
-                    market=market,
-                    session_date=session_date,
-                    reason="pre_open_guard_failed",
-                    context=_guard_context(
-                        market=market,
-                        session_date=session_date,
-                        guard=guard,
-                    ),
-                    now=now,
-                )
-                return ScheduledAiBriefResult(
-                    status="skip_artifact_upload_failed",
-                    session_date=session_date,
-                )
-            self._send_late_alert_once(
+            return self._persist_runtime_guard_skip_result(
                 market=market,
                 session_date=session_date,
-                reason="pre_open_guard_failed",
-                context=_guard_context(
+                guard=guard,
+                run_url=request.run_url,
+                success_status="guard_failed",
+                alert_reason="pre_open_guard_failed",
+                alert_context=_guard_context(
                     market=market,
                     session_date=session_date,
                     guard=guard,
                 ),
                 now=now,
-            )
-            return ScheduledAiBriefResult(
-                status="guard_failed",
-                session_date=session_date,
-                storage_key=skip_key,
             )
 
         self._notifier.require_telegram()
@@ -892,6 +847,68 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
         return None
+
+    def _persist_runtime_guard_skip_result(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        guard: GuardSnapshot,
+        run_url: str,
+        success_status: str,
+        alert_reason: str | None = None,
+        alert_context: dict[str, object] | None = None,
+        now: dt.datetime | None = None,
+    ) -> ScheduledAiBriefResult:
+        try:
+            skip_key = self._persist_runtime_guard_skip(
+                market=market,
+                session_date=session_date,
+                guard=guard,
+                run_url=run_url,
+            )
+        except _SkipArtifactClaimHeld:
+            return ScheduledAiBriefResult(
+                status="skip_artifact_claim_held",
+                session_date=session_date,
+            )
+        except Exception:
+            if alert_reason is not None:
+                self._send_late_alert_once(
+                    market=market,
+                    session_date=session_date,
+                    reason=alert_reason,
+                    context=alert_context
+                    or _guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=guard,
+                    ),
+                    now=now or self._now_fn(),
+                )
+            return ScheduledAiBriefResult(
+                status="skip_artifact_upload_failed",
+                session_date=session_date,
+            )
+
+        if alert_reason is not None:
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason=alert_reason,
+                context=alert_context
+                or _guard_context(
+                    market=market,
+                    session_date=session_date,
+                    guard=guard,
+                ),
+                now=now or self._now_fn(),
+            )
+        return ScheduledAiBriefResult(
+            status=success_status,
+            session_date=session_date,
+            storage_key=skip_key,
+        )
 
     def _reconcile_existing_or_repaired_artifact(
         self,

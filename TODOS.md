@@ -23,6 +23,9 @@
 
 ## Completed
 
+- 2026-06-03: Extracted scheduled AI Brief runtime-guard skip result handling
+  from `ScheduledAiBriefRunner.run`, with regression coverage for late-alert
+  preservation when skip artifact upload fails.
 - 2026-06-03: Extended `scripts/launchd/verify-sab-ai-brief.sh` with a
   shared-policy launchd timing drift check before bootstrap, backed by
   regression coverage for matching and intentionally drifted plist schedules.

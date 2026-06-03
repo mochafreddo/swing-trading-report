@@ -1462,6 +1462,35 @@ def test_pipeline_runner_persists_pre_open_guard_failure_artifact() -> None:
     assert "pre_open_guard_failed" in notifier.sent
 
 
+def test_runtime_guard_skip_result_helper_alerts_when_upload_fails() -> None:
+    storage = _FakeStorage(fail_skip_upload=True)
+    runner, _state, pipeline, storage, notifier = _runner(storage=storage)
+    guard = _guard(session_state="INTRADAY")
+
+    result = runner._persist_runtime_guard_skip_result(
+        market="US",
+        session_date="2026-05-28",
+        guard=guard,
+        run_url="https://github.com/owner/repo/actions/runs/2",
+        success_status="guard_failed",
+        alert_reason="pre_open_guard_failed",
+        alert_context=scheduler_runner._guard_context(
+            market="US",
+            session_date="2026-05-28",
+            guard=guard,
+        ),
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert result.status == "skip_artifact_upload_failed"
+    assert result.session_date == "2026-05-28"
+    assert result.storage_key is None
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert notifier.sent == ["pre_open_guard_failed"]
+
+
 def test_monitor_only_classifies_local_primary_lock_without_alerting() -> None:
     lock_key = build_scheduler_state_key(
         kind="lock", market="US", session_date="2026-05-28"
