@@ -17,6 +17,14 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell rule pipeline orchestration from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for reason
+  ordering, output field propagation, time-stop metadata, and corporate-action
+  flags.
+- 2026-06-04: Extracted hybrid sell profit/exit rule orchestration from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for custom
+  stop priority, peak-based profit protection reason ordering, and display
+  target propagation.
 - 2026-06-04: Extracted hybrid sell initial evaluation context preparation from
   `evaluate_sell_signals_hybrid`, with characterization coverage for eval-date
   parsing, future-entry review state, missing-indicator message ordering,

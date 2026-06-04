@@ -96,6 +96,15 @@ class _ExitOverrideState:
 
 
 @dataclass(frozen=True)
+class _ProfitExitState:
+    action: str
+    reasons: list[str]
+    stop_override: float | None
+    stop_price: float | None
+    target_price: float | None
+
+
+@dataclass(frozen=True)
 class _ProfitProtectionState:
     action: str
     reasons: list[str]
@@ -126,6 +135,17 @@ class _CorporateActionGuardState:
     action: str
     reasons: list[str]
     flags: list[str]
+
+
+@dataclass(frozen=True)
+class _HybridSellRulePipelineState:
+    action: str
+    reasons: list[str]
+    stop_price: float | None
+    target_price: float | None
+    flags: list[str]
+    days_in_trade_sessions: int | None
+    time_stop_triggered: bool
 
 
 @dataclass(frozen=True)
@@ -567,6 +587,44 @@ def _apply_profit_protection(
     )
 
 
+def _apply_profit_exit_rules(
+    *,
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+    context: _HybridSellContext,
+) -> _ProfitExitState:
+    exit_overrides = _apply_exit_overrides(
+        holding=holding,
+        entry_price=context.entry_price,
+        last_close=context.last_close,
+        settings=settings,
+        action=context.action,
+    )
+    reasons = list(exit_overrides.reasons)
+
+    profit_protection = _apply_profit_protection(
+        entry_price=context.entry_price,
+        pnl_pct=context.pnl_pct,
+        closes_since_entry=context.closes_since_entry,
+        last_close=context.last_close,
+        corporate_action_move=context.corporate_action_move,
+        entry_date_after_eval=context.entry_date_state.after_eval,
+        stop_override=exit_overrides.stop_override,
+        stop_price=exit_overrides.stop_price,
+        settings=settings,
+        action=exit_overrides.action,
+    )
+    reasons.extend(profit_protection.reasons)
+
+    return _ProfitExitState(
+        action=profit_protection.action,
+        reasons=reasons,
+        stop_override=exit_overrides.stop_override,
+        stop_price=profit_protection.stop_price,
+        target_price=exit_overrides.target_price,
+    )
+
+
 def _apply_trend_breakdown_rules(
     *,
     opens: list[float],
@@ -782,73 +840,35 @@ def _prepare_hybrid_sell_context(
     )
 
 
-def evaluate_sell_signals_hybrid(
+def _apply_hybrid_sell_rule_pipeline(
+    *,
     ticker: str,
-    candles: list[dict[str, float]],
     holding: dict[str, Any],
     settings: HybridSellSettings,
-) -> HybridSellEvaluation:
-    completed_candles = _resolve_completed_sell_candles(
-        candles=candles,
-        holding=holding,
-        settings=settings,
-    )
-    if isinstance(completed_candles, HybridSellEvaluation):
-        return completed_candles
-
-    idx_eval = completed_candles.idx_eval
-    candles_eval = completed_candles.candles_eval
-    opens = completed_candles.opens
-    closes = completed_candles.closes
-
-    flags: list[str] = []
-    context = _prepare_hybrid_sell_context(
-        candles_eval=candles_eval,
-        closes=closes,
-        holding=holding,
-        settings=settings,
-    )
+    opens: list[float],
+    closes: list[float],
+    context: _HybridSellContext,
+) -> _HybridSellRulePipelineState:
     last_close = context.last_close
-    eval_date = context.eval_date
-    eval_anchor = context.eval_anchor
     indicators = context.indicators
     entry_date_state = context.entry_date_state
-    action = context.action
     reasons = list(context.reasons)
-    closes_since_entry = context.closes_since_entry
     corporate_action_move = context.corporate_action_move
     entry_price = context.entry_price
     pnl_pct = context.pnl_pct
+    flags: list[str] = []
 
     # --- 1) Profit taking logic ---
-    exit_overrides = _apply_exit_overrides(
+    profit_exit = _apply_profit_exit_rules(
         holding=holding,
-        entry_price=entry_price,
-        last_close=last_close,
         settings=settings,
-        action=action,
+        context=context,
     )
-    stop_override = exit_overrides.stop_override
-    stop_price = exit_overrides.stop_price
-    target_price = exit_overrides.target_price
-    reasons.extend(exit_overrides.reasons)
-    action = exit_overrides.action
-
-    profit_protection = _apply_profit_protection(
-        entry_price=entry_price,
-        pnl_pct=pnl_pct,
-        closes_since_entry=closes_since_entry,
-        last_close=last_close,
-        corporate_action_move=corporate_action_move,
-        entry_date_after_eval=entry_date_state.after_eval,
-        stop_override=stop_override,
-        stop_price=stop_price,
-        settings=settings,
-        action=action,
-    )
-    reasons.extend(profit_protection.reasons)
-    action = profit_protection.action
-    stop_price = profit_protection.stop_price
+    stop_override = profit_exit.stop_override
+    stop_price = profit_exit.stop_price
+    target_price = profit_exit.target_price
+    reasons.extend(profit_exit.reasons)
+    action = profit_exit.action
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
     trend_breakdown = _apply_trend_breakdown_rules(
@@ -891,8 +911,8 @@ def evaluate_sell_signals_hybrid(
         holding=holding,
         settings=settings,
         entry_date_state=entry_date_state,
-        eval_anchor=eval_anchor,
-        eval_date=eval_date,
+        eval_anchor=context.eval_anchor,
+        eval_date=context.eval_date,
         action=action,
         pnl_pct=pnl_pct,
         last_close=last_close,
@@ -900,8 +920,6 @@ def evaluate_sell_signals_hybrid(
     )
     action = time_stop.action
     reasons.extend(time_stop.reasons)
-    days_in_trade_sessions = time_stop.days_in_trade_sessions
-    time_stop_triggered = time_stop.triggered
 
     corporate_action_guard = _apply_corporate_action_guard(
         corporate_action_move=corporate_action_move,
@@ -911,20 +929,66 @@ def evaluate_sell_signals_hybrid(
     reasons.extend(corporate_action_guard.reasons)
     flags.extend(corporate_action_guard.flags)
 
-    if not reasons:
-        reasons.append("No hybrid sell criteria triggered")
-
-    return HybridSellEvaluation(
+    return _HybridSellRulePipelineState(
         action=action,
         reasons=reasons,
         stop_price=stop_price,
         target_price=target_price,
-        eval_price=last_close,
+        flags=flags,
+        days_in_trade_sessions=time_stop.days_in_trade_sessions,
+        time_stop_triggered=time_stop.triggered,
+    )
+
+
+def evaluate_sell_signals_hybrid(
+    ticker: str,
+    candles: list[dict[str, float]],
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+) -> HybridSellEvaluation:
+    completed_candles = _resolve_completed_sell_candles(
+        candles=candles,
+        holding=holding,
+        settings=settings,
+    )
+    if isinstance(completed_candles, HybridSellEvaluation):
+        return completed_candles
+
+    idx_eval = completed_candles.idx_eval
+    candles_eval = completed_candles.candles_eval
+    opens = completed_candles.opens
+    closes = completed_candles.closes
+
+    context = _prepare_hybrid_sell_context(
+        candles_eval=candles_eval,
+        closes=closes,
+        holding=holding,
+        settings=settings,
+    )
+    rule_state = _apply_hybrid_sell_rule_pipeline(
+        ticker=ticker,
+        holding=holding,
+        settings=settings,
+        opens=opens,
+        closes=closes,
+        context=context,
+    )
+    reasons = list(rule_state.reasons)
+
+    if not reasons:
+        reasons.append("No hybrid sell criteria triggered")
+
+    return HybridSellEvaluation(
+        action=rule_state.action,
+        reasons=reasons,
+        stop_price=rule_state.stop_price,
+        target_price=rule_state.target_price,
+        eval_price=context.last_close,
         eval_index=idx_eval,
-        eval_date=eval_date,
-        flags=flags or None,
-        days_in_trade_sessions=days_in_trade_sessions,
-        time_stop_triggered=time_stop_triggered,
+        eval_date=context.eval_date,
+        flags=rule_state.flags or None,
+        days_in_trade_sessions=rule_state.days_in_trade_sessions,
+        time_stop_triggered=rule_state.time_stop_triggered,
     )
 
 

@@ -383,6 +383,121 @@ def test_hybrid_sell_profit_protection_state_preserves_peak_stop_contract() -> N
     ]
 
 
+def test_hybrid_sell_profit_exit_state_preserves_override_and_profit_order() -> None:
+    helper = getattr(hybrid_sell, "_apply_profit_exit_rules", None)
+
+    assert helper is not None
+
+    result = helper(
+        holding={"entry_price": 100.0, "stop_override": 99.0},
+        settings=HybridSellSettings(profit_target_high=0.10),
+        context=hybrid_sell._HybridSellContext(
+            last_close=98.0,
+            eval_date="20250103",
+            eval_anchor=dt.date(2025, 1, 3),
+            indicators=hybrid_sell._HybridSellIndicators(
+                ema_short=100.0,
+                ema_mid=99.0,
+                sma_trend=95.0,
+                rsi_today=60.0,
+                ema_short_prev=99.0,
+                ema_mid_prev=98.0,
+            ),
+            entry_date_state=hybrid_sell._EntryDateState(
+                entry_date=dt.date(2025, 1, 1),
+                invalid=False,
+                after_eval=False,
+            ),
+            action="HOLD",
+            reasons=[],
+            closes_since_entry=[100.0, 112.0, 98.0],
+            corporate_action_move=None,
+            entry_price=100.0,
+            pnl_pct=-0.02,
+        ),
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_override == 99.0
+    assert result.stop_price == 99.0
+    assert result.target_price == pytest.approx(110.0)
+    assert result.reasons == [
+        "Custom stop override in effect",
+        "Price hit custom stop override",
+        "Profit protection armed at break-even (peak 12.0% ≥ 3.0%)",
+        "Profit protection tightened above entry (peak 12.0% ≥ 5.0%)",
+        "High-target profit protection activated (peak 12.0% ≥ 10.0%)",
+    ]
+
+
+def test_hybrid_sell_rule_pipeline_preserves_reason_order_and_output_fields() -> None:
+    helper = getattr(hybrid_sell, "_apply_hybrid_sell_rule_pipeline", None)
+
+    assert helper is not None
+
+    result = helper(
+        ticker="TEST",
+        holding={
+            "entry_price": 100.0,
+            "entry_date": "2025-01-01",
+            "stop_override": 98.0,
+            "target_override": 123.0,
+            "tags": ["swing_high_breakout"],
+        },
+        settings=HybridSellSettings(
+            failed_breakout_drop_pct=0.03,
+            time_stop_days=10,
+        ),
+        opens=[102.0, 101.0, 97.0],
+        closes=[101.0, 100.0, 97.0],
+        context=hybrid_sell._HybridSellContext(
+            last_close=97.0,
+            eval_date="20250103",
+            eval_anchor=dt.date(2025, 1, 3),
+            indicators=hybrid_sell._HybridSellIndicators(
+                ema_short=98.0,
+                ema_mid=99.0,
+                sma_trend=98.5,
+                rsi_today=39.0,
+                ema_short_prev=100.0,
+                ema_mid_prev=99.0,
+            ),
+            entry_date_state=hybrid_sell._EntryDateState(
+                entry_date=dt.date(2025, 1, 1),
+                invalid=False,
+                after_eval=False,
+            ),
+            action="REVIEW",
+            reasons=["Indicator data unavailable for hybrid sell: EMA mid"],
+            closes_since_entry=[100.0, 101.0, 97.0],
+            corporate_action_move=0.5,
+            entry_price=100.0,
+            pnl_pct=-0.03,
+        ),
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 98.0
+    assert result.target_price == 123.0
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert result.days_in_trade_sessions is None
+    assert result.time_stop_triggered is False
+    assert result.reasons == [
+        "Indicator data unavailable for hybrid sell: EMA mid",
+        "Custom stop override in effect",
+        "Price hit custom stop override",
+        "Custom target override in effect",
+        "Close below EMA short",
+        "Close below SMA trend (SMA20)",
+        "EMA short crossed below EMA mid (momentum down)",
+        "RSI dropped below 50",
+        "RSI dropped into oversold zone (<40)",
+        "Failed breakout: price moved -3.0% below entry (threshold 3.0%)",
+        "Time stop skipped: unable to resolve holding market",
+        "Potential corporate action: abnormal one-day move 50.0%",
+    ]
+
+
 def test_hybrid_sell_trend_breakdown_state_preserves_review_reason_order() -> None:
     helper = getattr(hybrid_sell, "_apply_trend_breakdown_rules", None)
 
