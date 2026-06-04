@@ -6,9 +6,6 @@
 
 ## Deferred
 
-- 2026-06-02: Keep historical `docs/reviews/2026/*` artifacts as archive
-  evidence. Revalidate specific findings against current code/docs before
-  promoting them into active docs or actionable TODOs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first
   steps, starting with `sab/scheduler/runner.py`,
   `sab/signals/hybrid_sell.py`, and `sab/entry.py`.
@@ -20,6 +17,13 @@
 
 ## Completed
 
+- 2026-06-04: Revalidated the latest archived review findings from
+  `docs/reviews/2026/review-2026-03-08.md` and
+  `docs/reviews/2026/review-2026-03-06.md` against current code/docs. The
+  cited scan raw-reference batching, report artifact dates, run dispatch
+  locking, report pagination, holdings ticker contract, finite candle
+  sanitizer, US holiday refresh TTL, and login-throttle fail-mode findings are
+  already addressed, so no new active TODO was promoted.
 - 2026-06-04: Clarified historical review archive handling in
   `docs/reviews/README.md` and tightened the related deferred policy in
   `TODOS.md`; review artifacts stay immutable unless a specific finding is
