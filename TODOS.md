@@ -21,6 +21,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted scheduled AI Brief notification claim handling from
+  `ScheduledAiBriefRunner._reconcile_notification`, with characterization
+  coverage for claim key, attempt-based owner token, schedule payload, and held
+  claim result.
 - 2026-06-04: Extracted scheduled AI Brief main-lock claim handling from
   `ScheduledAiBriefRunner.run`, with characterization coverage for lock key,
   attempt-based owner token, and claim payload.

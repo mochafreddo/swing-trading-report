@@ -120,6 +120,12 @@ class _MainLockLease:
     owner_token: str
 
 
+@dataclass(frozen=True)
+class _NotificationClaimLease:
+    claim_key: str
+    owner_token: str
+
+
 class _SkipArtifactClaimHeld(RuntimeError):
     """Raised when another runner is already persisting the skip artifact."""
 
@@ -651,6 +657,45 @@ class ScheduledAiBriefRunner:
             )
         return _MainLockLease(lock_key=lock_key, owner_token=owner_token)
 
+    def _claim_schedule_notification(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+    ) -> _NotificationClaimLease | ScheduledAiBriefResult:
+        claim_key = build_scheduler_state_key(
+            kind="notification:claim",
+            market=market,
+            session_date=session_date,
+        )
+        owner_token = f"{attempt_id}-notification-{uuid.uuid4().hex}"
+        claim = self._state_store.claim_lock(
+            key=claim_key,
+            owner_token=owner_token,
+            ttl_seconds=_NOTIFICATION_CLAIM_TTL_SECONDS,
+            payload={
+                "attemptId": attempt_id,
+                "market": market,
+                "sessionDate": session_date,
+                "runnerRole": runner_role,
+                "scheduleRole": schedule_role,
+                "channel": "telegram",
+                "notificationType": "schedule",
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            return ScheduledAiBriefResult(
+                status="notification_claim_held",
+                session_date=session_date,
+            )
+        return _NotificationClaimLease(
+            claim_key=claim_key,
+            owner_token=owner_token,
+        )
+
     def _run_locked_pipeline(
         self,
         *,
@@ -1169,31 +1214,15 @@ class ScheduledAiBriefRunner:
                 status="artifact_marker_invalid",
                 session_date=session_date,
             )
-        claim_key = build_scheduler_state_key(
-            kind="notification:claim",
+        notification_claim = self._claim_schedule_notification(
             market=market,
             session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
         )
-        notification_owner_token = f"{attempt_id}-notification-{uuid.uuid4().hex}"
-        claim = self._state_store.claim_lock(
-            key=claim_key,
-            owner_token=notification_owner_token,
-            ttl_seconds=_NOTIFICATION_CLAIM_TTL_SECONDS,
-            payload={
-                "attemptId": attempt_id,
-                "market": market,
-                "sessionDate": session_date,
-                "runnerRole": runner_role,
-                "scheduleRole": schedule_role,
-                "channel": "telegram",
-                "notificationType": "schedule",
-            },
-        )
-        if not getattr(claim, "acquired", False):
-            return ScheduledAiBriefResult(
-                status="notification_claim_held",
-                session_date=session_date,
-            )
+        if isinstance(notification_claim, ScheduledAiBriefResult):
+            return notification_claim
         try:
             if require_main_lock and not self._owns_main_lock(
                 main_lock_key=main_lock_key,
@@ -1270,8 +1299,8 @@ class ScheduledAiBriefRunner:
             )
         finally:
             self._state_store.release_lock(
-                claim_key,
-                owner_token=notification_owner_token,
+                notification_claim.claim_key,
+                owner_token=notification_claim.owner_token,
             )
 
     def _owns_main_lock(

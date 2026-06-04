@@ -1200,6 +1200,63 @@ def test_main_lock_claim_helper_reports_lock_held_skip() -> None:
     assert state.claims == [lock_key]
 
 
+def test_notification_claim_helper_claims_schedule_claim_with_attempt_context() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner()
+    claim_key = build_scheduler_state_key(
+        kind="notification:claim", market="US", session_date="2026-05-28"
+    )
+
+    lease = runner._claim_schedule_notification(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-notification-helper",
+    )
+
+    assert isinstance(lease, scheduler_runner._NotificationClaimLease)
+    assert lease.claim_key == claim_key
+    assert lease.owner_token.startswith("attempt-notification-helper-notification-")
+    assert state.claims == [claim_key]
+    assert state.claim_payloads == [
+        (
+            claim_key,
+            {
+                "attemptId": "attempt-notification-helper",
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "runnerRole": "local-primary",
+                "scheduleRole": "local-primary",
+                "channel": "telegram",
+                "notificationType": "schedule",
+            },
+        )
+    ]
+
+
+def test_notification_claim_helper_reports_claim_held() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner(
+        state=_FakeStateStore(claim_results=[False])
+    )
+    claim_key = build_scheduler_state_key(
+        kind="notification:claim", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._claim_schedule_notification(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-notification-held",
+    )
+
+    assert isinstance(result, scheduler_runner.ScheduledAiBriefResult)
+    assert result.status == "notification_claim_held"
+    assert result.session_date == "2026-05-28"
+    assert result.storage_key is None
+    assert state.claims == [claim_key]
+
+
 def test_runner_releases_main_lock_when_pipeline_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
