@@ -9,6 +9,8 @@ from types import SimpleNamespace
 import pytest
 from sab.config_loader import ConfigLoadError
 from sab.entry import (
+    _collect_candidate_eval_date_issues,
+    _resolve_entry_artifact_date_context,
     _resolve_entry_fatal_missing_price_ratio,
     _resolve_signal_eval_date,
     _select_latest_buy_report,
@@ -413,6 +415,116 @@ def test_resolve_signal_eval_date_breaks_tie_with_latest_date() -> None:
     resolved = _resolve_signal_eval_date(report=source_report, market="US")
 
     assert resolved == "2026-02-25"
+
+
+def test_resolve_entry_artifact_date_context_preserves_single_market_contract(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("sab.entry._entry_session_date", lambda market: "2026-02-26")
+    source_report = {
+        "run_ts_utc": "2026-02-26T01:30:00Z",
+        "report_date": "2026-02-26",
+        "eval_context": {"market": "US"},
+    }
+    candidates_by_market = {
+        "US": [
+            _entry_candidate("AAPL.NASD", eval_date="20260224"),
+            _entry_candidate("MSFT.NASD", eval_date="20260225"),
+        ]
+    }
+
+    context = _resolve_entry_artifact_date_context(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=["US"],
+    )
+
+    assert context.artifact_market == "US"
+    assert context.artifact_markets is None
+    assert context.signal_eval_date == "2026-02-25"
+    assert context.entry_session_date == "2026-02-26"
+    assert context.signal_eval_date_by_market is None
+    assert context.entry_session_date_by_market is None
+
+
+def test_resolve_entry_artifact_date_context_preserves_mixed_market_contract(
+    monkeypatch,
+) -> None:
+    session_dates = {"KR": "2026-02-27", "US": "2026-02-26"}
+    monkeypatch.setattr(
+        "sab.entry._entry_session_date", lambda market: session_dates[market]
+    )
+    source_report = {
+        "run_ts_utc": "2026-02-26T01:30:00Z",
+        "eval_context": {"market": "MIXED", "markets": ["KR", "US"]},
+    }
+    candidates_by_market = {
+        "KR": [_entry_candidate("005930", eval_date="20260226")],
+        "US": [_entry_candidate("AAPL.NASD", eval_date="20260225")],
+    }
+
+    context = _resolve_entry_artifact_date_context(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=["KR", "US"],
+    )
+
+    assert context.artifact_market == "MIXED"
+    assert context.artifact_markets == ["KR", "US"]
+    assert context.signal_eval_date is None
+    assert context.entry_session_date is None
+    assert context.signal_eval_date_by_market == {
+        "KR": "2026-02-26",
+        "US": "2026-02-25",
+    }
+    assert context.entry_session_date_by_market == {
+        "KR": "2026-02-27",
+        "US": "2026-02-26",
+    }
+
+
+def test_collect_candidate_eval_date_issues_preserves_single_market_preview() -> None:
+    source_report: dict[str, object] = {}
+    candidates_by_market = {
+        "US": [
+            _entry_candidate("AAPL.NASD", eval_date="20260220"),
+            _entry_candidate("MSFT.NASD", eval_date="20260221"),
+            _entry_candidate("NVDA.NASD", eval_date="20260222"),
+            _entry_candidate("TSLA.NASD", eval_date="20260223"),
+            _entry_candidate("META.NASD", eval_date="20260224"),
+            _entry_candidate("GOOG.NASD", eval_date="20260225"),
+        ]
+    }
+
+    issues = _collect_candidate_eval_date_issues(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=["US"],
+    )
+
+    assert issues == [
+        "Mixed candidate eval_date values: "
+        "2026-02-20, 2026-02-21, 2026-02-22, 2026-02-23, 2026-02-24, +1 more"
+    ]
+
+
+def test_collect_candidate_eval_date_issues_scopes_mixed_market_message() -> None:
+    source_report: dict[str, object] = {}
+    candidates_by_market = {
+        "KR": [
+            _entry_candidate("005930", eval_date="20260225"),
+            _entry_candidate("000660", eval_date="20260226"),
+        ],
+        "US": [_entry_candidate("AAPL.NASD", eval_date="20260225")],
+    }
+
+    issues = _collect_candidate_eval_date_issues(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=["KR", "US"],
+    )
+
+    assert issues == ["Mixed candidate eval_date values for KR: 2026-02-25, 2026-02-26"]
 
 
 def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(

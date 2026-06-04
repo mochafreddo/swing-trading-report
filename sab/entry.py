@@ -8,6 +8,7 @@ import os
 import re
 from collections import Counter, deque
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -955,6 +956,89 @@ def _apply_portfolio_guards(
     return blocked_by_market
 
 
+@dataclass(frozen=True)
+class _EntryArtifactDateContext:
+    artifact_market: str
+    artifact_markets: list[str] | None
+    signal_eval_date: str | None
+    entry_session_date: str | None
+    signal_eval_date_by_market: dict[str, str] | None
+    entry_session_date_by_market: dict[str, str] | None
+
+
+def _resolve_entry_artifact_date_context(
+    *,
+    source_report: dict[str, Any],
+    candidates_by_market: dict[str, list[dict[str, Any]]],
+    resolved_markets: list[str],
+) -> _EntryArtifactDateContext:
+    if len(resolved_markets) == 1:
+        artifact_market = resolved_markets[0]
+        return _EntryArtifactDateContext(
+            artifact_market=artifact_market,
+            artifact_markets=None,
+            signal_eval_date=_resolve_signal_eval_date(
+                report=source_report,
+                market=artifact_market,
+                candidates=candidates_by_market[artifact_market],
+            ),
+            entry_session_date=_entry_session_date(artifact_market),
+            signal_eval_date_by_market=None,
+            entry_session_date_by_market=None,
+        )
+
+    return _EntryArtifactDateContext(
+        artifact_market="MIXED",
+        artifact_markets=resolved_markets,
+        signal_eval_date=None,
+        entry_session_date=None,
+        signal_eval_date_by_market={
+            market: _resolve_signal_eval_date(
+                report=source_report,
+                market=market,
+                candidates=candidates_by_market[market],
+            )
+            for market in resolved_markets
+        },
+        entry_session_date_by_market={
+            market: _entry_session_date(market) for market in resolved_markets
+        },
+    )
+
+
+def _collect_candidate_eval_date_issues(
+    *,
+    source_report: dict[str, Any],
+    candidates_by_market: dict[str, list[dict[str, Any]]],
+    resolved_markets: list[str],
+) -> list[str]:
+    issues: list[str] = []
+
+    for candidate_market in resolved_markets:
+        candidate_eval_dates = sorted(
+            set(
+                _collect_candidate_eval_dates(
+                    source_report,
+                    candidates=candidates_by_market[candidate_market],
+                )
+            )
+        )
+        if len(candidate_eval_dates) <= 1:
+            continue
+        max_preview = 5
+        preview = ", ".join(candidate_eval_dates[:max_preview])
+        if len(candidate_eval_dates) > max_preview:
+            preview = f"{preview}, +{len(candidate_eval_dates) - max_preview} more"
+        if len(resolved_markets) == 1:
+            issues.append(f"Mixed candidate eval_date values: {preview}")
+        else:
+            issues.append(
+                f"Mixed candidate eval_date values for {candidate_market}: {preview}"
+            )
+
+    return issues
+
+
 def _ordered_entry_rows(
     *,
     source_candidates: list[dict[str, Any]],
@@ -1123,56 +1207,25 @@ def run_entry(
         },
     )
 
-    if len(resolved_markets) == 1:
-        artifact_market = resolved_markets[0]
-        artifact_markets = None
-        signal_eval_date = _resolve_signal_eval_date(
-            report=source_report,
-            market=artifact_market,
-            candidates=candidates_by_market[artifact_market],
-        )
-        entry_session_date = _entry_session_date(artifact_market)
-        signal_eval_date_by_market = None
-        entry_session_date_by_market = None
-    else:
-        artifact_market = "MIXED"
-        artifact_markets = resolved_markets
-        signal_eval_date = None
-        entry_session_date = None
-        signal_eval_date_by_market = {
-            market: _resolve_signal_eval_date(
-                report=source_report,
-                market=market,
-                candidates=candidates_by_market[market],
-            )
-            for market in resolved_markets
-        }
-        entry_session_date_by_market = {
-            market: _entry_session_date(market) for market in resolved_markets
-        }
+    date_context = _resolve_entry_artifact_date_context(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=resolved_markets,
+    )
+    artifact_market = date_context.artifact_market
+    artifact_markets = date_context.artifact_markets
+    signal_eval_date = date_context.signal_eval_date
+    entry_session_date = date_context.entry_session_date
+    signal_eval_date_by_market = date_context.signal_eval_date_by_market
+    entry_session_date_by_market = date_context.entry_session_date_by_market
 
-    for candidate_market in resolved_markets:
-        candidate_eval_dates = sorted(
-            set(
-                _collect_candidate_eval_dates(
-                    source_report,
-                    candidates=candidates_by_market[candidate_market],
-                )
-            )
+    system_issues.extend(
+        _collect_candidate_eval_date_issues(
+            source_report=source_report,
+            candidates_by_market=candidates_by_market,
+            resolved_markets=resolved_markets,
         )
-        if len(candidate_eval_dates) <= 1:
-            continue
-        max_preview = 5
-        preview = ", ".join(candidate_eval_dates[:max_preview])
-        if len(candidate_eval_dates) > max_preview:
-            preview = f"{preview}, +{len(candidate_eval_dates) - max_preview} more"
-        if len(resolved_markets) == 1:
-            mixed_issue = f"Mixed candidate eval_date values: {preview}"
-        else:
-            mixed_issue = (
-                f"Mixed candidate eval_date values for {candidate_market}: {preview}"
-            )
-        system_issues.append(mixed_issue)
+    )
     system_issues = list(dict.fromkeys(system_issues))
 
     entry_summary = _build_entry_summary(
