@@ -85,6 +85,16 @@ class _TimeStopResult:
     triggered: bool
 
 
+@dataclass(frozen=True)
+class _ExitOverrideState:
+    action: str
+    reasons: list[str]
+    stop_override: float | None
+    target_override: float | None
+    stop_price: float | None
+    target_price: float | None
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -333,6 +343,45 @@ def _apply_time_stop_rules(
     )
 
 
+def _apply_exit_overrides(
+    *,
+    holding: dict[str, Any],
+    entry_price: float | None,
+    last_close: float,
+    settings: HybridSellSettings,
+    action: str,
+) -> _ExitOverrideState:
+    stop_override = _to_finite_float(holding.get("stop_override"))
+    target_override = _to_finite_float(holding.get("target_override"))
+    stop_price: float | None = None
+    target_price: float | None = None
+    reasons: list[str] = []
+    action_out = action
+
+    if stop_override is not None:
+        stop_price = stop_override
+        reasons.append("Custom stop override in effect")
+        if last_close <= stop_price:
+            reasons.append("Price hit custom stop override")
+            action_out = "SELL"
+
+    if target_override is not None:
+        target_price = target_override
+        reasons.append("Custom target override in effect")
+    elif entry_price is not None:
+        # Suggest a notional target price (can be surfaced in report)
+        target_price = entry_price * (1.0 + settings.profit_target_high)
+
+    return _ExitOverrideState(
+        action=action_out,
+        reasons=reasons,
+        stop_override=stop_override,
+        target_override=target_override,
+        stop_price=stop_price,
+        target_price=target_price,
+    )
+
+
 def evaluate_sell_signals_hybrid(
     ticker: str,
     candles: list[dict[str, float]],
@@ -419,27 +468,21 @@ def evaluate_sell_signals_hybrid(
     )
 
     entry_price = _to_finite_float(holding.get("entry_price"))
-    stop_override = _to_finite_float(holding.get("stop_override"))
-    target_override = _to_finite_float(holding.get("target_override"))
-
     pnl_pct = _compute_pnl_pct(entry_price, last_close)
 
     # --- 1) Profit taking logic ---
-    stop_price: float | None = None
-    target_price: float | None = None
-    if stop_override is not None:
-        stop_price = stop_override
-        reasons.append("Custom stop override in effect")
-        if last_close <= stop_price:
-            reasons.append("Price hit custom stop override")
-            action = "SELL"
-
-    if target_override is not None:
-        target_price = target_override
-        reasons.append("Custom target override in effect")
-    elif entry_price is not None:
-        # Suggest a notional target price (can be surfaced in report)
-        target_price = entry_price * (1.0 + settings.profit_target_high)
+    exit_overrides = _apply_exit_overrides(
+        holding=holding,
+        entry_price=entry_price,
+        last_close=last_close,
+        settings=settings,
+        action=action,
+    )
+    stop_override = exit_overrides.stop_override
+    stop_price = exit_overrides.stop_price
+    target_price = exit_overrides.target_price
+    reasons.extend(exit_overrides.reasons)
+    action = exit_overrides.action
 
     profit_protection_stop: float | None = None
     profit_protection_high_armed = False

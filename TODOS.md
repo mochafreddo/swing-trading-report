@@ -21,6 +21,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell exit override handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for parsed
+  stop/target override state, stop-triggered SELL promotion, display target
+  priority, and reason ordering.
 - 2026-06-04: Extracted scheduled AI Brief locked-pipeline upload precheck
   handling from `ScheduledAiBriefRunner._run_locked_pipeline`, with
   characterization coverage for lock renewal, pre-upload runtime guard skip

@@ -3,7 +3,11 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from sab.signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
+from sab.signals.hybrid_sell import (
+    HybridSellSettings,
+    _apply_exit_overrides,
+    evaluate_sell_signals_hybrid,
+)
 
 
 def _simple_candles(last_close: float) -> list[dict]:
@@ -180,6 +184,32 @@ def test_hybrid_sell_custom_stop_keeps_stop_price_when_profit_protection_also_ar
         "Price hit custom stop override",
     ]
     assert any("High-target profit protection activated" in r for r in result.reasons)
+
+
+def test_hybrid_sell_exit_override_state_preserves_contract() -> None:
+    settings = HybridSellSettings(profit_target_high=0.10)
+
+    result = _apply_exit_overrides(
+        holding={
+            "stop_override": 95.0,
+            "target_override": 123.0,
+        },
+        entry_price=100.0,
+        last_close=94.0,
+        settings=settings,
+        action="HOLD",
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_override == 95.0
+    assert result.target_override == 123.0
+    assert result.stop_price == 95.0
+    assert result.target_price == 123.0
+    assert result.reasons == [
+        "Custom stop override in effect",
+        "Price hit custom stop override",
+        "Custom target override in effect",
+    ]
 
 
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
