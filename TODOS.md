@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell initial evaluation context preparation from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for eval-date
+  parsing, future-entry review state, missing-indicator message ordering,
+  corporate-action candidate detection, and P&L normalization.
 - 2026-06-04: Extracted hybrid sell completed-candle context resolution from
   `evaluate_sell_signals_hybrid`, with characterization coverage for
   `choose_eval_index` metadata, completed-candle slicing, and finite OHLC

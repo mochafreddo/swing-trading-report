@@ -183,6 +183,78 @@ def test_hybrid_sell_completed_candles_context_preserves_meta_and_eval_slice(
     }
 
 
+def test_hybrid_sell_context_state_preserves_initial_review_contract(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.ema",
+        lambda closes, n: [101.0] * len(closes) if n == 2 else [],
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.sma", lambda closes, n: [99.0] * len(closes)
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_sell.rsi", lambda closes, n: [60.0] * len(closes)
+    )
+    helper = getattr(hybrid_sell, "_prepare_hybrid_sell_context", None)
+
+    assert helper is not None
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250102",
+            "open": 50.0,
+            "high": 51.0,
+            "low": 49.0,
+            "close": 50.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250103",
+            "open": 51.0,
+            "high": 52.0,
+            "low": 50.0,
+            "close": 51.0,
+            "volume": 1.0,
+        },
+    ]
+    result = helper(
+        candles_eval=cast(list[dict[str, float]], candles),
+        closes=[100.0, 50.0, 51.0],
+        holding={"entry_price": "100", "entry_date": "2025-01-10"},
+        settings=HybridSellSettings(
+            ema_short_period=2,
+            ema_mid_period=3,
+            sma_trend_period=2,
+            rsi_period=2,
+        ),
+    )
+
+    assert result.action == "REVIEW"
+    assert result.reasons == [
+        "Time stop skipped: entry_date after eval_date",
+        "Indicator data unavailable for hybrid sell: EMA mid",
+    ]
+    assert result.last_close == 51.0
+    assert result.eval_date == "20250103"
+    assert result.eval_anchor == dt.date(2025, 1, 3)
+    assert result.indicators.ema_short == 101.0
+    assert result.indicators.ema_mid is None
+    assert result.entry_date_state.after_eval is True
+    assert result.closes_since_entry == []
+    assert result.corporate_action_move == -0.5
+    assert result.entry_price == 100.0
+    assert result.pnl_pct == -0.49
+
+
 @pytest.mark.parametrize(
     ("candles", "holding", "indicator_kwargs", "expected_reason"),
     [

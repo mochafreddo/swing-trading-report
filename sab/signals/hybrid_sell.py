@@ -136,6 +136,21 @@ class _CompletedSellCandles:
     closes: list[float]
 
 
+@dataclass(frozen=True)
+class _HybridSellContext:
+    last_close: float
+    eval_date: str | None
+    eval_anchor: dt.date | None
+    indicators: _HybridSellIndicators
+    entry_date_state: _EntryDateState
+    action: str
+    reasons: list[str]
+    closes_since_entry: list[float] | None
+    corporate_action_move: float | None
+    entry_price: float | None
+    pnl_pct: float | None
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -702,50 +717,34 @@ def _apply_corporate_action_guard(
     )
 
 
-def evaluate_sell_signals_hybrid(
-    ticker: str,
-    candles: list[dict[str, float]],
+def _prepare_hybrid_sell_context(
+    *,
+    candles_eval: list[dict[str, float]],
+    closes: list[float],
     holding: dict[str, Any],
     settings: HybridSellSettings,
-) -> HybridSellEvaluation:
-    completed_candles = _resolve_completed_sell_candles(
-        candles=candles,
-        holding=holding,
-        settings=settings,
-    )
-    if isinstance(completed_candles, HybridSellEvaluation):
-        return completed_candles
-
-    idx_eval = completed_candles.idx_eval
-    candles_eval = completed_candles.candles_eval
-    opens = completed_candles.opens
-    closes = completed_candles.closes
-
+) -> _HybridSellContext:
     latest = candles_eval[-1]
     last_close = closes[-1]
     eval_date = str(latest.get("date") or "") or None
     eval_anchor = _parse_eval_date(eval_date)
 
     indicators = _compute_hybrid_sell_indicators(closes, settings)
-    ema_s = indicators.ema_short
-    ema_m = indicators.ema_mid
-    sma_t = indicators.sma_trend
-    rsi_today = indicators.rsi_today
-
     reasons: list[str] = []
-    flags: list[str] = []
     action = "HOLD"
+
     entry_date_state = _resolve_entry_date_state(holding, eval_anchor)
     if entry_date_state.after_eval:
         reasons.append("Time stop skipped: entry_date after eval_date")
         action = "REVIEW"
+
     missing_indicators = [
         label
         for label, value in (
-            ("EMA short", ema_s),
-            ("EMA mid", ema_m),
-            ("SMA trend", sma_t),
-            ("RSI", rsi_today),
+            ("EMA short", indicators.ema_short),
+            ("EMA mid", indicators.ema_mid),
+            ("SMA trend", indicators.sma_trend),
+            ("RSI", indicators.rsi_today),
         )
         if value is None
     ]
@@ -767,6 +766,59 @@ def evaluate_sell_signals_hybrid(
 
     entry_price = _to_finite_float(holding.get("entry_price"))
     pnl_pct = _compute_pnl_pct(entry_price, last_close)
+
+    return _HybridSellContext(
+        last_close=last_close,
+        eval_date=eval_date,
+        eval_anchor=eval_anchor,
+        indicators=indicators,
+        entry_date_state=entry_date_state,
+        action=action,
+        reasons=reasons,
+        closes_since_entry=closes_since_entry,
+        corporate_action_move=corporate_action_move,
+        entry_price=entry_price,
+        pnl_pct=pnl_pct,
+    )
+
+
+def evaluate_sell_signals_hybrid(
+    ticker: str,
+    candles: list[dict[str, float]],
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+) -> HybridSellEvaluation:
+    completed_candles = _resolve_completed_sell_candles(
+        candles=candles,
+        holding=holding,
+        settings=settings,
+    )
+    if isinstance(completed_candles, HybridSellEvaluation):
+        return completed_candles
+
+    idx_eval = completed_candles.idx_eval
+    candles_eval = completed_candles.candles_eval
+    opens = completed_candles.opens
+    closes = completed_candles.closes
+
+    flags: list[str] = []
+    context = _prepare_hybrid_sell_context(
+        candles_eval=candles_eval,
+        closes=closes,
+        holding=holding,
+        settings=settings,
+    )
+    last_close = context.last_close
+    eval_date = context.eval_date
+    eval_anchor = context.eval_anchor
+    indicators = context.indicators
+    entry_date_state = context.entry_date_state
+    action = context.action
+    reasons = list(context.reasons)
+    closes_since_entry = context.closes_since_entry
+    corporate_action_move = context.corporate_action_move
+    entry_price = context.entry_price
+    pnl_pct = context.pnl_pct
 
     # --- 1) Profit taking logic ---
     exit_overrides = _apply_exit_overrides(
