@@ -108,6 +108,13 @@ class _TrendBreakdownState:
     reasons: list[str]
 
 
+@dataclass(frozen=True)
+class _CorporateActionGuardState:
+    action: str
+    reasons: list[str]
+    flags: list[str]
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -534,6 +541,34 @@ def _apply_trend_breakdown_rules(
     return _TrendBreakdownState(action=action_out, reasons=reasons)
 
 
+def _apply_corporate_action_guard(
+    *,
+    corporate_action_move: float | None,
+    action: str,
+) -> _CorporateActionGuardState:
+    if corporate_action_move is None:
+        return _CorporateActionGuardState(action=action, reasons=[], flags=[])
+
+    reasons = [
+        "Potential corporate action: abnormal one-day move "
+        f"{corporate_action_move * 100:.1f}%"
+    ]
+    flags = ["CORPORATE_ACTION_SUSPECT"]
+    action_out = action
+    if action_out != "SELL":
+        if action_out != "REVIEW":
+            reasons.append(
+                "Corporate action suspect: manual review required before sell decision"
+            )
+        action_out = "REVIEW"
+
+    return _CorporateActionGuardState(
+        action=action_out,
+        reasons=reasons,
+        flags=flags,
+    )
+
+
 def evaluate_sell_signals_hybrid(
     ticker: str,
     candles: list[dict[str, float]],
@@ -716,18 +751,13 @@ def evaluate_sell_signals_hybrid(
     days_in_trade_sessions = time_stop.days_in_trade_sessions
     time_stop_triggered = time_stop.triggered
 
-    if corporate_action_move is not None:
-        reasons.append(
-            "Potential corporate action: abnormal one-day move "
-            f"{corporate_action_move * 100:.1f}%"
-        )
-        flags.append("CORPORATE_ACTION_SUSPECT")
-        if action != "SELL":
-            if action != "REVIEW":
-                reasons.append(
-                    "Corporate action suspect: manual review required before sell decision"
-                )
-            action = "REVIEW"
+    corporate_action_guard = _apply_corporate_action_guard(
+        corporate_action_move=corporate_action_move,
+        action=action,
+    )
+    action = corporate_action_guard.action
+    reasons.extend(corporate_action_guard.reasons)
+    flags.extend(corporate_action_guard.flags)
 
     if not reasons:
         reasons.append("No hybrid sell criteria triggered")

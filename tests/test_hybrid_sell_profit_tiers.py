@@ -302,6 +302,68 @@ def test_hybrid_sell_trend_breakdown_state_preserves_sell_priority() -> None:
     ]
 
 
+def test_hybrid_sell_corporate_action_guard_state_preserves_review_contract() -> None:
+    helper = getattr(hybrid_sell, "_apply_corporate_action_guard", None)
+
+    assert helper is not None
+
+    result = helper(corporate_action_move=0.5, action="HOLD")
+
+    assert result.action == "REVIEW"
+    assert result.flags == ["CORPORATE_ACTION_SUSPECT"]
+    assert result.reasons == [
+        "Potential corporate action: abnormal one-day move 50.0%",
+        "Corporate action suspect: manual review required before sell decision",
+    ]
+
+
+@pytest.mark.parametrize(
+    (
+        "corporate_action_move",
+        "initial_action",
+        "expected_action",
+        "expected_reasons",
+        "expected_flags",
+    ),
+    [
+        (None, "HOLD", "HOLD", [], []),
+        (
+            0.5,
+            "REVIEW",
+            "REVIEW",
+            ["Potential corporate action: abnormal one-day move 50.0%"],
+            ["CORPORATE_ACTION_SUSPECT"],
+        ),
+        (
+            0.5,
+            "SELL",
+            "SELL",
+            ["Potential corporate action: abnormal one-day move 50.0%"],
+            ["CORPORATE_ACTION_SUSPECT"],
+        ),
+    ],
+)
+def test_hybrid_sell_corporate_action_guard_state_preserves_existing_action_contracts(
+    corporate_action_move: float | None,
+    initial_action: str,
+    expected_action: str,
+    expected_reasons: list[str],
+    expected_flags: list[str],
+) -> None:
+    helper = getattr(hybrid_sell, "_apply_corporate_action_guard", None)
+
+    assert helper is not None
+
+    result = helper(
+        corporate_action_move=corporate_action_move,
+        action=initial_action,
+    )
+
+    assert result.action == expected_action
+    assert result.reasons == expected_reasons
+    assert result.flags == expected_flags
+
+
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(

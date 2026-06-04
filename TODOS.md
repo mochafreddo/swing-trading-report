@@ -19,6 +19,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell corporate-action guard handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for
+  manual-review promotion, flag propagation, and reason ordering.
 - 2026-06-04: Extracted scheduled AI Brief locked-pipeline failure handling from
   `ScheduledAiBriefRunner._run_locked_pipeline`, with characterization coverage
   for main-lock release, late-alert emission, status propagation, and storage-key
