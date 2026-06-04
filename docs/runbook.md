@@ -396,6 +396,92 @@
   - `entry`는 `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload`로 Storage/`report_index` 업로드를 수행할 수 있습니다.
   - `ai-brief`는 `SAB_UPLOAD_REPORTS=true` 또는 `sab ai-brief --upload`로 Storage/`report_index` 업로드를 수행할 수 있습니다.
 
+## GitHub Actions 실패 복구
+
+Actions 실패는 먼저 실패한 workflow/job/step을 기준으로 분류합니다. 원인을
+분류하기 전에는 반복 재실행하지 않습니다.
+
+- 공통 triage:
+  - Actions run summary에서 workflow 파일, event(`schedule`/`workflow_dispatch`/`pull_request`/`push`), 실패 job, 첫 실패 step을 기록합니다.
+  - CLI로 볼 때는 `gh run view <run-id> --log-failed`를 사용합니다. 로그를 공유할 때는 secret, token, webhook URL, Supabase project URL을 포함하지 않습니다.
+  - workflow YAML을 고쳤다면 `just workflow-audit`로 먼저 재현합니다.
+  - Python 변경이 원인 후보면 `just quality`, web 변경이 원인 후보면 `just ci-web`로 로컬 재현을 우선합니다.
+- Supabase 업로드/`report_index` fail-closed:
+  - GitHub Actions의 `scan`/`sell`/`entry`/`ai-brief` 업로드 경로는 Storage 업로드 또는 `report_index` upsert 실패를 성공으로 취급하지 않습니다.
+  - 로그에 `Supabase report upload failed`, `failed to upload report object`, `report_index`, `cleanup_failed`가 보이면 먼저 위 "원격 Supabase 복구 기준"의 Storage/`report_index` mismatch 쿼리와 `runtime_state` 기준을 확인합니다.
+  - object는 생겼지만 `report_index`가 없거나, index만 남은 경우에는 mismatch 쿼리 결과를 장애 기록에 남기고 같은 workflow를 재실행합니다. key 생성기는 중복 suffix를 처리하므로 기존 object를 임의 삭제하지 않습니다.
+- 알림 단계:
+  - `scan`/`sell` schedule의 Telegram/Slack 전송 step은 `continue-on-error`입니다. 알림 실패만으로는 리포트 생성/업로드 실패로 보지 않습니다.
+  - 알림을 수동 재전송하기 전에는 해당 run의 `uploaded_key`와 Storage/`report_index` row가 있는지 확인합니다.
+
+### `scan.yml` (`Scan pipeline`)
+
+- 주요 실패 지점:
+  - `Resolve workflow inputs`: `provider`/`universe` 조합 오류입니다. `provider=pykrx`는 `universe=KR`만 허용하고 실제 scan은 watchlist 경로를 씁니다.
+  - `Validate pykrx watchlist`: watchlist가 비어 있거나 경로가 틀린 상태입니다.
+  - `Run scan`: KIS credential/provider 오류, KIS rate limit/server 오류, watchlist/screener 데이터 실패, 또는 Supabase 업로드 fail-closed가 원인입니다.
+  - `Upload generated report artifact`: `reports/*.buy.json`이 없거나 경로 추출이 실패한 상태입니다.
+- 복구:
+  - `Buy report written to:`가 로그에 없으면 입력, provider, KIS secret, watchlist/screener 상태를 고친 뒤 같은 입력으로 `workflow_dispatch`를 재실행합니다.
+  - `Buy report written to:`는 있으나 `Buy report uploaded to Supabase:`가 없고 run이 실패했으면 Supabase 복구 기준을 먼저 확인한 뒤 재실행합니다.
+  - 성공 확인은 Actions artifact `scan-report-<run_id>`, 로그의 `Buy report uploaded to Supabase: <key>`, 웹 `Reports`의 buy 리포트 로드입니다.
+
+### `sell.yml` (`Sell pipeline`)
+
+- 주요 실패 지점:
+  - `Load holdings from Supabase`: `SUPABASE_URL`/`SUPABASE_SECRET_KEY`, publishable key 사용, REST 권한, 또는 holdings row 계약 위반입니다.
+  - `Run sell`: KIS/provider 오류, holdings normalization 오류, 시장 데이터 누락 fatal, 또는 Supabase 업로드 fail-closed가 원인입니다.
+- 복구:
+  - holdings 로드 실패는 workflow를 고치기 전에 SQL Editor와 웹 `Holdings`에서 active row, ticker 형식, `entry_currency`, `quantity`, `entry_price`를 확인합니다.
+  - `Sell report written to:` 이후 업로드 실패가 나면 Storage/`report_index` mismatch를 먼저 확인하고 같은 provider로 재실행합니다.
+  - 성공 확인은 Actions artifact `sell-report-<run_id>`, 로그의 `Sell report uploaded to Supabase: <key>`, 웹 `Reports`의 sell 리포트 로드입니다.
+
+### `ai-brief.yml` scheduled (`resolve_context` + `scheduled_ai_brief`)
+
+- `resolve_context`의 `should_run=false`는 off-window no-op입니다. 이 경우 `scheduled_ai_brief` job이 생성되지 않아도 정상입니다.
+- `scheduled_ai_brief` 실패 분류:
+  - lock 미획득, 기존 artifact marker, 기존 `success` marker는 중복 실행 방지입니다. `runtime_state` marker와 Storage object를 확인하고 강제 재처리하지 않습니다.
+  - `guard_failed_before_upload` 또는 skip artifact 생성은 PRE_OPEN/session guard가 실행 직전 막은 것입니다. `ai-brief-skip` Storage object와 `report_index` row를 확인합니다.
+  - `upload_failed` 또는 `skip_artifact_upload_failed`는 Supabase 복구 기준을 먼저 확인합니다. `success`/`notification:sent` marker는 중복 발송 판단 전 삭제하지 않습니다.
+  - `artifact_uploaded_notification_deferred`는 report artifact가 이미 있고 알림 reconcile만 남은 상태입니다. artifact marker를 삭제하지 말고 같은 session date의 notification marker만 확인합니다.
+- 복구:
+  - scheduled role을 그대로 복구해야 하면 GitHub `workflow_dispatch`가 아니라 로컬 scheduled runner 경로를 사용합니다. 예: `SAB_SCHEDULER_ENV_FILE=.env.scheduler.local just ai-brief-scheduled-docker --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick 0855`.
+  - 단순 수동 AI Brief가 목적이면 `workflow_dispatch`를 사용하되, 이는 scheduled `runtime_state` marker 복구가 아니라 별도 manual artifact 생성으로 기록합니다.
+  - 성공 확인은 같은 session date의 `artifact` 또는 `skip-artifact`, 정상 발송 경로의 `notification:sent`/`success` marker, Storage/`report_index` row, Telegram 본문입니다.
+
+### `ai-brief.yml` manual (`ai_brief`)
+
+- 주요 실패 지점:
+  - `Resolve workflow inputs`: `provider=pykrx`는 `market=KR`, `universe=watchlist`, `entry_mode=AFTER_CLOSE` 조합만 허용합니다.
+  - `Run scan`/`Run entry`/`Run AI brief`: 앞 단계 artifact가 없으면 뒤 단계는 복구 대상이 아니라 원인 step을 먼저 고칩니다.
+  - source provider 실패는 provider별 secret/API quota/URL safety/DNS/freshness 문제를 `source_issues[]`와 step log에서 확인합니다.
+- 복구:
+  - 입력 조합 또는 provider secret을 고친 뒤 같은 `workflow_dispatch` 입력으로 재실행합니다.
+  - `send_notifications=false`가 기본값이므로 알림 미발송은 실패가 아닙니다.
+  - 생성된 `*.ai-brief.json`은 `just ai-brief-eval --entry-report <entry.json> --ai-brief-report <ai-brief.json>`로 품질을 확인합니다.
+
+### `cleanup.yml` (`Report cleanup`)
+
+- scheduled cleanup은 `dry_run=false`로 실행하므로 실패 후에는 삭제 경계를 먼저 확인합니다.
+- 복구:
+  - 수동 재실행은 항상 `workflow_dispatch` + `dry_run=true` + 같은 `retention_days`로 시작합니다.
+  - 로그의 `[cleanup] listed_count`, `pattern_matched_count`, `expired_count`, `dangling_index_count`, `index_delete_target_count`를 장애 기록에 남깁니다.
+  - 예상 대상과 일치할 때만 `dry_run=false`로 재실행합니다. retention을 낮춰 삭제를 강제하지 않습니다.
+  - 부분 삭제나 REST 실패가 의심되면 위 Storage/`report_index` mismatch 쿼리로 정합성을 확인합니다.
+
+### `ci.yml`, `audit.yml`, `mise-lock-sync.yml`
+
+- `ci.yml`:
+  - `Ruff + Mypy + Pytest` 실패는 `just quality`로 재현합니다.
+  - `Next.js Web (Lint + Typecheck + Test + Build)` 실패는 `just ci-web`로 재현합니다.
+  - `Validate toolchain versions` 또는 `mise.lock changed during CI setup` 실패는 `mise lock --platform linux-x64,macos-arm64 && mise install` 후 lockfile diff를 커밋합니다.
+- `audit.yml`:
+  - `workflow_audit` 실패는 `just workflow-audit`로 재현하고, GitHub Actions `run: |` heredoc 들여쓰기와 shellcheck 경고를 우선 확인합니다.
+  - `security_audit` 실패는 `trivy-gate-results-<run_id>` artifact를 확인합니다. 의존성 업그레이드가 원칙이며, `.trivyignore` 예외는 만료일/사유를 적은 임시 예외만 허용합니다.
+- `mise-lock-sync.yml`:
+  - Renovate의 `mise.toml` PR에서만 동작합니다. `Commit and push` 실패가 나면 로컬에서 lockfile을 갱신해 같은 PR 브랜치에 커밋합니다.
+  - `Re-trigger CI` 실패는 lockfile 생성 실패가 아닙니다. CI run 상태를 별도로 확인합니다.
+
 ## Audit 수동 점검
 
 - Workflow YAML 점검:

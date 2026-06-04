@@ -6,8 +6,6 @@
 
 ## Deferred
 
-- 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
-  `docs/runbook.md` when recurring failure modes are confirmed.
 - 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
   promoted from archived evidence to active maintenance docs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first
@@ -21,6 +19,9 @@
 
 ## Completed
 
+- 2026-06-04: Expanded workflow-specific GitHub Actions failure recovery steps in
+  `docs/runbook.md`, covering scan/sell, AI Brief scheduled/manual, cleanup,
+  CI/audit, and mise lock sync triage.
 - 2026-06-04: Extracted hybrid sell trend breakdown handling from
   `evaluate_sell_signals_hybrid`, with characterization coverage for review
   reason ordering and SELL-priority momentum/RSI escalation.
