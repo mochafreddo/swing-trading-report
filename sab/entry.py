@@ -1110,6 +1110,78 @@ def _evaluate_entry_candidate_markets(
     return rows, list(dict.fromkeys(system_issues))
 
 
+def _write_entry_report_and_maybe_upload(
+    *,
+    report_dir: str,
+    artifact: dict[str, Any],
+    entries: list[EntryReportRow],
+    run_meta: dict[str, Any],
+    entry_summary: Mapping[str, Any],
+    system_issues: list[str],
+    entry_session_date: str | None,
+    entry_session_date_by_market: Mapping[str, str] | None,
+    fatal_missing_price_ratio: float,
+    upload: bool,
+    report_path_callback: Callable[[str], None] | None,
+) -> int:
+    artifact_dates = [
+        value
+        for value in [
+            entry_session_date,
+            *(entry_session_date_by_market or {}).values(),
+        ]
+        if value
+    ]
+
+    out_path = write_entry_report(
+        report_dir=report_dir,
+        artifact=artifact,
+        entries=entries,
+        run_meta=run_meta,
+        artifact_date=max(artifact_dates) if artifact_dates else None,
+    )
+    missing_price_ratio = float(entry_summary["missing_entry_price_ratio"])
+    logger.info(
+        "Entry evaluation summary: candidates=%s, missing_price_ratio=%.4f, "
+        "fatal_threshold=%.4f, system_issue_count=%s",
+        len(entries),
+        missing_price_ratio,
+        fatal_missing_price_ratio,
+        len(system_issues),
+    )
+    logger.info("Entry report written to: %s", out_path)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
+    if system_issues:
+        logger.warning(
+            "Entry completed with system issues (%s rows)", len(system_issues)
+        )
+    if _is_missing_price_ratio_fatal(
+        missing_price_ratio=missing_price_ratio,
+        fatal_missing_price_ratio=fatal_missing_price_ratio,
+    ):
+        logger.error(
+            "Entry failed: missing_price_ratio %.4f exceeded threshold %.4f",
+            missing_price_ratio,
+            fatal_missing_price_ratio,
+        )
+        return 1
+    try:
+        uploaded_key = maybe_upload_report_artifact(
+            artifact_path=out_path,
+            run_type="entry",
+            logger=logger,
+            force=upload,
+        )
+    except SupabaseStorageError as exc:
+        logger.error("Supabase report upload failed: %s", exc)
+        return 1
+    else:
+        if uploaded_key:
+            logger.info("Entry report uploaded to Supabase: %s", uploaded_key)
+    return 0
+
+
 def run_entry(
     *,
     buy_report_path: str | None,
@@ -1290,62 +1362,19 @@ def run_entry(
             source_report_gap_atr_multiplier=source_gap_atr_multiplier,
         ),
     )
-    artifact_dates = [
-        value
-        for value in [
-            entry_session_date,
-            *(entry_session_date_by_market or {}).values(),
-        ]
-        if value
-    ]
-
-    out_path = write_entry_report(
+    return _write_entry_report_and_maybe_upload(
         report_dir=cfg.report_dir,
         artifact=artifact,
         entries=rows,
         run_meta=run_meta,
-        artifact_date=max(artifact_dates) if artifact_dates else None,
-    )
-    missing_price_ratio = float(entry_summary["missing_entry_price_ratio"])
-    logger.info(
-        "Entry evaluation summary: candidates=%s, missing_price_ratio=%.4f, "
-        "fatal_threshold=%.4f, system_issue_count=%s",
-        len(rows),
-        missing_price_ratio,
-        fatal_missing_price_ratio,
-        len(system_issues),
-    )
-    logger.info("Entry report written to: %s", out_path)
-    if report_path_callback is not None:
-        report_path_callback(out_path)
-    if system_issues:
-        logger.warning(
-            "Entry completed with system issues (%s rows)", len(system_issues)
-        )
-    if _is_missing_price_ratio_fatal(
-        missing_price_ratio=missing_price_ratio,
+        entry_summary=entry_summary,
+        system_issues=system_issues,
+        entry_session_date=entry_session_date,
+        entry_session_date_by_market=entry_session_date_by_market,
         fatal_missing_price_ratio=fatal_missing_price_ratio,
-    ):
-        logger.error(
-            "Entry failed: missing_price_ratio %.4f exceeded threshold %.4f",
-            missing_price_ratio,
-            fatal_missing_price_ratio,
-        )
-        return 1
-    try:
-        uploaded_key = maybe_upload_report_artifact(
-            artifact_path=out_path,
-            run_type="entry",
-            logger=logger,
-            force=upload,
-        )
-    except SupabaseStorageError as exc:
-        logger.error("Supabase report upload failed: %s", exc)
-        return 1
-    else:
-        if uploaded_key:
-            logger.info("Entry report uploaded to Supabase: %s", uploaded_key)
-    return 0
+        upload=upload,
+        report_path_callback=report_path_callback,
+    )
 
 
 __all__ = ["_select_latest_buy_report", "evaluate_entry_candidates", "run_entry"]

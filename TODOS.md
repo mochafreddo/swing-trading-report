@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted entry report persistence/upload handling from
+  `run_entry`, with characterization coverage for mixed-market artifact date
+  selection, report path callback ordering, and fatal missing-price upload skip.
 - 2026-06-04: Extracted entry market candidate evaluation from `run_entry`,
   with characterization coverage for mixed-market source ordering, provider
   issue de-duplication, and missing-price issue ordering.

@@ -5,7 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import sab.entry as entry
 from sab.entry import run_entry
+from sab.report.entry_report import EntryReportRow
 from sab.report.supabase_storage import SupabaseStorageError
 
 
@@ -197,3 +199,56 @@ def test_run_entry_upload_flag_skips_supabase_upload_when_price_gap_is_fatal(
     assert exit_code == 1
     assert upload_calls == []
     assert len(list(report_dir.glob("*.entry.json"))) == 1
+
+
+def test_entry_report_write_helper_skips_upload_after_fatal_missing_price(
+    monkeypatch, tmp_path: Path
+) -> None:
+    assert hasattr(entry, "_write_entry_report_and_maybe_upload")
+    helper = entry._write_entry_report_and_maybe_upload
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    out_path = report_dir / "2026-02-27.entry.json"
+    row = EntryReportRow(
+        ticker="AAPL.NASD",
+        action="REVIEW",
+        reasons=["price snapshot unavailable"],
+        signal_close=100.0,
+        entry_price=None,
+        gap_pct=None,
+    )
+    write_calls: list[dict[str, object]] = []
+
+    def _fake_write_entry_report(**kwargs: object) -> str:
+        write_calls.append(kwargs)
+        return out_path.as_posix()
+
+    upload_calls: list[dict[str, object]] = []
+
+    def _fake_upload(**kwargs: object) -> str:
+        upload_calls.append(kwargs)
+        return "2026/02/2026-02-27.entry.json"
+
+    monkeypatch.setattr("sab.entry.write_entry_report", _fake_write_entry_report)
+    monkeypatch.setattr("sab.entry.maybe_upload_report_artifact", _fake_upload)
+
+    callback_paths: list[str] = []
+    exit_code = helper(
+        report_dir=report_dir.as_posix(),
+        artifact={"market": "MIXED"},
+        entries=[row],
+        run_meta={"run_id": "entry-test"},
+        entry_summary={"missing_entry_price_ratio": 1.0},
+        system_issues=["AAPL.NASD: price snapshot unavailable"],
+        entry_session_date=None,
+        entry_session_date_by_market={"US": "2026-02-26", "KR": "2026-02-27"},
+        fatal_missing_price_ratio=1.0,
+        upload=True,
+        report_path_callback=callback_paths.append,
+    )
+
+    assert exit_code == 1
+    assert write_calls[0]["entries"] == [row]
+    assert write_calls[0]["artifact_date"] == "2026-02-27"
+    assert callback_paths == [out_path.as_posix()]
+    assert upload_calls == []
