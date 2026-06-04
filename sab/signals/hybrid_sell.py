@@ -128,6 +128,14 @@ class _CorporateActionGuardState:
     flags: list[str]
 
 
+@dataclass(frozen=True)
+class _CompletedSellCandles:
+    idx_eval: int
+    candles_eval: list[dict[str, float]]
+    opens: list[float]
+    closes: list[float]
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -212,6 +220,51 @@ def _extract_sell_ohlc_series(
         opens.append(open_price)
         closes.append(close_price)
     return _SellOhlcSeries(opens=opens, closes=closes)
+
+
+def _resolve_completed_sell_candles(
+    *,
+    candles: list[dict[str, float]],
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+) -> _CompletedSellCandles | HybridSellEvaluation:
+    required_bars = max(settings.min_bars, 2)
+    if len(candles) < required_bars:
+        return HybridSellEvaluation(
+            action="REVIEW", reasons=["Insufficient data for hybrid sell evaluation"]
+        )
+
+    meta_currency = holding.get("entry_currency") or holding.get("currency")
+    meta = {"currency": meta_currency} if meta_currency else {}
+    meta["exchange"] = holding.get("exchange")
+    meta["data_source"] = holding.get("data_source")
+    meta["data_dir"] = holding.get("data_dir")
+    idx_eval, _ = choose_eval_index(candles, meta=meta)
+    if idx_eval < 1:
+        return HybridSellEvaluation(
+            action="REVIEW", reasons=["Not enough completed candles for hybrid sell"]
+        )
+
+    candles_eval = candles[: idx_eval + 1]
+    if len(candles_eval) < required_bars:
+        return HybridSellEvaluation(
+            action="REVIEW",
+            reasons=["Insufficient completed candles for hybrid sell"],
+        )
+
+    ohlc = _extract_sell_ohlc_series(candles_eval)
+    if ohlc is None:
+        return HybridSellEvaluation(
+            action="REVIEW",
+            reasons=["Invalid candle data: non-finite OHLC values"],
+        )
+
+    return _CompletedSellCandles(
+        idx_eval=idx_eval,
+        candles_eval=candles_eval,
+        opens=ohlc.opens,
+        closes=ohlc.closes,
+    )
 
 
 def _compute_hybrid_sell_indicators(
@@ -655,38 +708,18 @@ def evaluate_sell_signals_hybrid(
     holding: dict[str, Any],
     settings: HybridSellSettings,
 ) -> HybridSellEvaluation:
-    required_bars = max(settings.min_bars, 2)
-    if len(candles) < required_bars:
-        return HybridSellEvaluation(
-            action="REVIEW", reasons=["Insufficient data for hybrid sell evaluation"]
-        )
+    completed_candles = _resolve_completed_sell_candles(
+        candles=candles,
+        holding=holding,
+        settings=settings,
+    )
+    if isinstance(completed_candles, HybridSellEvaluation):
+        return completed_candles
 
-    meta_currency = holding.get("entry_currency") or holding.get("currency")
-    meta = {"currency": meta_currency} if meta_currency else {}
-    meta["exchange"] = holding.get("exchange")
-    meta["data_source"] = holding.get("data_source")
-    meta["data_dir"] = holding.get("data_dir")
-    idx_eval, _ = choose_eval_index(candles, meta=meta)
-    if idx_eval < 1:
-        return HybridSellEvaluation(
-            action="REVIEW", reasons=["Not enough completed candles for hybrid sell"]
-        )
-
-    candles_eval = candles[: idx_eval + 1]
-    if len(candles_eval) < required_bars:
-        return HybridSellEvaluation(
-            action="REVIEW",
-            reasons=["Insufficient completed candles for hybrid sell"],
-        )
-
-    ohlc = _extract_sell_ohlc_series(candles_eval)
-    if ohlc is None:
-        return HybridSellEvaluation(
-            action="REVIEW",
-            reasons=["Invalid candle data: non-finite OHLC values"],
-        )
-    opens = ohlc.opens
-    closes = ohlc.closes
+    idx_eval = completed_candles.idx_eval
+    candles_eval = completed_candles.candles_eval
+    opens = completed_candles.opens
+    closes = completed_candles.closes
 
     latest = candles_eval[-1]
     last_close = closes[-1]

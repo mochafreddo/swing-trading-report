@@ -114,6 +114,75 @@ def _patch_indicator_series(
     )
 
 
+def test_hybrid_sell_completed_candles_context_preserves_meta_and_eval_slice(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured_meta: dict[str, object] = {}
+
+    def _choose_eval_index(
+        data: list[dict[str, float]], **kwargs: object
+    ) -> tuple[int, bool]:
+        captured_meta.update(cast(dict[str, object], kwargs.get("meta") or {}))
+        return 1, False
+
+    monkeypatch.setattr("sab.signals.hybrid_sell.choose_eval_index", _choose_eval_index)
+    helper = getattr(hybrid_sell, "_resolve_completed_sell_candles", None)
+
+    assert helper is not None
+
+    candles = [
+        {
+            "date": "20250101",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250102",
+            "open": 105.0,
+            "high": 106.0,
+            "low": 104.0,
+            "close": 105.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250103",
+            "open": float("nan"),
+            "high": float("nan"),
+            "low": float("nan"),
+            "close": float("nan"),
+            "volume": 1.0,
+        },
+    ]
+    holding = {
+        "currency": "KRW",
+        "entry_currency": "USD",
+        "exchange": "NASDAQ",
+        "data_source": "kis",
+        "data_dir": tmp_path.as_posix(),
+    }
+
+    result = helper(
+        candles=cast(list[dict[str, float]], candles),
+        holding=holding,
+        settings=HybridSellSettings(min_bars=2),
+    )
+
+    assert isinstance(result, hybrid_sell._CompletedSellCandles)
+    assert result.idx_eval == 1
+    assert result.candles_eval == candles[:2]
+    assert result.opens == [100.0, 105.0]
+    assert result.closes == [100.0, 105.0]
+    assert captured_meta == {
+        "currency": "USD",
+        "exchange": "NASDAQ",
+        "data_source": "kis",
+        "data_dir": tmp_path.as_posix(),
+    }
+
+
 @pytest.mark.parametrize(
     ("candles", "holding", "indicator_kwargs", "expected_reason"),
     [

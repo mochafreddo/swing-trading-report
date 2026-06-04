@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell completed-candle context resolution from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for
+  `choose_eval_index` metadata, completed-candle slicing, and finite OHLC
+  extraction.
 - 2026-06-04: Extracted hybrid sell failed-breakout handling from
   `evaluate_sell_signals_hybrid`, with characterization coverage for breakout
   SELL promotion, missing entry/P&L no-op paths, non-breakout no-op, and
