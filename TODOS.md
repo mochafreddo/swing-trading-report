@@ -19,6 +19,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted scheduled AI Brief locked-pipeline failure handling from
+  `ScheduledAiBriefRunner._run_locked_pipeline`, with characterization coverage
+  for main-lock release, late-alert emission, status propagation, and storage-key
+  preservation.
 - 2026-06-04: Expanded workflow-specific GitHub Actions failure recovery steps in
   `docs/runbook.md`, covering scan/sell, AI Brief scheduled/manual, cleanup,
   CI/audit, and mise lock sync triage.

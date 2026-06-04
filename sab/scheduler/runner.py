@@ -738,21 +738,13 @@ class ScheduledAiBriefRunner:
             lock_renewer.stop()
 
         if pipeline_failed or pipeline_result is None:
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
-            self._send_late_alert_once(
+            return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
+                attempt_id=attempt_id,
+                lock_key=lock_key,
+                owner_token=owner_token,
                 reason="pipeline_failed",
-                context={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "attemptId": attempt_id,
-                },
-                now=self._now_fn(),
-            )
-            return ScheduledAiBriefResult(
-                status="pipeline_failed",
-                session_date=session_date,
             )
 
         pre_upload_result = self._handle_locked_pipeline_upload_precheck(
@@ -771,21 +763,13 @@ class ScheduledAiBriefRunner:
                 report_date=session_date,
             )
         except Exception:
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
-            self._send_late_alert_once(
+            return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
+                attempt_id=attempt_id,
+                lock_key=lock_key,
+                owner_token=owner_token,
                 reason="upload_failed",
-                context={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "attemptId": attempt_id,
-                },
-                now=self._now_fn(),
-            )
-            return ScheduledAiBriefResult(
-                status="upload_failed",
-                session_date=session_date,
             )
         try:
             self._record_ai_brief_artifact_marker(
@@ -799,22 +783,13 @@ class ScheduledAiBriefRunner:
                 now=now,
             )
         except Exception:
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
-            self._send_late_alert_once(
+            return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
+                attempt_id=attempt_id,
+                lock_key=lock_key,
+                owner_token=owner_token,
                 reason="artifact_marker_failed",
-                context={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "attemptId": attempt_id,
-                    "storageKey": storage_key,
-                },
-                now=self._now_fn(),
-            )
-            return ScheduledAiBriefResult(
-                status="artifact_marker_failed",
-                session_date=session_date,
                 storage_key=storage_key,
             )
         if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
@@ -849,6 +824,38 @@ class ScheduledAiBriefRunner:
                 storage_key=storage_key,
             )
         return result
+
+    def _handle_locked_pipeline_failure(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        attempt_id: str,
+        lock_key: str,
+        owner_token: str,
+        reason: str,
+        storage_key: str | None = None,
+    ) -> ScheduledAiBriefResult:
+        self._state_store.release_lock(lock_key, owner_token=owner_token)
+        context: dict[str, object] = {
+            "market": market,
+            "sessionDate": session_date,
+            "attemptId": attempt_id,
+        }
+        if storage_key is not None:
+            context["storageKey"] = storage_key
+        self._send_late_alert_once(
+            market=market,
+            session_date=session_date,
+            reason=reason,
+            context=context,
+            now=self._now_fn(),
+        )
+        return ScheduledAiBriefResult(
+            status=reason,
+            session_date=session_date,
+            storage_key=storage_key,
+        )
 
     def _handle_locked_pipeline_upload_precheck(
         self,

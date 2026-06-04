@@ -251,6 +251,7 @@ class _FakeStorage:
 @dataclass
 class _FakeNotifier:
     sent: list[str] = field(default_factory=list)
+    late_alerts: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     telegram_ready: bool = True
 
     def require_telegram(self) -> None:
@@ -262,6 +263,7 @@ class _FakeNotifier:
 
     def send_late_alert(self, *, reason: str, context: dict[str, object]) -> None:
         self.sent.append(reason)
+        self.late_alerts.append((reason, dict(context)))
 
 
 def _guard(
@@ -1307,6 +1309,52 @@ def test_runner_releases_main_lock_when_pipeline_fails(
     assert notifier.sent == ["pipeline_failed"]
     assert "scheduled AI brief pipeline failed" in caplog.text
     assert "pipeline failed" in caplog.text
+
+
+def test_locked_pipeline_failure_helper_releases_lock_and_alerts() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner()
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_failure(
+        market="US",
+        session_date="2026-05-28",
+        attempt_id="attempt-failure-helper",
+        lock_key=lock_key,
+        owner_token="attempt-failure-helper-owner",
+        reason="artifact_marker_failed",
+        storage_key="2026/05/2026-05-28.ai-brief.json",
+    )
+
+    assert result.status == "artifact_marker_failed"
+    assert result.session_date == "2026-05-28"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief.json"
+    assert lock_key in state.releases
+    assert notifier.sent == ["artifact_marker_failed"]
+    assert notifier.late_alerts == [
+        (
+            "artifact_marker_failed",
+            {
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "attemptId": "attempt-failure-helper",
+                "storageKey": "2026/05/2026-05-28.ai-brief.json",
+            },
+        )
+    ]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:artifact_marker_failed" in key
+    ]
+    assert sent_payloads == [
+        {
+            "market": "US",
+            "sessionDate": "2026-05-28",
+            "reason": "artifact_marker_failed",
+        }
+    ]
 
 
 def test_runner_releases_main_lock_when_upload_fails() -> None:
