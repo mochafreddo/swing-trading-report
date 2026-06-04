@@ -6,8 +6,9 @@
 
 ## Deferred
 
-- 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
-  promoted from archived evidence to active maintenance docs.
+- 2026-06-02: Keep historical `docs/reviews/2026/*` artifacts as archive
+  evidence. Revalidate specific findings against current code/docs before
+  promoting them into active docs or actionable TODOs.
 - 2026-06-01: Refactor long high-risk runtime functions in small, test-first
   steps, starting with `sab/scheduler/runner.py`,
   `sab/signals/hybrid_sell.py`, and `sab/entry.py`.
@@ -19,6 +20,10 @@
 
 ## Completed
 
+- 2026-06-04: Clarified historical review archive handling in
+  `docs/reviews/README.md` and tightened the related deferred policy in
+  `TODOS.md`; review artifacts stay immutable unless a specific finding is
+  revalidated and promoted.
 - 2026-06-04: Extracted hybrid sell hard-stop band handling from
   `evaluate_sell_signals_hybrid`, with characterization coverage for max-loss
   SELL promotion, hard-stop REVIEW preservation, SELL priority preservation, and
