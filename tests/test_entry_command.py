@@ -579,6 +579,30 @@ def test_collect_candidate_eval_date_issues_scopes_mixed_market_message() -> Non
     assert issues == ["Mixed candidate eval_date values for KR: 2026-02-25, 2026-02-26"]
 
 
+def test_run_entry_passes_holdings_path_override_to_config(monkeypatch) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_load_config(**kwargs: object) -> Config:
+        captured_kwargs.update(kwargs)
+        raise ConfigLoadError("stop after config kwargs capture")
+
+    monkeypatch.setattr("sab.entry.load_config", fake_load_config)
+
+    exit_code = run_entry(
+        buy_report_path=None,
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+        holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+    )
+
+    assert exit_code == 1
+    assert captured_kwargs == {
+        "provider_override": "kis",
+        "holdings_override": "data/scheduler/holdings.US.2026-05-28.yaml",
+    }
+
+
 def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
     monkeypatch, tmp_path: Path
 ) -> None:

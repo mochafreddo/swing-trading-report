@@ -1188,6 +1188,7 @@ def run_entry(
     provider: str | None,
     mode: str | None,
     market: str | None,
+    holdings_path: str | None = None,
     upload: bool = False,
     report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
@@ -1204,7 +1205,13 @@ def run_entry(
         return 1
 
     try:
-        cfg = load_config(provider_override=normalized_provider)
+        if holdings_path is None:
+            cfg = load_config(provider_override=normalized_provider)
+        else:
+            cfg = load_config(
+                provider_override=normalized_provider,
+                holdings_override=holdings_path,
+            )
     except ConfigLoadError as exc:
         logger.error("Configuration loading failed: %s", exc)
         return 1

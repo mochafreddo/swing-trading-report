@@ -40,7 +40,6 @@ from ..scan import run_scan
 from .holdings import (
     SupabaseHoldingsExportConfig,
     export_active_holdings_snapshot,
-    temporary_holdings_file,
 )
 from .schedule_policy import (
     is_within_role_window as _policy_is_within_role_window,
@@ -1554,15 +1553,15 @@ class DefaultScheduledPipeline:
         if not _guard_allows_pipeline(entry_guard):
             raise RuntimeError("scheduled pre-open guard failed before entry")
         entry_report_paths: list[str] = []
-        with temporary_holdings_file(holdings_path):
-            entry_status = run_entry(
-                buy_report_path=buy_report_path,
-                provider="kis",
-                mode="PRE_OPEN",
-                market=market,
-                upload=False,
-                report_path_callback=entry_report_paths.append,
-            )
+        entry_status = run_entry(
+            buy_report_path=buy_report_path,
+            provider="kis",
+            mode="PRE_OPEN",
+            market=market,
+            holdings_path=holdings_path.as_posix(),
+            upload=False,
+            report_path_callback=entry_report_paths.append,
+        )
         if entry_status != 0:
             raise RuntimeError("scheduled entry failed")
         entry_report_path = _require_single_report_path(

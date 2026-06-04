@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import threading
 from dataclasses import dataclass, field
 
@@ -1449,7 +1450,10 @@ def test_default_pipeline_rechecks_pre_open_guard_before_entry(
 def test_default_pipeline_uses_report_paths_returned_by_each_step(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("HOLDINGS_FILE", raising=False)
     entry_buy_paths: list[str] = []
+    entry_holdings_paths: list[str] = []
+    exported_paths: list[str] = []
     ai_brief_inputs: list[dict[str, object]] = []
 
     def fake_run_scan(**kwargs: object) -> int:
@@ -1458,8 +1462,14 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
             callback("reports/current.buy.json")
         return 0
 
+    def fake_export_active_holdings_snapshot(**kwargs: object) -> int:
+        exported_paths.append(str(kwargs["output_path"]))
+        return 1
+
     def fake_run_entry(**kwargs: object) -> int:
+        assert os.getenv("HOLDINGS_FILE") is None
         entry_buy_paths.append(str(kwargs["buy_report_path"]))
+        entry_holdings_paths.append(str(kwargs["holdings_path"]))
         callback = kwargs.get("report_path_callback")
         if callable(callback):
             callback("reports/current.entry.json")
@@ -1486,7 +1496,7 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     )
     monkeypatch.setattr(
         "sab.scheduler.runner.export_active_holdings_snapshot",
-        lambda **_kwargs: 1,
+        fake_export_active_holdings_snapshot,
     )
     monkeypatch.setattr(
         "sab.scheduler.runner._default_guard_snapshot",
@@ -1502,7 +1512,10 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
         dry_run=False,
     )
 
+    expected_holdings_path = "data/scheduler/holdings.US.2026-05-28.yaml"
+    assert exported_paths == [expected_holdings_path]
     assert entry_buy_paths == ["reports/current.buy.json"]
+    assert entry_holdings_paths == [expected_holdings_path]
     assert ai_brief_inputs[0]["buy_report_path"] == "reports/current.buy.json"
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
