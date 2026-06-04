@@ -1065,6 +1065,51 @@ def _ordered_entry_rows(
     return ordered_rows
 
 
+def _evaluate_entry_candidate_markets(
+    *,
+    cfg: Config,
+    provider: str,
+    mode: str,
+    resolved_markets: list[str],
+    candidates_by_market: dict[str, list[dict[str, Any]]],
+    source_candidates: list[dict[str, Any]],
+    market_override: str | None,
+    default_strategy_mode: str | None,
+    allow_missing_gap_guard: bool,
+) -> tuple[list[EntryReportRow], list[str]]:
+    system_issues: list[str] = []
+    market_rows_by_market: dict[str, list[EntryReportRow]] = {}
+
+    for candidate_market in resolved_markets:
+        market_candidates = candidates_by_market[candidate_market]
+        if not market_candidates:
+            market_rows_by_market[candidate_market] = []
+            continue
+        price_lookup_fn, provider_issues = _make_price_lookup(
+            cfg=cfg,
+            provider=provider,
+            mode=mode,
+            market=candidate_market,
+        )
+        market_rows, candidate_system_issues = evaluate_entry_candidates(
+            candidates=market_candidates,
+            price_lookup_fn=price_lookup_fn,
+            gap_breach_action="SKIP",
+            default_strategy_mode=default_strategy_mode,
+            allow_missing_gap_guard=allow_missing_gap_guard,
+        )
+        market_rows_by_market[candidate_market] = market_rows
+        system_issues.extend(provider_issues)
+        system_issues.extend(candidate_system_issues)
+
+    rows = _ordered_entry_rows(
+        source_candidates=source_candidates,
+        market_rows_by_market=market_rows_by_market,
+        market_override=market_override,
+    )
+    return rows, list(dict.fromkeys(system_issues))
+
+
 def run_entry(
     *,
     buy_report_path: str | None,
@@ -1153,9 +1198,6 @@ def run_entry(
         logger.error("pykrx provider only supports KR market for entry")
         return 1
 
-    rows: list[EntryReportRow] = []
-    system_issues: list[str] = []
-    market_rows_by_market: dict[str, list[EntryReportRow]] = {}
     report_strategy_mode = _resolve_report_strategy_mode(source_report)
     source_gap_atr_multiplier = _resolve_report_gap_atr_multiplier(source_report)
     effective_gap_atr_multiplier = source_gap_atr_multiplier
@@ -1166,33 +1208,17 @@ def run_entry(
     allow_missing_gap_guard = (
         effective_gap_atr_multiplier is not None and effective_gap_atr_multiplier <= 0
     )
-    for candidate_market in resolved_markets:
-        market_candidates = candidates_by_market[candidate_market]
-        if not market_candidates:
-            market_rows_by_market[candidate_market] = []
-            continue
-        price_lookup_fn, provider_issues = _make_price_lookup(
-            cfg=cfg,
-            provider=normalized_provider,
-            mode=normalized_mode,
-            market=candidate_market,
-        )
-        market_rows, candidate_system_issues = evaluate_entry_candidates(
-            candidates=market_candidates,
-            price_lookup_fn=price_lookup_fn,
-            gap_breach_action="SKIP",
-            default_strategy_mode=report_strategy_mode,
-            allow_missing_gap_guard=allow_missing_gap_guard,
-        )
-        market_rows_by_market[candidate_market] = market_rows
-        system_issues.extend(provider_issues)
-        system_issues.extend(candidate_system_issues)
-    rows = _ordered_entry_rows(
+    rows, system_issues = _evaluate_entry_candidate_markets(
+        cfg=cfg,
+        provider=normalized_provider,
+        mode=normalized_mode,
+        resolved_markets=resolved_markets,
+        candidates_by_market=candidates_by_market,
         source_candidates=candidates,
-        market_rows_by_market=market_rows_by_market,
         market_override=normalized_market,
+        default_strategy_mode=report_strategy_mode,
+        allow_missing_gap_guard=allow_missing_gap_guard,
     )
-    system_issues = list(dict.fromkeys(system_issues))
 
     active_total, active_tickers = _build_active_holding_state(holdings_data)
     portfolio_settings = getattr(cfg, "portfolio", None)

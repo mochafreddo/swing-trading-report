@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted entry market candidate evaluation from `run_entry`,
+  with characterization coverage for mixed-market source ordering, provider
+  issue de-duplication, and missing-price issue ordering.
 - 2026-06-04: Extracted hybrid sell rule pipeline orchestration from
   `evaluate_sell_signals_hybrid`, with characterization coverage for reason
   ordering, output field propagation, time-stop metadata, and corporate-action

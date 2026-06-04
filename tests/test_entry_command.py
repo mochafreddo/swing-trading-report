@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+import sab.entry as entry
+from sab.config import Config
 from sab.config_loader import ConfigLoadError
 from sab.entry import (
     _collect_candidate_eval_date_issues,
@@ -344,6 +348,54 @@ def test_evaluate_entry_candidates_marks_basis_date_mismatch_as_review() -> None
     assert rows[0].action == "REVIEW"
     assert "entry reference eval_date mismatch" in rows[0].reasons[0]
     assert any("entry reference eval_date mismatch" in issue for issue in issues)
+
+
+def test_evaluate_entry_candidate_markets_preserves_source_order_and_issue_contract(
+    monkeypatch,
+) -> None:
+    assert hasattr(entry, "_evaluate_entry_candidate_markets")
+    helper = entry._evaluate_entry_candidate_markets
+    source_candidates = [
+        _entry_candidate("AAPL.NASD"),
+        _entry_candidate("005930"),
+        _entry_candidate("MSFT.NASD"),
+    ]
+    candidates_by_market = {
+        "KR": [source_candidates[1]],
+        "US": [source_candidates[0], source_candidates[2]],
+    }
+
+    def fake_price_lookup(
+        *, cfg: object, provider: str, mode: str, market: str
+    ) -> tuple[Callable[[str], float | None], list[str]]:
+        del cfg, provider, mode
+        prices_by_market: dict[str, dict[str, float | None]] = {
+            "KR": {"005930": 101.0},
+            "US": {"AAPL.NASD": 101.0, "MSFT.NASD": None},
+        }
+        market_prices = prices_by_market[market]
+        return lambda ticker: market_prices.get(ticker), ["provider issue"]
+
+    monkeypatch.setattr("sab.entry._make_price_lookup", fake_price_lookup)
+
+    rows, issues = helper(
+        cfg=cast(Config, SimpleNamespace()),
+        provider="kis",
+        mode="PRE_OPEN",
+        resolved_markets=["KR", "US"],
+        candidates_by_market=candidates_by_market,
+        source_candidates=source_candidates,
+        market_override=None,
+        default_strategy_mode="ema_cross",
+        allow_missing_gap_guard=False,
+    )
+
+    assert [row.ticker for row in rows] == ["AAPL.NASD", "005930", "MSFT.NASD"]
+    assert [row.action for row in rows] == ["ENTER", "ENTER", "REVIEW"]
+    assert issues == [
+        "provider issue",
+        "MSFT.NASD: price snapshot unavailable",
+    ]
 
 
 def test_select_latest_buy_report_raises_when_missing(tmp_path: Path) -> None:
