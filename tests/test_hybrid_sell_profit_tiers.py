@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+import sab.signals.hybrid_sell as hybrid_sell
 from sab.signals.hybrid_sell import (
     HybridSellSettings,
     _apply_exit_overrides,
@@ -209,6 +210,35 @@ def test_hybrid_sell_exit_override_state_preserves_contract() -> None:
         "Custom stop override in effect",
         "Price hit custom stop override",
         "Custom target override in effect",
+    ]
+
+
+def test_hybrid_sell_profit_protection_state_preserves_peak_stop_contract() -> None:
+    settings = HybridSellSettings()
+    helper = getattr(hybrid_sell, "_apply_profit_protection", None)
+
+    assert helper is not None
+
+    result = helper(
+        entry_price=100.0,
+        pnl_pct=0.04,
+        closes_since_entry=[100.0, 112.0, 104.0],
+        last_close=104.0,
+        corporate_action_move=None,
+        entry_date_after_eval=False,
+        stop_override=None,
+        stop_price=None,
+        settings=settings,
+        action="HOLD",
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 105.0
+    assert result.reasons == [
+        "Profit protection armed at break-even (peak 12.0% ≥ 3.0%)",
+        "Profit protection tightened above entry (peak 12.0% ≥ 5.0%)",
+        "High-target profit protection activated (peak 12.0% ≥ 10.0%)",
+        "Price closed below profit protection stop",
     ]
 
 

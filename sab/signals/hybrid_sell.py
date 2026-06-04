@@ -95,6 +95,13 @@ class _ExitOverrideState:
     target_price: float | None
 
 
+@dataclass(frozen=True)
+class _ProfitProtectionState:
+    action: str
+    reasons: list[str]
+    stop_price: float | None
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -382,6 +389,90 @@ def _apply_exit_overrides(
     )
 
 
+def _apply_profit_protection(
+    *,
+    entry_price: float | None,
+    pnl_pct: float | None,
+    closes_since_entry: list[float] | None,
+    last_close: float,
+    corporate_action_move: float | None,
+    entry_date_after_eval: bool,
+    stop_override: float | None,
+    stop_price: float | None,
+    settings: HybridSellSettings,
+    action: str,
+) -> _ProfitProtectionState:
+    profit_protection_stop: float | None = None
+    profit_protection_high_armed = False
+    reasons: list[str] = []
+    action_out = action
+
+    if corporate_action_move:
+        if entry_date_after_eval:
+            profit_basis_pnl, profit_basis_uses_peak = None, False
+        else:
+            profit_basis_pnl, profit_basis_uses_peak = pnl_pct, False
+    else:
+        profit_basis_pnl, profit_basis_uses_peak = _compute_peak_pnl_pct_since_entry(
+            entry_price=entry_price,
+            closes_since_entry=closes_since_entry,
+            fallback_close=last_close,
+        )
+
+    if entry_price is not None and profit_basis_pnl is not None:
+        profit_label = (
+            f"peak {profit_basis_pnl * 100:.1f}%"
+            if profit_basis_uses_peak
+            else f"{profit_basis_pnl * 100:.1f}%"
+        )
+        if profit_basis_pnl >= settings.partial_profit_floor:
+            profit_protection_stop = entry_price
+            reasons.append(
+                "Profit protection armed at break-even "
+                f"({profit_label} ≥ {settings.partial_profit_floor * 100:.1f}%)"
+            )
+        if profit_basis_pnl >= settings.profit_target_low:
+            tightened_stop = entry_price * (1.0 + settings.partial_profit_floor)
+            profit_protection_stop = max(
+                profit_protection_stop or tightened_stop,
+                tightened_stop,
+            )
+            reasons.append(
+                "Profit protection tightened above entry "
+                f"({profit_label} ≥ {settings.profit_target_low * 100:.1f}%)"
+            )
+        if profit_basis_pnl >= settings.profit_target_high:
+            profit_protection_high_armed = True
+            extended_stop = entry_price * (1.0 + settings.profit_target_low)
+            profit_protection_stop = max(
+                profit_protection_stop or extended_stop,
+                extended_stop,
+            )
+            reasons.append(
+                "High-target profit protection activated "
+                f"({profit_label} ≥ {settings.profit_target_high * 100:.1f}%)"
+            )
+
+    stop_price_out = stop_price
+    if profit_protection_stop is not None and stop_override is None:
+        stop_price_out = max(
+            stop_price_out or profit_protection_stop,
+            profit_protection_stop,
+        )
+        if last_close <= stop_price_out:
+            reasons.append("Price closed below profit protection stop")
+            if profit_protection_high_armed:
+                action_out = "SELL"
+            elif action_out != "SELL":
+                action_out = "REVIEW"
+
+    return _ProfitProtectionState(
+        action=action_out,
+        reasons=reasons,
+        stop_price=stop_price_out,
+    )
+
+
 def evaluate_sell_signals_hybrid(
     ticker: str,
     candles: list[dict[str, float]],
@@ -484,60 +575,21 @@ def evaluate_sell_signals_hybrid(
     reasons.extend(exit_overrides.reasons)
     action = exit_overrides.action
 
-    profit_protection_stop: float | None = None
-    profit_protection_high_armed = False
-    if corporate_action_move:
-        if entry_date_state.after_eval:
-            profit_basis_pnl, profit_basis_uses_peak = None, False
-        else:
-            profit_basis_pnl, profit_basis_uses_peak = pnl_pct, False
-    else:
-        profit_basis_pnl, profit_basis_uses_peak = _compute_peak_pnl_pct_since_entry(
-            entry_price=entry_price,
-            closes_since_entry=closes_since_entry,
-            fallback_close=last_close,
-        )
-    if entry_price is not None and profit_basis_pnl is not None:
-        profit_label = (
-            f"peak {profit_basis_pnl * 100:.1f}%"
-            if profit_basis_uses_peak
-            else f"{profit_basis_pnl * 100:.1f}%"
-        )
-        if profit_basis_pnl >= settings.partial_profit_floor:
-            profit_protection_stop = entry_price
-            reasons.append(
-                "Profit protection armed at break-even "
-                f"({profit_label} ≥ {settings.partial_profit_floor * 100:.1f}%)"
-            )
-        if profit_basis_pnl >= settings.profit_target_low:
-            tightened_stop = entry_price * (1.0 + settings.partial_profit_floor)
-            profit_protection_stop = max(
-                profit_protection_stop or tightened_stop,
-                tightened_stop,
-            )
-            reasons.append(
-                "Profit protection tightened above entry "
-                f"({profit_label} ≥ {settings.profit_target_low * 100:.1f}%)"
-            )
-        if profit_basis_pnl >= settings.profit_target_high:
-            profit_protection_high_armed = True
-            extended_stop = entry_price * (1.0 + settings.profit_target_low)
-            profit_protection_stop = max(
-                profit_protection_stop or extended_stop,
-                extended_stop,
-            )
-            reasons.append(
-                "High-target profit protection activated "
-                f"({profit_label} ≥ {settings.profit_target_high * 100:.1f}%)"
-            )
-    if profit_protection_stop is not None and stop_override is None:
-        stop_price = max(stop_price or profit_protection_stop, profit_protection_stop)
-        if last_close <= stop_price:
-            reasons.append("Price closed below profit protection stop")
-            if profit_protection_high_armed:
-                action = "SELL"
-            elif action != "SELL":
-                action = "REVIEW"
+    profit_protection = _apply_profit_protection(
+        entry_price=entry_price,
+        pnl_pct=pnl_pct,
+        closes_since_entry=closes_since_entry,
+        last_close=last_close,
+        corporate_action_move=corporate_action_move,
+        entry_date_after_eval=entry_date_state.after_eval,
+        stop_override=stop_override,
+        stop_price=stop_price,
+        settings=settings,
+        action=action,
+    )
+    reasons.extend(profit_protection.reasons)
+    action = profit_protection.action
+    stop_price = profit_protection.stop_price
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
     # Price relative to EMA/SMA

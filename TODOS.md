@@ -21,6 +21,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell profit protection handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for peak-based
+  stop tightening, high-target SELL promotion, and reason ordering.
 - 2026-06-04: Extracted entry artifact date metadata and mixed eval-date issue
   collection from `run_entry`, with characterization coverage for single-market
   and mixed-market date context plus eval-date preview/message contracts.
