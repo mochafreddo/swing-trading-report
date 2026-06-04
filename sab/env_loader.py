@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-_SUPPRESSED_CONFIG_ENV_KEYS: ContextVar[frozenset[str]] = ContextVar(
+type _SuppressionState = tuple[threading.Thread, frozenset[str]]
+
+_SUPPRESSED_CONFIG_ENV_KEYS: ContextVar[_SuppressionState | None] = ContextVar(
     "sab_suppressed_config_env_keys",
-    default=frozenset(),
+    default=None,
 )
 
 
@@ -36,7 +39,9 @@ def suppress_config_env_keys(keys: Iterable[str]) -> Iterator[None]:
     if not normalized:
         yield
         return
-    token = _SUPPRESSED_CONFIG_ENV_KEYS.set(_active_suppressed_env_keys() | normalized)
+    token = _SUPPRESSED_CONFIG_ENV_KEYS.set(
+        (threading.current_thread(), _active_suppressed_env_keys() | normalized)
+    )
     try:
         yield
     finally:
@@ -51,7 +56,15 @@ def getenv(name: str, default: str | None = None) -> str | None:
 
 
 def _active_suppressed_env_keys() -> frozenset[str]:
-    return _SUPPRESSED_CONFIG_ENV_KEYS.get()
+    state = _SUPPRESSED_CONFIG_ENV_KEYS.get()
+    if state is None:
+        return frozenset()
+    owner_thread, keys = state
+    # Python 3.14 can inherit ContextVars into new threads; this suppression
+    # only applies in the thread that created it.
+    if owner_thread is not threading.current_thread():
+        return frozenset()
+    return keys
 
 
 def _python_dotenv_disabled() -> bool:

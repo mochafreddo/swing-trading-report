@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from contextvars import copy_context
 from pathlib import Path
 
 import pytest
@@ -148,9 +149,10 @@ def test_suppress_config_env_keys_does_not_hide_value_from_other_threads(
     with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
         assert env_loader.getenv("HOLDINGS_FILE") is None
         assert os.getenv("HOLDINGS_FILE") == "existing"
-        thread = threading.Thread(target=observe_env)
+        inherited_context = copy_context()
+        thread = threading.Thread(target=inherited_context.run, args=(observe_env,))
         thread.start()
-        thread.join(timeout=1)
+        thread.join()
 
     assert observed == [("existing", "existing")]
 
