@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .env_loader import getenv
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -22,7 +23,7 @@ class ConfigData:
 
 def load_yaml_config(path: str | None = None) -> ConfigData:
     resolved_path = (
-        path if path is not None else (os.getenv("SAB_CONFIG") or "config.yaml")
+        path if path is not None else (getenv("SAB_CONFIG") or "config.yaml")
     )
     p = Path(resolved_path)
     if not p.exists():

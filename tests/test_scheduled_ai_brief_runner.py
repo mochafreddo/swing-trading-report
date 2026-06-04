@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import pytest
 import sab.scheduler.runner as scheduler_runner
+from sab.env_loader import getenv, load_dotenv_if_available
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
     DefaultScheduledPipeline,
@@ -38,6 +39,7 @@ class _FakeStateStore:
     fail_attempt_upsert: bool = False
     fail_artifact_upsert: bool = False
     fail_notification_sent_upsert: bool = False
+    fail_late_alert_sent_upsert: bool = False
     claim_results: list[bool] = field(default_factory=list)
     renewed_event: threading.Event | None = None
 
@@ -65,6 +67,8 @@ class _FakeStateStore:
             raise RuntimeError("artifact write failed")
         if ":notification:sent:" in key and self.fail_notification_sent_upsert:
             raise RuntimeError("notification sent write failed")
+        if ":late-alert:sent:" in key and self.fail_late_alert_sent_upsert:
+            raise RuntimeError("late alert sent write failed")
         self.upserts.append((key, payload))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
@@ -254,6 +258,7 @@ class _FakeNotifier:
     sent: list[str] = field(default_factory=list)
     late_alerts: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     telegram_ready: bool = True
+    fail_late_alert: bool = False
 
     def require_telegram(self) -> None:
         if not self.telegram_ready:
@@ -263,6 +268,8 @@ class _FakeNotifier:
         self.sent.append(storage_key)
 
     def send_late_alert(self, *, reason: str, context: dict[str, object]) -> None:
+        if self.fail_late_alert:
+            raise RuntimeError("late alert delivery failed")
         self.sent.append(reason)
         self.late_alerts.append((reason, dict(context)))
 
@@ -449,6 +456,106 @@ def test_cutoff_alert_runs_after_fallback_grace_expires() -> None:
     assert pipeline.calls == []
     assert storage.uploads == []
     assert notifier.sent == ["cutoff_missing_ai_brief"]
+    assert notifier.late_alerts == [
+        (
+            "cutoff_missing_ai_brief",
+            {
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "scheduleRole": "cutoff-alert",
+                "runnerRole": "cutoff-alert",
+                "attemptId": "attempt-cutoff-after-grace",
+            },
+        )
+    ]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:cutoff_missing_ai_brief" in key
+    ]
+    assert sent_payloads == [
+        {
+            "market": "US",
+            "sessionDate": "2026-05-28",
+            "reason": "cutoff_missing_ai_brief",
+            "scheduleRole": "cutoff-alert",
+            "runnerRole": "cutoff-alert",
+            "attemptId": "attempt-cutoff-after-grace",
+        }
+    ]
+
+
+def test_late_alert_sent_marker_failure_reports_failure_after_delivery() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        state=_FakeStateStore(fail_late_alert_sent_upsert=True),
+        now=dt.datetime(2026, 5, 28, 13, 29, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="cutoff-alert",
+            runner_role="cutoff-alert",
+            scheduled_tick="0929",
+            attempt_id="attempt-cutoff-marker-fail",
+        )
+    )
+
+    assert result.status == "late_alert_sent_marker_failed"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == ["cutoff_missing_ai_brief"]
+    assert any(":late-alert:claim:" in key for key in state.releases)
+    assert "late_alert_sent_marker_failed" in scheduler_runner._FAILED_STATUSES
+
+
+def test_late_alert_delivery_failure_does_not_write_sent_marker() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        notifier=_FakeNotifier(fail_late_alert=True),
+        now=dt.datetime(2026, 5, 28, 13, 29, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="cutoff-alert",
+            runner_role="cutoff-alert",
+            scheduled_tick="0929",
+            attempt_id="attempt-cutoff-send-fail",
+        )
+    )
+
+    assert result.status == "late_alert_send_failed"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
+    assert any(":late-alert:claim:" in key for key in state.releases)
+    assert "late_alert_send_failed" in scheduler_runner._FAILED_STATUSES
+
+
+def test_late_alert_telegram_preflight_failure_does_not_write_sent_marker() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        notifier=_FakeNotifier(telegram_ready=False),
+        now=dt.datetime(2026, 5, 28, 13, 29, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="cutoff-alert",
+            runner_role="cutoff-alert",
+            scheduled_tick="0929",
+            attempt_id="attempt-cutoff-telegram-missing",
+        )
+    )
+
+    assert result.status == "late_alert_send_failed"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
+    assert any(":late-alert:claim:" in key for key in state.releases)
 
 
 def test_pipeline_role_records_role_scoped_attempt_after_preflight() -> None:
@@ -996,6 +1103,9 @@ def test_locked_upload_precheck_helper_persists_skip_artifact_before_upload() ->
         run_url="https://github.com/owner/repo/actions/runs/4",
         lock_key=lock_key,
         owner_token="attempt-upload-precheck-helper-owner",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-upload-precheck-helper",
     )
 
     assert result is not None
@@ -1006,6 +1116,9 @@ def test_locked_upload_precheck_helper_persists_skip_artifact_before_upload() ->
     assert any(":lock:" in key for key in state.renewals)
     assert lock_key in state.releases
     assert "pre_upload_guard_failed" in notifier.sent
+    assert notifier.late_alerts[0][1]["scheduleRole"] == "local-primary"
+    assert notifier.late_alerts[0][1]["runnerRole"] == "local-primary"
+    assert notifier.late_alerts[0][1]["attemptId"] == "attempt-upload-precheck-helper"
 
 
 def test_runner_rechecks_guard_after_notification_claim_before_sending() -> None:
@@ -1309,7 +1422,44 @@ def test_runner_releases_main_lock_when_pipeline_fails(
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["pipeline_failed"]
     assert "scheduled AI brief pipeline failed" in caplog.text
+    assert "schedule_role=local-primary" in caplog.text
+    assert "runner_role=local-primary" in caplog.text
+    assert "attempt_id=attempt-8" in caplog.text
     assert "pipeline failed" in caplog.text
+    assert notifier.late_alerts == [
+        (
+            "pipeline_failed",
+            {
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "attemptId": "attempt-8",
+                "scheduleRole": "local-primary",
+                "runnerRole": "local-primary",
+            },
+        )
+    ]
+
+
+def test_pipeline_failure_late_alert_marker_failure_preserves_pipeline_status() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        state=_FakeStateStore(fail_late_alert_sent_upsert=True),
+        pipeline=_FakePipeline(fail=True),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-pipeline-late-marker-fail",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert any(":late-alert:claim:" in key for key in state.releases)
 
 
 def test_locked_pipeline_failure_helper_releases_lock_and_alerts() -> None:
@@ -1354,14 +1504,20 @@ def test_locked_pipeline_failure_helper_releases_lock_and_alerts() -> None:
             "market": "US",
             "sessionDate": "2026-05-28",
             "reason": "artifact_marker_failed",
+            "attemptId": "attempt-failure-helper",
+            "storageKey": "2026/05/2026-05-28.ai-brief.json",
         }
     ]
 
 
-def test_runner_releases_main_lock_when_upload_fails() -> None:
+def test_runner_releases_main_lock_when_upload_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runner, state, _pipeline, _storage, notifier = _runner(
         storage=_FakeStorage(fail_upload=True)
     )
+
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
 
     result = runner.run(
         ScheduledAiBriefRequest(
@@ -1376,12 +1532,21 @@ def test_runner_releases_main_lock_when_upload_fails() -> None:
     assert result.status == "upload_failed"
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["upload_failed"]
+    assert "scheduled AI brief upload failed" in caplog.text
+    assert "schedule_role=local-primary" in caplog.text
+    assert "runner_role=local-primary" in caplog.text
+    assert "attempt_id=attempt-9" in caplog.text
+    assert "upload failed" in caplog.text
 
 
-def test_runner_releases_main_lock_when_artifact_marker_write_fails() -> None:
+def test_runner_releases_main_lock_when_artifact_marker_write_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runner, state, _pipeline, storage, notifier = _runner(
         state=_FakeStateStore(fail_artifact_upsert=True)
     )
+
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
 
     result = runner.run(
         ScheduledAiBriefRequest(
@@ -1397,6 +1562,12 @@ def test_runner_releases_main_lock_when_artifact_marker_write_fails() -> None:
     assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
     assert any(":lock:" in key for key in state.releases)
     assert "artifact_marker_failed" in notifier.sent
+    assert "scheduled AI brief artifact marker failed" in caplog.text
+    assert "schedule_role=local-primary" in caplog.text
+    assert "runner_role=local-primary" in caplog.text
+    assert "attempt_id=attempt-artifact-marker-fail" in caplog.text
+    assert "storage_key=2026/05/2026-05-28.ai-brief.json" in caplog.text
+    assert "artifact write failed" in caplog.text
 
 
 def test_invalid_artifact_marker_is_failed_scheduler_status() -> None:
@@ -1519,6 +1690,132 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert ai_brief_inputs[0]["buy_report_path"] == "reports/current.buy.json"
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
+
+
+def test_default_pipeline_ignores_ambient_holdings_file_env(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("HOLDINGS_FILE=from-dotenv.yaml\n", encoding="utf-8")
+    monkeypatch.setattr("sab.env_loader._load_with_python_dotenv", lambda **_: False)
+    monkeypatch.setenv("HOLDINGS_FILE", "holdings.yaml")
+    observed_steps: list[str] = []
+
+    def fake_run_scan(**kwargs: object) -> int:
+        load_dotenv_if_available()
+        assert getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        observed_steps.append("scan")
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        load_dotenv_if_available()
+        assert getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        observed_steps.append("entry")
+        assert kwargs["holdings_path"] == "data/scheduler/holdings.US.2026-05-28.yaml"
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        load_dotenv_if_available()
+        assert getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        observed_steps.append("ai-brief")
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.ai-brief.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+
+    result = DefaultScheduledPipeline().run(
+        market="US",
+        session_date="2026-05-28",
+        report_date="2026-05-28",
+        source_provider=None,
+        model_provider="fake",
+        dry_run=False,
+    )
+
+    assert observed_steps == ["scan", "entry", "ai-brief"]
+    assert result.ai_brief_report_path == "reports/current.ai-brief.json"
+    assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+
+
+def test_default_pipeline_logs_stage_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.ai-brief.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+    caplog.set_level("INFO", logger="sab.scheduler.runner")
+
+    DefaultScheduledPipeline().run(
+        market="US",
+        session_date="2026-05-28",
+        report_date="2026-05-28",
+        source_provider="finnhub",
+        model_provider="fake",
+        dry_run=False,
+    )
+
+    assert "step=scan market=US report_date=2026-05-28" in caplog.text
+    assert "step=holdings_export market=US report_date=2026-05-28" in caplog.text
+    assert "step=entry market=US report_date=2026-05-28" in caplog.text
+    assert "step=ai_brief market=US report_date=2026-05-28" in caplog.text
+    assert "report_path=reports/current.ai-brief.json" in caplog.text
 
 
 @pytest.mark.parametrize(

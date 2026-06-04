@@ -19,6 +19,7 @@ from ..ai_brief import run_ai_brief
 from ..ai_brief_eval_common import parse_iso_offset_datetime
 from ..data.trading_sessions import is_trading_session
 from ..entry import run_entry
+from ..env_loader import suppress_config_env_keys
 from ..report.ai_brief_report import validate_ai_brief_artifact
 from ..report.ai_brief_skip_report import (
     AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
@@ -66,6 +67,7 @@ _SKIP_ARTIFACT_CLAIM_TTL_SECONDS = 10 * 60
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
 _ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
 _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
+_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS = ("HOLDINGS_FILE",)
 _FAILED_STATUSES = {
     "attempt_marker_failed",
     "guard_failed",
@@ -75,6 +77,8 @@ _FAILED_STATUSES = {
     "upload_failed",
     "artifact_marker_failed",
     "artifact_marker_invalid",
+    "late_alert_send_failed",
+    "late_alert_sent_marker_failed",
     "skip_artifact_upload_failed",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -237,6 +241,23 @@ def _guard_context(
         "tradingSession": guard.trading_session,
         "localTime": guard.local_time,
     }
+
+
+def _with_alert_run_context(
+    context: dict[str, object],
+    *,
+    schedule_role: str | None = None,
+    runner_role: str | None = None,
+    attempt_id: str | None = None,
+) -> dict[str, object]:
+    enriched = dict(context)
+    if schedule_role is not None:
+        enriched["scheduleRole"] = schedule_role
+    if runner_role is not None:
+        enriched["runnerRole"] = runner_role
+    if attempt_id is not None:
+        enriched["attemptId"] = attempt_id
+    return enriched
 
 
 def _runner_origin(runner_role: str) -> str:
@@ -562,11 +583,13 @@ class ScheduledAiBriefRunner:
                 market=market,
                 session_date=session_date,
                 schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
                 now=now,
             )
 
         if runner_role == "cutoff-alert":
-            self._send_late_alert_once(
+            late_alert_status = self._send_late_alert_once(
                 market=market,
                 session_date=session_date,
                 reason="cutoff_missing_ai_brief",
@@ -574,11 +597,13 @@ class ScheduledAiBriefRunner:
                     "market": market,
                     "sessionDate": session_date,
                     "scheduleRole": schedule_role,
+                    "runnerRole": runner_role,
+                    "attemptId": attempt_id,
                 },
                 now=now,
             )
             return ScheduledAiBriefResult(
-                status="late_alert_sent",
+                status=late_alert_status,
                 session_date=session_date,
             )
 
@@ -595,6 +620,9 @@ class ScheduledAiBriefRunner:
                     session_date=session_date,
                     guard=guard,
                 ),
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
                 now=now,
             )
 
@@ -731,7 +759,16 @@ class ScheduledAiBriefRunner:
                 dry_run=False,
             )
         except Exception:
-            _LOGGER.exception("scheduled AI brief pipeline failed")
+            _LOGGER.exception(
+                "scheduled AI brief pipeline failed "
+                "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                "attempt_id=%s",
+                market,
+                session_date,
+                schedule_role,
+                runner_role,
+                attempt_id,
+            )
             pipeline_failed = True
         finally:
             lock_renewer.stop()
@@ -743,6 +780,8 @@ class ScheduledAiBriefRunner:
                 attempt_id=attempt_id,
                 lock_key=lock_key,
                 owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
                 reason="pipeline_failed",
             )
 
@@ -752,6 +791,9 @@ class ScheduledAiBriefRunner:
             run_url=run_url,
             lock_key=lock_key,
             owner_token=owner_token,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
         )
         if pre_upload_result is not None:
             return pre_upload_result
@@ -762,12 +804,25 @@ class ScheduledAiBriefRunner:
                 report_date=session_date,
             )
         except Exception:
+            _LOGGER.exception(
+                "scheduled AI brief upload failed "
+                "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                "attempt_id=%s report_path=%s",
+                market,
+                session_date,
+                schedule_role,
+                runner_role,
+                attempt_id,
+                pipeline_result.ai_brief_report_path,
+            )
             return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
                 attempt_id=attempt_id,
                 lock_key=lock_key,
                 owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
                 reason="upload_failed",
             )
         try:
@@ -782,12 +837,25 @@ class ScheduledAiBriefRunner:
                 now=now,
             )
         except Exception:
+            _LOGGER.exception(
+                "scheduled AI brief artifact marker failed "
+                "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                "attempt_id=%s storage_key=%s",
+                market,
+                session_date,
+                schedule_role,
+                runner_role,
+                attempt_id,
+                storage_key,
+            )
             return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
                 attempt_id=attempt_id,
                 lock_key=lock_key,
                 owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
                 reason="artifact_marker_failed",
                 storage_key=storage_key,
             )
@@ -833,6 +901,8 @@ class ScheduledAiBriefRunner:
         lock_key: str,
         owner_token: str,
         reason: str,
+        schedule_role: str | None = None,
+        runner_role: str | None = None,
         storage_key: str | None = None,
     ) -> ScheduledAiBriefResult:
         self._state_store.release_lock(lock_key, owner_token=owner_token)
@@ -841,6 +911,10 @@ class ScheduledAiBriefRunner:
             "sessionDate": session_date,
             "attemptId": attempt_id,
         }
+        if schedule_role is not None:
+            context["scheduleRole"] = schedule_role
+        if runner_role is not None:
+            context["runnerRole"] = runner_role
         if storage_key is not None:
             context["storageKey"] = storage_key
         self._send_late_alert_once(
@@ -864,6 +938,9 @@ class ScheduledAiBriefRunner:
         run_url: str,
         lock_key: str,
         owner_token: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
     ) -> ScheduledAiBriefResult | None:
         if not self._state_store.renew_lock(
             lock_key,
@@ -903,10 +980,15 @@ class ScheduledAiBriefRunner:
                 market=market,
                 session_date=session_date,
                 reason="pre_upload_guard_failed",
-                context=_guard_context(
-                    market=market,
-                    session_date=session_date,
-                    guard=pre_upload_guard,
+                context=_with_alert_run_context(
+                    _guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=pre_upload_guard,
+                    ),
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
                 ),
                 now=self._now_fn(),
             )
@@ -920,10 +1002,15 @@ class ScheduledAiBriefRunner:
             market=market,
             session_date=session_date,
             reason="pre_upload_guard_failed",
-            context=_guard_context(
-                market=market,
-                session_date=session_date,
-                guard=pre_upload_guard,
+            context=_with_alert_run_context(
+                _guard_context(
+                    market=market,
+                    session_date=session_date,
+                    guard=pre_upload_guard,
+                ),
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
             ),
             now=self._now_fn(),
         )
@@ -1012,6 +1099,9 @@ class ScheduledAiBriefRunner:
         success_status: str,
         alert_reason: str | None = None,
         alert_context: dict[str, object] | None = None,
+        schedule_role: str | None = None,
+        runner_role: str | None = None,
+        attempt_id: str | None = None,
         now: dt.datetime | None = None,
     ) -> ScheduledAiBriefResult:
         try:
@@ -1032,11 +1122,16 @@ class ScheduledAiBriefRunner:
                     market=market,
                     session_date=session_date,
                     reason=alert_reason,
-                    context=alert_context
-                    or _guard_context(
-                        market=market,
-                        session_date=session_date,
-                        guard=guard,
+                    context=_with_alert_run_context(
+                        alert_context
+                        or _guard_context(
+                            market=market,
+                            session_date=session_date,
+                            guard=guard,
+                        ),
+                        schedule_role=schedule_role,
+                        runner_role=runner_role,
+                        attempt_id=attempt_id,
                     ),
                     now=now or self._now_fn(),
                 )
@@ -1050,11 +1145,16 @@ class ScheduledAiBriefRunner:
                 market=market,
                 session_date=session_date,
                 reason=alert_reason,
-                context=alert_context
-                or _guard_context(
-                    market=market,
-                    session_date=session_date,
-                    guard=guard,
+                context=_with_alert_run_context(
+                    alert_context
+                    or _guard_context(
+                        market=market,
+                        session_date=session_date,
+                        guard=guard,
+                    ),
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
                 ),
                 now=now or self._now_fn(),
             )
@@ -1275,6 +1375,8 @@ class ScheduledAiBriefRunner:
                             session_date=session_date,
                             guard=pre_notification_guard,
                         ),
+                        "scheduleRole": schedule_role,
+                        "runnerRole": runner_role,
                         "attemptId": attempt_id,
                         "storageKey": storage_key,
                     },
@@ -1351,6 +1453,8 @@ class ScheduledAiBriefRunner:
         market: str,
         session_date: str,
         schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
         now: dt.datetime,
     ) -> ScheduledAiBriefResult:
         attempt_entries = self._state_store.list_entries(
@@ -1384,6 +1488,8 @@ class ScheduledAiBriefRunner:
                 "market": market,
                 "sessionDate": session_date,
                 "scheduleRole": schedule_role,
+                "runnerRole": runner_role,
+                "attemptId": attempt_id,
             },
             now=now,
         )
@@ -1492,17 +1598,40 @@ class ScheduledAiBriefRunner:
         try:
             if self._state_store.get_entry(sent_key) is not None:
                 return "late_alert_already_sent"
-            self._notifier.send_late_alert(reason=reason, context=context)
-            self._state_store.upsert_marker(
-                key=sent_key,
-                payload={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "reason": reason,
-                },
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
-                now=now,
-            )
+            try:
+                self._notifier.require_telegram()
+                self._notifier.send_late_alert(reason=reason, context=context)
+            except Exception:
+                _LOGGER.exception(
+                    "scheduled AI brief late alert delivery failed "
+                    "market=%s session_date=%s reason=%s context=%s",
+                    market,
+                    session_date,
+                    reason,
+                    context,
+                )
+                return "late_alert_send_failed"
+            try:
+                self._state_store.upsert_marker(
+                    key=sent_key,
+                    payload={
+                        **context,
+                        "market": market,
+                        "sessionDate": session_date,
+                        "reason": reason,
+                    },
+                    ttl_seconds=_SUCCESS_TTL_SECONDS,
+                    now=now,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "scheduled AI brief late alert sent marker failed "
+                    "market=%s session_date=%s reason=%s",
+                    market,
+                    session_date,
+                    reason,
+                )
+                return "late_alert_sent_marker_failed"
             return "late_alert_sent"
         finally:
             self._state_store.release_lock(claim_key, owner_token=owner_token)
@@ -1529,64 +1658,126 @@ class DefaultScheduledPipeline:
     ) -> ScheduledPipelineResult:
         del session_date, dry_run
         buy_report_paths: list[str] = []
-        scan_status = run_scan(
-            limit=None,
-            watchlist_path=None,
-            provider="kis",
-            universe="both",
-            markets=market,
-            report_path_callback=buy_report_paths.append,
+        _LOGGER.info(
+            "scheduled AI brief pipeline step started "
+            "step=scan market=%s report_date=%s",
+            market,
+            report_date,
         )
+        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+            scan_status = run_scan(
+                limit=None,
+                watchlist_path=None,
+                provider="kis",
+                universe="both",
+                markets=market,
+                report_path_callback=buy_report_paths.append,
+            )
         if scan_status != 0:
             raise RuntimeError("scheduled scan failed")
         buy_report_path = _require_single_report_path(
             buy_report_paths, report_type="buy"
         )
+        _LOGGER.info(
+            "scheduled AI brief pipeline step completed "
+            "step=scan market=%s report_date=%s report_path=%s",
+            market,
+            report_date,
+            buy_report_path,
+        )
         holdings_path = (
             Path("data") / "scheduler" / (f"holdings.{market}.{report_date}.yaml")
+        )
+        holdings_path_str = holdings_path.as_posix()
+        _LOGGER.info(
+            "scheduled AI brief pipeline step started "
+            "step=holdings_export market=%s report_date=%s output_path=%s",
+            market,
+            report_date,
+            holdings_path_str,
         )
         export_active_holdings_snapshot(
             output_path=holdings_path,
             config=SupabaseHoldingsExportConfig.from_env(),
         )
+        _LOGGER.info(
+            "scheduled AI brief pipeline step completed "
+            "step=holdings_export market=%s report_date=%s output_path=%s",
+            market,
+            report_date,
+            holdings_path_str,
+        )
         entry_guard = _default_guard_snapshot(market, dt.datetime.now(dt.UTC))
         if not _guard_allows_pipeline(entry_guard):
             raise RuntimeError("scheduled pre-open guard failed before entry")
         entry_report_paths: list[str] = []
-        entry_status = run_entry(
-            buy_report_path=buy_report_path,
-            provider="kis",
-            mode="PRE_OPEN",
-            market=market,
-            holdings_path=holdings_path.as_posix(),
-            upload=False,
-            report_path_callback=entry_report_paths.append,
+        _LOGGER.info(
+            "scheduled AI brief pipeline step started "
+            "step=entry market=%s report_date=%s buy_report_path=%s holdings_path=%s",
+            market,
+            report_date,
+            buy_report_path,
+            holdings_path_str,
         )
+        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+            entry_status = run_entry(
+                buy_report_path=buy_report_path,
+                provider="kis",
+                mode="PRE_OPEN",
+                market=market,
+                holdings_path=holdings_path_str,
+                upload=False,
+                report_path_callback=entry_report_paths.append,
+            )
         if entry_status != 0:
             raise RuntimeError("scheduled entry failed")
         entry_report_path = _require_single_report_path(
             entry_report_paths, report_type="entry"
         )
-        ai_brief_report_paths: list[str] = []
-        ai_status = run_ai_brief(
-            entry_report_path=entry_report_path,
-            buy_report_path=buy_report_path,
-            market=market,
-            model_provider=model_provider,
-            model_name="fake-ai-brief-v1",
-            source_provider=source_provider,
-            report_date=report_date,
-            upload=False,
-            report_path_callback=ai_brief_report_paths.append,
+        _LOGGER.info(
+            "scheduled AI brief pipeline step completed "
+            "step=entry market=%s report_date=%s report_path=%s",
+            market,
+            report_date,
+            entry_report_path,
         )
+        ai_brief_report_paths: list[str] = []
+        _LOGGER.info(
+            "scheduled AI brief pipeline step started "
+            "step=ai_brief market=%s report_date=%s entry_report_path=%s "
+            "source_provider=%s model_provider=%s",
+            market,
+            report_date,
+            entry_report_path,
+            source_provider or "",
+            model_provider,
+        )
+        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+            ai_status = run_ai_brief(
+                entry_report_path=entry_report_path,
+                buy_report_path=buy_report_path,
+                market=market,
+                model_provider=model_provider,
+                model_name="fake-ai-brief-v1",
+                source_provider=source_provider,
+                report_date=report_date,
+                upload=False,
+                report_path_callback=ai_brief_report_paths.append,
+            )
         if ai_status != 0:
             raise RuntimeError("scheduled ai-brief failed")
-        return ScheduledPipelineResult(
-            ai_brief_report_path=_require_single_report_path(
-                ai_brief_report_paths,
-                report_type="ai-brief",
-            )
+        ai_brief_report_path = _require_single_report_path(
+            ai_brief_report_paths,
+            report_type="ai-brief",
         )
+        _LOGGER.info(
+            "scheduled AI brief pipeline step completed "
+            "step=ai_brief market=%s report_date=%s report_path=%s",
+            market,
+            report_date,
+            ai_brief_report_path,
+        )
+        return ScheduledPipelineResult(ai_brief_report_path=ai_brief_report_path)
 
 
 class DefaultScheduledStorage:
@@ -1718,8 +1909,7 @@ class DefaultScheduledNotifier:
                 _LOGGER.warning("Slack webhook failed for scheduled AI brief: %s", exc)
 
     def send_late_alert(self, *, reason: str, context: dict[str, object]) -> None:
-        if not os.getenv("TELEGRAM_BOT_TOKEN") or not os.getenv("TELEGRAM_CHAT_ID"):
-            return
+        self.require_telegram()
         text = "\n".join(
             [
                 "[SAB][ai-brief][late-alert]",

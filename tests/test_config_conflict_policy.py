@@ -7,7 +7,13 @@ from sab.config_loader import ConfigLoadError
 
 
 def _reset_conflict_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("SAB_CONFIG", "DATA_PROVIDER", "SCREEN_LIMIT", "FX_MODE"):
+    for key in (
+        "SAB_CONFIG",
+        "DATA_PROVIDER",
+        "SCREEN_LIMIT",
+        "FX_MODE",
+        "HOLDINGS_FILE",
+    ):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -73,6 +79,36 @@ data:
 
     with pytest.raises(ConfigLoadError, match=r"DATA_PROVIDER \(data.provider\)"):
         load_config(provider_override="kis")
+
+
+def test_load_config_ignores_suppressed_env_key_for_conflicts_and_values(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+files:
+  holdings: config-holdings.yaml
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "HOLDINGS_FILE=dotenv-holdings.yaml\n",
+        encoding="utf-8",
+    )
+
+    _reset_conflict_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("HOLDINGS_FILE", "env-holdings.yaml")
+
+    with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
+        cfg = load_config()
+
+    assert cfg.holdings_path == "config-holdings.yaml"
+    assert env_loader.getenv("HOLDINGS_FILE") == "env-holdings.yaml"
 
 
 def test_load_config_allows_env_when_yaml_key_is_absent(

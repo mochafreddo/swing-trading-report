@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config_loader import ConfigLoadError, load_yaml_config
-from .env_loader import env_flag, load_dotenv_if_available
+from .env_loader import env_flag, getenv, load_dotenv_if_available
 from .holdings_loader import HoldingsData, load_holdings
 from .tickers import (
     parse_ticker,
@@ -323,7 +323,7 @@ def _is_strict_config_mode() -> bool:
     if env_flag("GITHUB_ACTIONS") or env_flag("CI"):
         return True
 
-    explicit = os.getenv("SAB_CONFIG_STRICT")
+    explicit = getenv("SAB_CONFIG_STRICT")
     if explicit is not None:
         return explicit.strip().lower() in {"1", "true", "yes", "y", "on"}
     return False
@@ -354,7 +354,7 @@ class _ConfigParser:
         expected_type: str,
         allow_none: bool = False,
     ) -> float | int | None:
-        env_val = os.getenv(key)
+        env_val = getenv(key)
         if env_val is not None:
             raw = env_val
             source = f"environment variable '{key}'"
@@ -377,7 +377,7 @@ class _ConfigParser:
             return default
 
     def env_bool(self, key: str, path: str, default: bool) -> bool:
-        env_val = os.getenv(key)
+        env_val = getenv(key)
         if env_val is not None:
             if self._strict:
                 return _parse_bool_strict(
@@ -447,7 +447,7 @@ class _ConfigParser:
             return None
 
     def env_str(self, key: str, path: str, default: str | None) -> str | None:
-        env_val = os.getenv(key)
+        env_val = getenv(key)
         if env_val is not None:
             return env_val
         value = self.from_yaml(path, default)
@@ -459,7 +459,7 @@ class _ConfigParser:
 def _collect_env_yaml_conflicts(parser: _ConfigParser) -> list[str]:
     conflicts: set[str] = set()
     for env_key, yaml_path in _ENV_YAML_CONFLICT_BINDINGS:
-        if os.getenv(env_key) is None:
+        if getenv(env_key) is None:
             continue
         if parser.has_yaml_path(yaml_path):
             conflicts.add(f"{env_key} ({yaml_path})")
@@ -584,7 +584,7 @@ def _parse_data_section(
 ) -> _DataSection:
     provider_raw = (
         provider_override
-        or os.getenv("DATA_PROVIDER")
+        or getenv("DATA_PROVIDER")
         or parser.from_yaml("data.provider", "kis")
         or "kis"
     )
@@ -602,7 +602,7 @@ def _parse_data_section(
             market.strip().upper() for market in markets_override if market.strip()
         ]
     else:
-        markets_env = os.getenv("UNIVERSE_MARKETS")
+        markets_env = getenv("UNIVERSE_MARKETS")
         if markets_env is not None:
             universe_markets = [
                 market.strip().upper()
@@ -635,9 +635,9 @@ def _parse_data_section(
     return _DataSection(
         provider=provider,
         screen_limit=screen_limit,
-        report_dir=os.getenv("REPORT_DIR")
+        report_dir=getenv("REPORT_DIR")
         or parser.from_yaml("data.report_dir", "reports"),
-        data_dir=os.getenv("DATA_DIR") or parser.from_yaml("data.data_dir", "data"),
+        data_dir=getenv("DATA_DIR") or parser.from_yaml("data.data_dir", "data"),
         watchlist_path=watchlist_path,
         holdings_path=holdings_path,
         screener_enabled=parser.env_bool("SCREENER_ENABLED", "screener.enabled", False),
@@ -656,10 +656,10 @@ def _parse_data_section(
         .strip()
         .lower(),
         us_screener_limit=parser.env_int("US_SCREENER_LIMIT", "screener.us_limit", 20),
-        kis_app_key=os.getenv("KIS_APP_KEY"),
-        kis_app_secret=os.getenv("KIS_APP_SECRET"),
+        kis_app_key=getenv("KIS_APP_KEY"),
+        kis_app_secret=getenv("KIS_APP_SECRET"),
         kis_base_url=_normalize_kis_base(
-            os.getenv("KIS_BASE_URL") or parser.from_yaml("kis.base_url")
+            getenv("KIS_BASE_URL") or parser.from_yaml("kis.base_url")
         ),
         kis_min_interval_ms=parser.env_optional_float(
             "KIS_MIN_INTERVAL_MS", "kis.min_interval_ms"
@@ -753,7 +753,7 @@ def _resolve_mode_string(
     it straight to ``_normalize_choice`` validators.
     """
 
-    raw: Any = os.getenv(env_key)
+    raw: Any = getenv(env_key)
     if raw is None:
         raw = parser.from_yaml(yaml_path, default)
     if raw is None:
@@ -919,8 +919,9 @@ def _parse_optional_int(
 ) -> int | None:
     raw: Any
     source = f"config.yaml '{path}'"
-    if env_key is not None and os.getenv(env_key) is not None:
-        raw = os.getenv(env_key)
+    env_value = getenv(env_key) if env_key is not None else None
+    if env_value is not None:
+        raw = env_value
         source = f"environment variable '{env_key}'"
     else:
         raw = parser.from_yaml(path)

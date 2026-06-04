@@ -29,6 +29,16 @@ def _collect_env_keys_from_usage(module_path: Path) -> set[str]:
             continue
 
         if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "getenv"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+            continue
+
+        if (
             isinstance(node.func, ast.Attribute)
             and node.func.attr
             in {

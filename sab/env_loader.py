@@ -1,27 +1,96 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+
+_SUPPRESSED_CONFIG_ENV_KEYS: ContextVar[frozenset[str]] = ContextVar(
+    "sab_suppressed_config_env_keys",
+    default=frozenset(),
+)
 
 
 def load_dotenv_if_available(
     *, dotenv_path: str | os.PathLike[str] | None = None, override: bool = False
 ) -> None:
-    if _load_with_python_dotenv(dotenv_path=dotenv_path, override=override):
+    if _python_dotenv_disabled():
         return
-    _load_with_fallback_parser(dotenv_path=dotenv_path, override=override)
+    suppressed_keys = _active_suppressed_env_keys()
+    if not _load_with_python_dotenv(
+        dotenv_path=dotenv_path,
+        override=override,
+        suppressed_keys=suppressed_keys,
+    ):
+        _load_with_fallback_parser(
+            dotenv_path=dotenv_path,
+            override=override,
+            suppressed_keys=suppressed_keys,
+        )
+
+
+@contextmanager
+def suppress_config_env_keys(keys: Iterable[str]) -> Iterator[None]:
+    normalized = frozenset(str(key).strip() for key in keys if str(key).strip())
+    if not normalized:
+        yield
+        return
+    token = _SUPPRESSED_CONFIG_ENV_KEYS.set(_active_suppressed_env_keys() | normalized)
+    try:
+        yield
+    finally:
+        _SUPPRESSED_CONFIG_ENV_KEYS.reset(token)
+
+
+def getenv(name: str, default: str | None = None) -> str | None:
+    key = str(name)
+    if key in _active_suppressed_env_keys():
+        return default
+    return os.getenv(key, default)
+
+
+def _active_suppressed_env_keys() -> frozenset[str]:
+    return _SUPPRESSED_CONFIG_ENV_KEYS.get()
+
+
+def _python_dotenv_disabled() -> bool:
+    value = os.environ.get("PYTHON_DOTENV_DISABLED")
+    if value is None:
+        return False
+    return value.casefold() in {"1", "true", "t", "yes", "y"}
 
 
 def _load_with_python_dotenv(
-    *, dotenv_path: str | os.PathLike[str] | None = None, override: bool = False
+    *,
+    dotenv_path: str | os.PathLike[str] | None = None,
+    override: bool = False,
+    suppressed_keys: frozenset[str] = frozenset(),
 ) -> bool:
     try:
         from dotenv import load_dotenv  # type: ignore
+        from dotenv.main import DotEnv, find_dotenv  # type: ignore
     except Exception:
         return False
 
     try:
-        if dotenv_path is not None:
+        if _python_dotenv_disabled():
+            return True
+        if suppressed_keys:
+            resolved_path = find_dotenv() if dotenv_path is None else dotenv_path
+            values = DotEnv(
+                dotenv_path=resolved_path,
+                verbose=False,
+                interpolate=True,
+                override=override,
+                encoding="utf-8",
+            ).dict()
+            _apply_env_values(
+                values,
+                override=override,
+                suppressed_keys=suppressed_keys,
+            )
+        elif dotenv_path is not None:
             load_dotenv(dotenv_path=str(dotenv_path), override=override)
         else:
             load_dotenv(override=override)
@@ -31,7 +100,10 @@ def _load_with_python_dotenv(
 
 
 def _load_with_fallback_parser(
-    *, dotenv_path: str | os.PathLike[str] | None = None, override: bool = False
+    *,
+    dotenv_path: str | os.PathLike[str] | None = None,
+    override: bool = False,
+    suppressed_keys: frozenset[str] = frozenset(),
 ) -> None:
     path = Path(dotenv_path) if dotenv_path is not None else Path(".env")
     if not path.exists():
@@ -47,9 +119,40 @@ def _load_with_fallback_parser(
         if parsed is None:
             continue
         key, value = parsed
-        if not override and os.getenv(key) is not None:
+        if not _should_apply_env_value(
+            key,
+            override=override,
+            suppressed_keys=suppressed_keys,
+        ):
             continue
         os.environ[key] = value
+
+
+def _apply_env_values(
+    values: Mapping[str, str | None],
+    *,
+    override: bool,
+    suppressed_keys: frozenset[str],
+) -> None:
+    for key, value in values.items():
+        if value is None or not _should_apply_env_value(
+            key,
+            override=override,
+            suppressed_keys=suppressed_keys,
+        ):
+            continue
+        os.environ[key] = value
+
+
+def _should_apply_env_value(
+    key: str,
+    *,
+    override: bool,
+    suppressed_keys: frozenset[str],
+) -> bool:
+    if key in suppressed_keys:
+        return False
+    return override or os.getenv(key) is None
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -129,7 +232,7 @@ def env_flag(name: str, *, default: bool = False) -> bool:
     무시)을 참으로 본다.
     """
 
-    raw = os.getenv(name)
+    raw = getenv(name)
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}

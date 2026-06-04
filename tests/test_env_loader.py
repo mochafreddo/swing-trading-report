@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,105 @@ def test_fallback_parser_respects_override_flag(
 
     env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=True)
     assert os.getenv("KIS_APP_KEY") == "from-file"
+
+
+def test_fallback_parser_respects_python_dotenv_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("KIS_APP_KEY=from-file\n", encoding="utf-8")
+
+    _force_fallback(monkeypatch)
+    monkeypatch.delenv("KIS_APP_KEY", raising=False)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "true")
+
+    env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=False)
+
+    assert os.getenv("KIS_APP_KEY") is None
+
+
+def test_suppress_config_env_keys_blocks_dotenv_reload_without_mutating_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("HOLDINGS_FILE=from-file\n", encoding="utf-8")
+
+    _force_fallback(monkeypatch)
+    monkeypatch.setenv("HOLDINGS_FILE", "existing")
+
+    with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
+        assert env_loader.getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "existing"
+        env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=False)
+        assert env_loader.getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "existing"
+
+    assert os.getenv("HOLDINGS_FILE") == "existing"
+
+
+def test_suppress_config_env_keys_respects_python_dotenv_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "KIS_APP_KEY=from-file\nHOLDINGS_FILE=from-file\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("KIS_APP_KEY", raising=False)
+    monkeypatch.setenv("HOLDINGS_FILE", "existing")
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "true")
+
+    with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
+        env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=False)
+
+    assert os.getenv("KIS_APP_KEY") is None
+    assert os.getenv("HOLDINGS_FILE") == "existing"
+
+
+def test_suppress_config_env_keys_preserves_python_dotenv_interpolation_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "BASE=from-file\nCOMBINED=${BASE}\nHOLDINGS_FILE=from-file\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("BASE", "from-env")
+    monkeypatch.delenv("COMBINED", raising=False)
+    monkeypatch.setenv("HOLDINGS_FILE", "existing")
+
+    with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
+        env_loader.load_dotenv_if_available(dotenv_path=dotenv_path, override=False)
+
+    assert os.getenv("BASE") == "from-env"
+    assert os.getenv("COMBINED") == "from-env"
+    assert os.getenv("HOLDINGS_FILE") == "existing"
+
+
+def test_suppress_config_env_keys_does_not_hide_value_from_other_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOLDINGS_FILE", "existing")
+    observed: list[tuple[str | None, str | None]] = []
+
+    def observe_env() -> None:
+        observed.append(
+            (
+                env_loader.getenv("HOLDINGS_FILE"),
+                os.getenv("HOLDINGS_FILE"),
+            )
+        )
+
+    with env_loader.suppress_config_env_keys(["HOLDINGS_FILE"]):
+        assert env_loader.getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "existing"
+        thread = threading.Thread(target=observe_env)
+        thread.start()
+        thread.join(timeout=1)
+
+    assert observed == [("existing", "existing")]
 
 
 def test_env_flag_returns_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
