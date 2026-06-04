@@ -583,6 +583,63 @@ def _empty_candidates_by_market(
     )
 
 
+@dataclass(frozen=True)
+class _EntrySourceReportContext:
+    resolved_report_path: str
+    source_report: dict[str, Any]
+    candidates: list[dict[str, Any]]
+    candidates_by_market: dict[str, list[dict[str, Any]]]
+    resolved_markets: list[str]
+
+
+def _load_entry_source_report(
+    *,
+    report_dir: str,
+    buy_report_path: str | None,
+    market_override: str | None,
+) -> _EntrySourceReportContext:
+    resolved_report_path = _resolve_buy_report_path(
+        report_dir=report_dir,
+        buy_report_path=buy_report_path,
+    )
+    with open(resolved_report_path, encoding="utf-8") as fp:
+        source_report = cast(dict[str, Any], json.load(fp))
+
+    candidates_raw = source_report.get("candidates")
+    if not isinstance(candidates_raw, list):
+        raise ValueError("Buy report is missing candidates[]")
+
+    candidates = [item for item in candidates_raw if isinstance(item, dict)]
+    if not candidates:
+        if candidates_raw:
+            raise ValueError("Buy report has no valid candidate rows")
+        logger.info("Buy report has no candidate rows; writing empty entry report")
+
+    if candidates:
+        try:
+            _validate_candidate_tickers(candidates)
+        except ValueError as exc:
+            raise ValueError(f"Buy report ticker validation failed: {exc}") from exc
+        candidates_by_market = _group_candidates_by_market(
+            report=source_report,
+            candidates=candidates,
+            market_override=market_override,
+        )
+    else:
+        candidates_by_market = _empty_candidates_by_market(
+            report=source_report,
+            market_override=market_override,
+        )
+
+    return _EntrySourceReportContext(
+        resolved_report_path=resolved_report_path,
+        source_report=source_report,
+        candidates=candidates,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=sorted(candidates_by_market),
+    )
+
+
 def _entry_session_date(market: str) -> str:
     zone = ZoneInfo("Asia/Seoul") if market == "KR" else ZoneInfo("America/New_York")
     return dt.datetime.now(zone).date().isoformat()
@@ -1227,52 +1284,23 @@ def run_entry(
         return 1
 
     try:
-        resolved_report_path = _resolve_buy_report_path(
+        source_context = _load_entry_source_report(
             report_dir=cfg.report_dir,
             buy_report_path=buy_report_path,
+            market_override=normalized_market,
         )
-        with open(resolved_report_path, encoding="utf-8") as fp:
-            source_report = json.load(fp)
     except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
         logger.error("Failed to load buy report: %s", exc)
         return 1
-
-    candidates_raw = source_report.get("candidates")
-    if not isinstance(candidates_raw, list):
-        logger.error("Buy report is missing candidates[]")
-        return 1
-
-    candidates = [item for item in candidates_raw if isinstance(item, dict)]
-    if not candidates:
-        if candidates_raw:
-            logger.error("Buy report has no valid candidate rows")
-            return 1
-        logger.info("Buy report has no candidate rows; writing empty entry report")
-
-    if candidates:
-        try:
-            _validate_candidate_tickers(candidates)
-        except ValueError as exc:
-            logger.error("Buy report ticker validation failed: %s", exc)
-            return 1
-
-    try:
-        if candidates:
-            candidates_by_market = _group_candidates_by_market(
-                report=source_report,
-                candidates=candidates,
-                market_override=normalized_market,
-            )
-        else:
-            candidates_by_market = _empty_candidates_by_market(
-                report=source_report,
-                market_override=normalized_market,
-            )
     except ValueError as exc:
         logger.error("%s", exc)
         return 1
 
-    resolved_markets = sorted(candidates_by_market)
+    resolved_report_path = source_context.resolved_report_path
+    source_report = source_context.source_report
+    candidates = source_context.candidates
+    candidates_by_market = source_context.candidates_by_market
+    resolved_markets = source_context.resolved_markets
     if normalized_provider == "pykrx" and resolved_markets != ["KR"]:
         logger.error("pykrx provider only supports KR market for entry")
         return 1

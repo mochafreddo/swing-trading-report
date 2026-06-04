@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted entry buy-report loading, candidate validation, and
+  market grouping context from `run_entry`, with characterization coverage for
+  market override filtering while preserving source candidate order.
 - 2026-06-04: Extracted entry report persistence/upload handling from
   `run_entry`, with characterization coverage for mixed-market artifact date
   selection, report path callback ordering, and fatal missing-price upload skip.
