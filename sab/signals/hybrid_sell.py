@@ -109,6 +109,12 @@ class _TrendBreakdownState:
 
 
 @dataclass(frozen=True)
+class _FailedBreakoutState:
+    action: str
+    reasons: list[str]
+
+
+@dataclass(frozen=True)
 class _HardStopBandState:
     action: str
     reasons: list[str]
@@ -548,6 +554,31 @@ def _apply_trend_breakdown_rules(
     return _TrendBreakdownState(action=action_out, reasons=reasons)
 
 
+def _apply_failed_breakout_rules(
+    *,
+    holding: dict[str, Any],
+    entry_price: float | None,
+    pnl_pct: float | None,
+    settings: HybridSellSettings,
+    action: str,
+) -> _FailedBreakoutState:
+    if (
+        entry_price is None
+        or pnl_pct is None
+        or not _is_breakout_holding(holding)
+        or pnl_pct > -settings.failed_breakout_drop_pct
+    ):
+        return _FailedBreakoutState(action=action, reasons=[])
+
+    return _FailedBreakoutState(
+        action="SELL",
+        reasons=[
+            f"Failed breakout: price moved {pnl_pct * 100:.1f}% below entry "
+            f"(threshold {settings.failed_breakout_drop_pct * 100:.1f}%)"
+        ],
+    )
+
+
 def _apply_hard_stop_band(
     *,
     entry_price: float | None,
@@ -746,18 +777,15 @@ def evaluate_sell_signals_hybrid(
     action = trend_breakdown.action
 
     # --- 3) Failed breakout ---
-    # If holding strategy is breakout-like, consider a sharp drop > failed_breakout_drop_pct
-    if (
-        entry_price is not None
-        and pnl_pct is not None
-        and _is_breakout_holding(holding)
-        and pnl_pct <= -settings.failed_breakout_drop_pct
-    ):
-        reasons.append(
-            f"Failed breakout: price moved {pnl_pct * 100:.1f}% below entry "
-            f"(threshold {settings.failed_breakout_drop_pct * 100:.1f}%)"
-        )
-        action = "SELL"
+    failed_breakout = _apply_failed_breakout_rules(
+        holding=holding,
+        entry_price=entry_price,
+        pnl_pct=pnl_pct,
+        settings=settings,
+        action=action,
+    )
+    reasons.extend(failed_breakout.reasons)
+    action = failed_breakout.action
 
     # --- 4) Hard stop loss band (3–5%) ---
     hard_stop_band = _apply_hard_stop_band(

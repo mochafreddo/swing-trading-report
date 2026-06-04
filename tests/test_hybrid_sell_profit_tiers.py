@@ -432,6 +432,62 @@ def test_hybrid_sell_hard_stop_band_state_preserves_contract(
     assert result.reasons == expected_reasons
 
 
+@pytest.mark.parametrize(
+    (
+        "holding",
+        "entry_price",
+        "pnl_pct",
+        "initial_action",
+        "expected_action",
+        "expected_reasons",
+    ),
+    [
+        (
+            {"tags": ["swing_high_breakout"]},
+            100.0,
+            -0.035,
+            "HOLD",
+            "SELL",
+            ["Failed breakout: price moved -3.5% below entry (threshold 3.0%)"],
+        ),
+        ({"tags": ["swing_high_breakout"]}, None, -0.035, "HOLD", "HOLD", []),
+        ({"tags": ["swing_high_breakout"]}, 100.0, None, "HOLD", "HOLD", []),
+        ({"tags": ["swing_high_breakout"]}, 100.0, -0.020, "HOLD", "HOLD", []),
+        ({"tags": ["mean_reversion"]}, 100.0, -0.035, "HOLD", "HOLD", []),
+        (
+            {"tags": ["swing_high_breakout"]},
+            100.0,
+            -0.035,
+            "SELL",
+            "SELL",
+            ["Failed breakout: price moved -3.5% below entry (threshold 3.0%)"],
+        ),
+    ],
+)
+def test_hybrid_sell_failed_breakout_state_preserves_contract(
+    holding: dict[str, object],
+    entry_price: float | None,
+    pnl_pct: float | None,
+    initial_action: str,
+    expected_action: str,
+    expected_reasons: list[str],
+) -> None:
+    helper = getattr(hybrid_sell, "_apply_failed_breakout_rules", None)
+
+    assert helper is not None
+
+    result = helper(
+        holding=holding,
+        entry_price=entry_price,
+        pnl_pct=pnl_pct,
+        settings=HybridSellSettings(failed_breakout_drop_pct=0.03),
+        action=initial_action,
+    )
+
+    assert result.action == expected_action
+    assert result.reasons == expected_reasons
+
+
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(

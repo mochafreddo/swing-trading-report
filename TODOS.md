@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell failed-breakout handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for breakout
+  SELL promotion, missing entry/P&L no-op paths, non-breakout no-op, and
+  existing SELL reason preservation.
 - 2026-06-04: Revalidated the latest archived review findings from
   `docs/reviews/2026/review-2026-03-08.md` and
   `docs/reviews/2026/review-2026-03-06.md` against current code/docs. The
