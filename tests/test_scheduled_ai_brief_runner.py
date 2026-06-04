@@ -27,6 +27,9 @@ class _FakeStateStore:
     entries: dict[str, RuntimeStateEntry] = field(default_factory=dict)
     upserts: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     claims: list[str] = field(default_factory=list)
+    claim_payloads: list[tuple[str, dict[str, object] | None]] = field(
+        default_factory=list
+    )
     releases: list[str] = field(default_factory=list)
     renewals: list[str] = field(default_factory=list)
     ownership_results: list[bool] = field(default_factory=lambda: [True, True, True])
@@ -78,6 +81,7 @@ class _FakeStateStore:
         payload: dict[str, object] | None = None,
     ) -> RuntimeStateLockClaim:
         self.claims.append(key)
+        self.claim_payloads.append((key, payload))
         acquired = self.claim_results.pop(0) if self.claim_results else True
         return RuntimeStateLockClaim(acquired=acquired, expires_at="soon")
 
@@ -1140,6 +1144,60 @@ def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
     assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
     assert any(key == artifact_key for key, _payload in state.upserts)
     assert lock_key in state.releases
+
+
+def test_main_lock_claim_helper_claims_session_lock_with_attempt_context() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner()
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    lease = runner._claim_main_lock(
+        market="US",
+        session_date="2026-05-28",
+        runner_role="local-primary",
+        attempt_id="attempt-lock-helper",
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert isinstance(lease, scheduler_runner._MainLockLease)
+    assert lease.lock_key == lock_key
+    assert lease.owner_token.startswith("attempt-lock-helper-")
+    assert state.claims == [lock_key]
+    assert state.claim_payloads == [
+        (
+            lock_key,
+            {
+                "attemptId": "attempt-lock-helper",
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "runnerRole": "local-primary",
+            },
+        )
+    ]
+
+
+def test_main_lock_claim_helper_reports_lock_held_skip() -> None:
+    runner, state, _pipeline, _storage, _notifier = _runner(
+        state=_FakeStateStore(claim_results=[False])
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._claim_main_lock(
+        market="US",
+        session_date="2026-05-28",
+        runner_role="local-primary",
+        attempt_id="attempt-lock-held",
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert isinstance(result, scheduler_runner.ScheduledAiBriefResult)
+    assert result.status == "lock_held_skip"
+    assert result.session_date == "2026-05-28"
+    assert result.storage_key is None
+    assert state.claims == [lock_key]
 
 
 def test_runner_releases_main_lock_when_pipeline_fails(

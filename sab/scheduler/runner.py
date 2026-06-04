@@ -114,6 +114,12 @@ class ScheduledPipelineResult:
     ai_brief_report_path: str
 
 
+@dataclass(frozen=True)
+class _MainLockLease:
+    lock_key: str
+    owner_token: str
+
+
 class _SkipArtifactClaimHeld(RuntimeError):
     """Raised when another runner is already persisting the skip artifact."""
 
@@ -588,6 +594,40 @@ class ScheduledAiBriefRunner:
             )
 
         self._notifier.require_telegram()
+        main_lock = self._claim_main_lock(
+            market=market,
+            session_date=session_date,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            now=now,
+        )
+        if isinstance(main_lock, ScheduledAiBriefResult):
+            return main_lock
+
+        return self._run_locked_pipeline(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=request.run_url,
+            source_provider=request.source_provider,
+            model_provider=request.model_provider,
+            lock_key=main_lock.lock_key,
+            owner_token=main_lock.owner_token,
+            artifact_key=artifact_key,
+            now=now,
+        )
+
+    def _claim_main_lock(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        runner_role: str,
+        attempt_id: str,
+        now: dt.datetime,
+    ) -> _MainLockLease | ScheduledAiBriefResult:
         owner_token = f"{attempt_id}-{uuid.uuid4().hex}"
         lock_key = build_scheduler_state_key(
             kind="lock", market=market, session_date=session_date
@@ -609,21 +649,7 @@ class ScheduledAiBriefRunner:
                 status="lock_held_skip",
                 session_date=session_date,
             )
-
-        return self._run_locked_pipeline(
-            market=market,
-            session_date=session_date,
-            schedule_role=schedule_role,
-            runner_role=runner_role,
-            attempt_id=attempt_id,
-            run_url=request.run_url,
-            source_provider=request.source_provider,
-            model_provider=request.model_provider,
-            lock_key=lock_key,
-            owner_token=owner_token,
-            artifact_key=artifact_key,
-            now=now,
-        )
+        return _MainLockLease(lock_key=lock_key, owner_token=owner_token)
 
     def _run_locked_pipeline(
         self,

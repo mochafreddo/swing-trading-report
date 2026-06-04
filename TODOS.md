@@ -21,6 +21,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted scheduled AI Brief main-lock claim handling from
+  `ScheduledAiBriefRunner.run`, with characterization coverage for lock key,
+  attempt-based owner token, and claim payload.
 - 2026-06-03: Documented production/remote Supabase recovery completion criteria
   in `docs/runbook.md`, covering migration/security, Storage, `report_index`,
   holdings, `runtime_state`, and user-facing verification.
