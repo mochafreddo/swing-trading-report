@@ -364,6 +364,74 @@ def test_hybrid_sell_corporate_action_guard_state_preserves_existing_action_cont
     assert result.flags == expected_flags
 
 
+@pytest.mark.parametrize(
+    (
+        "entry_price",
+        "last_close",
+        "stop_override",
+        "initial_action",
+        "expected_action",
+        "expected_stop_price",
+        "expected_reasons",
+    ),
+    [
+        (
+            100.0,
+            94.0,
+            None,
+            "HOLD",
+            "SELL",
+            95.0,
+            ["Hit hard stop max (loss 6.0% ≥ 5.0% max)"],
+        ),
+        (
+            100.0,
+            96.5,
+            None,
+            "HOLD",
+            "REVIEW",
+            95.0,
+            ["Loss within hard stop band (3.5% in 3.0%–5.0%)"],
+        ),
+        (
+            100.0,
+            96.5,
+            None,
+            "SELL",
+            "SELL",
+            95.0,
+            ["Loss within hard stop band (3.5% in 3.0%–5.0%)"],
+        ),
+        (100.0, 94.0, 90.0, "HOLD", "HOLD", None, []),
+        (None, 94.0, None, "HOLD", "HOLD", None, []),
+    ],
+)
+def test_hybrid_sell_hard_stop_band_state_preserves_contract(
+    entry_price: float | None,
+    last_close: float,
+    stop_override: float | None,
+    initial_action: str,
+    expected_action: str,
+    expected_stop_price: float | None,
+    expected_reasons: list[str],
+) -> None:
+    helper = getattr(hybrid_sell, "_apply_hard_stop_band", None)
+
+    assert helper is not None
+
+    result = helper(
+        entry_price=entry_price,
+        last_close=last_close,
+        stop_override=stop_override,
+        settings=HybridSellSettings(stop_loss_pct_min=0.03, stop_loss_pct_max=0.05),
+        action=initial_action,
+    )
+
+    assert result.action == expected_action
+    assert result.stop_price == expected_stop_price
+    assert result.reasons == expected_reasons
+
+
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(

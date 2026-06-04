@@ -19,6 +19,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell hard-stop band handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for max-loss
+  SELL promotion, hard-stop REVIEW preservation, SELL priority preservation, and
+  stop-override/no-entry-price no-op paths.
 - 2026-06-04: Extracted hybrid sell corporate-action guard handling from
   `evaluate_sell_signals_hybrid`, with characterization coverage for
   manual-review promotion, flag propagation, and reason ordering.

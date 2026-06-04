@@ -109,6 +109,13 @@ class _TrendBreakdownState:
 
 
 @dataclass(frozen=True)
+class _HardStopBandState:
+    action: str
+    reasons: list[str]
+    stop_price: float | None
+
+
+@dataclass(frozen=True)
 class _CorporateActionGuardState:
     action: str
     reasons: list[str]
@@ -541,6 +548,48 @@ def _apply_trend_breakdown_rules(
     return _TrendBreakdownState(action=action_out, reasons=reasons)
 
 
+def _apply_hard_stop_band(
+    *,
+    entry_price: float | None,
+    last_close: float,
+    stop_override: float | None,
+    settings: HybridSellSettings,
+    action: str,
+    stop_price: float | None = None,
+) -> _HardStopBandState:
+    reasons: list[str] = []
+    action_out = action
+    stop_price_out = stop_price
+
+    if entry_price is not None and stop_override is None:
+        loss_pct = _compute_pnl_pct(entry_price, last_close)
+        if loss_pct is not None and loss_pct < 0:
+            loss_abs = abs(loss_pct)
+            hard_stop_price = entry_price * (1.0 - settings.stop_loss_pct_max)
+            if loss_abs >= settings.stop_loss_pct_max:
+                reasons.append(
+                    f"Hit hard stop max (loss {loss_abs * 100:.1f}% ≥ "
+                    f"{settings.stop_loss_pct_max * 100:.1f}% max)"
+                )
+                action_out = "SELL"
+                stop_price_out = hard_stop_price
+            elif loss_abs >= settings.stop_loss_pct_min:
+                reasons.append(
+                    f"Loss within hard stop band ({loss_abs * 100:.1f}% in "
+                    f"{settings.stop_loss_pct_min * 100:.1f}%–"
+                    f"{settings.stop_loss_pct_max * 100:.1f}%)"
+                )
+                if action_out != "SELL":
+                    action_out = "REVIEW"
+                stop_price_out = hard_stop_price
+
+    return _HardStopBandState(
+        action=action_out,
+        reasons=reasons,
+        stop_price=stop_price_out,
+    )
+
+
 def _apply_corporate_action_guard(
     *,
     corporate_action_move: float | None,
@@ -711,27 +760,17 @@ def evaluate_sell_signals_hybrid(
         action = "SELL"
 
     # --- 4) Hard stop loss band (3–5%) ---
-    if entry_price is not None and stop_override is None:
-        loss_pct = _compute_pnl_pct(entry_price, last_close)
-        if loss_pct is not None and loss_pct < 0:
-            loss_abs = abs(loss_pct)
-            hard_stop_price = entry_price * (1.0 - settings.stop_loss_pct_max)
-            if loss_abs >= settings.stop_loss_pct_max:
-                reasons.append(
-                    f"Hit hard stop max (loss {loss_abs * 100:.1f}% ≥ "
-                    f"{settings.stop_loss_pct_max * 100:.1f}% max)"
-                )
-                action = "SELL"
-                stop_price = hard_stop_price
-            elif loss_abs >= settings.stop_loss_pct_min:
-                reasons.append(
-                    f"Loss within hard stop band ({loss_abs * 100:.1f}% in "
-                    f"{settings.stop_loss_pct_min * 100:.1f}%–"
-                    f"{settings.stop_loss_pct_max * 100:.1f}%)"
-                )
-                if action != "SELL":
-                    action = "REVIEW"
-                stop_price = hard_stop_price
+    hard_stop_band = _apply_hard_stop_band(
+        entry_price=entry_price,
+        last_close=last_close,
+        stop_override=stop_override,
+        settings=settings,
+        action=action,
+        stop_price=stop_price,
+    )
+    reasons.extend(hard_stop_band.reasons)
+    action = hard_stop_band.action
+    stop_price = hard_stop_band.stop_price
 
     # --- 5) Optional time stop ---
     time_stop = _apply_time_stop_rules(
