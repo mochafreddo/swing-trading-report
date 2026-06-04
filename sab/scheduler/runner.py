@@ -755,69 +755,15 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
 
-        if not self._state_store.renew_lock(
-            lock_key,
+        pre_upload_result = self._handle_locked_pipeline_upload_precheck(
+            market=market,
+            session_date=session_date,
+            run_url=run_url,
+            lock_key=lock_key,
             owner_token=owner_token,
-            ttl_seconds=_LOCK_TTL_SECONDS,
-        ):
-            return ScheduledAiBriefResult(
-                status="lock_lost_before_upload",
-                session_date=session_date,
-            )
-        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
-            return ScheduledAiBriefResult(
-                status="lock_lost_before_upload",
-                session_date=session_date,
-            )
-        pre_upload_guard = self._guard_resolver(market, self._now_fn())
-        if not _guard_allows_pipeline(pre_upload_guard):
-            try:
-                skip_key = self._persist_runtime_guard_skip(
-                    market=market,
-                    session_date=session_date,
-                    guard=pre_upload_guard,
-                    run_url=run_url,
-                )
-            except _SkipArtifactClaimHeld:
-                self._state_store.release_lock(lock_key, owner_token=owner_token)
-                return ScheduledAiBriefResult(
-                    status="skip_artifact_claim_held",
-                    session_date=session_date,
-                )
-            except Exception:
-                self._state_store.release_lock(lock_key, owner_token=owner_token)
-                self._send_late_alert_once(
-                    market=market,
-                    session_date=session_date,
-                    reason="pre_upload_guard_failed",
-                    context=_guard_context(
-                        market=market,
-                        session_date=session_date,
-                        guard=pre_upload_guard,
-                    ),
-                    now=self._now_fn(),
-                )
-                return ScheduledAiBriefResult(
-                    status="skip_artifact_upload_failed",
-                    session_date=session_date,
-                )
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
-            self._send_late_alert_once(
-                market=market,
-                session_date=session_date,
-                reason="pre_upload_guard_failed",
-                context=_guard_context(
-                    market=market,
-                    session_date=session_date,
-                    guard=pre_upload_guard,
-                ),
-                now=self._now_fn(),
-            )
-            return ScheduledAiBriefResult(
-                status="guard_failed_before_upload",
-                session_date=session_date,
-                storage_key=skip_key,
-            )
+        )
+        if pre_upload_result is not None:
+            return pre_upload_result
 
         try:
             storage_key = self._storage.upload_ai_brief(
@@ -903,6 +849,83 @@ class ScheduledAiBriefRunner:
                 storage_key=storage_key,
             )
         return result
+
+    def _handle_locked_pipeline_upload_precheck(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        run_url: str,
+        lock_key: str,
+        owner_token: str,
+    ) -> ScheduledAiBriefResult | None:
+        if not self._state_store.renew_lock(
+            lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+        ):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+
+        pre_upload_guard = self._guard_resolver(market, self._now_fn())
+        if _guard_allows_pipeline(pre_upload_guard):
+            return None
+
+        try:
+            skip_key = self._persist_runtime_guard_skip(
+                market=market,
+                session_date=session_date,
+                guard=pre_upload_guard,
+                run_url=run_url,
+            )
+        except _SkipArtifactClaimHeld:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="skip_artifact_claim_held",
+                session_date=session_date,
+            )
+        except Exception:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason="pre_upload_guard_failed",
+                context=_guard_context(
+                    market=market,
+                    session_date=session_date,
+                    guard=pre_upload_guard,
+                ),
+                now=self._now_fn(),
+            )
+            return ScheduledAiBriefResult(
+                status="skip_artifact_upload_failed",
+                session_date=session_date,
+            )
+
+        self._state_store.release_lock(lock_key, owner_token=owner_token)
+        self._send_late_alert_once(
+            market=market,
+            session_date=session_date,
+            reason="pre_upload_guard_failed",
+            context=_guard_context(
+                market=market,
+                session_date=session_date,
+                guard=pre_upload_guard,
+            ),
+            now=self._now_fn(),
+        )
+        return ScheduledAiBriefResult(
+            status="guard_failed_before_upload",
+            session_date=session_date,
+            storage_key=skip_key,
+        )
 
     def _record_pipeline_attempt_marker(
         self,

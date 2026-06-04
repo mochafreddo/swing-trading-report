@@ -21,6 +21,10 @@
 
 ## Completed
 
+- 2026-06-04: Extracted scheduled AI Brief locked-pipeline upload precheck
+  handling from `ScheduledAiBriefRunner._run_locked_pipeline`, with
+  characterization coverage for lock renewal, pre-upload runtime guard skip
+  artifact persistence, main-lock release, and late-alert emission.
 - 2026-06-04: Extracted scheduled AI Brief notification claim handling from
   `ScheduledAiBriefRunner._reconcile_notification`, with characterization
   coverage for claim key, attempt-based owner token, schedule payload, and held

@@ -979,6 +979,32 @@ def test_runner_rechecks_pre_open_guard_before_upload() -> None:
     assert "pre_upload_guard_failed" in notifier.sent
 
 
+def test_locked_upload_precheck_helper_persists_skip_artifact_before_upload() -> None:
+    runner, state, _pipeline, storage, notifier = _runner(
+        guard=_guard(session_state="INTRADAY")
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_upload_precheck(
+        market="US",
+        session_date="2026-05-28",
+        run_url="https://github.com/owner/repo/actions/runs/4",
+        lock_key=lock_key,
+        owner_token="attempt-upload-precheck-helper-owner",
+    )
+
+    assert result is not None
+    assert result.status == "guard_failed_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert any(":lock:" in key for key in state.renewals)
+    assert lock_key in state.releases
+    assert "pre_upload_guard_failed" in notifier.sent
+
+
 def test_runner_rechecks_guard_after_notification_claim_before_sending() -> None:
     runner, state, _pipeline, storage, notifier = _runner(
         guard_sequence=[
