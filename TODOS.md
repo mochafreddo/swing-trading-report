@@ -21,6 +21,9 @@
 
 ## Completed
 
+- 2026-06-04: Extracted hybrid sell trend breakdown handling from
+  `evaluate_sell_signals_hybrid`, with characterization coverage for review
+  reason ordering and SELL-priority momentum/RSI escalation.
 - 2026-06-04: Extracted hybrid sell profit protection handling from
   `evaluate_sell_signals_hybrid`, with characterization coverage for peak-based
   stop tightening, high-target SELL promotion, and reason ordering.

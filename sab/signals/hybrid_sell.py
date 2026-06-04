@@ -102,6 +102,12 @@ class _ProfitProtectionState:
     stop_price: float | None
 
 
+@dataclass(frozen=True)
+class _TrendBreakdownState:
+    action: str
+    reasons: list[str]
+
+
 def _compute_pnl_pct(
     entry_price: float | None, last_close: float | None
 ) -> float | None:
@@ -473,6 +479,61 @@ def _apply_profit_protection(
     )
 
 
+def _apply_trend_breakdown_rules(
+    *,
+    opens: list[float],
+    closes: list[float],
+    last_close: float,
+    indicators: _HybridSellIndicators,
+    action: str,
+) -> _TrendBreakdownState:
+    reasons: list[str] = []
+    action_out = action
+    ema_s = indicators.ema_short
+    ema_m = indicators.ema_mid
+    sma_t = indicators.sma_trend
+    rsi_today = indicators.rsi_today
+    ema_s_prev = indicators.ema_short_prev
+    ema_m_prev = indicators.ema_mid_prev
+
+    if ema_s is not None and last_close < ema_s:
+        reasons.append("Close below EMA short")
+        if action_out != "SELL":
+            action_out = "REVIEW"
+    if sma_t is not None and last_close < sma_t:
+        reasons.append("Close below SMA trend (SMA20)")
+        if action_out != "SELL":
+            action_out = "REVIEW"
+
+    if (
+        ema_s is not None
+        and ema_m is not None
+        and ema_s_prev is not None
+        and ema_m_prev is not None
+        and ema_s < ema_m
+        and ema_s_prev >= ema_m_prev
+    ):
+        reasons.append("EMA short crossed below EMA mid (momentum down)")
+        action_out = "SELL"
+
+    if len(closes) >= 3 and all(
+        closes[idx] < opens[idx] for idx in range(len(closes) - 3, len(closes))
+    ):
+        reasons.append("Three consecutive bearish candles")
+        if action_out != "SELL":
+            action_out = "REVIEW"
+
+    if rsi_today is not None and rsi_today < 50.0:
+        reasons.append("RSI dropped below 50")
+        if action_out != "SELL":
+            action_out = "REVIEW"
+    if rsi_today is not None and rsi_today < 40.0:
+        reasons.append("RSI dropped into oversold zone (<40)")
+        action_out = "SELL"
+
+    return _TrendBreakdownState(action=action_out, reasons=reasons)
+
+
 def evaluate_sell_signals_hybrid(
     ticker: str,
     candles: list[dict[str, float]],
@@ -522,8 +583,6 @@ def evaluate_sell_signals_hybrid(
     ema_m = indicators.ema_mid
     sma_t = indicators.sma_trend
     rsi_today = indicators.rsi_today
-    ema_s_prev = indicators.ema_short_prev
-    ema_m_prev = indicators.ema_mid_prev
 
     reasons: list[str] = []
     flags: list[str] = []
@@ -592,44 +651,15 @@ def evaluate_sell_signals_hybrid(
     stop_price = profit_protection.stop_price
 
     # --- 2) Trend breakdown (EMA/SMA + RSI) ---
-    # Price relative to EMA/SMA
-    if ema_s is not None and last_close < ema_s:
-        reasons.append("Close below EMA short")
-        if action != "SELL":
-            action = "REVIEW"
-    if sma_t is not None and last_close < sma_t:
-        reasons.append("Close below SMA trend (SMA20)")
-        if action != "SELL":
-            action = "REVIEW"
-
-    # Momentum shift: EMA short falling below EMA mid
-    if (
-        ema_s is not None
-        and ema_m is not None
-        and ema_s_prev is not None
-        and ema_m_prev is not None
-        and ema_s < ema_m
-        and ema_s_prev >= ema_m_prev
-    ):
-        reasons.append("EMA short crossed below EMA mid (momentum down)")
-        action = "SELL"
-
-    # Consecutive bearish candles
-    if len(candles_eval) >= 3 and all(
-        closes[idx] < opens[idx] for idx in range(len(closes) - 3, len(closes))
-    ):
-        reasons.append("Three consecutive bearish candles")
-        if action != "SELL":
-            action = "REVIEW"
-
-    # RSI breakdowns
-    if rsi_today is not None and rsi_today < 50.0:
-        reasons.append("RSI dropped below 50")
-        if action != "SELL":
-            action = "REVIEW"
-    if rsi_today is not None and rsi_today < 40.0:
-        reasons.append("RSI dropped into oversold zone (<40)")
-        action = "SELL"
+    trend_breakdown = _apply_trend_breakdown_rules(
+        opens=opens,
+        closes=closes,
+        last_close=last_close,
+        indicators=indicators,
+        action=action,
+    )
+    reasons.extend(trend_breakdown.reasons)
+    action = trend_breakdown.action
 
     # --- 3) Failed breakout ---
     # If holding strategy is breakout-like, consider a sharp drop > failed_breakout_drop_pct

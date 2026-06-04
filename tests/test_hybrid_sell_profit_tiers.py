@@ -242,6 +242,66 @@ def test_hybrid_sell_profit_protection_state_preserves_peak_stop_contract() -> N
     ]
 
 
+def test_hybrid_sell_trend_breakdown_state_preserves_review_reason_order() -> None:
+    helper = getattr(hybrid_sell, "_apply_trend_breakdown_rules", None)
+
+    assert helper is not None
+
+    result = helper(
+        opens=[106.0, 105.0, 104.0],
+        closes=[105.0, 104.0, 103.0],
+        last_close=103.0,
+        indicators=hybrid_sell._HybridSellIndicators(
+            ema_short=104.0,
+            ema_mid=100.0,
+            sma_trend=104.5,
+            rsi_today=45.0,
+            ema_short_prev=104.5,
+            ema_mid_prev=100.0,
+        ),
+        action="HOLD",
+    )
+
+    assert result.action == "REVIEW"
+    assert result.reasons == [
+        "Close below EMA short",
+        "Close below SMA trend (SMA20)",
+        "Three consecutive bearish candles",
+        "RSI dropped below 50",
+    ]
+
+
+def test_hybrid_sell_trend_breakdown_state_preserves_sell_priority() -> None:
+    helper = getattr(hybrid_sell, "_apply_trend_breakdown_rules", None)
+
+    assert helper is not None
+
+    result = helper(
+        opens=[102.0, 101.0, 100.0],
+        closes=[101.0, 100.0, 99.0],
+        last_close=99.0,
+        indicators=hybrid_sell._HybridSellIndicators(
+            ema_short=100.5,
+            ema_mid=101.0,
+            sma_trend=100.0,
+            rsi_today=39.0,
+            ema_short_prev=102.0,
+            ema_mid_prev=101.0,
+        ),
+        action="HOLD",
+    )
+
+    assert result.action == "SELL"
+    assert result.reasons == [
+        "Close below EMA short",
+        "Close below SMA trend (SMA20)",
+        "EMA short crossed below EMA mid (momentum down)",
+        "Three consecutive bearish candles",
+        "RSI dropped below 50",
+        "RSI dropped into oversold zone (<40)",
+    ]
+
+
 def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
