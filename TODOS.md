@@ -6,8 +6,6 @@
 
 ## Deferred
 
-- 2026-06-02: Document production/remote Supabase recovery criteria in
-  `docs/runbook.md` after operator confirmation.
 - 2026-06-02: Expand workflow-specific GitHub Actions failure recovery steps in
   `docs/runbook.md` when recurring failure modes are confirmed.
 - 2026-06-02: Review historical `docs/reviews/2026/*` artifacts only if they are
@@ -23,6 +21,9 @@
 
 ## Completed
 
+- 2026-06-03: Documented production/remote Supabase recovery completion criteria
+  in `docs/runbook.md`, covering migration/security, Storage, `report_index`,
+  holdings, `runtime_state`, and user-facing verification.
 - 2026-06-03: Extracted scheduled AI Brief artifact marker recording from the
   locked pipeline path, with characterization coverage for storage key,
   runner-origin, attempt, report-date, and run-url marker payload.

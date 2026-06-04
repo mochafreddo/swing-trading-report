@@ -80,6 +80,116 @@
   - 로컬 `supabase/config.toml`은 idle Docker 사용량 절감을 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화합니다.
   - 기본 앱 경로는 Postgres/Storage/runtime_state만 사용합니다. Studio/Realtime/메일 테스트가 필요한 경우에만 해당 서비스를 임시로 다시 켭니다.
 
+## 원격 Supabase 복구 기준
+
+원격/production Supabase 장애 후에는 "프로젝트가 다시 응답한다"만으로 복구 완료로 보지 않습니다. 아래 기준을 모두 통과하거나, 통과하지 못한 항목을 장애 기록에 명시해야 합니다.
+
+- 복구 전 확인:
+  - Supabase 프로젝트 ref가 의도한 원격 프로젝트인지 확인합니다. 프로젝트 ref/URL은 운영자 개인 환경에서 확인하고 문서나 로그에 비밀값을 남기지 않습니다.
+  - 데이터 변경 복구를 시작하기 전에는 가능한 경우 public schema dump를 먼저 남깁니다: `supabase db dump --linked --schema public --file backup-before-supabase-recovery.sql`
+  - `runtime_state` marker 삭제는 중복 리포트/중복 Telegram 발송을 만들 수 있으므로, owner/TTL/Storage object를 확인한 뒤 필요한 key만 삭제합니다. `success`와 `notification:sent` marker는 의도적인 재처리가 아니면 유지합니다.
+- 마이그레이션/보안 기준:
+  - `supabase migration list`에서 원격이 저장소 migration과 동기화되어야 합니다.
+  - SQL Editor에서 필수 테이블과 RLS/권한 상태를 확인합니다. 기대값은 `holdings`, `report_index`, `runtime_state`가 모두 존재하고, RLS/force RLS가 켜져 있으며, `anon`/`authenticated`의 직접 권한 row가 없는 상태입니다.
+    ```sql
+    select table_name
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name in ('holdings', 'report_index', 'runtime_state')
+    order by table_name;
+
+    select tablename, rowsecurity, forcerowsecurity
+    from pg_tables
+    where schemaname = 'public'
+      and tablename in ('holdings', 'report_index', 'runtime_state')
+    order by tablename;
+
+    select grantee, table_name, privilege_type
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name in ('holdings', 'report_index', 'runtime_state')
+      and grantee in ('anon', 'authenticated')
+    order by table_name, grantee, privilege_type;
+    ```
+- Storage 기준:
+  - `reports` bucket이 private이고 JSON 업로드만 허용해야 합니다.
+    ```sql
+    select id, public, allowed_mime_types
+    from storage.buckets
+    where id = 'reports';
+    ```
+  - 최근 object key는 `YYYY/MM/YYYY-MM-DD(.n).buy|sell|entry|ai-brief|ai-brief-skip.json` 규칙을 따라야 합니다.
+    ```sql
+    select name, created_at, updated_at
+    from storage.objects
+    where bucket_id = 'reports'
+    order by created_at desc
+    limit 20;
+    ```
+- `report_index`/Storage 정합성 기준:
+  - `report_index.report_type`은 `buy`, `sell`, `entry`, `ai-brief`, `ai-brief-skip`만 있어야 합니다.
+  - 아래 두 mismatch 쿼리는 모두 0행이어야 합니다. 오래된 수동 object나 의도적으로 삭제한 리포트가 있으면 장애 기록에 예외로 남깁니다.
+    ```sql
+    select report_type, count(*) as rows, max(report_date) as latest_report_date
+    from public.report_index
+    group by report_type
+    order by report_type;
+
+    select ri.report_key
+    from public.report_index as ri
+    left join storage.objects as objects
+      on objects.bucket_id = 'reports'
+     and objects.name = ri.report_key
+    where objects.name is null
+    order by ri.report_date desc, ri.report_key desc
+    limit 20;
+
+    select objects.name
+    from storage.objects as objects
+    left join public.report_index as ri
+      on ri.report_key = objects.name
+    where objects.bucket_id = 'reports'
+      and objects.name ~ '^\d{4}/\d{2}/\d{4}-\d{2}-\d{2}(?:-\d+)?\.(buy|sell|entry|ai-brief|ai-brief-skip)\.json$'
+      and ri.report_key is null
+    order by objects.created_at desc
+    limit 20;
+    ```
+- Holdings 기준:
+  - active row(`quantity > 0`)가 웹 Holdings 화면과 일치해야 합니다.
+  - ticker 계약 위반 row가 없어야 합니다. 특히 `.US` suffix는 복구 대상 데이터에 남기지 않습니다.
+    ```sql
+    select count(*) filter (where quantity > 0) as active_rows,
+           count(*) as total_rows,
+           max(updated_at) as latest_update
+    from public.holdings;
+
+    select ticker
+    from public.holdings
+    where ticker ~* '\.US$'
+       or not (
+         ticker ~ '^\d{6}$'
+         or ticker ~ '^[A-Z][A-Z0-9]*(\.[ABC])?\.(NAS|NYS|AMS)$'
+       )
+    order by ticker;
+    ```
+- `runtime_state`/scheduler 기준:
+  - lock RPC 변경, migration 복구, 또는 scheduled AI Brief 중복 실행 의심 후에는 `just runtime-state-lock-smoke`가 통과해야 합니다.
+  - scheduled AI Brief 복구 완료는 당일 session date에 `artifact` 또는 `skip-artifact` marker가 있고, 정상 알림 경로에서는 `notification:sent`와 `success` marker가 함께 있을 때로 봅니다.
+    ```sql
+    select state_key, state_payload, expires_at, updated_at
+    from public.runtime_state
+    where state_key like 'scheduled-ai-brief:%'
+    order by updated_at desc
+    limit 30;
+
+    select count(*) as expired_rows
+    from public.runtime_state
+    where expires_at <= now();
+    ```
+- 사용자 관점 복구 확인:
+  - 웹 `/login` liveness가 `200`을 반환하고, 로그인 후 `Reports`와 `Holdings`가 로드되어야 합니다.
+  - 최근 GitHub Actions 또는 로컬 scheduled run이 Storage 업로드와 `report_index` upsert를 성공해야 합니다. GitHub Actions에서는 이 경로가 fail-closed이므로 업로드/upsert 실패 run을 성공으로 간주하지 않습니다.
+
 ## 웹 UI 로컬 실행(Next.js + Docker)
 
 - 기본 운영 기준:
@@ -350,7 +460,7 @@
 | 웹 UI (`sab-web`) | `docker compose logs -f web` | `curl .../login` → `200`, `docker compose ps` | `docker compose up -d --build web` | `/login` 재진입 + `Reports` 로드 | 로컬(단일 사용자) |
 | scheduled AI Brief (로컬 primary) | `logs/launchd/US-local-primary.cmd.log`, plist `StandardOut/ErrorPath`, `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml logs scheduler` | Telegram 발송 + Supabase `runtime_state` marker(`success`/`notification:sent`) | `launchctl bootout`/`bootstrap` 또는 `just ai-brief-scheduled-docker ... --dry-run` | Supabase Storage/`report_index` artifact + Telegram 본문 | macOS `launchd`(호스트) |
 | GitHub Actions (`scan`/`sell`/`cleanup`, ai-brief monitor/fallback) | Actions run logs + run summary | Actions run 상태(성공/실패), `github-fallback` lock marker | 웹 `Run` 탭 또는 GitHub `workflow_dispatch` 재실행 | Supabase 업로드 + `report_index` upsert 성공 | GitHub Actions |
-| Supabase (Postgres/Storage/`runtime_state`) | Supabase 대시보드 로그, `cron.job_run_details` | 위 "보유 목록" 절의 SQL Editor 점검 쿼리 | managed(재기동 대상 아님) | `supabase migration list`, `db dump`, marker 쿼리 | 원격 Supabase 프로젝트 |
+| Supabase (Postgres/Storage/`runtime_state`) | Supabase 대시보드 로그, `cron.job_run_details` | 위 "원격 Supabase 복구 기준"의 SQL Editor 점검 쿼리 + `just runtime-state-lock-smoke` | managed(재기동 대상 아님) | Storage/`report_index` mismatch 0행 + marker 쿼리 + `Reports`/`Holdings` 로드 | 원격 Supabase 프로젝트 |
 | CLI (`scan`/`sell`/`entry`/`ai-brief`) | stdout(`LOG_LEVEL`로 상세도 조정) | 종료 코드 + `reports/*.json` 생성 여부 | `just scan`/`sell`/`entry` 또는 `uv run python -m sab ...` 재실행 | `reports/YYYY-MM-DD.*.json` 생성 + (업로드 시) Storage 반영 | 로컬 |
 
 ## 확장
