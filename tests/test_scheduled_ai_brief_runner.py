@@ -1290,6 +1290,51 @@ def test_artifact_marker_helper_records_upload_payload() -> None:
     ]
 
 
+def test_uploaded_artifact_marker_helper_preserves_failure_context() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        state=_FakeStateStore(fail_artifact_upsert=True)
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._record_uploaded_ai_brief_artifact(
+        artifact_key=artifact_key,
+        storage_key="2026/05/2026-05-28.ai-brief.json",
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-artifact-helper-fail",
+        run_url="https://github.com/owner/repo/actions/runs/5",
+        lock_key=lock_key,
+        owner_token="attempt-artifact-helper-fail-owner",
+        now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+    )
+
+    assert result is not None
+    assert result.status == "artifact_marker_failed"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief.json"
+    assert lock_key in state.releases
+    assert notifier.sent == ["artifact_marker_failed"]
+    assert notifier.late_alerts == [
+        (
+            "artifact_marker_failed",
+            {
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "attemptId": "attempt-artifact-helper-fail",
+                "scheduleRole": "local-primary",
+                "runnerRole": "local-primary",
+                "storageKey": "2026/05/2026-05-28.ai-brief.json",
+            },
+        )
+    ]
+
+
 def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
     runner, state, pipeline, storage, notifier = _runner()
     lock_key = build_scheduler_state_key(

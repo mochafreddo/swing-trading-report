@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief uploaded-artifact marker handling
+  from `ScheduledAiBriefRunner._run_locked_pipeline`, with characterization
+  coverage for artifact marker failure preserving storage key, schedule/runner
+  alert context, and main-lock release.
 - 2026-06-05: Extracted scheduled AI Brief run-context resolution from
   `ScheduledAiBriefRunner.run`, with characterization coverage for request
   normalization, generated attempt IDs, guard/session snapshot propagation,

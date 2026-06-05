@@ -884,40 +884,21 @@ class ScheduledAiBriefRunner:
                 runner_role=runner_role,
                 reason="upload_failed",
             )
-        try:
-            self._record_ai_brief_artifact_marker(
-                artifact_key=artifact_key,
-                storage_key=storage_key,
-                market=market,
-                session_date=session_date,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                run_url=run_url,
-                now=now,
-            )
-        except Exception:
-            _LOGGER.exception(
-                "scheduled AI brief artifact marker failed "
-                "market=%s session_date=%s schedule_role=%s runner_role=%s "
-                "attempt_id=%s storage_key=%s",
-                market,
-                session_date,
-                schedule_role,
-                runner_role,
-                attempt_id,
-                storage_key,
-            )
-            return self._handle_locked_pipeline_failure(
-                market=market,
-                session_date=session_date,
-                attempt_id=attempt_id,
-                lock_key=lock_key,
-                owner_token=owner_token,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                reason="artifact_marker_failed",
-                storage_key=storage_key,
-            )
+        artifact_result = self._record_uploaded_ai_brief_artifact(
+            artifact_key=artifact_key,
+            storage_key=storage_key,
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=run_url,
+            lock_key=lock_key,
+            owner_token=owner_token,
+            now=now,
+        )
+        if artifact_result is not None:
+            return artifact_result
         if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
             return ScheduledAiBriefResult(
                 status="artifact_uploaded_notification_deferred",
@@ -1147,6 +1128,57 @@ class ScheduledAiBriefRunner:
             ttl_seconds=_SUCCESS_TTL_SECONDS,
             now=now,
         )
+
+    def _record_uploaded_ai_brief_artifact(
+        self,
+        *,
+        artifact_key: str,
+        storage_key: str,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        lock_key: str,
+        owner_token: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult | None:
+        try:
+            self._record_ai_brief_artifact_marker(
+                artifact_key=artifact_key,
+                storage_key=storage_key,
+                market=market,
+                session_date=session_date,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=run_url,
+                now=now,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "scheduled AI brief artifact marker failed "
+                "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                "attempt_id=%s storage_key=%s",
+                market,
+                session_date,
+                schedule_role,
+                runner_role,
+                attempt_id,
+                storage_key,
+            )
+            return self._handle_locked_pipeline_failure(
+                market=market,
+                session_date=session_date,
+                attempt_id=attempt_id,
+                lock_key=lock_key,
+                owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                reason="artifact_marker_failed",
+                storage_key=storage_key,
+            )
+        return None
 
     def _persist_runtime_guard_skip_result(
         self,
