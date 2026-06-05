@@ -1811,6 +1811,47 @@ class DefaultScheduledPipeline:
         )
         return holdings_path_str
 
+    def _run_entry_step(
+        self,
+        *,
+        market: str,
+        report_date: str,
+        buy_report_path: str,
+        holdings_path: str,
+    ) -> str:
+        entry_report_paths: list[str] = []
+        _LOGGER.info(
+            "scheduled AI brief pipeline step started "
+            "step=entry market=%s report_date=%s buy_report_path=%s holdings_path=%s",
+            market,
+            report_date,
+            buy_report_path,
+            holdings_path,
+        )
+        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+            entry_status = run_entry(
+                buy_report_path=buy_report_path,
+                provider="kis",
+                mode="PRE_OPEN",
+                market=market,
+                holdings_path=holdings_path,
+                upload=False,
+                report_path_callback=entry_report_paths.append,
+            )
+        if entry_status != 0:
+            raise RuntimeError("scheduled entry failed")
+        entry_report_path = _require_single_report_path(
+            entry_report_paths, report_type="entry"
+        )
+        _LOGGER.info(
+            "scheduled AI brief pipeline step completed "
+            "step=entry market=%s report_date=%s report_path=%s",
+            market,
+            report_date,
+            entry_report_path,
+        )
+        return entry_report_path
+
     def run(
         self,
         *,
@@ -1833,36 +1874,11 @@ class DefaultScheduledPipeline:
         entry_guard = _default_guard_snapshot(market, dt.datetime.now(dt.UTC))
         if not _guard_allows_pipeline(entry_guard):
             raise RuntimeError("scheduled pre-open guard failed before entry")
-        entry_report_paths: list[str] = []
-        _LOGGER.info(
-            "scheduled AI brief pipeline step started "
-            "step=entry market=%s report_date=%s buy_report_path=%s holdings_path=%s",
-            market,
-            report_date,
-            buy_report_path,
-            holdings_path_str,
-        )
-        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
-            entry_status = run_entry(
-                buy_report_path=buy_report_path,
-                provider="kis",
-                mode="PRE_OPEN",
-                market=market,
-                holdings_path=holdings_path_str,
-                upload=False,
-                report_path_callback=entry_report_paths.append,
-            )
-        if entry_status != 0:
-            raise RuntimeError("scheduled entry failed")
-        entry_report_path = _require_single_report_path(
-            entry_report_paths, report_type="entry"
-        )
-        _LOGGER.info(
-            "scheduled AI brief pipeline step completed "
-            "step=entry market=%s report_date=%s report_path=%s",
-            market,
-            report_date,
-            entry_report_path,
+        entry_report_path = self._run_entry_step(
+            market=market,
+            report_date=report_date,
+            buy_report_path=buy_report_path,
+            holdings_path=holdings_path_str,
         )
         ai_brief_report_paths: list[str] = []
         _LOGGER.info(

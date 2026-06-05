@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief entry-step execution from
+  `DefaultScheduledPipeline.run`, with characterization coverage for PRE_OPEN
+  entry inputs, `HOLDINGS_FILE` suppression, and the single entry-report
+  artifact path contract.
 - 2026-06-05: Extracted scheduled AI Brief holdings-export step from
   `DefaultScheduledPipeline.run`, with characterization coverage for scheduler
   holdings snapshot path construction and Supabase export config propagation.

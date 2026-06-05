@@ -1764,6 +1764,48 @@ def test_default_pipeline_holdings_export_step_helper_writes_snapshot(
     assert exported[0]["config"] is export_config
 
 
+def test_default_pipeline_entry_step_helper_returns_single_entry_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOLDINGS_FILE", "holdings.yaml")
+    observed_kwargs: list[dict[str, object]] = []
+
+    def fake_run_entry(**kwargs: object) -> int:
+        load_dotenv_if_available()
+        assert getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        observed_kwargs.append(dict(kwargs))
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    assert hasattr(DefaultScheduledPipeline(), "_run_entry_step")
+    result = DefaultScheduledPipeline()._run_entry_step(
+        market="US",
+        report_date="2026-05-28",
+        buy_report_path="reports/current.buy.json",
+        holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+    )
+
+    assert result == "reports/current.entry.json"
+    assert len(observed_kwargs) == 1
+    entry_kwargs = observed_kwargs[0]
+    callback = entry_kwargs.pop("report_path_callback")
+    assert callable(callback)
+    assert entry_kwargs == {
+        "buy_report_path": "reports/current.buy.json",
+        "provider": "kis",
+        "mode": "PRE_OPEN",
+        "market": "US",
+        "holdings_path": "data/scheduler/holdings.US.2026-05-28.yaml",
+        "upload": False,
+    }
+    assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+
+
 def test_default_pipeline_rechecks_pre_open_guard_before_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
