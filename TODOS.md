@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief pre-notification guard failure
+  handling from `ScheduledAiBriefRunner._reconcile_notification`, with
+  characterization coverage for late-alert context, storage-key preservation,
+  and guard-failure result contract.
 - 2026-06-05: Extracted scheduled AI Brief uploaded-artifact marker handling
   from `ScheduledAiBriefRunner._run_locked_pipeline`, with characterization
   coverage for artifact marker failure preserving storage key, schedule/runner

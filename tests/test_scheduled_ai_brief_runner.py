@@ -1184,6 +1184,44 @@ def test_runner_rechecks_guard_after_notification_claim_before_sending() -> None
     assert not any(":success:" in key for key, _payload in state.upserts)
 
 
+def test_notification_guard_failure_helper_preserves_alert_context() -> None:
+    runner, _state, _pipeline, _storage, notifier = _runner()
+    guard = _guard(session_state="INTRADAY")
+
+    assert hasattr(runner, "_handle_notification_guard_failure")
+
+    result = runner._handle_notification_guard_failure(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-notification-guard-helper",
+        guard=guard,
+        storage_key="2026/05/2026-05-28.ai-brief.json",
+    )
+
+    assert result.status == "guard_failed_before_notification"
+    assert result.session_date == "2026-05-28"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief.json"
+    assert notifier.sent == ["pre_notification_guard_failed"]
+    assert notifier.late_alerts == [
+        (
+            "pre_notification_guard_failed",
+            {
+                "market": "US",
+                "sessionDate": "2026-05-28",
+                "sessionState": "INTRADAY",
+                "tradingSession": True,
+                "localTime": "2026-05-28T08:10:00-04:00",
+                "scheduleRole": "local-primary",
+                "runnerRole": "local-primary",
+                "attemptId": "attempt-notification-guard-helper",
+                "storageKey": "2026/05/2026-05-28.ai-brief.json",
+            },
+        )
+    ]
+
+
 def test_runner_renews_main_lock_after_pipeline_before_upload() -> None:
     runner, state, _pipeline, storage, _notifier = _runner()
 

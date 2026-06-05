@@ -1387,6 +1387,37 @@ class ScheduledAiBriefRunner:
         finally:
             self._state_store.release_lock(claim_key, owner_token=owner_token)
 
+    def _handle_notification_guard_failure(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        guard: GuardSnapshot,
+        storage_key: str,
+    ) -> ScheduledAiBriefResult:
+        context = _with_alert_run_context(
+            _guard_context(market=market, session_date=session_date, guard=guard),
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+        )
+        context["storageKey"] = storage_key
+        self._send_late_alert_once(
+            market=market,
+            session_date=session_date,
+            reason="pre_notification_guard_failed",
+            context=context,
+            now=self._now_fn(),
+        )
+        return ScheduledAiBriefResult(
+            status="guard_failed_before_notification",
+            session_date=session_date,
+            storage_key=storage_key,
+        )
+
     def _reconcile_notification(
         self,
         *,
@@ -1456,26 +1487,13 @@ class ScheduledAiBriefRunner:
 
             pre_notification_guard = self._guard_resolver(market, self._now_fn())
             if not _guard_allows_pipeline(pre_notification_guard):
-                self._send_late_alert_once(
+                return self._handle_notification_guard_failure(
                     market=market,
                     session_date=session_date,
-                    reason="pre_notification_guard_failed",
-                    context={
-                        **_guard_context(
-                            market=market,
-                            session_date=session_date,
-                            guard=pre_notification_guard,
-                        ),
-                        "scheduleRole": schedule_role,
-                        "runnerRole": runner_role,
-                        "attemptId": attempt_id,
-                        "storageKey": storage_key,
-                    },
-                    now=self._now_fn(),
-                )
-                return ScheduledAiBriefResult(
-                    status="guard_failed_before_notification",
-                    session_date=session_date,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
+                    guard=pre_notification_guard,
                     storage_key=storage_key,
                 )
             report = self._storage.download_json(storage_key)
