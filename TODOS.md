@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief holdings-export step from
+  `DefaultScheduledPipeline.run`, with characterization coverage for scheduler
+  holdings snapshot path construction and Supabase export config propagation.
 - 2026-06-05: Extracted scheduled AI Brief scan-step execution from
   `DefaultScheduledPipeline.run`, with characterization coverage for KIS/both
   scan inputs, `HOLDINGS_FILE` suppression, and the single buy-report artifact

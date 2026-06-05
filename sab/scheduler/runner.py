@@ -1786,21 +1786,7 @@ class DefaultScheduledPipeline:
         )
         return buy_report_path
 
-    def run(
-        self,
-        *,
-        market: str,
-        session_date: str,
-        report_date: str,
-        source_provider: str | None,
-        model_provider: str,
-        dry_run: bool,
-    ) -> ScheduledPipelineResult:
-        del session_date, dry_run
-        buy_report_path = self._run_scan_step(
-            market=market,
-            report_date=report_date,
-        )
+    def _run_holdings_export_step(self, *, market: str, report_date: str) -> str:
         holdings_path = (
             Path("data") / "scheduler" / (f"holdings.{market}.{report_date}.yaml")
         )
@@ -1822,6 +1808,27 @@ class DefaultScheduledPipeline:
             market,
             report_date,
             holdings_path_str,
+        )
+        return holdings_path_str
+
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult:
+        del session_date, dry_run
+        buy_report_path = self._run_scan_step(
+            market=market,
+            report_date=report_date,
+        )
+        holdings_path_str = self._run_holdings_export_step(
+            market=market,
+            report_date=report_date,
         )
         entry_guard = _default_guard_snapshot(market, dt.datetime.now(dt.UTC))
         if not _guard_allows_pipeline(entry_guard):

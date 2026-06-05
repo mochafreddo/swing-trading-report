@@ -1731,6 +1731,39 @@ def test_default_pipeline_scan_step_helper_returns_single_buy_report(
     assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
 
 
+def test_default_pipeline_holdings_export_step_helper_writes_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    export_config = object()
+    exported: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: export_config,
+    )
+
+    def fake_export_active_holdings_snapshot(**kwargs: object) -> int:
+        exported.append(dict(kwargs))
+        return 1
+
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        fake_export_active_holdings_snapshot,
+    )
+
+    assert hasattr(DefaultScheduledPipeline(), "_run_holdings_export_step")
+    result = DefaultScheduledPipeline()._run_holdings_export_step(
+        market="US",
+        report_date="2026-05-28",
+    )
+
+    expected_path = "data/scheduler/holdings.US.2026-05-28.yaml"
+    assert result == expected_path
+    assert len(exported) == 1
+    assert str(exported[0]["output_path"]) == expected_path
+    assert exported[0]["config"] is export_config
+
+
 def test_default_pipeline_rechecks_pre_open_guard_before_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
