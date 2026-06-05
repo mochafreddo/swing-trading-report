@@ -1013,6 +1013,26 @@ def _apply_portfolio_guards(
     return blocked_by_market
 
 
+def _apply_entry_portfolio_guards(
+    *,
+    cfg: Config,
+    holdings_data: HoldingsData | Any,
+    rows: list[EntryReportRow],
+) -> dict[str, int]:
+    active_total, active_tickers = _build_active_holding_state(holdings_data)
+    portfolio_settings = getattr(cfg, "portfolio", None)
+    return _apply_portfolio_guards(
+        rows,
+        active_total=active_total,
+        active_tickers=active_tickers,
+        max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
+        max_new_entries_per_market={
+            "KR": getattr(portfolio_settings, "max_new_entries_kr", None),
+            "US": getattr(portfolio_settings, "max_new_entries_us", None),
+        },
+    )
+
+
 @dataclass(frozen=True)
 class _EntryArtifactDateContext:
     artifact_market: str
@@ -1347,17 +1367,10 @@ def run_entry(
         allow_missing_gap_guard=entry_policy.allow_missing_gap_guard,
     )
 
-    active_total, active_tickers = _build_active_holding_state(holdings_data)
-    portfolio_settings = getattr(cfg, "portfolio", None)
-    portfolio_blocked_by_market = _apply_portfolio_guards(
-        rows,
-        active_total=active_total,
-        active_tickers=active_tickers,
-        max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
-        max_new_entries_per_market={
-            "KR": getattr(portfolio_settings, "max_new_entries_kr", None),
-            "US": getattr(portfolio_settings, "max_new_entries_us", None),
-        },
+    portfolio_blocked_by_market = _apply_entry_portfolio_guards(
+        cfg=cfg,
+        holdings_data=holdings_data,
+        rows=rows,
     )
 
     date_context = _resolve_entry_artifact_date_context(

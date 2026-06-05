@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-05: Extracted entry portfolio-guard orchestration from `run_entry`,
+  with characterization coverage for config-derived market caps, existing
+  holdings exclusion, row mutation, and blocked-market summary counts.
 - 2026-06-05: Extracted scheduled AI Brief entry-step execution from
   `DefaultScheduledPipeline.run`, with characterization coverage for PRE_OPEN
   entry inputs, `HOLDINGS_FILE` suppression, and the single entry-report

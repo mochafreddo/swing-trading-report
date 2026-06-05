@@ -399,6 +399,36 @@ def test_evaluate_entry_candidate_markets_preserves_source_order_and_issue_contr
     ]
 
 
+def test_apply_entry_portfolio_guards_uses_config_and_existing_holdings() -> None:
+    assert hasattr(entry, "_apply_entry_portfolio_guards")
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate("AAPL.NASD"),
+            _entry_candidate("MSFT.NASD"),
+            _entry_candidate("NVDA.NASD"),
+        ],
+        price_lookup_fn=lambda _ticker: 101.0,
+        gap_breach_action="SKIP",
+    )
+    assert issues == []
+
+    blocked_by_market = entry._apply_entry_portfolio_guards(
+        cfg=cast(
+            Config,
+            SimpleNamespace(portfolio=_portfolio_config(max_new_entries_us=1)),
+        ),
+        holdings_data=_holdings_data([Holding(ticker="AAPL.NASD", quantity=1)]),
+        rows=rows,
+    )
+
+    by_ticker = {row.ticker: row for row in rows}
+    assert by_ticker["AAPL.NASD"].action == "ENTER"
+    assert by_ticker["MSFT.NASD"].action == "ENTER"
+    assert by_ticker["NVDA.NASD"].action == "SKIP"
+    assert "portfolio market cap reached (US)" in by_ticker["NVDA.NASD"].reasons
+    assert blocked_by_market == {"KR": 0, "US": 1}
+
+
 def test_resolve_entry_evaluation_policy_prefers_source_report_snapshot() -> None:
     cfg = cast(
         Config,
