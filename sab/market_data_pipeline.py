@@ -506,6 +506,17 @@ def _load_cached_candles(
                 ticker,
                 dropped_tail,
                 cache_key,
+                extra={
+                    "event": "market_data_cache_trimmed",
+                    "operation": "market_data_cache_load",
+                    "dependency": "filesystem",
+                    "ticker": ticker,
+                    "market": market,
+                    "cache_key": cache_key,
+                    "dropped_count": dropped_tail,
+                    "status": "degraded",
+                    "reason": "incomplete_tail",
+                },
             )
         if dropped_invalid > 0:
             runtime.logger.warning(
@@ -513,6 +524,17 @@ def _load_cached_candles(
                 ticker,
                 dropped_invalid,
                 cache_key,
+                extra={
+                    "event": "market_data_cache_invalid_dropped",
+                    "operation": "market_data_cache_load",
+                    "dependency": "filesystem",
+                    "ticker": ticker,
+                    "market": market,
+                    "cache_key": cache_key,
+                    "dropped_count": dropped_invalid,
+                    "status": "degraded",
+                    "reason": "invalid_candle",
+                },
             )
         if dropped_tail > 0 or dropped_invalid > 0:
             try:
@@ -523,7 +545,21 @@ def _load_cached_candles(
                     f"'{cache_key}' ({type(exc).__name__}: {exc})"
                 )
                 runtime.failures.append(cache_msg)
-                runtime.logger.warning(cache_msg)
+                runtime.logger.warning(
+                    cache_msg,
+                    extra={
+                        "event": "market_data_cache_persist_failed",
+                        "operation": "market_data_cache_persist",
+                        "dependency": "filesystem",
+                        "ticker": ticker,
+                        "market": market,
+                        "cache_key": cache_key,
+                        "status": "degraded",
+                        "error_type": type(exc).__name__,
+                        "retryable": isinstance(exc, OSError),
+                        "reason": "sanitized_cache_write_failed",
+                    },
+                )
         if normalized_candidate:
             return normalized_candidate, cache_key
     return None, None
@@ -553,6 +589,16 @@ def _normalize_provider_candles(
             ticker,
             dropped_tail,
             source_label,
+            extra={
+                "event": "market_data_provider_candles_trimmed",
+                "operation": "market_data_provider_response_normalize",
+                "provider": source_label,
+                "ticker": ticker,
+                "market": market,
+                "dropped_count": dropped_tail,
+                "status": "degraded",
+                "reason": "incomplete_tail",
+            },
         )
     if dropped_invalid > 0:
         runtime.logger.warning(
@@ -560,6 +606,16 @@ def _normalize_provider_candles(
             ticker,
             dropped_invalid,
             source_label,
+            extra={
+                "event": "market_data_provider_candles_invalid_dropped",
+                "operation": "market_data_provider_response_normalize",
+                "provider": source_label,
+                "ticker": ticker,
+                "market": market,
+                "dropped_count": dropped_invalid,
+                "status": "degraded",
+                "reason": "invalid_candle",
+            },
         )
     return normalized_candles
 
@@ -614,7 +670,21 @@ def _apply_cached_candles[TRuntime: _CollectionRuntime](
                 f"'{cached_key}' -> '{target_cache_key}' ({exc})"
             )
             runtime.failures.append(migration_msg)
-            runtime.logger.warning(migration_msg)
+            runtime.logger.warning(
+                migration_msg,
+                extra={
+                    "event": "market_data_cache_migration_failed",
+                    "operation": "market_data_cache_migrate",
+                    "dependency": "filesystem",
+                    "ticker": ticker,
+                    "market": market,
+                    "cache_key": target_cache_key,
+                    "source_cache_key": cached_key,
+                    "status": "degraded",
+                    "error_type": type(exc).__name__,
+                    "retryable": isinstance(exc, OSError),
+                },
+            )
 
     runtime.logger.info(
         "Using cached candles for %s (market=%s, stale=%s/%s sessions)",
@@ -622,6 +692,18 @@ def _apply_cached_candles[TRuntime: _CollectionRuntime](
         market,
         stale_sessions or 0,
         max_stale_sessions,
+        extra={
+            "event": "market_data_cache_used",
+            "operation": "market_data_cache_load",
+            "dependency": "filesystem",
+            "ticker": ticker,
+            "market": market,
+            "cache_key": cached_key or target_cache_key,
+            "target_cache_key": target_cache_key,
+            "status": "success",
+            "stale_sessions": stale_sessions or 0,
+            "max_stale_sessions": max_stale_sessions,
+        },
     )
 
 
@@ -721,7 +803,24 @@ def _apply_stale_cache_fallback[TRuntime: _CollectionRuntime](
         stale_sessions=cache.stale_sessions,
         max_stale_sessions=cache.max_stale_sessions,
     )
-    runtime.logger.warning(warning_message, ticker, *warning_args)
+    runtime.logger.warning(
+        warning_message,
+        ticker,
+        *warning_args,
+        extra={
+            "event": "market_data_stale_cache_fallback_used",
+            "operation": "market_data_cache_fallback",
+            "dependency": "filesystem",
+            "ticker": ticker,
+            "market": cache.market,
+            "cache_key": cache.cache_key,
+            "target_cache_key": target_cache_key,
+            "status": "degraded",
+            "stale_sessions": cache.stale_sessions,
+            "max_stale_sessions": cache.max_stale_sessions,
+            "reason": cache.rejection_reason,
+        },
+    )
     return True
 
 
@@ -740,14 +839,29 @@ def _record_provider_failure(
     *,
     message: str,
     cache: _CacheLookupResult,
+    ticker: str,
+    provider: str,
+    target_cache_key: str,
     log_as_error: bool = False,
 ) -> None:
     full_message = _message_with_cache_rejection(message, cache=cache)
     runtime.failures.append(full_message)
+    log_extra = {
+        "event": "market_data_provider_fetch_failed",
+        "operation": "market_data_provider_fetch",
+        "provider": provider,
+        "ticker": ticker,
+        "market": cache.market,
+        "cache_key": cache.cache_key,
+        "target_cache_key": target_cache_key,
+        "status": "failed" if log_as_error else "degraded",
+        "retryable": True,
+        "reason": cache.rejection_reason,
+    }
     if log_as_error:
-        runtime.logger.error(full_message)
+        runtime.logger.error(full_message, extra=log_extra)
     else:
-        runtime.logger.warning(full_message)
+        runtime.logger.warning(full_message, extra=log_extra)
 
 
 def _handle_provider_rejection[TRuntime: _CollectionRuntime](
@@ -776,6 +890,9 @@ def _handle_provider_rejection[TRuntime: _CollectionRuntime](
         runtime,
         message=failure_message,
         cache=cache,
+        ticker=ticker,
+        provider=runtime.cfg.data_provider,
+        target_cache_key=target_cache_key,
         log_as_error=log_failure_as_error,
     )
 
@@ -827,6 +944,7 @@ def _apply_provider_candles[TRuntime: _CollectionRuntime](
     request: _CacheAwareRequest[TRuntime],
     target_cache_key: str,
     source: str,
+    market: str,
     persist_source_label: str,
     fetched_log_message: str,
 ) -> None:
@@ -840,10 +958,39 @@ def _apply_provider_candles[TRuntime: _CollectionRuntime](
             f"after successful {persist_source_label} fetch ({type(exc).__name__}: {exc})"
         )
         runtime.failures.append(cache_msg)
-        runtime.logger.warning(cache_msg)
+        runtime.logger.warning(
+            cache_msg,
+            extra={
+                "event": "market_data_cache_persist_failed",
+                "operation": "market_data_cache_persist",
+                "dependency": "filesystem",
+                "provider": source,
+                "ticker": ticker,
+                "market": market,
+                "cache_key": target_cache_key,
+                "status": "degraded",
+                "error_type": type(exc).__name__,
+                "retryable": isinstance(exc, OSError),
+                "reason": "provider_fetch_cache_write_failed",
+            },
+        )
     if request.on_candles_applied_fn:
         request.on_candles_applied_fn(runtime, ticker, candles)
-    runtime.logger.info(fetched_log_message, len(candles), ticker)
+    runtime.logger.info(
+        fetched_log_message,
+        len(candles),
+        ticker,
+        extra={
+            "event": "market_data_provider_fetch_completed",
+            "operation": "market_data_provider_fetch",
+            "provider": source,
+            "ticker": ticker,
+            "market": market,
+            "cache_key": target_cache_key,
+            "status": "success",
+            "candle_count": len(candles),
+        },
+    )
 
 
 def ensure_pykrx_client[TRuntime: _CollectionRuntime](
@@ -864,14 +1011,47 @@ def ensure_pykrx_client[TRuntime: _CollectionRuntime](
     cache_dir = kwargs.get("cache_dir")
     try:
         runtime.pykrx_client = PykrxClientCls(cache_dir=cache_dir)
-        runtime.logger.info(initialized_log_message)
+        runtime.logger.info(
+            initialized_log_message,
+            extra={
+                "event": "market_data_provider_initialized",
+                "operation": "market_data_provider_init",
+                "dependency": "pykrx",
+                "provider": "pykrx",
+                "status": "success",
+            },
+        )
         return runtime.pykrx_client
     except PykrxNotInstalledError as exc:
         set_pykrx_error_fn(runtime, str(exc))
-        runtime.logger.warning("PyKRX unavailable: %s", exc)
+        runtime.logger.warning(
+            "PyKRX unavailable: %s",
+            exc,
+            extra={
+                "event": "market_data_provider_init_failed",
+                "operation": "market_data_provider_init",
+                "dependency": "pykrx",
+                "provider": "pykrx",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
     except PykrxClientError as exc:
         set_pykrx_error_fn(runtime, str(exc))
-        runtime.logger.error("PyKRX init failed: %s", exc)
+        runtime.logger.error(
+            "PyKRX init failed: %s",
+            exc,
+            extra={
+                "event": "market_data_provider_init_failed",
+                "operation": "market_data_provider_init",
+                "dependency": "pykrx",
+                "provider": "pykrx",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
     return None
 
 
@@ -893,7 +1073,18 @@ def initialize_provider[TRuntime: _CollectionRuntime](
         if not (app_key and app_secret and base_url):
             msg = "KIS credentials missing. Set KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL in .env (see docs/kis-setup.md)."
             runtime.failures.append(msg)
-            runtime.logger.error(msg)
+            runtime.logger.error(
+                msg,
+                extra={
+                    "event": "market_data_provider_config_failed",
+                    "operation": "market_data_provider_init",
+                    "dependency": "kis",
+                    "provider": "kis",
+                    "status": "failed",
+                    "reason": "missing_credentials",
+                    "retryable": False,
+                },
+            )
             runtime.fatal_failure = True
             return
 
@@ -915,6 +1106,15 @@ def initialize_provider[TRuntime: _CollectionRuntime](
             runtime.kis_client.cache_status or "unknown",
             creds.env,
             cfg.data_dir,
+            extra={
+                "event": "market_data_provider_initialized",
+                "operation": "market_data_provider_init",
+                "dependency": "kis",
+                "provider": "kis",
+                "status": "success",
+                "cache_status": runtime.kis_client.cache_status or "unknown",
+                "provider_env": creds.env,
+            },
         )
         return
 
@@ -926,7 +1126,18 @@ def initialize_provider[TRuntime: _CollectionRuntime](
                 "Install with 'uv sync --extra pykrx'."
             )
             runtime.failures.append(msg)
-            runtime.logger.error(msg)
+            runtime.logger.error(
+                msg,
+                extra={
+                    "event": "market_data_provider_config_failed",
+                    "operation": "market_data_provider_init",
+                    "dependency": "pykrx",
+                    "provider": "pykrx",
+                    "status": "failed",
+                    "reason": "provider_unavailable",
+                    "retryable": False,
+                },
+            )
             runtime.fatal_failure = True
             return
         runtime.pykrx_client = client
@@ -936,7 +1147,17 @@ def initialize_provider[TRuntime: _CollectionRuntime](
     if unsupported_provider_message:
         msg = unsupported_provider_message.format(provider=cfg.data_provider)
         runtime.failures.append(msg)
-        runtime.logger.error(msg)
+        runtime.logger.error(
+            msg,
+            extra={
+                "event": "market_data_provider_config_failed",
+                "operation": "market_data_provider_init",
+                "provider": cfg.data_provider,
+                "status": "failed",
+                "reason": "unsupported_provider",
+                "retryable": False,
+            },
+        )
         if mark_fatal_on_unsupported:
             runtime.fatal_failure = True
 
@@ -1076,6 +1297,7 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 request=request,
                 target_cache_key=target.cache_key,
                 source="kis",
+                market=market,
                 persist_source_label="KIS",
                 fetched_log_message="Fetched %s candles for %s",
             )
@@ -1126,6 +1348,19 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                             ticker,
                             exc,
                             len(fallback_result.candles),
+                            extra={
+                                "event": "market_data_provider_fallback_used",
+                                "operation": "market_data_provider_fallback",
+                                "provider": "kis",
+                                "fallback_provider": "pykrx",
+                                "ticker": ticker,
+                                "market": market,
+                                "cache_key": target.cache_key,
+                                "status": "degraded",
+                                "error_type": type(exc).__name__,
+                                "retryable": True,
+                                "candle_count": len(fallback_result.candles),
+                            },
                         )
                         runtime.failures.append(
                             f"{ticker}: KIS error ({exc}); used PyKRX fallback"
@@ -1168,7 +1403,23 @@ def collect_market_data_from_kis[TRuntime: _CollectionRuntime](
                 msg += f" (PyKRX fallback unavailable: {fallback_error})"
             msg = _message_with_cache_rejection(msg, cache=cache)
             runtime.failures.append(msg)
-            runtime.logger.error(msg)
+            runtime.logger.error(
+                msg,
+                extra={
+                    "event": "market_data_provider_fetch_failed",
+                    "operation": "market_data_provider_fetch",
+                    "provider": "kis",
+                    "fallback_provider": "pykrx" if fallback_error else None,
+                    "ticker": ticker,
+                    "market": market,
+                    "cache_key": cache.cache_key,
+                    "target_cache_key": target.cache_key,
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "retryable": True,
+                    "reason": cache.rejection_reason or fallback_error,
+                },
+            )
 
 
 def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
@@ -1194,7 +1445,20 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
         if target.exchange is not None:
             msg = f"{ticker}: PyKRX provider supports KR tickers only"
             runtime.failures.append(msg)
-            runtime.logger.error(msg)
+            runtime.logger.error(
+                msg,
+                extra={
+                    "event": "market_data_provider_fetch_failed",
+                    "operation": "market_data_provider_fetch",
+                    "provider": "pykrx",
+                    "ticker": ticker,
+                    "market": "US",
+                    "cache_key": target.cache_key,
+                    "status": "failed",
+                    "reason": "unsupported_market",
+                    "retryable": False,
+                },
+            )
             continue
 
         max_stale_sessions = _resolve_market_stale_limit(runtime.cfg, market="KR")
@@ -1300,6 +1564,7 @@ def collect_market_data_from_pykrx[TRuntime: _CollectionRuntime](
             request=request,
             target_cache_key=target.cache_key,
             source="pykrx",
+            market="KR",
             persist_source_label="PyKRX",
             fetched_log_message="Fetched %s candles via PyKRX for %s",
         )

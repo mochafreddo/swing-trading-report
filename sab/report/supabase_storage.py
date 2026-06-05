@@ -663,11 +663,29 @@ def maybe_upload_report_artifact(
     if config is None:
         logger.info(
             "Supabase report upload skipped: "
-            "SUPABASE_URL and SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY not set"
+            "SUPABASE_URL and SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY not set",
+            extra={
+                "event": "supabase_report_upload_skipped",
+                "operation": "report_upload",
+                "dependency": "supabase",
+                "report_type": run_type,
+                "report_path": artifact_path,
+                "required": required,
+                "status": "skipped",
+                "reason": "not_configured",
+            },
         )
         return None
 
     report_date = _extract_report_date(artifact_path)
+    report_log_fields = {
+        "operation": "report_upload",
+        "dependency": "supabase",
+        "report_type": run_type,
+        "report_date": report_date.isoformat(),
+        "report_path": artifact_path,
+        "required": required,
+    }
     try:
         return upload_report_artifact(
             local_path=artifact_path,
@@ -681,12 +699,30 @@ def maybe_upload_report_artifact(
         logger.warning(
             "Supabase report upload rolled back after index upsert failure: %s",
             exc,
+            extra={
+                **report_log_fields,
+                "event": "supabase_report_index_upsert_failed",
+                "storage_key": exc.storage_key,
+                "status": "degraded",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+                "cleanup_failed": exc.cleanup_failed,
+            },
         )
         return None
-    except SupabaseStorageError:
+    except SupabaseStorageError as exc:
         if required:
             raise
-        logger.exception("Supabase report upload skipped due to upload error")
+        logger.exception(
+            "Supabase report upload skipped due to upload error",
+            extra={
+                **report_log_fields,
+                "event": "supabase_report_upload_failed",
+                "status": "degraded",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
         return None
 
 

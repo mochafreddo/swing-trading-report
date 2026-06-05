@@ -26,7 +26,10 @@ const SENSITIVE_TEXT_PATTERNS = [
 
 function errorType(error: unknown): string {
   if (error instanceof Error && error.name) {
-    return error.name;
+    if (error.name !== "Error") {
+      return error.name;
+    }
+    return error.constructor.name || error.name;
   }
   return typeof error;
 }

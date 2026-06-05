@@ -8,12 +8,14 @@ from typing import Any, cast
 
 import pytest
 from sab.data.kis_client import KISClientError
+from sab.data.pykrx_client import PykrxClientError
 from sab.market_data_common import build_market_data_dependencies
 from sab.market_data_pipeline import (
     KisCollectionRequest,
     PykrxCollectionRequest,
     collect_market_data_from_kis,
     collect_market_data_from_pykrx,
+    ensure_pykrx_client,
 )
 from sab.market_data_service import (
     ScanMarketData,
@@ -256,6 +258,42 @@ def test_collect_market_data_from_kis_adds_fallback_warning_once() -> None:
     )
 
 
+def test_ensure_pykrx_client_logs_structured_init_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _FailingPykrxClient:
+        def __init__(self, *, cache_dir: str | None = None) -> None:
+            del cache_dir
+            raise PykrxClientError("provider unavailable")
+
+    runtime = _build_runtime(kis_client=None, data_provider="pykrx")
+    caplog.set_level(logging.ERROR, logger=__name__)
+
+    client = ensure_pykrx_client(
+        runtime,
+        PykrxClientCls=cast(Any, _FailingPykrxClient),
+        get_pykrx_error_fn=lambda item: item.pykrx_init_error,
+        set_pykrx_error_fn=lambda item, message: setattr(
+            item, "pykrx_init_error", message
+        ),
+        initialized_log_message="PyKRX initialized",
+    )
+
+    assert client is None
+    assert runtime.pykrx_init_error == "provider unavailable"
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "market_data_provider_init_failed"
+    )
+    assert getattr(record, "operation", None) == "market_data_provider_init"
+    assert getattr(record, "dependency", None) == "pykrx"
+    assert getattr(record, "provider", None) == "pykrx"
+    assert getattr(record, "status", None) == "failed"
+    assert getattr(record, "error_type", None) == "PykrxClientError"
+    assert getattr(record, "retryable", None) is False
+
+
 def test_collect_market_data_from_kis_ignores_cache_migration_write_error() -> None:
     class _FailingKisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
@@ -285,13 +323,16 @@ def test_collect_market_data_from_kis_ignores_cache_migration_write_error() -> N
     assert any("Failed to migrate cache key" in message for message in runtime.failures)
 
 
-def test_collect_market_data_from_kis_continues_when_cache_persist_fails() -> None:
+def test_collect_market_data_from_kis_continues_when_cache_persist_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class _KisClient:
         def daily_candles(self, symbol: str, *, count: int) -> list[dict[str, Any]]:
             assert symbol == "005930"
             return _build_candles(count)
 
     runtime = _build_runtime(kis_client=_KisClient())
+    caplog.set_level(logging.WARNING, logger=__name__)
 
     _collect_market_data_from_kis(
         runtime,
@@ -314,6 +355,20 @@ def test_collect_market_data_from_kis_continues_when_cache_persist_fails() -> No
         and "disk full" in message
         for message in runtime.failures
     )
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "market_data_cache_persist_failed"
+    )
+    assert getattr(record, "operation", None) == "market_data_cache_persist"
+    assert getattr(record, "dependency", None) == "filesystem"
+    assert getattr(record, "provider", None) == "kis"
+    assert getattr(record, "ticker", None) == "005930"
+    assert getattr(record, "market", None) == "KR"
+    assert getattr(record, "cache_key", None) == _cache_key("005930")
+    assert getattr(record, "status", None) == "degraded"
+    assert getattr(record, "error_type", None) == "OSError"
+    assert getattr(record, "retryable", None) is True
 
 
 def test_collect_market_data_from_kis_ignores_non_list_cache_payload() -> None:
@@ -1401,7 +1456,9 @@ def test_collect_market_data_from_pykrx_uses_stale_cache_when_provider_has_no_da
     ]
 
 
-def test_collect_market_data_from_pykrx_continues_when_cache_persist_fails() -> None:
+def test_collect_market_data_from_pykrx_continues_when_cache_persist_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class _PykrxClient:
         def daily_candles(
             self, ticker: str, *, count: int, adjusted: bool = True
@@ -1413,6 +1470,7 @@ def test_collect_market_data_from_pykrx_continues_when_cache_persist_fails() -> 
 
     runtime = _build_runtime(kis_client=None, data_provider="pykrx")
     runtime.pykrx_client = _PykrxClient()
+    caplog.set_level(logging.WARNING, logger=__name__)
 
     _collect_market_data_from_pykrx(
         runtime,
@@ -1434,6 +1492,20 @@ def test_collect_market_data_from_pykrx_continues_when_cache_persist_fails() -> 
         and "disk full" in message
         for message in runtime.failures
     )
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "market_data_cache_persist_failed"
+    )
+    assert getattr(record, "operation", None) == "market_data_cache_persist"
+    assert getattr(record, "dependency", None) == "filesystem"
+    assert getattr(record, "provider", None) == "pykrx"
+    assert getattr(record, "ticker", None) == "005930"
+    assert getattr(record, "market", None) == "KR"
+    assert getattr(record, "cache_key", None) == _cache_key("005930")
+    assert getattr(record, "status", None) == "degraded"
+    assert getattr(record, "error_type", None) == "OSError"
+    assert getattr(record, "retryable", None) is True
 
 
 def test_collect_market_data_from_pykrx_rejects_stale_provider_response() -> None:

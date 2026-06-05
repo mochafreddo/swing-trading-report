@@ -626,7 +626,7 @@ def test_maybe_upload_report_artifact_skips_when_disabled(
 
 
 def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     report_path = tmp_path / "2026-02-13.buy.json"
     report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
@@ -650,17 +650,34 @@ def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
         "sab.report.supabase_storage.upload_report_artifact", _fake_upload
     )
 
+    logger = logging.getLogger("test.supabase_upload")
+    caplog.set_level(logging.ERROR, logger=logger.name)
+
     uploaded = maybe_upload_report_artifact(
         artifact_path=report_path.as_posix(),
         run_type="buy",
-        logger=logging.getLogger("test"),
+        logger=logger,
     )
 
     assert uploaded is None
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "supabase_report_upload_failed"
+    )
+    assert getattr(record, "operation", None) == "report_upload"
+    assert getattr(record, "dependency", None) == "supabase"
+    assert getattr(record, "report_type", None) == "buy"
+    assert getattr(record, "report_date", None) == "2026-02-13"
+    assert getattr(record, "report_path", None) == report_path.as_posix()
+    assert getattr(record, "status", None) == "degraded"
+    assert getattr(record, "error_type", None) == "SupabaseStorageError"
+    assert getattr(record, "retryable", None) is True
+    assert "sb_secret_server_key" not in caplog.text
 
 
 def test_maybe_upload_report_artifact_returns_none_on_local_index_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     report_path = tmp_path / "2026-02-13.buy.json"
     report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
@@ -687,13 +704,31 @@ def test_maybe_upload_report_artifact_returns_none_on_local_index_error(
         "sab.report.supabase_storage.upload_report_artifact", _fake_upload
     )
 
+    logger = logging.getLogger("test.supabase_index")
+    caplog.set_level(logging.WARNING, logger=logger.name)
+
     uploaded = maybe_upload_report_artifact(
         artifact_path=report_path.as_posix(),
         run_type="buy",
-        logger=logging.getLogger("test"),
+        logger=logger,
     )
 
     assert uploaded is None
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "supabase_report_index_upsert_failed"
+    )
+    assert getattr(record, "operation", None) == "report_upload"
+    assert getattr(record, "dependency", None) == "supabase"
+    assert getattr(record, "report_type", None) == "buy"
+    assert getattr(record, "report_date", None) == "2026-02-13"
+    assert getattr(record, "report_path", None) == report_path.as_posix()
+    assert getattr(record, "storage_key", None) == "2026/02/2026-02-13.buy.json"
+    assert getattr(record, "status", None) == "degraded"
+    assert getattr(record, "error_type", None) == "SupabaseReportIndexError"
+    assert getattr(record, "retryable", None) is True
+    assert getattr(record, "cleanup_failed", None) is False
 
 
 def test_maybe_upload_report_artifact_raises_on_github_actions_index_error(
