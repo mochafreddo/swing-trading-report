@@ -149,8 +149,8 @@ Entry는 “진입 가능성”을 세 단계로 분류합니다.
 
 `entry_price`는 “갭/가드 판단을 위한 기준 가격”이며, **조회 불가 시 `null` + `REVIEW`(우선순위 1)** 로 처리합니다.
 
-- `PRE_OPEN`: 장 시작 전 스냅샷 기준의 “예상 체결/indicative” 가격(가능한 경우). KIS live 상세 응답에 날짜/시각 계열 스냅샷 marker가 없으면 stale/ambiguous snapshot으로 보고 `null` 처리한다.
-- `INTRADAY`: 장중 스냅샷 기준의 “현재가/체결가(last)” 가격. 불가하면 `null`.
+- `PRE_OPEN`: 장 시작 전 스냅샷 기준의 “예상 체결/indicative” 가격(가능한 경우). US KIS 해외 `price-detail`은 날짜/시각 marker 없이 `last` 계열 가격을 제공할 수 있으므로 `curr`가 있으면 `USD`일 때만 양수 가격 필드를 사용한다. KR KIS domestic `price-detail`은 날짜/시각 계열 스냅샷 marker가 없으면 stale/ambiguous snapshot으로 보고 `null` 처리한다.
+- `INTRADAY`: 장중 스냅샷 기준의 “현재가/체결가(last)” 가격. US KIS 해외 `price-detail`은 `PRE_OPEN`과 같은 `curr=USD` 및 양수 가격 필드 검증을 적용한다. 불가하면 `null`.
 - `AFTER_CLOSE`: 해당 세션의 “종가(EOD close)” 가격.
   - `pykrx` provider는 이 모드에서만 허용합니다.
 

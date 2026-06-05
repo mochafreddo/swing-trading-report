@@ -109,7 +109,7 @@ flowchart LR
 ### 4.3 `entry` 플로우
 
 1. 입력 buy 리포트를 읽고 후보(`candidates[]`)를 시장별로 정규화합니다.
-2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. `PRE_OPEN`의 KIS live 응답에 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
+2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. US KIS 해외 `price-detail`은 `PRE_OPEN|INTRADAY`에서 날짜/시각 marker 없이 `last` 계열 가격을 줄 수 있어 `curr`가 있으면 `USD`일 때만 양수 가격 필드를 스냅샷으로 사용하고, KR KIS domestic `price-detail`은 `PRE_OPEN`에서 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)를 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다. 전체 보유 상한은 기존 활성 보유를 포함하고, 시장별 신규 진입 상한은 이번 run에서 승인된 신규 진입만 셉니다.
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 필수로 Supabase Storage 업로드 + `report_index` upsert를 수행합니다.

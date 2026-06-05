@@ -777,7 +777,7 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
     )
 
 
-def test_run_entry_e2e_reviews_pre_open_kis_price_without_datetime_marker(
+def test_run_entry_e2e_uses_kis_us_price_detail_without_datetime_marker(
     monkeypatch, tmp_path: Path
 ) -> None:
     report_dir = tmp_path / "reports"
@@ -821,7 +821,7 @@ def test_run_entry_e2e_reviews_pre_open_kis_price_without_datetime_marker(
         ) -> dict[str, str]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
-            return {"last": "101.0", "entry_snapshot_state": "PRE_OPEN"}
+            return {"last": "101.0", "curr": "USD"}
 
     monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
 
@@ -832,17 +832,28 @@ def test_run_entry_e2e_reviews_pre_open_kis_price_without_datetime_marker(
         market="US",
     )
 
-    assert exit_code == 1
+    assert exit_code == 0
     payload = json.loads(
         next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
     )
-    assert payload["entries"][0]["action"] == "REVIEW"
-    assert payload["entries"][0]["entry_price"] is None
-    assert any(
-        "price snapshot unavailable" in reason
-        for reason in payload["entries"][0]["reasons"]
-    )
-    assert payload["summary"]["missing_entry_price_count"] == 1
+    assert payload["entries"][0]["action"] == "ENTER"
+    assert payload["entries"][0]["entry_price"] == 101.0
+    assert payload["summary"]["missing_entry_price_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected"),
+    [
+        ({"last": "101.0", "curr": "USD"}, 101.0),
+        ({"last": "101.0"}, 101.0),
+        ({"last": "101.0", "curr": "EUR"}, None),
+        ({"open": "101.0", "curr": "USD"}, None),
+    ],
+)
+def test_extract_kis_overseas_entry_price_validates_us_currency_contract(
+    detail: dict[str, str], expected: float | None
+) -> None:
+    assert entry._extract_kis_overseas_entry_price(detail) == expected
 
 
 def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
@@ -1572,6 +1583,133 @@ def test_make_price_lookup_logs_kis_detail_failure(
     assert record.__dict__["ticker"] == "AAPL.NASD"
     assert record.__dict__["error_type"] == "KISClientError"
     assert record.__dict__["retryable"] is True
+
+
+@pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
+@pytest.mark.parametrize(
+    ("detail", "expected_reason", "expected_currency", "expected_fields"),
+    [
+        ({"last": "101.0", "curr": "EUR"}, "currency_mismatch", "EUR", ["last"]),
+        ({"open": "101.0", "curr": "USD"}, "no_supported_price_field", "USD", []),
+        ({"last": "0", "curr": "USD"}, "invalid_price_value", "USD", ["last"]),
+    ],
+)
+def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    detail: dict[str, str],
+    expected_reason: str,
+    expected_currency: str,
+    expected_fields: list[str],
+    mode: str,
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "entry-price-test-run")
+
+    fake_cfg = SimpleNamespace(
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+
+    class _RejectingKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return detail
+
+    monkeypatch.setattr("sab.entry.KISClient", _RejectingKISClient)
+    caplog.set_level(logging.WARNING, logger="sab.entry")
+
+    price_lookup, issues = entry._make_price_lookup(
+        cfg=cast(Config, fake_cfg),
+        provider="kis",
+        mode=mode,
+        market="US",
+    )
+
+    assert issues == []
+    assert price_lookup("AAPL.NASD") is None
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "entry_price_snapshot_rejected"
+    )
+    assert record.__dict__["run_id"] == "entry-price-test-run"
+    assert record.__dict__["operation"] == "entry"
+    assert record.__dict__["provider"] == "kis"
+    assert record.__dict__["dependency"] == "kis"
+    assert record.__dict__["market"] == "US"
+    assert record.__dict__["ticker"] == "AAPL.NASD"
+    assert record.__dict__["reason"] == expected_reason
+    assert record.__dict__["currency"] == expected_currency
+    assert record.__dict__["present_price_fields"] == expected_fields
+    assert "detail" not in record.__dict__
+
+
+def test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "KR"},
+                "candidates": [_entry_candidate("005930", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+            assert ticker == "005930"
+            return {"stck_prpr": "101.0"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="KR",
+    )
+
+    assert exit_code == 1
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["action"] == "REVIEW"
+    assert payload["entries"][0]["entry_price"] is None
+    assert "price snapshot unavailable" in payload["entries"][0]["reasons"]
 
 
 def test_run_entry_logs_structured_run_lifecycle(

@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-05-28
+최종 확인: 2026-06-05
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -434,7 +434,9 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `signal_price_basis=adjusted`, `signal_close_adjusted_value`, `entry_reference_close_raw_value`, `entry_reference_eval_date`를 포함합니다.
 - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
-- `PRE_OPEN`에서 KIS live 상세 응답이 날짜/시각 계열 스냅샷 marker(`xymd`, `stck_cntg_hour` 등)를 제공하지 않으면 `entry_price=null`로 fail closed 처리하고 `REVIEW`로 남깁니다.
+- `PRE_OPEN|INTRADAY`의 KIS live 가격 스냅샷 해석은 시장별로 분리합니다.
+  - US `overseas price-detail` 응답은 날짜/시각 marker 없이 `last` 계열 가격만 제공할 수 있으므로, `curr`가 있으면 `USD`일 때만 양수 `last`/`last_price`/`stck_prpr`/`ovrs_nmix_prpr`/`ovrs_prpr` 값을 entry snapshot으로 사용합니다.
+  - KR `domestic price-detail` 응답은 날짜/시각 계열 스냅샷 marker(`stck_cntg_hour`, `xymd` 등)가 없으면 `entry_price=null`로 fail closed 처리하고 `REVIEW`로 남깁니다.
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
   - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard/entry trigger guard 관련 필드를 포함합니다.

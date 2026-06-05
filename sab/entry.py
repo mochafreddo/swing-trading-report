@@ -72,12 +72,53 @@ _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
     "asof",
     "entry_snapshot_at",
 )
+_KIS_OVERSEAS_ENTRY_PRICE_KEYS = (
+    "last",
+    "last_price",
+    "stck_prpr",
+    "ovrs_nmix_prpr",
+    "ovrs_prpr",
+)
 
 
 def _has_pre_open_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
     return any(
         str(detail.get(key) or "").strip() for key in _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS
     )
+
+
+def _kis_overseas_entry_currency(detail: Mapping[str, Any]) -> str | None:
+    currency = str(detail.get("curr") or "").strip().upper()
+    return currency or None
+
+
+def _extract_kis_overseas_entry_price(detail: Mapping[str, Any]) -> float | None:
+    currency = _kis_overseas_entry_currency(detail)
+    if currency and currency != "USD":
+        return None
+    for key in _KIS_OVERSEAS_ENTRY_PRICE_KEYS:
+        parsed = _to_positive_price(detail.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _present_kis_overseas_entry_price_fields(detail: Mapping[str, Any]) -> list[str]:
+    return [
+        key
+        for key in _KIS_OVERSEAS_ENTRY_PRICE_KEYS
+        if str(detail.get(key) or "").strip()
+    ]
+
+
+def _kis_overseas_entry_price_reject_reason(
+    *, currency: str | None, present_price_fields: list[str]
+) -> str:
+    if currency and currency != "USD":
+        return "currency_mismatch"
+    if not present_price_fields:
+        return "no_supported_price_field"
+    return "invalid_price_value"
 
 
 def _normalize_ticker(ticker: Any) -> str:
@@ -937,18 +978,36 @@ def _make_price_lookup(
                 detail = kis_client.overseas_price_detail(
                     symbol=symbol, exchange=exchange
                 )
-                if mode == "PRE_OPEN" and not _has_pre_open_price_snapshot_time(detail):
-                    return None
-                for key in (
-                    "last",
-                    "last_price",
-                    "stck_prpr",
-                    "ovrs_nmix_prpr",
-                    "ovrs_prpr",
-                ):
-                    parsed = _to_positive_price(detail.get(key))
-                    if parsed is not None:
-                        return parsed
+                # KIS overseas price-detail returns live last-like prices without
+                # the date/time marker fields present in domestic snapshots.
+                entry_price = _extract_kis_overseas_entry_price(detail)
+                if entry_price is not None:
+                    return entry_price
+                currency = _kis_overseas_entry_currency(detail)
+                present_price_fields = _present_kis_overseas_entry_price_fields(detail)
+                reject_reason = _kis_overseas_entry_price_reject_reason(
+                    currency=currency,
+                    present_price_fields=present_price_fields,
+                )
+                logger.warning(
+                    "Entry price snapshot rejected: provider=kis market=%s ticker=%s reason=%s",
+                    market,
+                    ticker,
+                    reject_reason,
+                    extra={
+                        "event": "entry_price_snapshot_rejected",
+                        "operation": "entry",
+                        "run_id": log_run_id,
+                        "provider": "kis",
+                        "dependency": "kis",
+                        "market": market,
+                        "ticker": ticker,
+                        "status": "degraded",
+                        "reason": reject_reason,
+                        "currency": currency,
+                        "present_price_fields": present_price_fields,
+                    },
+                )
                 return None
 
             symbol, _ = _split_symbol_and_exchange(ticker)
