@@ -6,12 +6,14 @@
 
 ## Deferred
 
-- 2026-06-01: Add an optional live smoke-check path for external RSS/API/market
-  data integrations so local refactors can verify real service boundaries when
-  credentials and network access are intentionally available.
+- None.
 
 ## Completed
 
+- 2026-06-05: Added optional live integration smoke coverage via
+  `scripts/live_integration_smoke.py` and `just live-integration-smoke`, so
+  local refactors can intentionally verify real RSS/source API/KIS market-data
+  service boundaries when credentials and network access are available.
 - 2026-06-05: Consolidated AI Brief entry-report market resolution in
   `sab/ai_brief_eval_common.py`, sharing the `KR`/`US` override and `MIXED`
   error-message contract across AI Brief generation, source evaluation,

@@ -147,6 +147,7 @@
 - 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
 - 여러 source payload 오프라인 비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report polygon=polygon.sources.json --compare-source-report av=alpha-vantage.sources.json --compare-source-report marketaux=marketaux.sources.json --compare-source-report benzinga=benzinga.sources.json --compare-source-report naver=naver.sources.json`
 - 여러 live source provider 캡처/비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report reports/YYYY-MM-DD.entry.json --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --market US` (결과에는 provider별 `duration_ms`와 fastest leader가 포함됩니다)
+- 선택 live integration smoke(개발용, 자격 증명과 네트워크가 의도적으로 준비된 경우): `UV_CACHE_DIR=.uv-cache uv run python scripts/live_integration_smoke.py --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS --pretty`
 - 생성한 AI Brief 추천 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
 - KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
 
@@ -206,6 +207,7 @@
   - `--source-provider naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 Naver Search API 뉴스 endpoint(`https://openapi.naver.com/v1/search/news.json`)를 ticker별 1회 조회합니다. v1은 KR ticker만 지원하며 `--buy-report`의 회사명을 검색어로 우선 사용하고, 없으면 6자리 ticker를 사용합니다. 요청은 `display=10`, `start=1`, `sort=date`로 보냅니다. US ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`(HTML 제거), `originallink` 또는 `link`, `pubDate`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
   - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. 로컬 feed 파일은 offline으로 처리하고 item URL의 literal local/private IP와 localhost만 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, live item URL도 DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
   - `scripts/compare_ai_brief_live_sources.py`는 `--provider LABEL=PROVIDER`를 2개 이상 받아 `http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news` live source 결과를 각각 `sab.ai_brief_sources.v1` payload로 저장한 뒤 기존 source eval 비교를 실행합니다. `http-json` label에는 `--source-api-url LABEL=URL`을 지정하며, URL 없는 `http-json` provider가 정확히 하나면 `AI_BRIEF_SOURCE_API_URL`을 사용합니다. provider 실패는 전체 실행을 멈추지 않고 해당 payload의 top-level `ERROR` issue로 기록되어 비교 결과에서 FAIL로 판정됩니다. 각 captured payload와 최종 JSON에는 provider별 `duration_ms`가 포함되어 coverage/source count/issue 수와 함께 운영 비교에 사용할 수 있습니다.
+  - `scripts/live_integration_smoke.py`는 local refactor 뒤 선택적으로 RSS feed catalog, 단일 또는 복수 AI Brief live source provider, KIS token/price/daily candle endpoint를 한 JSON 결과로 smoke합니다. 아무 옵션도 없으면 실행하지 않고 실패하며, 선택한 check만 네트워크를 호출합니다. `FAIL` check가 있으면 exit 1, `WARN`만 있으면 exit 0입니다. 출력 summary에는 count/status/sample key만 남기고 API key나 app secret 값은 포함하지 않습니다.
   - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
   - source provider timeout/HTTP/JSON/body-size 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
   - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
@@ -291,6 +293,7 @@
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --compare-source-report finnhub=<path> --compare-source-report polygon=<path> --compare-source-report av=<path> --compare-source-report marketaux=<path> --compare-source-report benzinga=<path> --compare-source-report naver=<path>` | 여러 AI Brief source payload를 같은 entry 후보 기준으로 비교 평가 |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report <path> --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=<url>` | 여러 live AI Brief source provider를 캡처한 뒤 같은 entry 후보 기준으로 비교 평가하고 provider별 `duration_ms`/fastest leader를 남김. `market=MIXED` entry report는 `--market KR|US` 필요 |
+| `UV_CACHE_DIR=.uv-cache uv run python scripts/live_integration_smoke.py --entry-report <path> --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS` | 자격 증명과 네트워크가 준비된 로컬 환경에서 선택한 RSS/source API/KIS market-data 경계를 live smoke |
 | `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report <path> --ai-brief-report <path>` | 생성한 AI Brief 추천 artifact 품질 평가 |
 
 ## 작업 자동화 (just + direnv)
@@ -304,6 +307,7 @@
   - `just ai-brief-source-eval --entry-report reports/YYYY-MM-DD.entry.json --source-report captured.sources.json`
   - `just ai-brief-source-eval --entry-report reports/example.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report polygon=polygon.sources.json --compare-source-report av=alpha-vantage.sources.json --compare-source-report marketaux=marketaux.sources.json --compare-source-report benzinga=benzinga.sources.json --compare-source-report naver=naver.sources.json --now 2026-05-06T12:00:00+00:00 --pretty`
   - `just ai-brief-source-live-compare --entry-report reports/example.entry.json --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --market US --pretty`
+  - `just live-integration-smoke --entry-report reports/example.entry.json --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS --pretty`
   - `just ai-brief-eval --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
   - `just quality` (ruff + format-check + mypy + pytest)
   - `just check` (`just quality` 별칭 호환)
@@ -331,7 +335,7 @@
   - `sab/report/` - 리포트 아티팩트(JSON) 생성, AI Brief 판단 상태 결정(`ai_brief_state.py`)
 - `web/` - Next.js 로컬 대시보드(App Router + Route Handler)
 - `reports/` - 생성된 JSON 리포트 아티팩트 출력 폴더
-- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `eval_ai_brief_recommendations.py` 외 `check_major_updates.py`/`check_next_app_routes.py`/`run_vulture.py`/`upgrade_deps.sh`)
+- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `live_integration_smoke.py`, `eval_ai_brief_recommendations.py` 외 `check_major_updates.py`/`check_next_app_routes.py`/`run_vulture.py`/`upgrade_deps.sh`)
 - `data/` (루트 폴더) - 런타임 캐시/상태(JSON; KIS 캔들, 토큰, `holidays_us.json` 등). `sab/data/` 패키지 코드와는 별개 위치임에 유의.
 - `docs/README.md` - 문서 인덱스(진입점)
   - `docs/adr/README.md` - ADR 인덱스
@@ -479,7 +483,7 @@
 - GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
 - GitHub Actions `ai-brief.yml`의 수동 `workflow_dispatch`는 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in으로 Telegram/Slack 알림을 발송할 수 있습니다. scheduled 실행은 ADR-0012에 따라 로컬 Docker primary가 담당하고, `ai-brief.yml` 스케줄은 US canary monitor/fallback 역할만 수행합니다(상세: `docs/runbook.md`, `docs/ARCHITECTURE.md`). source provider(`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`)는 수동 `source_provider=...` 입력 또는 시장별 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`로 선택하며, provider별 secret·시장 제약(US/KR-only)·`AI_BRIEF_SOURCE_API_TOKEN` 전달 조건·scheduled fallback 순서는 위 "설정 파일 원칙과 `.env`"·"실행/입력 정책" 절과 `docs/ARCHITECTURE.md`·`docs/runbook.md`를 참고하세요.
 - 새 AI Brief artifact는 `brief_state`/`brief_reason`을 포함합니다. Telegram/Slack과 Reports 상세는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 상태를 같은 규칙으로 표시합니다. scheduled runtime guard가 막은 실행은 정상 `ai-brief`와 분리된 `ai-brief-skip` Reports artifact와 skipped Telegram 메시지를 남깁니다. 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
-- RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교하며, provider별 `duration_ms`를 함께 남깁니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
+- RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교하며, provider별 `duration_ms`를 함께 남깁니다. `scripts/live_integration_smoke.py`는 자격 증명과 네트워크가 의도적으로 준비된 로컬 환경에서 선택한 RSS/source API/KIS market-data 경계를 단일 JSON smoke 결과로 확인합니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
 
 ### 실험
 
