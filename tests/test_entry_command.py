@@ -15,6 +15,7 @@ from sab.config_loader import ConfigLoadError
 from sab.entry import (
     _collect_candidate_eval_date_issues,
     _resolve_entry_artifact_date_context,
+    _resolve_entry_evaluation_policy,
     _resolve_entry_fatal_missing_price_ratio,
     _resolve_signal_eval_date,
     _select_latest_buy_report,
@@ -396,6 +397,29 @@ def test_evaluate_entry_candidate_markets_preserves_source_order_and_issue_contr
         "provider issue",
         "MSFT.NASD: price snapshot unavailable",
     ]
+
+
+def test_resolve_entry_evaluation_policy_prefers_source_report_snapshot() -> None:
+    cfg = cast(
+        Config,
+        SimpleNamespace(
+            strategy_mode="ema_cross",
+            gap_atr_multiplier=1.0,
+        ),
+    )
+    source_report = {
+        "config_snapshot": {
+            "strategy_mode": "sma_ema_hybrid",
+            "gap_atr_multiplier": 0.0,
+        }
+    }
+
+    policy = _resolve_entry_evaluation_policy(cfg, source_report)
+
+    assert policy.default_strategy_mode == "sma_ema_hybrid"
+    assert policy.source_gap_atr_multiplier == 0.0
+    assert policy.effective_gap_atr_multiplier == 0.0
+    assert policy.allow_missing_gap_guard is True
 
 
 def test_select_latest_buy_report_raises_when_missing(tmp_path: Path) -> None:

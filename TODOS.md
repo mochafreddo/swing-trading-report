@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-05: Extracted entry evaluation policy resolution from `run_entry`,
+  with characterization coverage for source-report strategy/gap-ATR snapshot
+  precedence and missing-gap-guard enablement.
 - 2026-06-05: Extracted scheduled AI Brief non-trading guard handling from
   `ScheduledAiBriefRunner.run`, with characterization coverage that pipeline
   roles persist guard-noop skip artifacts without attempting report-index repair.

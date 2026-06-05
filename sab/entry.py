@@ -1023,6 +1023,35 @@ class _EntryArtifactDateContext:
     entry_session_date_by_market: dict[str, str] | None
 
 
+@dataclass(frozen=True)
+class _EntryEvaluationPolicy:
+    default_strategy_mode: str | None
+    source_gap_atr_multiplier: float | None
+    effective_gap_atr_multiplier: float | None
+    allow_missing_gap_guard: bool
+
+
+def _resolve_entry_evaluation_policy(
+    cfg: Config, source_report: dict[str, Any]
+) -> _EntryEvaluationPolicy:
+    source_gap_atr_multiplier = _resolve_report_gap_atr_multiplier(source_report)
+    effective_gap_atr_multiplier = source_gap_atr_multiplier
+    if effective_gap_atr_multiplier is None:
+        effective_gap_atr_multiplier = _to_finite_float(
+            getattr(cfg, "gap_atr_multiplier", None)
+        )
+
+    return _EntryEvaluationPolicy(
+        default_strategy_mode=_resolve_report_strategy_mode(source_report),
+        source_gap_atr_multiplier=source_gap_atr_multiplier,
+        effective_gap_atr_multiplier=effective_gap_atr_multiplier,
+        allow_missing_gap_guard=(
+            effective_gap_atr_multiplier is not None
+            and effective_gap_atr_multiplier <= 0
+        ),
+    )
+
+
 def _resolve_entry_artifact_date_context(
     *,
     source_report: dict[str, Any],
@@ -1305,16 +1334,7 @@ def run_entry(
         logger.error("pykrx provider only supports KR market for entry")
         return 1
 
-    report_strategy_mode = _resolve_report_strategy_mode(source_report)
-    source_gap_atr_multiplier = _resolve_report_gap_atr_multiplier(source_report)
-    effective_gap_atr_multiplier = source_gap_atr_multiplier
-    if effective_gap_atr_multiplier is None:
-        effective_gap_atr_multiplier = _to_finite_float(
-            getattr(cfg, "gap_atr_multiplier", None)
-        )
-    allow_missing_gap_guard = (
-        effective_gap_atr_multiplier is not None and effective_gap_atr_multiplier <= 0
-    )
+    entry_policy = _resolve_entry_evaluation_policy(cfg, source_report)
     rows, system_issues = _evaluate_entry_candidate_markets(
         cfg=cfg,
         provider=normalized_provider,
@@ -1323,8 +1343,8 @@ def run_entry(
         candidates_by_market=candidates_by_market,
         source_candidates=candidates,
         market_override=normalized_market,
-        default_strategy_mode=report_strategy_mode,
-        allow_missing_gap_guard=allow_missing_gap_guard,
+        default_strategy_mode=entry_policy.default_strategy_mode,
+        allow_missing_gap_guard=entry_policy.allow_missing_gap_guard,
     )
 
     active_total, active_tickers = _build_active_holding_state(holdings_data)
@@ -1393,8 +1413,8 @@ def run_entry(
             cfg,
             provider=normalized_provider,
             mode=normalized_mode,
-            effective_gap_atr_multiplier=effective_gap_atr_multiplier,
-            source_report_gap_atr_multiplier=source_gap_atr_multiplier,
+            effective_gap_atr_multiplier=entry_policy.effective_gap_atr_multiplier,
+            source_report_gap_atr_multiplier=entry_policy.source_gap_atr_multiplier,
         ),
     )
     return _write_entry_report_and_maybe_upload(
