@@ -503,40 +503,14 @@ class ScheduledAiBriefRunner:
         if request.dry_run:
             return ScheduledAiBriefResult(status="dry_run", session_date=session_date)
         if not guard.trading_session:
-            if runner_role in _PIPELINE_RUNNER_ROLES:
-                success_key = build_scheduler_state_key(
-                    kind="success", market=market, session_date=session_date
-                )
-                if self._state_store.get_entry(success_key) is not None:
-                    return ScheduledAiBriefResult(
-                        status="success_marker_skip",
-                        session_date=session_date,
-                    )
-                artifact_key = build_scheduler_state_key(
-                    kind="artifact", market=market, session_date=session_date
-                )
-                artifact_entry = self._state_store.get_entry(artifact_key)
-                if artifact_entry is not None:
-                    return self._reconcile_notification(
-                        market=market,
-                        session_date=session_date,
-                        schedule_role=schedule_role,
-                        runner_role=runner_role,
-                        attempt_id=attempt_id,
-                        artifact_entry=artifact_entry,
-                        require_main_lock=False,
-                        main_lock_key=None,
-                        main_owner_token=None,
-                    )
-                return self._persist_runtime_guard_skip_result(
-                    market=market,
-                    session_date=session_date,
-                    guard=guard,
-                    run_url=request.run_url,
-                    success_status="guard_noop",
-                )
-            return ScheduledAiBriefResult(
-                status="guard_noop", session_date=session_date
+            return self._handle_non_trading_guard(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                guard=guard,
+                run_url=request.run_url,
             )
 
         if runner_role in _PIPELINE_RUNNER_ROLES:
@@ -721,6 +695,56 @@ class ScheduledAiBriefRunner:
         return _NotificationClaimLease(
             claim_key=claim_key,
             owner_token=owner_token,
+        )
+
+    def _handle_non_trading_guard(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        guard: GuardSnapshot,
+        run_url: str,
+    ) -> ScheduledAiBriefResult:
+        if runner_role not in _PIPELINE_RUNNER_ROLES:
+            return ScheduledAiBriefResult(
+                status="guard_noop", session_date=session_date
+            )
+
+        success_key = build_scheduler_state_key(
+            kind="success", market=market, session_date=session_date
+        )
+        if self._state_store.get_entry(success_key) is not None:
+            return ScheduledAiBriefResult(
+                status="success_marker_skip",
+                session_date=session_date,
+            )
+
+        artifact_key = build_scheduler_state_key(
+            kind="artifact", market=market, session_date=session_date
+        )
+        artifact_entry = self._state_store.get_entry(artifact_key)
+        if artifact_entry is not None:
+            return self._reconcile_notification(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                artifact_entry=artifact_entry,
+                require_main_lock=False,
+                main_lock_key=None,
+                main_owner_token=None,
+            )
+
+        return self._persist_runtime_guard_skip_result(
+            market=market,
+            session_date=session_date,
+            guard=guard,
+            run_url=run_url,
+            success_status="guard_noop",
         )
 
     def _run_locked_pipeline(

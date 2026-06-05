@@ -17,6 +17,9 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief non-trading guard handling from
+  `ScheduledAiBriefRunner.run`, with characterization coverage that pipeline
+  roles persist guard-noop skip artifacts without attempting report-index repair.
 - 2026-06-05: Extracted hybrid sell extended time-stop judgment from
   `_apply_time_stop_rules`, with characterization coverage for P&L-floor
   failure, weak-trend failure, unavailable-trend no-op, threshold no-op,

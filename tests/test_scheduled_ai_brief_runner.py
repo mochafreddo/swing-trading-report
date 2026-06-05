@@ -1887,6 +1887,31 @@ def test_pipeline_runner_persists_non_trading_guard_skip_artifact() -> None:
     assert notifier.sent == []
 
 
+def test_non_trading_guard_helper_skips_report_index_repair() -> None:
+    storage = _FakeStorage()
+    storage.repair_candidates = ["2026/05/2026-05-25.ai-brief.json"]
+    runner, state, pipeline, storage, notifier = _runner(storage=storage)
+    guard = _guard(trading_session=False, session_date="2026-05-25")
+
+    result = runner._handle_non_trading_guard(
+        market="US",
+        session_date="2026-05-25",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-non-trading-helper",
+        guard=guard,
+        run_url="https://github.com/owner/repo/actions/runs/1",
+    )
+
+    assert result.status == "guard_noop"
+    assert result.storage_key == "2026/05/2026-05-25.ai-brief-skip.json"
+    assert pipeline.calls == []
+    assert storage.downloads == []
+    assert len(storage.skip_uploads) == 1
+    assert any(":skip-artifact:US:2026-05-25" in key for key, _payload in state.upserts)
+    assert notifier.sent == []
+
+
 def test_pipeline_runner_reuses_existing_non_trading_guard_skip_artifact() -> None:
     skip_key = build_scheduler_state_key(
         kind="skip-artifact", market="US", session_date="2026-05-25"
