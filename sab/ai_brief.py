@@ -7,7 +7,7 @@ import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .ai_brief_eval_common import ALLOWED_MARKETS, normalize_market
+from .ai_brief_eval_common import normalize_market, resolve_entry_report_market
 from .ai_brief_providers import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
     MODEL_PROVIDER_FAKE,
@@ -216,18 +216,10 @@ def _as_mapping_rows(value: object, *, field_name: str) -> list[dict[str, Any]]:
 def _resolve_target_market(
     *, report_market: object, market_override: str | None
 ) -> str:
-    market = str(report_market or "").strip().upper()
-    if market == "MIXED":
-        if market_override is None:
-            raise ValueError("MIXED entry report requires --market KR or --market US")
-        return market_override
-    if market not in ALLOWED_MARKETS:
-        raise ValueError("entry report market must be KR, US, or MIXED")
-    if market_override is not None and market_override != market:
-        raise ValueError(
-            f"--market {market_override} does not match entry report {market}"
-        )
-    return market
+    return resolve_entry_report_market(
+        report_market=report_market,
+        market_override=market_override,
+    )
 
 
 def _filter_rows_for_market(

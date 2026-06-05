@@ -8,12 +8,15 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .ai_brief_eval_common import (
+    ENTRY_REPORT_MARKET_INVALID_MESSAGE,
+    MIXED_ENTRY_REPORT_MARKET_REQUIRED_MESSAGE,
     AiBriefEvalIssue,
     AiBriefEvalSeverity,
     AiBriefEvalStatus,
     normalize_market,
     optional_text,
     parse_eval_now,
+    resolve_entry_report_market,
     string_list,
 )
 from .ai_brief_providers import PRESELECTION_LIMIT
@@ -309,27 +312,23 @@ def _load_entry_context(
     if load_issue is not None:
         return None, load_issue
 
-    report_market = str(entry_report.get("market") or "").strip().upper()
-    if report_market == "MIXED":
-        if market is None:
-            return None, AiBriefRecommendationEvalIssue(
-                code="entry_report_market_required",
-                severity="FAIL",
-                message="MIXED entry report requires --market KR or --market US",
-            )
-    elif report_market in {"KR", "US"}:
-        if market is not None and market != report_market:
-            return None, AiBriefRecommendationEvalIssue(
-                code="entry_report_market_mismatch",
-                severity="FAIL",
-                message=f"--market {market} does not match entry report {report_market}",
-            )
-        market = report_market
-    else:
+    try:
+        market = resolve_entry_report_market(
+            report_market=entry_report.get("market"),
+            market_override=market,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == MIXED_ENTRY_REPORT_MARKET_REQUIRED_MESSAGE:
+            code = "entry_report_market_required"
+        elif message == ENTRY_REPORT_MARKET_INVALID_MESSAGE:
+            code = "entry_report_invalid"
+        else:
+            code = "entry_report_market_mismatch"
         return None, AiBriefRecommendationEvalIssue(
-            code="entry_report_invalid",
+            code=code,
             severity="FAIL",
-            message="entry report market must be KR, US, or MIXED",
+            message=message,
         )
 
     rows = entry_report.get("entries")

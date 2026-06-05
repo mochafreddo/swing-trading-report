@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .ai_brief_eval_common import ALLOWED_MARKETS, normalize_market
+from .ai_brief_eval_common import normalize_market, resolve_entry_report_market
 from .ai_brief_source_eval import compare_ai_brief_source_reports
 from .ai_brief_sources import (
     SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
@@ -597,19 +597,10 @@ def _resolve_target_market(
     report_market: object,
     market_override: str | None,
 ) -> str:
-    report_market_text = str(report_market or "").strip().upper()
-    if report_market_text == "MIXED":
-        if market_override is None:
-            raise ValueError("MIXED entry report requires --market KR or --market US")
-        return market_override
-    if report_market_text in ALLOWED_MARKETS:
-        if market_override is not None and market_override != report_market_text:
-            raise ValueError(
-                f"--market {market_override} does not match entry report "
-                f"{report_market_text}"
-            )
-        return report_market_text
-    raise ValueError("entry report market must be KR, US, or MIXED")
+    return resolve_entry_report_market(
+        report_market=report_market,
+        market_override=market_override,
+    )
 
 
 __all__ = [

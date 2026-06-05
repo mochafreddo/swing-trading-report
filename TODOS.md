@@ -6,14 +6,16 @@
 
 ## Deferred
 
-- 2026-06-01: Consolidate duplicated market normalization rules after agreeing on
-  a shared error-message contract for `KR`, `US`, and `MIXED` handling.
 - 2026-06-01: Add an optional live smoke-check path for external RSS/API/market
   data integrations so local refactors can verify real service boundaries when
   credentials and network access are intentionally available.
 
 ## Completed
 
+- 2026-06-05: Consolidated AI Brief entry-report market resolution in
+  `sab/ai_brief_eval_common.py`, sharing the `KR`/`US` override and `MIXED`
+  error-message contract across AI Brief generation, source evaluation,
+  recommendation evaluation, and live source comparison.
 - 2026-06-05: Completed the deferred long high-risk runtime refactor pass
   for `sab/scheduler/runner.py`, `sab/signals/hybrid_sell.py`, and
   `sab/entry.py`, adding final test-first seams for scheduler runner-role
