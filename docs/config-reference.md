@@ -4,7 +4,7 @@
 
 대상: 로컬 개발자, 운영자, 자동화 에이전트
 
-이 문서는 `config.yaml`과 환경변수의 현재 계약을 코드 기준으로 정리합니다. 매일 쓰는 시크릿 템플릿은 루트 [`.env.example`](../.env.example)을 우선하고, 이 문서는 전체 override가 필요한 유지보수 작업에서 참고합니다.
+이 문서는 `config.yaml`과 환경변수의 전체 override 계약을 코드 기준으로 정리하는 deep reference입니다. 신규 개발자/운영자는 먼저 [configuration.md](configuration.md)를 읽고, 매일 쓰는 시크릿 템플릿은 루트 [`.env.example`](../.env.example)을 우선하세요.
 
 ## 문서 상태
 

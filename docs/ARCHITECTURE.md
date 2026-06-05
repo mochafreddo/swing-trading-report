@@ -23,6 +23,14 @@
 
 - `ADR-0006` 시절 가정(Storage listing 직접 조회, 인증 미도입)으로 되돌리는 방향은 채택하지 않습니다.
 
+## 관련 문서
+
+- 운영 절차: [operations.md](operations.md)
+- 배포/롤백: [deployment.md](deployment.md)
+- 장애 대응: [troubleshooting.md](troubleshooting.md)
+- API/CLI 계약: [api.md](api.md)
+- 설정: [configuration.md](configuration.md), [config-reference.md](config-reference.md)
+
 ## 1. 시스템 목적
 
 - Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, entry 결과를 로컬 `ai-brief` JSON으로 요약합니다.

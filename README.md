@@ -1,506 +1,104 @@
-# Swing Trading Report (KR/US, On-Demand)
+# Swing Trading Report
 
 상태: Accepted (프로젝트 진입점)
 
-간단한 스윙 스크리닝을 원할 때만 실행하고, 결과를 **JSON 리포트**로 저장한 뒤 **로컬 웹(Next.js)** 에서 열람하는 개인용 프로젝트입니다. 데이터 소스는 기본적으로 한국투자증권 KIS Developers(Open API)를 사용하며, 국내(KR) 기본 + (선택) 해외(US)까지 확장 가능합니다. 프로젝트/의존성 관리는 uv를 사용합니다.
-
-권장 구성(개인용):
-
-- 로컬 UI: Next.js(로컬 Docker)
-- 데이터: Supabase(Postgres/Storage) - 보유 목록/리포트/실행 이력
-- 자동 실행: GitHub Actions `schedule`(scan/sell) + 로컬 Docker primary(scheduled AI Brief)
-  - 텔레그램: 리포트 본문(매수 후보/매도·점검 후보) 전송
-  - 슬랙: 기존 요약 포맷 유지
-
-로컬 Supabase는 idle Docker CPU/메모리를 줄이기 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화한 최소 프로필을 사용합니다. Studio/Realtime/메일 테스트가 필요한 디버깅 세션에서만 `supabase/config.toml`의 해당 `enabled` 값을 일시적으로 `true`로 바꿔 사용하세요.
-
-상세 문서 인덱스는 [docs/README.md](docs/README.md), 제품 방향과 남은 backlog는 [docs/PRD.md](docs/PRD.md)를 참고하세요.
-
-## 어디서부터 읽을까
-
-| 질문 | 시작점 |
-| --- | --- |
-| 로컬에서 바로 실행하려면? | 이 README의 [Quickstart](#quickstart-uv-기반), [웹 UI 빠른 시작](#4-웹-ui-빠른-시작) |
-| 문서 전체 지도와 우선순위는? | [docs/README.md](docs/README.md) |
-| 개발/커밋/검증 흐름은? | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 시스템 구조와 데이터 흐름은? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 배포/운영/장애 대응을 보면? | [docs/runbook.md](docs/runbook.md)의 웹 UI 로컬 실행, 자동 실행, 문제 해결/장애 참조 |
-| 전략 신호와 리스크 규칙은? | [docs/STRATEGY.md](docs/STRATEGY.md) |
-| 환경변수와 시크릿은? | [.env.example](.env.example), [docs/config-reference.md](docs/config-reference.md), [SECURITY.md](SECURITY.md) |
-
-현재 동작 기준은 `README.md`, `docs/runbook.md`, `docs/ARCHITECTURE.md`,
-`docs/STRATEGY.md`, `docs/spec-v1.1.md`를 우선합니다. `docs/PRD.md`,
-`docs/spec-v1.3.md`, ADR, 리뷰 문서는 제품/backlog/의사결정 이력으로
-보존되며, 최신 운영 절차와 충돌하면 위 운영 기준 문서를 우선하세요.
-
-## 한눈에 보기
-
-- `sab scan`: KR/US 후보를 수집하고 buy 리포트를 생성합니다.
-- `sab sell`: 보유 종목을 매도/점검 규칙으로 평가합니다.
-- `sab entry`: buy 리포트 후보를 다음 세션 진입 관점으로 재평가합니다.
-- `sab ai-brief`: entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약합니다.
-- 결과물: `reports/YYYY-MM-DD(-n).{buy|sell|entry}.json`, `reports/YYYY-MM-DD(-n).ai-brief.json`, scheduled guard skip 시 `reports/YYYY-MM-DD(-n).ai-brief-skip.json`
-- GitHub Actions: `scan.yml`/`sell.yml` 자동·수동 실행, `ai-brief.yml` 수동 artifact 생성 + 알림 발송(scheduled AI Brief는 로컬 Docker primary, GitHub은 US canary monitor/fallback — ADR-0012)
-- 로컬 UI: `docker compose up -d --build web` 후 `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
-
-## Requirements
-
-- 필수: Python 3.14+, uv
-- 필수(웹 UI 로컬 배포): Docker Desktop
-- 선택: just (`justfile` 레시피 실행)
-- 선택: direnv (프로젝트 진입 시 로컬 환경변수 자동 적용)
-- 선택(웹 UI를 호스트에서 직접 실행할 때): Node.js + pnpm
-  - 권장: `mise` 설치 후 `mise install` (`mise.toml`/`mise.lock` 기준)
-  - 권장: 셸 활성화(`eval "$(mise activate zsh)"`) 또는 명령 실행 시 `mise x -- <cmd>` 사용
-
-## Quickstart (uv 기반)
-
-### 1. 도구/의존성 준비
-
-- uv 설치(macOS)
-  - `curl -LsSf https://astral.sh/uv/install.sh | sh`
-  - 확인: `uv --version`
-- 기본(슬림) 프로파일: `UV_CACHE_DIR=.uv-cache uv sync`
-- 개발 의존성 포함: `UV_CACHE_DIR=.uv-cache uv sync --all-groups`
-- 반복 실행용 레시피 목록: `just --list`
-- 도구체인(Node/pnpm) 동기화: `mise install` (`mise.lock`이 함께 커밋되어 있어야 재현성 보장)
-- lockfile 갱신(도구 버전 변경 시): `mise lock --platform linux-x64,macos-arm64 && mise install`
-- `.env` 자동 로딩은 기본 내장 파서로 동작합니다(추가 의존성 불필요).
-- 선택 extras:
-  - `python-dotenv` 고급 파싱: `UV_CACHE_DIR=.uv-cache uv sync --extra dotenv`
-  - 거래소 휴장일 자동 캘린더: `UV_CACHE_DIR=.uv-cache uv sync --extra calendar`
-  - PyKRX 데이터 제공자/폴백: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
-  - 전체 기능: `UV_CACHE_DIR=.uv-cache uv sync --all-extras --all-groups`
-  - 잠금 갱신: `UV_CACHE_DIR=.uv-cache uv lock` (업그레이드: `UV_CACHE_DIR=.uv-cache uv lock --upgrade`)
-- direnv 사용 시(선택):
-  - zsh 훅 추가: `echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc`
-  - 프로젝트 최초 1회: `direnv allow .`
-  - 기본값은 `.envrc`에서 관리(`UV_CACHE_DIR`, `PRE_COMMIT_HOME`), 머신별 오버라이드는 `.envrc.local` 사용(`.envrc.local.example` 참고)
-  - `.env`는 direnv가 아니라 애플리케이션(`sab`)이 로드합니다.
-
-### 2. 설정 파일 원칙과 `.env`
-
-- 원칙:
-  - `.env`는 **시크릿/환경별 값만** 둡니다(커밋 금지).
-  - 비시크릿 설정은 `config.yaml`로 관리합니다(샘플: `config.example.yaml`). 이 저장소는 기본 `config.yaml`을 **버전관리에 포함**하며, 기본값은 실전 KIS 엔드포인트(`kis.base_url: https://openapi.koreainvestment.com:9443`)와 `screener.us_mode: kis`입니다. 모의투자/다른 임계치를 쓰려면 `config.yaml`을 직접 조정하거나 `config.local.yaml` + `SAB_CONFIG`로 분리하세요(아래 참조).
-  - `config.yaml`과 `.env`에 **동일 키를 중복 정의하지 않습니다**(충돌 시 실패).
-  - 로컬 전용 설정이 필요하면 `config.local.yaml`을 만들고 `SAB_CONFIG=config.local.yaml`로 지정하세요(파일은 커밋하지 않기).
-- 최소 예시(필수):
-  - `KIS_APP_KEY=...`
-  - `KIS_APP_SECRET=...`
-- 웹 UI 추가(필수):
-  - `SUPABASE_URL=...`
-  - `SUPABASE_SECRET_KEY=...` (또는 `SUPABASE_SERVICE_ROLE_KEY=...`)
-  - `SAB_BASIC_AUTH_USER=...`, `SAB_BASIC_AUTH_PASS=...`, `SAB_SESSION_SECRET=...`
-- 선택(로컬 운영 편의):
-  - `LOG_LEVEL=INFO`
-- 선택(AI Brief OpenAI provider; scheduled AI Brief는 이 설정 필요):
-  - `OPENAI_API_KEY=...`
-  - `OPENAI_AI_BRIEF_MODEL=...` (또는 CLI `--model-name`)
-  - `AI_BRIEF_MODEL_TIMEOUT_SECONDS=20`
-- 선택(AI Brief 외부 source API provider):
-  - `AI_BRIEF_SOURCE_API_URL=...`
-  - scheduled `ai-brief.yml`에서 시장별 기본 API URL을 쓰려면 repository variable `AI_BRIEF_SOURCE_API_URL_KR=...` 또는 `AI_BRIEF_SOURCE_API_URL_US=...`를 설정
-  - `AI_BRIEF_SOURCE_API_TOKEN=...` (실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` 중 하나와 일치할 때만 Bearer 토큰으로 전송)
-  - `AI_BRIEF_SOURCE_TIMEOUT_SECONDS=10`
-- 선택(AI Brief Finnhub source provider; US ticker only):
-  - `FINNHUB_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`와 secret `FINNHUB_API_KEY`를 설정
-- 선택(AI Brief Polygon News source provider; US ticker only):
-  - `POLYGON_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=polygon-news`와 secret `POLYGON_API_KEY`를 설정
-- 선택(AI Brief Alpha Vantage News source provider; US ticker only):
-  - `ALPHA_VANTAGE_API_KEY=...`
-  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=alpha-vantage-news`와 secret `ALPHA_VANTAGE_API_KEY`를 설정
-- 선택(AI Brief Marketaux News source provider; US ticker only):
-  - `MARKETAUX_API_TOKEN=...`
-  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=marketaux-news`와 secret `MARKETAUX_API_TOKEN`을 설정
-- 선택(AI Brief Benzinga News source provider; US ticker only):
-  - `BENZINGA_API_TOKEN=...`
-  - scheduled `ai-brief.yml`에서 US 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_US=benzinga-news`와 secret `BENZINGA_API_TOKEN`을 설정
-- 선택(AI Brief Naver News source provider; KR ticker only):
-  - `NAVER_CLIENT_ID=...`
-  - `NAVER_CLIENT_SECRET=...`
-  - scheduled `ai-brief.yml`에서 KR 기본 provider로 쓰려면 repository variable `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`와 secrets `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`을 설정
-- 런타임 시크릿과 주요 환경변수 설명은 `.env.example`을 참고하세요. 전체 env/config override reference는 `docs/config-reference.md`에 둡니다. 비시크릿 전략/스크리너/캐시 설정은 기본적으로 `config.yaml`에 둡니다.
-
-### 3. 핵심 실행
-
-- 기본 실행: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
-- 평가 상한 지정(워치리스트+스크리너 병합 후 최종 cap): `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --limit 30`
-- 스크리너 상위 N 조정(KR/US 공통): `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --screener-limit 15`
-- 유니버스 선택: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --universe watchlist` (옵션: `watchlist`, `screener`, `both`)
-- 워치리스트 지정: `UV_CACHE_DIR=.uv-cache uv run python -m sab scan --watchlist watchlist.txt`
-- 보유 평가: `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
-- 진입 평가: `UV_CACHE_DIR=.uv-cache uv run python -m sab entry`
-- AI 진입 브리프: `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json`
-- OpenAI 모델 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --model-provider openai --model-name <openai-model>`
-- 로컬 source 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider local-json --source-report reports/YYYY-MM-DD.sources.json`
-- 외부 source API 포함 브리프(선택): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider http-json --source-api-url https://source.example/api`
-- Finnhub Company News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub`
-- Polygon News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider polygon-news`
-- Alpha Vantage News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider alpha-vantage-news`
-- Marketaux News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider marketaux-news`
-- Benzinga News 포함 브리프(선택, US ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --source-provider benzinga-news`
-- Naver News 포함 브리프(선택, KR ticker only): `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --buy-report reports/YYYY-MM-DD.buy.json --source-provider naver-news`
-- RSS/Atom/RDF source payload 생성(개발용, 로컬 파일 또는 live HTTPS feed URL catalog): `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog feeds.json --output reports/YYYY-MM-DD.sources.json`
-- 수집한 source payload 오프라인 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --source-report reports/YYYY-MM-DD.sources.json`
-- 여러 source payload 오프라인 비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report reports/YYYY-MM-DD.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report polygon=polygon.sources.json --compare-source-report av=alpha-vantage.sources.json --compare-source-report marketaux=marketaux.sources.json --compare-source-report benzinga=benzinga.sources.json --compare-source-report naver=naver.sources.json`
-- 여러 live source provider 캡처/비교(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report reports/YYYY-MM-DD.entry.json --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --market US` (결과에는 provider별 `duration_ms`와 fastest leader가 포함됩니다)
-- 선택 live integration smoke(개발용, 자격 증명과 네트워크가 의도적으로 준비된 경우): `UV_CACHE_DIR=.uv-cache uv run python scripts/live_integration_smoke.py --entry-report reports/YYYY-MM-DD.entry.json --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS --pretty`
-- 생성한 AI Brief 추천 품질 평가(개발용): `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
-- KIS 장애 시 PyKRX 폴백이 필요하면: `UV_CACHE_DIR=.uv-cache uv sync --extra pykrx`
-
-### 4. 웹 UI 빠른 시작
-
-- `.env`에 Supabase/로그인 설정 후 `docker compose up -d --build web`
-- 접속: `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
-- 로컬 CLI 실행 결과도 웹에서 보고 싶다면 `.env`에 `SAB_UPLOAD_REPORTS=true`를 설정하세요(Supabase 설정 필요).
-- `sab entry`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run python -m sab entry --upload`를 사용할 수 있습니다.
-- `sab ai-brief`만 즉시 업로드하고 싶다면 `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json --upload`를 사용할 수 있습니다.
-
-### 5. 리포트 아티팩트
-
-- Buy: `reports/YYYY-MM-DD(-n).buy.json`
-- Sell/Review: `reports/YYYY-MM-DD(-n).sell.json`
-- Entry: `reports/YYYY-MM-DD(-n).entry.json`
-- AI Brief: `reports/YYYY-MM-DD(-n).ai-brief.json`
-- 웹 대시보드는 Supabase Storage(`SUPABASE_REPORTS_BUCKET`, 기본값 `reports`)의 JSON을 렌더링합니다.
-  - 업로드는 GitHub Actions에서 기본 수행하고, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때 수행합니다.
-  - `entry`는 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief`도 `--upload`로 1회성 업로드를 강제할 수 있으며, 업로드 시 `report_index`까지 함께 갱신합니다.
-  - `ai-brief.yml` workflow에서는 buy/entry/ai-brief JSON과 알림 preview 텍스트를 Actions artifact로 남기고, AI Brief 리포트도 Supabase Storage/report_index에 업로드합니다.
-  - 수동 `ai-brief.yml` 실행은 `send_notifications=true`를 선택했을 때만 Telegram/Slack으로 실제 발송합니다. 기본값은 `false`입니다.
-  - scheduled AI Brief는 ADR-0012에 따라 **로컬 Docker primary**(macOS `launchd` → 1회성 Docker scheduler)가 담당하고, `ai-brief.yml` 스케줄은 US canary 구간에서 `early-monitor`/`github-fallback`/`cutoff-alert` monitor·fallback 역할만 수행합니다. 장일+PRE_OPEN window일 때만 scan/entry/ai-brief와 알림 발송을 진행하며, KR은 US canary 이후 롤아웃 대상입니다. schedule cron·역할·운영 절차 상세는 `docs/runbook.md`와 `docs/ARCHITECTURE.md`를 참고하세요.
-  - scheduled `ai-brief.yml`에서 watchlist와 screener가 모두 빈 결과를 만들면 실패 대신 빈 buy/entry/ai-brief artifact를 생성해 "후보 없음" 상태로 남깁니다. 다른 scan 오류는 계속 실패합니다.
-
-## 실행/입력 정책
-
-- 워치리스트 티커 정책(fail-closed):
-  - KR은 6자리 숫자 코드만 허용(예: `005930`)
-  - US는 명시 거래소 suffix 필수(예: `AAPL.NAS`, `IBM.NYS`, `SPY.AMS`)
-  - US 클래스 티커는 `BASE.CLASS.EXCH`를 캐노니컬로 사용(예: `BRK.B.NYS`), `BRK/B.NYS` 입력은 허용하되 내부에서 `BRK.B.NYS`로 정규화
-  - `AAPL`(bare), `.US`(모호 suffix), 미지원 suffix(`AAPL.XNAS`)는 즉시 실패
-  - Supabase `holdings`도 동일 계약을 강제하며, 기존 `.US` row가 있으면 관련 migration은 수동 정리 전까지 실패
-- 유니버스별 watchlist 로드 정책:
-  - `--universe screener`: watchlist 파일을 로드/검증하지 않음
-  - `--universe watchlist|both`: watchlist를 로드하며, 파일 누락/티커 검증 실패 시 즉시 실패
-- `sab entry` 입력 정책:
-  - mixed KR/US buy 리포트도 시장별로 나눠 한 번에 평가합니다.
-  - 특정 시장만 평가하려면 `UV_CACHE_DIR=.uv-cache uv run python -m sab entry --market US`처럼 지정합니다.
-  - 치명 열화 임계치(선택): `ENTRY_FATAL_MISSING_PRICE_RATIO` (기본 `1.0`)
-    - `entry_price`가 비어 있는 행 비율이 임계치 이상이면 `sab entry`는 `exit 1`로 종료
-    - `0.0`은 "누락이 1건이라도 있으면 실패" 정책으로 해석
-- `sab ai-brief` 입력 정책:
-  - `--entry-report`는 필수이며, `entries[].action == "ENTER"`인 행만 추천 후보가 됩니다.
-  - mixed KR/US entry 리포트에는 `--market KR|US`를 반드시 지정해야 합니다.
-  - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
-  - `--model-provider fake`는 외부 뉴스/API를 호출하지 않고 낮은 confidence와 source issue를 남기는 계약 테스트용 provider입니다.
-  - `--model-provider openai`는 OpenAI Responses API를 호출하며, `OPENAI_API_KEY`와 실제 `--model-name` 또는 `OPENAI_AI_BRIEF_MODEL`이 필요합니다.
-  - `--source-provider local-json --source-report <path>`는 로컬 JSON source report를 후보별 source context로 주입합니다. source report는 `sources[]` row에 `ticker`, `title`, HTTP(S) `url`, offset 포함 `published_at`을 포함해야 하며, offline 경로라 DNS 조회 없이 literal local/private IP와 localhost만 거부합니다. source 시간은 72시간 이내이고 15분 넘는 미래 시간이면 무시됩니다.
-  - `--source-provider http-json --source-api-url <url>`는 외부 source API에 `{"schema":"sab.ai_brief_source_request.v1","tickers":[...],"max_sources_per_ticker":3,"freshness_hours":72}`를 POST하고, 응답의 `sources[]` row를 같은 계약으로 정규화해 후보별 source context로 주입합니다. API URL은 HTTPS여야 하며 local/private host와 redirect 응답은 거부합니다. 반환된 source row URL도 DNS 검증을 포함해 local/private host를 가리킬 수 없습니다. URL은 `AI_BRIEF_SOURCE_API_URL`, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS`로도 설정할 수 있으며, `AI_BRIEF_SOURCE_API_TOKEN`은 실행 URL이 `AI_BRIEF_SOURCE_API_URL`과 정확히 일치할 때만 Bearer 토큰으로 전송합니다.
-  - `--source-provider finnhub`는 `FINNHUB_API_KEY`로 Finnhub Company News를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `headline`/`url`/Unix `datetime`을 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `--source-provider polygon-news`는 `POLYGON_API_KEY`로 Polygon.io Stocks News endpoint(`https://api.polygon.io/v2/reference/news`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. 요청은 `ticker`, `limit=10`, `order=desc`, `sort=published_utc`를 사용하고 API key는 `Authorization: Bearer` header로만 전송합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`/`article_url`/`published_utc`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `--source-provider alpha-vantage-news`는 `ALPHA_VANTAGE_API_KEY`로 Alpha Vantage `NEWS_SENTIMENT` endpoint(`https://www.alphavantage.co/query`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. 요청은 `function=NEWS_SENTIMENT`, `tickers`, `time_from=<now-72h UTC>`, `sort=LATEST`, `limit=10`을 사용합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `feed[].title`/`feed[].url`/`feed[].time_published`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `--source-provider marketaux-news`는 `MARKETAUX_API_TOKEN`으로 Marketaux Finance & Market News endpoint(`https://api.marketaux.com/v1/news/all`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. 요청은 `symbols`, `countries=us`, `language=en`, `filter_entities=true`, `must_have_entities=true`, `published_after=<now-72h UTC>`, `limit=10`을 사용합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `data[].title`/`data[].url`/`data[].published_at`을 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `--source-provider benzinga-news`는 `BENZINGA_API_TOKEN`으로 Benzinga News endpoint(`https://api.benzinga.com/api/v2/news`)를 ticker별 1회 조회합니다. v1은 US ticker만 지원하며 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 repo ticker suffix를 제거해 요청합니다. 요청은 `token`, `tickers`, `pageSize=10`, `displayOutput=headline`, `sort=created:desc`, `publishedSince=<now-72h UTC Unix>`를 사용합니다. KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`/`url`/`created`를 기존 source row 계약으로 정규화하고, `created`가 비어 있으면 `updated`를 사용합니다. timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `--source-provider naver-news`는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 Naver Search API 뉴스 endpoint(`https://openapi.naver.com/v1/search/news.json`)를 ticker별 1회 조회합니다. v1은 KR ticker만 지원하며 `--buy-report`의 회사명을 검색어로 우선 사용하고, 없으면 6자리 ticker를 사용합니다. 요청은 `display=10`, `start=1`, `sort=date`로 보냅니다. US ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환 row는 `title`(HTML 제거), `originallink` 또는 `link`, `pubDate`를 기존 source row 계약으로 정규화하고, timeout은 `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` 또는 `--source-timeout-seconds`를 사용합니다.
-  - `scripts/collect_ai_brief_sources.py --feed-catalog <path>`는 RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `sab.ai_brief_sources.v1` 호환 payload로 변환하는 source API 보조 도구입니다. feed catalog row는 `path`/`feed_path` 또는 `url`/`feed_url` 중 정확히 하나를 사용하며, URL 예시는 `{"schema":"sab.ai_brief_source_feed_catalog.v1","feeds":[{"ticker":"AAPL.NAS","url":"https://example.com/aapl.xml"}]}`입니다. 로컬 feed 파일은 offline으로 처리하고 item URL의 literal local/private IP와 localhost만 거부합니다. live feed URL은 HTTPS만 허용하고 userinfo, local/private host, redirect, 1MB 초과 응답을 거부하며, live item URL도 DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 전체 실패가 아니라 ticker별 `issues[]` WARN으로 남깁니다.
-  - `scripts/compare_ai_brief_live_sources.py`는 `--provider LABEL=PROVIDER`를 2개 이상 받아 `http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news` live source 결과를 각각 `sab.ai_brief_sources.v1` payload로 저장한 뒤 기존 source eval 비교를 실행합니다. `http-json` label에는 `--source-api-url LABEL=URL`을 지정하며, URL 없는 `http-json` provider가 정확히 하나면 `AI_BRIEF_SOURCE_API_URL`을 사용합니다. provider 실패는 전체 실행을 멈추지 않고 해당 payload의 top-level `ERROR` issue로 기록되어 비교 결과에서 FAIL로 판정됩니다. 각 captured payload와 최종 JSON에는 provider별 `duration_ms`가 포함되어 coverage/source count/issue 수와 함께 운영 비교에 사용할 수 있습니다.
-  - `scripts/live_integration_smoke.py`는 local refactor 뒤 선택적으로 RSS feed catalog, 단일 또는 복수 AI Brief live source provider, KIS token/price/daily candle endpoint를 한 JSON 결과로 smoke합니다. 아무 옵션도 없으면 실행하지 않고 실패하며, 선택한 check만 네트워크를 호출합니다. `FAIL` check가 있으면 exit 1, `WARN`만 있으면 exit 0입니다. 출력 summary에는 count/status/sample key만 남기고 API key나 app secret 값은 포함하지 않습니다.
-  - source provider는 entry report의 `ENTER` 후보를 추가할 수 없고, preselection에 포함되지 않은 ticker source는 `source_issues[]`로 기록한 뒤 무시합니다.
-  - source provider timeout/HTTP/JSON/body-size 실패는 실행을 중단하지 않고 `system_issues[]`에 남긴 뒤 source 없는 artifact를 생성합니다.
-  - OpenAI provider timeout/응답 계약 실패는 주문 추천 없이 빈 `recommendations[]`와 `system_issues[]`를 남기는 로컬 artifact로 기록합니다.
-  - OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있으며, 소스가 없는 추천은 ticker별 `source_issues[]`를 반드시 남겨야 합니다.
-  - `scripts/eval_ai_brief_recommendations.py`는 생성된 `*.ai-brief.json`을 entry report 기준으로 오프라인 평가합니다. 평가 항목은 eligible/excluded/cap-excluded 후보 정합성, summary count 일관성, rank 연속성, source-backed recommendation 비율, source 없는 추천의 confidence 안전성입니다.
-
-## 웹 UI 운영 참고
-
-- 기본 운영 기준: `web` 서비스는 이미지 빌드 시 `pnpm run build`를 수행하고, 런타임 엔트리는 `pnpm run start`만 실행합니다.
-- 로컬 Supabase는 idle 리소스 절감을 위해 `realtime`, `studio`, `inbucket`, `analytics`를 기본 비활성화한 최소 프로필을 사용합니다.
-
-### 실행 명령
-
-- 전환 직후 1회 정리: `docker compose down --remove-orphans && docker compose up -d --build web`
-- 일반 재기동: `docker compose up -d --build web`
-- 개발 모드(HMR): `docker compose --profile dev up -d --build web-dev`
-- 개발 모드 중지: `docker compose stop web-dev`
-- 강제 재생성(문제 시): `docker compose stop web && docker compose rm -f web && docker compose up -d --build web`
-- 로그(prod): `docker compose logs -f web`
-- 로그(dev): `docker compose --profile dev logs -f web-dev`
-- 중지(prod): `docker compose stop web`
-- 접속(prod): `http://localhost:${WEB_HOST_PORT}` (기본값 `55300`)
-- 접속(dev): `http://localhost:${WEB_DEV_HOST_PORT}` (기본값 `55301`)
-- 포트 변경(prod): `.env`에 `WEB_HOST_PORT=55444` 설정 후 `docker compose up -d --build web`
-- 포트 변경(dev): `.env`에 `WEB_DEV_HOST_PORT=55445` 설정 후 `docker compose --profile dev up -d --build web-dev`
-
-### 직접 실행/바인딩 정책
-
-- 직접 실행(선택): `cd web && pnpm install && pnpm run dev`
-- 직접 실행 기본 바인딩: `WEB_BIND_HOST` 미지정 시 `127.0.0.1`
-- 직접 실행에서 non-loopback bind(`0.0.0.0`, 사설 IP 등)는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없이 시작 단계에서 차단됩니다.
-- Docker Compose는 컨테이너 내부 `0.0.0.0` bind를 명시적으로 허용하지만, 호스트 publish가 `127.0.0.1:${WEB_HOST_PORT}:3000`인 경우만 지원 경로입니다.
-- 직접 실행 시 Node 버전은 `web/Dockerfile`/`web/Dockerfile.dev`의 `FROM node:<version>`과 동일하게 맞춥니다.
-- 웹 패키지 매니저: `pnpm` (고정)
-
-### 기능 및 보호 경계
-
-- `Reports`
-  - 리포트 목록/상세/타입 필터(`buy`/`sell`/`entry`/`ai-brief`)/ticker substring 검색
-  - 검색 범위 정책: 서버 환경변수 `REPORT_SEARCH_WINDOW` (기본 100, 최소 10, 최대 1000)
-  - 런타임 상태 저장소: `SAB_RUNTIME_STATE_STORE` (`supabase`/`memory`, 기본은 테스트 외 `supabase`)
-  - 로그인 스로틀 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE` (`degrade`/`strict`, 기본 `strict`)
-  - 응답의 `truncated=true`는 "정책상 검색 대상이 잘려 더 오래된 리포트는 미검색"을 의미
-  - 보호 경계: `/api/reports` 및 `/api/reports/detail`은 관리자 세션 인증(`requireAdminAuth`) + same-origin 검증을 필수로 요구
-- `Holdings`
-  - Supabase `holdings` CRUD
-  - 보호 경계: `/api/holdings` 및 `/api/holdings/[ticker]`는 관리자 세션 인증 + same-origin 검증을 필수로 요구
-  - 목록 조회: cursor 기반 페이지네이션(`limit`, `cursor`) + UI `Load more`
-  - 추가매수(`POST /api/holdings/[ticker]/add-buy`): `Idempotency-Key`(UUID) 헤더 필수, 동일 키 재시도 시 기존 결과 반환, 동일 키-다른 payload는 `409` 충돌 처리
-  - `sell` 평가는 `quantity > 0` 활성 보유분만 대상으로 처리
-- `Run`
-  - `scan.yml`/`sell.yml` `workflow_dispatch` 트리거
-  - 기능 플래그: `RUN_DISPATCH_ENABLED=1`에서 활성화(하위 호환: 플래그 미설정 + `GITHUB_OWNER/GITHUB_REPO/GITHUB_PAT` 모두 설정 시 자동 활성)
-  - 보호 경계: `/api/run`은 관리자 세션 인증 + same-origin 검증을 필수로 요구, 실행 ref는 `main`으로 고정
-  - `scan` 실행 입력 정책: `provider=pykrx`는 `universe=KR`에서만 지원
-  - `scan`에서 `provider=pykrx`를 사용할 때는 `watchlist.txt`(또는 `WATCHLIST_FILE`/`files.watchlist`)가 비어 있지 않아야 함
-  - `scan`에서 `provider=pykrx` + `universe=US|both` 조합은 입력 검증 단계에서 실패하도록 설계
-  - 기본 하드닝: 로컬 요청 검사는 기본 활성(`Host` + `x-forwarded-host` 일관성, unsafe 메서드는 `origin/referer` 로컬성 또는 `sec-fetch-site=same-origin` 요구), `SAB_ENFORCE_LOCAL_REQUEST=0`에서만 비활성화 (`/api/auth/`*, `/api/holdings*`, `/api/reports*`, `/api/run`)
-  - 시작 가드: `WEB_BIND_HOST`가 loopback 밖으로 열려 있으면 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없이 서버는 시작하지 않습니다.
-  - 운영 가정: 당분간 웹은 `localhost/127.0.0.1` 단일 사용자 노출만 지원하며, local-request 가드는 원격 노출의 완전한 보안 경계로 간주하지 않습니다.
-
-## CLI 서브커맨드
-
-`python -m sab` CLI는 아래 서브커맨드를 제공합니다.
-
-| 실행 예 | 설명 |
-| --- | --- |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab scan` | 후보 수집/평가 후 JSON 리포트 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab sell` | 보유 종목을 매도/점검 규칙으로 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab entry` | buy 리포트 후보를 다음 세션 진입 관점으로 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path>` | entry 리포트의 `ENTER` 후보를 로컬 AI brief로 요약 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief-scheduled --market <KR\|US> --schedule-role <role> --runner-role <role> --scheduled-tick <HHMM>` | runtime_state 멱등 가드 기반 scheduled AI Brief 실행(주로 launchd/Docker scheduler가 호출, 운영 절차는 `docs/runbook.md` 참고) |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --model-provider openai --model-name <model>` | OpenAI Responses API로 로컬 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider local-json --source-report <path>` | 로컬 JSON source context를 포함해 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider http-json --source-api-url <url>` | 외부 JSON source API context를 포함해 AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider finnhub` | Finnhub Company News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider polygon-news` | Polygon News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider alpha-vantage-news` | Alpha Vantage News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider marketaux-news` | Marketaux News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --source-provider benzinga-news` | Benzinga News source context를 포함해 US AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path> --buy-report <path> --source-provider naver-news` | Naver News source context를 포함해 KR AI brief 생성 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/collect_ai_brief_sources.py --feed-catalog <path>` | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 AI Brief source payload로 변환 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --source-report <path>` | 수집한 AI Brief source payload 품질 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_sources.py --entry-report <path> --compare-source-report finnhub=<path> --compare-source-report polygon=<path> --compare-source-report av=<path> --compare-source-report marketaux=<path> --compare-source-report benzinga=<path> --compare-source-report naver=<path>` | 여러 AI Brief source payload를 같은 entry 후보 기준으로 비교 평가 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/compare_ai_brief_live_sources.py --entry-report <path> --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=<url>` | 여러 live AI Brief source provider를 캡처한 뒤 같은 entry 후보 기준으로 비교 평가하고 provider별 `duration_ms`/fastest leader를 남김. `market=MIXED` entry report는 `--market KR|US` 필요 |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/live_integration_smoke.py --entry-report <path> --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS` | 자격 증명과 네트워크가 준비된 로컬 환경에서 선택한 RSS/source API/KIS market-data 경계를 live smoke |
-| `UV_CACHE_DIR=.uv-cache uv run python scripts/eval_ai_brief_recommendations.py --entry-report <path> --ai-brief-report <path>` | 생성한 AI Brief 추천 artifact 품질 평가 |
-
-## 작업 자동화 (just + direnv)
-
-- 기본 레시피 목록: `just --list`
-- 대표 명령:
-  - `just scan`
-  - `just sell`
-  - `just entry`
-  - `just ai-brief-source-collect --feed-catalog feeds.json --output captured.sources.json`
-  - `just ai-brief-source-eval --entry-report reports/YYYY-MM-DD.entry.json --source-report captured.sources.json`
-  - `just ai-brief-source-eval --entry-report reports/example.entry.json --compare-source-report finnhub=finnhub.sources.json --compare-source-report polygon=polygon.sources.json --compare-source-report av=alpha-vantage.sources.json --compare-source-report marketaux=marketaux.sources.json --compare-source-report benzinga=benzinga.sources.json --compare-source-report naver=naver.sources.json --now 2026-05-06T12:00:00+00:00 --pretty`
-  - `just ai-brief-source-live-compare --entry-report reports/example.entry.json --provider polygon=polygon-news --provider benzinga=benzinga-news --provider vendor=http-json --source-api-url vendor=https://source.example/api --market US --pretty`
-  - `just live-integration-smoke --entry-report reports/example.entry.json --source-provider finnhub=finnhub --kis-token --kis-overseas-price-ticker AAPL.NAS --pretty`
-  - `just ai-brief-eval --entry-report reports/YYYY-MM-DD.entry.json --ai-brief-report reports/YYYY-MM-DD.ai-brief.json`
-  - `just quality` (ruff + format-check + mypy + pytest)
-  - `just check` (`just quality` 별칭 호환)
-  - `just precommit-all`
-  - `just ci-python`
-  - `just ci-web` (web install + lint + format-check + typecheck + test:coverage + build, 비밀 없는 고정 CI placeholder env 사용)
-- 레시피에 CLI 인자 전달:
-  - 예시: `just scan --universe both --screener-limit 20`
-- direnv 사용 시:
-  - `.envrc`는 비시크릿 기본값/도구 캐시 변수만 관리
-  - 시크릿/개인 오버라이드는 `.envrc.local`(git ignore)로 분리
-  - `.envrc` 변경 시 `direnv allow .`를 다시 실행
-
-## 파일/폴더 구조
-
-- `sab/` - Python 애플리케이션 코드
-  - `__main__.py` - CLI 엔트리(`sab scan` / `sab sell` / `sab entry` / `sab ai-brief` / `sab ai-brief-scheduled`)
-  - `scan.py`, `scan_screener.py`, `scan_evaluation.py` - Scan 오케스트레이션
-  - `sell.py`, `sell_evaluation.py`, `sell_runtime.py` - Sell 오케스트레이션
-  - `entry.py` - Entry 후보 산출
-  - `ai_brief.py`, `ai_brief_sources.py`, `ai_brief_providers.py`, `ai_brief_source_collectors.py`, `ai_brief_source_eval.py`, `ai_brief_source_live_compare.py`, `ai_brief_eval.py`, `ai_brief_eval_common.py`, `ai_brief_url_safety.py` - AI Brief 오케스트레이션/소스/평가/URL 안전성
-  - `sab/scheduler/` - scheduled AI Brief runner(runtime_state 멱등 가드, holdings snapshot, role window) — `ai-brief-scheduled` 진입점
-  - `sab/data/` - KIS/PyKRX 커넥터(`sab/data/kis/` 서브패키지로 분리), 캐시 어댑터
-  - `sab/signals/` - EMA/RSI/ATR 계산
-  - `sab/report/` - 리포트 아티팩트(JSON) 생성, AI Brief 판단 상태 결정(`ai_brief_state.py`)
-- `web/` - Next.js 로컬 대시보드(App Router + Route Handler)
-- `reports/` - 생성된 JSON 리포트 아티팩트 출력 폴더
-- `scripts/` - 개발/운영 보조 스크립트(`collect_ai_brief_sources.py`, `eval_ai_brief_sources.py`, `compare_ai_brief_live_sources.py`, `live_integration_smoke.py`, `eval_ai_brief_recommendations.py` 외 `check_major_updates.py`/`check_next_app_routes.py`/`run_vulture.py`/`upgrade_deps.sh`)
-- `data/` (루트 폴더) - 런타임 캐시/상태(JSON; KIS 캔들, 토큰, `holidays_us.json` 등). `sab/data/` 패키지 코드와는 별개 위치임에 유의.
-- `docs/README.md` - 문서 인덱스(진입점)
-  - `docs/adr/README.md` - ADR 인덱스
-  - `docs/reviews/README.md` - 리뷰 인덱스
-- `supabase/` - Supabase 마이그레이션/설정
-- `holdings.yaml` - 선택 백업 파일(import/export 용도, 웹 UI에서 내보내기/가져오기 가능)
-
-## 전략(요약)
-
-- 상세 계약/모드별 규칙: `docs/STRATEGY.md`
-- 현재 배포 기본 모드는 `sma_ema_hybrid`(SMA20 + EMA10/21 + RSI 스윙존; `config.yaml`/`config.example.yaml`의 `strategy.mode`)입니다. 아래 코어 요약은 레거시 `ema_cross` 모드 기준이며, 모드별 정확한 계약·기본값은 `docs/STRATEGY.md`를 참조하세요.
-- (레거시 `ema_cross`) 코어: EMA20/50 골든크로스 + RSI14 30 상향 재돌파(+ RSI<70)
-- 장기 필터(옵션): 가격/EMA20/EMA50 모두 SMA200 위
-- 갭 필터: ATR 기반(|갭| <= ATR×배수 / 전일종가), 기본 배수 1.0 권장
-- 품질: 최소 거래대금(최근 20일 평균), 신규상장/저유동 제외, ETF/ETN/레버리지 제외 옵션
-- 품질 보강: EMA20/50 기울기>0, 신호일 종가가 두 EMA 위
-- 리스크: ATR14 기반 손절/타깃(~1:2)
-- 점수화: 추세/기울기/모멘텀/유동성/변동성 가중 합산으로 후보 정렬
-
-### 리더(선도주) 중심 보완
-
-- 스크리너 단계에서 거래대금 상위 N + 최소 가격(MIN_PRICE) 필터 권장
-- 상대강도(RS) 도입 시 지수 대비 상위 분위만 통과(선택)
-- 20/60일 수익률·회전율·과도갭 빈도 등을 보조 점수로 활용(선택)
-
-## 보유/매도 평가(개요)
-
-- (권장) 보유 목록은 Supabase `holdings`를 단일 소스로 사용합니다(웹 UI에서 CRUD).
-- 웹 Holdings 화면에서 `Export YAML`로 전체 holdings snapshot을 `holdings.yaml`로 내보낼 수 있습니다.
-- 같은 화면의 import 패널은 `holdings.yaml`을 dry-run으로 먼저 검증하고, 확인 후 **Replace All** 방식으로 현재 DB를 파일 내용으로 교체합니다.
-- export는 `quantity=0` 비활성 row까지 포함하며, 로컬 `sab sell`은 그중 `quantity > 0` row만 평가 대상으로 사용합니다.
-- 로컬에서 `sab sell`을 직접 실행할 때는 `holdings.yaml`(백업 파일) 또는 `--holdings <path>`로 지정한 파일을 입력으로 사용합니다.
-- `--holdings <path>` 또는 `files.holdings`가 지정된 경우, 파일이 존재하지 않으면 즉시 실패합니다.
-- 스키마와 예시는 `docs/holdings-schema.md` 및 `holdings.example.yaml`을 참고하세요.
-
-## 장 오픈 진입 체크(현재 제공)
-
-- 기본 Entry 평가는 이미 `sab entry`로 제공되며, `reports/YYYY-MM-DD(-n).entry.json` 아티팩트를 생성합니다.
-- Entry 리포트를 웹에서 보려면 Supabase 업로드가 필요하며, `SAB_UPLOAD_REPORTS=true` 또는 `sab entry --upload` 경로를 사용합니다.
-- 웹 `Run` 탭과 GitHub Actions에는 아직 standalone `entry` 전용 트리거가 없습니다. `ai-brief.yml`은 내부 단계로 `entry`를 실행합니다.
-
-## 데이터 수집(히스토리 누적)
-
-- KIS 일봉 API는 호출당 최대 100봉을 반환합니다. `MIN_HISTORY_BARS`(권장 200) 이상을 확보하기 위해 날짜 창을 이동하며 여러 번 호출해 누적 수집합니다.
-- 첫 실행은 2~3회 호출로 충분한 길이를 확보하고, 이후 실행은 최근 구간만 증분 갱신합니다.
-- 레이트리밋(EGW00201) 대응을 위해 요청 간 최소 간격(`KIS_MIN_INTERVAL_MS`)과 백오프 재시도를 적용합니다.
-
-## US 시장 참고
-
-- 해외 스크리너 모드
-  - `kis`: KIS 해외 랭킹 API(거래량/시가총액/거래대금 순위) 사용
-  - `defaults`: 설정의 기본 유니버스(`screener.us_defaults`)에서 상위 N 선택
-  - `screener.us_defaults`는 명시 거래소 suffix 티커만 허용(`AAPL.NAS`, `MSFT.NAS` 등). bare/KR/`.US`/미지원 suffix는 설정 로드 단계에서 즉시 실패
-  - `screener.us_mode=kis`는 fail-closed로 동작하며 `screener.us_defaults` 자동 폴백을 사용하지 않습니다.
-  - `--universe screener`에서 US KIS 스크리너가 실패/빈 결과면 즉시 실패합니다.
-  - `--universe both`에서 US KIS 스크리너가 실패/빈 결과면 watchlist는 유지하고 US 스크리너만 건너뜁니다.
-  - `--screener-limit`을 명시하면 KR/US 모두 해당 값이 우선 적용됩니다.
-  - `--screener-limit` 미지정 시 KR은 `screener.limit`, US는 `screener.us_limit`을 사용합니다.
-- 미국 시장 시간대는 EST/EDT 기준(09:30-16:00)이며, 스크리너 메타데이터에 시장 상태(open/closed)를 표기합니다.
-- 환율/통화 병기: `FX_MODE=kis`로 두면 KIS 해외 현재가상세에서 실시간 환율(`t_rate`)을 읽어 자동 적용합니다. `USD_KRW_RATE`는 manual 모드나 폴백으로 사용됩니다.
-- `FX_MODE` 상세
-  - `kis` (권장): `/uapi/overseas-price/v1/quotations/price-detail` 호출로 `t_rate`(당일환율)를 조회하고 `FX_CACHE_TTL` 분 동안 캐시합니다. `FX_KIS_SYMBOL`로 환율 조회용 심볼을 지정하거나, 자동으로 첫 USD 후보를 사용합니다.
-  - `manual`: `USD_KRW_RATE` 또는 `config.yaml`의 `fx.usdkrw` 값을 그대로 사용
-  - `off`: 환율을 무시하고 USD 금액만 출력합니다.
-  - 어떤 모드든 KIS 호출 실패 시 `USD_KRW_RATE` 값이 있으면 폴백하며, 값이 없으면 리포트 Appendix에 경고가 추가됩니다.
-- 휴장일: KIS 해외 휴일 API(`countries-holiday`)를 조회해 휴일/조기폐장 여부를 메타데이터에 표시합니다.
-  - `data/holidays_us.json`이 없거나 12시간 TTL을 넘긴 경우에만 재호출하며, 한 번 갱신할 때는 기본 10일 구간만 조회합니다.
-
-### Per-market 임계치(권장)
-
-- `config.yaml`의 `screener.min_price`/`min_dollar_volume`는 KR 기준(원화)
-- `screener.us.min_price`/`min_dollar_volume`는 US 기준(달러)로 별도 지정해 정확도를 높일 수 있습니다.
-
-### KIS 토큰 캐시
-
-- KIS 토큰은 1일 1회 발급 원칙입니다. 본 프로젝트는 토큰을 `data/`에 캐시해 같은 날 재발급을 피합니다.
-
-## 개발 운영(1인 사이드 프로젝트)
-
-- 이 저장소는 1인 개발 기준으로 운영합니다.
-- 기본 흐름은 `main`에 직접 push + CI 자동 검증입니다.
-- 필요할 때만 feature 브랜치/PR을 사용하고, PR을 쓸 때도 동일한 CI 검증을 적용합니다.
-- 로컬 품질 점검 권장 명령:
-  - `UV_CACHE_DIR=.uv-cache uv run ruff check .`
-  - `UV_CACHE_DIR=.uv-cache uv run ruff format --check .`
-  - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
-  - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
-
-## EOD Replay Harness
-
-- `tests/fixtures/replay_eod/scan/*`는 fixture 기반 `scan` replay baseline입니다. 전략 변경이 buy artifact를 어떻게 바꾸는지 CI에서 고정 비교합니다.
-- 실행 예시: `just test tests/test_replay_eod_scan.py -q`
-- 새 replay case를 추가할 때는 각 case 디렉터리에 `config.yaml`, `watchlist.txt`, `adjusted_market_data.json`, `raw_market_data.json`, `expected.buy.json` 다섯 파일만 포함해야 합니다.
-
-## Audit 자동화 (GitHub Actions)
-
-- 보안/워크플로 감사 전용 파이프라인은 `.github/workflows/audit.yml`로 운영합니다.
-- 트리거:
-  - `pull_request`
-  - `workflow_dispatch`
-  - `schedule: "0 11 * * 1"` (매주 월요일 11:00 UTC)
-- 감사 정책:
-  - 엔진: Trivy(`vuln,secret`)
-  - 차단 심각도: `HIGH,CRITICAL`
-  - 미패치 취약점도 차단 대상에 포함(`ignore-unfixed=false`)
-  - 결과물: `trivy-gate-results-<run_id>` / `trivy-report-results-<run_id>` 아티팩트 업로드(성공/실패 모두)
-- 로컬 수동 점검:
-  - 빠른 점검: `trivy fs .`
-  - CI 동일 정책 점검:
-    - `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed=false --format json --output trivy-gate-results.json .`
-- 취약점 예외는 `.trivyignore`에서 관리합니다.
-  - 임시 예외만 허용
-  - 각 항목에 만료일/사유 주석 필수
-  - 만료 시 즉시 삭제
-- PR 차단(브랜치 보호) 필수 체크:
-  - `CI / Ruff + Mypy + Pytest`
-  - `CI / Next.js Web (Lint + Typecheck + Test + Build)`
-  - `workflow_audit`
-  - `security_audit`
-
-## 의존성 업데이트 자동화 (Renovate)
-
-- 의존성 업데이트는 GitHub Actions 커스텀 워크플로 대신 Renovate GitHub App으로 운영합니다.
-- 스케줄: 매주 월요일 09:00 UTC
-- 자동 머지 정책:
-  - `patch`: CI 통과 시 자동 머지
-  - `minor`/`major`: 수동 검토 후 머지
-- 관리 범위:
-  - Python: `pyproject.toml`, `uv.lock`
-  - Web: `web/package.json`, `web/pnpm-lock.yaml`
-  - CI/런타임: `.github/workflows/*.yml`, `docker-compose.yml`, `web/Dockerfile`, `web/Dockerfile.dev`
-- 안정성 우선 정책:
-  - `.pre-commit-config.yaml`도 Renovate 관리 대상이며, control-plane 변경은 수동 검토 대상으로 둠
-  - 잠금 파일 유지보수 PR(lock file maintenance)은 자동 머지를 비활성화
-  - 메이저 업데이트 PR에는 `major` 라벨을 추가
-
-설정 파일은 `renovate.json`을 참고하세요.
+KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. GitHub Actions는 정기 scan/sell/cleanup과 AI Brief monitor/fallback을 실행합니다.
 
 ## 문서 상태
 
 ### 현재 제공
 
-- Buy/Sell/Entry 파이프라인과 로컬 AI Brief 생성은 로컬 JSON 리포트 생성까지 동작합니다.
-- 웹 콘솔은 Reports(`buy`/`sell`/`entry`/`ai-brief`), Holdings CRUD, Add Buy, YAML import/export, Metrics, `scan`/`sell` Run 트리거를 제공합니다.
-- GitHub Actions `scan.yml`/`sell.yml`은 `schedule` + `workflow_dispatch`와 자동 실행 알림을 지원합니다.
-- GitHub Actions `ai-brief.yml`의 수동 `workflow_dispatch`는 단일 시장 scan → entry → ai-brief를 실행하고 JSON/preview artifact를 업로드하며, 수동 opt-in으로 Telegram/Slack 알림을 발송할 수 있습니다. scheduled 실행은 ADR-0012에 따라 로컬 Docker primary가 담당하고, `ai-brief.yml` 스케줄은 US canary monitor/fallback 역할만 수행합니다(상세: `docs/runbook.md`, `docs/ARCHITECTURE.md`). source provider(`http-json`/`finnhub`/`polygon-news`/`alpha-vantage-news`/`marketaux-news`/`benzinga-news`/`naver-news`)는 수동 `source_provider=...` 입력 또는 시장별 scheduled `AI_BRIEF_SOURCE_PROVIDER_KR`/`AI_BRIEF_SOURCE_PROVIDER_US`로 선택하며, provider별 secret·시장 제약(US/KR-only)·`AI_BRIEF_SOURCE_API_TOKEN` 전달 조건·scheduled fallback 순서는 위 "설정 파일 원칙과 `.env`"·"실행/입력 정책" 절과 `docs/ARCHITECTURE.md`·`docs/runbook.md`를 참고하세요.
-- 새 AI Brief artifact는 `brief_state`/`brief_reason`을 포함합니다. Telegram/Slack과 Reports 상세는 `NO_SIGNAL`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 상태를 같은 규칙으로 표시합니다. scheduled runtime guard가 막은 실행은 정상 `ai-brief`와 분리된 `ai-brief-skip` Reports artifact와 skipped Telegram 메시지를 남깁니다. 장전 schedule이 지연되어 `INTRADAY`에 도달한 skip 알림은 `local_time`과 `reason=scheduled_run_after_pre_open_window`를 함께 표시합니다.
-- RSS/Atom/RDF 로컬 파일과 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sources[]` payload를 만들고, `ai-brief-source-eval`로 freshness/coverage/cap 품질을 확인하거나 여러 캡처 payload를 같은 entry 후보 기준으로 비교할 수 있습니다. `scripts/compare_ai_brief_live_sources.py`는 기존 live provider들을 직접 캡처해 같은 evaluator로 비교하며, provider별 `duration_ms`를 함께 남깁니다. `scripts/live_integration_smoke.py`는 자격 증명과 네트워크가 의도적으로 준비된 로컬 환경에서 선택한 RSS/source API/KIS market-data 경계를 단일 JSON smoke 결과로 확인합니다. 생성된 `*.ai-brief.json`은 `ai-brief-eval`로 entry alignment, summary consistency, source-backed ratio, confidence safety를 오프라인 확인할 수 있습니다.
+- 프로젝트 개요, 빠른 시작, 핵심 명령, 문서 지도만 제공합니다.
+- 상세한 개발, 설정, 배포, 운영, 장애 대응, API, 전략 문서는 `docs/` 아래 문서로 분리합니다.
 
 ### 실험
 
 - 별도 실험 전용 사용자 기능은 현재 운영 기준에 포함하지 않습니다.
-- 전략/파라미터 실험은 `tests/fixtures/replay_eod`와 설정 오버라이드로 검증합니다.
+- 전략/파라미터 실험은 `docs/STRATEGY.md`, replay fixture, 테스트에서 추적합니다.
 
 ### 백로그
 
-- 웹 `Run` 탭과 GitHub Actions workflow에 standalone `entry` 전용 실행 경로 추가
-- 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
-- 추가 유료/벤더별 news/API adapter 운영화
+- standalone `entry` workflow dispatch와 웹 `Run` 탭 연결은 backlog입니다.
+- 원격 공개 운영 모델은 별도 보안/권한 설계 전까지 범위 밖입니다.
 
 ### 폐기 후보
 
-- `watchlist.yaml` 같은 추가 입력 포맷 확장은 현재 근거가 부족해 채택 후보로 올리지 않습니다.
-- 긴 작업 분리 설계 없이 웹을 원격/Vercel에 직접 노출하는 방향은 재추진하지 않습니다.
+- `watchlist.yaml` 메모형 입력 포맷과 현재 저장소 구조와 맞지 않는 초기 bootstrap 설명은 유지하지 않습니다.
+
+## 빠른 시작
+
+```bash
+mise install
+UV_CACHE_DIR=.uv-cache uv sync --all-extras --all-groups
+cp .env.example .env
+```
+
+`.env`에는 실제 시크릿을 넣되 커밋하지 마세요. 최소 KIS 실행에는 `KIS_APP_KEY`, `KIS_APP_SECRET`이 필요하고, 웹 UI와 업로드에는 Supabase와 관리자 로그인 환경변수가 필요합니다. 전체 설정 표는 [docs/configuration.md](docs/configuration.md)를 보세요.
+
+## 핵심 명령
+
+```bash
+just --list
+just scan --universe both
+just sell
+just entry
+UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json
+docker compose up -d --build web
+```
+
+웹 UI 기본 주소는 `http://localhost:${WEB_HOST_PORT}`이며 기본 포트는 `55300`입니다.
+
+## 품질 검증
+
+```bash
+just quality
+just ci-web
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q
+```
+
+Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조 변경은 `tests/test_docs_state_contract.py`를 우선 실행합니다.
+
+## 기술 스택
+
+| 영역 | 스택 |
+| --- | --- |
+| Python engine | Python 3.14, `uv`, `requests`, `PyYAML`, optional `pykrx` |
+| Web console | Next.js 16, React 19, TypeScript, pnpm |
+| Storage/backend | Supabase Postgres, Supabase Storage |
+| Automation | GitHub Actions, Docker Compose, macOS `launchd` scheduled AI Brief |
+| Toolchain | `mise`, `just`, Ruff, Mypy, Pytest, ESLint, Vitest, Prettier |
+
+## 문서 지도
+
+| 질문 | 문서 |
+| --- | --- |
+| 이 시스템이 무엇을 하는가 | [docs/overview.md](docs/overview.md) |
+| 로컬에서 설치/실행/테스트하려면 | [docs/local-development.md](docs/local-development.md) |
+| 환경변수와 config 키는 무엇인가 | [docs/configuration.md](docs/configuration.md) |
+| 전체 구조와 데이터 흐름은 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| CLI와 웹 API는 어떻게 생겼나 | [docs/api.md](docs/api.md) |
+| 배포/마이그레이션/롤백은 | [docs/deployment.md](docs/deployment.md) |
+| 운영 체크와 로그/헬스체크는 | [docs/operations.md](docs/operations.md) |
+| 장애가 나면 어디서부터 보는가 | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| 전략 신호와 리스크 규칙은 | [docs/STRATEGY.md](docs/STRATEGY.md) |
+| 기여/커밋/검증 규칙은 | [docs/contributing.md](docs/contributing.md) |
+| 보안 신고와 시크릿 사고 대응은 | [SECURITY.md](SECURITY.md) |
+
+## 주요 산출물
+
+- 로컬 리포트: `reports/YYYY-MM-DD(-n).{buy|sell|entry|ai-brief|ai-brief-skip}.json`
+- Supabase Storage key: `YYYY/MM/YYYY-MM-DD(-n).{buy|sell|entry|ai-brief|ai-brief-skip}.json`
+- 보유 목록 source of truth: Supabase `holdings`
+- 리포트 목록 source of truth: Supabase `report_index`
+- 런타임 상태/락 source of truth: Supabase `runtime_state`
+
+## 보안 기본값
+
+- `.env`, `.env.*`, `.envrc.local`, `holdings.yaml`, `watchlist.txt`, `data/`, `reports/`는 커밋하지 않습니다.
+- `config.yaml`은 비시크릿 기본값만 담습니다.
+- `config.yaml`과 `.env`에 동일 논리 키를 중복 정의하면 fail-closed로 실패합니다.
+- 서버 전용 키(`SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_PAT`)는 브라우저 코드로 노출하지 않습니다.
 
 ## 라이선스
 
-- 본 리포지토리의 소스코드는 MIT License를 따릅니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
+[LICENSE](LICENSE)를 참고하세요.

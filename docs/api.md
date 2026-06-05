@@ -1,0 +1,139 @@
+# API
+
+상태: Accepted (API/인터페이스 가이드)
+
+이 문서는 현재 코드 기준의 CLI 서브커맨드와 로컬 웹 API route 계약을 정리합니다. 웹 API는 로컬 관리자 콘솔 내부 API이며, 공개 외부 API로 안정성/호환성을 보장하지 않습니다.
+
+## 문서 상태
+
+### 현재 제공
+
+- `sab` CLI subcommand, 주요 option, 산출물 계약을 제공합니다.
+- Next.js `web/src/app/api/**/route.ts` 기준 웹 API route, 인증 경계, 요청/응답 형태를 제공합니다.
+
+### 실험
+
+- OpenAPI/Swagger 문서는 아직 없습니다.
+- 웹 API contract 자동 생성은 구현되어 있지 않습니다.
+
+### 백로그
+
+- `web/src/lib/schemas.ts`에서 API 요청 schema 표를 자동 생성하는 문서화 스크립트.
+- standalone `entry` workflow dispatch API.
+
+### 폐기 후보
+
+- 인증 없이 Storage object를 직접 list/download하는 초기 웹 API 가정은 현재 계약이 아닙니다.
+
+## Authentication Boundary
+
+| Surface | Auth | Notes |
+| --- | --- | --- |
+| CLI `sab` | local environment credentials | `.env`/GitHub Secrets/Docker env에서 KIS, Supabase, provider secret을 읽습니다. |
+| Web pages | admin session cookie | `/login`에서 `SAB_BASIC_AUTH_USER/PASS`로 로그인합니다. |
+| Web APIs | admin session + same-origin/local request guard | `/api/auth/login`과 `/api/auth/logout`를 제외한 API route는 `enforceAdminApiGuard`를 사용합니다. |
+| GitHub workflow dispatch | server-side `GITHUB_PAT` | `RUN_DISPATCH_ENABLED=1`일 때만 `/api/run`이 dispatch합니다. |
+
+`/login` page는 liveness 확인용으로 비인증 접근이 가능하지만, 보호 API의 정상 여부를 의미하지 않습니다.
+
+## CLI Interface
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
+```
+
+| Command | Purpose | Key Options | Output |
+| --- | --- | --- | --- |
+| `scan` | watchlist/screener universe를 평가해 buy report 생성 | `--limit`, `--watchlist`, `--provider kis|pykrx`, `--screener-limit`, `--universe watchlist|screener|both`, `--markets KR,US` | `reports/YYYY-MM-DD(-n).buy.json` |
+| `sell` | active holdings 평가 후 sell report 생성 | `--provider kis|pykrx`, `--holdings <path>` | `reports/YYYY-MM-DD(-n).sell.json` |
+| `entry` | buy report 후보의 다음 세션 진입 조건 평가 | `--buy-report`, `--provider kis|pykrx`, `--mode PRE_OPEN|INTRADAY|AFTER_CLOSE`, `--market KR|US`, `--upload` | `reports/YYYY-MM-DD(-n).entry.json` |
+| `ai-brief` | entry report의 `ENTER` 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--source-provider`, `--source-report`, `--source-api-url`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
+| `ai-brief-scheduled` | runtime_state guard와 marker를 사용하는 scheduled runner | `--market`, `--schedule-role`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--source-provider`, `--model-provider`, `--dry-run`, `--guard-only` | `ai-brief` 또는 `ai-brief-skip` report, runtime_state marker |
+
+## Report Artifacts
+
+| Report Type | Local Pattern | Supabase Storage Pattern | Index Source |
+| --- | --- | --- | --- |
+| `buy` | `reports/YYYY-MM-DD(-n).buy.json` | `YYYY/MM/YYYY-MM-DD(-n).buy.json` | `report_index` |
+| `sell` | `reports/YYYY-MM-DD(-n).sell.json` | `YYYY/MM/YYYY-MM-DD(-n).sell.json` | `report_index` |
+| `entry` | `reports/YYYY-MM-DD(-n).entry.json` | `YYYY/MM/YYYY-MM-DD(-n).entry.json` | `report_index` |
+| `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
+| `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
+
+## Web API Routes
+
+| Method | Path | Purpose | Request Contract | Response/Status |
+| --- | --- | --- | --- | --- |
+| `POST` | `/api/auth/login` | 관리자 로그인 | JSON `{ "username": string, "password": string }` | `200 { "ok": true }`, sets HttpOnly session cookie |
+| `POST` | `/api/auth/logout` | 관리자 로그아웃 | no body required | `200 { "ok": true }`, clears session cookie |
+| `GET` | `/api/reports` | report_index 목록 조회 | query `type=all|buy|sell|entry|ai-brief|ai-brief-skip`, `q`, `limit=1..200`, `refresh=true|false` | `ReportsListResponse` |
+| `GET` | `/api/reports/detail` | Storage JSON 상세 조회 | query `key=<storage-key>`, `refresh=true|false` | report JSON |
+| `POST` | `/api/run` | `scan.yml`/`sell.yml` workflow_dispatch | scan: `{ "workflow":"scan", "provider":"kis|pykrx", "universe":"KR|US|both" }`; sell: `{ "workflow":"sell", "provider":"kis|pykrx" }` | `202 WorkflowDispatchResult` |
+| `GET` | `/api/holdings` | holdings 목록 | query `limit=1..200`, optional `cursor` | `{ items, nextCursor, hasMore }` |
+| `POST` | `/api/holdings` | holding 생성 | `HoldingMutationInput` with required `ticker` | `201 HoldingRecord` |
+| `PATCH` | `/api/holdings/[ticker]` | holding 수정 | at least one mutable holding field | `200 HoldingRecord` |
+| `DELETE` | `/api/holdings/[ticker]` | holding 삭제 | no body required | `200 { "deleted": true, "ticker": string }` |
+| `POST` | `/api/holdings/[ticker]/add-buy` | 추가매수 원자 갱신 | header `Idempotency-Key: <uuid>`, JSON `{ "buy_quantity": number, "buy_price": number, "buy_date"?: "YYYY-MM-DD" }` | `200 HoldingRecord`; mismatch `409` |
+| `PATCH`/`DELETE` | `/api/holdings/[...ticker]` | class ticker alias route | same as `[ticker]` | same as `[ticker]` |
+| `POST` | `/api/holdings/add-buy/[...ticker]` | class ticker add-buy alias route | same as `[ticker]/add-buy` | same as `[ticker]/add-buy` |
+| `GET` | `/api/holdings/yaml` | holdings YAML export | no body required | YAML snapshot payload |
+| `POST` | `/api/holdings/yaml` | holdings YAML import dry-run/apply | JSON `{ "document": string, "apply": boolean }` | `{ mode, summary }` |
+| `GET` | `/api/tickers/search` | ticker directory 검색 | query `q=1..120 chars`, `limit=1..50` | ticker search payload |
+| `GET` | `/api/tickers/recent-candidates` | 최근 buy 후보 | query `limitReports=1..50`, `limitCandidates=1..100` | recent candidate payload |
+
+## Ticker Contract
+
+| Market | Format | Example | Notes |
+| --- | --- | --- | --- |
+| KR | six digits | `005930` | KRX code. |
+| US | symbol + exchange suffix | `AAPL.NAS`, `BRK.B.NYS` | Supported suffixes: `.NAS`, `.NYS`, `.AMS`. |
+
+`.US` suffix is intentionally rejected because it is ambiguous.
+
+## Request Examples
+
+```bash
+curl -sS -X POST http://127.0.0.1:55300/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"replace-with-password"}'
+```
+
+```bash
+curl -sS 'http://127.0.0.1:55300/api/reports?type=buy&limit=30'
+```
+
+```bash
+curl -sS -X POST http://127.0.0.1:55300/api/run \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow":"scan","provider":"kis","universe":"both"}'
+```
+
+The examples above require a valid authenticated session cookie in normal browser/API use. They are shape examples, not a complete authentication walkthrough.
+
+## Error Handling
+
+| Condition | Typical Status | Notes |
+| --- | ---: | --- |
+| Missing/invalid admin session | `401` or redirect from page middleware | Protected API route guard. |
+| Same-origin/local guard failure | `403` | Local-console hardening. |
+| Schema validation failure | `400` | Zod schema errors are returned as request errors. |
+| GitHub dispatch disabled | `503`/feature disabled response | Depends on `/api/run` branch. |
+| Supabase upstream error | matching upstream status or `500` | Route logs include request metadata, not secrets. |
+| Add-buy idempotency payload mismatch | `409` | Same idempotency key with different payload. |
+
+## Source Of Truth
+
+- CLI options: `sab/__main__.py`
+- Web request schemas: `web/src/lib/schemas.ts`
+- Web route implementations: `web/src/app/api/**/route.ts`
+- Shared response types: `web/src/lib/types.ts`
+- Supabase schema/RPC: `supabase/migrations/`
+
+## Verification
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python -m sab --help
+pnpm --dir web run test
+```
+
+NOT_RUN: 이 문서 작성 중 CLI와 web test 전체를 실행하지 않았다면 최종 보고서에 별도로 기록합니다.

@@ -15,6 +15,14 @@ ARTIFACT_DOC_GLOBS = ("docs/governance/*.json",)
 DOC_STATE_SECTION_DOCS = (
     Path("README.md"),
     Path("docs/README.md"),
+    Path("docs/overview.md"),
+    Path("docs/local-development.md"),
+    Path("docs/configuration.md"),
+    Path("docs/api.md"),
+    Path("docs/deployment.md"),
+    Path("docs/operations.md"),
+    Path("docs/troubleshooting.md"),
+    Path("docs/contributing.md"),
     Path("docs/runbook.md"),
     Path("docs/ARCHITECTURE.md"),
     Path("docs/STRATEGY.md"),
@@ -25,6 +33,7 @@ DOC_STATE_SECTION_DOCS = (
     Path("docs/kis-setup.md"),
     Path("docs/holdings-ticker-lookup.md"),
     Path("docs/holdings-add-buy.md"),
+    Path("docs/config-reference.md"),
     Path("docs/governance/main-branch-protection.md"),
     Path("docs/codex-systematic-equities-team.md"),
 )
@@ -142,17 +151,18 @@ def test_architecture_links_local_scheduler_adr() -> None:
     assert "docs/adr/ADR-0012-local-docker-scheduled-runs.md" in text
 
 
-def test_runbook_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> None:
-    text = _read(Path("docs/runbook.md"))
-    manual_section = text.split("- AI Brief 수동 실행(GitHub Actions)", 1)[1].split(
-        "- AI Brief scheduled 실행", 1
+def test_operations_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> None:
+    text = _read(Path("docs/operations.md"))
+    daily_section = text.split("## Daily Checklist", 1)[1].split(
+        "## Weekly Checklist", 1
     )[0]
-    scheduled_section = text.split("- AI Brief scheduled 실행", 1)[1].split(
-        "- Audit 실행", 1
+    scheduled_section = text.split("## Scheduled AI Brief", 1)[1].split(
+        "## GitHub Actions", 1
     )[0]
 
-    assert "scheduled 기본값" not in manual_section
+    assert "scheduled 기본값" not in daily_section
     assert "AI_BRIEF_SOURCE_PROVIDER_US" in scheduled_section
+    assert "scheduled 기본값" in scheduled_section
 
 
 def test_index_docs_link_existing_files() -> None:
