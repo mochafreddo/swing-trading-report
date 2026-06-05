@@ -118,6 +118,15 @@ class _ProfitProtectionState:
 
 
 @dataclass(frozen=True)
+class _HybridSellExitTrendState:
+    action: str
+    reasons: list[str]
+    stop_override: float | None
+    stop_price: float | None
+    target_price: float | None
+
+
+@dataclass(frozen=True)
 class _TrendBreakdownState:
     action: str
     reasons: list[str]
@@ -660,6 +669,39 @@ def _apply_profit_exit_rules(
     )
 
 
+def _apply_hybrid_sell_exit_trend_rules(
+    *,
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+    opens: list[float],
+    closes: list[float],
+    context: _HybridSellContext,
+) -> _HybridSellExitTrendState:
+    profit_exit = _apply_profit_exit_rules(
+        holding=holding,
+        settings=settings,
+        context=context,
+    )
+    reasons = list(profit_exit.reasons)
+
+    trend_breakdown = _apply_trend_breakdown_rules(
+        opens=opens,
+        closes=closes,
+        last_close=context.last_close,
+        indicators=context.indicators,
+        action=profit_exit.action,
+    )
+    reasons.extend(trend_breakdown.reasons)
+
+    return _HybridSellExitTrendState(
+        action=trend_breakdown.action,
+        reasons=reasons,
+        stop_override=profit_exit.stop_override,
+        stop_price=profit_exit.stop_price,
+        target_price=profit_exit.target_price,
+    )
+
+
 def _apply_trend_breakdown_rules(
     *,
     opens: list[float],
@@ -893,28 +935,18 @@ def _apply_hybrid_sell_rule_pipeline(
     pnl_pct = context.pnl_pct
     flags: list[str] = []
 
-    # --- 1) Profit taking logic ---
-    profit_exit = _apply_profit_exit_rules(
+    exit_trend = _apply_hybrid_sell_exit_trend_rules(
         holding=holding,
         settings=settings,
-        context=context,
-    )
-    stop_override = profit_exit.stop_override
-    stop_price = profit_exit.stop_price
-    target_price = profit_exit.target_price
-    reasons.extend(profit_exit.reasons)
-    action = profit_exit.action
-
-    # --- 2) Trend breakdown (EMA/SMA + RSI) ---
-    trend_breakdown = _apply_trend_breakdown_rules(
         opens=opens,
         closes=closes,
-        last_close=last_close,
-        indicators=indicators,
-        action=action,
+        context=context,
     )
-    reasons.extend(trend_breakdown.reasons)
-    action = trend_breakdown.action
+    stop_override = exit_trend.stop_override
+    stop_price = exit_trend.stop_price
+    target_price = exit_trend.target_price
+    reasons.extend(exit_trend.reasons)
+    action = exit_trend.action
 
     # --- 3) Failed breakout ---
     failed_breakout = _apply_failed_breakout_rules(

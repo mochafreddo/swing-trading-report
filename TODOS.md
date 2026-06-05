@@ -6,9 +6,6 @@
 
 ## Deferred
 
-- 2026-06-01: Refactor long high-risk runtime functions in small, test-first
-  steps, starting with `sab/scheduler/runner.py`,
-  `sab/signals/hybrid_sell.py`, and `sab/entry.py`.
 - 2026-06-01: Consolidate duplicated market normalization rules after agreeing on
   a shared error-message contract for `KR`, `US`, and `MIXED` handling.
 - 2026-06-01: Add an optional live smoke-check path for external RSS/API/market
@@ -17,6 +14,11 @@
 
 ## Completed
 
+- 2026-06-05: Completed the deferred long high-risk runtime refactor pass
+  for `sab/scheduler/runner.py`, `sab/signals/hybrid_sell.py`, and
+  `sab/entry.py`, adding final test-first seams for scheduler runner-role
+  fail-closed dispatch, entry per-candidate evaluation/report payload assembly,
+  and hybrid sell exit/trend orchestration.
 - 2026-06-05: Extracted entry portfolio-guard orchestration from `run_entry`,
   with characterization coverage for config-derived market caps, existing
   holdings exclusion, row mutation, and blocked-market summary counts.

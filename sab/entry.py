@@ -372,6 +372,153 @@ def _resolve_report_gap_atr_multiplier(report: dict[str, Any]) -> float | None:
     return _to_finite_float(config_snapshot.get("gap_atr_multiplier"))
 
 
+def _resolve_entry_candidate_action(
+    *,
+    ticker: str,
+    entry_price: float | None,
+    gap_pct: float | None,
+    gap_guard_pct: float | None,
+    trigger_issue: str | None,
+    trigger_price: float | None,
+    trigger_operator: str | None,
+    trigger_label: str | None,
+    strategy_mode: str,
+    entry_state: str | None,
+    gap_breach_action: str,
+    allow_missing_gap_guard: bool,
+    reasons: list[str],
+    candidate_issues: list[str],
+) -> str:
+    if gap_guard_pct is None and not allow_missing_gap_guard:
+        reasons.append("gap guard unavailable")
+        candidate_issues.append(f"{ticker}: gap guard unavailable")
+        return "REVIEW"
+    if gap_pct is None:
+        return "REVIEW"
+    if gap_guard_pct is not None and abs(gap_pct) > gap_guard_pct:
+        reasons.append(
+            f"gap guard exceeded ({gap_pct * 100:.2f}% vs {gap_guard_pct * 100:.2f}%)"
+        )
+        return gap_breach_action
+    if trigger_issue is not None:
+        return "REVIEW"
+    if strategy_mode != "sma_ema_hybrid":
+        return "ENTER"
+    if entry_state != "READY":
+        reasons.append("hybrid entry_state requires manual review")
+        return "REVIEW"
+    if trigger_price is None:
+        return "ENTER"
+    trigger_label = trigger_label or "trigger"
+    if trigger_operator != "gte":
+        reasons.append(
+            "hybrid trigger guard unsupported "
+            f"({trigger_label} operator {trigger_operator})"
+        )
+        return "REVIEW"
+    if entry_price is not None and entry_price < trigger_price:
+        reasons.append(
+            "hybrid trigger guard failed "
+            f"({entry_price:.2f} < {trigger_label} {trigger_price:.2f})"
+        )
+        return "SKIP"
+    return "ENTER"
+
+
+def _evaluate_entry_candidate(
+    *,
+    candidate: dict[str, Any],
+    price_lookup_fn: Callable[[str], float | None],
+    gap_breach_action: str,
+    default_strategy_mode: str | None,
+    allow_missing_gap_guard: bool,
+) -> tuple[EntryReportRow, list[str]] | None:
+    ticker = _normalize_ticker(candidate.get("ticker"))
+    if not ticker:
+        logger.warning("Entry candidate skipped because ticker is missing")
+        return None
+
+    reasons: list[str] = []
+    candidate_issues: list[str] = []
+    signal_close = _extract_signal_close(candidate)
+    gap_guard_pct, gap_guard_up_price, gap_guard_down_price = _extract_gap_guard(
+        candidate
+    )
+    strategy_mode = _resolve_strategy_mode(
+        candidate,
+        default_strategy_mode=default_strategy_mode,
+    )
+    entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
+    pattern = str(candidate.get("pattern") or "").strip() or None
+    trigger_price, trigger_operator, trigger_label, trigger_issue = (
+        _extract_entry_trigger_guard(candidate, signal_close=signal_close)
+    )
+
+    if signal_close is None:
+        signal_issue = _signal_close_issue(candidate)
+        reasons.append(signal_issue)
+        candidate_issues.append(f"{ticker}: {signal_issue}")
+    if trigger_issue is not None:
+        reasons.append(trigger_issue)
+        candidate_issues.append(f"{ticker}: {trigger_issue}")
+
+    entry_price = price_lookup_fn(ticker)
+    if entry_price is not None and entry_price <= 0:
+        entry_price = None
+    if entry_price is None:
+        reasons.append("price snapshot unavailable")
+        candidate_issues.append(f"{ticker}: price snapshot unavailable")
+
+    gap_pct: float | None = None
+    if signal_close is not None and signal_close > 0 and entry_price is not None:
+        gap_pct = (entry_price - signal_close) / signal_close
+    if signal_close is not None and signal_close > 0 and gap_guard_pct is not None:
+        gap_guard_up_price = round(signal_close * (1.0 + gap_guard_pct), 10)
+        gap_guard_down_price = round(signal_close * (1.0 - gap_guard_pct), 10)
+
+    action = _resolve_entry_candidate_action(
+        ticker=ticker,
+        entry_price=entry_price,
+        gap_pct=gap_pct,
+        gap_guard_pct=gap_guard_pct,
+        trigger_issue=trigger_issue,
+        trigger_price=trigger_price,
+        trigger_operator=trigger_operator,
+        trigger_label=trigger_label,
+        strategy_mode=strategy_mode,
+        entry_state=entry_state,
+        gap_breach_action=gap_breach_action,
+        allow_missing_gap_guard=allow_missing_gap_guard,
+        reasons=reasons,
+        candidate_issues=candidate_issues,
+    )
+
+    if not reasons:
+        reasons.append("entry conditions satisfied")
+
+    row = EntryReportRow(
+        ticker=ticker,
+        action=action,
+        reasons=reasons,
+        signal_close=signal_close,
+        entry_price=entry_price,
+        gap_pct=gap_pct,
+        gap_guard_pct=gap_guard_pct,
+        gap_guard_up_price=gap_guard_up_price,
+        gap_guard_down_price=gap_guard_down_price,
+        strategy_mode=strategy_mode,
+        pattern=pattern,
+        entry_state=entry_state,
+    )
+    logger.debug(
+        "Entry candidate evaluated: ticker=%s action=%s reason_count=%s",
+        ticker,
+        action,
+        len(reasons),
+    )
+    return row, candidate_issues
+
+
 def evaluate_entry_candidates(
     *,
     candidates: list[dict[str, Any]],
@@ -385,106 +532,18 @@ def evaluate_entry_candidates(
     resolved_default_strategy_mode = _normalize_strategy_mode(default_strategy_mode)
 
     for candidate in candidates:
-        ticker = _normalize_ticker(candidate.get("ticker"))
-        if not ticker:
-            continue
-
-        reasons: list[str] = []
-        signal_close = _extract_signal_close(candidate)
-        gap_guard_pct, gap_guard_up_price, gap_guard_down_price = _extract_gap_guard(
-            candidate
-        )
-        strategy_mode = _resolve_strategy_mode(
-            candidate,
+        evaluation = _evaluate_entry_candidate(
+            candidate=candidate,
+            price_lookup_fn=price_lookup_fn,
+            gap_breach_action=gap_breach_action,
             default_strategy_mode=resolved_default_strategy_mode,
+            allow_missing_gap_guard=allow_missing_gap_guard,
         )
-        entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
-        pattern = str(candidate.get("pattern") or "").strip() or None
-        trigger_price, trigger_operator, trigger_label, trigger_issue = (
-            _extract_entry_trigger_guard(candidate, signal_close=signal_close)
-        )
-
-        if signal_close is None:
-            signal_issue = _signal_close_issue(candidate)
-            issue = f"{ticker}: {signal_issue}"
-            reasons.append(signal_issue)
-            system_issues.append(issue)
-        if trigger_issue is not None:
-            reasons.append(trigger_issue)
-            system_issues.append(f"{ticker}: {trigger_issue}")
-
-        entry_price = price_lookup_fn(ticker)
-        if entry_price is not None and entry_price <= 0:
-            entry_price = None
-        if entry_price is None:
-            issue = f"{ticker}: price snapshot unavailable"
-            reasons.append("price snapshot unavailable")
-            system_issues.append(issue)
-
-        gap_pct: float | None = None
-        if signal_close is not None and signal_close > 0 and entry_price is not None:
-            gap_pct = (entry_price - signal_close) / signal_close
-        if signal_close is not None and signal_close > 0 and gap_guard_pct is not None:
-            gap_guard_up_price = round(signal_close * (1.0 + gap_guard_pct), 10)
-            gap_guard_down_price = round(signal_close * (1.0 - gap_guard_pct), 10)
-
-        if gap_guard_pct is None and not allow_missing_gap_guard:
-            reasons.append("gap guard unavailable")
-            system_issues.append(f"{ticker}: gap guard unavailable")
-            action = "REVIEW"
-        elif gap_pct is None:
-            action = "REVIEW"
-        elif gap_guard_pct is not None and abs(gap_pct) > gap_guard_pct:
-            action = gap_breach_action
-            reasons.append(
-                "gap guard exceeded "
-                f"({gap_pct * 100:.2f}% vs {gap_guard_pct * 100:.2f}%)"
-            )
-        elif trigger_issue is not None:
-            action = "REVIEW"
-        elif strategy_mode == "sma_ema_hybrid":
-            if entry_state == "READY":
-                if trigger_price is None:
-                    action = "ENTER"
-                elif trigger_operator != "gte":
-                    action = "REVIEW"
-                    reasons.append(
-                        "hybrid trigger guard unsupported "
-                        f"({trigger_label} operator {trigger_operator})"
-                    )
-                elif entry_price is not None and entry_price < trigger_price:
-                    action = "SKIP"
-                    reasons.append(
-                        "hybrid trigger guard failed "
-                        f"({entry_price:.2f} < {trigger_label} {trigger_price:.2f})"
-                    )
-                else:
-                    action = "ENTER"
-            else:
-                action = "REVIEW"
-                reasons.append("hybrid entry_state requires manual review")
-        else:
-            action = "ENTER"
-
-        if not reasons:
-            reasons.append("entry conditions satisfied")
-
-        rows.append(
-            EntryReportRow(
-                ticker=ticker,
-                action=action,
-                reasons=reasons,
-                signal_close=signal_close,
-                entry_price=entry_price,
-                gap_pct=gap_pct,
-                gap_guard_pct=gap_guard_pct,
-                gap_guard_up_price=gap_guard_up_price,
-                gap_guard_down_price=gap_guard_down_price,
-                strategy_mode=strategy_mode,
-                pattern=pattern,
-                entry_state=entry_state,
-            )
-        )
+        if evaluation is None:
+            continue
+        row, candidate_issues = evaluation
+        rows.append(row)
+        system_issues.extend(candidate_issues)
 
     return rows, system_issues
 
@@ -1216,6 +1275,92 @@ def _evaluate_entry_candidate_markets(
     return rows, list(dict.fromkeys(system_issues))
 
 
+@dataclass(frozen=True)
+class _EntryReportPayloads:
+    artifact: dict[str, Any]
+    run_meta: dict[str, Any]
+    entry_summary: dict[str, Any]
+    system_issues: list[str]
+    entry_session_date: str | None
+    entry_session_date_by_market: dict[str, str] | None
+
+
+def _build_entry_report_payloads(
+    *,
+    cfg: Config,
+    source_report: dict[str, Any],
+    resolved_report_path: str,
+    normalized_provider: str,
+    normalized_mode: str,
+    rows: list[EntryReportRow],
+    system_issues: list[str],
+    portfolio_blocked_by_market: dict[str, int],
+    candidates_by_market: dict[str, list[dict[str, Any]]],
+    resolved_markets: list[str],
+    entry_policy: _EntryEvaluationPolicy,
+) -> _EntryReportPayloads:
+    date_context = _resolve_entry_artifact_date_context(
+        source_report=source_report,
+        candidates_by_market=candidates_by_market,
+        resolved_markets=resolved_markets,
+    )
+    system_issues = [
+        *system_issues,
+        *_collect_candidate_eval_date_issues(
+            source_report=source_report,
+            candidates_by_market=candidates_by_market,
+            resolved_markets=resolved_markets,
+        ),
+    ]
+    system_issues = list(dict.fromkeys(system_issues))
+    entry_summary = _build_entry_summary(
+        rows,
+        system_issues,
+        portfolio_blocked_by_market=portfolio_blocked_by_market,
+    )
+    artifact: dict[str, Any] = {
+        "provider": normalized_provider,
+        "mode": normalized_mode,
+        "market": date_context.artifact_market,
+        "source_buy_report": os.path.basename(resolved_report_path),
+        "signal_eval_date": date_context.signal_eval_date,
+        "entry_session_date": date_context.entry_session_date,
+        "tickers": sorted({row.ticker for row in rows}),
+        "summary": entry_summary,
+        "system_issues": system_issues,
+        "eval_index_policy": "entry_snapshot:v1",
+    }
+    if date_context.artifact_markets is not None:
+        artifact["markets"] = date_context.artifact_markets
+    if date_context.signal_eval_date_by_market is not None:
+        artifact["signal_eval_date_by_market"] = date_context.signal_eval_date_by_market
+    if date_context.entry_session_date_by_market is not None:
+        artifact["entry_session_date_by_market"] = (
+            date_context.entry_session_date_by_market
+        )
+    run_meta = build_run_meta(
+        market=date_context.artifact_market,
+        markets=date_context.artifact_markets,
+        session_state=normalized_mode,
+        eval_index_policy="entry_snapshot:v1",
+        config_snapshot=_build_config_snapshot(
+            cfg,
+            provider=normalized_provider,
+            mode=normalized_mode,
+            effective_gap_atr_multiplier=entry_policy.effective_gap_atr_multiplier,
+            source_report_gap_atr_multiplier=entry_policy.source_gap_atr_multiplier,
+        ),
+    )
+    return _EntryReportPayloads(
+        artifact=artifact,
+        run_meta=run_meta,
+        entry_summary=entry_summary,
+        system_issues=system_issues,
+        entry_session_date=date_context.entry_session_date,
+        entry_session_date_by_market=date_context.entry_session_date_by_market,
+    )
+
+
 def _write_entry_report_and_maybe_upload(
     *,
     report_dir: str,
@@ -1346,6 +1491,12 @@ def run_entry(
         return 1
 
     resolved_report_path = source_context.resolved_report_path
+    logger.info(
+        "Entry source report loaded: path=%s markets=%s candidates=%s",
+        resolved_report_path,
+        ",".join(source_context.resolved_markets),
+        len(source_context.candidates),
+    )
     source_report = source_context.source_report
     candidates = source_context.candidates
     candidates_by_market = source_context.candidates_by_market
@@ -1366,79 +1517,40 @@ def run_entry(
         default_strategy_mode=entry_policy.default_strategy_mode,
         allow_missing_gap_guard=entry_policy.allow_missing_gap_guard,
     )
+    logger.info(
+        "Entry candidate markets evaluated: markets=%s rows=%s system_issue_count=%s",
+        ",".join(resolved_markets),
+        len(rows),
+        len(system_issues),
+    )
 
     portfolio_blocked_by_market = _apply_entry_portfolio_guards(
         cfg=cfg,
         holdings_data=holdings_data,
         rows=rows,
     )
-
-    date_context = _resolve_entry_artifact_date_context(
+    report_payloads = _build_entry_report_payloads(
+        cfg=cfg,
         source_report=source_report,
+        resolved_report_path=resolved_report_path,
+        normalized_provider=normalized_provider,
+        normalized_mode=normalized_mode,
+        rows=rows,
+        system_issues=system_issues,
+        portfolio_blocked_by_market=portfolio_blocked_by_market,
         candidates_by_market=candidates_by_market,
         resolved_markets=resolved_markets,
-    )
-    artifact_market = date_context.artifact_market
-    artifact_markets = date_context.artifact_markets
-    signal_eval_date = date_context.signal_eval_date
-    entry_session_date = date_context.entry_session_date
-    signal_eval_date_by_market = date_context.signal_eval_date_by_market
-    entry_session_date_by_market = date_context.entry_session_date_by_market
-
-    system_issues.extend(
-        _collect_candidate_eval_date_issues(
-            source_report=source_report,
-            candidates_by_market=candidates_by_market,
-            resolved_markets=resolved_markets,
-        )
-    )
-    system_issues = list(dict.fromkeys(system_issues))
-
-    entry_summary = _build_entry_summary(
-        rows,
-        system_issues,
-        portfolio_blocked_by_market=portfolio_blocked_by_market,
-    )
-    artifact = {
-        "provider": normalized_provider,
-        "mode": normalized_mode,
-        "market": artifact_market,
-        "source_buy_report": os.path.basename(resolved_report_path),
-        "signal_eval_date": signal_eval_date,
-        "entry_session_date": entry_session_date,
-        "tickers": sorted({row.ticker for row in rows}),
-        "summary": entry_summary,
-        "system_issues": system_issues,
-        "eval_index_policy": "entry_snapshot:v1",
-    }
-    if artifact_markets is not None:
-        artifact["markets"] = artifact_markets
-    if signal_eval_date_by_market is not None:
-        artifact["signal_eval_date_by_market"] = signal_eval_date_by_market
-    if entry_session_date_by_market is not None:
-        artifact["entry_session_date_by_market"] = entry_session_date_by_market
-    run_meta = build_run_meta(
-        market=artifact_market,
-        markets=artifact_markets,
-        session_state=normalized_mode,
-        eval_index_policy="entry_snapshot:v1",
-        config_snapshot=_build_config_snapshot(
-            cfg,
-            provider=normalized_provider,
-            mode=normalized_mode,
-            effective_gap_atr_multiplier=entry_policy.effective_gap_atr_multiplier,
-            source_report_gap_atr_multiplier=entry_policy.source_gap_atr_multiplier,
-        ),
+        entry_policy=entry_policy,
     )
     return _write_entry_report_and_maybe_upload(
         report_dir=cfg.report_dir,
-        artifact=artifact,
+        artifact=report_payloads.artifact,
         entries=rows,
-        run_meta=run_meta,
-        entry_summary=entry_summary,
-        system_issues=system_issues,
-        entry_session_date=entry_session_date,
-        entry_session_date_by_market=entry_session_date_by_market,
+        run_meta=report_payloads.run_meta,
+        entry_summary=report_payloads.entry_summary,
+        system_issues=report_payloads.system_issues,
+        entry_session_date=report_payloads.entry_session_date,
+        entry_session_date_by_market=report_payloads.entry_session_date_by_market,
         fatal_missing_price_ratio=fatal_missing_price_ratio,
         upload=upload,
         report_path_callback=report_path_callback,

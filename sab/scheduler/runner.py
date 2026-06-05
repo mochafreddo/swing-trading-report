@@ -67,6 +67,8 @@ _SKIP_ARTIFACT_CLAIM_TTL_SECONDS = 10 * 60
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
 _ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
 _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
+_NON_PIPELINE_RUNNER_ROLES = {"monitor-only", "cutoff-alert"}
+_SUPPORTED_RUNNER_ROLES = _PIPELINE_RUNNER_ROLES | _NON_PIPELINE_RUNNER_ROLES
 _SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS = ("HOLDINGS_FILE",)
 _FAILED_STATUSES = {
     "attempt_marker_failed",
@@ -80,6 +82,7 @@ _FAILED_STATUSES = {
     "late_alert_send_failed",
     "late_alert_sent_marker_failed",
     "skip_artifact_upload_failed",
+    "unsupported_runner_role",
 }
 _LOGGER = logging.getLogger(__name__)
 
@@ -506,6 +509,18 @@ class ScheduledAiBriefRunner:
 
         guard = self._guard_resolver(market, now)
         session_date = guard.session_date
+        if runner_role not in _SUPPORTED_RUNNER_ROLES:
+            _LOGGER.error(
+                "scheduled AI brief unsupported runner role "
+                "market=%s schedule_role=%s runner_role=%s",
+                market,
+                schedule_role,
+                runner_role,
+            )
+            return ScheduledAiBriefResult(
+                status="unsupported_runner_role",
+                session_date=session_date,
+            )
         attempt_id = request.attempt_id or build_attempt_id(
             scheduled_tick=request.scheduled_tick,
             started_at=now,
@@ -587,66 +602,7 @@ class ScheduledAiBriefRunner:
         if artifact_result is not None:
             return artifact_result
 
-        if runner_role == "monitor-only":
-            return self._monitor_local_primary(
-                market=market,
-                session_date=session_date,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                now=now,
-            )
-
-        if runner_role == "cutoff-alert":
-            late_alert_status = self._send_late_alert_once(
-                market=market,
-                session_date=session_date,
-                reason="cutoff_missing_ai_brief",
-                context={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "scheduleRole": schedule_role,
-                    "runnerRole": runner_role,
-                    "attemptId": attempt_id,
-                },
-                now=now,
-            )
-            return ScheduledAiBriefResult(
-                status=late_alert_status,
-                session_date=session_date,
-            )
-
-        if not _guard_allows_pipeline(guard):
-            return self._persist_runtime_guard_skip_result(
-                market=market,
-                session_date=session_date,
-                guard=guard,
-                run_url=request.run_url,
-                success_status="guard_failed",
-                alert_reason="pre_open_guard_failed",
-                alert_context=_guard_context(
-                    market=market,
-                    session_date=session_date,
-                    guard=guard,
-                ),
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                now=now,
-            )
-
-        self._notifier.require_telegram()
-        main_lock = self._claim_main_lock(
-            market=market,
-            session_date=session_date,
-            runner_role=runner_role,
-            attempt_id=attempt_id,
-            now=now,
-        )
-        if isinstance(main_lock, ScheduledAiBriefResult):
-            return main_lock
-
-        return self._run_locked_pipeline(
+        return self._dispatch_ready_run(
             market=market,
             session_date=session_date,
             schedule_role=schedule_role,
@@ -655,8 +611,7 @@ class ScheduledAiBriefRunner:
             run_url=request.run_url,
             source_provider=request.source_provider,
             model_provider=request.model_provider,
-            lock_key=main_lock.lock_key,
-            owner_token=main_lock.owner_token,
+            guard=guard,
             artifact_key=artifact_key,
             now=now,
         )
@@ -780,6 +735,182 @@ class ScheduledAiBriefRunner:
             guard=guard,
             run_url=run_url,
             success_status="guard_noop",
+        )
+
+    def _dispatch_ready_run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        source_provider: str | None,
+        model_provider: str,
+        guard: GuardSnapshot,
+        artifact_key: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
+        _LOGGER.info(
+            "scheduled AI brief dispatch resolved "
+            "market=%s session_date=%s schedule_role=%s runner_role=%s "
+            "attempt_id=%s",
+            market,
+            session_date,
+            schedule_role,
+            runner_role,
+            attempt_id,
+        )
+        if runner_role == "monitor-only":
+            return self._monitor_local_primary(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                now=now,
+            )
+        if runner_role == "cutoff-alert":
+            return self._handle_cutoff_alert(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                now=now,
+            )
+        if not _guard_allows_pipeline(guard):
+            return self._handle_pre_open_guard_failure(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=run_url,
+                guard=guard,
+                now=now,
+            )
+        return self._start_locked_pipeline(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=run_url,
+            source_provider=source_provider,
+            model_provider=model_provider,
+            artifact_key=artifact_key,
+            now=now,
+        )
+
+    def _handle_cutoff_alert(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
+        late_alert_status = self._send_late_alert_once(
+            market=market,
+            session_date=session_date,
+            reason="cutoff_missing_ai_brief",
+            context={
+                "market": market,
+                "sessionDate": session_date,
+                "scheduleRole": schedule_role,
+                "runnerRole": runner_role,
+                "attemptId": attempt_id,
+            },
+            now=now,
+        )
+        return ScheduledAiBriefResult(
+            status=late_alert_status,
+            session_date=session_date,
+        )
+
+    def _handle_pre_open_guard_failure(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        guard: GuardSnapshot,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
+        _LOGGER.warning(
+            "scheduled AI brief pre-open guard blocked pipeline "
+            "market=%s session_date=%s schedule_role=%s runner_role=%s "
+            "attempt_id=%s session_state=%s trading_session=%s",
+            market,
+            session_date,
+            schedule_role,
+            runner_role,
+            attempt_id,
+            guard.session_state,
+            guard.trading_session,
+        )
+        return self._persist_runtime_guard_skip_result(
+            market=market,
+            session_date=session_date,
+            guard=guard,
+            run_url=run_url,
+            success_status="guard_failed",
+            alert_reason="pre_open_guard_failed",
+            alert_context=_guard_context(
+                market=market,
+                session_date=session_date,
+                guard=guard,
+            ),
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            now=now,
+        )
+
+    def _start_locked_pipeline(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        run_url: str,
+        source_provider: str | None,
+        model_provider: str,
+        artifact_key: str,
+        now: dt.datetime,
+    ) -> ScheduledAiBriefResult:
+        self._notifier.require_telegram()
+        main_lock = self._claim_main_lock(
+            market=market,
+            session_date=session_date,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            now=now,
+        )
+        if isinstance(main_lock, ScheduledAiBriefResult):
+            return main_lock
+        return self._run_locked_pipeline(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            run_url=run_url,
+            source_provider=source_provider,
+            model_provider=model_provider,
+            lock_key=main_lock.lock_key,
+            owner_token=main_lock.owner_token,
+            artifact_key=artifact_key,
+            now=now,
         )
 
     def _run_locked_pipeline(
