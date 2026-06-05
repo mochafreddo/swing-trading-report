@@ -63,6 +63,19 @@ const INITIAL_STATE: ReportsInitialState = {
   showRaw: false,
 };
 
+const EMPTY_SEARCH_STATE: ReportsInitialState = {
+  ...INITIAL_STATE,
+  query: "AAPL",
+  appliedQuery: "AAPL",
+  items: [],
+  total: 0,
+  searched: 100,
+  truncated: false,
+  selectedKey: null,
+  detailKey: null,
+  detail: null,
+};
+
 function Harness({
   initialState,
 }: {
@@ -106,13 +119,14 @@ describe("useReportsState URL sync", () => {
     ).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
   });
 
-  function renderWithSearchParams(value: string): void {
+  function renderWithSearchParams(
+    value: string,
+    initialState: ReportsInitialState = INITIAL_STATE,
+  ): void {
     navigationMock.setSearchParams(value);
 
     act(() => {
-      root.render(
-        React.createElement(Harness, { initialState: INITIAL_STATE }),
-      );
+      root.render(React.createElement(Harness, { initialState }));
     });
   }
 
@@ -138,5 +152,17 @@ describe("useReportsState URL sync", () => {
 
     expect(container.textContent).toContain("none");
     expect(navigationMock.replace).not.toHaveBeenCalled();
+  });
+
+  it("clears a stale URL key when the loaded report list is empty", () => {
+    renderWithSearchParams(
+      `q=AAPL&key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}`,
+      EMPTY_SEARCH_STATE,
+    );
+
+    expect(container.textContent).toContain("none");
+    expect(navigationMock.replace).toHaveBeenCalledWith("/reports?q=AAPL", {
+      scroll: false,
+    });
   });
 });

@@ -202,8 +202,8 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [warnings, setWarnings] = useState<ReportSearchWarning[]>(
     () => initialState?.warnings ?? [],
   );
-  const [selectedKey, setSelectedKeyState] = useState<string | null>(
-    () => initialState?.selectedKey ?? searchParams.get("key"),
+  const [selectedKey, setSelectedKeyState] = useState<string | null>(() =>
+    initialState ? initialState.selectedKey : searchParams.get("key"),
   );
   const [detail, setDetail] = useState<ReportJson | null>(
     () => initialState?.detail ?? null,
@@ -267,10 +267,11 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const nextShowRaw = searchParams.get("raw") === "1";
     const preserveWhenKeyMissing = preserveSelectionWhenUrlKeyMissing.current;
     const nextKey = nextKeyRaw?.trim() || null;
+    const hasLoadedEmptyResultSet = total === 0 && items.length === 0;
     const hasInvalidUrlKey =
       Boolean(nextKey) &&
-      items.length > 0 &&
-      !items.some((item) => item.key === nextKey);
+      (hasLoadedEmptyResultSet ||
+        (items.length > 0 && !items.some((item) => item.key === nextKey)));
 
     preserveSelectionWhenUrlKeyMissing.current = false;
     pendingUrlSync.current = preserveWhenKeyMissing || hasInvalidUrlKey;
@@ -280,16 +281,19 @@ export function useReportsState(initialState?: ReportsInitialState) {
     setAppliedQueryState((prev) =>
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
     );
-    setSelectedKeyState((prev) =>
-      resolveSelectedKeyFromUrl({
+    setSelectedKeyState((prev) => {
+      if (hasLoadedEmptyResultSet && nextKey) {
+        return null;
+      }
+      return resolveSelectedKeyFromUrl({
         previousSelectedKey: prev,
         nextKeyRaw,
         availableKeys: items.map((item) => item.key),
         preserveSelectionWhenKeyMissing: preserveWhenKeyMissing,
-      }),
-    );
+      });
+    });
     setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [items, searchParams]);
+  }, [items, searchParams, total]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
