@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief scan-step execution from
+  `DefaultScheduledPipeline.run`, with characterization coverage for KIS/both
+  scan inputs, `HOLDINGS_FILE` suppression, and the single buy-report artifact
+  path contract.
 - 2026-06-05: Extracted scheduled AI Brief pre-notification guard failure
   handling from `ScheduledAiBriefRunner._reconcile_notification`, with
   characterization coverage for late-alert context, storage-key preservation,

@@ -1755,17 +1755,7 @@ def _require_single_report_path(paths: list[str], *, report_type: str) -> str:
 
 
 class DefaultScheduledPipeline:
-    def run(
-        self,
-        *,
-        market: str,
-        session_date: str,
-        report_date: str,
-        source_provider: str | None,
-        model_provider: str,
-        dry_run: bool,
-    ) -> ScheduledPipelineResult:
-        del session_date, dry_run
+    def _run_scan_step(self, *, market: str, report_date: str) -> str:
         buy_report_paths: list[str] = []
         _LOGGER.info(
             "scheduled AI brief pipeline step started "
@@ -1793,6 +1783,23 @@ class DefaultScheduledPipeline:
             market,
             report_date,
             buy_report_path,
+        )
+        return buy_report_path
+
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+    ) -> ScheduledPipelineResult:
+        del session_date, dry_run
+        buy_report_path = self._run_scan_step(
+            market=market,
+            report_date=report_date,
         )
         holdings_path = (
             Path("data") / "scheduler" / (f"holdings.{market}.{report_date}.yaml")

@@ -1692,6 +1692,45 @@ def test_invalid_artifact_marker_is_failed_scheduler_status() -> None:
     assert "artifact_marker_invalid" in scheduler_runner._FAILED_STATUSES
 
 
+def test_default_pipeline_scan_step_helper_returns_single_buy_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOLDINGS_FILE", "holdings.yaml")
+    observed_kwargs: list[dict[str, object]] = []
+
+    def fake_run_scan(**kwargs: object) -> int:
+        load_dotenv_if_available()
+        assert getenv("HOLDINGS_FILE") is None
+        assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        observed_kwargs.append(dict(kwargs))
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+
+    assert hasattr(DefaultScheduledPipeline(), "_run_scan_step")
+    result = DefaultScheduledPipeline()._run_scan_step(
+        market="US",
+        report_date="2026-05-28",
+    )
+
+    assert result == "reports/current.buy.json"
+    assert len(observed_kwargs) == 1
+    scan_kwargs = observed_kwargs[0]
+    callback = scan_kwargs.pop("report_path_callback")
+    assert callable(callback)
+    assert scan_kwargs == {
+        "limit": None,
+        "watchlist_path": None,
+        "provider": "kis",
+        "universe": "both",
+        "markets": "US",
+    }
+    assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+
+
 def test_default_pipeline_rechecks_pre_open_guard_before_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
