@@ -1013,6 +1013,216 @@ def test_hybrid_sell_target_override_prioritizes_display_target(monkeypatch):
     assert "Custom target override in effect" in result.reasons
 
 
+@pytest.mark.parametrize(
+    (
+        "days_in_trade_sessions",
+        "pnl_pct",
+        "last_close",
+        "indicators",
+        "initial_action",
+        "expected_action",
+        "expected_reasons",
+    ),
+    [
+        (
+            12,
+            0.005,
+            101.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=101.0,
+                ema_mid=100.0,
+                sma_trend=99.0,
+                rsi_today=60.0,
+                ema_short_prev=100.0,
+                ema_mid_prev=99.0,
+            ),
+            "REVIEW",
+            "SELL",
+            ["Extended time stop: 12 sessions ≥ 12 sessions (P&L 0.5% < floor 1.0%)"],
+        ),
+        (
+            12,
+            0.02,
+            99.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=98.0,
+                ema_mid=100.0,
+                sma_trend=100.0,
+                rsi_today=60.0,
+                ema_short_prev=99.0,
+                ema_mid_prev=99.0,
+            ),
+            "REVIEW",
+            "SELL",
+            ["Extended time stop: 12 sessions ≥ 12 sessions (trend below SMA/EMA)"],
+        ),
+        (
+            12,
+            None,
+            99.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=None,
+                ema_mid=100.0,
+                sma_trend=None,
+                rsi_today=60.0,
+                ema_short_prev=99.0,
+                ema_mid_prev=99.0,
+            ),
+            "REVIEW",
+            "SELL",
+            [
+                "Extended time stop: 12 sessions ≥ 12 sessions "
+                "(P&L unavailable; trend indicators unavailable)"
+            ],
+        ),
+        (
+            12,
+            0.02,
+            99.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=None,
+                ema_mid=100.0,
+                sma_trend=None,
+                rsi_today=60.0,
+                ema_short_prev=99.0,
+                ema_mid_prev=99.0,
+            ),
+            "REVIEW",
+            "REVIEW",
+            [],
+        ),
+        (
+            11,
+            0.005,
+            101.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=101.0,
+                ema_mid=100.0,
+                sma_trend=99.0,
+                rsi_today=60.0,
+                ema_short_prev=100.0,
+                ema_mid_prev=99.0,
+            ),
+            "REVIEW",
+            "REVIEW",
+            [],
+        ),
+        (
+            12,
+            0.005,
+            101.0,
+            hybrid_sell._HybridSellIndicators(
+                ema_short=101.0,
+                ema_mid=100.0,
+                sma_trend=99.0,
+                rsi_today=60.0,
+                ema_short_prev=100.0,
+                ema_mid_prev=99.0,
+            ),
+            "SELL",
+            "SELL",
+            [],
+        ),
+    ],
+)
+def test_hybrid_sell_extended_time_stop_state_preserves_contract(
+    days_in_trade_sessions: int,
+    pnl_pct: float | None,
+    last_close: float,
+    indicators: hybrid_sell._HybridSellIndicators,
+    initial_action: str,
+    expected_action: str,
+    expected_reasons: list[str],
+) -> None:
+    helper = getattr(hybrid_sell, "_apply_extended_time_stop", None)
+
+    assert helper is not None
+
+    result = helper(
+        days_in_trade_sessions=days_in_trade_sessions,
+        settings=HybridSellSettings(
+            time_stop_days=10,
+            time_stop_grace_days=2,
+            time_stop_profit_floor=0.01,
+        ),
+        action=initial_action,
+        pnl_pct=pnl_pct,
+        last_close=last_close,
+        indicators=indicators,
+    )
+
+    assert result.action == expected_action
+    assert result.reasons == expected_reasons
+
+
+def test_hybrid_sell_public_pipeline_applies_extended_time_stop_after_grace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _patch_indicator_series(
+        monkeypatch,
+        ema_short=[100.0, 100.0, 100.0],
+        ema_mid=[99.0, 99.0, 99.0],
+        sma_trend=[99.0, 99.0, 99.0],
+        rsi_values=[60.0, 60.0, 60.0],
+    )
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=3,
+        sma_trend_period=2,
+        time_stop_days=1,
+        time_stop_grace_days=1,
+        time_stop_profit_floor=0.01,
+    )
+    holding = {
+        "entry_price": 100.0,
+        "entry_date": "2025-01-06",
+        "entry_currency": "USD",
+        "data_dir": tmp_path.as_posix(),
+    }
+    candles = [
+        {
+            "date": "20250106",
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250107",
+            "open": 100.5,
+            "high": 100.5,
+            "low": 100.5,
+            "close": 100.5,
+            "volume": 1.0,
+        },
+        {
+            "date": "20250108",
+            "open": 100.5,
+            "high": 100.5,
+            "low": 100.5,
+            "close": 100.5,
+            "volume": 1.0,
+        },
+    ]
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US",
+        cast(list[dict[str, float]], candles),
+        holding,
+        settings,
+    )
+
+    assert result.action == "SELL"
+    assert result.days_in_trade_sessions == 2
+    assert result.time_stop_triggered is True
+    assert result.reasons == [
+        "Time stop: 2 sessions ≥ 1 sessions",
+        "Extended time stop: 2 sessions ≥ 2 sessions (P&L 0.5% < floor 1.0%)",
+    ]
+
+
 def test_hybrid_sell_time_stop_uses_eval_date_not_local_today(monkeypatch):
     class _FixedDate(dt.date):
         @classmethod

@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted hybrid sell extended time-stop judgment from
+  `_apply_time_stop_rules`, with characterization coverage for P&L-floor
+  failure, weak-trend failure, unavailable-trend no-op, threshold no-op,
+  existing SELL preservation, and public pipeline application after grace.
 - 2026-06-04: Extracted entry buy-report loading, candidate validation, and
   market grouping context from `run_entry`, with characterization coverage for
   market override filtering while preserving source candidate order.

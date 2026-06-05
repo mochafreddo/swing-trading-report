@@ -86,6 +86,12 @@ class _TimeStopResult:
 
 
 @dataclass(frozen=True)
+class _ExtendedTimeStopState:
+    action: str
+    reasons: list[str]
+
+
+@dataclass(frozen=True)
 class _ExitOverrideState:
     action: str
     reasons: list[str]
@@ -352,6 +358,71 @@ def _detect_hybrid_sell_corporate_action(
     return corporate_action_move
 
 
+def _apply_extended_time_stop(
+    *,
+    days_in_trade_sessions: int | None,
+    settings: HybridSellSettings,
+    action: str,
+    pnl_pct: float | None,
+    last_close: float,
+    indicators: _HybridSellIndicators,
+) -> _ExtendedTimeStopState:
+    time_stop_days = settings.time_stop_days
+    time_stop_grace_days = settings.time_stop_grace_days
+    if (
+        days_in_trade_sessions is None
+        or time_stop_days <= 0
+        or time_stop_grace_days <= 0
+        or days_in_trade_sessions < (time_stop_days + time_stop_grace_days)
+        or action == "SELL"
+    ):
+        return _ExtendedTimeStopState(action=action, reasons=[])
+
+    time_stop_profit_floor = settings.time_stop_profit_floor
+    pnl_ok = pnl_pct is not None and pnl_pct >= time_stop_profit_floor
+    if (
+        indicators.sma_trend is None
+        or indicators.ema_short is None
+        or indicators.ema_mid is None
+    ):
+        trend_available = False
+        trend_ok = False
+    else:
+        trend_available = True
+        trend_ok = (
+            last_close >= indicators.sma_trend
+            and indicators.ema_short >= indicators.ema_mid
+        )
+
+    weak_bits = []
+    if not pnl_ok:
+        if pnl_pct is None:
+            weak_bits.append("P&L unavailable")
+        else:
+            weak_bits.append(
+                f"P&L {pnl_pct * 100:.1f}% < floor {time_stop_profit_floor * 100:.1f}%"
+            )
+    if trend_available and not trend_ok:
+        weak_bits.append("trend below SMA/EMA")
+    elif not trend_available and not pnl_ok:
+        weak_bits.append("trend indicators unavailable")
+
+    should_sell_for_extended_time_stop = not pnl_ok or (
+        trend_available and not trend_ok
+    )
+    if not should_sell_for_extended_time_stop:
+        return _ExtendedTimeStopState(action=action, reasons=[])
+
+    reason_detail = "; ".join(weak_bits) if weak_bits else "weak trend/return"
+    return _ExtendedTimeStopState(
+        action="SELL",
+        reasons=[
+            f"Extended time stop: {days_in_trade_sessions} sessions ≥ "
+            f"{time_stop_days + time_stop_grace_days} sessions ({reason_detail})"
+        ],
+    )
+
+
 def _apply_time_stop_rules(
     *,
     ticker: str,
@@ -371,8 +442,6 @@ def _apply_time_stop_rules(
     time_stop_triggered = False
     entry_date_str = holding.get("entry_date")
     time_stop_days = settings.time_stop_days
-    time_stop_grace_days = settings.time_stop_grace_days
-    time_stop_profit_floor = settings.time_stop_profit_floor
     if entry_date_str and time_stop_days > 0:
         if entry_date_state.invalid:
             reasons.append("Entry date missing/invalid; time stop skipped")
@@ -411,50 +480,16 @@ def _apply_time_stop_rules(
                     if action_out != "SELL":
                         action_out = "REVIEW"
 
-    if (
-        days_in_trade_sessions is not None
-        and time_stop_days > 0
-        and time_stop_grace_days > 0
-        and days_in_trade_sessions >= (time_stop_days + time_stop_grace_days)
-        and action_out != "SELL"
-    ):
-        pnl_ok = pnl_pct is not None and pnl_pct >= time_stop_profit_floor
-        if (
-            indicators.sma_trend is None
-            or indicators.ema_short is None
-            or indicators.ema_mid is None
-        ):
-            trend_available = False
-            trend_ok = False
-        else:
-            trend_available = True
-            trend_ok = (
-                last_close >= indicators.sma_trend
-                and indicators.ema_short >= indicators.ema_mid
-            )
-        weak_bits = []
-        if not pnl_ok:
-            if pnl_pct is None:
-                weak_bits.append("P&L unavailable")
-            else:
-                weak_bits.append(
-                    f"P&L {pnl_pct * 100:.1f}% < floor {time_stop_profit_floor * 100:.1f}%"
-                )
-        if trend_available and not trend_ok:
-            weak_bits.append("trend below SMA/EMA")
-        elif not trend_available and not pnl_ok:
-            weak_bits.append("trend indicators unavailable")
-
-        should_sell_for_extended_time_stop = not pnl_ok or (
-            trend_available and not trend_ok
-        )
-        if should_sell_for_extended_time_stop:
-            reason_detail = "; ".join(weak_bits) if weak_bits else "weak trend/return"
-            reasons.append(
-                f"Extended time stop: {days_in_trade_sessions} sessions ≥ "
-                f"{time_stop_days + time_stop_grace_days} sessions ({reason_detail})"
-            )
-            action_out = "SELL"
+    extended_time_stop = _apply_extended_time_stop(
+        days_in_trade_sessions=days_in_trade_sessions,
+        settings=settings,
+        action=action_out,
+        pnl_pct=pnl_pct,
+        last_close=last_close,
+        indicators=indicators,
+    )
+    action_out = extended_time_stop.action
+    reasons.extend(extended_time_stop.reasons)
 
     return _TimeStopResult(
         action=action_out,
