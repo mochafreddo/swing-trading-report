@@ -4,7 +4,7 @@ version: 1
 
 data:
   provider: kis
-  screen_limit: 300
+  screen_limit: 330
   report_dir: reports
   data_dir: data
 
@@ -93,6 +93,12 @@ sell:
 
 entry_check:
   enabled: false
+
+portfolio:
+  max_active_holdings: 8
+  max_new_entries_per_market:
+    KR: 1
+    US: 1
 
 universe:
   markets:
