@@ -86,6 +86,7 @@ function makeRequest(payload: object | string): NextRequest {
     headers: {
       "content-type": "application/json",
       origin: "http://localhost:55300",
+      "x-request-id": "run-route-test-request",
     },
     body,
   });
@@ -181,6 +182,97 @@ describe("POST /api/run route", () => {
 
     expect(response.status).toBe(403);
     expect(payload.error).toBe("Local only");
+  });
+
+  it("logs successful workflow dispatch with request correlation", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+    vi.mocked(dispatchWorkflow).mockResolvedValueOnce({
+      dispatched: true,
+      workflow: "scan",
+      workflowFile: "scan.yml",
+      workflowUrl: "https://github.com/example/repo/actions/workflows/scan.yml",
+      actionsUrl: "https://github.com/example/repo/actions",
+      ref: "main",
+    });
+
+    try {
+      const response = await POST(
+        makeRequest({
+          workflow: "scan",
+          provider: "kis",
+          universe: "US",
+        }),
+      );
+
+      expect(response.status).toBe(202);
+      expect(response.headers.get("x-request-id")).toBe(
+        "run-route-test-request",
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "web_api_request_completed",
+          component: "web",
+          request_id: "run-route-test-request",
+          route: "/api/run",
+          method: "POST",
+          operation: "dispatch_workflow",
+          status: "success",
+          status_code: 202,
+          dependency: "github_actions",
+          workflow: "scan",
+          provider: "kis",
+          universe: "US",
+        }),
+      );
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("logs GitHub dispatch failures with dependency context", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    vi.mocked(dispatchWorkflow).mockRejectedValueOnce(
+      new GitHubDispatchError("GitHub API unavailable", 503),
+    );
+
+    try {
+      const response = await POST(
+        makeRequest({
+          workflow: "scan",
+          provider: "kis",
+          universe: "US",
+        }),
+      );
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("x-request-id")).toBe(
+        "run-route-test-request",
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "web_api_request_failed",
+          component: "web",
+          request_id: "run-route-test-request",
+          route: "/api/run",
+          method: "POST",
+          operation: "dispatch_workflow",
+          status: "failed",
+          status_code: 503,
+          dependency: "github_actions",
+          workflow: "scan",
+          provider: "kis",
+          universe: "US",
+          error_type: "GitHubDispatchError",
+          retryable: true,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("maps GitHub 4xx errors as-is", async () => {

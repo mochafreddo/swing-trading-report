@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  elapsedMs,
+  getApiRequestId,
+  logApiError,
+  logApiInfo,
+  logApiWarn,
+  withApiRequestId,
+} from "@/lib/api-request-log";
 import { performAdminLogin } from "@/lib/admin-login";
 import {
   ADMIN_SESSION_COOKIE_NAME,
@@ -20,6 +28,10 @@ type LoginPayload = {
   password: string;
 };
 
+const ROUTE = "/api/auth/login";
+const METHOD = "POST";
+const OPERATION = "admin_login";
+
 function parseLoginPayload(payload: unknown): LoginPayload | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
@@ -36,50 +48,109 @@ function parseLoginPayload(payload: unknown): LoginPayload | null {
   return normalized;
 }
 
+function logRejectedLogin(
+  requestId: string,
+  startedAtMs: number,
+  statusCode: number,
+  reason: string,
+): void {
+  logApiWarn({
+    event: "web_api_request_rejected",
+    request_id: requestId,
+    route: ROUTE,
+    method: METHOD,
+    operation: OPERATION,
+    status: "failed",
+    status_code: statusCode,
+    reason,
+    duration_ms: elapsedMs(startedAtMs),
+  });
+}
+
 export async function POST(request: NextRequest) {
+  const requestId = getApiRequestId(request);
+  const startedAtMs = Date.now();
+
   try {
     assertSameOrigin(request);
     assertLocalRequest(request);
   } catch (error) {
     if (error instanceof SameOriginError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
+      logRejectedLogin(
+        requestId,
+        startedAtMs,
+        error.status,
+        "same_origin_guard",
+      );
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: error.status }),
+        requestId,
       );
     }
     if (error instanceof LocalRequestGuardError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
+      logRejectedLogin(
+        requestId,
+        startedAtMs,
+        error.status,
+        "local_request_guard",
+      );
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: error.status }),
+        requestId,
       );
     }
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    logApiError(error, {
+      event: "web_api_request_failed",
+      request_id: requestId,
+      route: ROUTE,
+      method: METHOD,
+      operation: OPERATION,
+      status: "failed",
+      status_code: 500,
+      duration_ms: elapsedMs(startedAtMs),
+      retryable: false,
+    });
+    return withApiRequestId(
+      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      requestId,
+    );
   }
 
   const body = await parseJsonBody(request);
   if (!body.ok) {
-    return body.response;
+    logRejectedLogin(
+      requestId,
+      startedAtMs,
+      body.response.status,
+      "invalid_json",
+    );
+    return withApiRequestId(body.response, requestId);
   }
 
   const parsed = parseLoginPayload(body.payload);
   if (!parsed) {
-    return NextResponse.json(
-      { error: "Invalid login payload" },
-      { status: 400 },
+    logRejectedLogin(requestId, startedAtMs, 400, "invalid_payload");
+    return withApiRequestId(
+      NextResponse.json({ error: "Invalid login payload" }, { status: 400 }),
+      requestId,
     );
   }
 
   try {
     const result = await performAdminLogin(parsed.username, parsed.password);
     if (!result.ok) {
-      return NextResponse.json(
-        { error: result.error },
-        {
-          status: result.status,
-          headers: result.retryAfterSeconds
-            ? { "Retry-After": String(result.retryAfterSeconds) }
-            : undefined,
-        },
+      logRejectedLogin(requestId, startedAtMs, result.status, "login_denied");
+      return withApiRequestId(
+        NextResponse.json(
+          { error: result.error },
+          {
+            status: result.status,
+            headers: result.retryAfterSeconds
+              ? { "Retry-After": String(result.retryAfterSeconds) }
+              : undefined,
+          },
+        ),
+        requestId,
       );
     }
 
@@ -89,8 +160,32 @@ export async function POST(request: NextRequest) {
       result.token,
       getAdminSessionCookieOptions(),
     );
-    return response;
+    logApiInfo({
+      event: "web_api_request_completed",
+      request_id: requestId,
+      route: ROUTE,
+      method: METHOD,
+      operation: OPERATION,
+      status: "success",
+      status_code: 200,
+      duration_ms: elapsedMs(startedAtMs),
+    });
+    return withApiRequestId(response, requestId);
   } catch (error) {
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    logApiError(error, {
+      event: "web_api_request_failed",
+      request_id: requestId,
+      route: ROUTE,
+      method: METHOD,
+      operation: OPERATION,
+      status: "failed",
+      status_code: 500,
+      duration_ms: elapsedMs(startedAtMs),
+      retryable: false,
+    });
+    return withApiRequestId(
+      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      requestId,
+    );
   }
 }

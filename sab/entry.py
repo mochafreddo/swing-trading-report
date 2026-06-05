@@ -26,6 +26,7 @@ from .holdings_loader import (
     load_holdings,
 )
 from .market_data_common import infer_env_from_base_url
+from .observability import current_run_id
 from .report.entry_report import EntryReportRow, write_entry_report
 from .report.run_meta import build_run_meta
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
@@ -809,8 +810,10 @@ def _make_price_lookup(
     provider: str,
     mode: str,
     market: str,
+    run_id: str | None = None,
 ) -> tuple[Callable[[str], float | None], list[str]]:
     provider_issues: list[str] = []
+    log_run_id = run_id or current_run_id("entry")
 
     if provider == "pykrx":
         if mode != "AFTER_CLOSE":
@@ -826,12 +829,46 @@ def _make_price_lookup(
             return (lambda _ticker: None), provider_issues
         except PykrxClientError as exc:
             provider_issues.append(f"provider init failed (pykrx): {exc}")
+            logger.warning(
+                "Entry price provider init failed: provider=pykrx market=%s error_type=%s",
+                market,
+                type(exc).__name__,
+                extra={
+                    "event": "entry_price_provider_failed",
+                    "operation": "entry",
+                    "run_id": log_run_id,
+                    "provider": "pykrx",
+                    "dependency": "pykrx",
+                    "market": market,
+                    "status": "degraded",
+                    "error_type": type(exc).__name__,
+                    "retryable": True,
+                },
+            )
             return (lambda _ticker: None), provider_issues
 
         def _lookup_pykrx(ticker: str) -> float | None:
             try:
                 rows = pykrx_client.daily_candles(ticker, count=1, adjusted=False)
-            except PykrxClientError:
+            except PykrxClientError as exc:
+                logger.warning(
+                    "Entry price lookup failed: provider=pykrx market=%s ticker=%s error_type=%s",
+                    market,
+                    ticker,
+                    type(exc).__name__,
+                    extra={
+                        "event": "entry_price_lookup_failed",
+                        "operation": "entry",
+                        "run_id": log_run_id,
+                        "provider": "pykrx",
+                        "dependency": "pykrx",
+                        "market": market,
+                        "ticker": ticker,
+                        "status": "degraded",
+                        "error_type": type(exc).__name__,
+                        "retryable": True,
+                    },
+                )
                 return None
             if not rows:
                 return None
@@ -862,6 +899,22 @@ def _make_price_lookup(
         kis_client = KISClient(creds, cache_dir=cfg.data_dir, min_interval=min_interval)
     except KISClientError as exc:
         provider_issues.append(f"provider init failed (kis): {exc}")
+        logger.warning(
+            "Entry price provider init failed: provider=kis market=%s error_type=%s",
+            market,
+            type(exc).__name__,
+            extra={
+                "event": "entry_price_provider_failed",
+                "operation": "entry",
+                "run_id": log_run_id,
+                "provider": "kis",
+                "dependency": "kis",
+                "market": market,
+                "status": "degraded",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
         return (lambda _ticker: None), provider_issues
 
     def _lookup_kis(ticker: str) -> float | None:
@@ -908,7 +961,25 @@ def _make_price_lookup(
             if live_price is not None:
                 return live_price
             return None
-        except KISClientError:
+        except KISClientError as exc:
+            logger.warning(
+                "Entry price lookup failed: provider=kis market=%s ticker=%s error_type=%s",
+                market,
+                ticker,
+                type(exc).__name__,
+                extra={
+                    "event": "entry_price_lookup_failed",
+                    "operation": "entry",
+                    "run_id": log_run_id,
+                    "provider": "kis",
+                    "dependency": "kis",
+                    "market": market,
+                    "ticker": ticker,
+                    "status": "degraded",
+                    "error_type": type(exc).__name__,
+                    "retryable": True,
+                },
+            )
             return None
 
     return _lookup_kis, provider_issues
@@ -1241,6 +1312,7 @@ def _evaluate_entry_candidate_markets(
     market_override: str | None,
     default_strategy_mode: str | None,
     allow_missing_gap_guard: bool,
+    run_id: str | None = None,
 ) -> tuple[list[EntryReportRow], list[str]]:
     system_issues: list[str] = []
     market_rows_by_market: dict[str, list[EntryReportRow]] = {}
@@ -1250,12 +1322,21 @@ def _evaluate_entry_candidate_markets(
         if not market_candidates:
             market_rows_by_market[candidate_market] = []
             continue
-        price_lookup_fn, provider_issues = _make_price_lookup(
-            cfg=cfg,
-            provider=provider,
-            mode=mode,
-            market=candidate_market,
-        )
+        if run_id is None:
+            price_lookup_fn, provider_issues = _make_price_lookup(
+                cfg=cfg,
+                provider=provider,
+                mode=mode,
+                market=candidate_market,
+            )
+        else:
+            price_lookup_fn, provider_issues = _make_price_lookup(
+                cfg=cfg,
+                provider=provider,
+                mode=mode,
+                market=candidate_market,
+                run_id=run_id,
+            )
         market_rows, candidate_system_issues = evaluate_entry_candidates(
             candidates=market_candidates,
             price_lookup_fn=price_lookup_fn,
@@ -1374,7 +1455,9 @@ def _write_entry_report_and_maybe_upload(
     fatal_missing_price_ratio: float,
     upload: bool,
     report_path_callback: Callable[[str], None] | None,
+    run_id: str | None = None,
 ) -> int:
+    log_run_id = run_id or current_run_id("entry")
     artifact_dates = [
         value
         for value in [
@@ -1399,8 +1482,30 @@ def _write_entry_report_and_maybe_upload(
         missing_price_ratio,
         fatal_missing_price_ratio,
         len(system_issues),
+        extra={
+            "event": "entry_summary",
+            "operation": "entry",
+            "run_id": log_run_id,
+            "status": "success",
+            "candidate_count": len(entries),
+            "missing_entry_price_ratio": missing_price_ratio,
+            "fatal_missing_price_ratio": fatal_missing_price_ratio,
+            "system_issue_count": len(system_issues),
+        },
     )
-    logger.info("Entry report written to: %s", out_path)
+    logger.info(
+        "Entry report written to: %s",
+        out_path,
+        extra={
+            "event": "entry_report_written",
+            "operation": "entry",
+            "run_id": log_run_id,
+            "report_path": out_path,
+            "report_type": "entry",
+            "status": "success",
+            "entry_count": len(entries),
+        },
+    )
     if report_path_callback is not None:
         report_path_callback(out_path)
     if system_issues:
@@ -1415,6 +1520,15 @@ def _write_entry_report_and_maybe_upload(
             "Entry failed: missing_price_ratio %.4f exceeded threshold %.4f",
             missing_price_ratio,
             fatal_missing_price_ratio,
+            extra={
+                "event": "entry_completed",
+                "operation": "entry",
+                "run_id": log_run_id,
+                "report_path": out_path,
+                "status": "failed",
+                "missing_entry_price_ratio": missing_price_ratio,
+                "fatal_missing_price_ratio": fatal_missing_price_ratio,
+            },
         )
         return 1
     try:
@@ -1425,11 +1539,65 @@ def _write_entry_report_and_maybe_upload(
             force=upload,
         )
     except SupabaseStorageError as exc:
-        logger.error("Supabase report upload failed: %s", exc)
+        logger.error(
+            "Supabase report upload failed: %s",
+            exc,
+            extra={
+                "event": "entry_upload_failed",
+                "operation": "entry",
+                "run_id": log_run_id,
+                "dependency": "supabase",
+                "report_path": out_path,
+                "report_type": "entry",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
+        logger.error(
+            "Entry completed with fatal errors. See report for details.",
+            extra={
+                "event": "entry_completed",
+                "operation": "entry",
+                "run_id": log_run_id,
+                "report_path": out_path,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
     else:
         if uploaded_key:
-            logger.info("Entry report uploaded to Supabase: %s", uploaded_key)
+            logger.info(
+                "Entry report uploaded to Supabase: %s",
+                uploaded_key,
+                extra={
+                    "event": "entry_upload_completed",
+                    "operation": "entry",
+                    "run_id": log_run_id,
+                    "dependency": "supabase",
+                    "report_path": out_path,
+                    "storage_key": uploaded_key,
+                    "report_type": "entry",
+                    "status": "success",
+                },
+            )
+    final_status = "warning" if system_issues else "success"
+    log_fn = logger.warning if system_issues else logger.info
+    log_fn(
+        "Entry completed with warnings. See report for details."
+        if system_issues
+        else "Entry completed successfully.",
+        extra={
+            "event": "entry_completed",
+            "operation": "entry",
+            "run_id": log_run_id,
+            "report_path": out_path,
+            "status": final_status,
+            "system_issue_count": len(system_issues),
+            "missing_entry_price_ratio": missing_price_ratio,
+        },
+    )
     return 0
 
 
@@ -1443,16 +1611,51 @@ def run_entry(
     upload: bool = False,
     report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
+    run_id = current_run_id("entry")
+    logger.info(
+        "Entry run started",
+        extra={
+            "event": "entry_started",
+            "operation": "entry",
+            "run_id": run_id,
+            "provider": provider or "kis",
+            "mode": mode or "PRE_OPEN",
+            "market": market or "report",
+            "buy_report_path": buy_report_path or "latest",
+            "upload": upload,
+        },
+    )
     try:
         normalized_provider = _normalize_provider(provider)
         normalized_mode = _normalize_mode(mode)
         normalized_market = _normalize_market(market)
     except ValueError as exc:
-        logger.error("%s", exc)
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     if normalized_provider == "pykrx" and normalized_mode != "AFTER_CLOSE":
-        logger.error("pykrx provider is only allowed in AFTER_CLOSE mode")
+        logger.error(
+            "pykrx provider is only allowed in AFTER_CLOSE mode",
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "provider": normalized_provider,
+                "mode": normalized_mode,
+                "error_type": "InvalidProviderMode",
+            },
+        )
         return 1
 
     try:
@@ -1464,17 +1667,47 @@ def run_entry(
                 holdings_override=holdings_path,
             )
     except ConfigLoadError as exc:
-        logger.error("Configuration loading failed: %s", exc)
+        logger.error(
+            "Configuration loading failed: %s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
     try:
         holdings_data = _resolve_entry_holdings(cfg)
     except HoldingsLoadError as exc:
-        logger.error("Holdings loading failed: %s", exc)
+        logger.error(
+            "Holdings loading failed: %s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
     try:
         fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()
     except ConfigLoadError as exc:
-        logger.error("Configuration loading failed: %s", exc)
+        logger.error(
+            "Configuration loading failed: %s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     try:
@@ -1484,10 +1717,31 @@ def run_entry(
             market_override=normalized_market,
         )
     except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
-        logger.error("Failed to load buy report: %s", exc)
+        logger.error(
+            "Failed to load buy report: %s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "buy_report_path": buy_report_path or "latest",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
     except ValueError as exc:
-        logger.error("%s", exc)
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     resolved_report_path = source_context.resolved_report_path
@@ -1496,13 +1750,33 @@ def run_entry(
         resolved_report_path,
         ",".join(source_context.resolved_markets),
         len(source_context.candidates),
+        extra={
+            "event": "entry_source_loaded",
+            "operation": "entry",
+            "run_id": run_id,
+            "source_report_path": resolved_report_path,
+            "market": ",".join(source_context.resolved_markets),
+            "candidate_count": len(source_context.candidates),
+            "status": "success",
+        },
     )
     source_report = source_context.source_report
     candidates = source_context.candidates
     candidates_by_market = source_context.candidates_by_market
     resolved_markets = source_context.resolved_markets
     if normalized_provider == "pykrx" and resolved_markets != ["KR"]:
-        logger.error("pykrx provider only supports KR market for entry")
+        logger.error(
+            "pykrx provider only supports KR market for entry",
+            extra={
+                "event": "entry_failed",
+                "operation": "entry",
+                "run_id": run_id,
+                "status": "failed",
+                "provider": normalized_provider,
+                "market": ",".join(resolved_markets),
+                "error_type": "InvalidProviderMarket",
+            },
+        )
         return 1
 
     entry_policy = _resolve_entry_evaluation_policy(cfg, source_report)
@@ -1516,12 +1790,22 @@ def run_entry(
         market_override=normalized_market,
         default_strategy_mode=entry_policy.default_strategy_mode,
         allow_missing_gap_guard=entry_policy.allow_missing_gap_guard,
+        run_id=run_id,
     )
     logger.info(
         "Entry candidate markets evaluated: markets=%s rows=%s system_issue_count=%s",
         ",".join(resolved_markets),
         len(rows),
         len(system_issues),
+        extra={
+            "event": "entry_markets_evaluated",
+            "operation": "entry",
+            "run_id": run_id,
+            "market": ",".join(resolved_markets),
+            "entry_count": len(rows),
+            "system_issue_count": len(system_issues),
+            "status": "success",
+        },
     )
 
     portfolio_blocked_by_market = _apply_entry_portfolio_guards(
@@ -1554,6 +1838,7 @@ def run_entry(
         fatal_missing_price_ratio=fatal_missing_price_ratio,
         upload=upload,
         report_path_callback=report_path_callback,
+        run_id=run_id,
     )
 
 

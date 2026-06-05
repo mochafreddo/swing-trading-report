@@ -10,6 +10,7 @@ import sys
 from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
+from .observability import sanitize_log_text, structured_log_fields
 from .scan import run_scan
 from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
 from .sell import run_sell
@@ -54,10 +55,13 @@ class _JsonFormatter(logging.Formatter):
             "timestamp": _format_record_time(record, datefmt=self.datefmt, tz=self._tz),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": sanitize_log_text(record.getMessage()),
         }
+        payload.update(structured_log_fields(record))
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            payload["exception"] = sanitize_log_text(
+                self.formatException(record.exc_info)
+            )
         return json.dumps(payload, ensure_ascii=False)
 
 

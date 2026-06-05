@@ -34,6 +34,7 @@ from .ai_brief_sources import (
     load_ai_brief_sources,
 )
 from .config import ConfigLoadError, load_config
+from .observability import current_run_id
 from .report.ai_brief_report import AiBriefValidationError, write_ai_brief_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .tickers import infer_market_from_ticker
@@ -80,6 +81,14 @@ _FIXED_API_SOURCE_PROVIDERS = frozenset(
         SOURCE_PROVIDER_NAVER_NEWS,
     }
 )
+
+
+def _source_provider_retryable(source_provider: str) -> bool:
+    return source_provider in _TIMEOUT_SOURCE_PROVIDERS
+
+
+def _model_provider_retryable(exc: AiBriefProviderError) -> bool:
+    return isinstance(exc, AiBriefProviderTimeoutError)
 
 
 def _normalize_model_provider(value: str | None) -> str:
@@ -441,6 +450,8 @@ def run_ai_brief(
     upload: bool = False,
     report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
+    run_id = current_run_id("ai-brief")
+    operation = "ai-brief"
     try:
         source_api_url_input = str(source_api_url or "").strip() or None
         normalized_market = normalize_market(market)
@@ -466,13 +477,54 @@ def run_ai_brief(
             value=source_timeout_seconds,
         )
     except ValueError as exc:
-        logger.error("%s", exc)
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "normalize_inputs",
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
         return 1
+
+    logger.info(
+        "AI brief started",
+        extra={
+            "event": "ai_brief_started",
+            "run_id": run_id,
+            "operation": operation,
+            "status": "started",
+            "entry_report_path": entry_report_path,
+            "buy_report_path": buy_report_path,
+            "market": normalized_market,
+            "model_provider": normalized_model_provider,
+            "model_name": normalized_model_name,
+            "source_provider": normalized_source_provider,
+            "upload": upload,
+        },
+    )
 
     try:
         cfg = load_config()
     except ConfigLoadError as exc:
-        logger.error("Configuration loading failed: %s", exc)
+        logger.error(
+            "Configuration loading failed: %s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "load_config",
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
         return 1
 
     try:
@@ -487,8 +539,38 @@ def run_ai_brief(
         target_rows = _filter_rows_for_market(entry_rows, market=target_market)
         buy_enrichment, enrichment_issues = _load_buy_enrichment(buy_report_path)
     except ValueError as exc:
-        logger.error("%s", exc)
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "load_entry_report",
+                "entry_report_path": entry_report_path,
+                "buy_report_path": buy_report_path,
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
         return 1
+
+    logger.info(
+        "AI brief entry report loaded",
+        extra={
+            "event": "ai_brief_entry_report_loaded",
+            "run_id": run_id,
+            "operation": operation,
+            "status": "success",
+            "entry_report_path": entry_report_path,
+            "buy_report_path": buy_report_path,
+            "market": target_market,
+            "entry_count": len(target_rows),
+            "candidate_count": len(entry_rows),
+            "enrichment_issue_count": len(enrichment_issues),
+        },
+    )
 
     eligible_candidates: list[dict[str, object]] = []
     excluded_candidates: list[dict[str, object]] = []
@@ -502,7 +584,20 @@ def run_ai_brief(
         elif action in {"REVIEW", "SKIP"}:
             excluded_candidates.append(_build_excluded_candidate(entry))
         else:
-            logger.error("entry row action must be ENTER, REVIEW, or SKIP")
+            logger.error(
+                "entry row action must be ENTER, REVIEW, or SKIP",
+                extra={
+                    "event": "ai_brief_failed",
+                    "run_id": run_id,
+                    "operation": operation,
+                    "status": "failed",
+                    "stage": "validate_entry_action",
+                    "market": target_market,
+                    "ticker": ticker,
+                    "action": action,
+                    "retryable": False,
+                },
+            )
             return 1
 
     preselected_candidates = eligible_candidates[:_PRESELECTION_LIMIT]
@@ -534,8 +629,42 @@ def run_ai_brief(
             source_provider_result.sources_by_ticker,
         )
         source_provider_issues = source_provider_result.source_issues
+        logger.info(
+            "AI brief source provider completed",
+            extra={
+                "event": "ai_brief_source_provider_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "source_provider": normalized_source_provider,
+                "dependency": normalized_source_provider,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "source_count": sum(
+                    len(sources)
+                    for sources in source_provider_result.sources_by_ticker.values()
+                ),
+                "source_issue_count": len(source_provider_issues),
+            },
+        )
     except AiBriefSourceProviderError as exc:
-        logger.error("AI brief source provider failed: %s", exc)
+        logger.error(
+            "AI brief source provider failed: %s",
+            exc,
+            extra={
+                "event": "ai_brief_source_provider_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "degraded",
+                "source_provider": normalized_source_provider,
+                "dependency": normalized_source_provider,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "source_report_path": source_report_path,
+                "error_type": type(exc).__name__,
+                "retryable": _source_provider_retryable(normalized_source_provider),
+            },
+        )
         preselected_candidates = _attach_candidate_sources(preselected_candidates, {})
         system_issues.append(_source_provider_system_issue(exc))
 
@@ -551,14 +680,62 @@ def run_ai_brief(
         recommendations = provider_result.recommendations
         source_issues = [*source_provider_issues, *provider_result.source_issues]
         vetoed_candidates = provider_result.vetoed_candidates
+        logger.info(
+            "AI brief model provider completed",
+            extra={
+                "event": "ai_brief_model_provider_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": normalized_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "recommendation_count": len(recommendations),
+                "vetoed_count": len(vetoed_candidates),
+                "source_issue_count": len(source_issues),
+            },
+        )
     except AiBriefProviderError as exc:
-        logger.error("AI brief provider failed: %s", exc)
+        logger.error(
+            "AI brief provider failed: %s",
+            exc,
+            extra={
+                "event": "ai_brief_model_provider_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "degraded",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": normalized_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "error_type": type(exc).__name__,
+                "retryable": _model_provider_retryable(exc),
+            },
+        )
         recommendations = []
         source_issues = source_provider_issues
         vetoed_candidates = []
         system_issues.append(_provider_system_issue(exc))
     except ValueError as exc:
-        logger.error("%s", exc)
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "build_model_provider",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": normalized_model_name,
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
         return 1
 
     artifact = {
@@ -599,10 +776,39 @@ def run_ai_brief(
             artifact_date=report_date,
         )
     except AiBriefValidationError as exc:
-        logger.error("AI brief validation failed: %s", exc)
+        logger.error(
+            "AI brief validation failed: %s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "write_report",
+                "market": target_market,
+                "report_date": report_date,
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
         return 1
 
-    logger.info("AI brief written to: %s", out_path)
+    logger.info(
+        "AI brief written to: %s",
+        out_path,
+        extra={
+            "event": "ai_brief_report_written",
+            "run_id": run_id,
+            "operation": operation,
+            "status": "success",
+            "market": target_market,
+            "report_path": out_path,
+            "report_date": report_date,
+            "recommendation_count": len(recommendations),
+            "source_issue_count": len(source_issues),
+            "system_issue_count": len(system_issues),
+        },
+    )
     if report_path_callback is not None:
         report_path_callback(out_path)
     try:
@@ -613,13 +819,64 @@ def run_ai_brief(
             force=upload,
         )
     except SupabaseStorageError as exc:
-        logger.error("Supabase AI brief upload failed: %s", exc)
+        logger.error(
+            "Supabase AI brief upload failed: %s",
+            exc,
+            extra={
+                "event": "ai_brief_upload_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "dependency": "supabase",
+                "market": target_market,
+                "report_path": out_path,
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
         return 1
     else:
         if uploaded_key:
-            logger.info("AI brief uploaded to Supabase: %s", uploaded_key)
+            logger.info(
+                "AI brief uploaded to Supabase: %s",
+                uploaded_key,
+                extra={
+                    "event": "ai_brief_upload_completed",
+                    "run_id": run_id,
+                    "operation": operation,
+                    "status": "success",
+                    "dependency": "supabase",
+                    "market": target_market,
+                    "report_path": out_path,
+                    "storage_key": uploaded_key,
+                },
+            )
+    completed_status = "warning" if system_issues else "success"
+    completed_extra = {
+        "event": "ai_brief_completed",
+        "run_id": run_id,
+        "operation": operation,
+        "status": completed_status,
+        "market": target_market,
+        "report_path": out_path,
+        "recommendation_count": len(recommendations),
+        "source_issue_count": len(source_issues),
+        "system_issue_count": len(system_issues),
+    }
     if source_issues:
-        logger.warning("AI brief completed with source issues (%s)", len(source_issues))
+        logger.warning(
+            "AI brief completed with source issues (%s)",
+            len(source_issues),
+            extra=completed_extra,
+        )
+    elif system_issues:
+        logger.warning(
+            "AI brief completed with system issues (%s)",
+            len(system_issues),
+            extra=completed_extra,
+        )
+    else:
+        logger.info("AI brief completed", extra=completed_extra)
     return 0
 
 

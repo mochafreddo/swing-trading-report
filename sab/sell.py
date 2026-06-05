@@ -11,6 +11,7 @@ from .fx import resolve_fx_rate
 from .holdings_loader import HoldingsData, HoldingsLoadError, load_holdings
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import SellMarketData
+from .observability import current_run_id
 from .report.sell_report import SellReportRow, write_sell_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_suffix
@@ -129,19 +130,50 @@ def _resolve_sell_holdings(cfg: Config) -> HoldingsData:
 
 def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     logger = logging.getLogger(__name__)
+    run_id = current_run_id("sell")
+    logger.info(
+        "Sell run started",
+        extra={
+            "event": "sell_started",
+            "operation": "sell",
+            "run_id": run_id,
+            "provider": provider or "config",
+            "holdings_path": holdings_path or "config",
+        },
+    )
     try:
         cfg: Config = load_config(
             provider_override=provider,
             holdings_override=holdings_path,
         )
     except ConfigLoadError as exc:
-        logger.error("Configuration loading failed: %s", exc)
+        logger.error(
+            "Configuration loading failed: %s",
+            exc,
+            extra={
+                "event": "sell_failed",
+                "operation": "sell",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     try:
         holdings_data = _resolve_sell_holdings(cfg)
     except HoldingsLoadError as exc:
-        logger.error("Holdings loading failed: %s", exc)
+        logger.error(
+            "Holdings loading failed: %s",
+            exc,
+            extra={
+                "event": "sell_failed",
+                "operation": "sell",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     runtime = _build_sell_runtime(cfg, logger, holdings=holdings_data)
@@ -150,7 +182,19 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     results = _evaluate_sell_runtime(runtime)
 
     out_path = _render_sell_report(runtime, results)
-    logger.info("Sell report written to: %s", out_path)
+    logger.info(
+        "Sell report written to: %s",
+        out_path,
+        extra={
+            "event": "sell_report_written",
+            "operation": "sell",
+            "run_id": run_id,
+            "report_path": out_path,
+            "report_type": "sell",
+            "status": "success",
+            "ticker_count": len(runtime.unique_tickers),
+        },
+    )
     try:
         uploaded_key = maybe_upload_report_artifact(
             artifact_path=out_path,
@@ -160,20 +204,75 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     except SupabaseStorageError as exc:
         runtime.failures.append(f"Supabase upload failed: {exc}")
         runtime.fatal_failure = True
-        logger.error("Supabase report upload failed: %s", exc)
+        logger.error(
+            "Supabase report upload failed: %s",
+            exc,
+            extra={
+                "event": "sell_upload_failed",
+                "operation": "sell",
+                "run_id": run_id,
+                "dependency": "supabase",
+                "report_path": out_path,
+                "report_type": "sell",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
     else:
         if uploaded_key:
-            logger.info("Sell report uploaded to Supabase: %s", uploaded_key)
+            logger.info(
+                "Sell report uploaded to Supabase: %s",
+                uploaded_key,
+                extra={
+                    "event": "sell_upload_completed",
+                    "operation": "sell",
+                    "run_id": run_id,
+                    "dependency": "supabase",
+                    "report_path": out_path,
+                    "storage_key": uploaded_key,
+                    "report_type": "sell",
+                    "status": "success",
+                },
+            )
 
     if runtime.fatal_failure:
         logger.error(
-            "Sell evaluation completed with fatal errors. See report for details."
+            "Sell evaluation completed with fatal errors. See report for details.",
+            extra={
+                "event": "sell_completed",
+                "operation": "sell",
+                "run_id": run_id,
+                "report_path": out_path,
+                "status": "failed",
+                "failure_count": len(runtime.failures),
+            },
         )
         return 1
     if runtime.failures:
         logger.warning(
-            "Sell evaluation completed with warnings. See report for details."
+            "Sell evaluation completed with warnings. See report for details.",
+            extra={
+                "event": "sell_completed",
+                "operation": "sell",
+                "run_id": run_id,
+                "report_path": out_path,
+                "status": "warning",
+                "failure_count": len(runtime.failures),
+            },
         )
+        return 0
+    logger.info(
+        "Sell evaluation completed successfully.",
+        extra={
+            "event": "sell_completed",
+            "operation": "sell",
+            "run_id": run_id,
+            "report_path": out_path,
+            "status": "success",
+            "failure_count": 0,
+        },
+    )
     return 0
 
 

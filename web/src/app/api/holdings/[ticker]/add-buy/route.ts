@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import {
+  elapsedMs,
+  getApiRequestId,
+  logApiError,
+  logApiInfo,
+  logApiWarn,
+  withApiRequestId,
+  type ApiLogFields,
+} from "@/lib/api-request-log";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { toErrorMessage } from "@/lib/error-utils";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
@@ -19,6 +28,10 @@ type ParsedIdempotencyKeyHeader = {
   key: string | null;
   invalid: boolean;
 };
+
+const ROUTE = "/api/holdings/[ticker]/add-buy";
+const METHOD = "POST";
+const OPERATION = "add_buy_to_holding";
 
 function parseIdempotencyKeyHeader(
   request: NextRequest,
@@ -49,43 +62,99 @@ function parseTickerParam(rawTicker: string): string | null {
   return parsed.success ? normalizeHoldingTickerForMutation(parsed.data) : null;
 }
 
+function logRejectedAddBuy(
+  requestId: string,
+  startedAtMs: number,
+  statusCode: number,
+  reason: string,
+  fields: ApiLogFields = {},
+): void {
+  logApiWarn({
+    event: "web_api_request_rejected",
+    request_id: requestId,
+    route: ROUTE,
+    method: METHOD,
+    operation: OPERATION,
+    status: "failed",
+    status_code: statusCode,
+    reason,
+    duration_ms: elapsedMs(startedAtMs),
+    ...fields,
+  });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
+  const requestId = getApiRequestId(request);
+  const startedAtMs = Date.now();
+
   const guardError = await enforceAdminApiGuard(request);
   if (guardError) {
-    return guardError;
+    logRejectedAddBuy(requestId, startedAtMs, guardError.status, "admin_guard");
+    return withApiRequestId(guardError, requestId);
   }
 
   const params = await context.params;
   const ticker = parseTickerParam(params.ticker);
   if (!ticker) {
-    return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
+    logRejectedAddBuy(requestId, startedAtMs, 400, "invalid_ticker");
+    return withApiRequestId(
+      NextResponse.json({ error: "Invalid ticker" }, { status: 400 }),
+      requestId,
+    );
   }
 
   const body = await parseJsonBody(request);
   if (!body.ok) {
-    return body.response;
+    logRejectedAddBuy(
+      requestId,
+      startedAtMs,
+      body.response.status,
+      "invalid_json",
+      {
+        ticker_count: 1,
+      },
+    );
+    return withApiRequestId(body.response, requestId);
   }
 
   const parsed = holdingAddBuySchema.safeParse(body.payload);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "Invalid holding add-buy payload",
-        details: parsed.error.flatten(),
-      },
-      { status: 400 },
+    logRejectedAddBuy(requestId, startedAtMs, 400, "invalid_payload", {
+      ticker_count: 1,
+    });
+    return withApiRequestId(
+      NextResponse.json(
+        {
+          error: "Invalid holding add-buy payload",
+          details: parsed.error.flatten(),
+        },
+        { status: 400 },
+      ),
+      requestId,
     );
   }
 
   const idempotencyKeyHeader = parseIdempotencyKeyHeader(request);
   if (!idempotencyKeyHeader.key) {
-    return NextResponse.json(
-      {
-        error: idempotencyKeyHeader.invalid
-          ? "Invalid Idempotency-Key header"
-          : "Missing Idempotency-Key header",
-      },
-      { status: 400 },
+    logRejectedAddBuy(
+      requestId,
+      startedAtMs,
+      400,
+      idempotencyKeyHeader.invalid
+        ? "invalid_idempotency_key"
+        : "missing_idempotency_key",
+      { ticker_count: 1, idempotency_key_present: false },
+    );
+    return withApiRequestId(
+      NextResponse.json(
+        {
+          error: idempotencyKeyHeader.invalid
+            ? "Invalid Idempotency-Key header"
+            : "Missing Idempotency-Key header",
+        },
+        { status: 400 },
+      ),
+      requestId,
     );
   }
 
@@ -96,28 +165,71 @@ export async function POST(request: NextRequest, context: RouteContext) {
       idempotencyKeyHeader.key,
     );
     if (!updated) {
-      return NextResponse.json({ error: "Holding not found" }, { status: 404 });
+      logRejectedAddBuy(requestId, startedAtMs, 404, "not_found", {
+        ticker_count: 1,
+        dependency: "supabase",
+        idempotency_key_present: true,
+      });
+      return withApiRequestId(
+        NextResponse.json({ error: "Holding not found" }, { status: 404 }),
+        requestId,
+      );
     }
-    return NextResponse.json(updated);
+    const response = NextResponse.json(updated);
+    logApiInfo({
+      event: "web_api_request_completed",
+      request_id: requestId,
+      route: ROUTE,
+      method: METHOD,
+      operation: OPERATION,
+      status: "success",
+      status_code: 200,
+      dependency: "supabase",
+      duration_ms: elapsedMs(startedAtMs),
+      ticker_count: 1,
+      idempotency_key_present: true,
+    });
+    return withApiRequestId(response, requestId);
   } catch (error) {
+    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    logApiError(error, {
+      event: "web_api_request_failed",
+      request_id: requestId,
+      route: ROUTE,
+      method: METHOD,
+      operation: OPERATION,
+      status: "failed",
+      status_code: statusCode,
+      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      duration_ms: elapsedMs(startedAtMs),
+      retryable: statusCode >= 500,
+      ticker_count: 1,
+      idempotency_key_present: true,
+    });
     if (error instanceof SupabaseApiError) {
       if (
         error.status === 409 &&
         error.code === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
       ) {
-        return NextResponse.json(
-          {
-            error: error.message,
-            code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
-          },
-          { status: error.status },
+        return withApiRequestId(
+          NextResponse.json(
+            {
+              error: error.message,
+              code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+            },
+            { status: error.status },
+          ),
+          requestId,
         );
       }
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: error.status }),
+        requestId,
       );
     }
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    return withApiRequestId(
+      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      requestId,
+    );
   }
 }

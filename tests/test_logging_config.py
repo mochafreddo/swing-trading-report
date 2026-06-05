@@ -142,6 +142,76 @@ def test_configure_logging_supports_json_format(
     }
 
 
+def test_configure_logging_json_promotes_structured_extra_fields(
+    isolated_root_logger, monkeypatch, make_log_record
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TZ", "utc")
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.delenv("LOG_DATEFMT", raising=False)
+
+    _configure_logging()
+    record = make_log_record(created=FIXED_CREATED)
+    record.event = "scan_started"
+    record.operation = "scan"
+    record.run_id = "scan-abc123"
+    record.market = "US"
+    record.ticker_count = 42
+    line = _format_root(record)
+
+    payload = json.loads(line)
+    assert payload["event"] == "scan_started"
+    assert payload["operation"] == "scan"
+    assert payload["run_id"] == "scan-abc123"
+    assert payload["market"] == "US"
+    assert payload["ticker_count"] == 42
+
+
+def test_configure_logging_json_redacts_sensitive_extra_fields(
+    isolated_root_logger, monkeypatch, make_log_record
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TZ", "utc")
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.delenv("LOG_DATEFMT", raising=False)
+
+    _configure_logging()
+    record = make_log_record(created=FIXED_CREATED)
+    record.event = "upstream_failed"
+    record.api_key = "sb_secret_should_not_be_logged"
+    record.authorization = "Bearer token_should_not_be_logged"
+    record.storage_key = "2026/06/report.json"
+    line = _format_root(record)
+
+    payload = json.loads(line)
+    assert payload["api_key"] == "[REDACTED]"
+    assert payload["authorization"] == "[REDACTED]"
+    assert payload["storage_key"] == "2026/06/report.json"
+    assert "sb_secret_should_not_be_logged" not in line
+    assert "token_should_not_be_logged" not in line
+
+
+def test_configure_logging_json_redacts_sensitive_message_text(
+    isolated_root_logger, monkeypatch, make_log_record
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TZ", "utc")
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.delenv("LOG_DATEFMT", raising=False)
+
+    _configure_logging()
+    record = make_log_record(
+        msg="request failed Authorization=Bearer token_should_not_be_logged api_key=secret_should_not_be_logged",
+        created=FIXED_CREATED,
+    )
+    line = _format_root(record)
+
+    payload = json.loads(line)
+    assert "token_should_not_be_logged" not in line
+    assert "secret_should_not_be_logged" not in line
+    assert payload["message"].count("[REDACTED]") >= 2
+
+
 def test_main_help_accepts_json_log_format(
     isolated_root_logger, monkeypatch, capsys
 ) -> None:

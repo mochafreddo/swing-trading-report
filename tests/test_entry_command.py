@@ -1523,6 +1523,128 @@ def test_run_entry_e2e_rejects_ambiguous_us_suffix_immediately(
     )
 
 
+def test_make_price_lookup_logs_kis_detail_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "entry-price-test-run")
+
+    fake_cfg = SimpleNamespace(
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+
+    class _FailingKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            raise entry.KISClientError("upstream timeout")
+
+    monkeypatch.setattr("sab.entry.KISClient", _FailingKISClient)
+    caplog.set_level(logging.WARNING, logger="sab.entry")
+
+    price_lookup, issues = entry._make_price_lookup(
+        cfg=cast(Config, fake_cfg),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert issues == []
+    assert price_lookup("AAPL.NASD") is None
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "entry_price_lookup_failed"
+    )
+    assert record.__dict__["run_id"] == "entry-price-test-run"
+    assert record.__dict__["operation"] == "entry"
+    assert record.__dict__["provider"] == "kis"
+    assert record.__dict__["dependency"] == "kis"
+    assert record.__dict__["market"] == "US"
+    assert record.__dict__["ticker"] == "AAPL.NASD"
+    assert record.__dict__["error_type"] == "KISClientError"
+    assert record.__dict__["retryable"] is True
+
+
+def test_run_entry_logs_structured_run_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "entry-test-run")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            return {"last": "101.5", "xymd": "20260226"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+    caplog.set_level(logging.INFO, logger="sab.entry")
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    lifecycle = [
+        record
+        for record in caplog.records
+        if getattr(record, "run_id", None) == "entry-test-run"
+    ]
+    assert [getattr(record, "event", None) for record in lifecycle] == [
+        "entry_started",
+        "entry_source_loaded",
+        "entry_markets_evaluated",
+        "entry_summary",
+        "entry_report_written",
+        "entry_completed",
+    ]
+    assert all(getattr(record, "operation", None) == "entry" for record in lifecycle)
+    assert lifecycle[1].__dict__["source_report_path"] == buy_report_path.as_posix()
+    assert lifecycle[-1].__dict__["status"] == "success"
+
+
 def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -> None:
     report_dir = tmp_path / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)

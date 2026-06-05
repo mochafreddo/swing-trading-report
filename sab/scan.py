@@ -12,6 +12,7 @@ from .data_coverage_policy import summarize_missing_market_data
 from .fx import resolve_fx_rate
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import ScanMarketData
+from .observability import current_run_id
 from .report.markdown import write_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .scan_types import (
@@ -164,6 +165,19 @@ def run_scan(
     report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
+    run_id = current_run_id("scan")
+    logger.info(
+        "Scan run started",
+        extra={
+            "event": "scan_started",
+            "operation": "scan",
+            "run_id": run_id,
+            "provider": provider or "config",
+            "universe": universe or "config",
+            "markets": markets or "config",
+            "limit": limit,
+        },
+    )
     markets_override: list[str] | None = None
     if markets is not None:
         parsed_markets = [item.strip() for item in markets.split(",") if item.strip()]
@@ -176,7 +190,17 @@ def run_scan(
             markets_override=markets_override,
         )
     except ConfigLoadError as exc:
-        logger.error("Configuration loading failed: %s", exc)
+        logger.error(
+            "Configuration loading failed: %s",
+            exc,
+            extra={
+                "event": "scan_failed",
+                "operation": "scan",
+                "run_id": run_id,
+                "status": "failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return 1
 
     screener_enabled, screener_only = scan_screener._resolve_screener_flags(
@@ -193,6 +217,14 @@ def run_scan(
             logger.error(
                 "Watchlist file '%s' does not exist; aborting for fail-closed safety.",
                 resolved_watchlist_path,
+                extra={
+                    "event": "scan_failed",
+                    "operation": "scan",
+                    "run_id": run_id,
+                    "status": "failed",
+                    "watchlist_path": resolved_watchlist_path,
+                    "error_type": "WatchlistMissing",
+                },
             )
             return 1
         try:
@@ -202,7 +234,17 @@ def run_scan(
                 load_watchlist_fn=load_watchlist,
             )
         except ConfigLoadError as exc:
-            logger.error("Watchlist loading failed: %s", exc)
+            logger.error(
+                "Watchlist loading failed: %s",
+                exc,
+                extra={
+                    "event": "scan_failed",
+                    "operation": "scan",
+                    "run_id": run_id,
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                },
+            )
             return 1
     filtered_tickers = _filter_tickers_by_markets(loaded_tickers, cfg.universe_markets)
     if len(filtered_tickers) != len(loaded_tickers):
@@ -255,7 +297,20 @@ def run_scan(
         _mark_missing_scan_market_data(runtime)
 
     out_path = _render_scan_report(runtime)
-    runtime.logger.info("Buy report written to: %s", out_path)
+    runtime.logger.info(
+        "Buy report written to: %s",
+        out_path,
+        extra={
+            "event": "scan_report_written",
+            "operation": "scan",
+            "run_id": run_id,
+            "report_path": out_path,
+            "report_type": "buy",
+            "status": "success",
+            "market": ",".join(runtime.cfg.universe_markets),
+            "ticker_count": len(runtime.tickers),
+        },
+    )
     if report_path_callback is not None:
         report_path_callback(out_path)
     try:
@@ -267,18 +322,78 @@ def run_scan(
     except SupabaseStorageError as exc:
         _record_system_issue(runtime, f"Supabase upload failed: {exc}")
         runtime.fatal_failure = True
-        runtime.logger.error("Supabase report upload failed: %s", exc)
+        runtime.logger.error(
+            "Supabase report upload failed: %s",
+            exc,
+            extra={
+                "event": "scan_upload_failed",
+                "operation": "scan",
+                "run_id": run_id,
+                "dependency": "supabase",
+                "report_path": out_path,
+                "report_type": "buy",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "retryable": True,
+            },
+        )
     else:
         if uploaded_key:
-            runtime.logger.info("Buy report uploaded to Supabase: %s", uploaded_key)
+            runtime.logger.info(
+                "Buy report uploaded to Supabase: %s",
+                uploaded_key,
+                extra={
+                    "event": "scan_upload_completed",
+                    "operation": "scan",
+                    "run_id": run_id,
+                    "dependency": "supabase",
+                    "report_path": out_path,
+                    "storage_key": uploaded_key,
+                    "report_type": "buy",
+                    "status": "success",
+                },
+            )
 
     if runtime.fatal_failure:
         runtime.logger.error(
-            "Scan completed with fatal errors. See failures section in report."
+            "Scan completed with fatal errors. See failures section in report.",
+            extra={
+                "event": "scan_completed",
+                "operation": "scan",
+                "run_id": run_id,
+                "report_path": out_path,
+                "status": "failed",
+                "failure_count": len(runtime.failures),
+                "system_issue_count": len(runtime.system_issues),
+            },
         )
         return 1
     if runtime.failures:
-        runtime.logger.warning("Scan completed with warnings. See report for details.")
+        runtime.logger.warning(
+            "Scan completed with warnings. See report for details.",
+            extra={
+                "event": "scan_completed",
+                "operation": "scan",
+                "run_id": run_id,
+                "report_path": out_path,
+                "status": "warning",
+                "failure_count": len(runtime.failures),
+                "system_issue_count": len(runtime.system_issues),
+            },
+        )
+        return 0
+    runtime.logger.info(
+        "Scan completed successfully.",
+        extra={
+            "event": "scan_completed",
+            "operation": "scan",
+            "run_id": run_id,
+            "report_path": out_path,
+            "status": "success",
+            "failure_count": 0,
+            "system_issue_count": 0,
+        },
+    )
     return 0
 
 

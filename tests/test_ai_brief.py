@@ -198,6 +198,86 @@ def test_run_ai_brief_writes_recommendations_from_entry_report_only(
     assert "NOT-ELIGIBLE.NAS" not in json.dumps(payload)
 
 
+def test_run_ai_brief_logs_structured_run_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "ai-brief-test-run")
+    entry_report = _write_entry_report(tmp_path)
+    buy_report = _write_buy_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    caplog.set_level("INFO", logger="sab.ai_brief")
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=buy_report.as_posix(),
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    lifecycle = [
+        record
+        for record in caplog.records
+        if getattr(record, "run_id", None) == "ai-brief-test-run"
+    ]
+    assert [getattr(record, "event", None) for record in lifecycle] == [
+        "ai_brief_started",
+        "ai_brief_entry_report_loaded",
+        "ai_brief_source_provider_completed",
+        "ai_brief_model_provider_completed",
+        "ai_brief_report_written",
+        "ai_brief_completed",
+    ]
+    assert all(getattr(record, "operation", None) == "ai-brief" for record in lifecycle)
+    assert lifecycle[1].__dict__["entry_report_path"] == entry_report.as_posix()
+    assert lifecycle[-1].__dict__["status"] == "success"
+
+
+def test_run_ai_brief_logs_source_provider_failure_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "ai-brief-source-test-run")
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    missing_source_report = tmp_path / "missing.sources.json"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    caplog.set_level("ERROR", logger="sab.ai_brief")
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="local-json",
+        source_report_path=missing_source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_source_provider_failed"
+    )
+    assert record.__dict__["run_id"] == "ai-brief-source-test-run"
+    assert record.__dict__["operation"] == "ai-brief"
+    assert record.__dict__["source_provider"] == "local-json"
+    assert record.__dict__["dependency"] == "local-json"
+    assert record.__dict__["status"] == "degraded"
+    assert record.__dict__["error_type"] == "AiBriefSourceProviderError"
+    assert record.__dict__["retryable"] is False
+
+
 def test_run_ai_brief_keeps_running_when_optional_buy_report_is_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -103,7 +103,9 @@ import {
 
 function makeGetRequest(query = ""): NextRequest {
   const suffix = query ? `?${query}` : "";
-  return new NextRequest(`http://localhost:55300/api/holdings${suffix}`);
+  return new NextRequest(`http://localhost:55300/api/holdings${suffix}`, {
+    headers: { "x-request-id": "holdings-route-test-request" },
+  });
 }
 
 function makePostRequest(payload: object | string): NextRequest {
@@ -113,6 +115,7 @@ function makePostRequest(payload: object | string): NextRequest {
     headers: {
       "content-type": "application/json",
       origin: "http://localhost:55300",
+      "x-request-id": "holdings-route-test-request",
     },
     body,
   });
@@ -198,6 +201,41 @@ describe("GET /api/holdings route", () => {
 
     expect(response.status).toBe(503);
     expect(payload.error).toBe("upstream unavailable");
+  });
+
+  it("logs supabase list failures with request correlation", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    vi.mocked(fetchHoldingsPage).mockRejectedValueOnce(
+      new SupabaseApiError("upstream unavailable", 503),
+    );
+
+    try {
+      const response = await GET(makeGetRequest("limit=10"));
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("x-request-id")).toBe(
+        "holdings-route-test-request",
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "web_api_request_failed",
+          component: "web",
+          request_id: "holdings-route-test-request",
+          route: "/api/holdings",
+          method: "GET",
+          operation: "list_holdings",
+          status: "failed",
+          status_code: 503,
+          dependency: "supabase",
+          error_type: "SupabaseApiError",
+          retryable: true,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

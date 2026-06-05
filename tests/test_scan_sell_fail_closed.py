@@ -514,6 +514,101 @@ def test_run_sell_logs_kis_token_cache_status_once(
     assert lines == [f"KIS token cache status=hit (env=real, cache_dir={tmp_path})"]
 
 
+def test_run_scan_logs_structured_run_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "scan-test-run")
+    watchlist_file = tmp_path / "watchlist.txt"
+    watchlist_file.write_text("005930\n", encoding="utf-8")
+    report_path = str(tmp_path / "2026-02-19.buy.json")
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
+        screener_enabled=False,
+        screener_only=False,
+    )
+    caplog.set_level(logging.INFO, logger="sab.scan")
+
+    with (
+        patch("sab.scan.load_config", return_value=cfg),
+        patch("sab.scan.load_watchlist", return_value=["005930"]),
+        patch("sab.market_data_common.KISClient", _FakeHitKISClient),
+        patch("sab.scan.resolve_fx_rate", return_value=(None, None, [])),
+        patch("sab.scan.maybe_upload_report_artifact", return_value=None),
+        patch("sab.scan.write_report", return_value=report_path),
+    ):
+        code = run_scan(
+            limit=None,
+            watchlist_path=None,
+            provider=None,
+            screener_limit=None,
+            universe="watchlist",
+        )
+
+    assert code == 0
+    lifecycle = [
+        record
+        for record in caplog.records
+        if getattr(record, "run_id", None) == "scan-test-run"
+    ]
+    assert [getattr(record, "event", None) for record in lifecycle] == [
+        "scan_started",
+        "scan_report_written",
+        "scan_completed",
+    ]
+    assert all(getattr(record, "operation", None) == "scan" for record in lifecycle)
+    assert lifecycle[1].__dict__["report_path"] == report_path
+    assert lifecycle[-1].__dict__["status"] == "success"
+
+
+def test_run_sell_logs_structured_run_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SAB_RUN_ID", "sell-test-run")
+    report_path = str(tmp_path / "2026-02-19.sell.json")
+    cfg = replace(
+        Config(),
+        data_provider="kis",
+        kis_app_key="key",
+        kis_app_secret="secret",
+        kis_base_url="https://example.com",
+        data_dir=str(tmp_path),
+        report_dir=str(tmp_path),
+        holdings=_build_holdings(["005930"]),
+    )
+    caplog.set_level(logging.INFO, logger="sab.sell")
+
+    with (
+        patch("sab.sell.load_config", return_value=cfg),
+        patch("sab.market_data_common.KISClient", _FakeHitKISClient),
+        patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
+        patch("sab.sell.maybe_upload_report_artifact", return_value=None),
+        patch("sab.sell.write_sell_report", return_value=report_path),
+    ):
+        code = run_sell(provider=None)
+
+    assert code == 0
+    lifecycle = [
+        record
+        for record in caplog.records
+        if getattr(record, "run_id", None) == "sell-test-run"
+    ]
+    assert [getattr(record, "event", None) for record in lifecycle] == [
+        "sell_started",
+        "sell_report_written",
+        "sell_completed",
+    ]
+    assert all(getattr(record, "operation", None) == "sell" for record in lifecycle)
+    assert lifecycle[1].__dict__["report_path"] == report_path
+    assert lifecycle[-1].__dict__["status"] == "success"
+
+
 def test_run_sell_expands_target_bars_for_long_held_positions(tmp_path: Path) -> None:
     cfg = replace(
         Config(),

@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
+import {
+  elapsedMs,
+  getApiRequestId,
+  logApiError,
+  logApiInfo,
+  logApiWarn,
+  withApiRequestId,
+  type ApiLogFields,
+} from "@/lib/api-request-log";
 import { toErrorMessage } from "@/lib/error-utils";
 import {
   buildHoldingsYamlDocument,
@@ -20,16 +29,54 @@ import type { HoldingsYamlImportResponse } from "@/lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const ROUTE = "/api/holdings/yaml";
+
+function logRejectedYamlRequest(
+  requestId: string,
+  startedAtMs: number,
+  method: "GET" | "POST",
+  operation: string,
+  statusCode: number,
+  reason: string,
+  fields: ApiLogFields = {},
+): void {
+  logApiWarn({
+    event: "web_api_request_rejected",
+    request_id: requestId,
+    route: ROUTE,
+    method,
+    operation,
+    status: "failed",
+    status_code: statusCode,
+    reason,
+    duration_ms: elapsedMs(startedAtMs),
+    ...fields,
+  });
+}
+
 export async function GET(request: NextRequest) {
+  const requestId = getApiRequestId(request);
+  const startedAtMs = Date.now();
+  const method = "GET";
+  const operation = "export_holdings_yaml";
+
   const guardError = await enforceAdminApiGuard(request);
   if (guardError) {
-    return guardError;
+    logRejectedYamlRequest(
+      requestId,
+      startedAtMs,
+      method,
+      operation,
+      guardError.status,
+      "admin_guard",
+    );
+    return withApiRequestId(guardError, requestId);
   }
 
   try {
     const holdings = await fetchAllHoldings();
     const document = buildHoldingsYamlDocument(holdings);
-    return new Response(document, {
+    const response = new Response(document, {
       status: 200,
       headers: {
         "Content-Type": "application/yaml; charset=utf-8",
@@ -37,36 +84,97 @@ export async function GET(request: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
+    logApiInfo({
+      event: "web_api_request_completed",
+      request_id: requestId,
+      route: ROUTE,
+      method,
+      operation,
+      status: "success",
+      status_code: 200,
+      dependency: "supabase",
+      duration_ms: elapsedMs(startedAtMs),
+      holding_count: holdings.length,
+    });
+    return withApiRequestId(response, requestId);
   } catch (error) {
+    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    logApiError(error, {
+      event: "web_api_request_failed",
+      request_id: requestId,
+      route: ROUTE,
+      method,
+      operation,
+      status: "failed",
+      status_code: statusCode,
+      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      duration_ms: elapsedMs(startedAtMs),
+      retryable: statusCode >= 500,
+    });
     if (error instanceof SupabaseApiError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: error.status }),
+        requestId,
       );
     }
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    return withApiRequestId(
+      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      requestId,
+    );
   }
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getApiRequestId(request);
+  const startedAtMs = Date.now();
+  const method = "POST";
+  const operation = "import_holdings_yaml";
+
   const guardError = await enforceAdminApiGuard(request);
   if (guardError) {
-    return guardError;
+    logRejectedYamlRequest(
+      requestId,
+      startedAtMs,
+      method,
+      operation,
+      guardError.status,
+      "admin_guard",
+    );
+    return withApiRequestId(guardError, requestId);
   }
 
   const body = await parseJsonBody(request);
   if (!body.ok) {
-    return body.response;
+    logRejectedYamlRequest(
+      requestId,
+      startedAtMs,
+      method,
+      operation,
+      body.response.status,
+      "invalid_json",
+    );
+    return withApiRequestId(body.response, requestId);
   }
 
   const parsedRequest = holdingYamlImportRequestSchema.safeParse(body.payload);
   if (!parsedRequest.success) {
-    return NextResponse.json(
-      {
-        error: "Invalid holdings YAML import payload",
-        details: parsedRequest.error.flatten(),
-      },
-      { status: 400 },
+    logRejectedYamlRequest(
+      requestId,
+      startedAtMs,
+      method,
+      operation,
+      400,
+      "invalid_payload",
+    );
+    return withApiRequestId(
+      NextResponse.json(
+        {
+          error: "Invalid holdings YAML import payload",
+          details: parsedRequest.error.flatten(),
+        },
+        { status: 400 },
+      ),
+      requestId,
     );
   }
 
@@ -97,25 +205,87 @@ export async function POST(request: NextRequest) {
             unchangedCount: result.unchangedCount,
           },
         };
-        return NextResponse.json(appliedResponse);
+        const response = NextResponse.json(appliedResponse);
+        logApiInfo({
+          event: "web_api_request_completed",
+          request_id: requestId,
+          route: ROUTE,
+          method,
+          operation,
+          status: "success",
+          status_code: 200,
+          dependency: "supabase",
+          duration_ms: elapsedMs(startedAtMs),
+          mode: "apply",
+          create_count: result.insertedCount,
+          update_count: result.updatedCount,
+          delete_count: result.deletedCount,
+          unchanged_count: result.unchangedCount,
+        });
+        return withApiRequestId(response, requestId);
       }
     }
 
-    const response: HoldingsYamlImportResponse = {
+    const responsePayload: HoldingsYamlImportResponse = {
       mode: parsedRequest.data.apply ? "apply" : "dry-run",
       summary,
     };
-    return NextResponse.json(response);
+    const response = NextResponse.json(responsePayload);
+    logApiInfo({
+      event: "web_api_request_completed",
+      request_id: requestId,
+      route: ROUTE,
+      method,
+      operation,
+      status: "success",
+      status_code: 200,
+      dependency: "supabase",
+      duration_ms: elapsedMs(startedAtMs),
+      mode: responsePayload.mode,
+      create_count: summary.createCount,
+      update_count: summary.updateCount,
+      delete_count: summary.deleteCount,
+      unchanged_count: summary.unchangedCount,
+    });
+    return withApiRequestId(response, requestId);
   } catch (error) {
     if (error instanceof HoldingsYamlError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    if (error instanceof SupabaseApiError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
+      logRejectedYamlRequest(
+        requestId,
+        startedAtMs,
+        method,
+        operation,
+        400,
+        "invalid_yaml",
+      );
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: 400 }),
+        requestId,
       );
     }
-    return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    logApiError(error, {
+      event: "web_api_request_failed",
+      request_id: requestId,
+      route: ROUTE,
+      method,
+      operation,
+      status: "failed",
+      status_code: statusCode,
+      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      duration_ms: elapsedMs(startedAtMs),
+      retryable: statusCode >= 500,
+      mode: parsedRequest.data.apply ? "apply" : "dry-run",
+    });
+    if (error instanceof SupabaseApiError) {
+      return withApiRequestId(
+        NextResponse.json({ error: error.message }, { status: error.status }),
+        requestId,
+      );
+    }
+    return withApiRequestId(
+      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      requestId,
+    );
   }
 }

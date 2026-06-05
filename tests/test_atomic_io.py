@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -54,3 +55,25 @@ def test_load_json_returns_none_for_invalid_json(tmp_path: Path) -> None:
     target.write_text("{not-json", encoding="utf-8")
 
     assert load_json(tmp_path.as_posix(), "broken") is None
+
+
+def test_load_json_logs_invalid_cache_payload(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    target = tmp_path / "broken.json"
+    target.write_text("{not-json", encoding="utf-8")
+    caplog.set_level(logging.WARNING, logger="sab.data.cache")
+
+    assert load_json(tmp_path.as_posix(), "broken") is None
+
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "cache_load_failed"
+    )
+    assert record.__dict__["status"] == "degraded"
+    assert record.__dict__["operation"] == "load_json_cache"
+    assert record.__dict__["cache_key"] == "broken"
+    assert record.__dict__["cache_path"] == target.as_posix()
+    assert record.__dict__["error_type"] == "JSONDecodeError"
+    assert record.__dict__["retryable"] is False
