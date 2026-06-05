@@ -86,7 +86,7 @@
 | `AI_BRIEF_SOURCE_API_URL` | required for `http-json` provider | none | `https://source.example/api` | `sab ai-brief` | External source API URL | HTTPS only; no internal real URL in docs. |
 | `AI_BRIEF_SOURCE_API_URL_KR` | no | none | `https://source.example/kr` | scheduled workflow | KR scheduled source API URL | GitHub variable. |
 | `AI_BRIEF_SOURCE_API_URL_US` | no | none | `https://source.example/us` | scheduled workflow | US scheduled source API URL | GitHub variable. |
-| `AI_BRIEF_SOURCE_API_TOKEN` | no | none | `replace-with-source-token` | source provider | Bearer token for matching configured URL | Secret. Only sent for matching URL. |
+| `AI_BRIEF_SOURCE_API_TOKEN` | no | none | `replace-with-source-token` | source provider | Bearer token for matching configured source API URL | Secret. Only sent when the request URL matches `AI_BRIEF_SOURCE_API_URL`, `_KR`, or `_US`. |
 | `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` | no | provider default | `10` | source providers | Source provider timeout | Positive number. |
 | `AI_BRIEF_SOURCE_PROVIDER_KR` | no | fallback chain | `naver-news` | scheduled workflow | KR scheduled source provider | GitHub variable. |
 | `AI_BRIEF_SOURCE_PROVIDER_US` | no | fallback chain | `finnhub` | scheduled workflow | US scheduled source provider | Current docs identify Finnhub as default candidate. |

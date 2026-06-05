@@ -235,6 +235,10 @@ NEEDS_CONFIRMATION: report_index backfill ownership and accepted recovery path.
 - `runtime_state` lock or marker already exists.
 - Local primary and GitHub fallback raced, but dedupe prevented duplicate output.
 - Source/model provider env is missing.
+- Source provider env is unsupported, or `http-json` source API URL is missing,
+  non-HTTPS, includes userinfo, targets a local/private literal host, has an
+  invalid port, or contains whitespace/control chars. Scheduler returns
+  `source_config_invalid` before scan/entry.
 - Notification token/webhook is missing.
 
 ### Checks
@@ -263,6 +267,9 @@ docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm sc
 - Treat `ai-brief-skip` as an artifact, not a silent failure.
 - Do not delete `success`, `artifact`, `skip-artifact`, or `notification:sent` markers unless intentionally rerunning.
 - Confirm `OPENAI_API_KEY` and market source provider env exist in the scheduler/GitHub environment.
+- For `source_config_invalid`, inspect scheduler logs for
+  `scheduled_ai_brief_source_config_invalid`; it includes provider/API URL
+  origin metadata but does not log the source API URL value.
 
 ### Escalation
 

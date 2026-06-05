@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -22,6 +23,30 @@ from sab.scheduler.state import (
     RuntimeStateLockClaim,
     build_scheduler_state_key,
 )
+
+_SCHEDULED_SOURCE_ENV_KEYS = (
+    "AI_BRIEF_SOURCE_PROVIDER_KR",
+    "AI_BRIEF_SOURCE_PROVIDER_US",
+    "AI_BRIEF_SOURCE_PROVIDER",
+    "AI_BRIEF_SOURCE_API_URL_KR",
+    "AI_BRIEF_SOURCE_API_URL_US",
+    "AI_BRIEF_SOURCE_API_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_scheduled_source_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in _SCHEDULED_SOURCE_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _log_records_for_event(
+    caplog: pytest.LogCaptureFixture,
+    event: str,
+) -> list[logging.LogRecord]:
+    return [
+        record for record in caplog.records if getattr(record, "event", None) == event
+    ]
 
 
 @dataclass
@@ -120,6 +145,7 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        source_api_url: str | None = None,
     ) -> None:
         self.calls.append(
             (
@@ -129,6 +155,7 @@ class _FakePipeline:
                     "session_date": session_date,
                     "report_date": report_date,
                     "source_provider": source_provider,
+                    "source_api_url": source_api_url,
                     "model_provider": model_provider,
                     "dry_run": dry_run,
                 },
@@ -144,12 +171,14 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        source_api_url: str | None = None,
     ) -> ScheduledPipelineResult:
         self._record_call(
             market=market,
             session_date=session_date,
             report_date=report_date,
             source_provider=source_provider,
+            source_api_url=source_api_url,
             model_provider=model_provider,
             dry_run=dry_run,
         )
@@ -174,12 +203,14 @@ class _BlockingPipeline(_FakePipeline):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        source_api_url: str | None = None,
     ) -> ScheduledPipelineResult:
         self._record_call(
             market=market,
             session_date=session_date,
             report_date=report_date,
             source_provider=source_provider,
+            source_api_url=source_api_url,
             model_provider=model_provider,
             dry_run=dry_run,
         )
@@ -1293,6 +1324,308 @@ def test_runner_passes_session_date_as_ai_brief_report_date() -> None:
     assert result.status == "completed"
     assert pipeline.calls[0][0] == "run"
     assert pipeline.calls[0][1]["report_date"] == "2026-05-28"
+
+
+def test_runner_uses_market_specific_source_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "finnhub")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER", "naver-news")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-env",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "finnhub"
+    assert pipeline.calls[0][1]["source_api_url"] is None
+
+
+def test_runner_uses_global_source_provider_env_when_market_env_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER", "polygon-news")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-global",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "polygon-news"
+    assert pipeline.calls[0][1]["source_api_url"] is None
+
+
+def test_runner_source_provider_request_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "finnhub")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-override",
+            source_provider="benzinga-news",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "benzinga-news"
+    assert pipeline.calls[0][1]["source_api_url"] is None
+
+
+def test_runner_source_api_url_env_implies_http_json_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL_US", "https://source.example/us")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/global")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-api-url",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "http-json"
+    assert pipeline.calls[0][1]["source_api_url"] == "https://source.example/us"
+
+
+def test_runner_http_json_provider_env_uses_source_api_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "http-json")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL_US", "https://source.example/us")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-http-json-source-api-url",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "http-json"
+    assert pipeline.calls[0][1]["source_api_url"] == "https://source.example/us"
+
+
+def test_runner_logs_resolved_source_context_without_source_api_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "HTTP-JSON")
+    monkeypatch.setenv(
+        "AI_BRIEF_SOURCE_API_URL_US",
+        "https://source.example/us?token=secret-token",
+    )
+    runner, _state, pipeline, _storage, _notifier = _runner()
+    caplog.set_level("INFO", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-context-log",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "http-json"
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_context_resolved",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["market"] == "US"
+    assert record.__dict__["session_date"] == "2026-05-28"
+    assert record.__dict__["schedule_role"] == "local-primary"
+    assert record.__dict__["runner_role"] == "local-primary"
+    assert record.__dict__["attempt_id"] == "attempt-source-context-log"
+    assert record.__dict__["source_provider"] == "http-json"
+    assert record.__dict__["source_provider_origin"] == "env_market"
+    assert record.__dict__["source_api_url_configured"] is True
+    assert record.__dict__["source_api_url_origin"] == "env_market"
+    assert "secret-token" not in caplog.text
+    assert "https://source.example/us" not in caplog.text
+
+
+def test_runner_fails_fast_for_unsupported_source_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "https://token@example.test")
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-invalid-source-provider",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert "source_config_invalid" in scheduler_runner._FAILED_STATUSES
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["error_code"] == "unsupported_source_provider"
+    assert record.__dict__["source_provider"] == "unsupported"
+    assert record.__dict__["source_provider_origin"] == "env_market"
+    assert "https://token@example.test" not in caplog.text
+    assert "token" not in caplog.text
+
+
+def test_runner_fails_fast_when_http_json_source_api_url_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "http-json")
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-http-json-missing-url",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["error_code"] == "missing_source_api_url"
+    assert record.__dict__["source_provider"] == "http-json"
+    assert record.__dict__["source_provider_origin"] == "env_market"
+    assert record.__dict__["source_api_url_configured"] is False
+
+
+def test_runner_fails_fast_when_source_api_url_env_is_multiline(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL_US", "https://source.example/us\nnext")
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-url-multiline",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["error_code"] == "invalid_source_api_url"
+    assert record.__dict__["source_provider"] == "http-json"
+    assert record.__dict__["source_provider_origin"] == "api_url_market"
+    assert record.__dict__["source_api_url_origin"] == "env_market"
+    assert "https://source.example/us" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "source_api_url",
+    [
+        "http://source.example/us",
+        "https://token@source.example/us",
+        "https://localhost/us",
+        "https://127.0.0.1/us",
+        "https://source.example:0/us",
+    ],
+)
+def test_runner_fails_fast_when_source_api_url_env_is_unsafe(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    source_api_url: str,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL_US", source_api_url)
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-url-unsafe",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["error_code"] == "invalid_source_api_url"
+    assert record.__dict__["source_provider"] == "http-json"
+    assert record.__dict__["source_api_url_configured"] is True
+    assert source_api_url not in caplog.text
 
 
 def test_artifact_marker_helper_records_upload_payload() -> None:

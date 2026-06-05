@@ -10,13 +10,24 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 import requests  # type: ignore[import-untyped]
 
+from .. import ai_brief_url_safety as url_safety
 from ..ai_brief import run_ai_brief
 from ..ai_brief_eval_common import parse_iso_offset_datetime
+from ..ai_brief_sources import (
+    SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+    SOURCE_PROVIDER_BENZINGA_NEWS,
+    SOURCE_PROVIDER_FINNHUB,
+    SOURCE_PROVIDER_HTTP_JSON,
+    SOURCE_PROVIDER_MARKETAUX_NEWS,
+    SOURCE_PROVIDER_NAVER_NEWS,
+    SOURCE_PROVIDER_NONE,
+    SOURCE_PROVIDER_POLYGON_NEWS,
+)
 from ..data.trading_sessions import is_trading_session
 from ..entry import run_entry
 from ..env_loader import suppress_config_env_keys
@@ -70,6 +81,28 @@ _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
 _NON_PIPELINE_RUNNER_ROLES = {"monitor-only", "cutoff-alert"}
 _SUPPORTED_RUNNER_ROLES = _PIPELINE_RUNNER_ROLES | _NON_PIPELINE_RUNNER_ROLES
 _SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS = ("HOLDINGS_FILE",)
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE = "none"
+_SCHEDULED_SOURCE_API_URL_ORIGIN_NONE = "none"
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_REQUEST = "request"
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_MARKET = "env_market"
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_GLOBAL = "env_global"
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_MARKET = "api_url_market"
+_SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_GLOBAL = "api_url_global"
+_SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_MARKET = "env_market"
+_SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_GLOBAL = "env_global"
+_SCHEDULED_SOURCE_API_URL_ALLOWED_SCHEMES = frozenset({"https"})
+_ALLOWED_SCHEDULED_SOURCE_PROVIDERS = frozenset(
+    {
+        SOURCE_PROVIDER_NONE,
+        SOURCE_PROVIDER_HTTP_JSON,
+        SOURCE_PROVIDER_FINNHUB,
+        SOURCE_PROVIDER_POLYGON_NEWS,
+        SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+        SOURCE_PROVIDER_MARKETAUX_NEWS,
+        SOURCE_PROVIDER_BENZINGA_NEWS,
+        SOURCE_PROVIDER_NAVER_NEWS,
+    }
+)
 _FAILED_STATUSES = {
     "attempt_marker_failed",
     "guard_failed",
@@ -82,6 +115,7 @@ _FAILED_STATUSES = {
     "late_alert_send_failed",
     "late_alert_sent_marker_failed",
     "skip_artifact_upload_failed",
+    "source_config_invalid",
     "unsupported_runner_role",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -143,6 +177,28 @@ class _ScheduledRunContext:
     attempt_id: str
 
 
+@dataclass(frozen=True)
+class _ScheduledSourceContext:
+    source_provider: str | None
+    source_provider_origin: str
+    source_api_url: str | None
+    source_api_url_origin: str
+    source_api_url_configured: bool
+
+
+class _ScheduledSourceConfigError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        source_context: _ScheduledSourceContext,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.source_context = source_context
+
+
 class _SkipArtifactClaimHeld(RuntimeError):
     """Raised when another runner is already persisting the skip artifact."""
 
@@ -192,6 +248,7 @@ class SchedulerPipeline(Protocol):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        source_api_url: str | None = None,
     ) -> ScheduledPipelineResult: ...
 
 
@@ -225,6 +282,171 @@ def _normalize_role(role: str, *, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} must not be blank")
     return normalized
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_optional_source_provider(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized or None
+
+
+def _scheduled_source_provider_candidate(
+    *,
+    market: str,
+    source_provider: str | None,
+) -> tuple[str | None, str]:
+    request_provider = _normalize_optional_source_provider(source_provider)
+    if request_provider:
+        return request_provider, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_REQUEST
+
+    market_provider = _normalize_optional_source_provider(
+        _optional_env(f"AI_BRIEF_SOURCE_PROVIDER_{market}")
+    )
+    if market_provider:
+        return market_provider, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_MARKET
+
+    global_provider = _normalize_optional_source_provider(
+        _optional_env("AI_BRIEF_SOURCE_PROVIDER")
+    )
+    if global_provider:
+        return global_provider, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_GLOBAL
+
+    return None, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE
+
+
+def _scheduled_source_api_url_candidate(*, market: str) -> tuple[str | None, str]:
+    market_api_url = _optional_env(f"AI_BRIEF_SOURCE_API_URL_{market}")
+    if market_api_url:
+        return market_api_url, _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_MARKET
+
+    global_api_url = _optional_env("AI_BRIEF_SOURCE_API_URL")
+    if global_api_url:
+        return global_api_url, _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_GLOBAL
+
+    return None, _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE
+
+
+def _source_provider_origin_for_api_url_origin(source_api_url_origin: str) -> str:
+    if source_api_url_origin == _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_MARKET:
+        return _SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_MARKET
+    if source_api_url_origin == _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_GLOBAL:
+        return _SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_GLOBAL
+    return _SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE
+
+
+def _validate_scheduled_source_api_url(value: str) -> None:
+    text = url_safety.validate_url(
+        value,
+        field_name="scheduled source API URL",
+        allowed_schemes=_SCHEDULED_SOURCE_API_URL_ALLOWED_SCHEMES,
+    )
+    parsed = urlparse(text)
+    url_safety.validated_url_port(parsed, field_name="scheduled source API URL")
+    aliases = url_safety.hostname_aliases(parsed.hostname or "")
+    if any(url_safety.is_blocked_hostname(alias) for alias in aliases):
+        raise ValueError(
+            "scheduled source API URL must not target local or private hosts"
+        )
+
+
+def _resolve_scheduled_source_context(
+    *,
+    market: str,
+    source_provider: str | None,
+) -> _ScheduledSourceContext:
+    resolved_provider, provider_origin = _scheduled_source_provider_candidate(
+        market=market,
+        source_provider=source_provider,
+    )
+    resolved_api_url, api_url_origin = _scheduled_source_api_url_candidate(
+        market=market
+    )
+
+    if resolved_provider:
+        source_context = _ScheduledSourceContext(
+            source_provider=resolved_provider,
+            source_provider_origin=provider_origin,
+            source_api_url=resolved_api_url
+            if resolved_provider == SOURCE_PROVIDER_HTTP_JSON
+            else None,
+            source_api_url_origin=api_url_origin
+            if resolved_provider == SOURCE_PROVIDER_HTTP_JSON
+            else _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
+            source_api_url_configured=bool(resolved_api_url)
+            if resolved_provider == SOURCE_PROVIDER_HTTP_JSON
+            else False,
+        )
+        _validate_scheduled_source_context(source_context)
+        return source_context
+
+    if resolved_api_url:
+        source_context = _ScheduledSourceContext(
+            source_provider=SOURCE_PROVIDER_HTTP_JSON,
+            source_provider_origin=_source_provider_origin_for_api_url_origin(
+                api_url_origin
+            ),
+            source_api_url=resolved_api_url,
+            source_api_url_origin=api_url_origin,
+            source_api_url_configured=True,
+        )
+        _validate_scheduled_source_context(source_context)
+        return source_context
+
+    return _ScheduledSourceContext(
+        source_provider=None,
+        source_provider_origin=_SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE,
+        source_api_url=None,
+        source_api_url_origin=_SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
+        source_api_url_configured=False,
+    )
+
+
+def _validate_scheduled_source_context(
+    source_context: _ScheduledSourceContext,
+) -> None:
+    provider = source_context.source_provider
+    if provider not in _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
+        raise _ScheduledSourceConfigError(
+            "unsupported scheduled AI brief source provider",
+            error_code="unsupported_source_provider",
+            source_context=source_context,
+        )
+    if provider != SOURCE_PROVIDER_HTTP_JSON:
+        return
+    if not source_context.source_api_url:
+        raise _ScheduledSourceConfigError(
+            "scheduled source_provider=http-json requires source API URL",
+            error_code="missing_source_api_url",
+            source_context=source_context,
+        )
+    try:
+        _validate_scheduled_source_api_url(source_context.source_api_url)
+    except ValueError as exc:
+        raise _ScheduledSourceConfigError(
+            "scheduled source API URL is invalid",
+            error_code="invalid_source_api_url",
+            source_context=source_context,
+        ) from exc
+
+
+def _scheduled_source_provider_for_log(
+    source_context: _ScheduledSourceContext,
+) -> str:
+    provider = source_context.source_provider
+    if not provider:
+        return SOURCE_PROVIDER_NONE
+    if provider not in _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
+        return "unsupported"
+    return provider
 
 
 def _local_zone(market: str) -> ZoneInfo:
@@ -791,6 +1013,32 @@ class ScheduledAiBriefRunner:
                 guard=guard,
                 now=now,
             )
+        try:
+            source_context = _resolve_scheduled_source_context(
+                market=market,
+                source_provider=source_provider,
+            )
+        except _ScheduledSourceConfigError as exc:
+            self._log_source_config_invalid(
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                error=exc,
+            )
+            return ScheduledAiBriefResult(
+                status="source_config_invalid",
+                session_date=session_date,
+            )
+        self._log_source_context_resolved(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            source_context=source_context,
+        )
         return self._start_locked_pipeline(
             market=market,
             session_date=session_date,
@@ -798,10 +1046,95 @@ class ScheduledAiBriefRunner:
             runner_role=runner_role,
             attempt_id=attempt_id,
             run_url=run_url,
-            source_provider=source_provider,
+            source_provider=source_context.source_provider,
+            source_api_url=source_context.source_api_url,
             model_provider=model_provider,
             artifact_key=artifact_key,
             now=now,
+        )
+
+    def _log_source_context_resolved(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        source_context: _ScheduledSourceContext,
+    ) -> None:
+        _LOGGER.info(
+            "scheduled AI brief source context resolved "
+            "market=%s session_date=%s schedule_role=%s runner_role=%s "
+            "attempt_id=%s source_provider=%s source_provider_origin=%s "
+            "source_api_url_configured=%s source_api_url_origin=%s",
+            market,
+            session_date,
+            schedule_role,
+            runner_role,
+            attempt_id,
+            _scheduled_source_provider_for_log(source_context),
+            source_context.source_provider_origin,
+            source_context.source_api_url_configured,
+            source_context.source_api_url_origin,
+            extra={
+                "event": "scheduled_ai_brief_source_context_resolved",
+                "status": "success",
+                "market": market,
+                "session_date": session_date,
+                "schedule_role": schedule_role,
+                "runner_role": runner_role,
+                "attempt_id": attempt_id,
+                "source_provider": _scheduled_source_provider_for_log(source_context),
+                "source_provider_origin": source_context.source_provider_origin,
+                "source_api_url_configured": source_context.source_api_url_configured,
+                "source_api_url_origin": source_context.source_api_url_origin,
+            },
+        )
+
+    def _log_source_config_invalid(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        error: _ScheduledSourceConfigError,
+    ) -> None:
+        source_context = error.source_context
+        _LOGGER.error(
+            "scheduled AI brief source config invalid "
+            "market=%s session_date=%s schedule_role=%s runner_role=%s "
+            "attempt_id=%s error_code=%s source_provider=%s "
+            "source_provider_origin=%s source_api_url_configured=%s "
+            "source_api_url_origin=%s",
+            market,
+            session_date,
+            schedule_role,
+            runner_role,
+            attempt_id,
+            error.error_code,
+            _scheduled_source_provider_for_log(source_context),
+            source_context.source_provider_origin,
+            source_context.source_api_url_configured,
+            source_context.source_api_url_origin,
+            extra={
+                "event": "scheduled_ai_brief_source_config_invalid",
+                "status": "failed",
+                "market": market,
+                "session_date": session_date,
+                "schedule_role": schedule_role,
+                "runner_role": runner_role,
+                "attempt_id": attempt_id,
+                "error_code": error.error_code,
+                "error_type": type(error).__name__,
+                "source_provider": _scheduled_source_provider_for_log(source_context),
+                "source_provider_origin": source_context.source_provider_origin,
+                "source_api_url_configured": source_context.source_api_url_configured,
+                "source_api_url_origin": source_context.source_api_url_origin,
+                "retryable": False,
+            },
         )
 
     def _handle_cutoff_alert(
@@ -884,6 +1217,7 @@ class ScheduledAiBriefRunner:
         attempt_id: str,
         run_url: str,
         source_provider: str | None,
+        source_api_url: str | None,
         model_provider: str,
         artifact_key: str,
         now: dt.datetime,
@@ -906,6 +1240,7 @@ class ScheduledAiBriefRunner:
             attempt_id=attempt_id,
             run_url=run_url,
             source_provider=source_provider,
+            source_api_url=source_api_url,
             model_provider=model_provider,
             lock_key=main_lock.lock_key,
             owner_token=main_lock.owner_token,
@@ -923,6 +1258,7 @@ class ScheduledAiBriefRunner:
         attempt_id: str,
         run_url: str,
         source_provider: str | None,
+        source_api_url: str | None = None,
         model_provider: str,
         lock_key: str,
         owner_token: str,
@@ -945,6 +1281,7 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
                 report_date=session_date,
                 source_provider=source_provider,
+                source_api_url=source_api_url,
                 model_provider=model_provider,
                 dry_run=False,
             )
@@ -1992,6 +2329,7 @@ class DefaultScheduledPipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        source_api_url: str | None = None,
     ) -> ScheduledPipelineResult:
         del session_date, dry_run
         buy_report_path = self._run_scan_step(
@@ -2030,6 +2368,7 @@ class DefaultScheduledPipeline:
                 model_provider=model_provider,
                 model_name="fake-ai-brief-v1",
                 source_provider=source_provider,
+                source_api_url=source_api_url,
                 report_date=report_date,
                 upload=False,
                 report_path_callback=ai_brief_report_paths.append,

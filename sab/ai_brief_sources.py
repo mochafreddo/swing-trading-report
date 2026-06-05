@@ -1126,10 +1126,17 @@ def _create_vendor_deadline_and_url(
 
 def _source_api_token_for_url(url: str) -> str:
     api_token = str(os.getenv("AI_BRIEF_SOURCE_API_TOKEN") or "").strip()
-    configured_url = str(os.getenv("AI_BRIEF_SOURCE_API_URL") or "").strip()
-    if not api_token or not configured_url:
+    if not api_token:
         return ""
-    return api_token if url == configured_url else ""
+    for env_key in (
+        "AI_BRIEF_SOURCE_API_URL",
+        "AI_BRIEF_SOURCE_API_URL_KR",
+        "AI_BRIEF_SOURCE_API_URL_US",
+    ):
+        configured_url = str(os.getenv(env_key) or "").strip()
+        if configured_url and url == configured_url:
+            return api_token
+    return ""
 
 
 def _getaddrinfo_with_timeout(

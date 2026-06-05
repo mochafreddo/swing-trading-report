@@ -82,7 +82,7 @@
 | `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | AI Brief model timeout | 선택 |
 | `AI_BRIEF_SOURCE_API_URL` | `http-json` source provider | HTTPS URL 필요 |
 | `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` | scheduled provider URL | GitHub Actions variable 용도 |
-| `AI_BRIEF_SOURCE_API_TOKEN` | `http-json` source provider | 실행 URL이 configured URL과 일치할 때만 Bearer 전송 |
+| `AI_BRIEF_SOURCE_API_TOKEN` | `http-json` source provider | 실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `_KR`, `_US` 중 하나와 일치할 때만 Bearer 전송 |
 | `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` | source provider timeout | 선택 |
 | `AI_BRIEF_SOURCE_PROVIDER_KR`, `AI_BRIEF_SOURCE_PROVIDER_US`, `AI_BRIEF_SOURCE_PROVIDER` | scheduled source provider | market-specific 값 우선 |
 | `FINNHUB_API_KEY` | `finnhub` source provider | US-only |
