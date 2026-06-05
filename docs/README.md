@@ -40,6 +40,8 @@
 | 9 | [Troubleshooting](troubleshooting.md) | 증상별 장애 대응 |
 | 10 | [Contributing](contributing.md) | 커밋, PR, 검증 규칙 |
 
+기존 `docs/runbook.md` 링크로 들어온 경우에는 [Runbook](runbook.md)을 호환 진입점으로 사용합니다. 새 운영 절차의 source of truth는 [Operations](operations.md), [Deployment](deployment.md), [Troubleshooting](troubleshooting.md)입니다.
+
 ## 현재 운영 기준
 
 - [Overview](overview.md)
@@ -51,6 +53,7 @@
 - [Operations](operations.md)
 - [Troubleshooting](troubleshooting.md)
 - [Contributing](contributing.md)
+- [Runbook 호환 진입점](runbook.md)
 - [Swing 핵심 로직 설계](STRATEGY.md)
 - [Spec v1.1 현재 계약](spec-v1.1.md)
 - [KIS 설정 가이드](kis-setup.md)

@@ -46,7 +46,7 @@ Do not commit `.env`, `.env.*`, `.envrc.local`, `holdings.yaml`, `data/`, or `re
 | Change Type | Preferred Command | Notes |
 | --- | --- | --- |
 | Python only | `just quality` | Ruff, format check, mypy, pytest. |
-| Web only | `just ci-web` | install/lint/format/typecheck/test/build. |
+| Web only | `just ci-web` | install/lint/format/typecheck/test:coverage/build. |
 | Python + web | `just quality` and `just ci-web` | Run both. |
 | Docs taxonomy/link change | `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q` | Required for docs index/state changes. |
 | Dead code check | `just deadcode` | Use before cleanup PRs. |
@@ -62,7 +62,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q
 pnpm --dir web run lint
 pnpm --dir web run format:check
 pnpm --dir web run typecheck
-pnpm --dir web run test
+pnpm --dir web run test:coverage
 pnpm --dir web run build
 ```
 

@@ -231,7 +231,7 @@ RPC 시그니처 예:
 - `processed=true` + `created_at` 90일 초과 이벤트와 `processed=false` + `updated_at` 90일 초과 이벤트를 `cleanup_holdings_add_buy_events()`로 배치 정리합니다.
 - 스케줄 작업(`holdings-add-buy-events-cleanup`, `30 3 * * *`)은 `public.cleanup_holdings_add_buy_events(interval '90 days', 500)`를 호출합니다.
 - `pg_cron`이 비활성인 환경에서는 스케줄 보강 마이그레이션이 실패하도록 하여(무음 skip 금지) 운영자가 확장 활성화를 명시적으로 수행하게 합니다.
-- 운영 점검 SQL(등록/수동 실행/실행 이력)은 `docs/runbook.md`의 “보유 목록(holdings)” 섹션을 기준으로 사용합니다.
+- 확인 필요: 이 설계 당시 운영 점검 SQL은 `docs/runbook.md`의 “보유 목록(holdings)” 섹션을 기준으로 삼았으나, 현재 `runbook.md`는 호환 진입점입니다. 실제 점검 절차는 [operations.md](operations.md)의 Supabase checks와 관련 migration/RPC를 함께 확인해야 합니다.
 
 라우팅/티커 별칭 정책:
 

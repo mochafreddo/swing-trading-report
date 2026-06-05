@@ -72,6 +72,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 
 | 질문 | 문서 |
 | --- | --- |
+| 처음 온 개발자가 어디서부터 읽을지 | [docs/README.md](docs/README.md) |
 | 이 시스템이 무엇을 하는가 | [docs/overview.md](docs/overview.md) |
 | 로컬에서 설치/실행/테스트하려면 | [docs/local-development.md](docs/local-development.md) |
 | 환경변수와 config 키는 무엇인가 | [docs/configuration.md](docs/configuration.md) |
@@ -79,6 +80,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 | CLI와 웹 API는 어떻게 생겼나 | [docs/api.md](docs/api.md) |
 | 배포/마이그레이션/롤백은 | [docs/deployment.md](docs/deployment.md) |
 | 운영 체크와 로그/헬스체크는 | [docs/operations.md](docs/operations.md) |
+| 기존 runbook 링크나 운영 시작점은 | [docs/runbook.md](docs/runbook.md) |
 | 장애가 나면 어디서부터 보는가 | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | 전략 신호와 리스크 규칙은 | [docs/STRATEGY.md](docs/STRATEGY.md) |
 | 기여/커밋/검증 규칙은 | [docs/contributing.md](docs/contributing.md) |

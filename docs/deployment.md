@@ -41,7 +41,7 @@ just quality
 just ci-web
 ```
 
-Direct equivalents:
+Local direct equivalents:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run ruff check .
@@ -51,11 +51,14 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q
 pnpm --dir web run lint
 pnpm --dir web run format:check
 pnpm --dir web run typecheck
-pnpm --dir web run test
+pnpm --dir web run test:coverage
 pnpm --dir web run build
 ```
 
 `just ci-web` injects secret-free placeholder env for web build. Direct `pnpm --dir web run build` needs valid placeholder or local env values.
+
+CI parity note: `.github/workflows/ci.yml` runs Python tests with coverage gate:
+`UV_CACHE_DIR=.uv-cache uv run python -m pytest -q --cov=sab --cov-report=term --cov-fail-under=70`.
 
 ## Pre-Deployment Checklist
 

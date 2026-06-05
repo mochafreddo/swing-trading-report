@@ -133,7 +133,7 @@ The examples above require a valid authenticated session cookie in normal browse
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m sab --help
-pnpm --dir web run test
+pnpm --dir web run test:coverage
 ```
 
 NOT_RUN: 이 문서 작성 중 CLI와 web test 전체를 실행하지 않았다면 최종 보고서에 별도로 기록합니다.

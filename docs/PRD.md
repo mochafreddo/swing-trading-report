@@ -4,8 +4,8 @@
 
 이 문서는 현재 계약 문서가 아닙니다. 제품 방향과 아직 남은 의사결정만
 짧게 보존합니다. 현재 동작 기준은 [README](../README.md),
-[런북](runbook.md), [아키텍처](ARCHITECTURE.md), [전략](STRATEGY.md),
-[Spec v1.1](spec-v1.1.md)을 우선합니다.
+[문서 인덱스](README.md), [아키텍처](ARCHITECTURE.md),
+[전략](STRATEGY.md), [Spec v1.1](spec-v1.1.md)을 우선합니다.
 
 ## 문서 상태
 
@@ -55,7 +55,8 @@
 - 성공 기준:
   - 신규 개발자는 README에서 시작해 로컬 실행, 테스트, 구조, 운영 문서로
     이동할 수 있다.
-  - 운영자는 runbook에서 장애 시작점과 복구 확인 방법을 찾을 수 있다.
+  - 운영자는 Operations/Troubleshooting에서 장애 시작점과 복구 확인 방법을
+    찾을 수 있다.
   - 전략 변경자는 STRATEGY와 관련 테스트를 기준으로 영향 범위를 판단할 수
     있다.
 
@@ -64,7 +65,9 @@
 | 질문 | Source of truth |
 | --- | --- |
 | 프로젝트 개요, 빠른 시작, 주요 명령 | [README](../README.md) |
-| 로컬 실행, 배포, 장애 대응 | [runbook](runbook.md) |
+| 로컬 실행 | [Local Development](local-development.md) |
+| 배포/롤백 | [Deployment](deployment.md) |
+| 운영 체크/장애 대응 | [Operations](operations.md), [Troubleshooting](troubleshooting.md) |
 | 시스템 구성과 데이터 흐름 | [ARCHITECTURE](ARCHITECTURE.md) |
 | 신호/리스크 전략 로직 | [STRATEGY](STRATEGY.md) |
 | Storage/report_index/runtime_state 계약 | [Spec v1.1](spec-v1.1.md) |
