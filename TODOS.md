@@ -17,6 +17,10 @@
 
 ## Completed
 
+- 2026-06-05: Extracted scheduled AI Brief run-context resolution from
+  `ScheduledAiBriefRunner.run`, with characterization coverage for request
+  normalization, generated attempt IDs, guard/session snapshot propagation,
+  and preflight-free helper behavior.
 - 2026-06-05: Extracted entry evaluation policy resolution from `run_entry`,
   with characterization coverage for source-report strategy/gap-ATR snapshot
   precedence and missing-gap-guard enablement.

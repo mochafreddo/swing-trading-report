@@ -129,6 +129,17 @@ class _NotificationClaimLease:
     owner_token: str
 
 
+@dataclass(frozen=True)
+class _ScheduledRunContext:
+    now: dt.datetime
+    market: str
+    schedule_role: str
+    runner_role: str
+    guard: GuardSnapshot
+    session_date: str
+    attempt_id: str
+
+
 class _SkipArtifactClaimHeld(RuntimeError):
     """Raised when another runner is already persisting the skip artifact."""
 
@@ -479,7 +490,9 @@ class ScheduledAiBriefRunner:
             else lock_renew_interval_seconds
         )
 
-    def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
+    def _resolve_run_context(
+        self, request: ScheduledAiBriefRequest
+    ) -> _ScheduledRunContext | ScheduledAiBriefResult:
         now = self._now_fn()
         market = _normalize_market(request.market)
         schedule_role = _normalize_role(
@@ -498,6 +511,28 @@ class ScheduledAiBriefRunner:
             started_at=now,
             suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
         )
+        return _ScheduledRunContext(
+            now=now,
+            market=market,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            guard=guard,
+            session_date=session_date,
+            attempt_id=attempt_id,
+        )
+
+    def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
+        run_context = self._resolve_run_context(request)
+        if isinstance(run_context, ScheduledAiBriefResult):
+            return run_context
+
+        now = run_context.now
+        market = run_context.market
+        schedule_role = run_context.schedule_role
+        runner_role = run_context.runner_role
+        guard = run_context.guard
+        session_date = run_context.session_date
+        attempt_id = run_context.attempt_id
 
         self._state_store.preflight()
         if request.dry_run:

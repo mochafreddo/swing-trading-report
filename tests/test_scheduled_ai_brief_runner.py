@@ -329,6 +329,41 @@ def _runner(
     return runner, state, pipeline, storage, notifier
 
 
+def test_run_context_helper_normalizes_request_and_builds_attempt_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FixedUuid:
+        hex = "abcdef1234567890"
+
+    monkeypatch.setattr(scheduler_runner.os, "getpid", lambda: 12345)
+    monkeypatch.setattr(scheduler_runner.uuid, "uuid4", lambda: _FixedUuid())
+    runner, state, pipeline, storage, notifier = _runner()
+
+    assert hasattr(runner, "_resolve_run_context")
+
+    context = runner._resolve_run_context(
+        ScheduledAiBriefRequest(
+            market=" us ",
+            schedule_role=" LOCAL-PRIMARY ",
+            runner_role=" LOCAL-PRIMARY ",
+            scheduled_tick="0810",
+        )
+    )
+
+    assert isinstance(context, scheduler_runner._ScheduledRunContext)
+    assert context.now == dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC)
+    assert context.market == "US"
+    assert context.schedule_role == "local-primary"
+    assert context.runner_role == "local-primary"
+    assert context.guard == _guard()
+    assert context.session_date == "2026-05-28"
+    assert context.attempt_id == "0810-20260528T121000Z-pid12345-abcdef12"
+    assert state.preflight_calls == 0
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
 def test_off_window_candidate_exits_before_runtime_state_preflight() -> None:
     runner, state, pipeline, storage, notifier = _runner(
         now=dt.datetime(2026, 5, 28, 13, 10, tzinfo=dt.UTC)
