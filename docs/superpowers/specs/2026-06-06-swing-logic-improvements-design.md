@@ -60,7 +60,7 @@ Improve the swing-trading decision surface while preserving auditability:
 
 - fail closed for entry execution when a usable entry price is unavailable,
 - add structured diagnostics for missing entry prices,
-- classify buy candidates by quality state and reason codes,
+- classify hybrid buy candidates by quality state and reason codes,
 - expose volatility-vs-stop alignment warnings,
 - make market-regime unavailable behavior explicit and configurable,
 - update strategy documentation and tests so the new behavior is reviewable.
@@ -85,14 +85,16 @@ Improve the swing-trading decision surface while preserving auditability:
 
 ## Impact Note
 
-What changes: buy and entry reports gain structured quality, risk, and price
-diagnostic fields; optional market-regime unavailable policy becomes explicit.
+What changes: hybrid buy reports gain structured quality/risk fields, entry
+reports gain structured price diagnostic fields, and optional market-regime
+unavailable policy becomes explicit.
 
 What might break: consumers that assume exact report schemas may need to ignore
-new fields; candidate order may change once quality sorting is introduced.
+new fields; hybrid candidate order may change once quality sorting is
+introduced.
 
 Tests/docs to change: add or update tests around config parsing, market-regime
-policy, buy candidate quality/risk classification, entry missing-price
+policy, hybrid buy candidate quality/risk classification, entry missing-price
 diagnostics, and update `docs/STRATEGY.md` plus config reference docs.
 
 ## Design Summary
@@ -100,8 +102,8 @@ diagnostics, and update `docs/STRATEGY.md` plus config reference docs.
 Implement the improvements in four focused slices:
 
 1. Entry execution reliability and diagnostics.
-2. Buy candidate quality state and ordering.
-3. Volatility/risk alignment annotations.
+2. Volatility/risk alignment annotations.
+3. Hybrid buy candidate quality state and ordering.
 4. Explicit market-regime unavailable policy.
 
 The first pass should improve visibility and ranking more than it blocks
@@ -123,8 +125,9 @@ flowchart TD
 ```
 
 The proposed changes keep this flow intact. They add deterministic annotations
-inside `BuyEval`, make `Entry` price resolution more observable, and make market
-regime fail-open behavior configurable at the scan/evaluation boundary.
+inside the hybrid `BuyEval`, make `Entry` price resolution more observable, and
+make market regime fail-open behavior configurable at the scan/evaluation
+boundary.
 
 ## Slice 1: Entry Execution Reliability
 
@@ -136,11 +139,30 @@ available:
 - If the scan runs before market open and live snapshot price is unavailable,
   the row remains `REVIEW`.
 - If the scan runs after market close and a trusted daily close is available,
-  daily close can be used as a deterministic fallback price.
+  daily close can be used as the deterministic after-close entry price.
 - If all providers fail, the row remains `REVIEW` with explicit provider
   diagnostics.
 
 This keeps the current conservative behavior, but makes the reason actionable.
+US `AFTER_CLOSE` handling is not a new alternate provider fallback in the first
+pass; it is the existing KIS daily-candle close path made explicit and
+observable. If KIS after-close daily candles are unavailable, the row remains
+`REVIEW` unless a later design adds another US close provider.
+
+### Lookup Contract
+
+Change the price lookup boundary from "return a float or `None`" to "return a
+small result object". The implementation can use a dataclass or typed dict, but
+the contract should carry at least:
+
+- `price`: positive numeric price, or `null`
+- `status`: `available`, `missing`, or `rejected`
+- `source`: stable source code, or `null`
+- `issue_codes`: stable reason-code list
+
+Provider init issues can still be returned separately as run-level provider
+issues, but ticker-level lookup failures must flow through this result object so
+row fields and summary aggregations use the same source of truth.
 
 ### Report Contract
 
@@ -169,60 +191,22 @@ Example issue codes:
 
 - Existing missing-price rows remain non-enterable.
 - Missing-price summaries explain which provider path failed.
-- Daily close fallback is only used for after-close runs where that source is
+- Daily close pricing is only used for after-close runs where that source is
   explicitly supported by the existing data provider layer.
 - Fatal missing-price ratio behavior continues to respect the existing
   `ENTRY_FATAL_MISSING_PRICE_RATIO` policy.
 
-## Slice 2: Buy Candidate Quality State
-
-### Behavior
-
-Add deterministic quality classification to each buy candidate:
-
-- `A`: ready candidate with non-negative relative strength, acceptable
-  volatility alignment, and no system/data warnings.
-- `B`: ready candidate with a weakness that needs review, such as negative
-  relative strength or elevated gap/volatility risk.
-- `C`: watch candidate, data-warning candidate, or candidate with unresolved
-  quality issues.
-
-Candidates are not removed by default. They are ranked by quality first, then
-current score, then relative strength, then liquidity. This preserves the
-candidate set while making the top of the report better match swing-trading
-review priorities.
-
-### Report Contract
-
-Add buy candidate fields:
-
-- `quality_state`: `A`, `B`, or `C`
-- `quality_reasons`: stable reason-code list
-
-Example reason codes:
-
-- `relative_strength_positive`
-- `relative_strength_negative`
-- `relative_strength_unavailable`
-- `entry_state_ready`
-- `entry_state_watch`
-- `data_warning`
-- `risk_alignment_tight_stop`
-
-### Acceptance Criteria
-
-- Negative relative-strength candidates remain visible but do not outrank
-  otherwise comparable strong relative-strength candidates.
-- The same raw strategy score remains present for auditability.
-- Quality state is deterministic and independent of report display order.
-
-## Slice 3: Volatility and Stop-Loss Alignment
+## Slice 2: Volatility and Stop-Loss Alignment
 
 ### Behavior
 
 Add a warning layer that compares the candidate's observed volatility guard to
 the configured sell stop model. The first implementation pass should only
 annotate and sort; it should not change sell actions.
+
+Risk alignment must be computed before quality state because `quality_state`
+uses risk alignment as an input. If the implementation slices are split across
+commits, implement risk fields first, then quality classification and ordering.
 
 Recommended calculation:
 
@@ -254,6 +238,55 @@ Example reason codes:
   risk-sizing or stop-model design.
 - Unknown volatility data does not silently become an aligned state.
 
+## Slice 3: Hybrid Buy Candidate Quality State
+
+### Behavior
+
+Add deterministic quality classification to each `sma_ema_hybrid` buy candidate:
+
+- `A`: ready candidate with non-negative relative strength, acceptable
+  volatility alignment, and no system/data warnings.
+- `B`: ready candidate with a weakness that needs review, such as negative
+  relative strength or elevated gap/volatility risk.
+- `C`: watch candidate, data-warning candidate, or candidate with unresolved
+  quality issues.
+
+Candidates are not removed by default. In hybrid buy reports only, they are
+ranked by quality first, then current score, then relative strength, then
+liquidity. This preserves the candidate set while making the top of the hybrid
+report better match swing-trading review priorities.
+
+`ema_cross` report ordering keeps the existing global contract:
+`score_value` desc, `rs_diff_value` desc, liquidity desc, percent change desc,
+then ticker. Expanding quality ordering to `ema_cross` requires a separate
+strategy-specific design because `entry_state` and the hybrid risk guide are not
+part of the `ema_cross` candidate contract.
+
+### Report Contract
+
+Add buy candidate fields:
+
+- `quality_state`: `A`, `B`, or `C`
+- `quality_reasons`: stable reason-code list
+
+Example reason codes:
+
+- `relative_strength_positive`
+- `relative_strength_negative`
+- `relative_strength_unavailable`
+- `entry_state_ready`
+- `entry_state_watch`
+- `data_warning`
+- `risk_alignment_tight_stop`
+
+### Acceptance Criteria
+
+- Negative relative-strength candidates remain visible but do not outrank
+  otherwise comparable strong relative-strength candidates.
+- The same raw strategy score remains present for auditability.
+- Quality state is deterministic and independent of report display order.
+- `ema_cross` ordering does not change in this pass.
+
 ## Slice 4: Market-Regime Unavailable Policy
 
 ### Behavior
@@ -281,6 +314,19 @@ Default to `warn_continue` to preserve existing production behavior. Use
   for that market when the required benchmark is unavailable.
 - The report summary exposes how many symbols were skipped by this policy.
 
+### Resolver Contract
+
+Do not implement `block_market` by parsing human-readable `system_issues`
+strings. Change market regime resolution to return structured data, such as:
+
+- `regime_by_market`: market to resolved `MarketRegimeContext`
+- `unavailable_markets`: market to stable issue code and message
+- `issues`: ordered user-facing issue messages
+
+The evaluator should use `unavailable_markets` to screen out all tickers in the
+affected market when `market_regime_unavailable_policy=block_market`. The report
+summary should derive skipped counts from this structured map.
+
 ## Config Surface
 
 Keep the first pass intentionally narrow:
@@ -303,16 +349,16 @@ policy handling and the new market-regime policy override:
 
 Implementation should add this pair to the existing env/YAML conflict policy so
 operators cannot define both values at once. Document the new env in
-`docs/configuration.md`, `docs/config-reference.md`, and `.env.example` only if
-it belongs in the project's major runtime env template.
+`docs/configuration.md`, `docs/config-reference.md`, and `.env.example` in the
+same implementation change.
 
 ## Documentation Updates
 
 Update `docs/STRATEGY.md` with:
 
-- quality state definitions,
+- hybrid quality state definitions,
 - risk alignment warning logic,
-- entry price fallback and fail-closed behavior,
+- entry price source and fail-closed behavior,
 - market-regime unavailable policy.
 
 Evaluate whether `docs/ARCHITECTURE.md` needs a small update for report-field
@@ -330,12 +376,13 @@ Add focused tests before implementation:
 - market-regime unavailable with default policy records warnings and continues;
 - market-regime unavailable with `block_market` skips affected market
   candidates and records summary counts;
-- buy candidate quality state marks negative relative-strength candidates as
+- hybrid buy candidate quality state marks negative relative-strength candidates as
   weaker than otherwise comparable positive relative-strength candidates;
 - risk alignment flags candidates whose volatility reference exceeds
   `sell.hybrid.stop_loss_pct_max`;
+- risk alignment fields are present before quality state uses them;
 - entry reports include missing-price diagnostics when all price sources fail;
-- after-close daily-close fallback produces `entry_price_status=available` and
+- after-close daily-close pricing produces `entry_price_status=available` and
   a deterministic `entry_price_source` when supported.
 
 Likely affected test areas:
@@ -343,6 +390,7 @@ Likely affected test areas:
 - `tests/test_config_validation_layers.py`
 - `tests/test_runtime_config_contract.py`
 - `tests/test_market_regime_filter.py`
+- `tests/test_scan_evaluation_issue_split.py`
 - `tests/test_hybrid_buy_state.py`
 - `tests/test_entry_command.py`
 
@@ -381,18 +429,23 @@ entry-price and opt-in market-regime paths.
 
 1. Add configuration parsing and validation for
    `strategy.market_regime_unavailable_policy`.
-2. Add entry price diagnostic fields and missing-price summary aggregation.
-3. Add buy candidate quality state fields and deterministic sort order.
-4. Add volatility/risk alignment fields.
-5. Add `block_market` behavior and summary counts.
+2. Add entry price lookup result contract, diagnostic fields, and missing-price
+   summary aggregation.
+3. Add volatility/risk alignment fields.
+4. Add hybrid buy candidate quality state fields and deterministic hybrid-only
+   sort order.
+5. Add structured market-regime resolver output, `block_market` behavior, and
+   summary counts.
 6. Update strategy/config documentation.
 7. Run the Python quality gate for the changed area.
 
-## Open Questions
+## Resolved Design Questions
 
-- Which daily-close provider should be considered authoritative for US entry
-  fallback when KIS live snapshot is unavailable after close?
-- Should quality state sort before raw score in every report view, or only in
-  the default CLI-generated JSON order?
-- Should `block_market` be configurable by market in a later pass, for example
-  strict for US but warn-only for KR?
+- US after-close close source: use the existing KIS daily-candle close path for
+  `provider=kis`; do not add a new US fallback provider in this pass.
+- Quality ordering scope: apply quality-first ordering only to
+  `sma_ema_hybrid` buy reports in this pass; keep `ema_cross` ordering
+  unchanged.
+- Market-regime policy scope: keep one global policy in the first pass. Per
+  market policy can be designed later if strict US and warn-only KR behavior
+  becomes necessary.
