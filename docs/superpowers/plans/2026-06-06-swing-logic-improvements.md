@@ -310,6 +310,24 @@ assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_credentials_missing"
 ```
 
+Update the existing exact summary assertion in
+`test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty` so the
+empty-entry summary includes the new aggregate fields:
+
+```python
+assert payload["summary"] == {
+    "entry_count": 0,
+    "action_counts": {},
+    "system_issue_count": 0,
+    "missing_entry_price_count": 0,
+    "missing_entry_price_ratio": 0.0,
+    "missing_entry_price_by_reason": {},
+    "entry_price_sources": {},
+    "portfolio_blocked_count": 0,
+    "portfolio_blocked_by_market": {},
+}
+```
+
 Update every direct `evaluate_entry_candidates` test helper in
 `tests/test_entry_command.py` that still returns `float | None`. Add a small
 helper near `_entry_candidate`:
@@ -1158,6 +1176,16 @@ def test_write_scan_report_includes_market_regime_policy_summary() -> None:
     assert summary["market_regime_blocked_by_market"] == {"US": 2}
 ```
 
+Update `test_write_scan_report_includes_market_regime_filter_in_config_snapshot`
+so the config snapshot also asserts the new policy field:
+
+```python
+assert (
+    captured["run_meta"]["config_snapshot"]["market_regime_unavailable_policy"]
+    == "warn_continue"
+)
+```
+
 Update the existing tests in `tests/test_market_regime_filter.py` that still
 expect `_resolve_market_regime_context` to return a plain dict.
 
@@ -1196,6 +1224,19 @@ MarketRegimeResolution(
     unavailable_markets={},
     issues=[],
 )
+```
+
+Keep the existing default `warn_continue` system-issue contract in
+`test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavailable`.
+After the resolver refactor, it should still assert the aggregated labeled
+message, not the raw resolver issue:
+
+```python
+assert runtime.system_issues == [
+    "Market regime filter disabled: "
+    "SPY.AMS: Market regime unavailable "
+    "(insufficient completed history for SMA200)"
+]
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -1283,9 +1324,26 @@ return MarketRegimeResolution(
 )
 ```
 
-Keep the existing system-issue recording behavior. After resolving the market
-regime context, record each `market_regime_resolution.issues` item through the
-existing `_record_system_issue(...)` path exactly once and in list order.
+Keep the existing system-issue recording behavior. `_resolve_market_regime_context`
+should populate `MarketRegimeResolution.issues`, but `_evaluate_candidates`
+should still record one aggregated labeled issue through `_record_system_issue(...)`:
+
+```python
+if market_regime_resolution.issues:
+    issue_label = (
+        "Market regime filter partially disabled"
+        if market_regimes_by_market
+        else "Market regime filter disabled"
+    )
+    _record_system_issue(
+        runtime,
+        issue_label + ": " + "; ".join(market_regime_resolution.issues),
+        warn=True,
+    )
+```
+
+Do not record each raw resolver issue as a separate `system_issues` entry; that
+would break the existing report and test contract.
 
 In `_evaluate_candidates`, change:
 
