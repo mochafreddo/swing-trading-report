@@ -355,7 +355,17 @@ def test_evaluate_candidates_blocks_market_when_regime_unavailable_policy_blocks
     )
 
     assert evaluated == []
+    assert runtime.system_issues == [
+        "Market regime unavailable policy blocked markets: "
+        "SPY.AMS: Market regime unavailable (insufficient completed history for SMA200)"
+    ]
     assert runtime.market_regime_blocked_by_market == {"US": 1}
+    assert runtime.market_regime_unavailable_by_market == {
+        "US": {
+            "issue_code": "market_regime_benchmark_unavailable",
+            "message": "SPY.AMS: Market regime unavailable (insufficient completed history for SMA200)",
+        }
+    }
     assert runtime.screen_outs == [
         "AAPL.NAS: Market regime unavailable policy blocked US "
         "(SPY.AMS: Market regime unavailable (insufficient completed history for SMA200))"

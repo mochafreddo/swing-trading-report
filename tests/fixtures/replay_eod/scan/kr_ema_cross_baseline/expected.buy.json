@@ -42,7 +42,8 @@
     "rs_benchmark_unavailable_ratio": null,
     "market_regime_unavailable_count": 0,
     "market_regime_blocked_count": 0,
-    "market_regime_blocked_by_market": {}
+    "market_regime_blocked_by_market": {},
+    "market_regime_unavailable_by_market": {}
   },
   "tickers": [
     "005930",

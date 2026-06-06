@@ -548,6 +548,7 @@ def _resolve_market_regime_context(
     runtime: _ScanRuntime,
 ) -> MarketRegimeResolution:
     runtime.market_regime_unavailable_count = 0
+    runtime.market_regime_unavailable_by_market = {}
     if not runtime.cfg.use_market_regime_filter:
         return MarketRegimeResolution(
             regime_by_market={},
@@ -600,6 +601,13 @@ def _resolve_market_regime_context(
         regime_by_market[market] = context
 
     runtime.market_regime_unavailable_count = len(unavailable_markets)
+    runtime.market_regime_unavailable_by_market = {
+        market: {
+            "issue_code": unavailable.issue_code,
+            "message": unavailable.message,
+        }
+        for market, unavailable in sorted(unavailable_markets.items())
+    }
     return MarketRegimeResolution(
         regime_by_market=regime_by_market,
         unavailable_markets=unavailable_markets,
@@ -676,11 +684,14 @@ def _evaluate_candidates(
     market_regime_resolution = _resolve_market_regime_context(runtime)
     market_regimes_by_market = market_regime_resolution.regime_by_market
     if market_regime_resolution.issues:
-        issue_label = (
-            "Market regime filter partially disabled"
-            if market_regimes_by_market
-            else "Market regime filter disabled"
-        )
+        if cfg.market_regime_unavailable_policy == "block_market":
+            issue_label = "Market regime unavailable policy blocked markets"
+        else:
+            issue_label = (
+                "Market regime filter partially disabled"
+                if market_regimes_by_market
+                else "Market regime filter disabled"
+            )
         _record_system_issue(
             runtime,
             issue_label + ": " + "; ".join(market_regime_resolution.issues),
@@ -1026,6 +1037,9 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         "market_regime_unavailable_count": runtime.market_regime_unavailable_count,
         "market_regime_blocked_count": sum(market_regime_blocked_by_market.values()),
         "market_regime_blocked_by_market": market_regime_blocked_by_market,
+        "market_regime_unavailable_by_market": dict(
+            sorted(runtime.market_regime_unavailable_by_market.items())
+        ),
     }
     return write_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,

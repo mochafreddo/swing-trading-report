@@ -182,8 +182,8 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 3. `use_market_regime_filter=true`이면, 시장별 benchmark(`rs_benchmark_ticker_kr/us`)의 완료 일봉 종가가 SMA200 위인지 먼저 확인합니다.
    - benchmark 종가가 SMA200 이하이면 그 시장의 ticker는 `Market regime filter blocked (...)` 사유로 scan에서 제외합니다.
    - benchmark를 구하지 못하거나 완료 히스토리/SMA200이 부족하면 `strategy.market_regime_unavailable_policy`로 처리합니다.
-     - `warn_continue`이면 buy report `system_issues`에 경고를 남기고 해당 시장의 레짐 필터만 비활성화한 뒤 scan을 계속합니다.
-     - `block_market`이면 benchmark를 구하지 못한 시장의 후보를 제외하고 summary에 `market_regime_blocked_by_market`을 기록합니다.
+     - `warn_continue`이면 buy report `system_issues`에 경고를 남기고 해당 시장의 레짐 필터만 비활성화한 뒤 scan을 계속하며, summary에 `market_regime_unavailable_by_market`(`issue_code`, `message`)을 기록합니다.
+     - `block_market`이면 benchmark를 구하지 못한 시장의 후보를 제외하고 summary에 `market_regime_blocked_by_market`와 `market_regime_unavailable_by_market`을 기록합니다.
    - 이 레짐 게이트는 **scan 전용**이며 sell/entry에는 적용하지 않습니다.
 4. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
 5. 후보(candidate) 티커만 raw 캔들을 추가 warmup한 뒤, cache hit 기반으로 entry용 raw reference close를 보강합니다.

@@ -129,6 +129,12 @@ def test_write_scan_report_includes_market_regime_policy_summary() -> None:
     runtime = _build_runtime(tickers=["AAPL.NAS"])
     runtime.market_regime_unavailable_count = 2
     runtime.market_regime_blocked_by_market = {"US": 2}
+    runtime.market_regime_unavailable_by_market = {
+        "US": {
+            "issue_code": "market_regime_benchmark_unavailable",
+            "message": "SPY.AMS: Market regime unavailable (insufficient completed history for SMA200)",
+        }
+    }
     captured: dict[str, Any] = {}
 
     def _fake_write_report(**kwargs: Any) -> str:
@@ -141,3 +147,9 @@ def test_write_scan_report_includes_market_regime_policy_summary() -> None:
     assert summary_fields["market_regime_unavailable_count"] == 2
     assert summary_fields["market_regime_blocked_count"] == 2
     assert summary_fields["market_regime_blocked_by_market"] == {"US": 2}
+    assert summary_fields["market_regime_unavailable_by_market"] == {
+        "US": {
+            "issue_code": "market_regime_benchmark_unavailable",
+            "message": "SPY.AMS: Market regime unavailable (insufficient completed history for SMA200)",
+        }
+    }

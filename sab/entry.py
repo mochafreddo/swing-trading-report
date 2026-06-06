@@ -79,6 +79,7 @@ _KIS_OVERSEAS_ENTRY_PRICE_KEYS = (
     "ovrs_nmix_prpr",
     "ovrs_prpr",
 )
+_KIS_DOMESTIC_ENTRY_PRICE_KEYS = ("stck_prpr",)
 
 
 @dataclass(frozen=True)
@@ -139,11 +140,25 @@ def _present_kis_overseas_entry_price_fields(detail: Mapping[str, Any]) -> list[
     ]
 
 
+def _present_kis_domestic_entry_price_fields(detail: Mapping[str, Any]) -> list[str]:
+    return [
+        key
+        for key in _KIS_DOMESTIC_ENTRY_PRICE_KEYS
+        if str(detail.get(key) or "").strip()
+    ]
+
+
 def _kis_overseas_entry_price_reject_reason(
     *, currency: str | None, present_price_fields: list[str]
 ) -> str:
     if currency and currency != "USD":
         return "currency_mismatch"
+    if not present_price_fields:
+        return "no_supported_price_field"
+    return "invalid_price_value"
+
+
+def _kis_domestic_entry_price_reject_reason(*, present_price_fields: list[str]) -> str:
     if not present_price_fields:
         return "no_supported_price_field"
     return "invalid_price_value"
@@ -1113,8 +1128,30 @@ def _make_price_lookup(
                     live_price,
                     source="kis_live_snapshot",
                 )
-            return EntryPriceLookupResult.missing(
-                "kis_live_snapshot_missing",
+            present_price_fields = _present_kis_domestic_entry_price_fields(detail)
+            reject_reason = _kis_domestic_entry_price_reject_reason(
+                present_price_fields=present_price_fields
+            )
+            logger.warning(
+                "Entry price snapshot rejected: provider=kis market=%s ticker=%s reason=%s",
+                market,
+                ticker,
+                reject_reason,
+                extra={
+                    "event": "entry_price_snapshot_rejected",
+                    "operation": "entry",
+                    "run_id": log_run_id,
+                    "provider": "kis",
+                    "dependency": "kis",
+                    "market": market,
+                    "ticker": ticker,
+                    "status": "degraded",
+                    "reason": reject_reason,
+                    "present_price_fields": present_price_fields,
+                },
+            )
+            return EntryPriceLookupResult.rejected(
+                _kis_live_snapshot_issue_code(reject_reason),
                 source="kis_live_snapshot",
             )
         except KISClientError as exc:

@@ -121,3 +121,6 @@ class _ScanRuntime:
     rs_benchmark_unavailable_count: int = 0
     market_regime_unavailable_count: int = 0
     market_regime_blocked_by_market: dict[str, int] = field(default_factory=dict)
+    market_regime_unavailable_by_market: dict[str, dict[str, str]] = field(
+        default_factory=dict
+    )

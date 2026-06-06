@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+import sab.config as sab_config
+from sab.config_loader import load_yaml_config
+
 
 def _extract_env_keys(path: Path) -> list[str]:
     keys: list[str] = []
@@ -32,7 +35,6 @@ def test_env_example_contains_v11_required_keys() -> None:
         "GITHUB_OWNER",
         "GITHUB_REPO",
         "GITHUB_PAT",
-        "MARKET_REGIME_UNAVAILABLE_POLICY",
         "REPORT_RETENTION_DAYS",
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
@@ -61,3 +63,23 @@ def test_env_example_retention_default_is_30_days() -> None:
         values[key.strip()] = value.strip()
 
     assert values.get("REPORT_RETENTION_DAYS") == "30"
+
+
+def test_env_example_documents_market_regime_policy_without_active_override() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+    active_keys = set(_extract_env_keys(env_example_path))
+
+    assert "MARKET_REGIME_UNAVAILABLE_POLICY" in text
+    assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
+
+
+def test_env_example_market_regime_policy_does_not_conflict_with_config() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    active_keys = set(_extract_env_keys(repo_root / ".env.example"))
+    config_data = load_yaml_config(str(repo_root / "config.yaml")).raw
+    binding_paths = dict(sab_config._ENV_YAML_CONFLICT_BINDINGS)
+
+    policy_path = binding_paths["MARKET_REGIME_UNAVAILABLE_POLICY"]
+    assert sab_config._from_nested(config_data, policy_path) is not None
+    assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
