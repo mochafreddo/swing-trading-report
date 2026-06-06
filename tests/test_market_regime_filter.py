@@ -85,6 +85,41 @@ def _build_runtime(
     return runtime
 
 
+def _split_overseas_for_test(ticker: str) -> tuple[str, str | None]:
+    parts = ticker.split(".", 1)
+    return parts[0], parts[1] if len(parts) > 1 else None
+
+
+def _excd_from_suffix_for_test(suffix: str | None) -> str | None:
+    return suffix
+
+
+def _settings_namespace(**kwargs: Any) -> SimpleNamespace:
+    return SimpleNamespace(**kwargs)
+
+
+def _no_candidate_result(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+    return SimpleNamespace(candidate=None, reason=None)
+
+
+def _evaluate_candidates_for_test(
+    runtime: _ScanRuntime,
+    *,
+    evaluate_ticker_fn: Any,
+    evaluate_ticker_hybrid_fn: Any = _no_candidate_result,
+) -> None:
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=_settings_namespace,
+        HybridEvaluationSettingsCls=_settings_namespace,
+        evaluate_ticker_fn=evaluate_ticker_fn,
+        evaluate_ticker_hybrid_fn=evaluate_ticker_hybrid_fn,
+        split_overseas_fn=_split_overseas_for_test,
+        excd_from_suffix_fn=_excd_from_suffix_for_test,
+        enrich_entry_reference_prices=False,
+    )
+
+
 def test_load_config_parses_market_regime_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -179,22 +214,14 @@ def test_evaluate_candidates_skips_ticker_when_market_regime_blocked(
         ),
     )
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=lambda *_args, **_kwargs: pytest.fail(
             "ticker evaluator must not run when market regime is blocked"
         ),
         evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: pytest.fail(
             "hybrid evaluator must not run when market regime is blocked"
         ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert runtime.candidates == []
@@ -241,20 +268,9 @@ def test_evaluate_candidates_keeps_other_market_when_one_market_blocked(
             candidate={"ticker": ticker, "score_value": 1.0}, reason=None
         )
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=_evaluate,
-        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate=None, reason=None
-        ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert evaluated == ["AAPL.NAS"]
@@ -297,20 +313,9 @@ def test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavai
             candidate={"ticker": ticker, "score_value": 1.0}, reason=None
         )
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=_evaluate,
-        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate=None, reason=None
-        ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert evaluated == ["AAPL.NAS"]
@@ -338,20 +343,9 @@ def test_evaluate_candidates_blocks_market_when_regime_unavailable_policy_blocks
         ),
     )
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=lambda ticker, *_args, **_kwargs: evaluated.append(ticker),
-        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate=None, reason=None
-        ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert evaluated == []
@@ -431,20 +425,9 @@ def test_evaluate_candidates_reports_mixed_market_regime_unavailable_summary(
             reason=None,
         )
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=_evaluate,
-        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate=None, reason=None
-        ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert evaluated == expected_evaluated
@@ -527,20 +510,9 @@ def test_evaluate_candidates_uses_ticker_market_for_regime_blocking_when_currenc
         evaluated.append(ticker)
         return SimpleNamespace(candidate=None, reason=None)
 
-    _evaluate_candidates(
+    _evaluate_candidates_for_test(
         runtime,
-        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         evaluate_ticker_fn=_evaluate,
-        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
-            candidate=None, reason=None
-        ),
-        split_overseas_fn=lambda ticker: (
-            ticker.split(".")[0],
-            ticker.split(".")[1] if "." in ticker else None,
-        ),
-        excd_from_suffix_fn=lambda suffix: suffix,
-        enrich_entry_reference_prices=False,
     )
 
     assert evaluated == ["AAPL.NAS"]
