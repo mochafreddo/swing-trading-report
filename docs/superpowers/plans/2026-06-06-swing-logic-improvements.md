@@ -82,6 +82,19 @@ def test_load_config_parses_market_regime_unavailable_policy_from_env(
     assert cfg.market_regime_unavailable_policy == "block_market"
 
 
+def test_load_config_normalizes_market_regime_unavailable_policy_from_env(
+    tmp_path, monkeypatch
+):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
+    monkeypatch.setenv("SAB_CONFIG", str(cfg_path))
+    monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", " BLOCK_MARKET ")
+
+    cfg = load_config()
+
+    assert cfg.market_regime_unavailable_policy == "block_market"
+
+
 def test_load_config_rejects_invalid_market_regime_unavailable_policy(
     tmp_path, monkeypatch
 ):
@@ -126,7 +139,10 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_layers.py tests/test_runtime_config_contract.py tests/test_config_conflict_binding_sync.py -q
 ```
 
-Expected: FAIL because `Config` has no `market_regime_unavailable_policy` attribute and `MARKET_REGIME_UNAVAILABLE_POLICY` is not in `_ENV_YAML_CONFLICT_BINDINGS`.
+Expected: FAIL because `Config` has no `market_regime_unavailable_policy` attribute
+and `MARKET_REGIME_UNAVAILABLE_POLICY` is not in `_ENV_YAML_CONFLICT_BINDINGS`.
+If the field is added with raw `parser.env_str(...)`, the normalization test
+must still fail until `_resolve_mode_string(...)` is used.
 
 - [ ] **Step 3: Implement the config contract**
 
@@ -148,14 +164,24 @@ Add the field to `_StrategySection`:
 market_regime_unavailable_policy: str
 ```
 
-In `_parse_strategy_section`, read the value:
+In `_parse_strategy_section`, resolve this as a mode-like string before building
+`_StrategySection`. Do not use `parser.env_str(...)` directly here; `_normalize_choice`
+expects an already normalized value and `strategy_mode` follows the same
+`_resolve_mode_string(...)` path.
 
 ```python
-market_regime_unavailable_policy=parser.env_str(
+market_regime_unavailable_policy = _resolve_mode_string(
+    parser,
     "MARKET_REGIME_UNAVAILABLE_POLICY",
     "strategy.market_regime_unavailable_policy",
     "warn_continue",
-) or "warn_continue",
+)
+```
+
+Then pass it into `_StrategySection`:
+
+```python
+market_regime_unavailable_policy=market_regime_unavailable_policy,
 ```
 
 In `_validate_sections`, normalize it with strict validation:
@@ -1208,7 +1234,7 @@ class MarketRegimeResolution:
     issues: list[str]
 ```
 
-Change `_resolve_market_regime_context` to return `MarketRegimeResolution`. On missing benchmark ticker, set:
+Change `_resolve_market_regime_context` to return `MarketRegimeResolution`.
 
 When the filter is disabled or there are no active markets, return an empty
 resolution instead of `{}`:
@@ -1221,22 +1247,29 @@ return MarketRegimeResolution(
 )
 ```
 
+On missing benchmark ticker, build one unavailable object and append the same
+message to `issues`:
+
 ```python
-unavailable_markets[market] = MarketRegimeUnavailable(
+unavailable = MarketRegimeUnavailable(
     market=market,
     issue_code="market_regime_benchmark_not_configured",
     message=f"{market}: market regime benchmark ticker not configured",
 )
+unavailable_markets[market] = unavailable
+issues.append(unavailable.message)
 ```
 
-On compute failure, set:
+On compute failure, use the same pattern:
 
 ```python
-unavailable_markets[market] = MarketRegimeUnavailable(
+unavailable = MarketRegimeUnavailable(
     market=market,
     issue_code="market_regime_benchmark_unavailable",
     message=issue or f"{market}: market regime unavailable",
 )
+unavailable_markets[market] = unavailable
+issues.append(unavailable.message)
 ```
 
 At return:
@@ -1249,6 +1282,10 @@ return MarketRegimeResolution(
     issues=issues,
 )
 ```
+
+Keep the existing system-issue recording behavior. After resolving the market
+regime context, record each `market_regime_resolution.issues` item through the
+existing `_record_system_issue(...)` path exactly once and in list order.
 
 In `_evaluate_candidates`, change:
 
