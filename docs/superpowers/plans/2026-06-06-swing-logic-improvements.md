@@ -269,6 +269,61 @@ assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_live_snapshot_missing"
 ```
 
+Update the existing `_make_price_lookup` tests in `tests/test_entry_command.py`
+that currently assert `price_lookup("AAPL.NASD") is None`.
+
+In `test_make_price_lookup_logs_kis_detail_failure`, replace that assertion with:
+
+```python
+lookup_result = price_lookup("AAPL.NASD")
+assert lookup_result.price is None
+assert lookup_result.status == "missing"
+assert lookup_result.source == "kis_live_snapshot"
+assert lookup_result.issue_codes == ("provider_error",)
+```
+
+In `test_make_price_lookup_logs_kis_us_snapshot_rejection_reason`, extend the
+parametrize tuple with `expected_issue_code`:
+
+```python
+@pytest.mark.parametrize(
+    ("detail", "expected_reason", "expected_issue_code", "expected_currency", "expected_fields"),
+    [
+        (
+            {"last": "101.0", "curr": "EUR"},
+            "currency_mismatch",
+            "kis_live_snapshot_currency_mismatch",
+            "EUR",
+            ["last"],
+        ),
+        (
+            {"open": "101.0", "curr": "USD"},
+            "no_supported_price_field",
+            "kis_live_snapshot_no_supported_price_field",
+            "USD",
+            [],
+        ),
+        (
+            {"last": "0", "curr": "USD"},
+            "invalid_price_value",
+            "kis_live_snapshot_invalid_price_value",
+            "USD",
+            ["last"],
+        ),
+    ],
+)
+```
+
+Then replace the `price_lookup("AAPL.NASD") is None` assertion with:
+
+```python
+lookup_result = price_lookup("AAPL.NASD")
+assert lookup_result.price is None
+assert lookup_result.status == "rejected"
+assert lookup_result.source == "kis_live_snapshot"
+assert lookup_result.issue_codes == (expected_issue_code,)
+```
+
 Add to `tests/test_entry_report.py`:
 
 ```python
@@ -362,6 +417,7 @@ Use these issue codes in the current failure branches:
 "kis_credentials_missing"
 "provider_error"
 "daily_close_unavailable"
+"entry_price_invalid"
 "kis_live_snapshot_missing"
 "kis_live_snapshot_no_supported_price_field"
 "kis_live_snapshot_currency_mismatch"
@@ -375,7 +431,7 @@ lookup_result = price_lookup_fn(ticker)
 entry_price = lookup_result.price
 if entry_price is not None and entry_price <= 0:
     lookup_result = EntryPriceLookupResult.rejected(
-        "invalid_price_value",
+        "entry_price_invalid",
         source=lookup_result.source,
     )
     entry_price = None
@@ -948,14 +1004,10 @@ def test_resolve_market_regime_context_returns_unavailable_markets() -> None:
     resolution = _resolve_market_regime_context(runtime)
 
     assert resolution.regime_by_market == {}
-    assert "US" in resolution.unavailable_markets
-    assert (
-        resolution.unavailable_markets["US"].issue_code
-        == "market_regime_benchmark_unavailable"
-    )
-    assert resolution.issues == [
-        "US: market regime benchmark unavailable"
-    ] or resolution.issues
+    unavailable = resolution.unavailable_markets["US"]
+    assert unavailable.issue_code == "market_regime_benchmark_unavailable"
+    assert unavailable.message.startswith("SPY.AMS: Market regime unavailable")
+    assert resolution.issues == [unavailable.message]
 
 
 def test_evaluate_candidates_blocks_market_when_regime_unavailable_policy_blocks(
@@ -1005,7 +1057,7 @@ Add to `tests/test_scan_metrics_summary.py`:
 
 ```python
 def test_write_scan_report_includes_market_regime_policy_summary() -> None:
-    runtime = _build_runtime()
+    runtime = _build_runtime(tickers=["AAPL.NAS"])
     runtime.market_regime_unavailable_count = 2
     runtime.market_regime_blocked_by_market = {"US": 2}
     captured: dict[str, Any] = {}
