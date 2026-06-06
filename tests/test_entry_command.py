@@ -1645,13 +1645,20 @@ def test_make_price_lookup_logs_kis_detail_failure(
             "USD",
             ["last"],
         ),
+        (
+            {"last": 0, "curr": "USD"},
+            "invalid_price_value",
+            "kis_live_snapshot_invalid_price_value",
+            "USD",
+            ["last"],
+        ),
     ],
 )
 def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    detail: dict[str, str],
+    detail: dict[str, object],
     expected_reason: str,
     expected_issue_code: str,
     expected_currency: str,
@@ -1674,7 +1681,7 @@ def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
 
         def overseas_price_detail(
             self, *, symbol: str, exchange: str
-        ) -> dict[str, str]:
+        ) -> dict[str, object]:
             assert symbol == "AAPL"
             assert exchange == "NAS"
             return detail
@@ -2029,14 +2036,26 @@ def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
 
 
 @pytest.mark.parametrize(
-    ("detail", "expected_issue_code"),
+    ("mode", "detail", "expected_issue_code"),
     [
         (
+            "PRE_OPEN",
             {"stck_cntg_hour": "090001", "stck_prdy_clpr": "101.0"},
             "kis_live_snapshot_no_supported_price_field",
         ),
         (
+            "INTRADAY",
+            {"stck_prdy_clpr": "101.0"},
+            "kis_live_snapshot_no_supported_price_field",
+        ),
+        (
+            "PRE_OPEN",
             {"stck_cntg_hour": "090001", "stck_prpr": "0"},
+            "kis_live_snapshot_invalid_price_value",
+        ),
+        (
+            "INTRADAY",
+            {"stck_prpr": 0},
             "kis_live_snapshot_invalid_price_value",
         ),
     ],
@@ -2044,7 +2063,8 @@ def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
 def test_run_entry_e2e_kr_pre_open_reports_rejected_live_snapshot_reason(
     monkeypatch,
     tmp_path: Path,
-    detail: dict[str, str],
+    mode: str,
+    detail: dict[str, object],
     expected_issue_code: str,
 ) -> None:
     report_dir = tmp_path / "reports"
@@ -2080,7 +2100,7 @@ def test_run_entry_e2e_kr_pre_open_reports_rejected_live_snapshot_reason(
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
-        def domestic_price_detail(self, *, ticker: str) -> dict[str, str]:
+        def domestic_price_detail(self, *, ticker: str) -> dict[str, object]:
             assert ticker == "005930"
             return dict(detail)
 
@@ -2089,7 +2109,7 @@ def test_run_entry_e2e_kr_pre_open_reports_rejected_live_snapshot_reason(
     exit_code = run_entry(
         buy_report_path=buy_report_path.as_posix(),
         provider="kis",
-        mode="PRE_OPEN",
+        mode=mode,
         market="KR",
     )
 

@@ -132,11 +132,20 @@ def _extract_kis_overseas_entry_price(detail: Mapping[str, Any]) -> float | None
     return None
 
 
+def _has_nonempty_kis_field(detail: Mapping[str, Any], key: str) -> bool:
+    value = detail.get(key)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
 def _present_kis_overseas_entry_price_fields(detail: Mapping[str, Any]) -> list[str]:
     return [
         key
         for key in _KIS_OVERSEAS_ENTRY_PRICE_KEYS
-        if str(detail.get(key) or "").strip()
+        if _has_nonempty_kis_field(detail, key)
     ]
 
 
@@ -144,7 +153,7 @@ def _present_kis_domestic_entry_price_fields(detail: Mapping[str, Any]) -> list[
     return [
         key
         for key in _KIS_DOMESTIC_ENTRY_PRICE_KEYS
-        if str(detail.get(key) or "").strip()
+        if _has_nonempty_kis_field(detail, key)
     ]
 
 
