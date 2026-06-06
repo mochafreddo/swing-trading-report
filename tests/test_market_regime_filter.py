@@ -479,6 +479,68 @@ def test_evaluate_candidates_reports_mixed_market_regime_unavailable_summary(
     }
 
 
+def test_evaluate_candidates_uses_ticker_market_for_regime_blocking_when_currency_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _build_runtime(tickers=["005930", "AAPL.NAS"])
+    runtime.cfg = replace(
+        runtime.cfg,
+        use_market_regime_filter=True,
+        market_regime_unavailable_policy="block_market",
+    )
+    runtime.ticker_currency["AAPL.NAS"] = "KRW"
+    evaluated: list[str] = []
+
+    def _compute_context(
+        _runtime: _ScanRuntime,
+        *,
+        ticker: str,
+        market: str,
+    ) -> tuple[MarketRegimeContext | None, str | None]:
+        if market == "KR":
+            return (
+                None,
+                f"{ticker}: Market regime unavailable (insufficient completed history for SMA200)",
+            )
+        return (
+            MarketRegimeContext(
+                benchmark_ticker=ticker,
+                benchmark_close=400.0,
+                benchmark_sma200=390.0,
+                is_bullish=True,
+            ),
+            None,
+        )
+
+    monkeypatch.setattr(
+        "sab.scan_evaluation._compute_market_regime_context",
+        _compute_context,
+    )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=lambda ticker, *_args, **_kwargs: evaluated.append(ticker),
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+        enrich_entry_reference_prices=False,
+    )
+
+    assert evaluated == ["AAPL.NAS"]
+    assert runtime.market_regime_blocked_by_market == {"KR": 1}
+    assert runtime.screen_outs == [
+        "005930: Market regime unavailable policy blocked KR "
+        "(069500: Market regime unavailable (insufficient completed history for SMA200))"
+    ]
+
+
 def test_write_scan_report_includes_market_regime_filter_in_config_snapshot() -> None:
     runtime = _build_runtime(
         tickers=["AAPL.NAS"],

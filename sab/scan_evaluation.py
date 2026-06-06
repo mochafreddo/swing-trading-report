@@ -787,7 +787,7 @@ def _evaluate_candidates(
             split_overseas_fn=split_overseas_fn,
             excd_from_suffix_fn=excd_from_suffix_fn,
         )
-        ticker_market = "US" if meta["currency"].upper() == "USD" else "KR"
+        ticker_market = infer_market_from_ticker(ticker)
         unavailable = market_regime_resolution.unavailable_markets.get(ticker_market)
         if (
             unavailable is not None
