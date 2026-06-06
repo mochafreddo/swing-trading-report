@@ -258,7 +258,11 @@ assert row.entry_price_issue_code == "kis_live_snapshot_missing"
 assert row.entry_price_issues == ["kis_live_snapshot_missing"]
 ```
 
-Add a summary assertion to a missing-price E2E test in `tests/test_entry_command.py`:
+Add summary assertions to
+`test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price`
+in `tests/test_entry_command.py`. This is the KIS live snapshot missing case;
+do not add these `kis_live_snapshot_missing` assertions to the provider
+credentials test.
 
 ```python
 assert payload["summary"]["missing_entry_price_by_reason"] == {
@@ -268,6 +272,54 @@ assert payload["summary"]["entry_price_sources"] == {}
 assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_live_snapshot_missing"
 ```
+
+In `test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing`, assert the
+credentials-specific diagnostic instead:
+
+```python
+assert payload["summary"]["missing_entry_price_by_reason"] == {
+    "kis_credentials_missing": 1
+}
+assert payload["entries"][0]["entry_price_status"] == "missing"
+assert payload["entries"][0]["entry_price_issue_code"] == "kis_credentials_missing"
+```
+
+Update every direct `evaluate_entry_candidates` test helper in
+`tests/test_entry_command.py` that still returns `float | None`. Add a small
+helper near `_entry_candidate`:
+
+```python
+def _entry_price_result(
+    price: float | None,
+    *,
+    source: str = "test",
+    issue_code: str = "kis_live_snapshot_missing",
+) -> entry.EntryPriceLookupResult:
+    if price is None:
+        return entry.EntryPriceLookupResult.missing(issue_code, source=source)
+    return entry.EntryPriceLookupResult.available(price, source=source)
+```
+
+Then replace direct lookup lambdas such as:
+
+```python
+price_lookup_fn=lambda _ticker: 101.0
+price_lookup_fn=lambda _ticker: None
+price_lookup_fn=lambda ticker: prices.get(ticker)
+```
+
+with:
+
+```python
+price_lookup_fn=lambda _ticker: _entry_price_result(101.0)
+price_lookup_fn=lambda _ticker: _entry_price_result(None)
+price_lookup_fn=lambda ticker: _entry_price_result(prices.get(ticker))
+```
+
+Also update fake `_make_price_lookup` providers in the same file from
+`Callable[[str], float | None]` to
+`Callable[[str], entry.EntryPriceLookupResult]`, returning
+`_entry_price_result(market_prices.get(ticker))`.
 
 Update the existing `_make_price_lookup` tests in `tests/test_entry_command.py`
 that currently assert `price_lookup("AAPL.NASD") is None`.
@@ -897,6 +949,12 @@ class _QualityState:
     state: str
     reasons: list[str]
 ```
+
+Do not add a candidate-level `data_warning` reason in the first pass. Current
+hybrid system/data failures return `HybridEvaluationResult(candidate=None, ...)`
+and are recorded outside the candidate list, so `_build_quality_state` should
+only classify emitted-candidate inputs: `entry_state`, `rs_diff`, and
+`risk_alignment`.
 
 Add:
 

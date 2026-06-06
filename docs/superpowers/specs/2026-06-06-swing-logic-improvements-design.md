@@ -244,12 +244,16 @@ Example reason codes:
 
 Add deterministic quality classification to each `sma_ema_hybrid` buy candidate:
 
-- `A`: ready candidate with non-negative relative strength, acceptable
-  volatility alignment, and no system/data warnings.
+- `A`: ready candidate with non-negative relative strength and acceptable
+  volatility alignment.
 - `B`: ready candidate with a weakness that needs review, such as negative
   relative strength or elevated gap/volatility risk.
-- `C`: watch candidate, data-warning candidate, or candidate with unresolved
-  quality issues.
+- `C`: watch candidate or candidate with unresolved quality issues.
+
+The first implementation pass only classifies fields that exist on emitted
+hybrid candidates. Scan-level system/data failures still produce
+`system_issues`, `failures`, or `screen_outs` because no candidate is emitted;
+they are not mapped into a candidate-level `data_warning` reason in this pass.
 
 Candidates are not removed by default. In hybrid buy reports only, they are
 ranked by quality first, then current score, then relative strength, then
@@ -276,7 +280,6 @@ Example reason codes:
 - `relative_strength_unavailable`
 - `entry_state_ready`
 - `entry_state_watch`
-- `data_warning`
 - `risk_alignment_tight_stop`
 
 ### Acceptance Criteria
