@@ -136,3 +136,31 @@ def test_write_entry_report_uses_artifact_date_for_filename_and_payload(
     payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
     assert Path(out_path).name == "2026-02-26.entry.json"
     assert payload["report_date"] == "2026-02-26"
+
+
+def test_write_entry_report_includes_entry_price_diagnostics(tmp_path: Path) -> None:
+    out = write_entry_report(
+        report_dir=tmp_path.as_posix(),
+        artifact={"market": "US", "mode": "PRE_OPEN", "summary": {}},
+        entries=[
+            EntryReportRow(
+                ticker="AAPL.NASD",
+                action="REVIEW",
+                reasons=["price snapshot unavailable"],
+                signal_close=100.0,
+                entry_price=None,
+                gap_pct=None,
+                entry_price_status="missing",
+                entry_price_source="kis_live_snapshot",
+                entry_price_issue_code="kis_live_snapshot_missing",
+                entry_price_issues=["kis_live_snapshot_missing"],
+            )
+        ],
+        artifact_date="2026-06-06",
+    )
+
+    payload = json.loads(Path(out).read_text(encoding="utf-8"))
+    row = payload["entries"][0]
+    assert row["entry_price_status"] == "missing"
+    assert row["entry_price_source"] == "kis_live_snapshot"
+    assert row["entry_price_issue_code"] == "kis_live_snapshot_missing"

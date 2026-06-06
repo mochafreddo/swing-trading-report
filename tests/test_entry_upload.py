@@ -21,6 +21,15 @@ def _build_entry_candidate() -> dict[str, object]:
     }
 
 
+def _entry_price_result(price: float | None) -> entry.EntryPriceLookupResult:
+    if price is None:
+        return entry.EntryPriceLookupResult.missing(
+            "provider_error",
+            source="kis_live_snapshot",
+        )
+    return entry.EntryPriceLookupResult.available(price, source="kis_live_snapshot")
+
+
 def test_run_entry_upload_flag_uses_supabase_upload_path(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -54,7 +63,7 @@ def test_run_entry_upload_flag_uses_supabase_upload_path(
     )
     monkeypatch.setattr(
         "sab.entry._make_price_lookup",
-        lambda **_kwargs: (lambda _ticker: 101.5, []),
+        lambda **_kwargs: (lambda _ticker: _entry_price_result(101.5), []),
     )
 
     upload_calls: list[dict[str, object]] = []
@@ -126,7 +135,7 @@ def test_run_entry_upload_flag_returns_error_on_supabase_failure(
     )
     monkeypatch.setattr(
         "sab.entry._make_price_lookup",
-        lambda **_kwargs: (lambda _ticker: 101.5, []),
+        lambda **_kwargs: (lambda _ticker: _entry_price_result(101.5), []),
     )
     monkeypatch.setattr(
         "sab.entry.maybe_upload_report_artifact",
@@ -177,7 +186,10 @@ def test_run_entry_upload_flag_skips_supabase_upload_when_price_gap_is_fatal(
     )
     monkeypatch.setattr(
         "sab.entry._make_price_lookup",
-        lambda **_kwargs: (lambda _ticker: None, ["provider unavailable"]),
+        lambda **_kwargs: (
+            lambda _ticker: _entry_price_result(None),
+            ["provider unavailable"],
+        ),
     )
 
     upload_calls: list[dict[str, object]] = []

@@ -7,6 +7,10 @@ def test_entry_candidate_helper_preserves_review_issue_order() -> None:
     helper = getattr(entry, "_evaluate_entry_candidate", None)
 
     assert helper is not None
+    lookup_result = entry.EntryPriceLookupResult.missing(
+        "kis_live_snapshot_missing",
+        source="kis_live_snapshot",
+    )
 
     row, issues = helper(
         candidate={
@@ -22,7 +26,7 @@ def test_entry_candidate_helper_preserves_review_issue_order() -> None:
             "entry_trigger_operator": "gte",
             "entry_trigger_label": "swing high",
         },
-        price_lookup_fn=lambda _ticker: None,
+        price_lookup_fn=lambda _ticker: lookup_result,
         gap_breach_action="SKIP",
         default_strategy_mode=None,
         allow_missing_gap_guard=False,
@@ -31,6 +35,10 @@ def test_entry_candidate_helper_preserves_review_issue_order() -> None:
     assert row.ticker == "AAPL.NASD"
     assert row.action == "REVIEW"
     assert row.entry_price is None
+    assert row.entry_price_status == "missing"
+    assert row.entry_price_source == "kis_live_snapshot"
+    assert row.entry_price_issue_code == "kis_live_snapshot_missing"
+    assert row.entry_price_issues == ["kis_live_snapshot_missing"]
     assert row.reasons == [
         "hybrid trigger guard invalid",
         "price snapshot unavailable",

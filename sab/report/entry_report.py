@@ -27,6 +27,10 @@ class EntryReportRow:
     strategy_mode: str | None = None
     pattern: str | None = None
     entry_state: str | None = None
+    entry_price_status: str | None = None
+    entry_price_source: str | None = None
+    entry_price_issue_code: str | None = None
+    entry_price_issues: list[str] | None = None
 
 
 def write_entry_report(

@@ -81,6 +81,34 @@ _KIS_OVERSEAS_ENTRY_PRICE_KEYS = (
 )
 
 
+@dataclass(frozen=True)
+class EntryPriceLookupResult:
+    price: float | None
+    status: str
+    source: str | None = None
+    issue_codes: tuple[str, ...] = ()
+
+    @classmethod
+    def available(cls, price: float, *, source: str) -> EntryPriceLookupResult:
+        return cls(price=price, status="available", source=source)
+
+    @classmethod
+    def missing(
+        cls, issue_code: str, *, source: str | None = None
+    ) -> EntryPriceLookupResult:
+        return cls(
+            price=None, status="missing", source=source, issue_codes=(issue_code,)
+        )
+
+    @classmethod
+    def rejected(
+        cls, issue_code: str, *, source: str | None = None
+    ) -> EntryPriceLookupResult:
+        return cls(
+            price=None, status="rejected", source=source, issue_codes=(issue_code,)
+        )
+
+
 def _has_pre_open_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
     return any(
         str(detail.get(key) or "").strip() for key in _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS
@@ -119,6 +147,10 @@ def _kis_overseas_entry_price_reject_reason(
     if not present_price_fields:
         return "no_supported_price_field"
     return "invalid_price_value"
+
+
+def _kis_live_snapshot_issue_code(reject_reason: str) -> str:
+    return f"kis_live_snapshot_{reject_reason}"
 
 
 def _normalize_ticker(ticker: Any) -> str:
@@ -470,7 +502,7 @@ def _resolve_entry_candidate_action(
 def _evaluate_entry_candidate(
     *,
     candidate: dict[str, Any],
-    price_lookup_fn: Callable[[str], float | None],
+    price_lookup_fn: Callable[[str], EntryPriceLookupResult],
     gap_breach_action: str,
     default_strategy_mode: str | None,
     allow_missing_gap_guard: bool,
@@ -504,8 +536,13 @@ def _evaluate_entry_candidate(
         reasons.append(trigger_issue)
         candidate_issues.append(f"{ticker}: {trigger_issue}")
 
-    entry_price = price_lookup_fn(ticker)
+    lookup_result = price_lookup_fn(ticker)
+    entry_price = lookup_result.price
     if entry_price is not None and entry_price <= 0:
+        lookup_result = EntryPriceLookupResult.rejected(
+            "entry_price_invalid",
+            source=lookup_result.source,
+        )
         entry_price = None
     if entry_price is None:
         reasons.append("price snapshot unavailable")
@@ -551,6 +588,12 @@ def _evaluate_entry_candidate(
         strategy_mode=strategy_mode,
         pattern=pattern,
         entry_state=entry_state,
+        entry_price_status=lookup_result.status,
+        entry_price_source=lookup_result.source,
+        entry_price_issue_code=(
+            lookup_result.issue_codes[0] if lookup_result.issue_codes else None
+        ),
+        entry_price_issues=list(lookup_result.issue_codes),
     )
     logger.debug(
         "Entry candidate evaluated: ticker=%s action=%s reason_count=%s",
@@ -564,7 +607,7 @@ def _evaluate_entry_candidate(
 def evaluate_entry_candidates(
     *,
     candidates: list[dict[str, Any]],
-    price_lookup_fn: Callable[[str], float | None],
+    price_lookup_fn: Callable[[str], EntryPriceLookupResult],
     gap_breach_action: str = "SKIP",
     default_strategy_mode: str | None = None,
     allow_missing_gap_guard: bool = False,
@@ -852,7 +895,7 @@ def _make_price_lookup(
     mode: str,
     market: str,
     run_id: str | None = None,
-) -> tuple[Callable[[str], float | None], list[str]]:
+) -> tuple[Callable[[str], EntryPriceLookupResult], list[str]]:
     provider_issues: list[str] = []
     log_run_id = run_id or current_run_id("entry")
 
@@ -867,7 +910,10 @@ def _make_price_lookup(
             provider_issues.append(
                 "provider init failed (pykrx): pykrx package is not installed"
             )
-            return (lambda _ticker: None), provider_issues
+            return (
+                lambda _ticker: EntryPriceLookupResult.missing("provider_error"),
+                provider_issues,
+            )
         except PykrxClientError as exc:
             provider_issues.append(f"provider init failed (pykrx): {exc}")
             logger.warning(
@@ -886,9 +932,12 @@ def _make_price_lookup(
                     "retryable": True,
                 },
             )
-            return (lambda _ticker: None), provider_issues
+            return (
+                lambda _ticker: EntryPriceLookupResult.missing("provider_error"),
+                provider_issues,
+            )
 
-        def _lookup_pykrx(ticker: str) -> float | None:
+        def _lookup_pykrx(ticker: str) -> EntryPriceLookupResult:
             try:
                 rows = pykrx_client.daily_candles(ticker, count=1, adjusted=False)
             except PykrxClientError as exc:
@@ -910,10 +959,25 @@ def _make_price_lookup(
                         "retryable": True,
                     },
                 )
-                return None
+                return EntryPriceLookupResult.missing(
+                    "provider_error",
+                    source="pykrx_after_close_daily",
+                )
             if not rows:
-                return None
-            return _to_finite_float(rows[-1].get("close"))
+                return EntryPriceLookupResult.missing(
+                    "daily_close_unavailable",
+                    source="pykrx_after_close_daily",
+                )
+            close = _to_positive_price(rows[-1].get("close"))
+            if close is None:
+                return EntryPriceLookupResult.rejected(
+                    "daily_close_unavailable",
+                    source="pykrx_after_close_daily",
+                )
+            return EntryPriceLookupResult.available(
+                close,
+                source="pykrx_after_close_daily",
+            )
 
         return _lookup_pykrx, provider_issues
 
@@ -923,7 +987,10 @@ def _make_price_lookup(
             "provider not configured (kis): missing KIS_APP_KEY/KIS_APP_SECRET/"
             "KIS_BASE_URL"
         )
-        return (lambda _ticker: None), provider_issues
+        return (
+            lambda _ticker: EntryPriceLookupResult.missing("kis_credentials_missing"),
+            provider_issues,
+        )
 
     creds = KISCredentials(
         app_key=cfg.kis_app_key,
@@ -956,9 +1023,12 @@ def _make_price_lookup(
                 "retryable": True,
             },
         )
-        return (lambda _ticker: None), provider_issues
+        return (
+            lambda _ticker: EntryPriceLookupResult.missing("provider_error"),
+            provider_issues,
+        )
 
-    def _lookup_kis(ticker: str) -> float | None:
+    def _lookup_kis(ticker: str) -> EntryPriceLookupResult:
         try:
             if mode == "AFTER_CLOSE":
                 if market == "US":
@@ -970,8 +1040,20 @@ def _make_price_lookup(
                     symbol, _ = _split_symbol_and_exchange(ticker)
                     rows = kis_client.daily_candles(symbol, count=1, adjusted=False)
                 if not rows:
-                    return None
-                return _to_positive_price(rows[-1].get("close"))
+                    return EntryPriceLookupResult.missing(
+                        "daily_close_unavailable",
+                        source="kis_after_close_daily",
+                    )
+                close = _to_positive_price(rows[-1].get("close"))
+                if close is None:
+                    return EntryPriceLookupResult.rejected(
+                        "daily_close_unavailable",
+                        source="kis_after_close_daily",
+                    )
+                return EntryPriceLookupResult.available(
+                    close,
+                    source="kis_after_close_daily",
+                )
 
             if market == "US":
                 symbol, exchange = _split_symbol_and_exchange(ticker)
@@ -982,7 +1064,10 @@ def _make_price_lookup(
                 # the date/time marker fields present in domestic snapshots.
                 entry_price = _extract_kis_overseas_entry_price(detail)
                 if entry_price is not None:
-                    return entry_price
+                    return EntryPriceLookupResult.available(
+                        entry_price,
+                        source="kis_live_snapshot",
+                    )
                 currency = _kis_overseas_entry_currency(detail)
                 present_price_fields = _present_kis_overseas_entry_price_fields(detail)
                 reject_reason = _kis_overseas_entry_price_reject_reason(
@@ -1008,18 +1093,30 @@ def _make_price_lookup(
                         "present_price_fields": present_price_fields,
                     },
                 )
-                return None
+                return EntryPriceLookupResult.rejected(
+                    _kis_live_snapshot_issue_code(reject_reason),
+                    source="kis_live_snapshot",
+                )
 
             symbol, _ = _split_symbol_and_exchange(ticker)
             detail = kis_client.domestic_price_detail(ticker=symbol)
             if mode == "PRE_OPEN" and not _has_pre_open_price_snapshot_time(detail):
-                return None
+                return EntryPriceLookupResult.missing(
+                    "kis_live_snapshot_missing",
+                    source="kis_live_snapshot",
+                )
             # Use only live traded price for KR PRE_OPEN/INTRADAY.
             # Fallback fields (prev close/open/high/low) can misclassify gap guard.
             live_price = _to_positive_price(detail.get("stck_prpr"))
             if live_price is not None:
-                return live_price
-            return None
+                return EntryPriceLookupResult.available(
+                    live_price,
+                    source="kis_live_snapshot",
+                )
+            return EntryPriceLookupResult.missing(
+                "kis_live_snapshot_missing",
+                source="kis_live_snapshot",
+            )
         except KISClientError as exc:
             logger.warning(
                 "Entry price lookup failed: provider=kis market=%s ticker=%s error_type=%s",
@@ -1039,7 +1136,14 @@ def _make_price_lookup(
                     "retryable": True,
                 },
             )
-            return None
+            return EntryPriceLookupResult.missing(
+                "provider_error",
+                source=(
+                    "kis_after_close_daily"
+                    if mode == "AFTER_CLOSE"
+                    else "kis_live_snapshot"
+                ),
+            )
 
     return _lookup_kis, provider_issues
 
@@ -1053,6 +1157,17 @@ def _build_entry_summary(
     counts = Counter(row.action for row in rows)
     missing_entry_price_count = sum(1 for row in rows if row.entry_price is None)
     missing_entry_price_ratio = missing_entry_price_count / len(rows) if rows else 0.0
+    missing_by_reason = Counter(
+        issue
+        for row in rows
+        if row.entry_price is None
+        for issue in (row.entry_price_issues or [])
+    )
+    source_counts = Counter(
+        row.entry_price_source
+        for row in rows
+        if row.entry_price_source and row.entry_price is not None
+    )
     portfolio_counts = {
         market: count
         for market, count in sorted((portfolio_blocked_by_market or {}).items())
@@ -1064,6 +1179,8 @@ def _build_entry_summary(
         "system_issue_count": len(system_issues),
         "missing_entry_price_count": missing_entry_price_count,
         "missing_entry_price_ratio": missing_entry_price_ratio,
+        "missing_entry_price_by_reason": dict(sorted(missing_by_reason.items())),
+        "entry_price_sources": dict(sorted(source_counts.items())),
         "portfolio_blocked_count": sum(portfolio_counts.values()),
         "portfolio_blocked_by_market": portfolio_counts,
     }
@@ -1901,4 +2018,9 @@ def run_entry(
     )
 
 
-__all__ = ["_select_latest_buy_report", "evaluate_entry_candidates", "run_entry"]
+__all__ = [
+    "EntryPriceLookupResult",
+    "_select_latest_buy_report",
+    "evaluate_entry_candidates",
+    "run_entry",
+]

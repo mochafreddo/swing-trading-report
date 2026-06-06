@@ -69,6 +69,17 @@ def _entry_candidate(
     return candidate
 
 
+def _entry_price_result(
+    price: float | None,
+    *,
+    source: str = "test",
+    issue_code: str = "kis_live_snapshot_missing",
+) -> entry.EntryPriceLookupResult:
+    if price is None:
+        return entry.EntryPriceLookupResult.missing(issue_code, source=source)
+    return entry.EntryPriceLookupResult.available(price, source=source)
+
+
 def test_select_latest_buy_report_prefers_latest_date_and_duplicate(
     tmp_path: Path,
 ) -> None:
@@ -116,7 +127,7 @@ def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda ticker: prices.get(ticker),
+        price_lookup_fn=lambda ticker: _entry_price_result(prices.get(ticker)),
         gap_breach_action="SKIP",
     )
 
@@ -144,7 +155,7 @@ def test_evaluate_entry_candidates_skips_hybrid_ready_on_trigger_fail() -> None:
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
 
@@ -174,7 +185,7 @@ def test_evaluate_entry_candidates_normalizes_adjusted_hybrid_trigger_to_raw_ref
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda _ticker: 203.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(203.0),
         gap_breach_action="SKIP",
     )
 
@@ -204,7 +215,7 @@ def test_evaluate_entry_candidates_reviews_malformed_hybrid_trigger_guard() -> N
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
 
@@ -236,7 +247,7 @@ def test_evaluate_entry_candidates_marks_review_on_missing_data() -> None:
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda _ticker: None,
+        price_lookup_fn=lambda _ticker: _entry_price_result(None),
         gap_breach_action="SKIP",
     )
 
@@ -272,7 +283,7 @@ def test_evaluate_entry_candidates_skips_gap_guard_when_disabled() -> None:
 
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda ticker: prices.get(ticker),
+        price_lookup_fn=lambda ticker: _entry_price_result(prices.get(ticker)),
         gap_breach_action="SKIP",
         allow_missing_gap_guard=True,
     )
@@ -299,7 +310,7 @@ def test_evaluate_entry_candidates_handles_legacy_guard_strings() -> None:
     ]
     rows, issues = evaluate_entry_candidates(
         candidates=candidates,
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
 
@@ -321,7 +332,7 @@ def test_evaluate_entry_candidates_marks_legacy_basis_as_review() -> None:
                 "strategy_mode": "ema_cross",
             }
         ],
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
 
@@ -341,7 +352,7 @@ def test_evaluate_entry_candidates_marks_basis_date_mismatch_as_review() -> None
                 entry_reference_eval_date="20260224",
             )
         ],
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
 
@@ -368,14 +379,17 @@ def test_evaluate_entry_candidate_markets_preserves_source_order_and_issue_contr
 
     def fake_price_lookup(
         *, cfg: object, provider: str, mode: str, market: str
-    ) -> tuple[Callable[[str], float | None], list[str]]:
+    ) -> tuple[Callable[[str], entry.EntryPriceLookupResult], list[str]]:
         del cfg, provider, mode
         prices_by_market: dict[str, dict[str, float | None]] = {
             "KR": {"005930": 101.0},
             "US": {"AAPL.NASD": 101.0, "MSFT.NASD": None},
         }
         market_prices = prices_by_market[market]
-        return lambda ticker: market_prices.get(ticker), ["provider issue"]
+        return (
+            lambda ticker: _entry_price_result(market_prices.get(ticker)),
+            ["provider issue"],
+        )
 
     monkeypatch.setattr("sab.entry._make_price_lookup", fake_price_lookup)
 
@@ -407,7 +421,7 @@ def test_apply_entry_portfolio_guards_uses_config_and_existing_holdings() -> Non
             _entry_candidate("MSFT.NASD"),
             _entry_candidate("NVDA.NASD"),
         ],
-        price_lookup_fn=lambda _ticker: 101.0,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
         gap_breach_action="SKIP",
     )
     assert issues == []
@@ -772,6 +786,11 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
     payload = json.loads(out_files[0].read_text(encoding="utf-8"))
     assert payload["entries"][0]["action"] == "REVIEW"
     assert payload["entries"][0]["entry_price"] is None
+    assert payload["summary"]["missing_entry_price_by_reason"] == {
+        "kis_credentials_missing": 1
+    }
+    assert payload["entries"][0]["entry_price_status"] == "missing"
+    assert payload["entries"][0]["entry_price_issue_code"] == "kis_credentials_missing"
     assert any(
         "provider not configured" in issue.lower() for issue in payload["system_issues"]
     )
@@ -911,6 +930,8 @@ def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
         "system_issue_count": 0,
         "missing_entry_price_count": 0,
         "missing_entry_price_ratio": 0.0,
+        "missing_entry_price_by_reason": {},
+        "entry_price_sources": {},
         "portfolio_blocked_count": 0,
         "portfolio_blocked_by_market": {},
     }
@@ -1482,6 +1503,10 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
             "strategy_mode": "ema_cross",
             "pattern": None,
             "entry_state": None,
+            "entry_price_status": "available",
+            "entry_price_source": "kis_live_snapshot",
+            "entry_price_issue_code": None,
+            "entry_price_issues": [],
         }
     ]
 
@@ -1569,7 +1594,11 @@ def test_make_price_lookup_logs_kis_detail_failure(
     )
 
     assert issues == []
-    assert price_lookup("AAPL.NASD") is None
+    lookup_result = price_lookup("AAPL.NASD")
+    assert lookup_result.price is None
+    assert lookup_result.status == "missing"
+    assert lookup_result.source == "kis_live_snapshot"
+    assert lookup_result.issue_codes == ("provider_error",)
     record = next(
         record
         for record in caplog.records
@@ -1587,11 +1616,35 @@ def test_make_price_lookup_logs_kis_detail_failure(
 
 @pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
 @pytest.mark.parametrize(
-    ("detail", "expected_reason", "expected_currency", "expected_fields"),
+    (
+        "detail",
+        "expected_reason",
+        "expected_issue_code",
+        "expected_currency",
+        "expected_fields",
+    ),
     [
-        ({"last": "101.0", "curr": "EUR"}, "currency_mismatch", "EUR", ["last"]),
-        ({"open": "101.0", "curr": "USD"}, "no_supported_price_field", "USD", []),
-        ({"last": "0", "curr": "USD"}, "invalid_price_value", "USD", ["last"]),
+        (
+            {"last": "101.0", "curr": "EUR"},
+            "currency_mismatch",
+            "kis_live_snapshot_currency_mismatch",
+            "EUR",
+            ["last"],
+        ),
+        (
+            {"open": "101.0", "curr": "USD"},
+            "no_supported_price_field",
+            "kis_live_snapshot_no_supported_price_field",
+            "USD",
+            [],
+        ),
+        (
+            {"last": "0", "curr": "USD"},
+            "invalid_price_value",
+            "kis_live_snapshot_invalid_price_value",
+            "USD",
+            ["last"],
+        ),
     ],
 )
 def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
@@ -1600,6 +1653,7 @@ def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
     caplog: pytest.LogCaptureFixture,
     detail: dict[str, str],
     expected_reason: str,
+    expected_issue_code: str,
     expected_currency: str,
     expected_fields: list[str],
     mode: str,
@@ -1636,7 +1690,11 @@ def test_make_price_lookup_logs_kis_us_snapshot_rejection_reason(
     )
 
     assert issues == []
-    assert price_lookup("AAPL.NASD") is None
+    lookup_result = price_lookup("AAPL.NASD")
+    assert lookup_result.price is None
+    assert lookup_result.status == "rejected"
+    assert lookup_result.source == "kis_live_snapshot"
+    assert lookup_result.issue_codes == (expected_issue_code,)
     record = next(
         record
         for record in caplog.records
@@ -1709,6 +1767,14 @@ def test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price
     )
     assert payload["entries"][0]["action"] == "REVIEW"
     assert payload["entries"][0]["entry_price"] is None
+    assert payload["summary"]["missing_entry_price_by_reason"] == {
+        "kis_live_snapshot_missing": 1
+    }
+    assert payload["summary"]["entry_price_sources"] == {}
+    assert payload["entries"][0]["entry_price_status"] == "missing"
+    assert payload["entries"][0]["entry_price_issue_code"] == (
+        "kis_live_snapshot_missing"
+    )
     assert "price snapshot unavailable" in payload["entries"][0]["reasons"]
 
 
@@ -1839,6 +1905,10 @@ def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -
     payload = json.loads(out_files[0].read_text(encoding="utf-8"))
     assert payload["entries"][0]["action"] == "ENTER"
     assert payload["entries"][0]["entry_price"] == 101.5
+    assert payload["entries"][0]["entry_price_status"] == "available"
+    assert payload["entries"][0]["entry_price_source"] == "kis_live_snapshot"
+    assert payload["entries"][0]["entry_price_issue_code"] is None
+    assert payload["summary"]["entry_price_sources"] == {"kis_live_snapshot": 1}
 
 
 def test_run_entry_e2e_uses_kis_kr_snapshot_price_intraday(
@@ -2017,6 +2087,74 @@ def test_run_entry_e2e_uses_pykrx_after_close_price(
     payload = json.loads(out_files[0].read_text(encoding="utf-8"))
     assert payload["entries"][0]["action"] == "ENTER"
     assert payload["entries"][0]["entry_price"] == 101.0
+    assert payload["entries"][0]["entry_price_status"] == "available"
+    assert payload["entries"][0]["entry_price_source"] == "pykrx_after_close_daily"
+    assert payload["entries"][0]["entry_price_issue_code"] is None
+    assert payload["summary"]["entry_price_sources"] == {"pykrx_after_close_daily": 1}
+
+
+def test_run_entry_e2e_uses_kis_us_after_close_daily_price_diagnostics(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T21:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_daily_candles(
+            self, *, symbol: str, exchange: str, count: int, adjusted: bool
+        ) -> list[dict[str, float]]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            assert count == 1
+            assert adjusted is False
+            return [{"close": 101.5}]
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="AFTER_CLOSE",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["entry_price"] == 101.5
+    assert payload["entries"][0]["entry_price_status"] == "available"
+    assert payload["entries"][0]["entry_price_source"] == "kis_after_close_daily"
+    assert payload["summary"]["entry_price_sources"] == {"kis_after_close_daily": 1}
 
 
 def test_run_entry_e2e_applies_max_active_holdings_portfolio_guard(
