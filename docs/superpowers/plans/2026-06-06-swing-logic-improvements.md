@@ -1419,9 +1419,11 @@ return MarketRegimeResolution(
 )
 ```
 
-Keep the existing system-issue recording behavior. `_resolve_market_regime_context`
-should populate `MarketRegimeResolution.issues`, but `_evaluate_candidates`
-should still record one aggregated labeled issue through `_record_system_issue(...)`:
+Move system-issue recording out of `_resolve_market_regime_context`. The
+resolver should only populate `MarketRegimeResolution.issues` and structured
+`unavailable_markets`; `_evaluate_candidates` owns preserving the existing
+report contract by recording one aggregated labeled issue through
+`_record_system_issue(...)`:
 
 ```python
 if market_regime_resolution.issues:
@@ -1437,8 +1439,9 @@ if market_regime_resolution.issues:
     )
 ```
 
-Do not record each raw resolver issue as a separate `system_issues` entry; that
-would break the existing report and test contract.
+Do not mutate `runtime.system_issues` inside `_resolve_market_regime_context`,
+and do not record each raw resolver issue as a separate `system_issues` entry;
+either would break the existing report and test contract.
 
 In `_evaluate_candidates`, change:
 
