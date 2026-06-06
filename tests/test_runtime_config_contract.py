@@ -28,3 +28,11 @@ def test_repository_config_has_entry_portfolio_caps(
     assert cfg.portfolio.max_active_holdings is not None
     assert cfg.portfolio.max_new_entries_kr is not None
     assert cfg.portfolio.max_new_entries_us is not None
+
+
+def test_repository_config_defaults_market_regime_unavailable_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _load_repository_config(monkeypatch)
+
+    assert cfg.market_regime_unavailable_policy == "warn_continue"

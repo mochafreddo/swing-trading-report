@@ -58,6 +58,7 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("STRATEGY_MODE", "strategy.mode"),
     ("USE_SMA200_FILTER", "strategy.use_sma200_filter"),
     ("USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter"),
+    ("MARKET_REGIME_UNAVAILABLE_POLICY", "strategy.market_regime_unavailable_policy"),
     ("GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier"),
     ("MIN_DOLLAR_VOLUME", "screener.min_dollar_volume"),
     ("MIN_HISTORY_BARS", "strategy.min_history_bars"),
@@ -203,6 +204,7 @@ class Config:
     strategy_mode: str = "ema_cross"
     use_sma200_filter: bool = False
     use_market_regime_filter: bool = False
+    market_regime_unavailable_policy: str = "warn_continue"
     gap_atr_multiplier: float = 1.0
     min_dollar_volume: float = 0.0
     min_history_bars: int = 120
@@ -511,6 +513,7 @@ class _StrategySection:
     strategy_mode: str
     use_sma200_filter: bool
     use_market_regime_filter: bool
+    market_regime_unavailable_policy: str
     gap_atr_multiplier: float
     min_dollar_volume: float
     min_history_bars: int
@@ -765,6 +768,12 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
     strategy_mode = _resolve_mode_string(
         parser, "STRATEGY_MODE", "strategy.mode", "ema_cross"
     )
+    market_regime_unavailable_policy = _resolve_mode_string(
+        parser,
+        "MARKET_REGIME_UNAVAILABLE_POLICY",
+        "strategy.market_regime_unavailable_policy",
+        "warn_continue",
+    )
     us_min_price = parser.yaml_optional_float("screener.us.min_price")
     us_min_dollar_volume = parser.yaml_optional_float("screener.us.min_dollar_volume")
     rs_benchmark_ticker_kr = _normalize_strategy_benchmark_ticker(
@@ -794,6 +803,7 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         use_market_regime_filter=parser.env_bool(
             "USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter", False
         ),
+        market_regime_unavailable_policy=market_regime_unavailable_policy,
         gap_atr_multiplier=parser.env_float(
             "GAP_ATR_MULTIPLIER", "strategy.gap_atr_multiplier", 1.0
         ),
@@ -1239,6 +1249,16 @@ def _validate_sections(
             strict=strict,
             source_name="STRATEGY_MODE/strategy.mode",
         ),
+        market_regime_unavailable_policy=_normalize_choice(
+            strategy.market_regime_unavailable_policy,
+            allowed={"warn_continue", "block_market"},
+            default="warn_continue",
+            strict=strict,
+            source_name=(
+                "MARKET_REGIME_UNAVAILABLE_POLICY/"
+                "strategy.market_regime_unavailable_policy"
+            ),
+        ),
     )
     validated_sell = replace(
         sell,
@@ -1288,6 +1308,7 @@ def _compose_config(
         strategy_mode=strategy.strategy_mode,
         use_sma200_filter=strategy.use_sma200_filter,
         use_market_regime_filter=strategy.use_market_regime_filter,
+        market_regime_unavailable_policy=strategy.market_regime_unavailable_policy,
         gap_atr_multiplier=strategy.gap_atr_multiplier,
         min_dollar_volume=strategy.min_dollar_volume,
         min_history_bars=strategy.min_history_bars,

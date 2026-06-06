@@ -20,6 +20,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "MARKET_CACHE_STALE_SESSIONS_US",
         "STRATEGY_MODE",
         "USE_MARKET_REGIME_FILTER",
+        "MARKET_REGIME_UNAVAILABLE_POLICY",
         "SELL_MODE",
         "FX_MODE",
         "GITHUB_ACTIONS",
@@ -138,6 +139,121 @@ strategy:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
 
     with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+def test_load_config_defaults_market_regime_unavailable_policy(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg.market_regime_unavailable_policy == "warn_continue"
+
+
+def test_load_config_parses_market_regime_unavailable_policy_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n"
+        "  mode: sma_ema_hybrid\n"
+        "  market_regime_unavailable_policy: block_market\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg.market_regime_unavailable_policy == "block_market"
+
+
+def test_load_config_parses_market_regime_unavailable_policy_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", "block_market")
+
+    cfg = load_config()
+
+    assert cfg.market_regime_unavailable_policy == "block_market"
+
+
+def test_load_config_normalizes_market_regime_unavailable_policy_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", " BLOCK_MARKET ")
+
+    cfg = load_config()
+
+    assert cfg.market_regime_unavailable_policy == "block_market"
+
+
+def test_load_config_rejects_invalid_market_regime_unavailable_policy(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n  market_regime_unavailable_policy: maybe\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
+
+    with pytest.raises(ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"):
+        load_config()
+
+
+def test_load_config_rejects_market_regime_policy_env_yaml_conflict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n  market_regime_unavailable_policy: warn_continue\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", "block_market")
+
+    with pytest.raises(ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"):
         load_config()
 
 
