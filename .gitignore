@@ -57,3 +57,4 @@ mise.local.lock
 /watchlist.txt
 /config.local.yaml
 /holdings.yaml
+.gstack/
