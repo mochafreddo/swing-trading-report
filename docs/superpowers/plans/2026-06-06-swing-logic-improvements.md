@@ -299,6 +299,93 @@ assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_live_snapshot_missing"
 ```
 
+Update existing available-price E2E tests so the success path also proves the
+new diagnostics. In `test_run_entry_e2e_uses_kis_us_snapshot_price`, add:
+
+```python
+assert payload["entries"][0]["entry_price_status"] == "available"
+assert payload["entries"][0]["entry_price_source"] == "kis_live_snapshot"
+assert payload["entries"][0]["entry_price_issue_code"] is None
+assert payload["summary"]["entry_price_sources"] == {"kis_live_snapshot": 1}
+```
+
+In `test_run_entry_e2e_uses_pykrx_after_close_price`, add:
+
+```python
+assert payload["entries"][0]["entry_price_status"] == "available"
+assert payload["entries"][0]["entry_price_source"] == "pykrx_after_close_daily"
+assert payload["entries"][0]["entry_price_issue_code"] is None
+assert payload["summary"]["entry_price_sources"] == {"pykrx_after_close_daily": 1}
+```
+
+Add a KIS after-close daily-candle success test so the third source code is
+covered:
+
+```python
+def test_run_entry_e2e_uses_kis_us_after_close_daily_price_diagnostics(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T21:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [_entry_candidate("AAPL.NASD", gap_guard_value=0.05)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_daily_candles(
+            self, *, symbol: str, exchange: str, count: int, adjusted: bool
+        ) -> list[dict[str, float]]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            assert count == 1
+            assert adjusted is False
+            return [{"close": 101.5}]
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="AFTER_CLOSE",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    assert payload["entries"][0]["entry_price"] == 101.5
+    assert payload["entries"][0]["entry_price_status"] == "available"
+    assert payload["entries"][0]["entry_price_source"] == "kis_after_close_daily"
+    assert payload["summary"]["entry_price_sources"] == {"kis_after_close_daily": 1}
+```
+
 In `test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing`, assert the
 credentials-specific diagnostic instead:
 
@@ -510,6 +597,12 @@ Use these source codes:
 "kis_live_snapshot"
 "pykrx_after_close_daily"
 ```
+
+Map successful providers deterministically:
+
+- KIS `AFTER_CLOSE` daily candles -> `kis_after_close_daily`
+- KIS live snapshot/detail paths -> `kis_live_snapshot`
+- PyKRX `AFTER_CLOSE` daily candles -> `pykrx_after_close_daily`
 
 Use these issue codes in the current failure branches:
 
@@ -1112,7 +1205,9 @@ def test_resolve_market_regime_context_returns_unavailable_markets() -> None:
     assert resolution.regime_by_market == {}
     unavailable = resolution.unavailable_markets["US"]
     assert unavailable.issue_code == "market_regime_benchmark_unavailable"
-    assert unavailable.message.startswith("SPY.AMS: Market regime unavailable")
+    assert unavailable.message.startswith(
+        "SPY.AMS: Market regime benchmark unavailable"
+    )
     assert resolution.issues == [unavailable.message]
 
 
