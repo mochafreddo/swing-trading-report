@@ -158,7 +158,7 @@ market_regime_unavailable_policy=parser.env_str(
 ) or "warn_continue",
 ```
 
-In `_validate_config_sections`, normalize it with strict validation:
+In `_validate_sections`, normalize it with strict validation:
 
 ```python
 validated_strategy = replace(
@@ -403,7 +403,11 @@ class EntryPriceLookupResult:
         return cls(price=None, status="rejected", source=source, issue_codes=(issue_code,))
 ```
 
-Change `_make_price_lookup` to return `Callable[[str], EntryPriceLookupResult]`. Use these source codes:
+Change `_make_price_lookup` to return
+`Callable[[str], EntryPriceLookupResult]`. Also update the `price_lookup_fn`
+type hints in `_evaluate_entry_candidate` and `evaluate_entry_candidates` from
+`Callable[[str], float | None]` to `Callable[[str], EntryPriceLookupResult]`.
+Use these source codes:
 
 ```python
 "kis_after_close_daily"
@@ -1070,6 +1074,46 @@ def test_write_scan_report_includes_market_regime_policy_summary() -> None:
     assert summary["market_regime_blocked_by_market"] == {"US": 2}
 ```
 
+Update the existing tests in `tests/test_market_regime_filter.py` that still
+expect `_resolve_market_regime_context` to return a plain dict.
+
+Add `MarketRegimeResolution` to the import from `sab.scan_evaluation`.
+
+In `test_resolve_market_regime_context_marks_bullish_market`, change:
+
+```python
+contexts = _resolve_market_regime_context(runtime)
+
+assert contexts["US"].benchmark_ticker == "SPY.AMS"
+assert contexts["US"].is_bullish is True
+assert contexts["US"].benchmark_close > contexts["US"].benchmark_sma200
+```
+
+to:
+
+```python
+resolution = _resolve_market_regime_context(runtime)
+
+contexts = resolution.regime_by_market
+assert contexts["US"].benchmark_ticker == "SPY.AMS"
+assert contexts["US"].is_bullish is True
+assert contexts["US"].benchmark_close > contexts["US"].benchmark_sma200
+assert resolution.unavailable_markets == {}
+assert resolution.issues == []
+```
+
+In `test_evaluate_candidates_skips_ticker_when_market_regime_blocked` and
+`test_evaluate_candidates_keeps_other_market_when_one_market_blocked`, replace
+the monkeypatched plain dict return value with:
+
+```python
+MarketRegimeResolution(
+    regime_by_market={...},
+    unavailable_markets={},
+    issues=[],
+)
+```
+
 - [ ] **Step 2: Run tests to verify failure**
 
 Run:
@@ -1107,6 +1151,17 @@ class MarketRegimeResolution:
 ```
 
 Change `_resolve_market_regime_context` to return `MarketRegimeResolution`. On missing benchmark ticker, set:
+
+When the filter is disabled or there are no active markets, return an empty
+resolution instead of `{}`:
+
+```python
+return MarketRegimeResolution(
+    regime_by_market={},
+    unavailable_markets={},
+    issues=[],
+)
+```
 
 ```python
 unavailable_markets[market] = MarketRegimeUnavailable(
