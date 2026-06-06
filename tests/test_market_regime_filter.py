@@ -489,6 +489,7 @@ def test_evaluate_candidates_uses_ticker_market_for_regime_blocking_when_currenc
         market_regime_unavailable_policy="block_market",
     )
     runtime.ticker_currency["AAPL.NAS"] = "KRW"
+    runtime.ticker_currency["005930"] = "USD"
     evaluated: list[str] = []
 
     def _compute_context(
@@ -517,11 +518,20 @@ def test_evaluate_candidates_uses_ticker_market_for_regime_blocking_when_currenc
         _compute_context,
     )
 
+    def _evaluate(
+        ticker: str,
+        _candles: list[dict[str, float]],
+        _settings: Any,
+        _meta: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        evaluated.append(ticker)
+        return SimpleNamespace(candidate=None, reason=None)
+
     _evaluate_candidates(
         runtime,
         EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
         HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
-        evaluate_ticker_fn=lambda ticker, *_args, **_kwargs: evaluated.append(ticker),
+        evaluate_ticker_fn=_evaluate,
         evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
             candidate=None, reason=None
         ),
@@ -539,6 +549,8 @@ def test_evaluate_candidates_uses_ticker_market_for_regime_blocking_when_currenc
         "005930: Market regime unavailable policy blocked KR "
         "(069500: Market regime unavailable (insufficient completed history for SMA200))"
     ]
+    assert runtime.failures == []
+    assert runtime.fatal_failure is False
 
 
 def test_write_scan_report_includes_market_regime_filter_in_config_snapshot() -> None:

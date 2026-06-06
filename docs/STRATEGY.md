@@ -55,12 +55,15 @@
 - volume은 모드별로 처리 정책이 다릅니다(3.3 참고).
 - scan/sell 수집은 장중 미완성 tail candle이 제거되어도 평가에 필요한 완성봉 수가 남도록 기본 요청 수에 1봉 버퍼를 더합니다.
 
-### 3.2 시장 구분(통화 기반)
+### 3.2 시장/통화 구분
 
-- 기본 규칙:
-  - `currency == "USD"` → US market
-  - 그 외 → KR market
-- scan에서는 ticker suffix로 통화를 추론합니다(예: `.NAS/.NYS/.AMS`, `.NASDAQ/.NYSE/.AMEX` 등).
+- 시장 키(`KR|US`)는 티커 정규화/파싱 결과를 기준으로 합니다.
+  - KR: 6자리 숫자 티커.
+  - US: 거래소 suffix가 명시된 티커(예: `.NAS/.NYS/.AMS`, `.NASDAQ/.NYSE/.AMEX` 등).
+- RS benchmark와 market regime 게이트는 이 티커 기반 시장 키로 시장별 benchmark를 선택하고, `market_regime_blocked_by_market`/`market_regime_unavailable_by_market`도 같은 키로 기록합니다.
+- 통화(`KRW|USD`)는 평가 metadata, 거래대금/가격 기준, 표시용 필드입니다.
+  - scan은 티커 suffix로 통화를 추론합니다.
+  - `currency == "USD"`는 US 금액 기준을 뜻하지만, market regime/RS 시장 키를 대체하지 않습니다.
 
 ### 3.3 Volume(거래량) 처리 정책
 
