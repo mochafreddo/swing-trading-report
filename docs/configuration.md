@@ -76,6 +76,7 @@
 | `GITHUB_PAT` | required when dispatch enabled | none | `replace-with-github-token` | web `/api/run` | GitHub token for workflow dispatch | Secret. Server-only. |
 | `REPORT_RETENTION_DAYS` | no | `30` | `30` | web, cleanup workflow | Retention days display/cleanup input | Cleanup workflow validates positive integer. |
 | `REPORT_SEARCH_WINDOW` | no | `100` | `100` | web reports | Ticker search scan window | Code clamps min/max. |
+| `MARKET_REGIME_UNAVAILABLE_POLICY` | no | `warn_continue` | `block_market` | `sab scan` | Market regime unavailable policy | Must be `warn_continue` or `block_market`. |
 | `TELEGRAM_BOT_TOKEN` | no | none | `replace-with-token` | workflows, scheduler | Telegram notification token | Secret. |
 | `TELEGRAM_CHAT_ID` | no | none | `replace-with-chat-id` | workflows, scheduler | Telegram chat id | Treat as sensitive. |
 | `SLACK_WEBHOOK_URL` | no | none | `https://hooks.slack.com/...` | workflows, scheduler | Slack notification webhook | Secret/internal URL; do not publish real value. |

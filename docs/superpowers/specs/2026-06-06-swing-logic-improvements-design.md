@@ -1,3 +1,5 @@
+상태: Accepted
+
 # Swing Logic Improvements Design
 
 Status: Proposed

@@ -180,3 +180,13 @@ def test_artifact_globs_are_centrally_declared() -> None:
     for pattern in ARTIFACT_DOC_GLOBS:
         matches = list(REPO_ROOT.glob(pattern))
         assert matches, f"artifact glob has no matches: {pattern}"
+
+
+def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
+    strategy_text = _read(Path("docs/STRATEGY.md"))
+    config_reference_text = _read(Path("docs/config-reference.md"))
+
+    assert "market_regime_unavailable_policy" in strategy_text
+    assert "quality_state" in strategy_text
+    assert "risk_alignment" in strategy_text
+    assert "MARKET_REGIME_UNAVAILABLE_POLICY" in config_reference_text

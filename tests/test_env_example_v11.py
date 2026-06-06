@@ -32,6 +32,7 @@ def test_env_example_contains_v11_required_keys() -> None:
         "GITHUB_OWNER",
         "GITHUB_REPO",
         "GITHUB_PAT",
+        "MARKET_REGIME_UNAVAILABLE_POLICY",
         "REPORT_RETENTION_DAYS",
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",

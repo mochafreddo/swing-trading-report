@@ -120,6 +120,7 @@
 | `STRATEGY_MODE` | `strategy.mode` | buy strategy mode |
 | `USE_SMA200_FILTER` | `strategy.use_sma200_filter` | SMA200 필터 |
 | `USE_MARKET_REGIME_FILTER` | `strategy.use_market_regime_filter` | market regime 필터 |
+| `MARKET_REGIME_UNAVAILABLE_POLICY` | `strategy.market_regime_unavailable_policy` | benchmark unavailable 시 market regime 처리 정책 |
 | `GAP_ATR_MULTIPLIER` | `strategy.gap_atr_multiplier` | gap ATR multiplier |
 | `MIN_DOLLAR_VOLUME` | `screener.min_dollar_volume` | 공통 최소 거래대금 |
 | `MIN_HISTORY_BARS` | `strategy.min_history_bars` | 최소 히스토리 봉 수 |

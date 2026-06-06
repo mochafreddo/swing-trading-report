@@ -181,7 +181,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 2. 캔들 데이터를 수집합니다(캐시 우선 + provider 조회).
 3. `use_market_regime_filter=true`이면, 시장별 benchmark(`rs_benchmark_ticker_kr/us`)의 완료 일봉 종가가 SMA200 위인지 먼저 확인합니다.
    - benchmark 종가가 SMA200 이하이면 그 시장의 ticker는 `Market regime filter blocked (...)` 사유로 scan에서 제외합니다.
-   - benchmark를 구하지 못하거나 완료 히스토리/SMA200이 부족하면, 해당 시장의 레짐 필터는 비활성화하고 buy report `system_issues`에 경고를 남긴 뒤 scan은 계속 진행합니다.
+   - benchmark를 구하지 못하거나 완료 히스토리/SMA200이 부족하면 `strategy.market_regime_unavailable_policy`로 처리합니다.
+     - `warn_continue`이면 buy report `system_issues`에 경고를 남기고 해당 시장의 레짐 필터만 비활성화한 뒤 scan을 계속합니다.
+     - `block_market`이면 benchmark를 구하지 못한 시장의 후보를 제외하고 summary에 `market_regime_blocked_by_market`을 기록합니다.
    - 이 레짐 게이트는 **scan 전용**이며 sell/entry에는 적용하지 않습니다.
 4. 각 티커별로 **완성 캔들 기준**으로 평가합니다.
 5. 후보(candidate) 티커만 raw 캔들을 추가 warmup한 뒤, cache hit 기반으로 entry용 raw reference close를 보강합니다.
@@ -316,6 +318,21 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 - `rs_benchmark_value`는 scan 단계가 주입한 같은 시장 benchmark 수익률을 우선 사용하고, 없으면 정적 `strategy.rs_benchmark_return`을 사용합니다.
 - `rs_diff_value = rs_return_value - rs_benchmark_value`이며, 전체 후보 정렬의 tie-breaker에 사용됩니다(5.2.4 참고).
 
+#### 5.3.7 리스크 정합성/품질 상태 계약
+
+- hybrid buy candidate는 `risk_alignment`를 포함합니다.
+  - 값: `aligned | tight_stop_vs_volatility | unknown`
+  - `volatility_reference_pct`는 gap guard 비율을 우선 사용하고, 없으면 ATR/종가 비율을 사용한 숫자 값입니다.
+  - `risk_alignment_reasons`는 `gap_guard_exceeds_stop_max`, `atr_exceeds_stop_max`, `volatility_reference_unavailable` 같은 안정적인 reason code 목록입니다.
+  - `tight_stop_vs_volatility`는 후보 변동성 기준이 `sell.hybrid.stop_loss_pct_max`보다 큰 경우이며, 후보를 즉시 제외하지 않고 warning 근거로 표시합니다.
+- hybrid buy candidate는 `quality_state`를 포함합니다.
+  - 값: `A | B | C`
+  - `A`: READY + RS 양호 + 리스크 정합성 양호
+  - `B`: READY지만 RS 약세 또는 손절폭 대비 변동성 warning이 있음
+  - `C`: WATCH, RS 기준 미확보, 또는 변동성 기준 미확보
+  - `quality_reasons`는 `entry_state_ready`, `relative_strength_negative`, `risk_alignment_tight_stop` 같은 reason code 목록입니다.
+- `strategy_mode=sma_ema_hybrid` 정렬은 `quality_state`를 먼저 적용한 뒤 기존 점수/RS/유동성/등락률/ticker tie-breaker를 사용합니다. `ema_cross` 정렬은 기존 score 우선 계약을 유지합니다.
+
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
 
 buy candidate는 기존 문자열 필드(`score_notes`, `pattern_reasons`, `entry_state_reason`)를 유지하면서,
@@ -335,7 +352,7 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
 - `strategy_mode=sma_ema_hybrid` 예:
   - `pattern_*`, `entry_state_*`
   - 패턴 트리거(`trigger_*`)
-  - 리스크 가드(`gap_guard_atr`, 필요 시 `breakout_extended`)
+  - 리스크 가드(`gap_guard_atr`, 필요 시 `breakout_extended`, `risk_alignment_tight_stop`)
   - RS 비교(`rs_above_benchmark` 또는 `rs_below_benchmark`)
 
 운영/호환성 원칙:
