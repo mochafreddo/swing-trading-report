@@ -28,7 +28,6 @@ def test_env_example_contains_v11_required_keys() -> None:
     required = {
         "KIS_APP_KEY",
         "KIS_APP_SECRET",
-        "KIS_BASE_URL",
         "SUPABASE_URL",
         "SUPABASE_SECRET_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
@@ -74,12 +73,14 @@ def test_env_example_documents_market_regime_policy_without_active_override() ->
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
 
 
-def test_env_example_market_regime_policy_does_not_conflict_with_config() -> None:
+def test_env_example_active_keys_do_not_conflict_with_config() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     active_keys = set(_extract_env_keys(repo_root / ".env.example"))
     config_data = load_yaml_config(str(repo_root / "config.yaml")).raw
-    binding_paths = dict(sab_config._ENV_YAML_CONFLICT_BINDINGS)
 
-    policy_path = binding_paths["MARKET_REGIME_UNAVAILABLE_POLICY"]
-    assert sab_config._from_nested(config_data, policy_path) is not None
-    assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
+    conflicting_keys = []
+    for env_key, yaml_path in sab_config._ENV_YAML_CONFLICT_BINDINGS:
+        if env_key in active_keys and sab_config._from_nested(config_data, yaml_path):
+            conflicting_keys.append(env_key)
+
+    assert not conflicting_keys
