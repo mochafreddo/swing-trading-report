@@ -823,15 +823,29 @@ def _decorate_candidates(
             return liquidity * runtime.fx_rate
         return liquidity
 
-    runtime.candidates.sort(
-        key=lambda candidate: (
+    def _quality_rank(candidate: dict[str, Any]) -> int:
+        return {"A": 0, "B": 1, "C": 2}.get(
+            str(candidate.get("quality_state") or "C"),
+            2,
+        )
+
+    def _base_sort_key(
+        candidate: dict[str, Any],
+    ) -> tuple[float, float, float, float, str]:
+        return (
             -_metric(candidate, "score_value", fallback_key="score", default=0.0),
             -_metric(candidate, "rs_diff_value", default=float("-inf")),
             -_liquidity_metric(candidate),
             -_metric(candidate, "pct_change_value"),
             str(candidate.get("ticker", "")),
         )
-    )
+
+    if runtime.cfg.strategy_mode == "sma_ema_hybrid":
+        runtime.candidates.sort(
+            key=lambda candidate: (_quality_rank(candidate), *_base_sort_key(candidate))
+        )
+    else:
+        runtime.candidates.sort(key=_base_sort_key)
     for candidate in runtime.candidates:
         apply_currency_display_fn(candidate, runtime.fx_rate, runtime.fx_meta_note)
         if candidate.get("currency", "KRW").upper() != "USD":

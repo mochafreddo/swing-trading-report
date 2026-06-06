@@ -1111,6 +1111,96 @@ def test_hybrid_candidate_marks_unknown_risk_without_volatility_reference(monkey
     assert candidate["risk_alignment_reasons"] == ["volatility_reference_unavailable"]
 
 
+def test_hybrid_candidate_quality_state_demotes_negative_rs(monkeypatch):
+    candles = _simple_candles(6, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [1.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    settings = _settings(min_history=2)
+    settings.rs_lookback_days = 2
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US",
+        candles,
+        settings,
+        {
+            "currency": "USD",
+            "rs_benchmark_return": 0.50,
+            "rs_benchmark_ticker": "SPY.AMS",
+        },
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["quality_state"] == "B"
+    assert "relative_strength_negative" in candidate["quality_reasons"]
+
+
+def test_hybrid_candidate_quality_state_marks_watch_as_c(monkeypatch):
+    candles = _simple_candles(6, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Reversal candle near EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": False,
+                "rsi_val": 45.0,
+                "close_above_ema_short": False,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["entry_state"] == "WATCH"
+    assert candidate["quality_state"] == "C"
+    assert "entry_state_watch" in candidate["quality_reasons"]
+
+
 def test_hybrid_kr_breakout_second_close_confirms_original_swing_high(monkeypatch):
     candles = _kr_breakout_confirmation_candles()
     _patch_kr_breakout_confirmation_indicators(monkeypatch)

@@ -1080,6 +1080,84 @@ def test_decorate_candidates_ranks_known_rs_before_missing_rs() -> None:
     ]
 
 
+def test_decorate_candidates_uses_quality_first_only_for_hybrid() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(runtime.cfg, strategy_mode="sma_ema_hybrid")
+    runtime.candidates = [
+        {
+            "ticker": "HIGH_SCORE_B.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 10.0,
+            "quality_state": "B",
+            "rs_diff_value": -0.1,
+            "avg_dollar_volume_value": 300_000.0,
+            "pct_change_value": 0.03,
+        },
+        {
+            "ticker": "LOW_SCORE_A.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 1.0,
+            "quality_state": "A",
+            "rs_diff_value": 0.1,
+            "avg_dollar_volume_value": 100_000.0,
+            "pct_change_value": 0.01,
+        },
+    ]
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=lambda **_kwargs: "closed",
+    )
+
+    assert [candidate["ticker"] for candidate in runtime.candidates] == [
+        "LOW_SCORE_A.KR",
+        "HIGH_SCORE_B.KR",
+    ]
+
+
+def test_decorate_candidates_keeps_score_first_for_ema_cross() -> None:
+    runtime = _build_runtime()
+    runtime.cfg = replace(runtime.cfg, strategy_mode="ema_cross")
+    runtime.candidates = [
+        {
+            "ticker": "HIGH_SCORE_B.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 10.0,
+            "quality_state": "B",
+            "rs_diff_value": -0.1,
+            "avg_dollar_volume_value": 300_000.0,
+            "pct_change_value": 0.03,
+        },
+        {
+            "ticker": "LOW_SCORE_A.KR",
+            "currency": "KRW",
+            "price_value": 100.0,
+            "score_value": 1.0,
+            "quality_state": "A",
+            "rs_diff_value": 0.1,
+            "avg_dollar_volume_value": 100_000.0,
+            "pct_change_value": 0.01,
+        },
+    ]
+
+    _decorate_candidates(
+        runtime,
+        apply_currency_display_fn=lambda *_args, **_kwargs: None,
+        lookup_holiday_fn=lambda *_args, **_kwargs: None,
+        us_market_status_fn=lambda **_kwargs: "closed",
+    )
+
+    assert [candidate["ticker"] for candidate in runtime.candidates] == [
+        "HIGH_SCORE_B.KR",
+        "LOW_SCORE_A.KR",
+    ]
+
+
 def test_evaluate_candidates_keeps_available_rs_benchmark_for_other_market(
     monkeypatch: Any,
 ) -> None:

@@ -630,6 +630,12 @@ class _RiskAlignment:
 
 
 @dataclass(frozen=True)
+class _QualityState:
+    state: str
+    reasons: list[str]
+
+
+@dataclass(frozen=True)
 class _EntryTriggerGuard:
     price_value: float | None
     operator: str | None
@@ -908,6 +914,39 @@ def _build_risk_alignment(
         reasons=[],
         volatility_reference_pct=volatility_reference_pct,
     )
+
+
+def _build_quality_state(
+    *,
+    entry_state: _EntryStateResult,
+    rs_diff: float | None,
+    risk_alignment: _RiskAlignment,
+) -> _QualityState:
+    reasons: list[str] = []
+    if entry_state.state == "WATCH":
+        reasons.append("entry_state_watch")
+        return _QualityState("C", reasons)
+
+    reasons.append("entry_state_ready")
+    if rs_diff is None:
+        reasons.append("relative_strength_unavailable")
+        return _QualityState("C", reasons)
+    if rs_diff < 0:
+        reasons.append("relative_strength_negative")
+    else:
+        reasons.append("relative_strength_positive")
+
+    if risk_alignment.state == "unknown":
+        reasons.extend(risk_alignment.reasons)
+        return _QualityState("C", reasons)
+    if risk_alignment.state == "tight_stop_vs_volatility":
+        reasons.append("risk_alignment_tight_stop")
+    if (
+        "relative_strength_negative" in reasons
+        or "risk_alignment_tight_stop" in reasons
+    ):
+        return _QualityState("B", reasons)
+    return _QualityState("A", reasons)
 
 
 def _build_entry_trigger_guard(
@@ -1230,6 +1269,11 @@ def evaluate_ticker_hybrid(
         last_close=last_close,
         settings=settings,
     )
+    quality_state = _build_quality_state(
+        entry_state=entry_state,
+        rs_diff=rs_diff,
+        risk_alignment=risk_alignment,
+    )
     entry_trigger = _build_entry_trigger_guard(
         pattern=pattern,
         pattern_context=pattern_context,
@@ -1321,6 +1365,8 @@ def evaluate_ticker_hybrid(
         "risk_alignment": risk_alignment.state,
         "risk_alignment_reasons": list(risk_alignment.reasons),
         "volatility_reference_pct": risk_alignment.volatility_reference_pct,
+        "quality_state": quality_state.state,
+        "quality_reasons": list(quality_state.reasons),
         "risk_guide": risk_guide,
         "score_value": score.value,
         "score": f"{score.value:.2f}",
