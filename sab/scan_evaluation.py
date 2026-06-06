@@ -43,6 +43,20 @@ class MarketRegimeContext:
     is_bullish: bool
 
 
+@dataclass(frozen=True)
+class MarketRegimeUnavailable:
+    market: str
+    issue_code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MarketRegimeResolution:
+    regime_by_market: dict[str, MarketRegimeContext]
+    unavailable_markets: dict[str, MarketRegimeUnavailable]
+    issues: list[str]
+
+
 def _is_system_issue_reason(reason: str) -> bool:
     return reason.startswith(_SYSTEM_REASON_PREFIXES)
 
@@ -532,26 +546,42 @@ def _compute_market_regime_context(
 
 def _resolve_market_regime_context(
     runtime: _ScanRuntime,
-) -> dict[str, MarketRegimeContext]:
+) -> MarketRegimeResolution:
+    runtime.market_regime_unavailable_count = 0
     if not runtime.cfg.use_market_regime_filter:
-        return {}
+        return MarketRegimeResolution(
+            regime_by_market={},
+            unavailable_markets={},
+            issues=[],
+        )
 
     active_markets = sorted(
         {infer_market_from_ticker(ticker) for ticker in runtime.tickers if ticker}
     )
     if not active_markets:
-        return {}
+        return MarketRegimeResolution(
+            regime_by_market={},
+            unavailable_markets={},
+            issues=[],
+        )
 
     configured_benchmarks = {
         "KR": runtime.cfg.rs_benchmark_ticker_kr,
         "US": runtime.cfg.rs_benchmark_ticker_us,
     }
     regime_by_market: dict[str, MarketRegimeContext] = {}
+    unavailable_markets: dict[str, MarketRegimeUnavailable] = {}
     issues: list[str] = []
     for market in active_markets:
         benchmark_ticker = configured_benchmarks.get(market)
         if not benchmark_ticker:
-            issues.append(f"{market}: market regime benchmark ticker not configured")
+            unavailable = MarketRegimeUnavailable(
+                market=market,
+                issue_code="market_regime_benchmark_not_configured",
+                message=f"{market}: market regime benchmark ticker not configured",
+            )
+            unavailable_markets[market] = unavailable
+            issues.append(unavailable.message)
             continue
         context, issue = _compute_market_regime_context(
             runtime,
@@ -559,23 +589,22 @@ def _resolve_market_regime_context(
             market=market,
         )
         if context is None:
-            issues.append(issue or f"{market}: market regime unavailable")
+            unavailable = MarketRegimeUnavailable(
+                market=market,
+                issue_code="market_regime_benchmark_unavailable",
+                message=issue or f"{market}: market regime unavailable",
+            )
+            unavailable_markets[market] = unavailable
+            issues.append(unavailable.message)
             continue
         regime_by_market[market] = context
 
-    if issues:
-        issue_label = (
-            "Market regime filter partially disabled"
-            if regime_by_market
-            else "Market regime filter disabled"
-        )
-        _record_system_issue(
-            runtime,
-            issue_label + ": " + "; ".join(issues),
-            warn=True,
-        )
-
-    return regime_by_market
+    runtime.market_regime_unavailable_count = len(unavailable_markets)
+    return MarketRegimeResolution(
+        regime_by_market=regime_by_market,
+        unavailable_markets=unavailable_markets,
+        issues=issues,
+    )
 
 
 def _enrich_entry_reference_prices(runtime: _ScanRuntime) -> None:
@@ -644,7 +673,19 @@ def _evaluate_candidates(
     enrich_entry_reference_prices: bool = True,
 ) -> None:
     cfg = runtime.cfg
-    market_regimes_by_market = _resolve_market_regime_context(runtime)
+    market_regime_resolution = _resolve_market_regime_context(runtime)
+    market_regimes_by_market = market_regime_resolution.regime_by_market
+    if market_regime_resolution.issues:
+        issue_label = (
+            "Market regime filter partially disabled"
+            if market_regimes_by_market
+            else "Market regime filter disabled"
+        )
+        _record_system_issue(
+            runtime,
+            issue_label + ": " + "; ".join(market_regime_resolution.issues),
+            warn=True,
+        )
     eval_date_by_ticker = _resolve_ticker_eval_date_keys(
         runtime,
         split_overseas_fn=split_overseas_fn,
@@ -736,6 +777,21 @@ def _evaluate_candidates(
             excd_from_suffix_fn=excd_from_suffix_fn,
         )
         ticker_market = "US" if meta["currency"].upper() == "USD" else "KR"
+        unavailable = market_regime_resolution.unavailable_markets.get(ticker_market)
+        if (
+            unavailable is not None
+            and cfg.market_regime_unavailable_policy == "block_market"
+        ):
+            detail = (
+                f"{ticker}: Market regime unavailable policy blocked {ticker_market} "
+                f"({unavailable.message})"
+            )
+            runtime.screen_outs.append(detail)
+            runtime.market_regime_blocked_by_market[ticker_market] = (
+                runtime.market_regime_blocked_by_market.get(ticker_market, 0) + 1
+            )
+            runtime.logger.info("%s", detail)
+            continue
         regime_context = market_regimes_by_market.get(ticker_market)
         if regime_context is not None and not regime_context.is_bullish:
             detail = (
@@ -900,6 +956,9 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         "strategy_mode": runtime.cfg.strategy_mode,
         "use_sma200_filter": runtime.cfg.use_sma200_filter,
         "use_market_regime_filter": runtime.cfg.use_market_regime_filter,
+        "market_regime_unavailable_policy": (
+            runtime.cfg.market_regime_unavailable_policy
+        ),
         "gap_atr_multiplier": runtime.cfg.gap_atr_multiplier,
         "min_history_bars": runtime.cfg.min_history_bars,
         "rs_lookback_days": runtime.cfg.rs_lookback_days,
@@ -945,6 +1004,9 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
         }
     )
     artifact_date = artifact_dates[-1] if artifact_dates else None
+    market_regime_blocked_by_market = dict(
+        sorted(runtime.market_regime_blocked_by_market.items())
+    )
     summary_fields = {
         **build_market_data_summary(
             requested_count=len(runtime.tickers),
@@ -961,6 +1023,9 @@ def _write_scan_report(runtime: _ScanRuntime, *, write_report_fn: Any) -> str:
             numerator=runtime.rs_benchmark_unavailable_count,
             denominator=runtime.rs_benchmark_requested_count,
         ),
+        "market_regime_unavailable_count": runtime.market_regime_unavailable_count,
+        "market_regime_blocked_count": sum(market_regime_blocked_by_market.values()),
+        "market_regime_blocked_by_market": market_regime_blocked_by_market,
     }
     return write_report_fn(  # type: ignore[no-any-return]
         report_dir=runtime.cfg.report_dir,

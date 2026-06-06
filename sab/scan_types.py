@@ -119,3 +119,5 @@ class _ScanRuntime:
     candidates: list[dict[str, Any]] = field(default_factory=list)
     rs_benchmark_requested_count: int = 0
     rs_benchmark_unavailable_count: int = 0
+    market_regime_unavailable_count: int = 0
+    market_regime_blocked_by_market: dict[str, int] = field(default_factory=dict)

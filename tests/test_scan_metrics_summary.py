@@ -123,3 +123,21 @@ def test_write_scan_report_includes_market_data_and_rs_summary_fields() -> None:
     assert summary_fields["rs_benchmark_requested_count"] == 2
     assert summary_fields["rs_benchmark_unavailable_count"] == 1
     assert summary_fields["rs_benchmark_unavailable_ratio"] == pytest.approx(0.5)
+
+
+def test_write_scan_report_includes_market_regime_policy_summary() -> None:
+    runtime = _build_runtime(tickers=["AAPL.NAS"])
+    runtime.market_regime_unavailable_count = 2
+    runtime.market_regime_blocked_by_market = {"US": 2}
+    captured: dict[str, Any] = {}
+
+    def _fake_write_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_scan_report(runtime, write_report_fn=_fake_write_report)
+
+    summary_fields = captured["summary_fields"]
+    assert summary_fields["market_regime_unavailable_count"] == 2
+    assert summary_fields["market_regime_blocked_count"] == 2
+    assert summary_fields["market_regime_blocked_by_market"] == {"US": 2}

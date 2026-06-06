@@ -12,6 +12,7 @@ import sab.config as sab_config
 from sab.config import Config, load_config
 from sab.scan_evaluation import (
     MarketRegimeContext,
+    MarketRegimeResolution,
     _evaluate_candidates,
     _resolve_market_regime_context,
     _write_scan_report,
@@ -131,11 +132,30 @@ def test_resolve_market_regime_context_marks_bullish_market() -> None:
 
     runtime.kis_client = cast(Any, _FakeKISClient())
 
-    contexts = _resolve_market_regime_context(runtime)
+    resolution = _resolve_market_regime_context(runtime)
+    contexts = resolution.regime_by_market
 
     assert contexts["US"].benchmark_ticker == "SPY.AMS"
     assert contexts["US"].is_bullish is True
     assert contexts["US"].benchmark_close > contexts["US"].benchmark_sma200
+    assert resolution.unavailable_markets == {}
+    assert resolution.issues == []
+    assert runtime.system_issues == []
+
+
+def test_resolve_market_regime_context_returns_unavailable_markets() -> None:
+    runtime = _build_runtime(tickers=["AAPL.NAS"])
+    runtime.kis_client = None
+
+    resolution = _resolve_market_regime_context(runtime)
+
+    assert resolution.regime_by_market == {}
+    unavailable = resolution.unavailable_markets["US"]
+    assert unavailable.issue_code == "market_regime_benchmark_unavailable"
+    assert unavailable.message.startswith(
+        "SPY.AMS: Market regime benchmark unavailable"
+    )
+    assert resolution.issues == [unavailable.message]
     assert runtime.system_issues == []
 
 
@@ -145,14 +165,18 @@ def test_evaluate_candidates_skips_ticker_when_market_regime_blocked(
     runtime = _build_runtime(tickers=["AAPL.NAS"])
     monkeypatch.setattr(
         "sab.scan_evaluation._resolve_market_regime_context",
-        lambda runtime_obj: {
-            "US": MarketRegimeContext(
-                benchmark_ticker="SPY.AMS",
-                benchmark_close=400.0,
-                benchmark_sma200=410.0,
-                is_bullish=False,
-            )
-        },
+        lambda runtime_obj: MarketRegimeResolution(
+            regime_by_market={
+                "US": MarketRegimeContext(
+                    benchmark_ticker="SPY.AMS",
+                    benchmark_close=400.0,
+                    benchmark_sma200=410.0,
+                    is_bullish=False,
+                )
+            },
+            unavailable_markets={},
+            issues=[],
+        ),
     )
 
     _evaluate_candidates(
@@ -185,20 +209,24 @@ def test_evaluate_candidates_keeps_other_market_when_one_market_blocked(
     runtime = _build_runtime(tickers=["005930", "AAPL.NAS"])
     monkeypatch.setattr(
         "sab.scan_evaluation._resolve_market_regime_context",
-        lambda runtime_obj: {
-            "KR": MarketRegimeContext(
-                benchmark_ticker="069500",
-                benchmark_close=300.0,
-                benchmark_sma200=310.0,
-                is_bullish=False,
-            ),
-            "US": MarketRegimeContext(
-                benchmark_ticker="SPY.AMS",
-                benchmark_close=400.0,
-                benchmark_sma200=390.0,
-                is_bullish=True,
-            ),
-        },
+        lambda runtime_obj: MarketRegimeResolution(
+            regime_by_market={
+                "KR": MarketRegimeContext(
+                    benchmark_ticker="069500",
+                    benchmark_close=300.0,
+                    benchmark_sma200=310.0,
+                    is_bullish=False,
+                ),
+                "US": MarketRegimeContext(
+                    benchmark_ticker="SPY.AMS",
+                    benchmark_close=400.0,
+                    benchmark_sma200=390.0,
+                    is_bullish=True,
+                ),
+            },
+            unavailable_markets={},
+            issues=[],
+        ),
     )
     evaluated: list[str] = []
 
@@ -291,6 +319,49 @@ def test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavai
     ]
 
 
+def test_evaluate_candidates_blocks_market_when_regime_unavailable_policy_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _build_runtime(tickers=["AAPL.NAS"])
+    runtime.cfg = replace(
+        runtime.cfg,
+        use_market_regime_filter=True,
+        market_regime_unavailable_policy="block_market",
+    )
+    evaluated: list[str] = []
+
+    monkeypatch.setattr(
+        "sab.scan_evaluation._compute_market_regime_context",
+        lambda *_args, **_kwargs: (
+            None,
+            "SPY.AMS: Market regime unavailable (insufficient completed history for SMA200)",
+        ),
+    )
+
+    _evaluate_candidates(
+        runtime,
+        EvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        HybridEvaluationSettingsCls=lambda **kwargs: SimpleNamespace(**kwargs),
+        evaluate_ticker_fn=lambda ticker, *_args, **_kwargs: evaluated.append(ticker),
+        evaluate_ticker_hybrid_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            candidate=None, reason=None
+        ),
+        split_overseas_fn=lambda ticker: (
+            ticker.split(".")[0],
+            ticker.split(".")[1] if "." in ticker else None,
+        ),
+        excd_from_suffix_fn=lambda suffix: suffix,
+        enrich_entry_reference_prices=False,
+    )
+
+    assert evaluated == []
+    assert runtime.market_regime_blocked_by_market == {"US": 1}
+    assert runtime.screen_outs == [
+        "AAPL.NAS: Market regime unavailable policy blocked US "
+        "(SPY.AMS: Market regime unavailable (insufficient completed history for SMA200))"
+    ]
+
+
 def test_write_scan_report_includes_market_regime_filter_in_config_snapshot() -> None:
     runtime = _build_runtime(
         tickers=["AAPL.NAS"],
@@ -305,3 +376,7 @@ def test_write_scan_report_includes_market_regime_filter_in_config_snapshot() ->
     _write_scan_report(runtime, write_report_fn=_fake_write_report)
 
     assert captured["run_meta"]["config_snapshot"]["use_market_regime_filter"] is True
+    assert (
+        captured["run_meta"]["config_snapshot"]["market_regime_unavailable_policy"]
+        == "warn_continue"
+    )
