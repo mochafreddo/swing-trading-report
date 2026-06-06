@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -115,39 +113,9 @@ def test_scan_replay_hybrid_report_preserves_quality_fields_and_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    base_case = _SCAN_REPLAY_ROOT / "kr_ema_cross_baseline"
-    case_dir = tmp_path / "kr_hybrid_quality_order"
-    case_dir.mkdir()
-    for name in ("watchlist.txt", "raw_market_data.json", "expected.buy.json"):
-        shutil.copy2(base_case / name, case_dir / name)
-
-    base_config = (base_case / "config.yaml").read_text(encoding="utf-8")
-    (case_dir / "config.yaml").write_text(
-        _build_hybrid_replay_config(
-            base_config,
-            rsi_zone_high=70,
-            max_gap_pct=0.60,
-            use_sma60_filter=False,
-        ),
-        encoding="utf-8",
-    )
-
-    adjusted_market_data = json.loads(
-        (base_case / "adjusted_market_data.json").read_text(encoding="utf-8")
-    )
-    for row in adjusted_market_data["000660"]:
-        close = float(row["close"])
-        row["open"] = close * 0.998
-        row["high"] = close * 1.002
-        row["low"] = close * 0.998
-    (case_dir / "adjusted_market_data.json").write_text(
-        json.dumps(adjusted_market_data, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
     result = run_scan_replay_case(
-        case_dir,
-        tmp_path=tmp_path / "run",
+        _SCAN_REPLAY_ROOT / "kr_hybrid_quality_order",
+        tmp_path=tmp_path,
         monkeypatch=monkeypatch,
     )
 
