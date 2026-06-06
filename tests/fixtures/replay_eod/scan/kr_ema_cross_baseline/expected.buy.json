@@ -9,6 +9,7 @@
     "strategy_mode": "ema_cross",
     "use_sma200_filter": false,
     "use_market_regime_filter": false,
+    "market_regime_unavailable_policy": "warn_continue",
     "require_slope_up": false,
     "gap_atr_multiplier": 1.0,
     "min_history_bars": 30,
@@ -38,7 +39,10 @@
     "provider_fallback_ratio": 1.0,
     "rs_benchmark_requested_count": 0,
     "rs_benchmark_unavailable_count": 0,
-    "rs_benchmark_unavailable_ratio": null
+    "rs_benchmark_unavailable_ratio": null,
+    "market_regime_unavailable_count": 0,
+    "market_regime_blocked_count": 0,
+    "market_regime_blocked_by_market": {}
   },
   "tickers": [
     "005930",
