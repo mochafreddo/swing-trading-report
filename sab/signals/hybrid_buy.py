@@ -47,6 +47,7 @@ class HybridEvaluationSettings:
     exclude_etf_etn: bool
     rs_lookback_days: int = 20
     rs_benchmark_return: float | None = None
+    sell_stop_loss_pct_max: float = 0.05
 
 
 @dataclass
@@ -622,6 +623,13 @@ class _GapGuard:
 
 
 @dataclass(frozen=True)
+class _RiskAlignment:
+    state: str
+    reasons: list[str]
+    volatility_reference_pct: float | None
+
+
+@dataclass(frozen=True)
 class _EntryTriggerGuard:
     price_value: float | None
     operator: str | None
@@ -866,6 +874,42 @@ def _build_hybrid_gap_guard(
     return _GapGuard(pct=None, up_price=None, down_price=None)
 
 
+def _build_risk_alignment(
+    *,
+    gap_guard: _GapGuard,
+    atr_value: float,
+    last_close: float,
+    settings: HybridEvaluationSettings,
+) -> _RiskAlignment:
+    volatility_reference_pct = _to_finite_float(gap_guard.pct)
+    reason_prefix = "gap_guard"
+    atr_reference = _to_finite_float(atr_value)
+    if (
+        volatility_reference_pct is None
+        and atr_reference is not None
+        and last_close > 0
+    ):
+        volatility_reference_pct = atr_reference / last_close
+        reason_prefix = "atr"
+    if volatility_reference_pct is None:
+        return _RiskAlignment(
+            state="unknown",
+            reasons=["volatility_reference_unavailable"],
+            volatility_reference_pct=None,
+        )
+    if volatility_reference_pct > settings.sell_stop_loss_pct_max:
+        return _RiskAlignment(
+            state="tight_stop_vs_volatility",
+            reasons=[f"{reason_prefix}_exceeds_stop_max"],
+            volatility_reference_pct=volatility_reference_pct,
+        )
+    return _RiskAlignment(
+        state="aligned",
+        reasons=[],
+        volatility_reference_pct=volatility_reference_pct,
+    )
+
+
 def _build_entry_trigger_guard(
     *,
     pattern: HybridPattern,
@@ -937,6 +981,8 @@ def _build_hybrid_reasons(
     entry_state: _EntryStateResult,
     score: _HybridScore,
     gap_guard: _GapGuard,
+    risk_alignment: _RiskAlignment,
+    sell_stop_loss_pct_max: float,
     entry_trigger: _EntryTriggerGuard,
     rs_diff: float | None,
 ) -> list[dict[str, Any]]:
@@ -992,6 +1038,17 @@ def _build_hybrid_reasons(
             kind="risk",
             points=0.0,
             value=gap_guard.pct,
+        )
+    if risk_alignment.state == "tight_stop_vs_volatility":
+        _add_hybrid_reason(
+            reasons,
+            reason_id="risk_alignment_tight_stop",
+            label="손절폭 대비 변동성 큼",
+            kind="risk",
+            status="warn",
+            points=0.0,
+            value=risk_alignment.volatility_reference_pct,
+            threshold=sell_stop_loss_pct_max,
         )
     if entry_trigger.price_value is not None:
         _add_hybrid_reason(
@@ -1167,6 +1224,12 @@ def evaluate_ticker_hybrid(
         atr_value=indicators.atr_value,
         last_close=last_close,
     )
+    risk_alignment = _build_risk_alignment(
+        gap_guard=gap_guard,
+        atr_value=indicators.atr_value,
+        last_close=last_close,
+        settings=settings,
+    )
     entry_trigger = _build_entry_trigger_guard(
         pattern=pattern,
         pattern_context=pattern_context,
@@ -1179,6 +1242,8 @@ def evaluate_ticker_hybrid(
         entry_state=entry_state,
         score=score,
         gap_guard=gap_guard,
+        risk_alignment=risk_alignment,
+        sell_stop_loss_pct_max=settings.sell_stop_loss_pct_max,
         entry_trigger=entry_trigger,
         rs_diff=rs_diff,
     )
@@ -1253,6 +1318,9 @@ def evaluate_ticker_hybrid(
         if gap_guard.down_price
         else "-",
         "gap_guard_down_price_value": gap_guard.down_price,
+        "risk_alignment": risk_alignment.state,
+        "risk_alignment_reasons": list(risk_alignment.reasons),
+        "volatility_reference_pct": risk_alignment.volatility_reference_pct,
         "risk_guide": risk_guide,
         "score_value": score.value,
         "score": f"{score.value:.2f}",

@@ -721,6 +721,7 @@ def _evaluate_candidates(
         exclude_etf_etn=cfg.exclude_etf_etn,
         rs_lookback_days=cfg.rs_lookback_days,
         rs_benchmark_return=cfg.rs_benchmark_return,
+        sell_stop_loss_pct_max=cfg.hybrid_sell.stop_loss_pct_max,
     )
 
     for ticker in runtime.tickers:

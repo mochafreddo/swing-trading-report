@@ -355,6 +355,7 @@ def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
                 "trigger_bullish_candle_rising_volume",
                 "volume_confirmation",
                 "gap_guard_atr",
+                "risk_alignment_tight_stop",
                 "entry_trigger_guard",
             ],
         ),
@@ -370,6 +371,7 @@ def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
                 "trigger_breakout_above_swing_high_with_volume",
                 "volume_confirmation",
                 "gap_guard_atr",
+                "risk_alignment_tight_stop",
                 "entry_trigger_guard",
             ],
         ),
@@ -389,6 +391,7 @@ def test_hybrid_candidate_exposes_structured_reasons(monkeypatch):
                 "trigger_reversal_off_ema_support_with_volume",
                 "volume_confirmation",
                 "gap_guard_atr",
+                "risk_alignment_tight_stop",
                 "entry_trigger_guard",
             ],
         ),
@@ -1015,6 +1018,97 @@ def test_hybrid_breakout_candidate_exposes_entry_trigger_guard(monkeypatch):
     assert result.candidate["entry_trigger_price_basis"] == "adjusted"
     assert result.candidate["entry_trigger_operator"] == "gte"
     assert result.candidate["entry_trigger_label"] == "swing_high"
+
+
+def test_hybrid_candidate_flags_tight_stop_vs_gap_guard(monkeypatch):
+    candles = _simple_candles(6, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [8.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    settings = _settings(min_history=2)
+    settings.sell_stop_loss_pct_max = 0.05
+    result = evaluate_ticker_hybrid("FAKE.US", candles, settings, {"currency": "USD"})
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    expected_reference = 8.0 / float(candles[-1]["close"])
+    assert candidate["risk_alignment"] == "tight_stop_vs_volatility"
+    assert candidate["volatility_reference_pct"] == pytest.approx(expected_reference)
+    assert candidate["risk_alignment_reasons"] == ["gap_guard_exceeds_stop_max"]
+    assert any(
+        reason["id"] == "risk_alignment_tight_stop" and reason["status"] == "warn"
+        for reason in candidate["reasons"]
+    )
+
+
+def test_hybrid_candidate_marks_unknown_risk_without_volatility_reference(monkeypatch):
+    candles = _simple_candles(6, base=100.0)
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, False),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.atr",
+        lambda highs, lows, closes, n: [math.nan] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *args, **kwargs: (
+            True,
+            ["Close reclaimed EMA short"],
+            HybridPattern.TREND_PULLBACK_BOUNCE,
+            {
+                "trigger_rsi50": True,
+                "rsi_val": 55.0,
+                "close_above_ema_short": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_rsi_oversold_reversal",
+        lambda *_args, **_kwargs: (False, [], None, {}),
+    )
+
+    result = evaluate_ticker_hybrid(
+        "FAKE.US", candles, _settings(min_history=2), {"currency": "USD"}
+    )
+
+    assert result.candidate is not None
+    candidate = result.candidate
+    assert candidate["risk_alignment"] == "unknown"
+    assert candidate["volatility_reference_pct"] is None
+    assert candidate["risk_alignment_reasons"] == ["volatility_reference_unavailable"]
 
 
 def test_hybrid_kr_breakout_second_close_confirms_original_swing_high(monkeypatch):
