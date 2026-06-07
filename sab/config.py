@@ -248,8 +248,8 @@ class Config:
     us_min_dollar_volume: float | None = None
     hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
     hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
-    entry_fatal_missing_price_ratio: float = 1.0
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
+    entry_fatal_missing_price_ratio: float = 1.0
 
 
 def _normalize_kis_base(url: str | None) -> str | None:
@@ -1014,13 +1014,48 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
     )
 
 
+def _parse_entry_fatal_missing_price_ratio(parser: _ConfigParser) -> float:
+    path = "entry_check.fatal_missing_price_ratio"
+    default = 1.0
+    env_value = getenv("ENTRY_FATAL_MISSING_PRICE_RATIO")
+    if env_value is not None:
+        raw: Any = env_value
+        source = "environment variable 'ENTRY_FATAL_MISSING_PRICE_RATIO'"
+        provided = True
+    else:
+        raw = parser.from_yaml(path, default)
+        source = f"config.yaml '{path}'"
+        provided = parser.has_yaml_path(path)
+
+    if isinstance(raw, bool):
+        if parser.strict and provided:
+            raise ConfigLoadError(
+                "Strict config parsing failed: "
+                f"{source} must be a number between 0.0 and 1.0, got {raw!r}."
+            )
+        return default
+
+    try:
+        parsed = float(raw)
+    except (TypeError, ValueError) as err:
+        if parser.strict and provided:
+            raise ConfigLoadError(
+                "Strict config parsing failed: "
+                f"{source} must be a number between 0.0 and 1.0, got {raw!r}."
+            ) from err
+        return default
+
+    return _normalize_probability_threshold(
+        path,
+        parsed,
+        default=default,
+        strict=parser.strict,
+    )
+
+
 def _parse_entry_check_section(parser: _ConfigParser) -> _EntryCheckSection:
     return _EntryCheckSection(
-        fatal_missing_price_ratio=parser.env_float(
-            "ENTRY_FATAL_MISSING_PRICE_RATIO",
-            "entry_check.fatal_missing_price_ratio",
-            1.0,
-        )
+        fatal_missing_price_ratio=_parse_entry_fatal_missing_price_ratio(parser)
     )
 
 
