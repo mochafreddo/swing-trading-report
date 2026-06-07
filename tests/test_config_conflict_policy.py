@@ -13,6 +13,7 @@ def _reset_conflict_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SCREEN_LIMIT",
         "FX_MODE",
         "HOLDINGS_FILE",
+        "ENTRY_FATAL_MISSING_PRICE_RATIO",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -161,3 +162,26 @@ data:
     cfg = load_config()
 
     assert cfg.screen_limit == 42
+
+
+def test_load_config_rejects_entry_fatal_missing_price_ratio_env_yaml_conflict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "entry_check:\n  fatal_missing_price_ratio: 0.0\n",
+        encoding="utf-8",
+    )
+
+    _reset_conflict_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "1.0")
+
+    with pytest.raises(
+        ConfigLoadError,
+        match=r"ENTRY_FATAL_MISSING_PRICE_RATIO \(entry_check\.fatal_missing_price_ratio\)",
+    ):
+        load_config()
