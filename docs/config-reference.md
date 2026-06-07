@@ -92,7 +92,7 @@
 | `BENZINGA_API_TOKEN` | `benzinga-news` source provider | US-only |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | `naver-news` source provider | KR-only |
 | `LOG_LEVEL`, `LOG_FORMAT`, `LOG_DATEFMT`, `LOG_TZ` | CLI logging | `LOG_FORMAT=json`, `LOG_TZ=utc` 지원 |
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | 0.0-1.0, 기본 1.0 |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, 코드 fallback 1.0 |
 | `SAB_DATA_DIR` | calendar/eval helper lower-level override | 일반 config는 `DATA_DIR`/`data.data_dir` 우선 |
 | `SAB_USE_PMC_CALENDAR` | trading calendar optional path | 기본 enabled, calendar extra 필요 가능 |
 
@@ -173,6 +173,7 @@
 | `HYBRID_SELL_TIME_STOP_DAYS` | `sell.hybrid.time_stop_days` | hybrid sell time stop |
 | `HYBRID_SELL_TIME_STOP_GRACE_DAYS` | `sell.hybrid.time_stop_grace_days` | hybrid sell time stop grace |
 | `HYBRID_SELL_TIME_STOP_PROFIT_FLOOR` | `sell.hybrid.time_stop_profit_floor` | hybrid sell time stop profit floor |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `entry_check.fatal_missing_price_ratio` | entry price 누락 fatal 임계치 |
 | `USD_KRW_RATE` | `fx.usdkrw` | manual/fallback USDKRW |
 | `FX_MODE` | `fx.mode` | `kis`/`manual`/`off` |
 | `FX_CACHE_TTL` | `fx.cache_ttl_minutes` | FX cache TTL |

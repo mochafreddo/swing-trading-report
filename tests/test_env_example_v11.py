@@ -73,6 +73,24 @@ def test_env_example_documents_market_regime_policy_without_active_override() ->
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
 
 
+def test_env_example_documents_entry_fatal_override_without_active_override() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+    active_keys = set(_extract_env_keys(env_example_path))
+
+    assert "ENTRY_FATAL_MISSING_PRICE_RATIO" in text
+    assert "entry_check.fatal_missing_price_ratio" in text
+    assert "ENTRY_FATAL_MISSING_PRICE_RATIO" not in active_keys
+
+
+def test_env_example_uses_active_kis_interval_in_commented_override() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+
+    assert "# KIS_MIN_INTERVAL_MS=200" in text
+    assert "# KIS_MIN_INTERVAL_MS=500" not in text
+
+
 def test_env_example_active_keys_do_not_conflict_with_config() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     active_keys = set(_extract_env_keys(repo_root / ".env.example"))

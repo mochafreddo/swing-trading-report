@@ -50,7 +50,7 @@
 | `KIS_APP_KEY` | yes for KIS calls | none | `replace-with-kis-app-key` | `sab`, GitHub Actions, scheduler | KIS Open API app key | Secret. Do not commit. |
 | `KIS_APP_SECRET` | yes for KIS calls | none | `replace-with-kis-app-secret` | `sab`, GitHub Actions, scheduler | KIS Open API app secret | Secret. Do not commit. |
 | `KIS_BASE_URL` | no | `config.yaml` `kis.base_url` | `https://openapi.koreainvestment.com:9443` | `sab` | KIS endpoint override | Env/YAML conflict binding. |
-| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `500` | `sab` | Minimum KIS request interval | Use for rate-limit tuning. |
+| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200` | `sab` | Minimum KIS request interval | Env/YAML conflict binding. Use for rate-limit tuning. |
 | `SUPABASE_URL` | yes for web/upload | none | `https://example.supabase.co` | web, `sab` upload, workflows, scheduler | Supabase project URL | Do not expose real internal URL in docs. |
 | `SUPABASE_SECRET_KEY` | yes for server access | none | `sb_secret_replace_me` | web, workflows, scheduler | Recommended server-side Supabase key | Publishable key is rejected in server paths. |
 | `SUPABASE_SERVICE_ROLE_KEY` | fallback | none | `replace-with-service-role-key` | web, workflows, scheduler | Legacy server-side Supabase key fallback | Secret. Prefer `SUPABASE_SECRET_KEY`. |
@@ -76,7 +76,7 @@
 | `GITHUB_PAT` | required when dispatch enabled | none | `replace-with-github-token` | web `/api/run` | GitHub token for workflow dispatch | Secret. Server-only. |
 | `REPORT_RETENTION_DAYS` | no | `30` | `30` | web, cleanup workflow | Retention days display/cleanup input | Cleanup workflow validates positive integer. |
 | `REPORT_SEARCH_WINDOW` | no | `100` | `100` | web reports | Ticker search scan window | Code clamps min/max. |
-| `MARKET_REGIME_UNAVAILABLE_POLICY` | no | `warn_continue` | `block_market` | `sab scan` | Market regime unavailable policy | Must be `warn_continue` or `block_market`. |
+| `MARKET_REGIME_UNAVAILABLE_POLICY` | no | `config.yaml` `strategy.market_regime_unavailable_policy` | `block_market` | `sab scan` | Market regime unavailable policy | Env/YAML conflict binding. |
 | `TELEGRAM_BOT_TOKEN` | no | none | `replace-with-token` | workflows, scheduler | Telegram notification token | Secret. |
 | `TELEGRAM_CHAT_ID` | no | none | `replace-with-chat-id` | workflows, scheduler | Telegram chat id | Treat as sensitive. |
 | `SLACK_WEBHOOK_URL` | no | none | `https://hooks.slack.com/...` | workflows, scheduler | Slack notification webhook | Secret/internal URL; do not publish real value. |
@@ -103,7 +103,7 @@
 | `LOG_FORMAT` | no | text format | `json` | CLI/scheduler | Logging format | Scheduler compose sets JSON. |
 | `LOG_DATEFMT` | no | ISO-like default | `%Y-%m-%dT%H:%M:%S%z` | CLI | Logging date format | Optional. |
 | `LOG_TZ` | no | `local` | `utc` | CLI/scheduler | Log timezone | `local` or `utc`. |
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | 0.0 means any missing price fails. |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | `config.yaml` `entry_check.fatal_missing_price_ratio`; code fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
 | `SAB_CONFIG` | no | `config.yaml` | `config.local.yaml` | `sab` | Config file path override | Do not commit local config. |
 | `SAB_CONFIG_STRICT` | no | true in CI/GHA | `true` | `sab` | Strict config parsing | Recommended for reproducing CI locally. |
 
