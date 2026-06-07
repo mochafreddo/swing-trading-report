@@ -38,7 +38,7 @@ strategy:
   mode: sma_ema_hybrid # ema_cross | sma_ema_hybrid
   use_sma200_filter: false
   use_market_regime_filter: true
-  market_regime_unavailable_policy: warn_continue
+  market_regime_unavailable_policy: block_market
   require_slope_up: false # applies to ema_cross mode only
   gap_atr_multiplier: 1.0
   min_history_bars: 200
@@ -94,6 +94,7 @@ sell:
 
 entry_check:
   enabled: false
+  fatal_missing_price_ratio: 0.0
 
 portfolio:
   max_active_holdings: 8

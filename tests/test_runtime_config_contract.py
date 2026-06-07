@@ -35,4 +35,12 @@ def test_repository_config_defaults_market_regime_unavailable_policy(
 ) -> None:
     cfg = _load_repository_config(monkeypatch)
 
-    assert cfg.market_regime_unavailable_policy == "warn_continue"
+    assert cfg.market_regime_unavailable_policy == "block_market"
+
+
+def test_repository_config_defaults_entry_fatal_missing_price_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _load_repository_config(monkeypatch)
+
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
