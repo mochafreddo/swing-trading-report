@@ -214,6 +214,35 @@ def test_ai_brief_workflow_allows_empty_scheduled_scan_only() -> None:
     assert 'exit "${scan_status}"' in run_scan_script
 
 
+def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = _steps(workflow)
+
+    run_entry_step = _find_step_by_name(steps, "Run entry")
+    run_entry_script = str(run_entry_step.get("run") or "")
+
+    assert "set +e" in run_entry_script
+    assert "entry_status=${PIPESTATUS[0]}" in run_entry_script
+    assert (
+        'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'
+        in run_entry_script
+    )
+    assert (
+        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
+    )
+    assert 'exit "${entry_status}"' in run_entry_script
+
+    upload_step = _find_step_by_name(steps, "Upload fatal entry artifact")
+    assert "failure()" in str(upload_step.get("if") or "")
+    assert "steps.run_entry.outputs.entry_report_path != ''" in str(
+        upload_step.get("if") or ""
+    )
+    assert "actions/upload-artifact" in str(upload_step.get("uses") or "")
+    upload_with = upload_step.get("with") or {}
+    assert upload_with.get("name") == "ai-brief-entry-report-${{ github.run_id }}"
+    assert upload_with.get("path") == "${{ steps.run_entry.outputs.entry_report_path }}"
+
+
 def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)
