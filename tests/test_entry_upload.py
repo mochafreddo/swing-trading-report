@@ -57,6 +57,7 @@ def test_run_entry_upload_flag_uses_supabase_upload_path(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -129,6 +130,7 @@ def test_run_entry_upload_flag_returns_error_on_supabase_failure(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -180,6 +182,7 @@ def test_run_entry_upload_flag_skips_supabase_upload_when_price_gap_is_fatal(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -264,3 +267,132 @@ def test_entry_report_write_helper_skips_upload_after_fatal_missing_price(
     assert write_calls[0]["artifact_date"] == "2026-02-27"
     assert callback_paths == [out_path.as_posix()]
     assert upload_calls == []
+
+
+def test_run_entry_uses_config_threshold_instead_of_env(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    _build_entry_candidate(),
+                    {
+                        **_build_entry_candidate(),
+                        "ticker": "MSFT.NASD",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "0.0")
+    monkeypatch.setattr(
+        "sab.entry._make_price_lookup",
+        lambda **_kwargs: (
+            lambda ticker: (
+                _entry_price_result(None)
+                if ticker == "AAPL.NASD"
+                else _entry_price_result(101.5)
+            ),
+            [],
+        ),
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+        upload=False,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.entry.json")).read_text("utf-8"))
+    assert payload["summary"]["missing_entry_price_ratio"] == 0.5
+    assert payload["config_snapshot"]["entry_fatal_missing_price_ratio"] == 1.0
+
+
+def test_run_entry_threshold_zero_fails_on_partial_missing_price(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    _build_entry_candidate(),
+                    {
+                        **_build_entry_candidate(),
+                        "ticker": "MSFT.NASD",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key=None,
+        kis_app_secret=None,
+        kis_base_url=None,
+        kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=0.0,
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+    monkeypatch.setattr(
+        "sab.entry._make_price_lookup",
+        lambda **_kwargs: (
+            lambda ticker: (
+                _entry_price_result(None)
+                if ticker == "AAPL.NASD"
+                else _entry_price_result(101.5)
+            ),
+            [],
+        ),
+    )
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+        upload=True,
+    )
+
+    assert exit_code == 1
+    payload = json.loads(next(report_dir.glob("*.entry.json")).read_text("utf-8"))
+    assert payload["summary"]["missing_entry_price_ratio"] == 0.5
+    assert payload["config_snapshot"]["entry_fatal_missing_price_ratio"] == 0.0

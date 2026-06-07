@@ -16,7 +16,6 @@ from sab.entry import (
     _collect_candidate_eval_date_issues,
     _resolve_entry_artifact_date_context,
     _resolve_entry_evaluation_policy,
-    _resolve_entry_fatal_missing_price_ratio,
     _resolve_signal_eval_date,
     _select_latest_buy_report,
     evaluate_entry_candidates,
@@ -95,16 +94,6 @@ def test_select_latest_buy_report_prefers_latest_date_and_duplicate(
     selected = _select_latest_buy_report(tmp_path.as_posix())
 
     assert selected.endswith("2026-02-25-1.buy.json")
-
-
-def test_entry_fatal_missing_price_ratio_rejects_invalid_env_in_ci(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "not-a-ratio")
-
-    with pytest.raises(ConfigLoadError, match="ENTRY_FATAL_MISSING_PRICE_RATIO"):
-        _resolve_entry_fatal_missing_price_ratio()
 
 
 def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
@@ -699,6 +688,7 @@ def test_run_entry_e2e_normalizes_signal_eval_date_to_market_session(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -766,6 +756,7 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -824,6 +815,7 @@ def test_run_entry_e2e_uses_kis_us_price_detail_without_datetime_marker(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -903,6 +895,7 @@ def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -966,6 +959,7 @@ def test_run_entry_e2e_threshold_zero_does_not_fail_when_prices_available(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -1032,6 +1026,7 @@ def test_run_entry_e2e_skips_gap_guard_when_filter_disabled(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -1102,6 +1097,7 @@ def test_run_entry_e2e_uses_source_report_gap_guard_disabled_config(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(),
     )
@@ -1171,6 +1167,7 @@ def test_run_entry_e2e_prefers_candidate_eval_date_over_run_ts(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1236,6 +1233,7 @@ def test_run_entry_e2e_reports_mixed_candidate_eval_dates_as_system_issue(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1309,6 +1307,7 @@ def test_run_entry_e2e_uses_report_level_strategy_mode_for_legacy_candidates(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1373,6 +1372,7 @@ def test_run_entry_e2e_handles_mixed_market_buy_report(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1459,6 +1459,7 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1538,6 +1539,7 @@ def test_run_entry_e2e_rejects_ambiguous_us_suffix_immediately(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1746,6 +1748,7 @@ def test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1813,6 +1816,7 @@ def test_run_entry_logs_structured_run_lifecycle(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1881,6 +1885,7 @@ def test_run_entry_e2e_uses_kis_us_snapshot_price(monkeypatch, tmp_path: Path) -
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -1945,6 +1950,7 @@ def test_run_entry_e2e_uses_kis_kr_snapshot_price_intraday(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -2002,6 +2008,7 @@ def test_run_entry_e2e_kr_pre_open_requires_positive_live_price(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -2091,6 +2098,7 @@ def test_run_entry_e2e_kr_pre_open_reports_rejected_live_snapshot_reason(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -2158,6 +2166,7 @@ def test_run_entry_e2e_uses_pykrx_after_close_price(
         kis_app_secret=None,
         kis_base_url=None,
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -2223,6 +2232,7 @@ def test_run_entry_e2e_uses_kis_us_after_close_daily_price_diagnostics(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
     )
     monkeypatch.setattr(
         "sab.entry.load_config", lambda provider_override=None: fake_cfg
@@ -2287,6 +2297,7 @@ def test_run_entry_e2e_applies_max_active_holdings_portfolio_guard(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data(
             [Holding(ticker="MSFT.NASD", quantity=1, entry_price=100.0)]
         ),
@@ -2365,6 +2376,7 @@ holdings:
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings_path=holdings_path.as_posix(),
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(max_active_holdings=1),
@@ -2438,6 +2450,7 @@ def test_run_entry_e2e_applies_market_portfolio_guard_without_touching_review_ro
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(max_new_entries_us=1, max_new_entries_kr=1),
     )
@@ -2510,6 +2523,7 @@ def test_run_entry_e2e_preserves_buy_report_order_for_mixed_portfolio_guard(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(max_active_holdings=1),
     )
@@ -2582,6 +2596,7 @@ def test_run_entry_e2e_blocks_second_us_entry_when_market_cap_reached(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([]),
         portfolio=_portfolio_config(max_new_entries_us=1),
     )
@@ -2649,6 +2664,7 @@ def test_run_entry_e2e_market_new_entry_cap_excludes_existing_holdings(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=_holdings_data([Holding(ticker="MSFT.NASD", quantity=1)]),
         portfolio=_portfolio_config(max_new_entries_us=1),
     )

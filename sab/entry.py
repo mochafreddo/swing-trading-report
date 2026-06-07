@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-import math
 import os
 import re
 from collections import Counter, deque
@@ -17,7 +16,6 @@ from .config import Config, load_config
 from .config_loader import ConfigLoadError
 from .data.kis_client import KISClient, KISClientError, KISCredentials
 from .data.pykrx_client import PykrxClient, PykrxClientError, PykrxNotInstalledError
-from .env_loader import env_flag
 from .holdings_loader import (
     Holding,
     HoldingsData,
@@ -56,7 +54,6 @@ _REPORT_LEVEL_MARKETS = {"KR", "US", "MIXED"}
 _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
 _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
-_DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO = 1.0
 _PORTFOLIO_BLOCK_REASON_TOTAL = "portfolio max active holdings reached"
 _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
     "stck_cntg_hour",
@@ -248,52 +245,6 @@ def _normalize_provider(provider: str | None) -> str:
     if normalized not in _SUPPORTED_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(_SUPPORTED_PROVIDERS)}")
     return normalized
-
-
-def _is_entry_strict_config_mode() -> bool:
-    return env_flag("GITHUB_ACTIONS") or env_flag("CI") or env_flag("SAB_CONFIG_STRICT")
-
-
-def _resolve_entry_fatal_missing_price_ratio() -> float:
-    raw = str(
-        os.getenv(
-            "ENTRY_FATAL_MISSING_PRICE_RATIO",
-            str(_DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO),
-        )
-        or ""
-    ).strip()
-    try:
-        parsed = float(raw)
-    except ValueError as exc:
-        if _is_entry_strict_config_mode():
-            raise ConfigLoadError(
-                "Strict config parsing failed: environment variable "
-                "'ENTRY_FATAL_MISSING_PRICE_RATIO' must be a number between "
-                f"0.0 and 1.0, got {raw!r}."
-            ) from exc
-        logger.warning(
-            "Invalid ENTRY_FATAL_MISSING_PRICE_RATIO=%r; fallback to %.2f",
-            raw,
-            _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO,
-        )
-        return _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO
-
-    if not math.isfinite(parsed) or parsed < 0 or parsed > 1:
-        if _is_entry_strict_config_mode():
-            raise ConfigLoadError(
-                "Strict config parsing failed: environment variable "
-                "'ENTRY_FATAL_MISSING_PRICE_RATIO' must be between 0.0 and "
-                f"1.0, got {raw!r}."
-            )
-        logger.warning(
-            "ENTRY_FATAL_MISSING_PRICE_RATIO must be between 0.0 and 1.0; got %r. "
-            "fallback to %.2f",
-            raw,
-            _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO,
-        )
-        return _DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO
-
-    return parsed
 
 
 def _parse_guard_percent_text(value: Any) -> float | None:
@@ -1259,6 +1210,7 @@ def _build_config_snapshot(
         "effective_gap_atr_multiplier": effective_gap_atr_multiplier,
         "source_report_gap_atr_multiplier": source_report_gap_atr_multiplier,
         "min_history_bars": cfg.min_history_bars,
+        "entry_fatal_missing_price_ratio": cfg.entry_fatal_missing_price_ratio,
         "portfolio": {
             "max_active_holdings": getattr(portfolio, "max_active_holdings", None),
             "max_new_entries_per_market": {
@@ -1916,21 +1868,7 @@ def run_entry(
             },
         )
         return 1
-    try:
-        fatal_missing_price_ratio = _resolve_entry_fatal_missing_price_ratio()
-    except ConfigLoadError as exc:
-        logger.error(
-            "Configuration loading failed: %s",
-            exc,
-            extra={
-                "event": "entry_failed",
-                "operation": "entry",
-                "run_id": run_id,
-                "status": "failed",
-                "error_type": type(exc).__name__,
-            },
-        )
-        return 1
+    fatal_missing_price_ratio = cfg.entry_fatal_missing_price_ratio
 
     try:
         source_context = _load_entry_source_report(
