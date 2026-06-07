@@ -134,6 +134,7 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("FX_CACHE_TTL", "fx.cache_ttl_minutes"),
     ("FX_KIS_SYMBOL", "fx.kis_symbol"),
     ("PORTFOLIO_MAX_ACTIVE_HOLDINGS", "portfolio.max_active_holdings"),
+    ("ENTRY_FATAL_MISSING_PRICE_RATIO", "entry_check.fatal_missing_price_ratio"),
 )
 
 
@@ -247,6 +248,7 @@ class Config:
     us_min_dollar_volume: float | None = None
     hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
     hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
+    entry_fatal_missing_price_ratio: float = 1.0
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
 
 
@@ -558,6 +560,11 @@ class _PortfolioSection:
     max_active_holdings: int | None
     max_new_entries_kr: int | None
     max_new_entries_us: int | None
+
+
+@dataclass(frozen=True)
+class _EntryCheckSection:
+    fatal_missing_price_ratio: float
 
 
 def _create_config_parser() -> _ConfigParser:
@@ -1007,6 +1014,16 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
     )
 
 
+def _parse_entry_check_section(parser: _ConfigParser) -> _EntryCheckSection:
+    return _EntryCheckSection(
+        fatal_missing_price_ratio=parser.env_float(
+            "ENTRY_FATAL_MISSING_PRICE_RATIO",
+            "entry_check.fatal_missing_price_ratio",
+            1.0,
+        )
+    )
+
+
 def _normalize_choice(
     value: str,
     *,
@@ -1048,6 +1065,20 @@ def _validate_rsi_threshold(path: str, value: float) -> None:
         _raise_range_error(path, f"must be finite (got {value!r})")
     if value < 0 or value > 100:
         _raise_range_error(path, f"must be between 0 and 100 (got {value!r})")
+
+
+def _normalize_probability_threshold(
+    path: str,
+    value: float,
+    *,
+    default: float,
+    strict: bool,
+) -> float:
+    if math.isfinite(value) and 0.0 <= value <= 1.0:
+        return value
+    if strict:
+        _raise_range_error(path, f"must be between 0.0 and 1.0 (got {value!r})")
+    return default
 
 
 def _validate_int_min(path: str, value: int, minimum: int = 1) -> None:
@@ -1238,8 +1269,16 @@ def _validate_sections(
     sell: _SellSection,
     fx: _FxSection,
     portfolio: _PortfolioSection,
+    entry_check: _EntryCheckSection,
     strict: bool,
-) -> tuple[_DataSection, _StrategySection, _SellSection, _FxSection, _PortfolioSection]:
+) -> tuple[
+    _DataSection,
+    _StrategySection,
+    _SellSection,
+    _FxSection,
+    _PortfolioSection,
+    _EntryCheckSection,
+]:
     validated_strategy = replace(
         strategy,
         strategy_mode=_normalize_choice(
@@ -1280,9 +1319,25 @@ def _validate_sections(
             source_name="FX_MODE/fx.mode",
         ),
     )
+    validated_entry_check = replace(
+        entry_check,
+        fatal_missing_price_ratio=_normalize_probability_threshold(
+            "entry_check.fatal_missing_price_ratio",
+            entry_check.fatal_missing_price_ratio,
+            default=1.0,
+            strict=strict,
+        ),
+    )
     _validate_risk_ranges(strategy=validated_strategy, sell=validated_sell)
     _validate_portfolio_ranges(portfolio)
-    return data, validated_strategy, validated_sell, validated_fx, portfolio
+    return (
+        data,
+        validated_strategy,
+        validated_sell,
+        validated_fx,
+        portfolio,
+        validated_entry_check,
+    )
 
 
 def _compose_config(
@@ -1292,6 +1347,7 @@ def _compose_config(
     sell: _SellSection,
     fx: _FxSection,
     portfolio: _PortfolioSection,
+    entry_check: _EntryCheckSection,
 ) -> Config:
     return Config(
         data_provider=data.provider,
@@ -1347,6 +1403,7 @@ def _compose_config(
         us_min_dollar_volume=strategy.us_min_dollar_volume,
         hybrid=strategy.hybrid,
         hybrid_sell=sell.hybrid_sell,
+        entry_fatal_missing_price_ratio=entry_check.fatal_missing_price_ratio,
         portfolio=PortfolioConfig(
             max_active_holdings=portfolio.max_active_holdings,
             max_new_entries_kr=portfolio.max_new_entries_kr,
@@ -1377,6 +1434,7 @@ def load_config(
     sell_section = _parse_sell_section(parser)
     fx_section = _parse_fx_section(parser)
     portfolio_section = _parse_portfolio_section(parser)
+    entry_check_section = _parse_entry_check_section(parser)
 
     (
         validated_data,
@@ -1384,12 +1442,14 @@ def load_config(
         validated_sell,
         validated_fx,
         validated_portfolio,
+        validated_entry_check,
     ) = _validate_sections(
         data=data_section,
         strategy=strategy_section,
         sell=sell_section,
         fx=fx_section,
         portfolio=portfolio_section,
+        entry_check=entry_check_section,
         strict=parser.strict,
     )
     return _compose_config(
@@ -1398,6 +1458,7 @@ def load_config(
         sell=validated_sell,
         fx=validated_fx,
         portfolio=validated_portfolio,
+        entry_check=validated_entry_check,
     )
 
 
