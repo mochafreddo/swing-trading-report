@@ -57,6 +57,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py
 ```
 
 Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조 변경은 `tests/test_docs_state_contract.py`를 우선 실행합니다.
+웹 UI나 인증/라우팅에 영향을 줄 수 있는 변경은 로컬 `sab-web`에서 브라우저 smoke도 남깁니다. QA 리포트와 스크린샷 같은 로컬 검증 산출물은 `.gstack/qa-reports/`에 두며 git에는 커밋하지 않습니다.
 
 ## 기술 스택
 
@@ -93,6 +94,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 - 보유 목록 source of truth: Supabase `holdings`
 - 리포트 목록 source of truth: Supabase `report_index`
 - 런타임 상태/락 source of truth: Supabase `runtime_state`
+- 로컬 QA 산출물: `.gstack/qa-reports/`(리포트, baseline, 스크린샷; gitignore 대상)
 
 ## 보안 기본값
 

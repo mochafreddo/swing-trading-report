@@ -49,6 +49,7 @@ Do not commit `.env`, `.env.*`, `.envrc.local`, `holdings.yaml`, `data/`, or `re
 | Web only | `just ci-web` | install/lint/format/typecheck/test:coverage/build. |
 | Python + web | `just quality` and `just ci-web` | Run both. |
 | Docs taxonomy/link change | `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q` | Required for docs index/state changes. |
+| Browser smoke / QA | local `sab-web` + browser checks | Required for UI changes, auth/routing changes, or backend/config changes that can affect web flows. |
 | Dead code check | `just deadcode` | Use before cleanup PRs. |
 | Pre-commit all | `just precommit-all` | May need network on first hook install. |
 
@@ -88,7 +89,7 @@ git commit -m "docs(api): 웹 API 계약 문서 정리" -m "라우트 스키마�
 | Runtime behavior changes are tested | yes |
 | Config/env/API/report schema changes are documented | yes |
 | Supabase migrations have rollback/recovery notes | yes when applicable |
-| Screenshots or browser checks included for UI changes | yes when applicable |
+| Screenshots or browser checks included for UI/auth/routing-affecting changes | yes when applicable |
 | Secrets absent from diff, logs, screenshots, PR body | yes |
 | `NOT_RUN` explains any skipped validation | yes |
 
@@ -97,6 +98,7 @@ git commit -m "docs(api): 웹 API 계약 문서 정리" -m "라우트 스키마�
 - README stays short and points to `docs/`.
 - Current operational docs must have `상태:` metadata and document state sections.
 - When docs and code conflict, prefer actual application code, then runtime/deploy config, CI, tests, env examples, current docs, then inference.
+- Local QA reports, browser baselines, and screenshots belong under `.gstack/qa-reports/`; keep them local and summarize the result in the PR or handoff instead of committing the artifacts.
 - Use `NEEDS_CONFIRMATION` for policy/credential/owner/deployment details not derivable from code.
 - Use `NOT_RUN` for commands not executed.
 - Do not paste real URLs, tokens, DB strings, customer names, personal emails, phone numbers, cookies, or private keys.

@@ -156,7 +156,26 @@ pnpm --dir web run test:coverage
 pnpm --dir web run build
 ```
 
-## 7. 자주 발생하는 로컬 문제
+## 7. Web UI smoke / QA
+
+웹 UI, 인증, 라우팅, API guard, 또는 웹에서 소비하는 리포트/API 계약을 바꾸면 `sab-web` 컨테이너에서 브라우저 smoke를 남깁니다.
+
+```bash
+docker compose up -d --build web
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
+```
+
+기본 unauthenticated smoke 범위:
+
+- `/`가 `/login?next=%2F`로 redirect되는지 확인합니다.
+- `/reports`, `/holdings`, `/run` 같은 보호 페이지가 `/login?next=...`로 redirect되는지 확인합니다.
+- 로그인 폼의 빈 제출(required validation)과 잘못된 자격 증명(`Unauthorized`) 상태를 확인합니다.
+- desktop과 mobile viewport에서 텍스트/폼/alert가 겹치지 않는지 확인합니다.
+- browser console error가 없는지 확인합니다.
+
+로컬 QA 리포트, baseline, 스크린샷은 `.gstack/qa-reports/`에 저장합니다. 이 디렉터리는 검증 증거용 로컬 산출물이므로 git에 커밋하지 않습니다.
+
+## 8. 자주 발생하는 로컬 문제
 
 | Symptom | First check |
 | --- | --- |
