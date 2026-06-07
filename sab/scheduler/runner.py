@@ -2307,7 +2307,12 @@ class DefaultScheduledPipeline:
                 report_path_callback=entry_report_paths.append,
             )
         if entry_status != 0:
-            raise RuntimeError("scheduled entry failed")
+            report_hint = (
+                entry_report_paths[-1] if entry_report_paths else "not produced"
+            )
+            raise RuntimeError(
+                f"scheduled entry failed (entry_report_path={report_hint})"
+            )
         entry_report_path = _require_single_report_path(
             entry_report_paths, report_type="entry"
         )
