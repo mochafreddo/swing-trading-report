@@ -1,6 +1,8 @@
+상태: Accepted
+
 # Swing Operational Safety Defaults Design
 
-Status: Review Ready
+Status: Accepted
 Date: 2026-06-07
 
 ## Problem Brief
