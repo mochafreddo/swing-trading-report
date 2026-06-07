@@ -2139,6 +2139,29 @@ def test_default_pipeline_entry_step_helper_returns_single_entry_report(
     assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
 
 
+def test_default_pipeline_entry_step_failure_mentions_written_entry_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 1
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"scheduled entry failed.*reports/current\.entry\.json",
+    ):
+        DefaultScheduledPipeline()._run_entry_step(
+            market="US",
+            report_date="2026-05-28",
+            buy_report_path="reports/current.buy.json",
+            holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+        )
+
+
 def test_default_pipeline_rechecks_pre_open_guard_before_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
