@@ -51,6 +51,7 @@ def test_run_entry_existing_holding_candidate_does_not_consume_new_entry_caps(
         kis_app_secret="s",
         kis_base_url="https://example.test",
         kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
         holdings=HoldingsData(
             path=None,
             settings=HoldingSettings(),
