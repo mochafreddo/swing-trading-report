@@ -883,12 +883,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          set +e
           uv run -m sab entry \
             --provider "${{ steps.params.outputs.provider }}" \
             --mode "${{ steps.params.outputs.entry_mode }}" \
             --market "${{ steps.params.outputs.market }}" \
             --buy-report "${{ steps.run_scan.outputs.buy_report_path }}" \
             --upload 2>&1 | tee entry.log
+          entry_status=${PIPESTATUS[0]}
+          set -e
 
           entry_report_path="$(sed -n 's/.*Entry report written to: //p' entry.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${entry_report_path}" ]]; then
@@ -911,6 +914,17 @@ jobs:
           fi
 
           echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"
+          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
+          if [[ "${entry_status}" -ne 0 ]]; then
+            exit "${entry_status}"
+          fi
+
+      - name: Upload fatal entry artifact
+        if: failure() && steps.run_entry.outputs.entry_report_path != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ai-brief-entry-report-${{ github.run_id }}
+          path: ${{ steps.run_entry.outputs.entry_report_path }}
 
       - name: Run AI brief
         id: run_ai_brief
