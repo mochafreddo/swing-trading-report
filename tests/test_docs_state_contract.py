@@ -185,8 +185,16 @@ def test_artifact_globs_are_centrally_declared() -> None:
 def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     strategy_text = _read(Path("docs/STRATEGY.md"))
     config_reference_text = _read(Path("docs/config-reference.md"))
+    configuration_text = _read(Path("docs/configuration.md"))
 
     assert "market_regime_unavailable_policy" in strategy_text
     assert "quality_state" in strategy_text
     assert "risk_alignment" in strategy_text
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" in config_reference_text
+    assert "entry_check.fatal_missing_price_ratio" in strategy_text
+    assert "ENTRY_FATAL_MISSING_PRICE_RATIO" in config_reference_text
+    assert "entry_check.fatal_missing_price_ratio" in config_reference_text
+    assert (
+        "| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200`"
+        in configuration_text
+    )

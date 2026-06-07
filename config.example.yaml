@@ -17,7 +17,7 @@ kis:
   # Security policy: keep credentials in .env only.
   # Set KIS_APP_KEY / KIS_APP_SECRET via environment variables.
   base_url: https://openapivts.koreainvestment.com
-  min_interval_ms: 500
+  min_interval_ms: 200
 
 screener:
   enabled: true
@@ -50,6 +50,7 @@ strategy:
   mode: sma_ema_hybrid
   use_sma200_filter: true
   use_market_regime_filter: false  # benchmark가 SMA200 아래면 해당 시장 scan 후보를 차단
+  market_regime_unavailable_policy: block_market  # warn_continue | block_market
   require_slope_up: false          # applies to ema_cross mode only
   gap_atr_multiplier: 1.0
   min_history_bars: 200
@@ -110,6 +111,7 @@ sell:
 
 entry_check:
   enabled: false
+  fatal_missing_price_ratio: 0.0  # 0.0이면 entry price 누락 1건도 실패
 
 universe:
   markets:
