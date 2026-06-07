@@ -42,6 +42,12 @@ def _find_step_by_name(steps: list[dict[str, Any]], name: str) -> dict[str, Any]
     raise AssertionError(f"Step not found: {name}")
 
 
+def _script_index(script: str, needle: str) -> int:
+    index = script.find(needle)
+    assert index >= 0, f"Script fragment not found: {needle}"
+    return index
+
+
 def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
 
@@ -217,6 +223,7 @@ def test_ai_brief_workflow_allows_empty_scheduled_scan_only() -> None:
 def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)
+    step_names = [str(step.get("name") or "") for step in steps]
 
     run_entry_step = _find_step_by_name(steps, "Run entry")
     run_entry_script = str(run_entry_step.get("run") or "")
@@ -231,13 +238,43 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
         'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
     )
     assert 'exit "${entry_status}"' in run_entry_script
+    capture_status_index = _script_index(
+        run_entry_script, "entry_status=${PIPESTATUS[0]}"
+    )
+    restore_errexit_index = run_entry_script.find("\nset -e\n", capture_status_index)
+    assert restore_errexit_index >= 0
+    assert (
+        _script_index(run_entry_script, "set +e")
+        < _script_index(run_entry_script, "uv run -m sab entry")
+        < capture_status_index
+        < restore_errexit_index
+        < _script_index(
+            run_entry_script,
+            'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"',
+        )
+        < _script_index(
+            run_entry_script,
+            'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
+        )
+        < _script_index(run_entry_script, 'if [[ "${entry_status}" -ne 0 ]]')
+        < _script_index(run_entry_script, 'exit "${entry_status}"')
+    )
 
     upload_step = _find_step_by_name(steps, "Upload fatal entry artifact")
+    assert step_names.index("Upload fatal entry artifact") == (
+        step_names.index("Run entry") + 1
+    )
+    assert step_names.index("Upload fatal entry artifact") < step_names.index(
+        "Run AI brief"
+    )
     assert "failure()" in str(upload_step.get("if") or "")
     assert "steps.run_entry.outputs.entry_report_path != ''" in str(
         upload_step.get("if") or ""
     )
-    assert "actions/upload-artifact" in str(upload_step.get("uses") or "")
+    assert (
+        upload_step.get("uses")
+        == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    )
     upload_with = upload_step.get("with") or {}
     assert upload_with.get("name") == "ai-brief-entry-report-${{ github.run_id }}"
     assert upload_with.get("path") == "${{ steps.run_entry.outputs.entry_report_path }}"
