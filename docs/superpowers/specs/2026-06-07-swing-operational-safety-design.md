@@ -54,7 +54,8 @@ Make swing operational safety defaults explicit, reproducible, and tested:
 - Do not change report JSON schemas except for existing config snapshots if
   they already include runtime config.
 - Do not remove the existing `ENTRY_FATAL_MISSING_PRICE_RATIO` env override.
-- Do not change web env validation or GitHub workflow dispatch behavior.
+- Do not change web env validation or GitHub workflow dispatch inputs/schedule
+  semantics. Artifact capture and failure diagnostics may change where needed.
 
 ### Constraints
 
@@ -78,9 +79,10 @@ partial missing price snapshots will exit non-zero when any candidate price is
 missing under the active default `0.0`. Scans may return fewer candidates when
 benchmark data is unavailable because affected markets are blocked.
 
-Tests/docs to change: config validation tests, entry command tests, runtime
-config contract tests, env/YAML conflict tests, config docs, strategy docs, and
-configuration examples.
+Tests/docs to change: config validation tests, entry command tests, entry report
+snapshot tests, runtime config contract tests, env/YAML conflict tests, GitHub
+Actions artifact handling, scheduled runner diagnostics, config docs, strategy
+docs, and configuration examples.
 
 ## Current Behavior
 
@@ -135,8 +137,21 @@ production default because market regime is a precondition, not a scoring
 bonus.
 
 Compatibility: the existing `MARKET_REGIME_UNAVAILABLE_POLICY=warn_continue`
-override remains available for exploratory local runs. The current conflict
-policy already rejects duplicate env/YAML definitions for this key.
+override remains available for exploratory local runs only when the matching
+YAML path is absent. With committed `config.yaml`, setting that env key directly
+fails by design because the existing conflict policy rejects duplicate env/YAML
+definitions. Operators who need a looser local policy should use a local YAML
+selected with `SAB_CONFIG`, or remove the YAML key from that local config before
+using the env override.
+
+Default contract: omitted custom configs keep the current code-level default
+`warn_continue` for backward compatibility. The active repository default comes
+from committed `config.yaml` and is `block_market`.
+
+Operational contract: `block_market` closes the market to candidates and records
+blocked-market diagnostics in the buy report. It is not a scan workflow failure
+by itself; scheduled/local scans should still write and upload the buy report so
+operators can see why candidates were excluded.
 
 ### 2. Entry Fatal Missing-Price Policy
 
@@ -147,6 +162,11 @@ entry_check:
   enabled: false
   fatal_missing_price_ratio: 0.0
 ```
+
+`entry_check.enabled` is an existing setting and must not gate this fatal
+missing-price policy. The threshold applies whenever `sab entry` evaluates entry
+prices. If a future cleanup renames or removes `entry_check.enabled`, that should
+be a separate change.
 
 Add a matching config/env binding:
 
@@ -161,6 +181,11 @@ Parsing contract:
 - Allowed range: finite float between `0.0` and `1.0`
 - Default when omitted: `1.0` for backward compatibility in custom configs
 - Active repository value: `0.0`
+- Conflict behavior: if YAML defines the threshold, direct env override fails
+  closed; use a local YAML selected with `SAB_CONFIG` or remove the YAML key
+  before relying on the env override.
+- Invalid values: strict config mode raises `ConfigLoadError`; non-strict mode
+  warns and falls back to the compatibility default `1.0`.
 
 Behavior contract:
 
@@ -168,18 +193,30 @@ Behavior contract:
 - If threshold is greater than `0.0`, fatal when
   `missing_entry_price_ratio >= threshold`.
 - The report is still written before exit, preserving diagnostics.
+- The entry report config snapshot includes `entry_fatal_missing_price_ratio`
+  so a non-zero exit can be explained from the artifact alone.
+- Fatal entry runs still return non-zero. Automation must still surface the
+  written entry report path/artifact before terminating the workflow.
 
 Implementation detail: `sab.entry` should stop reading
 `ENTRY_FATAL_MISSING_PRICE_RATIO` directly. `run_entry()` already loads `cfg`;
 it should use `cfg.entry_fatal_missing_price_ratio` and keep any helper logic
 focused on threshold comparison.
 
+Automation detail: current fatal entry behavior writes the report before
+returning `1`, but upload/artifact handling happens after that in some paths.
+Implementation should make the manual AI Brief workflow capture the entry report
+artifact even when `sab entry` exits non-zero, and should make the scheduled
+runner include the captured entry report path in the raised failure or late
+alert diagnostics.
+
 ### 3. Documentation and Examples
 
 Update docs and examples so operators see one coherent policy:
 
 - `.env.example`: keep `ENTRY_FATAL_MISSING_PRICE_RATIO` commented as an
-  override, not the primary place to configure normal operation.
+  override, not the primary place to configure normal operation. The comment
+  must warn that it conflicts with YAML when the YAML key is present.
 - `docs/configuration.md`: document YAML as the default source and env as an
   override subject to conflict policy.
 - `docs/config-reference.md`: add the YAML binding row.
@@ -209,6 +246,14 @@ Add or update focused tests:
   - `run_entry()` uses config threshold rather than direct env lookup;
   - threshold `0.0` makes any missing price fatal;
   - threshold `1.0` preserves legacy all-missing fatal behavior.
+  - fake `load_config()` fixtures include the new threshold attribute or use the
+    real `Config` shape.
+- Entry report/automation behavior:
+  - entry report `config_snapshot` includes `entry_fatal_missing_price_ratio`;
+  - manual AI Brief artifact upload includes the entry report after a fatal
+    missing-price exit when the report was produced;
+  - scheduled entry failure diagnostics include the written entry report path
+    when a report was produced before the non-zero status.
 - Docs contract:
   - `docs/config-reference.md` includes the new binding;
   - `.env.example` mentions the override but does not activate it;
@@ -262,15 +307,29 @@ for safe entry/regime gating is missing.
 - `load_config()` on repository `config.yaml` returns:
   - `market_regime_unavailable_policy == "block_market"`
   - `entry_fatal_missing_price_ratio == 0.0`
+- A custom config that omits `strategy.market_regime_unavailable_policy` keeps
+  the code-level compatibility default `warn_continue`.
+- A custom config that omits `entry_check.fatal_missing_price_ratio` keeps the
+  code-level compatibility default `1.0`.
 - Defining `ENTRY_FATAL_MISSING_PRICE_RATIO` while YAML also defines
   `entry_check.fatal_missing_price_ratio` raises `ConfigLoadError`.
+- Defining `MARKET_REGIME_UNAVAILABLE_POLICY` while YAML also defines
+  `strategy.market_regime_unavailable_policy` continues to raise
+  `ConfigLoadError`.
 - `sab entry` uses `cfg.entry_fatal_missing_price_ratio`.
 - Missing one entry price is fatal under active defaults.
+- Fatal entry reports include `entry_fatal_missing_price_ratio` in their config
+  snapshot.
+- Manual and scheduled automation keep the written entry report discoverable
+  when missing entry prices make `sab entry` exit non-zero.
+- `block_market` excludes affected market candidates but still writes scan
+  diagnostics rather than turning benchmark unavailability into an immediate CLI
+  failure.
 - Strategy/config docs match active defaults.
 - KIS interval docs no longer present `500ms` as the active default.
 
 ## Open Decisions
 
 None. Operators can still choose more permissive behavior explicitly by
-removing the YAML key and using env, or by changing the YAML value in a local
-uncommitted config file selected with `SAB_CONFIG`.
+removing the matching YAML key and using env, or by changing the YAML value in a
+local uncommitted config file selected with `SAB_CONFIG`.
