@@ -91,6 +91,19 @@ def test_env_example_uses_active_kis_interval_in_commented_override() -> None:
     assert "# KIS_MIN_INTERVAL_MS=500" not in text
 
 
+def test_env_example_conflict_check_treats_zero_yaml_values_as_present() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config_data = load_yaml_config(str(repo_root / "config.yaml")).raw
+
+    assert (
+        sab_config._from_nested(config_data, "entry_check.fatal_missing_price_ratio")
+        == 0.0
+    )
+    assert sab_config._yaml_path_exists(
+        config_data, "entry_check.fatal_missing_price_ratio"
+    )
+
+
 def test_env_example_active_keys_do_not_conflict_with_config() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     active_keys = set(_extract_env_keys(repo_root / ".env.example"))
@@ -98,7 +111,9 @@ def test_env_example_active_keys_do_not_conflict_with_config() -> None:
 
     conflicting_keys = []
     for env_key, yaml_path in sab_config._ENV_YAML_CONFLICT_BINDINGS:
-        if env_key in active_keys and sab_config._from_nested(config_data, yaml_path):
+        if env_key in active_keys and sab_config._yaml_path_exists(
+            config_data, yaml_path
+        ):
             conflicting_keys.append(env_key)
 
     assert not conflicting_keys

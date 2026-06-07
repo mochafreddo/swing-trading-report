@@ -2162,6 +2162,51 @@ def test_default_pipeline_entry_step_failure_mentions_written_entry_report(
         )
 
 
+def test_default_pipeline_entry_step_failure_mentions_last_written_entry_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/stale.entry.json")
+            callback("reports/current.entry.json")
+        return 1
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    with pytest.raises(RuntimeError) as exc:
+        DefaultScheduledPipeline()._run_entry_step(
+            market="US",
+            report_date="2026-05-28",
+            buy_report_path="reports/current.buy.json",
+            holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+        )
+
+    assert "scheduled entry failed" in str(exc.value)
+    assert "entry_report_path=reports/current.entry.json" in str(exc.value)
+    assert "reports/stale.entry.json" not in str(exc.value)
+
+
+def test_default_pipeline_entry_step_failure_mentions_not_produced_without_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_entry(**_kwargs: object) -> int:
+        return 1
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"scheduled entry failed \(entry_report_path=not produced\)",
+    ):
+        DefaultScheduledPipeline()._run_entry_step(
+            market="US",
+            report_date="2026-05-28",
+            buy_report_path="reports/current.buy.json",
+            holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+        )
+
+
 def test_default_pipeline_rechecks_pre_open_guard_before_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
