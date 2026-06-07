@@ -275,6 +275,26 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_from_yaml(
     assert cfg.entry_fatal_missing_price_ratio == 0.0
 
 
+def test_load_config_parses_entry_fatal_missing_price_ratio_upper_bound_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "entry_check:\n  fatal_missing_price_ratio: 1.0\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg.entry_fatal_missing_price_ratio == 1.0
+
+
 def test_load_config_parses_entry_fatal_missing_price_ratio_from_env(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -291,6 +311,48 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_from_env(
     cfg = load_config()
 
     assert cfg.entry_fatal_missing_price_ratio == 0.25
+
+
+def test_load_config_strict_mode_rejects_bool_entry_fatal_missing_price_ratio_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "entry_check:\n  fatal_missing_price_ratio: false\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
+
+    with pytest.raises(
+        ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
+    ):
+        load_config()
+
+
+def test_load_config_strict_mode_rejects_non_finite_entry_fatal_missing_price_ratio_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "nan")
+
+    with pytest.raises(
+        ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
+    ):
+        load_config()
 
 
 def test_load_config_strict_mode_rejects_invalid_entry_fatal_missing_price_ratio(
