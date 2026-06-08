@@ -238,6 +238,24 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     assert "entry_reports_before=" in run_entry_script
     assert "ENTRY_REPORTS_BEFORE" in run_entry_script
     assert "from sab.config import load_config" in run_entry_script
+    assert "entry_reports_before=\"$(uv run python - <<'PY'" in run_entry_script
+    assert (
+        'entry_report_path="$(ENTRY_REPORTS_BEFORE="${entry_reports_before}" '
+        "uv run python - <<'PY'"
+    ) in run_entry_script
+    assert (
+        "ENTRY_REPORT_PATH=\"${entry_report_path}\" uv run python - <<'PY'"
+        in run_entry_script
+    )
+    assert "entry_reports_before=\"$(python - <<'PY'" not in run_entry_script
+    assert (
+        "ENTRY_REPORTS_BEFORE=\"${entry_reports_before}\" python - <<'PY'"
+        not in run_entry_script
+    )
+    assert (
+        "ENTRY_REPORT_PATH=\"${entry_report_path}\" python - <<'PY'"
+        not in run_entry_script
+    )
     assert "report_dir = Path(load_config().report_dir)" in run_entry_script
     assert "report_dir = PurePosixPath(Path(load_config().report_dir).as_posix())" in (
         run_entry_script

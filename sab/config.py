@@ -146,6 +146,7 @@ def _yaml_path_exists(yaml_cfg: dict[str, Any], path: str) -> bool:
 _SAFETY_DOTTED_YAML_KEYS = frozenset(
     {
         "strategy.market_regime_unavailable_policy",
+        "strategy.use_market_regime_filter",
         "entry_check.fatal_missing_price_ratio",
     }
 )

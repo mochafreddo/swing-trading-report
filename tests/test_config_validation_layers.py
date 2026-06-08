@@ -430,6 +430,10 @@ def test_load_config_rejects_non_mapping_safety_sections_without_strict(
             "strategy.market_regime_unavailable_policy",
         ),
         (
+            "strategy.use_market_regime_filter: false\n",
+            "strategy.use_market_regime_filter",
+        ),
+        (
             "entry_check.fatal_missing_price_ratio: -1\n",
             "entry_check.fatal_missing_price_ratio",
         ),
@@ -448,6 +452,34 @@ def test_load_config_rejects_top_level_dotted_safety_keys_without_strict(
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
     with pytest.raises(ConfigLoadError, match=re.escape(path_name)) as exc:
+        load_config()
+    assert "top-level dotted key" in str(exc.value)
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+def test_load_config_rejects_top_level_dotted_market_regime_filter_with_env_override(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy.use_market_regime_filter: false\n"
+        "strategy:\n"
+        "  market_regime_unavailable_policy: block_market\n"
+        "entry_check:\n"
+        "  fatal_missing_price_ratio: 0.0\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("USE_MARKET_REGIME_FILTER", "false")
+
+    with pytest.raises(
+        ConfigLoadError, match=r"strategy\.use_market_regime_filter"
+    ) as exc:
         load_config()
     assert "top-level dotted key" in str(exc.value)
     assert "Strict config parsing failed" not in str(exc.value)
