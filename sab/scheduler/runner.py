@@ -4,11 +4,14 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import threading
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from types import TracebackType
 from typing import Protocol
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
@@ -114,6 +117,7 @@ _FAILED_STATUSES = {
     "artifact_marker_invalid",
     "late_alert_send_failed",
     "late_alert_sent_marker_failed",
+    "lock_lost_before_upload",
     "skip_artifact_upload_failed",
     "source_config_invalid",
     "unsupported_runner_role",
@@ -254,6 +258,8 @@ class SchedulerPipeline(Protocol):
 
 class SchedulerStorage(Protocol):
     def upload_ai_brief(self, report_path: str, *, report_date: str) -> str: ...
+
+    def upload_entry_report(self, report_path: str, *, report_date: str) -> str: ...
 
     def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str: ...
 
@@ -496,6 +502,32 @@ def _with_alert_run_context(
     return enriched
 
 
+def _late_alert_sent_key(*, market: str, session_date: str, reason: str) -> str:
+    return (
+        build_scheduler_state_key(
+            kind="late-alert:sent",
+            market=market,
+            session_date=session_date,
+        )
+        + f":{reason}"
+    )
+
+
+def _scheduled_entry_failure_artifact_key(*, market: str, session_date: str) -> str:
+    return build_scheduler_state_key(
+        kind="entry-failure-artifact",
+        market=market,
+        session_date=session_date,
+    )
+
+
+class _EntryFailureArtifactClaimHeld:
+    pass
+
+
+_ENTRY_FAILURE_ARTIFACT_CLAIM_HELD = _EntryFailureArtifactClaimHeld()
+
+
 def _runner_origin(runner_role: str) -> str:
     if runner_role.startswith("local-"):
         return "local"
@@ -515,6 +547,19 @@ def _runtime_state_storage_key(entry: RuntimeStateEntry | None) -> str | None:
     if entry is None:
         return None
     storage_key = str(entry.state_payload.get("storageKey") or "").strip()
+    return storage_key or None
+
+
+def _runtime_state_entry_report_storage_key(
+    entry: RuntimeStateEntry | None,
+) -> str | None:
+    if entry is None:
+        return None
+    storage_key = str(
+        entry.state_payload.get("entryReportStorageKey")
+        or entry.state_payload.get("storageKey")
+        or ""
+    ).strip()
     return storage_key or None
 
 
@@ -1274,7 +1319,7 @@ class ScheduledAiBriefRunner:
         )
         lock_renewer.start()
         pipeline_result: ScheduledPipelineResult | None = None
-        pipeline_failed = False
+        pipeline_error: Exception | None = None
         try:
             pipeline_result = self._pipeline.run(
                 market=market,
@@ -1285,22 +1330,23 @@ class ScheduledAiBriefRunner:
                 model_provider=model_provider,
                 dry_run=False,
             )
-        except Exception:
-            _LOGGER.exception(
-                "scheduled AI brief pipeline failed "
-                "market=%s session_date=%s schedule_role=%s runner_role=%s "
-                "attempt_id=%s",
-                market,
-                session_date,
-                schedule_role,
-                runner_role,
-                attempt_id,
-            )
-            pipeline_failed = True
+        except Exception as err:
+            pipeline_error = err
         finally:
             lock_renewer.stop()
 
-        if pipeline_failed or pipeline_result is None:
+        if pipeline_error is not None:
+            return self._handle_locked_pipeline_exception(
+                market=market,
+                session_date=session_date,
+                attempt_id=attempt_id,
+                lock_key=lock_key,
+                owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                error=pipeline_error,
+            )
+        if pipeline_result is None:
             return self._handle_locked_pipeline_failure(
                 market=market,
                 session_date=session_date,
@@ -1400,6 +1446,243 @@ class ScheduledAiBriefRunner:
             )
         return result
 
+    def _handle_locked_pipeline_exception(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        attempt_id: str,
+        lock_key: str,
+        owner_token: str,
+        schedule_role: str,
+        runner_role: str,
+        error: Exception,
+    ) -> ScheduledAiBriefResult:
+        failure_is_scheduled_entry, failure_context = (
+            _scheduled_entry_failure_diagnostic(error)
+        )
+        failure_alert_reason = "pipeline_failed"
+        if failure_is_scheduled_entry:
+            failure_alert_reason = _SCHEDULED_ENTRY_FAILURE_ALERT_REASON
+            entry_report_upload_path = _scheduled_entry_failure_upload_path(error)
+            if entry_report_upload_path is not None:
+                try:
+                    entry_report_upload = (
+                        self._upload_scheduled_entry_failure_report_once(
+                            market=market,
+                            session_date=session_date,
+                            schedule_role=schedule_role,
+                            runner_role=runner_role,
+                            attempt_id=attempt_id,
+                            lock_key=lock_key,
+                            owner_token=owner_token,
+                            report_path=entry_report_upload_path,
+                        )
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "scheduled entry failure report upload failed "
+                        "market=%s session_date=%s schedule_role=%s "
+                        "runner_role=%s attempt_id=%s report_path=%s",
+                        market,
+                        session_date,
+                        schedule_role,
+                        runner_role,
+                        attempt_id,
+                        entry_report_upload_path,
+                    )
+                    failure_context["entryReportUploadStatus"] = "failed"
+                else:
+                    if isinstance(entry_report_upload, ScheduledAiBriefResult):
+                        self._log_locked_pipeline_exception(
+                            market=market,
+                            session_date=session_date,
+                            schedule_role=schedule_role,
+                            runner_role=runner_role,
+                            attempt_id=attempt_id,
+                            error=error,
+                        )
+                        return entry_report_upload
+                    if isinstance(entry_report_upload, _EntryFailureArtifactClaimHeld):
+                        failure_alert_reason = "pipeline_failed"
+                        failure_context = {}
+                    elif entry_report_upload is not None:
+                        failure_context["entryReportStorageKey"] = entry_report_upload
+
+        self._log_locked_pipeline_exception(
+            market=market,
+            session_date=session_date,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            attempt_id=attempt_id,
+            error=error,
+        )
+        return self._handle_locked_pipeline_failure(
+            market=market,
+            session_date=session_date,
+            attempt_id=attempt_id,
+            lock_key=lock_key,
+            owner_token=owner_token,
+            schedule_role=schedule_role,
+            runner_role=runner_role,
+            reason="pipeline_failed",
+            alert_reason=failure_alert_reason,
+            failure_context=failure_context,
+        )
+
+    def _log_locked_pipeline_exception(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        error: Exception,
+    ) -> None:
+        safe_log_message = _scheduled_entry_failure_log_message(error)
+        if safe_log_message is None:
+            _LOGGER.error(
+                "scheduled AI brief pipeline failed "
+                "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                "attempt_id=%s",
+                market,
+                session_date,
+                schedule_role,
+                runner_role,
+                attempt_id,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+            return
+
+        _LOGGER.error(
+            "scheduled AI brief pipeline failed "
+            "market=%s session_date=%s schedule_role=%s runner_role=%s "
+            "attempt_id=%s error_type=%s error=%s",
+            market,
+            session_date,
+            schedule_role,
+            runner_role,
+            attempt_id,
+            type(error).__name__,
+            safe_log_message,
+            exc_info=_scheduled_entry_failure_exc_info(error, safe_log_message),
+        )
+
+    def _upload_scheduled_entry_failure_report_once(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        lock_key: str,
+        owner_token: str,
+        report_path: str,
+    ) -> str | ScheduledAiBriefResult | _EntryFailureArtifactClaimHeld | None:
+        if not self._state_store.renew_lock(
+            lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+        ):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+            )
+        artifact_key = _scheduled_entry_failure_artifact_key(
+            market=market,
+            session_date=session_date,
+        )
+        existing_storage_key = _runtime_state_storage_key(
+            self._state_store.get_entry(artifact_key)
+        )
+        if existing_storage_key:
+            return existing_storage_key
+        sent_storage_key = _runtime_state_entry_report_storage_key(
+            self._state_store.get_entry(
+                _late_alert_sent_key(
+                    market=market,
+                    session_date=session_date,
+                    reason=_SCHEDULED_ENTRY_FAILURE_ALERT_REASON,
+                )
+            )
+        )
+        if sent_storage_key:
+            return sent_storage_key
+
+        claim_key = build_scheduler_state_key(
+            kind="entry-failure-artifact:claim",
+            market=market,
+            session_date=session_date,
+        )
+        claim_owner_token = f"entry-failure-artifact-{uuid.uuid4().hex}"
+        now = self._now_fn()
+        claim = self._state_store.claim_lock(
+            key=claim_key,
+            owner_token=claim_owner_token,
+            ttl_seconds=_LATE_ALERT_CLAIM_TTL_SECONDS,
+            now=now,
+            payload={
+                "market": market,
+                "sessionDate": session_date,
+                "reason": _SCHEDULED_ENTRY_FAILURE_ALERT_REASON,
+                "scheduleRole": schedule_role,
+                "runnerRole": runner_role,
+                "attemptId": attempt_id,
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            existing_storage_key = _runtime_state_storage_key(
+                self._state_store.get_entry(artifact_key)
+            )
+            if existing_storage_key:
+                return existing_storage_key
+            return _ENTRY_FAILURE_ARTIFACT_CLAIM_HELD
+
+        try:
+            existing_storage_key = _runtime_state_storage_key(
+                self._state_store.get_entry(artifact_key)
+            )
+            if existing_storage_key:
+                return existing_storage_key
+            storage_key = self._storage.upload_entry_report(
+                report_path,
+                report_date=session_date,
+            )
+            if not self._state_store.check_ownership(
+                lock_key,
+                owner_token=owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
+            self._state_store.upsert_marker(
+                key=artifact_key,
+                payload={
+                    "storageKey": storage_key,
+                    "market": market,
+                    "sessionDate": session_date,
+                    "reportDate": session_date,
+                    "entryReportPath": report_path,
+                    "reason": _SCHEDULED_ENTRY_FAILURE_ALERT_REASON,
+                    "scheduleRole": schedule_role,
+                    "runnerRole": runner_role,
+                    "attemptId": attempt_id,
+                },
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+            return storage_key
+        finally:
+            self._state_store.release_lock(claim_key, owner_token=claim_owner_token)
+
     def _handle_locked_pipeline_failure(
         self,
         *,
@@ -1412,6 +1695,8 @@ class ScheduledAiBriefRunner:
         schedule_role: str | None = None,
         runner_role: str | None = None,
         storage_key: str | None = None,
+        alert_reason: str | None = None,
+        failure_context: dict[str, object] | None = None,
     ) -> ScheduledAiBriefResult:
         self._state_store.release_lock(lock_key, owner_token=owner_token)
         context: dict[str, object] = {
@@ -1425,10 +1710,12 @@ class ScheduledAiBriefRunner:
             context["runnerRole"] = runner_role
         if storage_key is not None:
             context["storageKey"] = storage_key
+        if failure_context:
+            context.update(failure_context)
         self._send_late_alert_once(
             market=market,
             session_date=session_date,
-            reason=reason,
+            reason=alert_reason or reason,
             context=context,
             now=self._now_fn(),
         )
@@ -2139,13 +2426,10 @@ class ScheduledAiBriefRunner:
         context: dict[str, object],
         now: dt.datetime,
     ) -> str:
-        sent_key = (
-            build_scheduler_state_key(
-                kind="late-alert:sent",
-                market=market,
-                session_date=session_date,
-            )
-            + f":{reason}"
+        sent_key = _late_alert_sent_key(
+            market=market,
+            session_date=session_date,
+            reason=reason,
         )
         if self._state_store.get_entry(sent_key) is not None:
             return "late_alert_already_sent"
@@ -2212,6 +2496,464 @@ class ScheduledAiBriefRunner:
             return "late_alert_sent"
         finally:
             self._state_store.release_lock(claim_key, owner_token=owner_token)
+
+
+_SCHEDULED_ENTRY_FAILURE_ALERT_REASON = "scheduled_entry_failed"
+_SCHEDULED_ENTRY_FAILURE_TOKEN = "scheduled entry failed"
+_SCHEDULED_ENTRY_FAILURE_TOKEN_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])scheduled[^A-Za-z0-9]*entry[^A-Za-z0-9]*failed(?![A-Za-z0-9])"
+)
+_SCHEDULED_ENTRY_FAILURE_PREFIX = (
+    f"{_SCHEDULED_ENTRY_FAILURE_TOKEN} (entry_report_path="
+)
+_SCHEDULED_ENTRY_FAILURE_SUFFIX = ")"
+_ENTRY_REPORT_JSON_SUFFIX = ".entry.json"
+_SCHEDULED_ENTRY_FAILURE_SENTINELS = frozenset({"not produced", "unsafe"})
+_SCHEDULED_ENTRY_FAILURE_LOG_PREFIXES = (
+    _SCHEDULED_ENTRY_FAILURE_PREFIX,
+    f"wrapper: {_SCHEDULED_ENTRY_FAILURE_PREFIX}",
+    f"entry wrapper: {_SCHEDULED_ENTRY_FAILURE_PREFIX}",
+)
+_ENTRY_REPORT_PATH_LABEL_PATTERN = re.compile(r"entry_report_path\s*=", re.IGNORECASE)
+_ENTRY_REPORT_PATH_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9._/-])"
+    r"(?:file:/*|[A-Za-z]:[\\/]|\\\\[^\\/\r\n]+[\\/]|/|~/|\./|\.\./|reports[\\/])"
+    r"[^\r\n]*?\.entry\.json(?:[^\s\r\n]*)?",
+    re.IGNORECASE,
+)
+_SAFE_ENTRY_REPORT_PATH_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/"
+)
+_ENTRY_REPORT_PATH_SLASH_LIKE_CHARS = frozenset(
+    {
+        "\u2044",  # fraction slash
+        "\u2215",  # division slash
+        "\u2216",  # set minus
+        "\u2571",  # box drawings light diagonal upper right to lower left
+        "\u29f8",  # big solidus
+        "\uff0f",  # fullwidth solidus
+    }
+)
+
+
+class _ScheduledEntryStepError(RuntimeError):
+    def __init__(self, entry_report_path: str) -> None:
+        normalized = _strip_scheduled_entry_failure_log_boundaries(entry_report_path)
+        normalized_lower = normalized.lower()
+        prefix = _SCHEDULED_ENTRY_FAILURE_PREFIX
+        if normalized_lower.startswith(prefix) and normalized.endswith(
+            _SCHEDULED_ENTRY_FAILURE_SUFFIX
+        ):
+            entry_report_path = normalized[
+                len(prefix) : -len(_SCHEDULED_ENTRY_FAILURE_SUFFIX)
+            ]
+        self.entry_report_path = entry_report_path
+        super().__init__(
+            f"scheduled entry failed (entry_report_path={entry_report_path})"
+        )
+
+
+def _scheduled_entry_failure_report_path_from_message(message: str) -> str | None:
+    normalized = _strip_scheduled_entry_failure_log_boundaries(message)
+    normalized_lower = normalized.lower()
+    for prefix in _SCHEDULED_ENTRY_FAILURE_LOG_PREFIXES:
+        if not normalized_lower.startswith(prefix):
+            continue
+        value_start = len(prefix)
+        value_end = normalized.find(_SCHEDULED_ENTRY_FAILURE_SUFFIX, value_start)
+        if value_end >= 0:
+            return normalized[value_start:value_end]
+    return None
+
+
+def _scheduled_entry_failure_context_from_report_path(
+    report_path: str,
+) -> dict[str, object]:
+    if report_path in _SCHEDULED_ENTRY_FAILURE_SENTINELS:
+        return {
+            "failureDetail": "scheduled entry failed",
+            "entryReportPath": report_path,
+        }
+    if not _is_safe_entry_report_path(report_path):
+        return {}
+    return {
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": report_path,
+    }
+
+
+def _scheduled_entry_failure_diagnostic(
+    error: Exception,
+) -> tuple[bool, dict[str, object]]:
+    for current in _iter_exception_diagnostic_errors(error):
+        if not isinstance(current, _ScheduledEntryStepError):
+            continue
+        report_path = current.entry_report_path
+        context = _scheduled_entry_failure_context_from_report_path(report_path)
+        if context:
+            return True, context
+        return True, {}
+    return False, {}
+
+
+def _scheduled_entry_failure_upload_path(error: Exception) -> str | None:
+    for current in _iter_exception_diagnostic_errors(error):
+        if not isinstance(current, _ScheduledEntryStepError):
+            continue
+        report_path = current.entry_report_path
+        if _is_safe_entry_report_path(report_path):
+            return report_path
+    return None
+
+
+def _iter_exception_diagnostic_errors(error: BaseException) -> list[BaseException]:
+    errors: list[BaseException] = []
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        errors.append(current)
+
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None and not current.__suppress_context__:
+            pending.append(current.__context__)
+    return errors
+
+
+def _iter_exception_diagnostic_messages(error: BaseException) -> list[str]:
+    messages: list[str] = []
+    for current in _iter_exception_diagnostic_errors(error):
+        message = str(current)
+        if message:
+            messages.append(message)
+        for note in getattr(current, "__notes__", ()):
+            note_text = str(note)
+            if note_text:
+                messages.append(note_text)
+    return messages
+
+
+def _is_scheduled_entry_failure_log_boundary_char(char: str) -> bool:
+    category = unicodedata.category(char)
+    return char.isspace() or category.startswith("C") or category.startswith("Z")
+
+
+def _strip_scheduled_entry_failure_log_boundaries(message: str) -> str:
+    start = 0
+    end = len(message)
+    while start < end and _is_scheduled_entry_failure_log_boundary_char(message[start]):
+        start += 1
+    while end > start and _is_scheduled_entry_failure_log_boundary_char(
+        message[end - 1]
+    ):
+        end -= 1
+    return message[start:end]
+
+
+def _normalize_log_char_for_entry_report_detection(char: str) -> str:
+    normalized = unicodedata.normalize("NFKC", char)
+    return "".join(
+        "/"
+        if normalized_char in _ENTRY_REPORT_PATH_SLASH_LIKE_CHARS
+        else normalized_char
+        for normalized_char in normalized
+    )
+
+
+def _normalized_text_with_original_offsets(message: str) -> tuple[str, list[int]]:
+    normalized_parts: list[str] = []
+    offsets: list[int] = []
+    for index, char in enumerate(message):
+        normalized_char = _normalize_log_char_for_entry_report_detection(char)
+        normalized_parts.append(normalized_char)
+        offsets.extend([index] * len(normalized_char))
+    return "".join(normalized_parts), offsets
+
+
+def _original_offset(
+    offsets: list[int], normalized_offset: int, *, fallback: int
+) -> int:
+    if normalized_offset >= len(offsets):
+        return fallback
+    return offsets[normalized_offset]
+
+
+def _original_end_offset(
+    offsets: list[int], normalized_offset: int, *, fallback: int
+) -> int:
+    if normalized_offset <= 0:
+        return 0
+    if normalized_offset > len(offsets):
+        return fallback
+    return offsets[normalized_offset - 1] + 1
+
+
+def _is_scheduled_entry_failure_log_message(message: str) -> bool:
+    normalized, _offsets = _normalized_text_with_original_offsets(message)
+    return _SCHEDULED_ENTRY_FAILURE_TOKEN_PATTERN.search(normalized) is not None
+
+
+def _entry_report_label_value_end(message: str, value_start: int) -> int:
+    entry_suffix_start = message.lower().find(_ENTRY_REPORT_JSON_SUFFIX, value_start)
+    if entry_suffix_start >= 0:
+        entry_suffix_end = entry_suffix_start + len(_ENTRY_REPORT_JSON_SUFFIX)
+        value_end = message.find(_SCHEDULED_ENTRY_FAILURE_SUFFIX, entry_suffix_end)
+        return len(message) if value_end < 0 else value_end
+
+    value_end = message.find(_SCHEDULED_ENTRY_FAILURE_SUFFIX, value_start)
+    return len(message) if value_end < 0 else value_end
+
+
+def _redact_entry_report_path_labels(message: str) -> tuple[str, bool]:
+    normalized, offsets = _normalized_text_with_original_offsets(message)
+    parts: list[str] = []
+    redacted = False
+    cursor = 0
+
+    for match in _ENTRY_REPORT_PATH_LABEL_PATTERN.finditer(normalized):
+        label_start = _original_offset(offsets, match.start(), fallback=len(message))
+        value_start = _original_offset(offsets, match.end(), fallback=len(message))
+        if label_start < cursor:
+            continue
+
+        value_end = _entry_report_label_value_end(message, value_start)
+
+        report_path = message[value_start:value_end]
+        report_hint = _scheduled_entry_report_hint(report_path)
+        parts.append(message[cursor:value_start])
+        parts.append(report_hint)
+        redacted = redacted or report_hint == "unsafe"
+        cursor = value_end
+
+    parts.append(message[cursor:])
+    return "".join(parts), redacted
+
+
+def _safe_entry_report_path_after_trimming_token_closers(candidate: str) -> bool:
+    trimmed = candidate.rstrip(_SCHEDULED_ENTRY_FAILURE_SUFFIX)
+    return trimmed != candidate and _is_safe_entry_report_path(trimmed)
+
+
+def _redact_unsafe_entry_report_path_tokens(message: str) -> tuple[str, bool]:
+    normalized, offsets = _normalized_text_with_original_offsets(message)
+    parts: list[str] = []
+    redacted = False
+    cursor = 0
+
+    for match in _ENTRY_REPORT_PATH_TOKEN_PATTERN.finditer(normalized):
+        candidate_start = _original_offset(
+            offsets,
+            match.start(),
+            fallback=len(message),
+        )
+        candidate_end = _original_end_offset(
+            offsets,
+            match.end(),
+            fallback=len(message),
+        )
+        if candidate_start < cursor:
+            continue
+        candidate = message[candidate_start:candidate_end]
+        if _scheduled_entry_report_hint(
+            candidate
+        ) != "unsafe" or _safe_entry_report_path_after_trimming_token_closers(
+            candidate
+        ):
+            continue
+        parts.append(message[cursor:candidate_start])
+        parts.append("unsafe")
+        redacted = True
+        cursor = candidate_end
+
+    parts.append(message[cursor:])
+    return "".join(parts), redacted
+
+
+def _scheduled_entry_failure_log_message_from_message(message: str) -> str | None:
+    normalized = _strip_scheduled_entry_failure_log_boundaries(message)
+    if not _is_scheduled_entry_failure_log_message(normalized):
+        return None
+
+    sanitized, label_redacted = _redact_entry_report_path_labels(normalized)
+    sanitized, token_redacted = _redact_unsafe_entry_report_path_tokens(sanitized)
+    redacted = label_redacted or token_redacted
+
+    normalized_lower = normalized.lower()
+    for prefix in _SCHEDULED_ENTRY_FAILURE_LOG_PREFIXES:
+        if normalized_lower.startswith(prefix) and normalized.endswith(
+            _SCHEDULED_ENTRY_FAILURE_SUFFIX
+        ):
+            return sanitized
+
+    if redacted:
+        if "entry_report_path=unsafe" not in sanitized:
+            sanitized = f"{sanitized} entry_report_path=unsafe"
+        return sanitized
+    return None
+
+
+def _scheduled_entry_failure_log_message(error: Exception) -> str | None:
+    for message in _iter_exception_diagnostic_messages(error):
+        safe_message = _scheduled_entry_failure_log_message_from_message(message)
+        if safe_message is not None:
+            return safe_message
+    return None
+
+
+def _redact_entry_report_path_references(message: str) -> str:
+    sanitized, _token_redacted = _redact_unsafe_entry_report_path_tokens(message)
+    label_sanitized, label_redacted = _redact_entry_report_path_labels(sanitized)
+    return label_sanitized if label_redacted else sanitized
+
+
+def _safe_exception_traceback_message(
+    error: BaseException, *, redact_entry_report_paths: bool
+) -> str:
+    message = str(error)
+    safe_message = _scheduled_entry_failure_log_message_from_message(message)
+    if safe_message is not None:
+        return safe_message
+    if redact_entry_report_paths:
+        return _redact_entry_report_path_references(message)
+    return message
+
+
+def _new_sanitized_exception_value(
+    error_type: type[BaseException], message: str
+) -> BaseException:
+    try:
+        return error_type(message)
+    except Exception:
+        return RuntimeError(f"{error_type.__name__}: {message}")
+
+
+def _new_sanitized_exception_group(
+    error_type: type[BaseException],
+    message: str,
+    exceptions: tuple[BaseException, ...],
+) -> BaseException:
+    try:
+        return error_type(message, exceptions)
+    except Exception:
+        return BaseExceptionGroup(message, exceptions)
+
+
+def _safe_exception_note(note_text: str, *, redact_entry_report_paths: bool) -> str:
+    safe_note = _scheduled_entry_failure_log_message_from_message(note_text)
+    if safe_note is not None:
+        return safe_note
+    if redact_entry_report_paths:
+        return _redact_entry_report_path_references(note_text)
+    return note_text
+
+
+def _clone_exception_for_sanitized_traceback(
+    error: BaseException,
+    seen: set[int] | None = None,
+    *,
+    redact_entry_report_paths: bool = False,
+) -> BaseException:
+    if seen is None:
+        seen = set()
+    error_id = id(error)
+    if error_id in seen:
+        return RuntimeError(f"{type(error).__name__}: <cycle>")
+    seen.add(error_id)
+
+    safe_message = _safe_exception_traceback_message(
+        error,
+        redact_entry_report_paths=redact_entry_report_paths,
+    )
+    if isinstance(error, BaseExceptionGroup):
+        child_exceptions = tuple(
+            _clone_exception_for_sanitized_traceback(
+                child,
+                seen,
+                redact_entry_report_paths=redact_entry_report_paths,
+            )
+            for child in error.exceptions
+        )
+        sanitized = _new_sanitized_exception_group(
+            type(error), safe_message, child_exceptions
+        ).with_traceback(error.__traceback__)
+    else:
+        sanitized = _new_sanitized_exception_value(
+            type(error), safe_message
+        ).with_traceback(error.__traceback__)
+    for note in getattr(error, "__notes__", ()):
+        sanitized.add_note(
+            _safe_exception_note(
+                str(note),
+                redact_entry_report_paths=redact_entry_report_paths,
+            )
+        )
+
+    if error.__cause__ is not None:
+        sanitized.__cause__ = _clone_exception_for_sanitized_traceback(
+            error.__cause__,
+            seen,
+            redact_entry_report_paths=redact_entry_report_paths,
+        )
+    if error.__context__ is not None and not error.__suppress_context__:
+        sanitized.__context__ = _clone_exception_for_sanitized_traceback(
+            error.__context__,
+            seen,
+            redact_entry_report_paths=redact_entry_report_paths,
+        )
+    sanitized.__suppress_context__ = error.__suppress_context__
+    return sanitized
+
+
+def _scheduled_entry_failure_exc_info(
+    error: Exception, safe_log_message: str
+) -> tuple[type[BaseException], BaseException, TracebackType | None]:
+    sanitized_error = _clone_exception_for_sanitized_traceback(
+        error,
+        redact_entry_report_paths=bool(safe_log_message),
+    )
+    return (type(error), sanitized_error, error.__traceback__)
+
+
+def _is_safe_entry_report_path(report_path: str) -> bool:
+    if (
+        not report_path
+        or "\\" in report_path
+        or unicodedata.normalize("NFKC", report_path) != report_path
+        or any(char not in _SAFE_ENTRY_REPORT_PATH_CHARS for char in report_path)
+        or any(
+            (category := unicodedata.category(char)).startswith("C")
+            or category in {"Zl", "Zp"}
+            for char in report_path
+        )
+    ):
+        return False
+    path = PurePosixPath(report_path)
+    if report_path != path.as_posix():
+        return False
+    return (
+        not path.is_absolute()
+        and ".." not in path.parts
+        and len(path.parts) >= 2
+        and path.parts[0] == "reports"
+        and path.name.endswith(".entry.json")
+    )
+
+
+def _scheduled_entry_report_hint(report_path: str | None) -> str:
+    if report_path is None:
+        return "not produced"
+    if report_path in _SCHEDULED_ENTRY_FAILURE_SENTINELS:
+        return report_path
+    if _is_safe_entry_report_path(report_path):
+        return report_path
+    return "unsafe"
 
 
 def _require_single_report_path(paths: list[str], *, report_type: str) -> str:
@@ -2307,12 +3049,10 @@ class DefaultScheduledPipeline:
                 report_path_callback=entry_report_paths.append,
             )
         if entry_status != 0:
-            report_hint = (
-                entry_report_paths[-1] if entry_report_paths else "not produced"
+            report_hint = _scheduled_entry_report_hint(
+                entry_report_paths[-1] if entry_report_paths else None
             )
-            raise RuntimeError(
-                f"scheduled entry failed (entry_report_path={report_hint})"
-            )
+            raise _ScheduledEntryStepError(report_hint)
         entry_report_path = _require_single_report_path(
             entry_report_paths, report_type="entry"
         )
@@ -2409,6 +3149,14 @@ class DefaultScheduledStorage:
         return upload_report_artifact(
             local_path=report_path,
             run_type="ai-brief",
+            report_date=dt.date.fromisoformat(report_date),
+            config=self._config,
+        )
+
+    def upload_entry_report(self, report_path: str, *, report_date: str) -> str:
+        return upload_report_artifact(
+            local_path=report_path,
+            run_type="entry",
             report_date=dt.date.fromisoformat(report_date),
             config=self._config,
         )

@@ -9,7 +9,7 @@
     "strategy_mode": "ema_cross",
     "use_sma200_filter": false,
     "use_market_regime_filter": false,
-    "market_regime_unavailable_policy": "warn_continue",
+    "market_regime_unavailable_policy": "block_market",
     "require_slope_up": false,
     "gap_atr_multiplier": 1.0,
     "min_history_bars": 30,

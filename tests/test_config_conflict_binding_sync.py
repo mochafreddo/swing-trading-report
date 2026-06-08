@@ -81,6 +81,15 @@ def _collect_env_keys_from_usage(module_path: Path) -> set[str]:
         ):
             keys.add(node.args[1].value)
 
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "_parse_fail_closed_bool"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            keys.add(node.args[1].value)
+
     return keys
 
 

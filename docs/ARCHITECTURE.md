@@ -144,7 +144,7 @@ flowchart LR
 9. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 10. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때 Supabase Storage 업로드 + `report_index` upsert를 수행합니다. Scheduled runner는 `sab ai-brief --report-date <sessionDate>`로 artifact date를 session date에 고정한 뒤 직접 AI Brief upload와 marker 기록을 수행합니다.
 11. `.github/workflows/ai-brief.yml`의 수동 `workflow_dispatch`는 기존 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → `ai-brief --upload` 흐름을 유지합니다. `sab entry`가 fatal missing-price 정책으로 non-zero 종료해도 이미 작성된 entry report는 workflow output과 별도 artifact upload step으로 노출해 진단 가능성을 유지합니다.
-12. Scheduled AI Brief primary는 macOS `launchd`가 host wrapper를 실행하고, wrapper가 role window guard 통과 후 one-shot Docker scheduler를 실행하는 구조입니다. Runner는 `runtime_state`에 `attempt`, `lock`, `artifact`, `skip-artifact`, `notification:claim`, `notification:sent`, `success`, `late-alert:*` marker를 기록해 같은 시장/session date 리포트와 알림을 dedupe합니다. Pipeline runner가 runtime guard에서 중단되면 정상 AI Brief 판단과 섞지 않고 `*.ai-brief-skip.json` artifact(`skip_state=RUNTIME_GUARD_SKIPPED`)를 Storage/`report_index`에 기록합니다.
+12. Scheduled AI Brief primary는 macOS `launchd`가 host wrapper를 실행하고, wrapper가 role window guard 통과 후 one-shot Docker scheduler를 실행하는 구조입니다. Runner는 `runtime_state`에 `attempt`, `lock`, `artifact`, `skip-artifact`, `entry-failure-artifact`, `notification:claim`, `notification:sent`, `success`, `late-alert:*` marker를 기록해 같은 시장/session date 리포트와 알림을 dedupe합니다. Pipeline runner가 runtime guard에서 중단되면 정상 AI Brief 판단과 섞지 않고 `*.ai-brief-skip.json` artifact(`skip_state=RUNTIME_GUARD_SKIPPED`)를 Storage/`report_index`에 기록합니다. Scheduled entry 실패 진단은 `DefaultScheduledPipeline`의 typed entry-step failure만 late-alert marker reason `scheduled_entry_failed`로 분리하고, 안전한 기본 `reports/...*.entry.json`은 main lock 소유권과 중복 marker를 확인한 뒤 `entry` artifact로 Storage/`report_index`에 업로드합니다. 업로드 후 marker/late-alert 전에도 main lock 소유권을 다시 확인해 오래된 runner가 성공한 fallback 뒤에 실패 상태를 게시하지 못하게 하고, 소유권이 유지될 때만 `entryReportStorageKey`를 late-alert/state에 남깁니다. DefaultScheduledPipeline이 unsafe path를 만든 경우에는 `unsafe` sentinel을 남기며 업로드하지 않습니다. 외부/원시 wrapper의 문자열 메시지는 scheduled entry 실패로 분류하지 않고, 로그에서만 맥락을 유지하되 unsafe raw path를 `entry_report_path=unsafe`로 축약합니다.
 13. GitHub Actions schedule은 US canary 기간에 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `resolve_context` job이 dependency-free boundary로 checkout 후 stdlib-only `sab/scheduler/schedule_policy.py`를 import해 cron mapping과 role window 정책으로 market/session_date/schedule_role/runner_role을 산출하고, scheduled job concurrency는 `market + session_date + schedule_role` 기준으로 묶되 cancel은 하지 않습니다. `github-fallback`은 같은 runtime_state lock/artifact marker를 사용하므로 로컬 primary와 동시 실행되어도 새 report 생성은 한 runner만 진행합니다. GitHub queue delay로 `github-fallback`이 명목 08:55 <= t < 09:25 ET window 이후 시작되면 09:29 ET 전까지만 bounded grace로 role guard를 통과시키며, PRE_OPEN/runtime_state guard는 그대로 적용합니다.
 
 ### 4.4 웹 리포트 조회 플로우
@@ -248,7 +248,7 @@ flowchart LR
 ## 7. 신뢰성/복구 설계
 
 - 설정/입력 Fail-Closed
-  - YAML 파싱 실패, 잘못된 루트 타입, 필수 설정 누락 시 즉시 실패
+  - YAML 파싱 실패, 중복 YAML key, 잘못된 루트 타입, 필수 설정 누락 시 즉시 실패
   - `kis.app_key`/`kis.app_secret`를 YAML에 저장하면 보안 정책 위반으로 실패
   - `GITHUB_ACTIONS=true`(또는 `CI=true`)에서는 strict config parsing을 강제 적용하며, 숫자/enum 오입력은 기본값으로 회귀하지 않고 즉시 실패
   - 로컬 운영에서도 `SAB_CONFIG_STRICT=true`를 설정하면 동일한 strict parsing 정책을 강제

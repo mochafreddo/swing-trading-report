@@ -254,7 +254,6 @@ jobs:
           AI_BRIEF_SOURCE_API_URL: ${{ needs.resolve_context.outputs.source_api_url }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
-          KIS_BASE_URL: ${{ vars.KIS_BASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
@@ -883,6 +882,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          entry_reports_before="$(python - <<'PY'
+          from pathlib import Path
+
+          for path in sorted(Path("reports").glob("*.entry.json")):
+              print(path.as_posix())
+          PY
+          )"
+
           set +e
           uv run -m sab entry \
             --provider "${{ steps.params.outputs.provider }}" \
@@ -895,11 +902,17 @@ jobs:
 
           entry_report_path="$(sed -n 's/.*Entry report written to: //p' entry.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${entry_report_path}" ]]; then
-            entry_report_path="$(python - <<'PY'
+            entry_report_path="$(ENTRY_REPORTS_BEFORE="${entry_reports_before}" python - <<'PY'
+          import os
           from pathlib import Path
 
+          before = set(os.environ["ENTRY_REPORTS_BEFORE"].splitlines())
           paths = sorted(
-              Path("reports").glob("*.entry.json"),
+              (
+                  p
+                  for p in Path("reports").glob("*.entry.json")
+                  if p.as_posix() not in before
+              ),
               key=lambda p: p.stat().st_mtime,
               reverse=True,
           )
@@ -908,13 +921,37 @@ jobs:
           )"
           fi
 
+          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
           if [[ -z "${entry_report_path}" || ! -f "${entry_report_path}" ]]; then
             echo "Entry report (*.entry.json) not found under reports/" >&2
             exit 1
           fi
 
-          echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"
-          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
+          ENTRY_REPORT_PATH="${entry_report_path}" python - <<'PY'
+          import os
+          from pathlib import PurePosixPath
+
+          entry_report_path = os.environ["ENTRY_REPORT_PATH"]
+          allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/")
+          path = PurePosixPath(entry_report_path)
+          if (
+              not entry_report_path
+              or "\\" in entry_report_path
+              or any(char not in allowed for char in entry_report_path)
+              or entry_report_path != path.as_posix()
+              or path.is_absolute()
+              or ".." in path.parts
+              or len(path.parts) < 2
+              or path.parts[0] != "reports"
+              or not path.name.endswith(".entry.json")
+          ):
+              raise SystemExit(
+                  "entry_report_path must stay under reports/ and end with .entry.json"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"entry_report_path={entry_report_path}\n")
+          PY
           if [[ "${entry_status}" -ne 0 ]]; then
             exit "${entry_status}"
           fi
@@ -923,8 +960,9 @@ jobs:
         if: failure() && steps.run_entry.outputs.entry_report_path != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ai-brief-entry-report-${{ github.run_id }}
+          name: ai-brief-entry-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.run_entry.outputs.entry_report_path }}
+          if-no-files-found: error
 
       - name: Run AI brief
         id: run_ai_brief

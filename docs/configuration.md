@@ -49,7 +49,7 @@
 |---|---:|---|---|---|---|---|
 | `KIS_APP_KEY` | yes for KIS calls | none | `replace-with-kis-app-key` | `sab`, GitHub Actions, scheduler | KIS Open API app key | Secret. Do not commit. |
 | `KIS_APP_SECRET` | yes for KIS calls | none | `replace-with-kis-app-secret` | `sab`, GitHub Actions, scheduler | KIS Open API app secret | Secret. Do not commit. |
-| `KIS_BASE_URL` | no | `config.yaml` `kis.base_url` | `https://openapi.koreainvestment.com:9443` | `sab` | KIS endpoint override | Env/YAML conflict binding. |
+| `KIS_BASE_URL` | no | `config.yaml` `kis.base_url` | `https://openapi.koreainvestment.com:9443` | `sab` | KIS endpoint override | Env/YAML conflict binding. Scheduled GitHub fallback does not forward `vars.KIS_BASE_URL`; change committed config intentionally. Scheduler runtime env override only works when the selected YAML config omits `kis.base_url`. |
 | `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200` | `sab` | Minimum KIS request interval | Env/YAML conflict binding. Use for rate-limit tuning. |
 | `SUPABASE_URL` | yes for web/upload | none | `https://example.supabase.co` | web, `sab` upload, workflows, scheduler | Supabase project URL | Do not expose real internal URL in docs. |
 | `SUPABASE_SECRET_KEY` | yes for server access | none | `sb_secret_replace_me` | web, workflows, scheduler | Recommended server-side Supabase key | Publishable key is rejected in server paths. |
@@ -103,7 +103,7 @@
 | `LOG_FORMAT` | no | text format | `json` | CLI/scheduler | Logging format | Scheduler compose sets JSON. |
 | `LOG_DATEFMT` | no | ISO-like default | `%Y-%m-%dT%H:%M:%S%z` | CLI | Logging date format | Optional. |
 | `LOG_TZ` | no | `local` | `utc` | CLI/scheduler | Log timezone | `local` or `utc`. |
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | `config.yaml` `entry_check.fatal_missing_price_ratio`; code fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | loaded YAML active default `0.0`; no-config legacy fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
 | `SAB_CONFIG` | no | `config.yaml` | `config.local.yaml` | `sab` | Config file path override | Do not commit local config. |
 | `SAB_CONFIG_STRICT` | no | true in CI/GHA | `true` | `sab` | Strict config parsing | Recommended for reproducing CI locally. |
 
@@ -111,7 +111,9 @@
 
 `config.yaml` is committed and contains non-secret defaults such as provider, report/data directories, screener thresholds, strategy parameters, sell rules, entry check settings, universe markets, holdings/watchlist file names, and FX mode.
 
-Use `config.local.yaml` plus `SAB_CONFIG=config.local.yaml` for local experiments that should not be committed.
+YAML mapping keys must be unique at every level; duplicate keys fail closed instead of letting a later key mask an earlier safety setting. Empty top-level `strategy:` and `entry_check:` sections are rejected instead of falling back to code defaults. Valid nested safety values are accepted, but `null` or invalid values are rejected, for example `fatal_missing_price_ratio: null` under `entry_check:`.
+
+Use `config.local.yaml` plus `SAB_CONFIG=config.local.yaml` for local experiments that should not be committed. When any YAML config is loaded, omitted operational safety keys inherit the active safety defaults: `strategy.use_market_regime_filter=true`, `strategy.market_regime_unavailable_policy=block_market`, and `entry_check.fatal_missing_price_ratio=0.0`. Set those keys explicitly only when the local experiment intentionally changes the safety posture.
 
 ## Secret handling
 

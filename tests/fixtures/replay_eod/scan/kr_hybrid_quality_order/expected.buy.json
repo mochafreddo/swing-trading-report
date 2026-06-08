@@ -9,7 +9,7 @@
     "strategy_mode": "sma_ema_hybrid",
     "use_sma200_filter": false,
     "use_market_regime_filter": false,
-    "market_regime_unavailable_policy": "warn_continue",
+    "market_regime_unavailable_policy": "block_market",
     "gap_atr_multiplier": 1.0,
     "min_history_bars": 30,
     "rs_lookback_days": 5,

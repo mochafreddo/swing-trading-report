@@ -1,12 +1,12 @@
-상태: Backlog
+상태: Accepted
 
 # Swing Operational Safety Defaults Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** This plan has been implemented. The completed steps are tracked with checked checkbox (`- [x]`) syntax.
 
 **Goal:** Make swing operational safety defaults explicit in YAML, fail closed for active market-regime and entry price-missing checks, and keep fatal entry diagnostics visible in automation.
 
-**Architecture:** Keep the current scan and entry orchestration shape. `sab/config.py` owns non-secret safety policy parsing and env/YAML conflict detection, `sab.entry` consumes the parsed threshold and writes it to the entry report snapshot, and workflow/scheduler code preserves report diagnostics when entry exits non-zero. Documentation and examples are updated in the same change so operators see one active default set.
+**Architecture:** Keep the current scan and entry orchestration shape. `sab/config.py` owns non-secret safety policy parsing and env/YAML conflict detection, `sab.entry` consumes the parsed threshold and writes it to the entry report snapshot, and workflow/scheduler code preserves report diagnostics when entry exits non-zero. Scheduler-recognized scheduled-entry diagnostics redact unsafe paths; the manual workflow preserves the produced report artifact path for operator diagnosis. Documentation and examples are updated in the same change so operators see one active default set.
 
 **Tech Stack:** Python dataclasses, pytest, existing `sab` config loader, existing entry report writer, GitHub Actions YAML, repository `uv` and `just` task runners.
 
@@ -16,12 +16,20 @@
 
 This plan intentionally keeps one implementation track. The code changes touch config, entry reporting, automation diagnostics, and docs, but they are one operational-safety contract and must ship together so active defaults cannot change without observable diagnostics.
 
+## Implementation Result
+
+- Implemented on branch `swing-operational-safety-defaults`.
+- Active defaults now block missing market-regime benchmarks and fail entry on any missing price when any YAML config is loaded; local `SAB_CONFIG=config.local.yaml` files inherit the active safety defaults unless they explicitly override them.
+- `ENTRY_FATAL_MISSING_PRICE_RATIO` now flows through config loading and entry report snapshots instead of being parsed directly by `sab entry`.
+- Manual and scheduled AI Brief paths preserve fatal entry diagnostics; scheduled diagnostics keep safe default `reports/...*.entry.json` paths and use the `unsafe` sentinel for other path shapes when the failure is identified as a scheduled entry diagnostic. Follow-up review tightened invalid safety config handling, local config safety-default inheritance, scheduled late-alert/state/log diagnostics, post-upload lock ownership checks, and manual workflow entry path validation.
+- Verification evidence is recorded in Task 7 below.
+
 ## File Structure
 
 - Modify `sab/config.py`: add `entry_fatal_missing_price_ratio`, env/YAML conflict binding, parsing, validation, and composition.
 - Modify `sab/entry.py`: remove direct `ENTRY_FATAL_MISSING_PRICE_RATIO` parsing, use `cfg.entry_fatal_missing_price_ratio`, and include the threshold in entry `config_snapshot`.
 - Modify `.github/workflows/ai-brief.yml`: capture entry report path before exiting non-zero and upload the fatal entry artifact.
-- Modify `sab/scheduler/runner.py`: include the produced entry report path in scheduled entry failure diagnostics.
+- Modify `sab/scheduler/runner.py`: include the produced entry report path in scheduled entry failure diagnostics when it is a safe default `reports/...*.entry.json` path; otherwise use the `unsafe` sentinel.
 - Modify `config.yaml`: change active market-regime unavailable policy to `block_market` and add `entry_check.fatal_missing_price_ratio: 0.0`.
 - Modify `config.example.yaml`: align KIS interval example to the active `200` default and show the entry threshold key.
 - Modify `.env.example`: update commented override examples to avoid conflict confusion.
@@ -31,7 +39,7 @@ This plan intentionally keeps one implementation track. The code changes touch c
 - Test `tests/test_runtime_config_contract.py`: repository `config.yaml` loads the active safety defaults.
 - Test `tests/test_entry_command.py` and `tests/test_entry_upload.py`: `run_entry()` uses the config threshold and report snapshots include it.
 - Test `tests/test_ai_brief_workflow.py`: manual workflow preserves fatal entry artifact path and upload step.
-- Test `tests/test_scheduled_ai_brief_runner.py`: scheduled entry failure includes the written entry report path.
+- Test `tests/test_scheduled_ai_brief_runner.py`: scheduled entry failure includes a safe written entry report path and omits unsafe raw paths.
 - Test `tests/test_env_example_v11.py` and `tests/test_docs_state_contract.py`: docs/examples expose the new contracts and no active env example conflicts with YAML.
 
 ## Task 1: Config Entry Threshold Contract
@@ -41,7 +49,7 @@ This plan intentionally keeps one implementation track. The code changes touch c
 - Modify: `tests/test_config_conflict_policy.py`
 - Modify: `sab/config.py`
 
-- [ ] **Step 1: Write failing config parsing tests**
+- [x] **Step 1: Write failing config parsing tests**
 
 In `tests/test_config_validation_layers.py`, add `ENTRY_FATAL_MISSING_PRICE_RATIO` to `_reset_config_env()`:
 
@@ -130,7 +138,7 @@ def test_load_config_strict_mode_rejects_invalid_entry_fatal_missing_price_ratio
         load_config()
 
 
-def test_load_config_non_strict_invalid_entry_fatal_missing_price_ratio_falls_back(
+def test_load_config_rejects_negative_entry_fatal_missing_price_ratio_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -146,9 +154,10 @@ def test_load_config_non_strict_invalid_entry_fatal_missing_price_ratio_falls_ba
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
-    cfg = load_config()
-
-    assert cfg.entry_fatal_missing_price_ratio == 1.0
+    with pytest.raises(
+        ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
+    ):
+        load_config()
 ```
 
 In `tests/test_config_conflict_policy.py`, add `ENTRY_FATAL_MISSING_PRICE_RATIO` to `_reset_conflict_env()` and append:
@@ -178,7 +187,7 @@ def test_load_config_rejects_entry_fatal_missing_price_ratio_env_yaml_conflict(
         load_config()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -188,7 +197,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_laye
 
 Expected: FAIL with an `AttributeError` for `entry_fatal_missing_price_ratio` or missing conflict binding. The strict invalid test should also fail until range validation is added.
 
-- [ ] **Step 3: Implement config parsing and validation**
+- [x] **Step 3: Implement config parsing and validation**
 
 In `sab/config.py`, add this conflict binding near the existing entry-adjacent non-secret bindings:
 
@@ -215,11 +224,7 @@ Add this parser helper:
 ```python
 def _parse_entry_check_section(parser: _ConfigParser) -> _EntryCheckSection:
     return _EntryCheckSection(
-        fatal_missing_price_ratio=parser.env_float(
-            "ENTRY_FATAL_MISSING_PRICE_RATIO",
-            "entry_check.fatal_missing_price_ratio",
-            1.0,
-        )
+        fatal_missing_price_ratio=_parse_entry_fatal_missing_price_ratio(parser)
     )
 ```
 
@@ -271,7 +276,7 @@ validated_entry_check = replace(
         "entry_check.fatal_missing_price_ratio",
         entry_check.fatal_missing_price_ratio,
         default=1.0,
-        strict=strict,
+        strict=True,
     ),
 )
 ```
@@ -315,7 +320,7 @@ entry_check_section = _parse_entry_check_section(parser)
 
 and unpack/pass `validated_entry_check`.
 
-- [ ] **Step 4: Run config tests to verify they pass**
+- [x] **Step 4: Run config tests to verify they pass**
 
 Run:
 
@@ -325,7 +330,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_laye
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit config contract**
+- [x] **Step 5: Commit config contract**
 
 ```bash
 git add sab/config.py tests/test_config_validation_layers.py tests/test_config_conflict_policy.py
@@ -340,7 +345,7 @@ git commit -m "feat(config): entry 가격 누락 임계치 설정 추가" -m "EN
 - Modify: `tests/test_entry_portfolio_existing_holding.py`
 - Modify: `sab/entry.py`
 
-- [ ] **Step 1: Add failing entry behavior tests**
+- [x] **Step 1: Add failing entry behavior tests**
 
 In `tests/test_entry_upload.py`, add `entry_fatal_missing_price_ratio=1.0` to each `fake_cfg = SimpleNamespace(...)` block.
 
@@ -474,7 +479,7 @@ def test_run_entry_threshold_zero_fails_on_partial_missing_price(
 
 In `tests/test_entry_command.py` and `tests/test_entry_portfolio_existing_holding.py`, add `entry_fatal_missing_price_ratio=1.0` to every `fake_cfg = SimpleNamespace(...)` that is returned from a monkeypatched `sab.entry.load_config`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -484,7 +489,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_entry_upload.py tests/
 
 Expected: FAIL because `run_entry()` still reads `ENTRY_FATAL_MISSING_PRICE_RATIO` directly and `config_snapshot` does not include `entry_fatal_missing_price_ratio`.
 
-- [ ] **Step 3: Implement entry config consumption**
+- [x] **Step 3: Implement entry config consumption**
 
 In `sab/entry.py`, delete `_DEFAULT_ENTRY_FATAL_MISSING_PRICE_RATIO`, `_is_entry_strict_config_mode()`, and `_resolve_entry_fatal_missing_price_ratio()`.
 
@@ -502,7 +507,7 @@ In `run_entry()`, replace the try/except block that calls `_resolve_entry_fatal_
 fatal_missing_price_ratio = cfg.entry_fatal_missing_price_ratio
 ```
 
-- [ ] **Step 4: Run entry tests to verify they pass**
+- [x] **Step 4: Run entry tests to verify they pass**
 
 Run:
 
@@ -512,7 +517,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_entry_upload.py tests/
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit entry runtime changes**
+- [x] **Step 5: Commit entry runtime changes**
 
 ```bash
 git add sab/entry.py tests/test_entry_upload.py tests/test_entry_command.py tests/test_entry_portfolio_existing_holding.py
@@ -525,7 +530,7 @@ git commit -m "feat(entry): 설정 기반 가격 누락 실패 기준 적용" -m
 - Modify: `tests/test_runtime_config_contract.py`
 - Modify: `config.yaml`
 
-- [ ] **Step 1: Update failing runtime contract tests**
+- [x] **Step 1: Update failing runtime contract tests**
 
 In `tests/test_runtime_config_contract.py`, change the market-regime assertion and add the entry threshold assertion:
 
@@ -546,7 +551,7 @@ def test_repository_config_defaults_entry_fatal_missing_price_ratio(
     assert cfg.entry_fatal_missing_price_ratio == 0.0
 ```
 
-- [ ] **Step 2: Run runtime contract tests to verify they fail**
+- [x] **Step 2: Run runtime contract tests to verify they fail**
 
 Run:
 
@@ -554,11 +559,11 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_runtime_config_contract.py -q
 ```
 
-Expected: FAIL because active `config.yaml` still uses `warn_continue` and has no `entry_check.fatal_missing_price_ratio`.
+Initial expected result before Task 3 was implemented: FAIL, because `config.yaml` still used `warn_continue` and had no `entry_check.fatal_missing_price_ratio`. Accepted-state `config.yaml` now uses `block_market` and `entry_check.fatal_missing_price_ratio: 0.0`.
 
-- [ ] **Step 3: Update active config**
+- [x] **Step 3: Update active config**
 
-In `config.yaml`, change:
+Implementation changed `config.yaml` from:
 
 ```yaml
   market_regime_unavailable_policy: warn_continue
@@ -570,7 +575,7 @@ to:
   market_regime_unavailable_policy: block_market
 ```
 
-Under `entry_check:`, change:
+Under `entry_check:`, implementation changed:
 
 ```yaml
 entry_check:
@@ -585,7 +590,7 @@ entry_check:
   fatal_missing_price_ratio: 0.0
 ```
 
-- [ ] **Step 4: Run runtime and replay tests**
+- [x] **Step 4: Run runtime and replay tests**
 
 Run:
 
@@ -595,7 +600,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_runtime_config_contrac
 
 Expected: PASS. Replay fixtures use their own fixture `config.yaml`; if a replay expected JSON changes only because a fixture config was intentionally changed in this task, update the matching `tests/fixtures/replay_eod/scan/*/expected.buy.json` key and rerun this command.
 
-- [ ] **Step 5: Commit active defaults**
+- [x] **Step 5: Commit active defaults**
 
 ```bash
 git add config.yaml tests/test_runtime_config_contract.py tests/fixtures/replay_eod/scan
@@ -608,7 +613,7 @@ git commit -m "feat(config): 스윙 운영 안전 기본값 강화" -m "활성 c
 - Modify: `tests/test_ai_brief_workflow.py`
 - Modify: `.github/workflows/ai-brief.yml`
 
-- [ ] **Step 1: Add failing workflow structure test**
+- [x] **Step 1: Add failing workflow structure test**
 
 Append this test to `tests/test_ai_brief_workflow.py`:
 
@@ -622,9 +627,42 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
 
     assert "set +e" in run_entry_script
     assert "entry_status=${PIPESTATUS[0]}" in run_entry_script
-    assert 'echo "entry_report_path=${entry_report_path}"' in run_entry_script
-    assert 'echo "entry_status=${entry_status}"' in run_entry_script
+    assert (
+        'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'
+        in run_entry_script
+    )
+    assert (
+        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
+    )
     assert 'exit "${entry_status}"' in run_entry_script
+    capture_status_index = _script_index(
+        run_entry_script, "entry_status=${PIPESTATUS[0]}"
+    )
+    restore_errexit_index = run_entry_script.find("\nset -e\n", capture_status_index)
+    assert restore_errexit_index >= 0
+    status_output_index = _script_index(
+        run_entry_script,
+        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
+    )
+    missing_report_check_index = _script_index(
+        run_entry_script,
+        'if [[ -z "${entry_report_path}" || ! -f "${entry_report_path}" ]]',
+    )
+    report_path_output_index = _script_index(
+        run_entry_script,
+        'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"',
+    )
+    assert (
+        _script_index(run_entry_script, "set +e")
+        < _script_index(run_entry_script, "uv run -m sab entry")
+        < capture_status_index
+        < restore_errexit_index
+        < status_output_index
+        < missing_report_check_index
+        < report_path_output_index
+        < _script_index(run_entry_script, 'if [[ "${entry_status}" -ne 0 ]]')
+        < _script_index(run_entry_script, 'exit "${entry_status}"')
+    )
 
     upload_step = _find_step_by_name(steps, "Upload fatal entry artifact")
     assert "failure()" in str(upload_step.get("if") or "")
@@ -633,11 +671,14 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     )
     assert "actions/upload-artifact" in str(upload_step.get("uses") or "")
     upload_with = upload_step.get("with") or {}
-    assert upload_with.get("name") == "ai-brief-entry-report-${{ github.run_id }}"
+    assert upload_with.get("name") == (
+        "ai-brief-entry-report-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
     assert upload_with.get("path") == "${{ steps.run_entry.outputs.entry_report_path }}"
+    assert upload_with.get("if-no-files-found") == "error"
 ```
 
-- [ ] **Step 2: Run workflow test to verify it fails**
+- [x] **Step 2: Run workflow test to verify it fails**
 
 Run:
 
@@ -647,7 +688,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_workflow.py -
 
 Expected: FAIL because the `Run entry` step still exits before capturing status and there is no fatal-entry upload step.
 
-- [ ] **Step 3: Update workflow entry step**
+- [x] **Step 3: Update workflow entry step**
 
 In `.github/workflows/ai-brief.yml`, replace the entry command portion of `Run entry` with:
 
@@ -663,7 +704,13 @@ In `.github/workflows/ai-brief.yml`, replace the entry command portion of `Run e
           set -e
 ```
 
-Keep the existing `entry_report_path` extraction block. After:
+Keep the existing `entry_report_path` extraction block. Before the missing-report check, add:
+
+```bash
+          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
+```
+
+After:
 
 ```bash
           echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"
@@ -672,7 +719,6 @@ Keep the existing `entry_report_path` extraction block. After:
 add:
 
 ```bash
-          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
           if [[ "${entry_status}" -ne 0 ]]; then
             exit "${entry_status}"
           fi
@@ -685,11 +731,12 @@ Add this step immediately after `Run entry` and before `Run AI brief`:
         if: failure() && steps.run_entry.outputs.entry_report_path != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ai-brief-entry-report-${{ github.run_id }}
+          name: ai-brief-entry-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.run_entry.outputs.entry_report_path }}
+          if-no-files-found: error
 ```
 
-- [ ] **Step 4: Run workflow tests**
+- [x] **Step 4: Run workflow tests**
 
 Run:
 
@@ -699,7 +746,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_workflow.py -
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit workflow artifact change**
+- [x] **Step 5: Commit workflow artifact change**
 
 ```bash
 git add .github/workflows/ai-brief.yml tests/test_ai_brief_workflow.py
@@ -712,7 +759,7 @@ git commit -m "fix(workflow): fatal entry 리포트 artifact 보존" -m "AI Brie
 - Modify: `tests/test_scheduled_ai_brief_runner.py`
 - Modify: `sab/scheduler/runner.py`
 
-- [ ] **Step 1: Add failing scheduler diagnostic test**
+- [x] **Step 1: Add failing scheduler diagnostic test**
 
 Append this test near `test_default_pipeline_entry_step_helper_returns_single_entry_report()` in `tests/test_scheduled_ai_brief_runner.py`:
 
@@ -740,7 +787,7 @@ def test_default_pipeline_entry_step_failure_mentions_written_entry_report(
         )
 ```
 
-- [ ] **Step 2: Run scheduler test to verify it fails**
+- [x] **Step 2: Run scheduler test to verify it fails**
 
 Run:
 
@@ -750,7 +797,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_scheduled_ai_brief_run
 
 Expected: FAIL because `_run_entry_step()` raises `scheduled entry failed` without the report path.
 
-- [ ] **Step 3: Implement scheduled diagnostic message**
+- [x] **Step 3: Implement scheduled diagnostic message**
 
 In `sab/scheduler/runner.py`, replace:
 
@@ -763,13 +810,15 @@ with:
 
 ```python
         if entry_status != 0:
-            report_hint = entry_report_paths[-1] if entry_report_paths else "not produced"
+            report_hint = _scheduled_entry_report_hint(
+                entry_report_paths[-1] if entry_report_paths else None
+            )
             raise RuntimeError(
                 f"scheduled entry failed (entry_report_path={report_hint})"
             )
 ```
 
-- [ ] **Step 4: Run scheduler tests**
+- [x] **Step 4: Run scheduler tests**
 
 Run:
 
@@ -779,7 +828,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_scheduled_ai_brief_run
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit scheduled diagnostics**
+- [x] **Step 5: Commit scheduled diagnostics**
 
 ```bash
 git add sab/scheduler/runner.py tests/test_scheduled_ai_brief_runner.py
@@ -798,7 +847,7 @@ git commit -m "fix(scheduler): entry 실패 진단에 리포트 경로 포함" -
 - Modify: `docs/STRATEGY.md`
 - Modify: `docs/ARCHITECTURE.md`
 
-- [ ] **Step 1: Add failing docs/example tests**
+- [x] **Step 1: Add failing docs/example tests**
 
 In `tests/test_env_example_v11.py`, append:
 
@@ -832,7 +881,7 @@ In `tests/test_docs_state_contract.py`, extend `test_strategy_docs_include_swing
     assert "| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200`" in configuration_text
 ```
 
-- [ ] **Step 2: Run docs tests to verify they fail**
+- [x] **Step 2: Run docs tests to verify they fail**
 
 Run:
 
@@ -842,7 +891,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_env_example_v11.py tes
 
 Expected: FAIL because docs/examples still present entry fatal as env-only and KIS interval examples still show `500`.
 
-- [ ] **Step 3: Update `.env.example`**
+- [x] **Step 3: Update `.env.example`**
 
 Change:
 
@@ -875,7 +924,7 @@ Replace the market regime comment block with:
 # MARKET_REGIME_UNAVAILABLE_POLICY=block_market
 ```
 
-- [ ] **Step 4: Update `config.example.yaml`**
+- [x] **Step 4: Update `config.example.yaml`**
 
 Change:
 
@@ -901,7 +950,7 @@ Under `entry_check:`, add:
   fatal_missing_price_ratio: 0.0  # 0.0이면 entry price 누락 1건도 실패
 ```
 
-- [ ] **Step 5: Update config docs**
+- [x] **Step 5: Update config docs**
 
 In `docs/configuration.md`, update the `KIS_MIN_INTERVAL_MS` row so the example is `200`.
 
@@ -914,7 +963,7 @@ Update the `MARKET_REGIME_UNAVAILABLE_POLICY` row so the default column referenc
 Update the `ENTRY_FATAL_MISSING_PRICE_RATIO` row:
 
 ```markdown
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | `config.yaml` `entry_check.fatal_missing_price_ratio`; code fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | loaded YAML active default `0.0`; no-config legacy fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
 ```
 
 In `docs/config-reference.md`, replace:
@@ -926,7 +975,7 @@ In `docs/config-reference.md`, replace:
 with:
 
 ```markdown
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, 코드 fallback 1.0 |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, loaded YAML active default 0.0 |
 ```
 
 Add this row to the CLI Config Override Bindings table:
@@ -935,12 +984,12 @@ Add this row to the CLI Config Override Bindings table:
 | `ENTRY_FATAL_MISSING_PRICE_RATIO` | `entry_check.fatal_missing_price_ratio` | entry price 누락 fatal 임계치 |
 ```
 
-- [ ] **Step 6: Update strategy and architecture docs**
+- [x] **Step 6: Update strategy and architecture docs**
 
 In `docs/STRATEGY.md`, add this bullet under the `sab entry` report behavior section:
 
 ```markdown
-- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. 코드 fallback은 기존 호환성을 위해 `1.0`입니다.
+- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. YAML config가 로드되지 않는 legacy fallback만 기존 호환성을 위해 `1.0`입니다.
 ```
 
 In `docs/ARCHITECTURE.md`, extend the manual AI Brief flow note with:
@@ -949,7 +998,7 @@ In `docs/ARCHITECTURE.md`, extend the manual AI Brief flow note with:
 `sab entry`가 fatal missing-price 정책으로 non-zero 종료해도 이미 작성된 entry report는 workflow output과 별도 artifact upload step으로 노출해 진단 가능성을 유지합니다.
 ```
 
-- [ ] **Step 7: Run docs tests**
+- [x] **Step 7: Run docs tests**
 
 Run:
 
@@ -959,7 +1008,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_env_example_v11.py tes
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit docs/examples**
+- [x] **Step 8: Commit docs/examples**
 
 ```bash
 git add .env.example config.example.yaml docs/configuration.md docs/config-reference.md docs/STRATEGY.md docs/ARCHITECTURE.md tests/test_env_example_v11.py tests/test_docs_state_contract.py
@@ -971,7 +1020,7 @@ git commit -m "docs(config): 스윙 운영 안전 기본값 문서화" -m "entry
 **Files:**
 - Verify only; do not modify files in this task.
 
-- [ ] **Step 1: Run targeted regression suite**
+- [x] **Step 1: Run targeted regression suite**
 
 Run:
 
@@ -981,7 +1030,9 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_laye
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Python quality gate**
+Observed on 2026-06-08 after follow-up review fixes: PASS (`349 passed in 1.16s`).
+
+- [x] **Step 2: Run Python quality gate**
 
 Run:
 
@@ -997,7 +1048,9 @@ mise exec -- just quality
 
 Expected: PASS.
 
-- [ ] **Step 3: Review final diff**
+Observed on 2026-06-08 after follow-up review fixes: PASS. `just quality` completed `ruff check`, `ruff format --check`, `mypy`, and full pytest with `1595 passed in 5.67s`.
+
+- [x] **Step 3: Review final diff**
 
 Run:
 
@@ -1006,5 +1059,14 @@ git status --short
 git log --oneline -7
 ```
 
-Expected: working tree clean, with the six implementation commits from Tasks 1-6 on top of the design commits.
+Expected before merge: review the final diff and confirm no unrelated files are included. The working tree may remain unstaged during agent review.
 
+Additional observed checks on 2026-06-08 after follow-up review fixes:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/run_vulture.py
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_workflow.py tests/test_docs_state_contract.py tests/test_config_conflict_binding_sync.py -q
+just workflow-audit
+```
+
+Observed: PASS. The workflow/docs/conflict-sync targeted check reported `19 passed in 0.18s`; vulture and workflow audit completed without findings.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from sab import env_loader
 from sab.config import load_config
@@ -143,7 +145,74 @@ strategy:
         load_config()
 
 
-def test_load_config_defaults_market_regime_unavailable_policy(
+@pytest.mark.parametrize("env_value", ["maybe", ""])
+def test_load_config_rejects_invalid_market_regime_filter_env_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, env_value: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n"
+        "  use_market_regime_filter: true\n"
+        "  market_regime_unavailable_policy: block_market\n"
+        "entry_check:\n"
+        "  fatal_missing_price_ratio: 0.0\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("USE_MARKET_REGIME_FILTER", env_value)
+
+    with pytest.raises(ConfigLoadError, match="USE_MARKET_REGIME_FILTER"):
+        load_config()
+
+
+def test_load_config_rejects_invalid_market_regime_filter_yaml_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n"
+        "  use_market_regime_filter: maybe\n"
+        "  market_regime_unavailable_policy: block_market\n"
+        "entry_check:\n"
+        "  fatal_missing_price_ratio: 0.0\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=r"strategy\.use_market_regime_filter"):
+        load_config()
+
+
+def test_load_config_custom_yaml_inherits_active_safety_defaults(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.local.yaml"
+    config_path.write_text("data:\n  provider: kis\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+
+    assert cfg.use_market_regime_filter is True
+    assert cfg.market_regime_unavailable_policy == "block_market"
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
+
+
+def test_load_config_uses_active_market_regime_unavailable_policy_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -157,7 +226,7 @@ def test_load_config_defaults_market_regime_unavailable_policy(
 
     cfg = load_config()
 
-    assert cfg.market_regime_unavailable_policy == "warn_continue"
+    assert cfg.market_regime_unavailable_policy == "block_market"
 
 
 def test_load_config_parses_market_regime_unavailable_policy_from_yaml(
@@ -218,7 +287,7 @@ def test_load_config_normalizes_market_regime_unavailable_policy_from_env(
     assert cfg.market_regime_unavailable_policy == "block_market"
 
 
-def test_load_config_rejects_invalid_market_regime_unavailable_policy(
+def test_load_config_rejects_invalid_market_regime_unavailable_policy_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -232,13 +301,159 @@ def test_load_config_rejects_invalid_market_regime_unavailable_policy(
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
 
-    with pytest.raises(ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"):
+    with pytest.raises(
+        ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"
+    ) as exc:
+        load_config()
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+def test_load_config_rejects_invalid_market_regime_unavailable_policy_env_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", "maybe")
+
+    with pytest.raises(
+        ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"
+    ) as exc:
+        load_config()
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+def test_load_config_rejects_null_market_regime_unavailable_policy_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "strategy:\n  market_regime_unavailable_policy: null\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(
+        ConfigLoadError, match="MARKET_REGIME_UNAVAILABLE_POLICY"
+    ) as exc:
+        load_config()
+    assert "Strict config parsing failed" not in str(exc.value)
+    assert "config.yaml 'strategy.market_regime_unavailable_policy'" in str(exc.value)
+    assert "null" in str(exc.value)
+
+
+@pytest.mark.parametrize("yaml_text", ["strategy:\n", "entry_check:\n"])
+def test_load_config_rejects_empty_safety_sections_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, yaml_text: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match="must be a mapping"):
         load_config()
 
 
-def test_load_config_defaults_entry_fatal_missing_price_ratio(
+@pytest.mark.parametrize(
+    ("yaml_text", "section_name"),
+    [
+        ("strategy: {}\n", "strategy"),
+        ("entry_check: {}\n", "entry_check"),
+    ],
+)
+def test_load_config_rejects_empty_safety_mapping_sections_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, yaml_text: str, section_name: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=section_name) as exc:
+        load_config()
+    assert "must not be empty" in str(exc.value)
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "section_name"),
+    [
+        ("strategy: []\n", "strategy"),
+        ("strategy: warn_continue\n", "strategy"),
+        ("entry_check: []\n", "entry_check"),
+        ("entry_check: 1.0\n", "entry_check"),
+    ],
+)
+def test_load_config_rejects_non_mapping_safety_sections_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, yaml_text: str, section_name: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=section_name) as exc:
+        load_config()
+    assert "must be a mapping" in str(exc.value)
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "path_name"),
+    [
+        (
+            "strategy.market_regime_unavailable_policy: garbage\n",
+            "strategy.market_regime_unavailable_policy",
+        ),
+        (
+            "entry_check.fatal_missing_price_ratio: -1\n",
+            "entry_check.fatal_missing_price_ratio",
+        ),
+    ],
+)
+def test_load_config_rejects_top_level_dotted_safety_keys_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, yaml_text: str, path_name: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=re.escape(path_name)) as exc:
+        load_config()
+    assert "top-level dotted key" in str(exc.value)
+    assert "Strict config parsing failed" not in str(exc.value)
+
+
+def test_load_config_uses_active_entry_fatal_missing_price_ratio_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -252,7 +467,7 @@ def test_load_config_defaults_entry_fatal_missing_price_ratio(
 
     cfg = load_config()
 
-    assert cfg.entry_fatal_missing_price_ratio == 1.0
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
 
 
 def test_load_config_parses_entry_fatal_missing_price_ratio_from_yaml(
@@ -313,7 +528,7 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_from_env(
     assert cfg.entry_fatal_missing_price_ratio == 0.25
 
 
-def test_load_config_strict_mode_rejects_bool_entry_fatal_missing_price_ratio_from_yaml(
+def test_load_config_rejects_bool_entry_fatal_missing_price_ratio_from_yaml_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -327,7 +542,6 @@ def test_load_config_strict_mode_rejects_bool_entry_fatal_missing_price_ratio_fr
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
 
     with pytest.raises(
         ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
@@ -335,8 +549,31 @@ def test_load_config_strict_mode_rejects_bool_entry_fatal_missing_price_ratio_fr
         load_config()
 
 
-def test_load_config_strict_mode_rejects_non_finite_entry_fatal_missing_price_ratio_env(
+def test_load_config_rejects_null_entry_fatal_missing_price_ratio_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "entry_check:\n  fatal_missing_price_ratio: null\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(
+        ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
+    ) as exc:
+        load_config()
+    assert "null" in str(exc.value)
+
+
+@pytest.mark.parametrize("env_value", ["nan", "not-a-number"])
+def test_load_config_rejects_invalid_entry_fatal_missing_price_ratio_env_without_strict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, env_value: str
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
@@ -346,8 +583,7 @@ def test_load_config_strict_mode_rejects_non_finite_entry_fatal_missing_price_ra
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
-    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "nan")
+    monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", env_value)
 
     with pytest.raises(
         ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
@@ -355,7 +591,7 @@ def test_load_config_strict_mode_rejects_non_finite_entry_fatal_missing_price_ra
         load_config()
 
 
-def test_load_config_strict_mode_rejects_invalid_entry_fatal_missing_price_ratio(
+def test_load_config_rejects_out_of_range_entry_fatal_missing_price_ratio_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -369,7 +605,6 @@ def test_load_config_strict_mode_rejects_invalid_entry_fatal_missing_price_ratio
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
-    monkeypatch.setenv("SAB_CONFIG_STRICT", "1")
 
     with pytest.raises(
         ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
@@ -377,7 +612,7 @@ def test_load_config_strict_mode_rejects_invalid_entry_fatal_missing_price_ratio
         load_config()
 
 
-def test_load_config_non_strict_invalid_entry_fatal_missing_price_ratio_falls_back(
+def test_load_config_rejects_negative_entry_fatal_missing_price_ratio_without_strict(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -392,9 +627,10 @@ def test_load_config_non_strict_invalid_entry_fatal_missing_price_ratio_falls_ba
     _force_fallback_dotenv(monkeypatch)
     monkeypatch.setenv("SAB_CONFIG", str(config_path))
 
-    cfg = load_config()
-
-    assert cfg.entry_fatal_missing_price_ratio == 1.0
+    with pytest.raises(
+        ConfigLoadError, match=r"entry_check\.fatal_missing_price_ratio"
+    ):
+        load_config()
 
 
 def test_load_config_rejects_market_regime_policy_env_yaml_conflict(
