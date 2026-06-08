@@ -885,7 +885,10 @@ jobs:
           entry_reports_before="$(python - <<'PY'
           from pathlib import Path
 
-          for path in sorted(Path("reports").glob("*.entry.json")):
+          from sab.config import load_config
+
+          report_dir = Path(load_config().report_dir)
+          for path in sorted(report_dir.glob("*.entry.json")):
               print(path.as_posix())
           PY
           )"
@@ -906,11 +909,14 @@ jobs:
           import os
           from pathlib import Path
 
+          from sab.config import load_config
+
           before = set(os.environ["ENTRY_REPORTS_BEFORE"].splitlines())
+          report_dir = Path(load_config().report_dir)
           paths = sorted(
               (
                   p
-                  for p in Path("reports").glob("*.entry.json")
+                  for p in report_dir.glob("*.entry.json")
                   if p.as_posix() not in before
               ),
               key=lambda p: p.stat().st_mtime,
@@ -923,17 +929,28 @@ jobs:
 
           echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
           if [[ -z "${entry_report_path}" || ! -f "${entry_report_path}" ]]; then
-            echo "Entry report (*.entry.json) not found under reports/" >&2
+            echo "Entry report (*.entry.json) not found" >&2
             exit 1
           fi
 
           ENTRY_REPORT_PATH="${entry_report_path}" python - <<'PY'
           import os
-          from pathlib import PurePosixPath
+          from pathlib import Path, PurePosixPath
+
+          from sab.config import load_config
 
           entry_report_path = os.environ["ENTRY_REPORT_PATH"]
           allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/")
+          report_dir = PurePosixPath(Path(load_config().report_dir).as_posix())
           path = PurePosixPath(entry_report_path)
+          if (
+              not str(report_dir)
+              or "\\" in str(report_dir)
+              or any(char not in allowed for char in str(report_dir))
+              or report_dir.is_absolute()
+              or ".." in report_dir.parts
+          ):
+              raise SystemExit("configured report_dir must be a safe relative path")
           if (
               not entry_report_path
               or "\\" in entry_report_path
@@ -941,12 +958,12 @@ jobs:
               or entry_report_path != path.as_posix()
               or path.is_absolute()
               or ".." in path.parts
-              or len(path.parts) < 2
-              or path.parts[0] != "reports"
+              or len(path.parts) <= len(report_dir.parts)
+              or path.parts[: len(report_dir.parts)] != report_dir.parts
               or not path.name.endswith(".entry.json")
           ):
               raise SystemExit(
-                  "entry_report_path must stay under reports/ and end with .entry.json"
+                  "entry_report_path must be a safe relative path ending with .entry.json"
               )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
