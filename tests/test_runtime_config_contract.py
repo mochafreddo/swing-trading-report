@@ -12,6 +12,14 @@ def _load_repository_config(monkeypatch: pytest.MonkeyPatch):
     return load_config()
 
 
+def _load_example_config(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("SAB_CONFIG", "config.example.yaml")
+    for env_key, _yaml_path in _ENV_YAML_CONFLICT_BINDINGS:
+        monkeypatch.delenv(env_key, raising=False)
+    return load_config()
+
+
 def test_repository_config_evaluates_full_configured_screener_universe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -43,4 +51,14 @@ def test_repository_config_defaults_entry_fatal_missing_price_ratio(
 ) -> None:
     cfg = _load_repository_config(monkeypatch)
 
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
+
+
+def test_example_config_keeps_fail_closed_scan_safety_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _load_example_config(monkeypatch)
+
+    assert cfg.use_market_regime_filter is True
+    assert cfg.market_regime_unavailable_policy == "block_market"
     assert cfg.entry_fatal_missing_price_ratio == 0.0

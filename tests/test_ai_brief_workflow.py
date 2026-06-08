@@ -237,9 +237,23 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     assert "entry_status=${PIPESTATUS[0]}" in run_entry_script
     assert "entry_reports_before=" in run_entry_script
     assert "ENTRY_REPORTS_BEFORE" in run_entry_script
+    assert "from sab.config import load_config" in run_entry_script
+    assert "report_dir = Path(load_config().report_dir)" in run_entry_script
+    assert "report_dir = PurePosixPath(Path(load_config().report_dir).as_posix())" in (
+        run_entry_script
+    )
+    assert 'Path("reports").glob("*.entry.json")' not in run_entry_script
     assert "p.as_posix() not in before" in run_entry_script
     assert "ENTRY_REPORT_PATH=" in run_entry_script
-    assert "entry_report_path must stay under reports/" in run_entry_script
+    assert "path.parts[: len(report_dir.parts)] != report_dir.parts" in (
+        run_entry_script
+    )
+    assert 'path.parts[0] != "reports"' not in run_entry_script
+    assert (
+        "entry_report_path must be a safe relative path ending with .entry.json"
+        in run_entry_script
+    )
+    assert "entry_report_path must stay under reports/" not in run_entry_script
     assert 'out.write(f"entry_report_path={entry_report_path}\\n")' in run_entry_script
     assert (
         'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'

@@ -1768,12 +1768,18 @@ class ScheduledAiBriefRunner:
             return None
 
         try:
-            skip_key = self._persist_runtime_guard_skip(
+            skip_result = self._persist_runtime_guard_skip(
                 market=market,
                 session_date=session_date,
                 guard=pre_upload_guard,
                 run_url=run_url,
+                main_lock_key=lock_key,
+                main_owner_token=owner_token,
             )
+            if isinstance(skip_result, ScheduledAiBriefResult):
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
+                return skip_result
+            skip_key = skip_result
         except _SkipArtifactClaimHeld:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
             return ScheduledAiBriefResult(
@@ -1803,6 +1809,13 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
 
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=skip_key,
+            )
         self._state_store.release_lock(lock_key, owner_token=owner_token)
         self._send_late_alert_once(
             market=market,
@@ -1975,6 +1988,8 @@ class ScheduledAiBriefRunner:
                 guard=guard,
                 run_url=run_url,
             )
+            if isinstance(skip_key, ScheduledAiBriefResult):
+                return skip_key
         except _SkipArtifactClaimHeld:
             return ScheduledAiBriefResult(
                 status="skip_artifact_claim_held",
@@ -2077,7 +2092,9 @@ class ScheduledAiBriefRunner:
         session_date: str,
         guard: GuardSnapshot,
         run_url: str,
-    ) -> str:
+        main_lock_key: str | None = None,
+        main_owner_token: str | None = None,
+    ) -> str | ScheduledAiBriefResult:
         skip_artifact_key = build_scheduler_state_key(
             kind="skip-artifact",
             market=market,
@@ -2137,6 +2154,19 @@ class ScheduledAiBriefRunner:
                 report_path,
                 report_date=session_date,
             )
+            if (
+                main_lock_key is not None
+                and main_owner_token is not None
+                and not self._state_store.check_ownership(
+                    main_lock_key,
+                    owner_token=main_owner_token,
+                )
+            ):
+                return ScheduledAiBriefResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             self._state_store.upsert_marker(
                 key=skip_artifact_key,
                 payload={

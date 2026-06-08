@@ -1275,6 +1275,81 @@ def test_locked_upload_precheck_helper_persists_skip_artifact_before_upload() ->
     assert notifier.late_alerts[0][1]["attemptId"] == "attempt-upload-precheck-helper"
 
 
+def test_locked_upload_precheck_does_not_record_skip_or_alert_after_lock_loss() -> None:
+    state = _FakeStateStore(ownership_results=[True, False])
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        guard=_guard(session_state="INTRADAY"),
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_upload_precheck(
+        market="US",
+        session_date="2026-05-28",
+        run_url="https://github.com/owner/repo/actions/runs/5",
+        lock_key=lock_key,
+        owner_token="attempt-upload-precheck-lock-lost-owner",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-upload-precheck-lock-lost",
+    )
+
+    assert result is not None
+    assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    assert lock_key in state.releases
+    assert not any(":skip-artifact:US:2026-05-28" in key for key, _ in state.upserts)
+    assert "pre_upload_guard_failed" not in notifier.sent
+    assert notifier.late_alerts == []
+
+
+def test_locked_upload_precheck_does_not_alert_after_lock_loss_reusing_skip() -> None:
+    skip_key = build_scheduler_state_key(
+        kind="skip-artifact", market="US", session_date="2026-05-28"
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        entries={
+            skip_key: RuntimeStateEntry(
+                state_key=skip_key,
+                state_payload={"storageKey": "2026/05/2026-05-28.ai-brief-skip.json"},
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        },
+        ownership_results=[True, False],
+    )
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        guard=_guard(session_state="INTRADAY"),
+    )
+
+    result = runner._handle_locked_pipeline_upload_precheck(
+        market="US",
+        session_date="2026-05-28",
+        run_url="https://github.com/owner/repo/actions/runs/6",
+        lock_key=lock_key,
+        owner_token="attempt-upload-precheck-reuse-lock-lost-owner",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-upload-precheck-reuse-lock-lost",
+    )
+
+    assert result is not None
+    assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert storage.uploads == []
+    assert storage.skip_uploads == []
+    assert lock_key in state.releases
+    assert "pre_upload_guard_failed" not in notifier.sent
+    assert notifier.late_alerts == []
+
+
 def test_runner_rechecks_guard_after_notification_claim_before_sending() -> None:
     runner, state, _pipeline, storage, notifier = _runner(
         guard_sequence=[
