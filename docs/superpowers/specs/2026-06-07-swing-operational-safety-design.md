@@ -146,9 +146,10 @@ definitions. Operators who need a looser local policy should use a local YAML
 selected with `SAB_CONFIG`, or remove the YAML key from that local config before
 using the env override.
 
-Default contract: omitted custom configs keep the current code-level default
-`warn_continue` for backward compatibility. The active repository default comes
-from committed `config.yaml` and is `block_market`.
+Default contract: when any YAML config is loaded, omitted safety keys inherit
+the active safety defaults. `strategy.market_regime_unavailable_policy` defaults
+to `block_market` in that loaded-YAML path. Only the no-config legacy fallback
+keeps `warn_continue` for backward compatibility.
 
 Operational contract: `block_market` closes the market to candidates and records
 blocked-market diagnostics in the buy report. It is not a scan workflow failure
@@ -181,13 +182,14 @@ Parsing contract:
 - YAML path: `entry_check.fatal_missing_price_ratio`
 - Env override: `ENTRY_FATAL_MISSING_PRICE_RATIO`
 - Allowed range: finite float between `0.0` and `1.0`
-- Default when omitted: `1.0` for backward compatibility in custom configs
+- Default when omitted in a loaded YAML config: `0.0`
+- No-config legacy fallback: `1.0`
 - Active repository value: `0.0`
 - Conflict behavior: if YAML defines the threshold, direct env override fails
   closed; use a local YAML selected with `SAB_CONFIG` or remove the YAML key
   before relying on the env override.
-- Invalid values: strict config mode raises `ConfigLoadError`; non-strict mode
-  warns and falls back to the compatibility default `1.0`.
+- Invalid values: fail closed with `ConfigLoadError`; omitted values use the
+  active loaded-YAML default or the no-config legacy fallback described above.
 
 Behavior contract:
 
@@ -309,10 +311,10 @@ for safe entry/regime gating is missing.
 - `load_config()` on repository `config.yaml` returns:
   - `market_regime_unavailable_policy == "block_market"`
   - `entry_fatal_missing_price_ratio == 0.0`
-- A custom config that omits `strategy.market_regime_unavailable_policy` keeps
-  the code-level compatibility default `warn_continue`.
-- A custom config that omits `entry_check.fatal_missing_price_ratio` keeps the
-  code-level compatibility default `1.0`.
+- Loaded YAML configs with omitted custom safety keys inherit the active safety
+  defaults:
+  - `strategy.market_regime_unavailable_policy == "block_market"`
+  - `entry_fatal_missing_price_ratio == 0.0`
 - Defining `ENTRY_FATAL_MISSING_PRICE_RATIO` while YAML also defines
   `entry_check.fatal_missing_price_ratio` raises `ConfigLoadError`.
 - Defining `MARKET_REGIME_UNAVAILABLE_POLICY` while YAML also defines
