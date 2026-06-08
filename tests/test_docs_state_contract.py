@@ -198,3 +198,11 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
         "| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200`"
         in configuration_text
     )
+    assert (
+        "Scheduler runtime env override only works when the selected YAML config omits `kis.base_url`."
+        in configuration_text
+    )
+    assert (
+        "omitted operational safety keys inherit the active safety defaults"
+        in configuration_text
+    )

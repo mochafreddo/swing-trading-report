@@ -143,6 +143,17 @@ def _yaml_path_exists(yaml_cfg: dict[str, Any], path: str) -> bool:
     return _from_nested(yaml_cfg, path, sentinel) is not sentinel
 
 
+_SAFETY_DOTTED_YAML_KEYS = frozenset(
+    {
+        "strategy.market_regime_unavailable_policy",
+        "entry_check.fatal_missing_price_ratio",
+    }
+)
+_ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT = True
+_ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT = "block_market"
+_ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT = 0.0
+
+
 @dataclass(frozen=True)
 class HybridStrategyConfig:
     sma_trend_period: int = 20
@@ -334,19 +345,29 @@ def _is_strict_config_mode() -> bool:
 
 
 class _ConfigParser:
-    def __init__(self, yaml_cfg: dict[str, Any], *, strict: bool) -> None:
+    def __init__(
+        self, yaml_cfg: dict[str, Any], *, strict: bool, has_config_file: bool
+    ) -> None:
         self._yaml_cfg = yaml_cfg
         self._strict = strict
+        self._has_config_file = has_config_file
 
     @property
     def strict(self) -> bool:
         return self._strict
+
+    @property
+    def has_config_file(self) -> bool:
+        return self._has_config_file
 
     def from_yaml(self, path: str, default: Any = None) -> Any:
         return _from_nested(self._yaml_cfg, path, default)
 
     def has_yaml_path(self, path: str) -> bool:
         return _yaml_path_exists(self._yaml_cfg, path)
+
+    def has_top_level_yaml_key(self, key: str) -> bool:
+        return key in self._yaml_cfg
 
     def _coerce_numeric_or_default(
         self,
@@ -569,8 +590,43 @@ class _EntryCheckSection:
 
 def _create_config_parser() -> _ConfigParser:
     load_dotenv_if_available(override=False)
-    yaml_cfg = load_yaml_config().raw
-    return _ConfigParser(yaml_cfg, strict=_is_strict_config_mode())
+    config_data = load_yaml_config()
+    return _ConfigParser(
+        config_data.raw,
+        strict=_is_strict_config_mode(),
+        has_config_file=config_data.loaded,
+    )
+
+
+def _yaml_value_type_name(value: Any) -> str:
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
+def _enforce_safety_section_shapes(parser: _ConfigParser) -> None:
+    for yaml_path in sorted(_SAFETY_DOTTED_YAML_KEYS):
+        if parser.has_top_level_yaml_key(yaml_path):
+            raise ConfigLoadError(
+                "Invalid config value: "
+                f"config.yaml top-level dotted key {yaml_path!r} is not "
+                "supported; use nested YAML mapping syntax instead."
+            )
+
+    for section_name in ("strategy", "entry_check"):
+        if not parser.has_yaml_path(section_name):
+            continue
+        section_value = parser.from_yaml(section_name)
+        if not isinstance(section_value, dict):
+            raise ConfigLoadError(
+                "Invalid config value: "
+                f"config.yaml '{section_name}' must be a mapping, "
+                f"got {_yaml_value_type_name(section_value)}."
+            )
+        if not section_value:
+            raise ConfigLoadError(
+                f"Invalid config value: config.yaml '{section_name}' must not be empty."
+            )
 
 
 def _enforce_secret_policy(parser: _ConfigParser) -> None:
@@ -756,6 +812,8 @@ def _resolve_mode_string(
     env_key: str,
     yaml_path: str,
     default: str,
+    *,
+    reject_explicit_yaml_null: bool = False,
 ) -> str:
     """Resolve a mode-like string from env > YAML > literal default.
 
@@ -765,10 +823,54 @@ def _resolve_mode_string(
 
     raw: Any = getenv(env_key)
     if raw is None:
+        yaml_has_path = parser.has_yaml_path(yaml_path)
         raw = parser.from_yaml(yaml_path, default)
+        if raw is None and reject_explicit_yaml_null and yaml_has_path:
+            raise ConfigLoadError(
+                "Invalid config value: "
+                f"config.yaml '{yaml_path}' ({env_key}) must be a non-null string, "
+                "got null."
+            )
     if raw is None:
         raw = default
     return str(raw).strip().lower()
+
+
+def _safety_default[T](
+    parser: _ConfigParser,
+    *,
+    active: T,
+    legacy: T,
+) -> T:
+    return active if parser.has_config_file else legacy
+
+
+def _parse_fail_closed_bool(
+    parser: _ConfigParser,
+    env_key: str,
+    yaml_path: str,
+    default: bool,
+) -> bool:
+    env_val = getenv(env_key)
+    if env_val is not None:
+        raw: Any = env_val
+        source = f"environment variable '{env_key}' ({yaml_path})"
+        provided = True
+    else:
+        raw = parser.from_yaml(yaml_path, default)
+        source = f"config.yaml '{yaml_path}' ({env_key})"
+        provided = parser.has_yaml_path(yaml_path)
+
+    parsed = _parse_bool_literal(raw)
+    if parsed is not None:
+        return parsed
+    if raw is None and not provided:
+        return default
+
+    prefix = (
+        "Strict config parsing failed: " if parser.strict else "Invalid config value: "
+    )
+    raise ConfigLoadError(f"{prefix}{source} must be a boolean, got {raw!r}.")
 
 
 def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
@@ -779,7 +881,12 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         parser,
         "MARKET_REGIME_UNAVAILABLE_POLICY",
         "strategy.market_regime_unavailable_policy",
-        "warn_continue",
+        _safety_default(
+            parser,
+            active=_ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT,
+            legacy="warn_continue",
+        ),
+        reject_explicit_yaml_null=True,
     )
     us_min_price = parser.yaml_optional_float("screener.us.min_price")
     us_min_dollar_volume = parser.yaml_optional_float("screener.us.min_dollar_volume")
@@ -807,8 +914,15 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         use_sma200_filter=parser.env_bool(
             "USE_SMA200_FILTER", "strategy.use_sma200_filter", False
         ),
-        use_market_regime_filter=parser.env_bool(
-            "USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter", False
+        use_market_regime_filter=_parse_fail_closed_bool(
+            parser,
+            "USE_MARKET_REGIME_FILTER",
+            "strategy.use_market_regime_filter",
+            _safety_default(
+                parser,
+                active=_ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT,
+                legacy=False,
+            ),
         ),
         market_regime_unavailable_policy=market_regime_unavailable_policy,
         gap_atr_multiplier=parser.env_float(
@@ -1016,11 +1130,18 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
 
 def _parse_entry_fatal_missing_price_ratio(parser: _ConfigParser) -> float:
     path = "entry_check.fatal_missing_price_ratio"
-    default = 1.0
+    default = _safety_default(
+        parser,
+        active=_ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT,
+        legacy=1.0,
+    )
     env_value = getenv("ENTRY_FATAL_MISSING_PRICE_RATIO")
     if env_value is not None:
         raw: Any = env_value
-        source = "environment variable 'ENTRY_FATAL_MISSING_PRICE_RATIO'"
+        source = (
+            "environment variable 'ENTRY_FATAL_MISSING_PRICE_RATIO' "
+            "(entry_check.fatal_missing_price_ratio)"
+        )
         provided = True
     else:
         raw = parser.from_yaml(path, default)
@@ -1028,20 +1149,19 @@ def _parse_entry_fatal_missing_price_ratio(parser: _ConfigParser) -> float:
         provided = parser.has_yaml_path(path)
 
     if isinstance(raw, bool):
-        if parser.strict and provided:
+        if provided:
             raise ConfigLoadError(
-                "Strict config parsing failed: "
                 f"{source} must be a number between 0.0 and 1.0, got {raw!r}."
             )
         return default
 
+    raw_description = _yaml_value_type_name(raw) if raw is None else repr(raw)
     try:
         parsed = float(raw)
     except (TypeError, ValueError) as err:
-        if parser.strict and provided:
+        if provided:
             raise ConfigLoadError(
-                "Strict config parsing failed: "
-                f"{source} must be a number between 0.0 and 1.0, got {raw!r}."
+                f"{source} must be a number between 0.0 and 1.0, got {raw_description}."
             ) from err
         return default
 
@@ -1049,7 +1169,7 @@ def _parse_entry_fatal_missing_price_ratio(parser: _ConfigParser) -> float:
         path,
         parsed,
         default=default,
-        strict=parser.strict,
+        strict=provided or parser.strict,
     )
 
 
@@ -1075,6 +1195,15 @@ def _normalize_choice(
             f"Strict config parsing failed: {source_name} must be one of {{{allowed_values}}}, got {value!r}."
         )
     return default
+
+
+def _require_choice(value: str, *, allowed: set[str], source_name: str) -> str:
+    if value in allowed:
+        return value
+    allowed_values = ", ".join(sorted(allowed))
+    raise ConfigLoadError(
+        f"Invalid config value: {source_name} must be one of {{{allowed_values}}}, got {value!r}."
+    )
 
 
 def _raise_range_error(path: str, detail: str) -> None:
@@ -1323,11 +1452,9 @@ def _validate_sections(
             strict=strict,
             source_name="STRATEGY_MODE/strategy.mode",
         ),
-        market_regime_unavailable_policy=_normalize_choice(
+        market_regime_unavailable_policy=_require_choice(
             strategy.market_regime_unavailable_policy,
             allowed={"warn_continue", "block_market"},
-            default="warn_continue",
-            strict=strict,
             source_name=(
                 "MARKET_REGIME_UNAVAILABLE_POLICY/"
                 "strategy.market_regime_unavailable_policy"
@@ -1360,7 +1487,7 @@ def _validate_sections(
             "entry_check.fatal_missing_price_ratio",
             entry_check.fatal_missing_price_ratio,
             default=1.0,
-            strict=strict,
+            strict=True,
         ),
     )
     _validate_risk_ranges(strategy=validated_strategy, sell=validated_sell)
@@ -1455,6 +1582,7 @@ def load_config(
     markets_override: list[str] | None = None,
 ) -> Config:
     parser = _create_config_parser()
+    _enforce_safety_section_shapes(parser)
     _enforce_env_yaml_conflict_policy(parser)
     _enforce_secret_policy(parser)
 

@@ -84,6 +84,9 @@ class _Storage:
         self.uploads.append(report_path)
         return "2026/05/2026-05-28.ai-brief.json"
 
+    def upload_entry_report(self, report_path: str, *, report_date: str) -> str:
+        raise AssertionError("unsupported runner role must not upload entry artifact")
+
     def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
         raise AssertionError("unsupported runner role must not upload skip artifact")
 

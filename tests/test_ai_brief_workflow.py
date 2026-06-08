@@ -111,7 +111,12 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert 'out.write("should_run=true\\n")' not in resolve_script
     assert 'out.write(f"source_api_url={source_api_url}\\n")' in resolve_script
 
+    workflow_env = workflow.get("env") or {}
+    assert "KIS_BASE_URL" not in workflow_env
+
     scheduled_job = jobs["scheduled_ai_brief"]
+    scheduled_job_env = scheduled_job.get("env") or {}
+    assert "KIS_BASE_URL" not in scheduled_job_env
     assert scheduled_job.get("needs") == "resolve_context"
     assert scheduled_job.get("if") == (
         "github.event_name == 'schedule' && "
@@ -137,7 +142,7 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert run_env.get("TELEGRAM_BOT_TOKEN") == "${{ secrets.TELEGRAM_BOT_TOKEN }}"
     assert run_env.get("KIS_APP_KEY") == "${{ secrets.KIS_APP_KEY }}"
     assert run_env.get("KIS_APP_SECRET") == "${{ secrets.KIS_APP_SECRET }}"
-    assert run_env.get("KIS_BASE_URL") == "${{ vars.KIS_BASE_URL }}"
+    assert "KIS_BASE_URL" not in run_env
     assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
         "${{ needs.resolve_context.outputs.source_provider == 'http-json' && "
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
@@ -230,9 +235,15 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
 
     assert "set +e" in run_entry_script
     assert "entry_status=${PIPESTATUS[0]}" in run_entry_script
+    assert "entry_reports_before=" in run_entry_script
+    assert "ENTRY_REPORTS_BEFORE" in run_entry_script
+    assert "p.as_posix() not in before" in run_entry_script
+    assert "ENTRY_REPORT_PATH=" in run_entry_script
+    assert "entry_report_path must stay under reports/" in run_entry_script
+    assert 'out.write(f"entry_report_path={entry_report_path}\\n")' in run_entry_script
     assert (
         'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'
-        in run_entry_script
+        not in run_entry_script
     )
     assert (
         'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
@@ -243,19 +254,27 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     )
     restore_errexit_index = run_entry_script.find("\nset -e\n", capture_status_index)
     assert restore_errexit_index >= 0
+    status_output_index = _script_index(
+        run_entry_script,
+        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
+    )
+    missing_report_check_index = _script_index(
+        run_entry_script,
+        'if [[ -z "${entry_report_path}" || ! -f "${entry_report_path}" ]]',
+    )
+    report_path_output_index = _script_index(
+        run_entry_script,
+        'out.write(f"entry_report_path={entry_report_path}\\n")',
+    )
     assert (
-        _script_index(run_entry_script, "set +e")
+        _script_index(run_entry_script, "entry_reports_before=")
+        < _script_index(run_entry_script, "set +e")
         < _script_index(run_entry_script, "uv run -m sab entry")
         < capture_status_index
         < restore_errexit_index
-        < _script_index(
-            run_entry_script,
-            'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"',
-        )
-        < _script_index(
-            run_entry_script,
-            'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
-        )
+        < status_output_index
+        < missing_report_check_index
+        < report_path_output_index
         < _script_index(run_entry_script, 'if [[ "${entry_status}" -ne 0 ]]')
         < _script_index(run_entry_script, 'exit "${entry_status}"')
     )
@@ -276,8 +295,11 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
         == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     )
     upload_with = upload_step.get("with") or {}
-    assert upload_with.get("name") == "ai-brief-entry-report-${{ github.run_id }}"
+    assert upload_with.get("name") == (
+        "ai-brief-entry-report-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
     assert upload_with.get("path") == "${{ steps.run_entry.outputs.entry_report_path }}"
+    assert upload_with.get("if-no-files-found") == "error"
 
 
 def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:

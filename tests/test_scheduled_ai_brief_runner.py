@@ -4,10 +4,13 @@ import datetime as dt
 import logging
 import os
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 
 import pytest
 import sab.scheduler.runner as scheduler_runner
+from sab.config import load_config
+from sab.config_loader import ConfigLoadError
 from sab.env_loader import getenv, load_dotenv_if_available
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
@@ -135,6 +138,7 @@ class _FakeStateStore:
 class _FakePipeline:
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     fail: bool = False
+    failure_message: str = "pipeline failed"
 
     def _record_call(
         self,
@@ -183,10 +187,37 @@ class _FakePipeline:
             dry_run=dry_run,
         )
         if self.fail:
-            raise RuntimeError("pipeline failed")
+            raise RuntimeError(self.failure_message)
         return ScheduledPipelineResult(
             ai_brief_report_path="reports/2026-05-28.ai-brief.json"
         )
+
+
+@dataclass
+class _TypedEntryFailurePipeline(_FakePipeline):
+    entry_report_path: str = "reports/current.entry.json"
+
+    def run(
+        self,
+        *,
+        market: str,
+        session_date: str,
+        report_date: str,
+        source_provider: str | None,
+        model_provider: str,
+        dry_run: bool,
+        source_api_url: str | None = None,
+    ) -> ScheduledPipelineResult:
+        self._record_call(
+            market=market,
+            session_date=session_date,
+            report_date=report_date,
+            source_provider=source_provider,
+            source_api_url=source_api_url,
+            model_provider=model_provider,
+            dry_run=dry_run,
+        )
+        raise scheduler_runner._ScheduledEntryStepError(self.entry_report_path)
 
 
 @dataclass
@@ -225,6 +256,7 @@ class _BlockingPipeline(_FakePipeline):
 @dataclass
 class _FakeStorage:
     uploads: list[str] = field(default_factory=list)
+    entry_uploads: list[str] = field(default_factory=list)
     skip_uploads: list[str] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     repair_candidates: list[str] = field(default_factory=list)
@@ -266,6 +298,10 @@ class _FakeStorage:
             "generated_at": self.uploaded_generated_at,
         }
         return storage_key
+
+    def upload_entry_report(self, report_path: str, *, report_date: str) -> str:
+        self.entry_uploads.append(report_path)
+        return f"2026/05/{report_date}.entry.json"
 
     def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
         self.skip_uploads.append(report_path)
@@ -1121,6 +1157,7 @@ def test_runner_aborts_without_upload_when_lock_is_lost_before_upload() -> None:
     )
 
     assert result.status == "lock_lost_before_upload"
+    assert "lock_lost_before_upload" in scheduler_runner._FAILED_STATUSES
     assert len(pipeline.calls) == 1
     assert storage.uploads == []
     assert notifier.sent == []
@@ -1891,6 +1928,1429 @@ def test_runner_releases_main_lock_when_pipeline_fails(
     ]
 
 
+def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> None:
+    class _TypedEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            raise scheduler_runner._ScheduledEntryStepError(
+                "reports/current.entry.json"
+            )
+
+    runner, state, _pipeline, storage, notifier = _runner(
+        pipeline=_TypedEntryFailurePipeline()
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-failed",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert storage.entry_uploads == ["reports/current.entry.json"]
+    assert notifier.sent == ["scheduled_entry_failed"]
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-failed",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "reports/current.entry.json",
+        "entryReportStorageKey": "2026/05/2026-05-28.entry.json",
+    }
+    assert notifier.late_alerts == [("scheduled_entry_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
+
+
+def test_scheduled_entry_failure_skips_upload_and_alert_when_main_lock_is_lost() -> (
+    None
+):
+    state = _FakeStateStore(ownership_results=[False])
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-lock-lost",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert "lock_lost_before_upload" in scheduler_runner._FAILED_STATUSES
+    assert any(":lock:" in key for key in state.renewals)
+    assert storage.entry_uploads == []
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+
+
+def test_scheduled_entry_failure_skips_marker_and_alert_when_lock_is_lost_after_upload() -> (
+    None
+):
+    state = _FakeStateStore(ownership_results=[True, False])
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-lock-lost-after-upload",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert storage.entry_uploads == ["reports/current.entry.json"]
+    assert not any(
+        ":entry-failure-artifact:US:2026-05-28" in key
+        for key, _payload in state.upserts
+    )
+    assert not any(
+        ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+        for key, _payload in state.upserts
+    )
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+
+
+def test_scheduled_entry_failure_claim_loser_does_not_suppress_artifact_alert() -> None:
+    state = _FakeStateStore(claim_results=[True, False, True, True, True, True])
+    notifier = _FakeNotifier()
+    loser_storage = _FakeStorage()
+    loser_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        storage=loser_storage,
+        notifier=notifier,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    loser_result = loser_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-claim-loser",
+        )
+    )
+
+    assert loser_result.status == "pipeline_failed"
+    assert loser_storage.entry_uploads == []
+    assert notifier.sent == ["pipeline_failed"]
+    assert not any(
+        ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+        for key, _payload in state.upserts
+    )
+
+    winner_storage = _FakeStorage()
+    winner_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        storage=winner_storage,
+        notifier=notifier,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    winner_result = winner_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-claim-winner",
+        )
+    )
+
+    assert winner_result.status == "pipeline_failed"
+    assert winner_storage.entry_uploads == ["reports/current.entry.json"]
+    assert notifier.sent == ["pipeline_failed", "scheduled_entry_failed"]
+    expected_entry_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-claim-winner",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "reports/current.entry.json",
+        "entryReportStorageKey": "2026/05/2026-05-28.entry.json",
+    }
+    assert notifier.late_alerts[-1] == (
+        "scheduled_entry_failed",
+        expected_entry_context,
+    )
+
+
+def test_scheduled_entry_failure_uploads_artifact_when_prior_alert_lacks_storage_key() -> (
+    None
+):
+    sent_key = (
+        build_scheduler_state_key(
+            kind="late-alert:sent",
+            market="US",
+            session_date="2026-05-28",
+        )
+        + ":scheduled_entry_failed"
+    )
+    state = _FakeStateStore(
+        entries={
+            sent_key: RuntimeStateEntry(
+                state_key=sent_key,
+                state_payload={
+                    "market": "US",
+                    "sessionDate": "2026-05-28",
+                    "reason": "scheduled_entry_failed",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        }
+    )
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-alert-already-sent",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert storage.entry_uploads == ["reports/current.entry.json"]
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    artifact_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":entry-failure-artifact:US:2026-05-28" in key
+    ]
+    assert artifact_payloads == [
+        {
+            "storageKey": "2026/05/2026-05-28.entry.json",
+            "market": "US",
+            "sessionDate": "2026-05-28",
+            "reportDate": "2026-05-28",
+            "entryReportPath": "reports/current.entry.json",
+            "reason": "scheduled_entry_failed",
+            "scheduleRole": "local-primary",
+            "runnerRole": "local-primary",
+            "attemptId": "attempt-entry-alert-already-sent",
+        }
+    ]
+
+
+def test_pipeline_failure_string_does_not_spoof_scheduled_entry_alert() -> None:
+    runner, _state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(
+            fail=True,
+            failure_message=(
+                "scheduled entry failed (entry_report_path=reports/current.entry.json)"
+            ),
+        )
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-spoofed-entry-failed",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert notifier.sent == ["pipeline_failed"]
+    reason, context = notifier.late_alerts[0]
+    assert reason == "pipeline_failed"
+    assert "failureDetail" not in context
+    assert "entryReportPath" not in context
+
+
+def test_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipeline_failure() -> (
+    None
+):
+    state = _FakeStateStore()
+    notifier = _FakeNotifier()
+    generic_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        notifier=notifier,
+        pipeline=_FakePipeline(fail=True),
+    )
+
+    generic_result = generic_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-generic-pipeline-failed",
+        )
+    )
+
+    entry_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        notifier=notifier,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+    entry_result = entry_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-scheduled-entry-failed",
+        )
+    )
+
+    assert generic_result.status == "pipeline_failed"
+    assert entry_result.status == "pipeline_failed"
+    assert notifier.sent == ["pipeline_failed", "scheduled_entry_failed"]
+    entry_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-scheduled-entry-failed",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "reports/current.entry.json",
+        "entryReportStorageKey": "2026/05/2026-05-28.entry.json",
+    }
+    assert notifier.late_alerts[-1] == ("scheduled_entry_failed", entry_context)
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**entry_context, "reason": "scheduled_entry_failed"}]
+
+
+def test_wrapped_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipeline_failure() -> (
+    None
+):
+    class _WrappedScheduledEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            try:
+                raise scheduler_runner._ScheduledEntryStepError(
+                    "reports/current.entry.json"
+                )
+            except RuntimeError as err:
+                raise RuntimeError("pipeline wrapper") from err
+
+    state = _FakeStateStore()
+    notifier = _FakeNotifier()
+    generic_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        notifier=notifier,
+        pipeline=_FakePipeline(fail=True),
+    )
+
+    generic_result = generic_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-generic-before-wrapped-entry",
+        )
+    )
+
+    entry_runner, _state, _pipeline, _storage, _notifier = _runner(
+        state=state,
+        notifier=notifier,
+        pipeline=_WrappedScheduledEntryFailurePipeline(),
+    )
+    entry_result = entry_runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-wrapped-scheduled-entry",
+        )
+    )
+
+    assert generic_result.status == "pipeline_failed"
+    assert entry_result.status == "pipeline_failed"
+    assert notifier.sent == ["pipeline_failed", "scheduled_entry_failed"]
+    entry_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-wrapped-scheduled-entry",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "reports/current.entry.json",
+        "entryReportStorageKey": "2026/05/2026-05-28.entry.json",
+    }
+    assert notifier.late_alerts[-1] == ("scheduled_entry_failed", entry_context)
+
+
+def test_pipeline_failure_late_alert_does_not_classify_case_variant_string_detail() -> (
+    None
+):
+    failure_message = (
+        "Scheduled entry failed (entry_report_path=reports/current.entry.json)"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-case-variant",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-case-variant",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+    }
+    assert notifier.late_alerts == [("pipeline_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:pipeline_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "pipeline_failed"}]
+
+
+@pytest.mark.parametrize(
+    "entry_report_path",
+    [
+        "/tmp/private/current.entry.json",
+        "reports/../current.entry.json",
+        "reports\\current.entry.json",
+        "reports//current.entry.json",
+        "reports/./current.entry.json",
+        "reports/foo\x00/current.entry.json",
+        "reports/foo\x1f/current.entry.json",
+        "reports/foo\x85/current.entry.json",
+        "reports/foo\x9b/current.entry.json",
+        "\nreports/current.entry.json\n",
+        "\rreports/current.entry.json\r",
+        "reports/foo\nentryReportPath=/tmp/private/current.entry.json",
+        "reports/foo\rentryReportPath=/tmp/private/current.entry.json",
+        "reports/foo\u2028entryReportPath=/tmp/private/current.entry.json",
+        "reports/foo\u2029entryReportPath=/tmp/private/current.entry.json",
+        "reports/..\uff0fprivate.entry.json",
+        "reports/\uff0e\uff0e/private.entry.json",
+        "reports/foo\uff0fbar.entry.json",
+        "reports/..\u2215private.entry.json",
+        "reports/foo\u2044bar.entry.json",
+        "reports/foo\u29f8bar.entry.json",
+        "reports/foo\u2216bar.entry.json",
+        "reports/foo\u2571bar.entry.json",
+    ],
+)
+def test_pipeline_failure_late_alert_omits_unsafe_scheduled_entry_detail(
+    caplog: pytest.LogCaptureFixture, entry_report_path: str
+) -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(
+            fail=True,
+            failure_message=(
+                f"scheduled entry failed (entry_report_path={entry_report_path})"
+            ),
+        )
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-unsafe-detail",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-unsafe-detail",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+    }
+    assert notifier.late_alerts == [("pipeline_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:pipeline_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "pipeline_failed"}]
+    assert "entry_report_path=unsafe" in caplog.text
+
+    emitted_text = "\n".join(
+        [caplog.text, str(notifier.late_alerts), str(sent_payloads)]
+    )
+    dangerous_fragments = {
+        entry_report_path,
+        unicodedata.normalize("NFKC", entry_report_path),
+        "/tmp/private",
+    }
+    for fragment in dangerous_fragments:
+        assert fragment not in emitted_text
+
+
+@pytest.mark.parametrize(
+    "failure_message",
+    [
+        "scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)",
+        "\nscheduled entry failed (entry_report_path=/tmp/private/current.entry.json)\n",
+        "\rscheduled entry failed (entry_report_path=/tmp/private/current.entry.json)\r",
+        "scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)\u2028",
+        "\x00scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)\x00",
+        "\x1bscheduled entry failed (entry_report_path=/tmp/private/current.entry.json)\x1b",
+        "wrapper: scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)",
+        "entry wrapper: scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)",
+    ],
+)
+def test_runner_pipeline_failure_log_omits_raw_wrapped_entry_report_path(
+    caplog: pytest.LogCaptureFixture, failure_message: str
+) -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-raw-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_keeps_sanitized_traceback_for_entry_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "scheduled entry failed (entry_report_path=/tmp/private/current.entry.json)"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-sanitized-traceback",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    failure_records = [
+        record
+        for record in caplog.records
+        if "scheduled AI brief pipeline failed" in record.getMessage()
+    ]
+    assert len(failure_records) == 1
+    assert failure_records[0].exc_info is not None
+    assert "error_type=RuntimeError" in caplog.text
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_redacts_mixed_case_entry_report_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "scheduled entry failed "
+        "(entry_report_path=reports/current.entry.json) "
+        "raw=/tmp/private/CURRENT.ENTRY.JSON"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-mixed-case-token",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "CURRENT.ENTRY.JSON" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_redacts_entry_report_path_token_suffix(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "scheduled entry failed "
+        "(entry_report_path=reports/current.entry.json) "
+        "raw=/tmp/private/current.entry.json?token=abc#fragment"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-token-suffix",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "raw=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "token=abc" not in caplog.text
+    assert "#fragment" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_redacts_entry_report_path_token_with_parenthesis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "scheduled entry failed "
+        "(entry_report_path=reports/current.entry.json) "
+        "raw=/tmp/private/foo)bar.entry.json"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-token-paren",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "raw=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "foo)bar.entry.json" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_redacts_labeled_entry_report_path_with_parenthesis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "scheduled entry failed (entry_report_path=/tmp/private/foo)bar.entry.json)"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-label-paren",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "foo)bar.entry.json" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_keeps_original_exception_type_for_sanitized_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _ValueErrorEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            raise ValueError(
+                "scheduled entry failed "
+                "(entry_report_path=/tmp/private/current.entry.json)"
+            )
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_ValueErrorEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-value-error-traceback",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    failure_records = [
+        record
+        for record in caplog.records
+        if "scheduled AI brief pipeline failed" in record.getMessage()
+    ]
+    assert len(failure_records) == 1
+    assert failure_records[0].exc_info is not None
+    exc_type, exc_value, _traceback = failure_records[0].exc_info
+    assert exc_type is ValueError
+    assert isinstance(exc_value, ValueError)
+    assert "entry_report_path=unsafe" in str(exc_value)
+    assert "error_type=ValueError" in caplog.text
+    assert "/tmp/private" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _ChainedValueErrorEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            try:
+                raise ValueError(
+                    "scheduled entry failed "
+                    "(entry_report_path=/tmp/private/current.entry.json)"
+                )
+            except ValueError as err:
+                raise RuntimeError("pipeline wrapper") from err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_ChainedValueErrorEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-sanitized-chain",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    failure_records = [
+        record
+        for record in caplog.records
+        if "scheduled AI brief pipeline failed" in record.getMessage()
+    ]
+    assert len(failure_records) == 1
+    assert failure_records[0].exc_info is not None
+    _exc_type, exc_value, _traceback = failure_records[0].exc_info
+    assert isinstance(exc_value, RuntimeError)
+    assert isinstance(exc_value.__cause__, ValueError)
+    assert "entry_report_path=unsafe" in str(exc_value.__cause__)
+    assert "pipeline wrapper" in str(exc_value)
+    assert "/tmp/private" not in caplog.text
+
+
+def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _RawWrapperEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            try:
+                raise RuntimeError(
+                    "scheduled entry failed "
+                    "(entry_report_path=reports/current.entry.json)"
+                )
+            except RuntimeError as err:
+                wrapper = RuntimeError(
+                    "pipeline wrapper raw=/tmp/private/current.entry.json"
+                )
+                wrapper.add_note("note raw=/tmp/private/from-note.entry.json")
+                raise wrapper from err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_RawWrapperEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-raw-wrapper-note",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=reports/current.entry.json" in caplog.text
+    assert "raw=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_classifies_exception_group_entry_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _GroupedEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            raise ExceptionGroup(
+                "pipeline group",
+                [
+                    RuntimeError(
+                        "scheduled entry failed "
+                        "(entry_report_path=/tmp/private/current.entry.json)"
+                    )
+                ],
+            )
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_GroupedEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-exception-group",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert notifier.late_alerts[0][0] == "pipeline_failed"
+    assert "failureDetail" not in notifier.late_alerts[0][1]
+    assert "entryReportPath" not in notifier.late_alerts[0][1]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_preserves_unrelated_entry_report_path_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "ai-brief parse failed entry_report_path=reports/current.entry.json"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-unrelated-entry-report-token",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert failure_message in caplog.text
+    assert "scheduled entry failed (entry_report_path=" not in caplog.text
+    context = notifier.late_alerts[0][1]
+    assert "failureDetail" not in context
+    assert "entryReportPath" not in context
+
+
+@pytest.mark.parametrize(
+    ("failure_message", "expected_context", "raw_fragment", "expected_reason"),
+    [
+        (
+            "scheduled entry failed raw=／tmp／private/current.entry.json",
+            "scheduled entry failed",
+            "／tmp／private",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled entry failed raw=⁄tmp⁄private/current.entry.json",
+            "scheduled entry failed",
+            "⁄tmp⁄private",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled entry failed\u200b "
+            "(entry_report_path=/tmp/private/current.entry.json)",
+            "scheduled entry failed",
+            "/tmp/private",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled-entry failed "
+            "(entry_report_path=/tmp/private/current.entry.json)",
+            "scheduled-entry failed",
+            "/tmp/private",
+            "pipeline_failed",
+        ),
+        (
+            "entry wrapper: scheduled entry failed "
+            "(entry_report_path=reports/current.entry.json); "
+            "raw=/tmp/private/current.entry.json",
+            "entry wrapper",
+            "/tmp/private",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled entry failed "
+            "(entry_report_path=reports/current.entry.json) "
+            r"raw=C:\Users\me\current.entry.json",
+            "scheduled entry failed",
+            r"C:\Users",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled entry failed "
+            "(entry_report_path=reports/current.entry.json) "
+            "raw=/tmp/private/current entry.entry.json",
+            "scheduled entry failed",
+            "/tmp/private",
+            "pipeline_failed",
+        ),
+        (
+            "scheduled entry failed "
+            "(ｅｎｔｒｙ_report_path="
+            r"C:\Users\me\current.entry.json)",
+            "scheduled entry failed",
+            r"C:\Users",
+            "pipeline_failed",
+        ),
+        (
+            "ai-brief parse failed while reading text: scheduled entry failed "
+            "(entry_report_path=/tmp/private/current.entry.json)",
+            "ai-brief parse failed",
+            "/tmp/private",
+            "pipeline_failed",
+        ),
+    ],
+)
+def test_runner_pipeline_failure_log_redacts_obfuscated_scheduled_entry_path(
+    caplog: pytest.LogCaptureFixture,
+    failure_message: str,
+    expected_context: str,
+    raw_fragment: str,
+    expected_reason: str,
+) -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-obfuscated-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == [expected_reason]
+    assert expected_context in caplog.text
+    assert "entry_report_path=unsafe" in caplog.text
+    assert raw_fragment not in caplog.text
+    assert raw_fragment not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_redacts_noted_windows_entry_report_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _NotedWindowsEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            err = RuntimeError("pipeline wrapper")
+            err.add_note(
+                "scheduled entry failed "
+                "(entry_report_path=reports/current.entry.json) "
+                r"raw=C:\Users\me\current.entry.json"
+            )
+            raise err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_NotedWindowsEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-noted-windows-entry-report-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert r"C:\Users" not in caplog.text
+    assert r"C:\Users" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _ChainedEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            try:
+                raise RuntimeError(
+                    "scheduled entry failed "
+                    "(entry_report_path=/tmp/private/current.entry.json)"
+                )
+            except RuntimeError as err:
+                raise RuntimeError("pipeline wrapper") from err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_ChainedEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-chained-entry-report-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_omits_noted_unsafe_entry_report_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _NotedEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            err = RuntimeError("pipeline wrapper")
+            err.add_note(
+                "\x00scheduled entry failed "
+                "(entry_report_path=/tmp/private/from-note.entry.json)\x00"
+            )
+            raise err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_NotedEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-noted-entry-report-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_preserves_quoted_scheduled_entry_phrase(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failure_message = (
+        "ai-brief parse failed while reading text: scheduled entry failed "
+        "(entry_report_path=reports/current.entry.json)"
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-quoted-entry-report-token",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["pipeline_failed"]
+    assert failure_message in caplog.text
+    assert "error=scheduled entry failed" not in caplog.text
+    context = notifier.late_alerts[0][1]
+    assert "failureDetail" not in context
+    assert "entryReportPath" not in context
+
+
+@pytest.mark.parametrize(
+    "failure_message",
+    [
+        "\nscheduled entry failed (entry_report_path=reports/current.entry.json)\n",
+        "\rscheduled entry failed (entry_report_path=reports/current.entry.json)\r",
+    ],
+)
+def test_pipeline_failure_late_alert_includes_boundary_wrapped_scheduled_entry_detail(
+    failure_message: str,
+) -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True, failure_message=failure_message)
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-non-exact-wrapper",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-non-exact-wrapper",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+    }
+    assert notifier.late_alerts == [("pipeline_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:pipeline_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "pipeline_failed"}]
+
+
+def test_pipeline_failure_late_alert_includes_entry_not_produced_detail() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_TypedEntryFailurePipeline(entry_report_path="not produced")
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-not-produced",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-not-produced",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "not produced",
+    }
+    assert notifier.late_alerts == [("scheduled_entry_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
+
+
+def test_pipeline_failure_late_alert_includes_entry_unsafe_detail() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_TypedEntryFailurePipeline(entry_report_path="unsafe")
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-unsafe-sentinel",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-unsafe-sentinel",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "unsafe",
+    }
+    assert notifier.late_alerts == [("scheduled_entry_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
+
+
 def test_pipeline_failure_late_alert_marker_failure_preserves_pipeline_status() -> None:
     runner, state, _pipeline, _storage, notifier = _runner(
         state=_FakeStateStore(fail_late_alert_sent_upsert=True),
@@ -2187,6 +3647,107 @@ def test_default_pipeline_entry_step_failure_mentions_last_written_entry_report(
     assert "reports/stale.entry.json" not in str(exc.value)
 
 
+def test_default_pipeline_entry_step_failure_omits_unsafe_entry_report_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("/tmp/private/current.entry.json")
+        return 1
+
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+
+    with pytest.raises(RuntimeError) as exc:
+        DefaultScheduledPipeline()._run_entry_step(
+            market="US",
+            report_date="2026-05-28",
+            buy_report_path="reports/current.buy.json",
+            holdings_path="data/scheduler/holdings.US.2026-05-28.yaml",
+        )
+
+    assert "scheduled entry failed" in str(exc.value)
+    assert "entry_report_path=unsafe" in str(exc.value)
+    assert "/tmp/private" not in str(exc.value)
+
+
+def test_runner_pipeline_failure_log_omits_unsafe_entry_report_path(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("/tmp/private/current.entry.json")
+        return 1
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+    state = _FakeStateStore()
+    notifier = _FakeNotifier()
+    runner = ScheduledAiBriefRunner(
+        state_store=state,
+        pipeline=DefaultScheduledPipeline(),
+        storage=_FakeStorage(),
+        notifier=notifier,
+        now_fn=lambda: dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+        guard_resolver=lambda _market, _now: _guard(),
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-unsafe-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["scheduled_entry_failed"]
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-unsafe-log",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "unsafe",
+    }
+    assert notifier.late_alerts == [("scheduled_entry_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
+    assert "entry_report_path=unsafe" in caplog.text
+    assert "/tmp/private" not in caplog.text
+    assert "/tmp/private" not in str(notifier.late_alerts)
+    assert "/tmp/private" not in str(sent_payloads)
+
+
 def test_default_pipeline_entry_step_failure_mentions_not_produced_without_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2330,15 +3891,23 @@ def test_default_pipeline_ignores_ambient_holdings_file_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text("HOLDINGS_FILE=from-dotenv.yaml\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "HOLDINGS_FILE=from-dotenv.yaml\nKIS_BASE_URL=https://dotenv.example.invalid\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr("sab.env_loader._load_with_python_dotenv", lambda **_: False)
+    monkeypatch.delenv("SAB_CONFIG", raising=False)
     monkeypatch.setenv("HOLDINGS_FILE", "holdings.yaml")
+    monkeypatch.setenv("KIS_BASE_URL", "https://ambient.example.invalid")
     observed_steps: list[str] = []
 
     def fake_run_scan(**kwargs: object) -> int:
         load_dotenv_if_available()
         assert getenv("HOLDINGS_FILE") is None
+        assert getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
         assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        assert os.getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
+        assert load_config().kis_base_url == "https://ambient.example.invalid:9443"
         observed_steps.append("scan")
         callback = kwargs.get("report_path_callback")
         if callable(callback):
@@ -2348,7 +3917,9 @@ def test_default_pipeline_ignores_ambient_holdings_file_env(
     def fake_run_entry(**kwargs: object) -> int:
         load_dotenv_if_available()
         assert getenv("HOLDINGS_FILE") is None
+        assert getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
         assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        assert os.getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
         observed_steps.append("entry")
         assert kwargs["holdings_path"] == "data/scheduler/holdings.US.2026-05-28.yaml"
         callback = kwargs.get("report_path_callback")
@@ -2359,7 +3930,9 @@ def test_default_pipeline_ignores_ambient_holdings_file_env(
     def fake_run_ai_brief(**kwargs: object) -> int:
         load_dotenv_if_available()
         assert getenv("HOLDINGS_FILE") is None
+        assert getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
         assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+        assert os.getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
         observed_steps.append("ai-brief")
         callback = kwargs.get("report_path_callback")
         if callable(callback):
@@ -2394,6 +3967,31 @@ def test_default_pipeline_ignores_ambient_holdings_file_env(
     assert observed_steps == ["scan", "entry", "ai-brief"]
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
     assert os.getenv("HOLDINGS_FILE") == "holdings.yaml"
+    assert os.getenv("KIS_BASE_URL") == "https://ambient.example.invalid"
+
+
+def test_default_pipeline_does_not_mask_kis_base_url_config_conflict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "kis:\n  base_url: https://yaml.example.invalid\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("SAB_CONFIG", raising=False)
+    monkeypatch.setenv("KIS_BASE_URL", "https://ambient.example.invalid")
+
+    def fake_run_scan(**_kwargs: object) -> int:
+        load_config()
+        return 0
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+
+    with pytest.raises(ConfigLoadError, match="KIS_BASE_URL"):
+        DefaultScheduledPipeline()._run_scan_step(
+            market="US",
+            report_date="2026-05-28",
+        )
 
 
 def test_default_pipeline_logs_stage_boundaries(
