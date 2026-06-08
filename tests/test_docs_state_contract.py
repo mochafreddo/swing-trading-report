@@ -186,6 +186,9 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     strategy_text = _read(Path("docs/STRATEGY.md"))
     config_reference_text = _read(Path("docs/config-reference.md"))
     configuration_text = _read(Path("docs/configuration.md"))
+    safety_design_text = _read(
+        Path("docs/superpowers/specs/2026-06-07-swing-operational-safety-design.md")
+    )
 
     assert "market_regime_unavailable_policy" in strategy_text
     assert "quality_state" in strategy_text
@@ -194,6 +197,11 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     assert "entry_check.fatal_missing_price_ratio" in strategy_text
     assert "ENTRY_FATAL_MISSING_PRICE_RATIO" in config_reference_text
     assert "entry_check.fatal_missing_price_ratio" in config_reference_text
+    assert (
+        "| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | "
+        "`entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, "
+        "loaded YAML active default 0.0"
+    ) in config_reference_text
     assert (
         "| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200`"
         in configuration_text
@@ -206,3 +214,8 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
         "omitted operational safety keys inherit the active safety defaults"
         in configuration_text
     )
+    assert "Loaded YAML configs with omitted custom safety keys inherit" in (
+        safety_design_text
+    )
+    assert "code-level compatibility default `warn_continue`" not in safety_design_text
+    assert "code-level compatibility default `1.0`" not in safety_design_text
