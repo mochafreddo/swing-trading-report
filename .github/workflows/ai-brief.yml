@@ -882,7 +882,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          entry_reports_before="$(python - <<'PY'
+          entry_reports_before="$(uv run python - <<'PY'
           from pathlib import Path
 
           from sab.config import load_config
@@ -905,7 +905,7 @@ jobs:
 
           entry_report_path="$(sed -n 's/.*Entry report written to: //p' entry.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${entry_report_path}" ]]; then
-            entry_report_path="$(ENTRY_REPORTS_BEFORE="${entry_reports_before}" python - <<'PY'
+            entry_report_path="$(ENTRY_REPORTS_BEFORE="${entry_reports_before}" uv run python - <<'PY'
           import os
           from pathlib import Path
 
@@ -933,7 +933,7 @@ jobs:
             exit 1
           fi
 
-          ENTRY_REPORT_PATH="${entry_report_path}" python - <<'PY'
+          ENTRY_REPORT_PATH="${entry_report_path}" uv run python - <<'PY'
           import os
           from pathlib import Path, PurePosixPath
 

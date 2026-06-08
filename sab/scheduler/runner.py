@@ -1504,8 +1504,22 @@ class ScheduledAiBriefRunner:
                         )
                         return entry_report_upload
                     if isinstance(entry_report_upload, _EntryFailureArtifactClaimHeld):
-                        failure_alert_reason = "pipeline_failed"
-                        failure_context = {}
+                        self._log_locked_pipeline_exception(
+                            market=market,
+                            session_date=session_date,
+                            schedule_role=schedule_role,
+                            runner_role=runner_role,
+                            attempt_id=attempt_id,
+                            error=error,
+                        )
+                        self._state_store.release_lock(
+                            lock_key,
+                            owner_token=owner_token,
+                        )
+                        return ScheduledAiBriefResult(
+                            status="entry_failure_artifact_claim_held",
+                            session_date=session_date,
+                        )
                     elif entry_report_upload is not None:
                         failure_context["entryReportStorageKey"] = entry_report_upload
 
@@ -1651,6 +1665,23 @@ class ScheduledAiBriefRunner:
             )
             if existing_storage_key:
                 return existing_storage_key
+            if not self._state_store.renew_lock(
+                lock_key,
+                owner_token=owner_token,
+                ttl_seconds=_LOCK_TTL_SECONDS,
+            ):
+                return ScheduledAiBriefResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
+            if not self._state_store.check_ownership(
+                lock_key,
+                owner_token=owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
             storage_key = self._storage.upload_entry_report(
                 report_path,
                 report_date=session_date,
@@ -2848,10 +2879,21 @@ def _scheduled_entry_failure_log_message_from_message(message: str) -> str | Non
 
 
 def _scheduled_entry_failure_log_message(error: Exception) -> str | None:
-    for message in _iter_exception_diagnostic_messages(error):
+    messages = _iter_exception_diagnostic_messages(error)
+    for message in messages:
         safe_message = _scheduled_entry_failure_log_message_from_message(message)
         if safe_message is not None:
             return safe_message
+    if not any(
+        _is_scheduled_entry_failure_log_message(message) for message in messages
+    ):
+        return None
+    for message in messages:
+        sanitized = _redact_entry_report_path_references(message)
+        if sanitized != message:
+            if _is_scheduled_entry_failure_log_message(sanitized):
+                return sanitized
+            return f"{_SCHEDULED_ENTRY_FAILURE_TOKEN} {sanitized}"
     return None
 
 
