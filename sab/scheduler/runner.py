@@ -1698,7 +1698,6 @@ class ScheduledAiBriefRunner:
         alert_reason: str | None = None,
         failure_context: dict[str, object] | None = None,
     ) -> ScheduledAiBriefResult:
-        self._state_store.release_lock(lock_key, owner_token=owner_token)
         context: dict[str, object] = {
             "market": market,
             "sessionDate": session_date,
@@ -1712,6 +1711,18 @@ class ScheduledAiBriefRunner:
             context["storageKey"] = storage_key
         if failure_context:
             context.update(failure_context)
+        if not self._state_store.renew_lock(
+            lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_LOCK_TTL_SECONDS,
+        ) or not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        self._state_store.release_lock(lock_key, owner_token=owner_token)
         self._send_late_alert_once(
             market=market,
             session_date=session_date,
@@ -1899,6 +1910,13 @@ class ScheduledAiBriefRunner:
         owner_token: str,
         now: dt.datetime,
     ) -> ScheduledAiBriefResult | None:
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
         try:
             self._record_ai_brief_artifact_marker(
                 artifact_key=artifact_key,

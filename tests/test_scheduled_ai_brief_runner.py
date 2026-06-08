@@ -1163,6 +1163,57 @@ def test_runner_aborts_without_upload_when_lock_is_lost_before_upload() -> None:
     assert notifier.sent == []
 
 
+def test_runner_does_not_publish_failure_alert_when_lock_is_lost() -> None:
+    state = _FakeStateStore(ownership_results=[False])
+    runner, state, _pipeline, _storage, notifier = _runner(
+        state=state,
+        pipeline=_FakePipeline(fail=True),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-failure-lock-lost",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert any(":lock:" in key for key in state.renewals)
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
+
+
+def test_runner_does_not_publish_unsafe_entry_failure_alert_when_lock_is_lost() -> None:
+    state = _FakeStateStore(ownership_results=[False])
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(entry_report_path="unsafe"),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-unsafe-entry-lock-lost",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert storage.entry_uploads == []
+    assert any(":lock:" in key for key in state.renewals)
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
+
+
 def test_runner_rechecks_pre_open_guard_before_upload() -> None:
     runner, state, pipeline, storage, notifier = _runner(
         guard_sequence=[
@@ -1306,6 +1357,30 @@ def test_runner_renews_main_lock_after_pipeline_before_upload() -> None:
     assert result.status == "completed"
     assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
     assert any(":lock:" in key for key in state.renewals)
+
+
+def test_runner_does_not_record_artifact_marker_when_lock_is_lost_after_upload() -> (
+    None
+):
+    state = _FakeStateStore(ownership_results=[True, False])
+    runner, state, _pipeline, storage, notifier = _runner(state=state)
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-artifact-lock-lost-after-upload",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert any(":lock:" in key for key in state.releases)
+    assert not any(":artifact:US:2026-05-28" in key for key, _payload in state.upserts)
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
 
 
 def test_runner_renews_main_lock_while_pipeline_is_running() -> None:
