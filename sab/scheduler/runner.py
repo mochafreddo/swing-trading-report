@@ -115,6 +115,7 @@ _FAILED_STATUSES = {
     "upload_failed",
     "artifact_marker_failed",
     "artifact_marker_invalid",
+    "entry_failure_artifact_claim_held",
     "late_alert_send_failed",
     "late_alert_sent_marker_failed",
     "lock_lost_before_upload",
@@ -2169,6 +2170,18 @@ class ScheduledAiBriefRunner:
             )
             if existing_storage_key:
                 return existing_storage_key
+            if (
+                main_lock_key is not None
+                and main_owner_token is not None
+                and not self._owns_main_lock(
+                    main_lock_key=main_lock_key,
+                    main_owner_token=main_owner_token,
+                )
+            ):
+                return ScheduledAiBriefResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
             report_path = write_ai_brief_skip_report(
                 report_dir="reports",
                 market=market,
@@ -2188,9 +2201,9 @@ class ScheduledAiBriefRunner:
             if (
                 main_lock_key is not None
                 and main_owner_token is not None
-                and not self._state_store.check_ownership(
-                    main_lock_key,
-                    owner_token=main_owner_token,
+                and not self._owns_main_lock(
+                    main_lock_key=main_lock_key,
+                    main_owner_token=main_owner_token,
                 )
             ):
                 return ScheduledAiBriefResult(
@@ -2265,6 +2278,15 @@ class ScheduledAiBriefRunner:
         main_lock_key: str | None,
         main_owner_token: str | None,
     ) -> ScheduledAiBriefResult:
+        if require_main_lock and not self._owns_main_lock(
+            main_lock_key=main_lock_key,
+            main_owner_token=main_owner_token,
+        ):
+            return ScheduledAiBriefResult(
+                status="artifact_uploaded_notification_deferred",
+                session_date=session_date,
+            )
+
         sent_key = build_scheduler_state_key(
             kind="notification:sent",
             market=market,
@@ -2280,15 +2302,6 @@ class ScheduledAiBriefRunner:
             )
             return ScheduledAiBriefResult(
                 status="completion_repaired",
-                session_date=session_date,
-            )
-
-        if require_main_lock and not self._owns_main_lock(
-            main_lock_key=main_lock_key,
-            main_owner_token=main_owner_token,
-        ):
-            return ScheduledAiBriefResult(
-                status="artifact_uploaded_notification_deferred",
                 session_date=session_date,
             )
 

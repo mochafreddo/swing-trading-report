@@ -1298,9 +1298,9 @@ def test_locked_upload_precheck_does_not_record_skip_or_alert_after_lock_loss() 
 
     assert result is not None
     assert result.status == "lock_lost_before_upload"
-    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert result.storage_key is None
     assert storage.uploads == []
-    assert len(storage.skip_uploads) == 1
+    assert storage.skip_uploads == []
     assert lock_key in state.releases
     assert not any(":skip-artifact:US:2026-05-28" in key for key, _ in state.upserts)
     assert "pre_upload_guard_failed" not in notifier.sent
@@ -1376,6 +1376,49 @@ def test_runner_rechecks_guard_after_notification_claim_before_sending() -> None
     assert any(":notification:claim:" in key for key in state.releases)
     assert not any(":notification:sent:" in key for key, _payload in state.upserts)
     assert not any(":success:" in key for key, _payload in state.upserts)
+
+
+def test_notification_repair_defers_success_marker_after_main_lock_loss() -> None:
+    sent_key = build_scheduler_state_key(
+        kind="notification:sent", market="US", session_date="2026-05-28"
+    )
+    artifact_entry = RuntimeStateEntry(
+        state_key=build_scheduler_state_key(
+            kind="artifact", market="US", session_date="2026-05-28"
+        ),
+        state_payload={"storageKey": "2026/05/2026-05-28.ai-brief.json"},
+        expires_at="2026-05-30T00:00:00Z",
+    )
+    state = _FakeStateStore(
+        entries={
+            sent_key: RuntimeStateEntry(
+                state_key=sent_key,
+                state_payload={
+                    "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        },
+        ownership_results=[False],
+    )
+    runner, state, _pipeline, _storage, _notifier = _runner(state=state)
+
+    result = runner._reconcile_notification(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-notification-repair-lock-lost",
+        artifact_entry=artifact_entry,
+        require_main_lock=True,
+        main_lock_key=build_scheduler_state_key(
+            kind="lock", market="US", session_date="2026-05-28"
+        ),
+        main_owner_token="attempt-notification-repair-lock-lost-owner",
+    )
+
+    assert result.status == "artifact_uploaded_notification_deferred"
+    assert not any(":success:US:2026-05-28" in key for key, _payload in state.upserts)
 
 
 def test_notification_guard_failure_helper_preserves_alert_context() -> None:
@@ -2256,6 +2299,7 @@ def test_scheduled_entry_failure_claim_loser_does_not_suppress_artifact_alert() 
     )
 
     assert loser_result.status == "entry_failure_artifact_claim_held"
+    assert "entry_failure_artifact_claim_held" in scheduler_runner._FAILED_STATUSES
     assert loser_storage.entry_uploads == []
     assert notifier.sent == []
     assert not any(
