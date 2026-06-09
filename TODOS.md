@@ -4,9 +4,6 @@
 
 - 2026-06-09: Swing-trader review follow-ups for the current
   `sma_ema_hybrid` strategy:
-  - Add stop-distance-based position sizing, including per-trade account risk,
-    gross exposure, and currency-aware sizing; current portfolio guards cap
-    count only (`max_active_holdings`, `max_new_entries_per_market`).
   - Preserve buy `pattern` into holdings/entry state so breakout-specific sell
     rules reliably identify failed breakout positions, not only holdings with
     manual `strategy`/`tags` markers.
@@ -22,7 +19,10 @@
 
 ## Deferred
 
-- None.
+- 2026-06-09: Add stop-distance-based position sizing, including per-trade
+  account risk, gross exposure, and currency-aware sizing. Deferred while
+  buy/portfolio state is manually maintained without Toss Securities API;
+  revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed
 
