@@ -20,9 +20,9 @@ signal-formula problems:
 - `strategy.market_regime_unavailable_policy` is currently `warn_continue`.
   When benchmark data is unavailable, scan continues for that market instead
   of blocking it.
-- `ENTRY_FATAL_MISSING_PRICE_RATIO` is env-only and defaults to `1.0`. A run
-  with some missing entry prices succeeds; only a 100% missing-price ratio is
-  fatal.
+- `ENTRY_FATAL_MISSING_PRICE_RATIO` now flows through config loading and
+  active defaults use `0.0`. A run with any missing entry price is fatal unless
+  an explicit local no-YAML env override or YAML config changes the threshold.
 - KIS interval documentation/examples still mention `500ms` in places while
   active `config.yaml` uses `200ms`.
 
@@ -146,10 +146,11 @@ definitions. Operators who need a looser local policy should use a local YAML
 selected with `SAB_CONFIG`, or remove the YAML key from that local config before
 using the env override.
 
-Default contract: when any YAML config is loaded, omitted safety keys inherit
-the active safety defaults. `strategy.market_regime_unavailable_policy` defaults
-to `block_market` in that loaded-YAML path. Only the no-config legacy fallback
-keeps `warn_continue` for backward compatibility.
+Default contract: omitted safety keys inherit the active safety defaults.
+`strategy.market_regime_unavailable_policy` defaults to `block_market` and
+`entry_check.fatal_missing_price_ratio` defaults to `0.0`, even when no YAML
+config is loaded. When YAML config is loaded, safety env overrides are rejected
+if the YAML omits the matching key; put local experiments in YAML instead.
 
 Operational contract: `block_market` closes the market to candidates and records
 blocked-market diagnostics in the buy report. It is not a scan workflow failure
@@ -182,14 +183,13 @@ Parsing contract:
 - YAML path: `entry_check.fatal_missing_price_ratio`
 - Env override: `ENTRY_FATAL_MISSING_PRICE_RATIO`
 - Allowed range: finite float between `0.0` and `1.0`
-- Default when omitted in a loaded YAML config: `0.0`
-- No-config legacy fallback: `1.0`
+- Default when omitted: `0.0`
 - Active repository value: `0.0`
-- Conflict behavior: if YAML defines the threshold, direct env override fails
-  closed; use a local YAML selected with `SAB_CONFIG` or remove the YAML key
-  before relying on the env override.
+- Conflict behavior: if any YAML config is loaded, direct env override fails
+  closed whether the YAML defines or omits the threshold. Use a local YAML
+  selected with `SAB_CONFIG` for local experiments.
 - Invalid values: fail closed with `ConfigLoadError`; omitted values use the
-  active loaded-YAML default or the no-config legacy fallback described above.
+  active default described above.
 
 Behavior contract:
 
