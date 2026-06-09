@@ -277,9 +277,7 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
         'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'
         not in run_entry_script
     )
-    assert (
-        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
-    )
+    assert 'out.write(f"entry_status={entry_status}\\n")' in run_entry_script
     assert 'exit "${entry_status}"' in run_entry_script
     capture_status_index = _script_index(
         run_entry_script, "entry_status=${PIPESTATUS[0]}"
@@ -288,7 +286,7 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     assert restore_errexit_index >= 0
     status_output_index = _script_index(
         run_entry_script,
-        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
+        'out.write(f"entry_status={entry_status}\\n")',
     )
     missing_report_check_index = _script_index(
         run_entry_script,

@@ -628,11 +628,11 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     assert "set +e" in run_entry_script
     assert "entry_status=${PIPESTATUS[0]}" in run_entry_script
     assert (
-        'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"'
+        'out.write(f"entry_report_path={entry_report_path}\\n")'
         in run_entry_script
     )
     assert (
-        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"' in run_entry_script
+        'out.write(f"entry_status={entry_status}\\n")' in run_entry_script
     )
     assert 'exit "${entry_status}"' in run_entry_script
     capture_status_index = _script_index(
@@ -642,7 +642,7 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     assert restore_errexit_index >= 0
     status_output_index = _script_index(
         run_entry_script,
-        'echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"',
+        'out.write(f"entry_status={entry_status}\\n")',
     )
     missing_report_check_index = _script_index(
         run_entry_script,
@@ -650,7 +650,7 @@ def test_ai_brief_workflow_uploads_entry_artifact_after_fatal_entry() -> None:
     )
     report_path_output_index = _script_index(
         run_entry_script,
-        'echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"',
+        'out.write(f"entry_report_path={entry_report_path}\\n")',
     )
     assert (
         _script_index(run_entry_script, "set +e")
@@ -707,13 +707,23 @@ In `.github/workflows/ai-brief.yml`, replace the entry command portion of `Run e
 Keep the existing `entry_report_path` extraction block. Before the missing-report check, add:
 
 ```bash
-          echo "entry_status=${entry_status}" >> "${GITHUB_OUTPUT}"
+          ENTRY_STATUS="${entry_status}" uv run python - <<'PY'
+          import os
+          entry_status = os.environ["ENTRY_STATUS"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"entry_status={entry_status}\n")
+          PY
 ```
 
 After:
 
 ```bash
-          echo "entry_report_path=${entry_report_path}" >> "${GITHUB_OUTPUT}"
+          ENTRY_REPORT_PATH="${entry_report_path}" uv run python - <<'PY'
+          import os
+          entry_report_path = os.environ["ENTRY_REPORT_PATH"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"entry_report_path={entry_report_path}\n")
+          PY
 ```
 
 add:
@@ -963,7 +973,7 @@ Update the `MARKET_REGIME_UNAVAILABLE_POLICY` row so the default column referenc
 Update the `ENTRY_FATAL_MISSING_PRICE_RATIO` row:
 
 ```markdown
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | loaded YAML active default `0.0`; no-config legacy fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | active default `0.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Operational safety key. When YAML config is loaded, configure this in YAML; env override is accepted only when no YAML config is loaded. 0.0 means any missing price fails. |
 ```
 
 In `docs/config-reference.md`, replace:
@@ -975,7 +985,7 @@ In `docs/config-reference.md`, replace:
 with:
 
 ```markdown
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, loaded YAML active default 0.0 |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio`, 0.0-1.0, active default 0.0; env override only when no YAML config is loaded |
 ```
 
 Add this row to the CLI Config Override Bindings table:
@@ -989,7 +999,7 @@ Add this row to the CLI Config Override Bindings table:
 In `docs/STRATEGY.md`, add this bullet under the `sab entry` report behavior section:
 
 ```markdown
-- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. YAML config가 로드되지 않는 legacy fallback만 기존 호환성을 위해 `1.0`입니다.
+- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. YAML config가 없어도 같은 active default를 사용하며, env override는 YAML config가 로드되지 않은 경우에만 허용됩니다.
 ```
 
 In `docs/ARCHITECTURE.md`, extend the manual AI Brief flow note with:
