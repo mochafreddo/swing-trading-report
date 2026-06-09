@@ -70,6 +70,7 @@ def test_env_example_documents_market_regime_policy_without_active_override() ->
     active_keys = set(_extract_env_keys(env_example_path))
 
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" in text
+    assert "env override는 YAML이 없을 때만 허용됩니다" in text
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" not in active_keys
 
 
@@ -80,6 +81,7 @@ def test_env_example_documents_entry_fatal_override_without_active_override() ->
 
     assert "ENTRY_FATAL_MISSING_PRICE_RATIO" in text
     assert "entry_check.fatal_missing_price_ratio" in text
+    assert "env override는 YAML이 없을 때만 허용됩니다" in text
     assert "ENTRY_FATAL_MISSING_PRICE_RATIO" not in active_keys
 
 

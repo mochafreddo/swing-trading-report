@@ -13,6 +13,8 @@ def _reset_conflict_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SCREEN_LIMIT",
         "FX_MODE",
         "HOLDINGS_FILE",
+        "USE_MARKET_REGIME_FILTER",
+        "MARKET_REGIME_UNAVAILABLE_POLICY",
         "ENTRY_FATAL_MISSING_PRICE_RATIO",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -112,7 +114,7 @@ files:
     assert env_loader.getenv("HOLDINGS_FILE") == "env-holdings.yaml"
 
 
-def test_load_config_allows_env_when_yaml_key_is_absent(
+def test_load_config_allows_non_safety_env_when_yaml_key_is_absent(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)

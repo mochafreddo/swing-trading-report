@@ -139,12 +139,11 @@ production default because market regime is a precondition, not a scoring
 bonus.
 
 Compatibility: the existing `MARKET_REGIME_UNAVAILABLE_POLICY=warn_continue`
-override remains available for exploratory local runs only when the matching
-YAML path is absent. With committed `config.yaml`, setting that env key directly
-fails by design because the existing conflict policy rejects duplicate env/YAML
-definitions. Operators who need a looser local policy should use a local YAML
-selected with `SAB_CONFIG`, or remove the YAML key from that local config before
-using the env override.
+override remains available for exploratory no-YAML local runs. When any YAML
+config is loaded, setting that safety env key directly fails by design whether
+the YAML defines or omits the matching path. Operators who need a looser local
+policy should set the value explicitly in a local YAML selected with
+`SAB_CONFIG`.
 
 Default contract: omitted safety keys inherit the active safety defaults.
 `strategy.market_regime_unavailable_policy` defaults to `block_market` and
@@ -220,7 +219,7 @@ Update docs and examples so operators see one coherent policy:
 
 - `.env.example`: keep `ENTRY_FATAL_MISSING_PRICE_RATIO` commented as an
   override, not the primary place to configure normal operation. The comment
-  must warn that it conflicts with YAML when the YAML key is present.
+  must warn that safety env overrides are only valid for no-YAML local runs.
 - `docs/configuration.md`: document YAML as the default source and env as an
   override subject to conflict policy.
 - `docs/config-reference.md`: add the YAML binding row.
@@ -238,7 +237,7 @@ Add or update focused tests:
 
 - Config parsing:
   - YAML `entry_check.fatal_missing_price_ratio` is parsed.
-  - Env override is parsed when YAML key is absent.
+  - Env override is parsed when no YAML config is loaded.
   - Invalid values in strict mode fail with `ConfigLoadError`.
   - Env/YAML duplicate key fails closed.
 - Runtime repository contract:
@@ -312,9 +311,11 @@ for safe entry/regime gating is missing.
   - `market_regime_unavailable_policy == "block_market"`
   - `entry_fatal_missing_price_ratio == 0.0`
 - Loaded YAML configs with omitted custom safety keys inherit the active safety
-  defaults:
+  defaults when no matching safety env overrides are set:
   - `strategy.market_regime_unavailable_policy == "block_market"`
   - `entry_fatal_missing_price_ratio == 0.0`
+- Loaded YAML configs with matching safety env overrides raise `ConfigLoadError`,
+  even when the YAML omits the matching safety key.
 - Defining `ENTRY_FATAL_MISSING_PRICE_RATIO` while YAML also defines
   `entry_check.fatal_missing_price_ratio` raises `ConfigLoadError`.
 - Defining `MARKET_REGIME_UNAVAILABLE_POLICY` while YAML also defines
@@ -334,6 +335,6 @@ for safe entry/regime gating is missing.
 
 ## Open Decisions
 
-None. Operators can still choose more permissive behavior explicitly by
-removing the matching YAML key and using env, or by changing the YAML value in a
-local uncommitted config file selected with `SAB_CONFIG`.
+None. Operators can still choose more permissive behavior explicitly by changing
+the YAML value in a local uncommitted config file selected with `SAB_CONFIG`, or
+by using env only in no-YAML local runs.
