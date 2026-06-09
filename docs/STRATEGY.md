@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-05
+최종 확인: 2026-06-09
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -327,7 +327,8 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
   - 값: `aligned | tight_stop_vs_volatility | unknown`
   - `volatility_reference_pct`는 gap guard 비율을 우선 사용하고, 없으면 ATR/종가 비율을 사용한 숫자 값입니다.
   - `risk_alignment_reasons`는 `gap_guard_exceeds_stop_max`, `atr_exceeds_stop_max`, `volatility_reference_unavailable` 같은 안정적인 reason code 목록입니다.
-  - `tight_stop_vs_volatility`는 후보 변동성 기준이 `sell.hybrid.stop_loss_pct_max`보다 큰 경우이며, 후보를 즉시 제외하지 않고 warning 근거로 표시합니다.
+  - `tight_stop_vs_volatility`는 후보 변동성 기준이 `sell.hybrid.stop_loss_pct_max`보다 큰 경우이며, scan 후보에서는 즉시 제외하지 않고 warning 근거로 표시합니다.
+  - `sab entry`는 hybrid candidate에 `risk_alignment`가 명시되어 있고 값이 `aligned`가 아니면, 가격/갭/트리거 조건이 통과해도 자동 `ENTER` 대신 `REVIEW`로 낮춥니다.
 - hybrid buy candidate는 `quality_state`를 포함합니다.
   - 값: `A | B | C`
   - `A`: READY + RS 양호 + 리스크 정합성 양호
@@ -460,6 +461,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
   - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
 - hybrid buy는 추가로 pattern/entry_state/gap_guard/entry trigger guard 관련 필드를 포함합니다.
+  - `risk_alignment`가 명시된 hybrid candidate는 `aligned`일 때만 자동 `ENTER` 대상이 될 수 있습니다. `tight_stop_vs_volatility`나 `unknown`은 entry row에 수동검토 reason을 남기고 `REVIEW`로 처리합니다.
+  - `risk_alignment`가 없는 레거시 candidate는 기존 호환성을 위해 이 규칙만으로 차단하지 않습니다.
 - `sma_ema_hybrid` buy report의 `config_snapshot`은 공통 전략 설정과 함께 `strategy.hybrid.*` 값을 기록해, hybrid 후보 평가 파라미터를 사후 재현할 수 있게 합니다.
 - static `strategy.rs_benchmark_return`이 설정된 buy report는 `config_snapshot.rs_benchmark_return`도 기록해 RS tie-breaker 입력을 사후 재현할 수 있게 합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.

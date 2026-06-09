@@ -403,6 +403,28 @@ def _resolve_strategy_mode(
     return "ema_cross"
 
 
+def _normalize_risk_alignment(candidate: dict[str, Any]) -> str | None:
+    normalized = str(candidate.get("risk_alignment") or "").strip().lower()
+    return normalized or None
+
+
+def _normalize_risk_alignment_reasons(candidate: dict[str, Any]) -> list[str]:
+    raw_reasons = candidate.get("risk_alignment_reasons")
+    if isinstance(raw_reasons, list):
+        return [str(reason).strip() for reason in raw_reasons if str(reason).strip()]
+    reason = str(raw_reasons or "").strip()
+    return [reason] if reason else []
+
+
+def _hybrid_risk_alignment_review_reason(
+    risk_alignment: str, risk_alignment_reasons: list[str]
+) -> str:
+    detail = risk_alignment
+    if risk_alignment_reasons:
+        detail = f"{detail}: {', '.join(risk_alignment_reasons)}"
+    return f"hybrid risk_alignment requires manual review ({detail})"
+
+
 def _resolve_report_strategy_mode(report: dict[str, Any]) -> str | None:
     direct = _normalize_strategy_mode(report.get("strategy_mode"))
     if direct is not None:
@@ -433,6 +455,8 @@ def _resolve_entry_candidate_action(
     trigger_label: str | None,
     strategy_mode: str,
     entry_state: str | None,
+    risk_alignment: str | None,
+    risk_alignment_reasons: list[str],
     gap_breach_action: str,
     allow_missing_gap_guard: bool,
     reasons: list[str],
@@ -456,21 +480,25 @@ def _resolve_entry_candidate_action(
     if entry_state != "READY":
         reasons.append("hybrid entry_state requires manual review")
         return "REVIEW"
-    if trigger_price is None:
-        return "ENTER"
-    trigger_label = trigger_label or "trigger"
-    if trigger_operator != "gte":
+    if trigger_price is not None:
+        trigger_label = trigger_label or "trigger"
+        if trigger_operator != "gte":
+            reasons.append(
+                "hybrid trigger guard unsupported "
+                f"({trigger_label} operator {trigger_operator})"
+            )
+            return "REVIEW"
+        if entry_price is not None and entry_price < trigger_price:
+            reasons.append(
+                "hybrid trigger guard failed "
+                f"({entry_price:.2f} < {trigger_label} {trigger_price:.2f})"
+            )
+            return "SKIP"
+    if risk_alignment is not None and risk_alignment != "aligned":
         reasons.append(
-            "hybrid trigger guard unsupported "
-            f"({trigger_label} operator {trigger_operator})"
+            _hybrid_risk_alignment_review_reason(risk_alignment, risk_alignment_reasons)
         )
         return "REVIEW"
-    if entry_price is not None and entry_price < trigger_price:
-        reasons.append(
-            "hybrid trigger guard failed "
-            f"({entry_price:.2f} < {trigger_label} {trigger_price:.2f})"
-        )
-        return "SKIP"
     return "ENTER"
 
 
@@ -498,6 +526,8 @@ def _evaluate_entry_candidate(
         default_strategy_mode=default_strategy_mode,
     )
     entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
+    risk_alignment = _normalize_risk_alignment(candidate)
+    risk_alignment_reasons = _normalize_risk_alignment_reasons(candidate)
     pattern = str(candidate.get("pattern") or "").strip() or None
     trigger_price, trigger_operator, trigger_label, trigger_issue = (
         _extract_entry_trigger_guard(candidate, signal_close=signal_close)
@@ -541,6 +571,8 @@ def _evaluate_entry_candidate(
         trigger_label=trigger_label,
         strategy_mode=strategy_mode,
         entry_state=entry_state,
+        risk_alignment=risk_alignment,
+        risk_alignment_reasons=risk_alignment_reasons,
         gap_breach_action=gap_breach_action,
         allow_missing_gap_guard=allow_missing_gap_guard,
         reasons=reasons,

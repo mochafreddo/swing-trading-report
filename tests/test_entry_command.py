@@ -154,6 +154,43 @@ def test_evaluate_entry_candidates_skips_hybrid_ready_on_trigger_fail() -> None:
     assert issues == []
 
 
+@pytest.mark.parametrize(
+    ("risk_alignment", "risk_reasons"),
+    [
+        ("tight_stop_vs_volatility", ["gap_guard_exceeds_stop_max"]),
+        ("unknown", ["volatility_reference_unavailable"]),
+    ],
+)
+def test_evaluate_entry_candidates_reviews_hybrid_ready_when_risk_not_aligned(
+    risk_alignment: str, risk_reasons: list[str]
+) -> None:
+    candidates = [
+        _entry_candidate(
+            "005930",
+            raw_close=100.0,
+            gap_guard_value=0.03,
+            strategy_mode="sma_ema_hybrid",
+            entry_state="READY",
+            risk_alignment=risk_alignment,
+            risk_alignment_reasons=risk_reasons,
+        )
+    ]
+
+    rows, issues = evaluate_entry_candidates(
+        candidates=candidates,
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].action == "REVIEW"
+    assert rows[0].reasons == [
+        "hybrid risk_alignment requires manual review "
+        f"({risk_alignment}: {risk_reasons[0]})"
+    ]
+    assert issues == []
+
+
 def test_evaluate_entry_candidates_normalizes_adjusted_hybrid_trigger_to_raw_reference() -> (
     None
 ):

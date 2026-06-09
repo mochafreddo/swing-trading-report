@@ -4,9 +4,6 @@
 
 - 2026-06-09: Swing-trader review follow-ups for the current
   `sma_ema_hybrid` strategy:
-  - Gate or downgrade entries when `risk_alignment != aligned`; today the buy
-    report warns on volatility wider than `sell.hybrid.stop_loss_pct_max`, but
-    entry can still proceed if price/trigger checks pass.
   - Add stop-distance-based position sizing, including per-trade account risk,
     gross exposure, and currency-aware sizing; current portfolio guards cap
     count only (`max_active_holdings`, `max_new_entries_per_market`).
@@ -29,6 +26,10 @@
 
 ## Completed
 
+- 2026-06-09: Downgraded `sma_ema_hybrid` entry candidates with explicit
+  non-`aligned` `risk_alignment` to `REVIEW`, so volatility/unknown-risk buy
+  warnings cannot become automatic `ENTER` rows just because price, gap, and
+  trigger checks pass.
 - 2026-06-05: Added optional live integration smoke coverage via
   `scripts/live_integration_smoke.py` and `just live-integration-smoke`, so
   local refactors can intentionally verify real RSS/source API/KIS market-data
