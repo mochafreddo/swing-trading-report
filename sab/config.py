@@ -143,12 +143,8 @@ def _yaml_path_exists(yaml_cfg: dict[str, Any], path: str) -> bool:
     return _from_nested(yaml_cfg, path, sentinel) is not sentinel
 
 
-_SAFETY_DOTTED_YAML_KEYS = frozenset(
-    {
-        "strategy.market_regime_unavailable_policy",
-        "strategy.use_market_regime_filter",
-        "entry_check.fatal_missing_price_ratio",
-    }
+_DOTTED_ENV_YAML_BINDING_KEYS = frozenset(
+    yaml_path for _env_key, yaml_path in _ENV_YAML_CONFLICT_BINDINGS
 )
 _ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT = True
 _ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT = "block_market"
@@ -606,7 +602,7 @@ def _yaml_value_type_name(value: Any) -> str:
 
 
 def _enforce_safety_section_shapes(parser: _ConfigParser) -> None:
-    for yaml_path in sorted(_SAFETY_DOTTED_YAML_KEYS):
+    for yaml_path in sorted(_DOTTED_ENV_YAML_BINDING_KEYS):
         if parser.has_top_level_yaml_key(yaml_path):
             raise ConfigLoadError(
                 "Invalid config value: "

@@ -79,6 +79,8 @@ class ConfigData:
 
 def load_yaml_config(path: str | None = None) -> ConfigData:
     env_path = getenv("SAB_CONFIG")
+    if path is None and env_path is not None and not env_path.strip():
+        raise ConfigLoadError("SAB_CONFIG must not be blank.")
     resolved_path = path if path is not None else (env_path or "config.yaml")
     p = Path(resolved_path)
     if not p.exists():

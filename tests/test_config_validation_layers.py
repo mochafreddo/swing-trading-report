@@ -485,6 +485,26 @@ def test_load_config_rejects_top_level_dotted_market_regime_filter_with_env_over
     assert "Strict config parsing failed" not in str(exc.value)
 
 
+def test_load_config_rejects_top_level_dotted_config_binding_key(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "kis.base_url: https://openapi.example.invalid\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=r"kis\.base_url") as exc:
+        load_config()
+    assert "top-level dotted key" in str(exc.value)
+
+
 def test_load_config_uses_active_entry_fatal_missing_price_ratio_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

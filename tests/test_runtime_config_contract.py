@@ -46,6 +46,14 @@ def test_repository_config_defaults_market_regime_unavailable_policy(
     assert cfg.market_regime_unavailable_policy == "block_market"
 
 
+def test_repository_config_enables_market_regime_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _load_repository_config(monkeypatch)
+
+    assert cfg.use_market_regime_filter is True
+
+
 def test_repository_config_defaults_entry_fatal_missing_price_ratio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

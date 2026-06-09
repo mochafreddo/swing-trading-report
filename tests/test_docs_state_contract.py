@@ -214,6 +214,8 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
         "omitted operational safety keys inherit the active safety defaults"
         in configuration_text
     )
+    assert "tests/test_config_validation_layers.py" in configuration_text
+    assert "tests/test_runtime_config_contract.py" in configuration_text
     assert "Loaded YAML configs with omitted custom safety keys inherit" in (
         safety_design_text
     )

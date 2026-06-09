@@ -56,6 +56,7 @@ def _log_records_for_event(
 class _FakeStateStore:
     entries: dict[str, RuntimeStateEntry] = field(default_factory=dict)
     upserts: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    events: list[tuple[str, str]] = field(default_factory=list)
     claims: list[str] = field(default_factory=list)
     claim_payloads: list[tuple[str, dict[str, object] | None]] = field(
         default_factory=list
@@ -66,6 +67,8 @@ class _FakeStateStore:
     preflight_calls: int = 0
     fail_attempt_upsert: bool = False
     fail_artifact_upsert: bool = False
+    fail_entry_failure_artifact_upsert: bool = False
+    fail_skip_artifact_upsert: bool = False
     fail_notification_sent_upsert: bool = False
     fail_late_alert_sent_upsert: bool = False
     claim_results: list[bool] = field(default_factory=list)
@@ -89,10 +92,18 @@ class _FakeStateStore:
         ttl_seconds: int,
         now: dt.datetime | None = None,
     ) -> None:
+        self.events.append(("upsert", key))
         if ":attempt:" in key and self.fail_attempt_upsert:
             raise RuntimeError("attempt write failed")
         if ":artifact:" in key and self.fail_artifact_upsert:
             raise RuntimeError("artifact write failed")
+        if (
+            ":entry-failure-artifact:" in key
+            and self.fail_entry_failure_artifact_upsert
+        ):
+            raise RuntimeError("entry failure artifact write failed")
+        if ":skip-artifact:" in key and self.fail_skip_artifact_upsert:
+            raise RuntimeError("skip artifact write failed")
         if ":notification:sent:" in key and self.fail_notification_sent_upsert:
             raise RuntimeError("notification sent write failed")
         if ":late-alert:sent:" in key and self.fail_late_alert_sent_upsert:
@@ -119,6 +130,7 @@ class _FakeStateStore:
         return RuntimeStateLockClaim(acquired=acquired, expires_at="soon")
 
     def release_lock(self, key: str, *, owner_token: str) -> bool:
+        self.events.append(("release", key))
         self.releases.append(key)
         return True
 
@@ -1307,6 +1319,89 @@ def test_locked_upload_precheck_does_not_record_skip_or_alert_after_lock_loss() 
     assert notifier.late_alerts == []
 
 
+def test_locked_upload_precheck_records_skip_marker_after_post_upload_lock_loss() -> (
+    None
+):
+    state = _FakeStateStore(ownership_results=[True, True, False])
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        guard=_guard(session_state="INTRADAY"),
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_upload_precheck(
+        market="US",
+        session_date="2026-05-28",
+        run_url="https://github.com/owner/repo/actions/runs/7",
+        lock_key=lock_key,
+        owner_token="attempt-upload-precheck-post-upload-lock-lost-owner",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-upload-precheck-post-upload-lock-lost",
+    )
+
+    assert result is not None
+    assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert storage.uploads == []
+    assert len(storage.skip_uploads) == 1
+    skip_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":skip-artifact:US:2026-05-28" in key
+    ]
+    assert skip_payloads == [
+        {
+            "storageKey": "2026/05/2026-05-28.ai-brief-skip.json",
+            "market": "US",
+            "sessionDate": "2026-05-28",
+            "skipState": "RUNTIME_GUARD_SKIPPED",
+            "skipReason": "runtime_guard_skipped",
+            "runUrl": "https://github.com/owner/repo/actions/runs/7",
+        }
+    ]
+    assert lock_key in state.releases
+    assert "pre_upload_guard_failed" not in notifier.sent
+    assert notifier.late_alerts == []
+
+
+def test_locked_upload_precheck_does_not_alert_when_skip_marker_fails_after_post_upload_lock_loss() -> (
+    None
+):
+    state = _FakeStateStore(
+        ownership_results=[True, True, False],
+        fail_skip_artifact_upsert=True,
+    )
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        guard=_guard(session_state="INTRADAY"),
+    )
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_upload_precheck(
+        market="US",
+        session_date="2026-05-28",
+        run_url="https://github.com/owner/repo/actions/runs/7",
+        lock_key=lock_key,
+        owner_token="attempt-upload-precheck-marker-fail-owner",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-upload-precheck-marker-fail",
+    )
+
+    assert result is not None
+    assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
+    assert len(storage.skip_uploads) == 1
+    assert lock_key in state.releases
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+
+
 def test_locked_upload_precheck_does_not_alert_after_lock_loss_reusing_skip() -> None:
     skip_key = build_scheduler_state_key(
         kind="skip-artifact", market="US", session_date="2026-05-28"
@@ -2119,6 +2214,20 @@ def test_runner_releases_main_lock_when_pipeline_fails(
             },
         )
     ]
+    late_alert_sent_index = next(
+        index
+        for index, (_event, key) in enumerate(state.events)
+        if ":late-alert:sent:US:2026-05-28:pipeline_failed" in key
+    )
+    main_lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+    main_lock_release_index = next(
+        index
+        for index, event in enumerate(state.events)
+        if event == ("release", main_lock_key)
+    )
+    assert late_alert_sent_index < main_lock_release_index
 
 
 def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> None:
@@ -2244,7 +2353,7 @@ def test_scheduled_entry_failure_skips_upload_and_alert_when_lock_is_lost_after_
     assert notifier.late_alerts == []
 
 
-def test_scheduled_entry_failure_skips_marker_and_alert_when_lock_is_lost_after_upload() -> (
+def test_scheduled_entry_failure_records_marker_without_alert_when_lock_is_lost_after_upload() -> (
     None
 ):
     state = _FakeStateStore(ownership_results=[True, True, False])
@@ -2264,11 +2373,59 @@ def test_scheduled_entry_failure_skips_marker_and_alert_when_lock_is_lost_after_
     )
 
     assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.entry.json"
     assert storage.entry_uploads == ["reports/current.entry.json"]
+    marker_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":entry-failure-artifact:US:2026-05-28" in key
+    ]
+    assert marker_payloads == [
+        {
+            "storageKey": "2026/05/2026-05-28.entry.json",
+            "market": "US",
+            "sessionDate": "2026-05-28",
+            "reportDate": "2026-05-28",
+            "entryReportPath": "reports/current.entry.json",
+            "reason": "scheduled_entry_failed",
+            "scheduleRole": "local-primary",
+            "runnerRole": "local-primary",
+            "attemptId": "attempt-entry-lock-lost-after-upload",
+        }
+    ]
     assert not any(
-        ":entry-failure-artifact:US:2026-05-28" in key
+        ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
         for key, _payload in state.upserts
     )
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+
+
+def test_scheduled_entry_failure_does_not_alert_when_marker_fails_after_post_upload_lock_loss() -> (
+    None
+):
+    state = _FakeStateStore(
+        ownership_results=[True, True, False],
+        fail_entry_failure_artifact_upsert=True,
+    )
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-marker-fail-after-lock-lost",
+        )
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert result.storage_key == "2026/05/2026-05-28.entry.json"
+    assert storage.entry_uploads == ["reports/current.entry.json"]
     assert not any(
         ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
         for key, _payload in state.upserts
