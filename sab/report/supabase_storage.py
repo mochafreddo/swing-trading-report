@@ -6,8 +6,11 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
@@ -29,6 +32,29 @@ _REPORT_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _REPORT_KEY_PATTERN = re.compile(
     rf"\d{{4}}/\d{{2}}/\d{{4}}-\d{{2}}-\d{{2}}(?:-(\d+))?\.{REPORT_RUN_TYPE_PATTERN}\.json$"
 )
+
+type _UploadSuppressionState = tuple[threading.Thread, bool]
+_REPORT_UPLOADS_SUPPRESSED: ContextVar[_UploadSuppressionState | None] = ContextVar(
+    "sab_report_uploads_suppressed",
+    default=None,
+)
+
+
+@contextmanager
+def suppress_report_uploads() -> Iterator[None]:
+    token = _REPORT_UPLOADS_SUPPRESSED.set((threading.current_thread(), True))
+    try:
+        yield
+    finally:
+        _REPORT_UPLOADS_SUPPRESSED.reset(token)
+
+
+def _report_uploads_suppressed() -> bool:
+    state = _REPORT_UPLOADS_SUPPRESSED.get()
+    if state is None:
+        return False
+    owner_thread, suppressed = state
+    return suppressed and owner_thread is threading.current_thread()
 
 
 class SupabaseStorageError(RuntimeError):
@@ -651,6 +677,9 @@ def maybe_upload_report_artifact(
     logger: logging.Logger,
     force: bool = False,
 ) -> str | None:
+    if _report_uploads_suppressed():
+        return None
+
     required, enabled = _resolve_upload_mode(
         github_actions=_is_github_actions(),
         upload_flag=env_flag("SAB_UPLOAD_REPORTS", default=False),
@@ -732,5 +761,6 @@ __all__ = [
     "SupabaseStorageConfigError",
     "SupabaseStorageError",
     "maybe_upload_report_artifact",
+    "suppress_report_uploads",
     "upload_report_artifact",
 ]

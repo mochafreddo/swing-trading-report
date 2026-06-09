@@ -49,6 +49,7 @@ from ..report.supabase_storage import (
     SupabaseStorageConfig,
     _auth_headers,
     _load_storage_config,
+    suppress_report_uploads,
     upload_report_artifact,
 )
 from ..scan import run_scan
@@ -3234,7 +3235,10 @@ class DefaultScheduledPipeline:
             market,
             report_date,
         )
-        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+        with (
+            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
+            suppress_report_uploads(),
+        ):
             scan_status = run_scan(
                 limit=None,
                 watchlist_path=None,
@@ -3299,7 +3303,10 @@ class DefaultScheduledPipeline:
             buy_report_path,
             holdings_path,
         )
-        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+        with (
+            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
+            suppress_report_uploads(),
+        ):
             entry_status = run_entry(
                 buy_report_path=buy_report_path,
                 provider="kis",
@@ -3366,7 +3373,10 @@ class DefaultScheduledPipeline:
             source_provider or "",
             model_provider,
         )
-        with suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS):
+        with (
+            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
+            suppress_report_uploads(),
+        ):
             ai_status = run_ai_brief(
                 entry_report_path=entry_report_path,
                 buy_report_path=buy_report_path,

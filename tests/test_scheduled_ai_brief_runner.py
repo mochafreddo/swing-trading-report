@@ -4499,6 +4499,91 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
+def test_default_pipeline_suppresses_ambient_github_actions_report_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-secret")
+    upload_calls: list[str] = []
+
+    def fake_upload_report_artifact(**kwargs: object) -> str:
+        run_type = str(kwargs["run_type"])
+        upload_calls.append(run_type)
+        return f"2026/05/2026-05-28.{run_type}.json"
+
+    def maybe_upload_from_step(*, artifact_path: str, run_type: str) -> None:
+        from sab.report.supabase_storage import maybe_upload_report_artifact
+
+        maybe_upload_report_artifact(
+            artifact_path=artifact_path,
+            run_type=run_type,
+            logger=logging.getLogger(__name__),
+        )
+
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/2026-05-28.buy.json")
+        maybe_upload_from_step(
+            artifact_path="reports/2026-05-28.buy.json",
+            run_type="buy",
+        )
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/2026-05-28.entry.json")
+        maybe_upload_from_step(
+            artifact_path="reports/2026-05-28.entry.json",
+            run_type="entry",
+        )
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/2026-05-28.ai-brief.json")
+        maybe_upload_from_step(
+            artifact_path="reports/2026-05-28.ai-brief.json",
+            run_type="ai-brief",
+        )
+        return 0
+
+    monkeypatch.setattr(
+        "sab.report.supabase_storage.upload_report_artifact",
+        fake_upload_report_artifact,
+    )
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+
+    result = DefaultScheduledPipeline().run(
+        market="US",
+        session_date="2026-05-28",
+        report_date="2026-05-28",
+        source_provider=None,
+        model_provider="fake",
+        dry_run=False,
+    )
+
+    assert result.ai_brief_report_path == "reports/2026-05-28.ai-brief.json"
+    assert upload_calls == []
+
+
 def test_default_pipeline_ignores_ambient_holdings_file_env(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
