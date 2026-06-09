@@ -162,14 +162,13 @@ Add a small config section value:
 
 ```yaml
 entry_check:
-  enabled: false
   fatal_missing_price_ratio: 0.0
 ```
 
-`entry_check.enabled` is an existing setting and must not gate this fatal
-missing-price policy. The threshold applies whenever `sab entry` evaluates entry
-prices. If a future cleanup renames or removes `entry_check.enabled`, that should
-be a separate change.
+Legacy configs may still contain `entry_check.enabled`, but that key must not gate
+this fatal missing-price policy. The threshold applies whenever `sab entry`
+evaluates entry prices. Active examples should not show `entry_check.enabled`
+because it is ignored for this behavior.
 
 Add a matching config/env binding:
 

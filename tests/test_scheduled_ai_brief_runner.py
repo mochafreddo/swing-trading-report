@@ -353,6 +353,18 @@ class _FakeNotifier:
         self.late_alerts.append((reason, dict(context)))
 
 
+@dataclass
+class _BlockingScheduleNotifier(_FakeNotifier):
+    send_started_event: threading.Event = field(default_factory=threading.Event)
+    release_event: threading.Event = field(default_factory=threading.Event)
+
+    def send_schedule(self, *, report: dict[str, object], storage_key: str) -> None:
+        self.send_started_event.set()
+        if not self.release_event.wait(timeout=1):
+            raise AssertionError("notification send was not released by the test")
+        super().send_schedule(report=report, storage_key=storage_key)
+
+
 def _guard(
     *,
     session_state: str = "PRE_OPEN",
@@ -918,6 +930,46 @@ def test_artifact_only_reconciliation_uses_notification_claim_without_main_lock(
     assert storage.downloads == ["2026/05/2026-05-28.ai-brief.json"]
     assert not any(":lock:" in key for key in state.claims)
     assert any(":notification:claim:" in key for key in state.claims)
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
+
+
+def test_main_lock_renewer_stays_active_during_locked_notification_send() -> None:
+    state = _FakeStateStore()
+    notifier = _BlockingScheduleNotifier()
+    runner, state, _pipeline, _storage, _returned_notifier = _runner(
+        state=state,
+        notifier=notifier,
+        lock_renew_interval_seconds=0.01,
+    )
+    renewed_during_send = threading.Event()
+    results: list[scheduler_runner.ScheduledAiBriefResult] = []
+
+    thread = threading.Thread(
+        target=lambda: results.append(
+            runner.run(
+                ScheduledAiBriefRequest(
+                    market="US",
+                    schedule_role="local-primary",
+                    runner_role="local-primary",
+                    scheduled_tick="0810",
+                    attempt_id="attempt-renew-during-notification",
+                )
+            )
+        ),
+        daemon=True,
+    )
+    thread.start()
+
+    assert notifier.send_started_event.wait(timeout=1)
+    state.renewed_event = renewed_during_send
+    try:
+        assert renewed_during_send.wait(timeout=1)
+    finally:
+        notifier.release_event.set()
+        thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert results[0].status == "completed"
     assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
 
 
@@ -3217,7 +3269,8 @@ def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
     assert isinstance(exc_value, RuntimeError)
     assert isinstance(exc_value.__cause__, ValueError)
     assert "entry_report_path=unsafe" in str(exc_value.__cause__)
-    assert "pipeline wrapper" in str(exc_value)
+    assert str(exc_value) == "<redacted scheduled entry exception>"
+    assert "pipeline wrapper" not in str(exc_value)
     assert "/tmp/private" not in caplog.text
 
 
@@ -3276,7 +3329,8 @@ def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["pipeline_failed"]
     assert "entry_report_path=reports/current.entry.json" in caplog.text
-    assert "raw=unsafe" in caplog.text
+    assert "<redacted scheduled entry exception>" in caplog.text
+    assert "raw=unsafe" not in caplog.text
     assert "/tmp/private" not in caplog.text
     assert "/tmp/private" not in str(notifier.late_alerts)
 
@@ -3577,6 +3631,61 @@ def test_runner_pipeline_failure_log_redacts_split_scheduled_entry_note_path(
     assert "entry_report_path=unsafe" in caplog.text
     assert "/tmp/private" not in caplog.text
     assert "/tmp/private" not in str(notifier.late_alerts)
+
+
+def test_runner_pipeline_failure_log_redacts_wrapped_scheduled_entry_exception_output(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _WrappedEntryFailurePipeline(_FakePipeline):
+        def run(
+            self,
+            *,
+            market: str,
+            session_date: str,
+            report_date: str,
+            source_provider: str | None,
+            model_provider: str,
+            dry_run: bool,
+            source_api_url: str | None = None,
+        ) -> ScheduledPipelineResult:
+            self._record_call(
+                market=market,
+                session_date=session_date,
+                report_date=report_date,
+                source_provider=source_provider,
+                source_api_url=source_api_url,
+                model_provider=model_provider,
+                dry_run=dry_run,
+            )
+            try:
+                raise scheduler_runner._ScheduledEntryStepError(
+                    "reports/current.entry.json"
+                )
+            except RuntimeError as err:
+                entry_output = "entry stdout=KIS_APP_SECRET=sekret"
+                raise RuntimeError(entry_output) from err
+
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_WrappedEntryFailurePipeline()
+    )
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-wrapped-entry-secret-log",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == ["scheduled_entry_failed"]
+    assert "scheduled entry failed" in caplog.text
+    assert "KIS_APP_SECRET" not in caplog.text
+    assert "sekret" not in caplog.text
 
 
 def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(

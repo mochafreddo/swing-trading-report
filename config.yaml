@@ -93,7 +93,6 @@ sell:
     time_stop_profit_floor: 0.03
 
 entry_check:
-  enabled: false
   fatal_missing_price_ratio: 0.0
 
 portfolio:

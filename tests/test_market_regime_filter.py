@@ -283,7 +283,18 @@ def test_evaluate_candidates_keeps_other_market_when_one_market_blocked(
 def test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavailable() -> (
     None
 ):
-    runtime = _build_runtime(tickers=["AAPL.NAS"])
+    runtime = _build_runtime(
+        tickers=["AAPL.NAS"],
+        cfg=replace(
+            Config(),
+            data_provider="kis",
+            strategy_mode="ema_cross",
+            use_market_regime_filter=True,
+            market_regime_unavailable_policy="warn_continue",
+            rs_lookback_days=0,
+            rs_benchmark_ticker_us="SPY.AMS",
+        ),
+    )
     evaluated: list[str] = []
 
     class _FakeKISClient:
@@ -541,5 +552,5 @@ def test_write_scan_report_includes_market_regime_filter_in_config_snapshot() ->
     assert captured["run_meta"]["config_snapshot"]["use_market_regime_filter"] is True
     assert (
         captured["run_meta"]["config_snapshot"]["market_regime_unavailable_policy"]
-        == "warn_continue"
+        == "block_market"
     )

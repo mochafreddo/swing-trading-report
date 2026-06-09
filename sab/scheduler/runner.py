@@ -1333,119 +1333,121 @@ class ScheduledAiBriefRunner:
             )
         except Exception as err:
             pipeline_error = err
+
+        try:
+            if pipeline_error is not None:
+                return self._handle_locked_pipeline_exception(
+                    market=market,
+                    session_date=session_date,
+                    attempt_id=attempt_id,
+                    lock_key=lock_key,
+                    owner_token=owner_token,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    error=pipeline_error,
+                )
+            if pipeline_result is None:
+                return self._handle_locked_pipeline_failure(
+                    market=market,
+                    session_date=session_date,
+                    attempt_id=attempt_id,
+                    lock_key=lock_key,
+                    owner_token=owner_token,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    reason="pipeline_failed",
+                )
+
+            pre_upload_result = self._handle_locked_pipeline_upload_precheck(
+                market=market,
+                session_date=session_date,
+                run_url=run_url,
+                lock_key=lock_key,
+                owner_token=owner_token,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+            )
+            if pre_upload_result is not None:
+                return pre_upload_result
+
+            try:
+                storage_key = self._storage.upload_ai_brief(
+                    pipeline_result.ai_brief_report_path,
+                    report_date=session_date,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "scheduled AI brief upload failed "
+                    "market=%s session_date=%s schedule_role=%s runner_role=%s "
+                    "attempt_id=%s report_path=%s",
+                    market,
+                    session_date,
+                    schedule_role,
+                    runner_role,
+                    attempt_id,
+                    pipeline_result.ai_brief_report_path,
+                )
+                return self._handle_locked_pipeline_failure(
+                    market=market,
+                    session_date=session_date,
+                    attempt_id=attempt_id,
+                    lock_key=lock_key,
+                    owner_token=owner_token,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    reason="upload_failed",
+                )
+            artifact_result = self._record_uploaded_ai_brief_artifact(
+                artifact_key=artifact_key,
+                storage_key=storage_key,
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                run_url=run_url,
+                lock_key=lock_key,
+                owner_token=owner_token,
+                now=now,
+            )
+            if artifact_result is not None:
+                return artifact_result
+            if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+
+            try:
+                result = self._reconcile_notification(
+                    market=market,
+                    session_date=session_date,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
+                    artifact_entry=RuntimeStateEntry(
+                        state_key=artifact_key,
+                        state_payload={"storageKey": storage_key},
+                        expires_at="",
+                    ),
+                    require_main_lock=True,
+                    main_lock_key=lock_key,
+                    main_owner_token=owner_token,
+                )
+            finally:
+                lock_renewer.stop()
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
+            if result.status == "notification_reconciled":
+                return ScheduledAiBriefResult(
+                    status="completed",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            return result
         finally:
             lock_renewer.stop()
-
-        if pipeline_error is not None:
-            return self._handle_locked_pipeline_exception(
-                market=market,
-                session_date=session_date,
-                attempt_id=attempt_id,
-                lock_key=lock_key,
-                owner_token=owner_token,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                error=pipeline_error,
-            )
-        if pipeline_result is None:
-            return self._handle_locked_pipeline_failure(
-                market=market,
-                session_date=session_date,
-                attempt_id=attempt_id,
-                lock_key=lock_key,
-                owner_token=owner_token,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                reason="pipeline_failed",
-            )
-
-        pre_upload_result = self._handle_locked_pipeline_upload_precheck(
-            market=market,
-            session_date=session_date,
-            run_url=run_url,
-            lock_key=lock_key,
-            owner_token=owner_token,
-            schedule_role=schedule_role,
-            runner_role=runner_role,
-            attempt_id=attempt_id,
-        )
-        if pre_upload_result is not None:
-            return pre_upload_result
-
-        try:
-            storage_key = self._storage.upload_ai_brief(
-                pipeline_result.ai_brief_report_path,
-                report_date=session_date,
-            )
-        except Exception:
-            _LOGGER.exception(
-                "scheduled AI brief upload failed "
-                "market=%s session_date=%s schedule_role=%s runner_role=%s "
-                "attempt_id=%s report_path=%s",
-                market,
-                session_date,
-                schedule_role,
-                runner_role,
-                attempt_id,
-                pipeline_result.ai_brief_report_path,
-            )
-            return self._handle_locked_pipeline_failure(
-                market=market,
-                session_date=session_date,
-                attempt_id=attempt_id,
-                lock_key=lock_key,
-                owner_token=owner_token,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                reason="upload_failed",
-            )
-        artifact_result = self._record_uploaded_ai_brief_artifact(
-            artifact_key=artifact_key,
-            storage_key=storage_key,
-            market=market,
-            session_date=session_date,
-            schedule_role=schedule_role,
-            runner_role=runner_role,
-            attempt_id=attempt_id,
-            run_url=run_url,
-            lock_key=lock_key,
-            owner_token=owner_token,
-            now=now,
-        )
-        if artifact_result is not None:
-            return artifact_result
-        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
-            return ScheduledAiBriefResult(
-                status="artifact_uploaded_notification_deferred",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
-
-        try:
-            result = self._reconcile_notification(
-                market=market,
-                session_date=session_date,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                artifact_entry=RuntimeStateEntry(
-                    state_key=artifact_key,
-                    state_payload={"storageKey": storage_key},
-                    expires_at="",
-                ),
-                require_main_lock=True,
-                main_lock_key=lock_key,
-                main_owner_token=owner_token,
-            )
-        finally:
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
-        if result.status == "notification_reconciled":
-            return ScheduledAiBriefResult(
-                status="completed",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
-        return result
 
     def _handle_locked_pipeline_exception(
         self,
@@ -2740,6 +2742,7 @@ class ScheduledAiBriefRunner:
 
 _SCHEDULED_ENTRY_FAILURE_ALERT_REASON = "scheduled_entry_failed"
 _SCHEDULED_ENTRY_FAILURE_TOKEN = "scheduled entry failed"
+_SCHEDULED_ENTRY_TRACEBACK_REDACTION = "<redacted scheduled entry exception>"
 _SCHEDULED_ENTRY_FAILURE_TOKEN_PATTERN = re.compile(
     r"(?i)(?<![A-Za-z0-9])scheduled[^A-Za-z0-9]*entry[^A-Za-z0-9]*failed(?![A-Za-z0-9])"
 )
@@ -3064,6 +3067,13 @@ def _redact_entry_report_path_references(message: str) -> str:
     return label_sanitized if label_redacted else sanitized
 
 
+def _redact_scheduled_entry_traceback_message(message: str) -> str:
+    redacted = _redact_entry_report_path_references(message)
+    if redacted != message and _is_scheduled_entry_failure_log_message(redacted):
+        return redacted
+    return _SCHEDULED_ENTRY_TRACEBACK_REDACTION
+
+
 def _safe_exception_traceback_message(
     error: BaseException, *, redact_entry_report_paths: bool
 ) -> str:
@@ -3072,7 +3082,7 @@ def _safe_exception_traceback_message(
     if safe_message is not None:
         return safe_message
     if redact_entry_report_paths:
-        return _redact_entry_report_path_references(message)
+        return _redact_scheduled_entry_traceback_message(message)
     return message
 
 
@@ -3101,7 +3111,7 @@ def _safe_exception_note(note_text: str, *, redact_entry_report_paths: bool) -> 
     if safe_note is not None:
         return safe_note
     if redact_entry_report_paths:
-        return _redact_entry_report_path_references(note_text)
+        return _redact_scheduled_entry_traceback_message(note_text)
     return note_text
 
 

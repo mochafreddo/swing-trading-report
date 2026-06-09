@@ -110,7 +110,6 @@ sell:
     time_stop_profit_floor: 0.00   # >= 0 (e.g., 0.03 = 3%)
 
 entry_check:
-  enabled: false
   fatal_missing_price_ratio: 0.0  # 0.0이면 entry price 누락 1건도 실패
 
 universe:

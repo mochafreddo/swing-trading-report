@@ -66,7 +66,7 @@ def test_load_config_uses_active_entry_fatal_missing_price_ratio_default_when_ya
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("entry_check:\n  enabled: false\n", encoding="utf-8")
+    config_path.write_text("entry_check:\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
@@ -85,7 +85,6 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_from_yaml(
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "entry_check:\n"
-        "  enabled: false\n"
         "  fatal_missing_price_ratio: 0.0\n",
         encoding="utf-8",
     )
@@ -99,17 +98,14 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_from_yaml(
     assert cfg.entry_fatal_missing_price_ratio == 0.0
 
 
-def test_load_config_parses_entry_fatal_missing_price_ratio_from_env(
+def test_load_config_parses_entry_fatal_missing_price_ratio_from_env_without_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("entry_check:\n  enabled: false\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "0.25")
 
     cfg = load_config()
@@ -579,16 +575,10 @@ Under `entry_check:`, implementation changed:
 
 ```yaml
 entry_check:
-  enabled: false
-```
-
-to:
-
-```yaml
-entry_check:
-  enabled: false
   fatal_missing_price_ratio: 0.0
 ```
+
+The obsolete `entry_check.enabled` key is intentionally not shown in active examples because it does not gate the fatal missing-price threshold.
 
 - [x] **Step 4: Run runtime and replay tests**
 
