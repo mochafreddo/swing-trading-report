@@ -14,8 +14,8 @@
     sell logic tightens protective stops at 5%/10% profit tiers but does not
     realize partial gains.
   - Use `quality_state` as an entry policy input, e.g. default `A -> ENTER`,
-    `B -> REVIEW`, `C -> REVIEW/WATCH`, instead of letting all READY rows pass
-    only on gap/trigger checks.
+    `B -> REVIEW`, `C -> REVIEW/WATCH`, instead of letting READY rows pass
+    without quality-state policy after gap/trigger/risk checks.
   - Revisit pattern-specific time stops; the current 30-session stop plus
     15-session grace may hold weak swing setups too long, especially failed
     breakouts.
