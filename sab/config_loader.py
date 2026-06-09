@@ -28,16 +28,16 @@ def _construct_mapping_key_for_duplicate_check(
 
 
 def _reject_duplicate_mapping_keys(loader: Any, node: Any, deep: bool) -> None:
-    seen_keys: list[Any] = []
+    seen_keys: set[Any] = set()
     for key_node, _value_node in node.value:
         key = _construct_mapping_key_for_duplicate_check(loader, key_node, deep)
-        if any(key == seen_key for seen_key in seen_keys):
-            raise ConfigLoadError(f"duplicate YAML key {key!r}")
         try:
             hash(key)
         except TypeError as exc:
             raise ConfigLoadError(f"unhashable YAML key {key!r}") from exc
-        seen_keys.append(key)
+        if key in seen_keys:
+            raise ConfigLoadError(f"duplicate YAML key {key!r}")
+        seen_keys.add(key)
 
 
 def _construct_mapping_without_duplicate_keys(
