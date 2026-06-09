@@ -2,7 +2,26 @@
 
 ## Active
 
-- None.
+- 2026-06-09: Swing-trader review follow-ups for the current
+  `sma_ema_hybrid` strategy:
+  - Gate or downgrade entries when `risk_alignment != aligned`; today the buy
+    report warns on volatility wider than `sell.hybrid.stop_loss_pct_max`, but
+    entry can still proceed if price/trigger checks pass.
+  - Add stop-distance-based position sizing, including per-trade account risk,
+    gross exposure, and currency-aware sizing; current portfolio guards cap
+    count only (`max_active_holdings`, `max_new_entries_per_market`).
+  - Preserve buy `pattern` into holdings/entry state so breakout-specific sell
+    rules reliably identify failed breakout positions, not only holdings with
+    manual `strategy`/`tags` markers.
+  - Consider partial-exit actions such as `TRIM`/`SELL_PARTIAL`; current hybrid
+    sell logic tightens protective stops at 5%/10% profit tiers but does not
+    realize partial gains.
+  - Use `quality_state` as an entry policy input, e.g. default `A -> ENTER`,
+    `B -> REVIEW`, `C -> REVIEW/WATCH`, instead of letting all READY rows pass
+    only on gap/trigger checks.
+  - Revisit pattern-specific time stops; the current 30-session stop plus
+    15-session grace may hold weak swing setups too long, especially failed
+    breakouts.
 
 ## Deferred
 
