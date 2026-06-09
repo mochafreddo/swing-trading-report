@@ -19,7 +19,12 @@ from sab.signals.hybrid_buy import HybridEvaluationSettings, evaluate_ticker_hyb
 
 
 def _build_runtime() -> _ScanRuntime:
-    cfg = replace(Config(), data_dir="data", report_dir="reports")
+    cfg = replace(
+        Config(),
+        data_dir="data",
+        report_dir="reports",
+        use_market_regime_filter=False,
+    )
     runtime = _ScanRuntime(
         cfg=cfg, logger=logging.getLogger(__name__), tickers=["AAPL.NAS"]
     )

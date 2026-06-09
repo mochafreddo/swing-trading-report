@@ -47,6 +47,7 @@ class RunScanUSScreenerMetaETFTests(unittest.TestCase):
                 screener_only=True,
                 us_screener_mode="kis",
                 strategy_mode="sma_ema_hybrid",
+                use_market_regime_filter=False,
                 exclude_etf_etn=True,
             )
 

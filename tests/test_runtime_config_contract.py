@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from sab.config import _ENV_YAML_CONFLICT_BINDINGS, load_config
+from sab.config import _ENV_YAML_CONFLICT_BINDINGS, Config, load_config
+from sab.config_loader import load_yaml_config
 
 
 def _load_repository_config(monkeypatch: pytest.MonkeyPatch):
@@ -60,6 +61,22 @@ def test_repository_config_defaults_entry_fatal_missing_price_ratio(
     cfg = _load_repository_config(monkeypatch)
 
     assert cfg.entry_fatal_missing_price_ratio == 0.0
+
+
+def test_config_dataclass_defaults_match_active_safety_contract() -> None:
+    cfg = Config()
+
+    assert cfg.use_market_regime_filter is True
+    assert cfg.market_regime_unavailable_policy == "block_market"
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
+
+
+def test_entry_check_yaml_sections_only_expose_effective_threshold() -> None:
+    repository_config = load_yaml_config("config.yaml").raw
+    example_config = load_yaml_config("config.example.yaml").raw
+
+    assert set(repository_config["entry_check"]) == {"fatal_missing_price_ratio"}
+    assert set(example_config["entry_check"]) == {"fatal_missing_price_ratio"}
 
 
 def test_example_config_keeps_fail_closed_scan_safety_defaults(

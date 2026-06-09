@@ -220,8 +220,8 @@ class Config:
     screener_only: bool = False
     strategy_mode: str = "ema_cross"
     use_sma200_filter: bool = False
-    use_market_regime_filter: bool = False
-    market_regime_unavailable_policy: str = "warn_continue"
+    use_market_regime_filter: bool = True
+    market_regime_unavailable_policy: str = "block_market"
     gap_atr_multiplier: float = 1.0
     min_dollar_volume: float = 0.0
     min_history_bars: int = 120
@@ -265,7 +265,7 @@ class Config:
     hybrid: HybridStrategyConfig = field(default_factory=HybridStrategyConfig)
     hybrid_sell: HybridSellConfig = field(default_factory=HybridSellConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
-    entry_fatal_missing_price_ratio: float = 1.0
+    entry_fatal_missing_price_ratio: float = 0.0
 
 
 def _normalize_kis_base(url: str | None) -> str | None:
