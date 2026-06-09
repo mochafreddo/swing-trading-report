@@ -181,6 +181,24 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     )
 
 
+def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    resolve_steps = _job_steps(workflow, "resolve_context")
+    resolve_step = _find_step_by_name(resolve_steps, "Resolve schedule context")
+    resolve_script = str(resolve_step.get("run") or "")
+
+    assert "def _single_line_output_value" in resolve_script
+    assert "must be a single-line value" in resolve_script
+    assert (
+        'source_provider = _single_line_output_value("source_provider", source_provider)'
+        in resolve_script
+    )
+    assert (
+        'source_api_url = _single_line_output_value("source_api_url", source_api_url)'
+        in resolve_script
+    )
+
+
 def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)

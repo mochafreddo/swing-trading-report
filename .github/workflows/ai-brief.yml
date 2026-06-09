@@ -154,6 +154,11 @@ jobs:
               market_zone,
           )
 
+          def _single_line_output_value(name: str, value: str) -> str:
+              if "\n" in value or "\r" in value:
+                  raise SystemExit(f"{name} must be a single-line value")
+              return value
+
           is_schedule = os.environ["EVENT_NAME"] == "schedule"
           if is_schedule:
               try:
@@ -190,6 +195,8 @@ jobs:
               source_provider = "http-json"
           if source_provider == "http-json":
               source_api_url = default_source_api_url
+          source_provider = _single_line_output_value("source_provider", source_provider)
+          source_api_url = _single_line_output_value("source_api_url", source_api_url)
           should_run = True
           if is_schedule:
               should_run = is_within_role_window(
