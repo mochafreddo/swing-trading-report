@@ -277,3 +277,20 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - Correcting pushed commit messages or rewriting pushed history is human-led work. Check branch policy and collaboration context first. Automation agents should prefer non-interactive git methods and use force-push commands only when the user requests them.
 - Run git commands such as `git status`, `git add`, and `git commit` directly, without a shell wrapper like `/bin/zsh -lc`.
 - Run `git push` with elevated permissions (`sandbox_permissions="require_escalated"`).
+
+## Deploy Configuration (configured by /setup-deploy)
+
+- Platform: custom/local Docker + GitHub Actions
+- Production URL: `http://127.0.0.1:55300`
+- Deploy workflow: local Docker manual deploy; GitHub Actions workflow files deploy by merge to `main`
+- Deploy status command: `docker compose ps`
+- Merge method: merge
+- Project type: local web app + Python CLI automation
+- Post-deploy health check: `http://127.0.0.1:55300/login`
+
+### Custom deploy hooks
+
+- Pre-merge: `just quality` and `just ci-web`
+- Deploy trigger: `docker compose up -d --build web`
+- Deploy status: `docker compose ps`
+- Health check: `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login`
