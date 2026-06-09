@@ -103,7 +103,7 @@
 | `LOG_FORMAT` | no | text format | `json` | CLI/scheduler | Logging format | Scheduler compose sets JSON. |
 | `LOG_DATEFMT` | no | ISO-like default | `%Y-%m-%dT%H:%M:%S%z` | CLI | Logging date format | Optional. |
 | `LOG_TZ` | no | `local` | `utc` | CLI/scheduler | Log timezone | `local` or `utc`. |
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | loaded YAML active default `0.0`; no-config legacy fallback `1.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Env/YAML conflict binding. 0.0 means any missing price fails. |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | active default `0.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Operational safety key. When YAML config is loaded, configure this in YAML; env override is accepted only when no YAML config is loaded. 0.0 means any missing price fails. |
 | `SAB_CONFIG` | no | `config.yaml` | `config.local.yaml` | `sab` | Config file path override | Do not commit local config. |
 | `SAB_CONFIG_STRICT` | no | true in CI/GHA | `true` | `sab` | Strict config parsing | Recommended for reproducing CI locally. |
 
@@ -113,7 +113,7 @@
 
 YAML mapping keys must be unique at every level; duplicate keys fail closed instead of letting a later key mask an earlier safety setting. Empty top-level `strategy:` and `entry_check:` sections are rejected instead of falling back to code defaults. Valid nested safety values are accepted, but `null` or invalid values are rejected, for example `fatal_missing_price_ratio: null` under `entry_check:`.
 
-Use `config.local.yaml` plus `SAB_CONFIG=config.local.yaml` for local experiments that should not be committed. When any YAML config is loaded, omitted operational safety keys inherit the active safety defaults: `strategy.use_market_regime_filter=true`, `strategy.market_regime_unavailable_policy=block_market`, and `entry_check.fatal_missing_price_ratio=0.0`. Set those keys explicitly only when the local experiment intentionally changes the safety posture.
+Use `config.local.yaml` plus `SAB_CONFIG=config.local.yaml` for local experiments that should not be committed. When any YAML config is loaded, omitted operational safety keys inherit the active safety defaults: `strategy.use_market_regime_filter=true`, `strategy.market_regime_unavailable_policy=block_market`, and `entry_check.fatal_missing_price_ratio=0.0`. Environment overrides for those operational safety keys are rejected while YAML config is loaded, even if the YAML omits the key; set them explicitly in YAML when the local experiment intentionally changes the safety posture. With no YAML config loaded, the same active safety defaults still apply unless an explicit env override is set.
 
 ## Secret handling
 

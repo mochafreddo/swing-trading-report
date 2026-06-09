@@ -199,8 +199,8 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     assert "entry_check.fatal_missing_price_ratio" in config_reference_text
     assert (
         "| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | "
-        "`entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, "
-        "loaded YAML active default 0.0"
+        "`entry_check.fatal_missing_price_ratio`, 0.0-1.0, active default 0.0; "
+        "env override only when no YAML config is loaded"
     ) in config_reference_text
     assert (
         "| `KIS_MIN_INTERVAL_MS` | no | `config.yaml` `kis.min_interval_ms` | `200`"

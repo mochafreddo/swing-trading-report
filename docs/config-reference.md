@@ -92,7 +92,7 @@
 | `BENZINGA_API_TOKEN` | `benzinga-news` source provider | US-only |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | `naver-news` source provider | KR-only |
 | `LOG_LEVEL`, `LOG_FORMAT`, `LOG_DATEFMT`, `LOG_TZ` | CLI logging | `LOG_FORMAT=json`, `LOG_TZ=utc` 지원 |
-| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio` env override, 0.0-1.0, loaded YAML active default 0.0; no-config legacy fallback 1.0 |
+| `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio`, 0.0-1.0, active default 0.0; env override only when no YAML config is loaded |
 | `SAB_DATA_DIR` | calendar/eval helper lower-level override | 일반 config는 `DATA_DIR`/`data.data_dir` 우선 |
 | `SAB_USE_PMC_CALENDAR` | trading calendar optional path | 기본 enabled, calendar extra 필요 가능 |
 

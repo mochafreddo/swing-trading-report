@@ -108,12 +108,9 @@ def test_load_config_strict_mode_rejects_invalid_boolean_from_env(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("{}\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("USE_MARKET_REGIME_FILTER", "maybe")
 
@@ -212,6 +209,69 @@ def test_load_config_custom_yaml_inherits_active_safety_defaults(
     assert cfg.entry_fatal_missing_price_ratio == 0.0
 
 
+def test_load_config_missing_yaml_inherits_active_safety_defaults(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+
+    cfg = load_config()
+
+    assert cfg.use_market_regime_filter is True
+    assert cfg.market_regime_unavailable_policy == "block_market"
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
+
+
+@pytest.mark.parametrize(
+    ("env_key", "env_value", "yaml_text", "yaml_path"),
+    [
+        (
+            "USE_MARKET_REGIME_FILTER",
+            "false",
+            "strategy:\n  mode: sma_ema_hybrid\n",
+            "strategy.use_market_regime_filter",
+        ),
+        (
+            "MARKET_REGIME_UNAVAILABLE_POLICY",
+            "warn_continue",
+            "strategy:\n  mode: sma_ema_hybrid\n",
+            "strategy.market_regime_unavailable_policy",
+        ),
+        (
+            "ENTRY_FATAL_MISSING_PRICE_RATIO",
+            "0.25",
+            "entry_check:\n  enabled: false\n",
+            "entry_check.fatal_missing_price_ratio",
+        ),
+    ],
+)
+def test_load_config_rejects_safety_env_when_loaded_yaml_omits_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    env_key: str,
+    env_value: str,
+    yaml_text: str,
+    yaml_path: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv(env_key, env_value)
+
+    with pytest.raises(ConfigLoadError, match=env_key) as exc:
+        load_config()
+    assert yaml_path in str(exc.value)
+    assert "omits" in str(exc.value)
+
+
 def test_load_config_uses_active_market_regime_unavailable_policy_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -251,17 +311,14 @@ def test_load_config_parses_market_regime_unavailable_policy_from_yaml(
     assert cfg.market_regime_unavailable_policy == "block_market"
 
 
-def test_load_config_parses_market_regime_unavailable_policy_from_env(
+def test_load_config_parses_market_regime_unavailable_policy_from_env_without_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", "block_market")
 
     cfg = load_config()
@@ -269,17 +326,14 @@ def test_load_config_parses_market_regime_unavailable_policy_from_env(
     assert cfg.market_regime_unavailable_policy == "block_market"
 
 
-def test_load_config_normalizes_market_regime_unavailable_policy_from_env(
+def test_load_config_normalizes_market_regime_unavailable_policy_from_env_without_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", " BLOCK_MARKET ")
 
     cfg = load_config()
@@ -562,17 +616,14 @@ def test_load_config_parses_entry_fatal_missing_price_ratio_upper_bound_from_yam
     assert cfg.entry_fatal_missing_price_ratio == 1.0
 
 
-def test_load_config_parses_entry_fatal_missing_price_ratio_from_env(
+def test_load_config_parses_entry_fatal_missing_price_ratio_from_env_without_yaml(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("entry_check:\n  enabled: false\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", "0.25")
 
     cfg = load_config()

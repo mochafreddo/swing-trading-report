@@ -149,6 +149,14 @@ _DOTTED_ENV_YAML_BINDING_KEYS = frozenset(
 _ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT = True
 _ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT = "block_market"
 _ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT = 0.0
+_OPERATIONAL_SAFETY_ENV_YAML_BINDINGS: tuple[tuple[str, str], ...] = (
+    ("USE_MARKET_REGIME_FILTER", "strategy.use_market_regime_filter"),
+    (
+        "MARKET_REGIME_UNAVAILABLE_POLICY",
+        "strategy.market_regime_unavailable_policy",
+    ),
+    ("ENTRY_FATAL_MISSING_PRICE_RATIO", "entry_check.fatal_missing_price_ratio"),
+)
 
 
 @dataclass(frozen=True)
@@ -504,6 +512,33 @@ def _enforce_env_yaml_conflict_policy(parser: _ConfigParser) -> None:
     )
 
 
+def _collect_loaded_yaml_omitted_safety_env_conflicts(
+    parser: _ConfigParser,
+) -> list[str]:
+    if not parser.has_config_file:
+        return []
+    conflicts: list[str] = []
+    for env_key, yaml_path in _OPERATIONAL_SAFETY_ENV_YAML_BINDINGS:
+        if getenv(env_key) is None or parser.has_yaml_path(yaml_path):
+            continue
+        conflicts.append(f"{env_key} ({yaml_path})")
+    return conflicts
+
+
+def _enforce_loaded_yaml_safety_env_policy(parser: _ConfigParser) -> None:
+    conflicts = _collect_loaded_yaml_omitted_safety_env_conflicts(parser)
+    if not conflicts:
+        return
+    raise ConfigLoadError(
+        "Config conflict policy violation: loaded YAML config omits "
+        "operational safety keys that are set in .env/environment: "
+        f"{', '.join(conflicts)}. "
+        "When YAML config is loaded, put operational safety keys in YAML "
+        "or remove the matching environment override so active safety "
+        "defaults are used."
+    )
+
+
 @dataclass(frozen=True)
 class _DataSection:
     provider: str
@@ -839,7 +874,8 @@ def _safety_default[T](
     active: T,
     legacy: T,
 ) -> T:
-    return active if parser.has_config_file else legacy
+    del parser, legacy
+    return active
 
 
 def _parse_fail_closed_bool(
@@ -1581,6 +1617,7 @@ def load_config(
     parser = _create_config_parser()
     _enforce_safety_section_shapes(parser)
     _enforce_env_yaml_conflict_policy(parser)
+    _enforce_loaded_yaml_safety_env_policy(parser)
     _enforce_secret_policy(parser)
 
     data_section = _parse_data_section(

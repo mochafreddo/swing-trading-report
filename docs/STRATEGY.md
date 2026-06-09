@@ -471,7 +471,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
 - 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
 - 같은 시장 안에서 candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
-- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. 코드 fallback은 기존 호환성을 위해 `1.0`입니다.
+- `entry_check.fatal_missing_price_ratio`는 entry price 누락 비율이 어느 수준부터 fatal인지 정합니다. 활성 운영 기본값은 `0.0`이므로 누락이 1건이라도 있으면 entry report를 쓴 뒤 `sab entry`가 non-zero로 종료합니다. YAML config가 없어도 같은 active default를 사용하며, env override는 YAML config가 로드되지 않은 경우에만 허용됩니다.
 
 ### 7.1.1 AI Brief report (entry 후속 요약)
 
