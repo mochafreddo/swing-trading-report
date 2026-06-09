@@ -148,19 +148,9 @@ def test_load_config_rejects_invalid_market_regime_filter_env_without_strict(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "strategy:\n"
-        "  use_market_regime_filter: true\n"
-        "  market_regime_unavailable_policy: block_market\n"
-        "entry_check:\n"
-        "  fatal_missing_price_ratio: 0.0\n",
-        encoding="utf-8",
-    )
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("USE_MARKET_REGIME_FILTER", env_value)
 
     with pytest.raises(ConfigLoadError, match="USE_MARKET_REGIME_FILTER"):
@@ -270,6 +260,7 @@ def test_load_config_rejects_safety_env_when_loaded_yaml_omits_key(
         load_config()
     assert yaml_path in str(exc.value)
     assert "omits" in str(exc.value)
+    assert "put operational safety keys in YAML" in str(exc.value)
 
 
 def test_load_config_uses_active_market_regime_unavailable_policy_default_when_yaml_loaded(
@@ -368,12 +359,9 @@ def test_load_config_rejects_invalid_market_regime_unavailable_policy_env_withou
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("strategy:\n  mode: sma_ema_hybrid\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("MARKET_REGIME_UNAVAILABLE_POLICY", "maybe")
 
     with pytest.raises(
@@ -680,12 +668,9 @@ def test_load_config_rejects_invalid_entry_fatal_missing_price_ratio_env_without
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("{}\n", encoding="utf-8")
 
     _reset_config_env(monkeypatch)
     _force_fallback_dotenv(monkeypatch)
-    monkeypatch.setenv("SAB_CONFIG", str(config_path))
     monkeypatch.setenv("ENTRY_FATAL_MISSING_PRICE_RATIO", env_value)
 
     with pytest.raises(

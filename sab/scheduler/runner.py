@@ -1726,17 +1726,31 @@ class ScheduledAiBriefRunner:
                     session_date=session_date,
                     storage_key=storage_key,
                 )
-            self._record_scheduled_entry_failure_artifact_marker(
-                artifact_key=artifact_key,
-                storage_key=storage_key,
-                market=market,
-                session_date=session_date,
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-                report_path=report_path,
-                now=now,
-            )
+            try:
+                self._record_scheduled_entry_failure_artifact_marker(
+                    artifact_key=artifact_key,
+                    storage_key=storage_key,
+                    market=market,
+                    session_date=session_date,
+                    schedule_role=schedule_role,
+                    runner_role=runner_role,
+                    attempt_id=attempt_id,
+                    report_path=report_path,
+                    now=now,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "scheduled entry failure artifact marker failed "
+                    "market=%s session_date=%s schedule_role=%s "
+                    "runner_role=%s attempt_id=%s storage_key=%s report_path=%s",
+                    market,
+                    session_date,
+                    schedule_role,
+                    runner_role,
+                    attempt_id,
+                    storage_key,
+                    report_path,
+                )
             return storage_key
         finally:
             self._state_store.release_lock(claim_key, owner_token=claim_owner_token)

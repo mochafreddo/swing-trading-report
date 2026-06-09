@@ -2310,6 +2310,44 @@ def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> N
     assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
 
 
+def test_scheduled_entry_failure_preserves_storage_key_when_marker_fails() -> None:
+    state = _FakeStateStore(fail_entry_failure_artifact_upsert=True)
+    runner, state, _pipeline, storage, notifier = _runner(
+        state=state,
+        pipeline=_TypedEntryFailurePipeline(),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-entry-marker-failed",
+        )
+    )
+
+    assert result.status == "pipeline_failed"
+    assert storage.entry_uploads == ["reports/current.entry.json"]
+    expected_context = {
+        "market": "US",
+        "sessionDate": "2026-05-28",
+        "attemptId": "attempt-entry-marker-failed",
+        "scheduleRole": "local-primary",
+        "runnerRole": "local-primary",
+        "failureDetail": "scheduled entry failed",
+        "entryReportPath": "reports/current.entry.json",
+        "entryReportStorageKey": "2026/05/2026-05-28.entry.json",
+    }
+    assert notifier.late_alerts == [("scheduled_entry_failed", expected_context)]
+    sent_payloads = [
+        payload
+        for key, payload in state.upserts
+        if ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
+    ]
+    assert sent_payloads == [{**expected_context, "reason": "scheduled_entry_failed"}]
+
+
 def test_scheduled_entry_failure_skips_upload_and_alert_when_main_lock_is_lost() -> (
     None
 ):
