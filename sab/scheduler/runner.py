@@ -8,7 +8,9 @@ import re
 import threading
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import TracebackType
@@ -2797,19 +2799,6 @@ class _ScheduledEntryStepError(RuntimeError):
         )
 
 
-def _scheduled_entry_failure_report_path_from_message(message: str) -> str | None:
-    normalized = _strip_scheduled_entry_failure_log_boundaries(message)
-    normalized_lower = normalized.lower()
-    for prefix in _SCHEDULED_ENTRY_FAILURE_LOG_PREFIXES:
-        if not normalized_lower.startswith(prefix):
-            continue
-        value_start = len(prefix)
-        value_end = normalized.find(_SCHEDULED_ENTRY_FAILURE_SUFFIX, value_start)
-        if value_end >= 0:
-            return normalized[value_start:value_end]
-    return None
-
-
 def _scheduled_entry_failure_context_from_report_path(
     report_path: str,
 ) -> dict[str, object]:
@@ -2852,10 +2841,10 @@ def _scheduled_entry_failure_upload_path(error: Exception) -> str | None:
 
 def _iter_exception_diagnostic_errors(error: BaseException) -> list[BaseException]:
     errors: list[BaseException] = []
-    pending: list[BaseException] = [error]
+    pending: deque[BaseException] = deque([error])
     seen: set[int] = set()
     while pending:
-        current = pending.pop(0)
+        current = pending.popleft()
         current_id = id(current)
         if current_id in seen:
             continue
@@ -3226,6 +3215,15 @@ def _require_single_report_path(paths: list[str], *, report_type: str) -> str:
     return paths[0]
 
 
+@contextmanager
+def _suppress_scheduled_step_side_effects() -> Iterator[None]:
+    with (
+        suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
+        suppress_report_uploads(),
+    ):
+        yield
+
+
 class DefaultScheduledPipeline:
     def _run_scan_step(self, *, market: str, report_date: str) -> str:
         buy_report_paths: list[str] = []
@@ -3235,10 +3233,7 @@ class DefaultScheduledPipeline:
             market,
             report_date,
         )
-        with (
-            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
-            suppress_report_uploads(),
-        ):
+        with _suppress_scheduled_step_side_effects():
             scan_status = run_scan(
                 limit=None,
                 watchlist_path=None,
@@ -3303,10 +3298,7 @@ class DefaultScheduledPipeline:
             buy_report_path,
             holdings_path,
         )
-        with (
-            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
-            suppress_report_uploads(),
-        ):
+        with _suppress_scheduled_step_side_effects():
             entry_status = run_entry(
                 buy_report_path=buy_report_path,
                 provider="kis",
@@ -3373,10 +3365,7 @@ class DefaultScheduledPipeline:
             source_provider or "",
             model_provider,
         )
-        with (
-            suppress_config_env_keys(_SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS),
-            suppress_report_uploads(),
-        ):
+        with _suppress_scheduled_step_side_effects():
             ai_status = run_ai_brief(
                 entry_report_path=entry_report_path,
                 buy_report_path=buy_report_path,
@@ -3416,28 +3405,35 @@ class DefaultScheduledStorage:
             raise SchedulerStateError("Supabase storage config is required")
         return cls(config)
 
-    def upload_ai_brief(self, report_path: str, *, report_date: str) -> str:
+    def _upload_report(
+        self, report_path: str, *, report_date: str, run_type: str
+    ) -> str:
         return upload_report_artifact(
             local_path=report_path,
-            run_type="ai-brief",
+            run_type=run_type,
             report_date=dt.date.fromisoformat(report_date),
             config=self._config,
+        )
+
+    def upload_ai_brief(self, report_path: str, *, report_date: str) -> str:
+        return self._upload_report(
+            report_path,
+            report_date=report_date,
+            run_type="ai-brief",
         )
 
     def upload_entry_report(self, report_path: str, *, report_date: str) -> str:
-        return upload_report_artifact(
-            local_path=report_path,
+        return self._upload_report(
+            report_path,
+            report_date=report_date,
             run_type="entry",
-            report_date=dt.date.fromisoformat(report_date),
-            config=self._config,
         )
 
     def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
-        return upload_report_artifact(
-            local_path=report_path,
+        return self._upload_report(
+            report_path,
+            report_date=report_date,
             run_type="ai-brief-skip",
-            report_date=dt.date.fromisoformat(report_date),
-            config=self._config,
         )
 
     def download_json(self, storage_key: str) -> dict[str, object]:

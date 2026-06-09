@@ -868,16 +868,6 @@ def _resolve_mode_string(
     return str(raw).strip().lower()
 
 
-def _safety_default[T](
-    parser: _ConfigParser,
-    *,
-    active: T,
-    legacy: T,
-) -> T:
-    del parser, legacy
-    return active
-
-
 def _parse_fail_closed_bool(
     parser: _ConfigParser,
     env_key: str,
@@ -914,11 +904,7 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
         parser,
         "MARKET_REGIME_UNAVAILABLE_POLICY",
         "strategy.market_regime_unavailable_policy",
-        _safety_default(
-            parser,
-            active=_ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT,
-            legacy="warn_continue",
-        ),
+        _ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT,
         reject_explicit_yaml_null=True,
     )
     us_min_price = parser.yaml_optional_float("screener.us.min_price")
@@ -951,11 +937,7 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
             parser,
             "USE_MARKET_REGIME_FILTER",
             "strategy.use_market_regime_filter",
-            _safety_default(
-                parser,
-                active=_ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT,
-                legacy=False,
-            ),
+            _ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT,
         ),
         market_regime_unavailable_policy=market_regime_unavailable_policy,
         gap_atr_multiplier=parser.env_float(
@@ -1163,11 +1145,7 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
 
 def _parse_entry_fatal_missing_price_ratio(parser: _ConfigParser) -> float:
     path = "entry_check.fatal_missing_price_ratio"
-    default = _safety_default(
-        parser,
-        active=_ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT,
-        legacy=1.0,
-    )
+    default = _ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT
     env_value = getenv("ENTRY_FATAL_MISSING_PRICE_RATIO")
     if env_value is not None:
         raw: Any = env_value
