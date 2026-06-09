@@ -1721,31 +1721,6 @@ class ScheduledAiBriefRunner:
                 lock_key,
                 owner_token=owner_token,
             ):
-                try:
-                    self._record_scheduled_entry_failure_artifact_marker(
-                        artifact_key=artifact_key,
-                        storage_key=storage_key,
-                        market=market,
-                        session_date=session_date,
-                        schedule_role=schedule_role,
-                        runner_role=runner_role,
-                        attempt_id=attempt_id,
-                        report_path=report_path,
-                        now=now,
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "scheduled entry failure artifact marker failed after "
-                        "main lock loss market=%s session_date=%s "
-                        "schedule_role=%s runner_role=%s attempt_id=%s "
-                        "storage_key=%s",
-                        market,
-                        session_date,
-                        schedule_role,
-                        runner_role,
-                        attempt_id,
-                        storage_key,
-                    )
                 return ScheduledAiBriefResult(
                     status="lock_lost_before_upload",
                     session_date=session_date,
@@ -1806,15 +1781,23 @@ class ScheduledAiBriefRunner:
                 storage_key=storage_key,
             )
         try:
-            self._send_late_alert_once(
+            late_alert_status = self._send_late_alert_once(
                 market=market,
                 session_date=session_date,
                 reason=alert_reason or reason,
                 context=context,
                 now=self._now_fn(),
+                main_lock_key=lock_key,
+                main_owner_token=owner_token,
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+        if late_alert_status == "lock_lost_before_upload":
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
         return ScheduledAiBriefResult(
             status=reason,
             session_date=session_date,
@@ -1888,6 +1871,8 @@ class ScheduledAiBriefRunner:
                         attempt_id=attempt_id,
                     ),
                     now=self._now_fn(),
+                    main_lock_key=lock_key,
+                    main_owner_token=owner_token,
                 )
             finally:
                 self._state_store.release_lock(lock_key, owner_token=owner_token)
@@ -1904,7 +1889,7 @@ class ScheduledAiBriefRunner:
                 storage_key=skip_key,
             )
         try:
-            self._send_late_alert_once(
+            late_alert_status = self._send_late_alert_once(
                 market=market,
                 session_date=session_date,
                 reason="pre_upload_guard_failed",
@@ -1919,9 +1904,17 @@ class ScheduledAiBriefRunner:
                     attempt_id=attempt_id,
                 ),
                 now=self._now_fn(),
+                main_lock_key=lock_key,
+                main_owner_token=owner_token,
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+        if late_alert_status == "lock_lost_before_upload":
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=skip_key,
+            )
         return ScheduledAiBriefResult(
             status="guard_failed_before_upload",
             session_date=session_date,
@@ -2263,24 +2256,6 @@ class ScheduledAiBriefRunner:
                     main_owner_token=main_owner_token,
                 )
             ):
-                try:
-                    self._record_runtime_guard_skip_marker(
-                        skip_artifact_key=skip_artifact_key,
-                        storage_key=storage_key,
-                        market=market,
-                        session_date=session_date,
-                        run_url=run_url,
-                        now=now,
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "scheduled AI brief skip artifact marker failed after "
-                        "main lock loss market=%s session_date=%s "
-                        "storage_key=%s",
-                        market,
-                        session_date,
-                        storage_key,
-                    )
                 return ScheduledAiBriefResult(
                     status="lock_lost_before_upload",
                     session_date=session_date,
@@ -2338,6 +2313,8 @@ class ScheduledAiBriefRunner:
         attempt_id: str,
         guard: GuardSnapshot,
         storage_key: str,
+        main_lock_key: str | None = None,
+        main_owner_token: str | None = None,
     ) -> ScheduledAiBriefResult:
         context = _with_alert_run_context(
             _guard_context(market=market, session_date=session_date, guard=guard),
@@ -2346,13 +2323,21 @@ class ScheduledAiBriefRunner:
             attempt_id=attempt_id,
         )
         context["storageKey"] = storage_key
-        self._send_late_alert_once(
+        late_alert_status = self._send_late_alert_once(
             market=market,
             session_date=session_date,
             reason="pre_notification_guard_failed",
             context=context,
             now=self._now_fn(),
+            main_lock_key=main_lock_key,
+            main_owner_token=main_owner_token,
         )
+        if late_alert_status == "lock_lost_before_upload":
+            return ScheduledAiBriefResult(
+                status="artifact_uploaded_notification_deferred",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
         return ScheduledAiBriefResult(
             status="guard_failed_before_notification",
             session_date=session_date,
@@ -2386,7 +2371,17 @@ class ScheduledAiBriefRunner:
             market=market,
             session_date=session_date,
         )
-        if self._state_store.get_entry(sent_key) is not None:
+        sent_entry = self._state_store.get_entry(sent_key)
+        if sent_entry is not None:
+            if require_main_lock and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=_runtime_state_storage_key(sent_entry),
+                )
             self._state_store.upsert_marker(
                 key=build_scheduler_state_key(
                     kind="success", market=market, session_date=session_date
@@ -2436,6 +2431,8 @@ class ScheduledAiBriefRunner:
                     attempt_id=attempt_id,
                     guard=pre_notification_guard,
                     storage_key=storage_key,
+                    main_lock_key=main_lock_key if require_main_lock else None,
+                    main_owner_token=(main_owner_token if require_main_lock else None),
                 )
             report = self._storage.download_json(storage_key)
             validate_ai_brief_artifact(report, now=dt.datetime.now(dt.UTC))
@@ -2450,7 +2447,25 @@ class ScheduledAiBriefRunner:
                     session_date=session_date,
                     storage_key=storage_key,
                 )
+            if require_main_lock and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             self._notifier.send_schedule(report=report, storage_key=storage_key)
+            if require_main_lock and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             self._state_store.upsert_marker(
                 key=sent_key,
                 payload={
@@ -2461,6 +2476,15 @@ class ScheduledAiBriefRunner:
                 },
                 ttl_seconds=_SUCCESS_TTL_SECONDS,
             )
+            if require_main_lock and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return ScheduledAiBriefResult(
+                    status="artifact_uploaded_notification_deferred",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             self._state_store.upsert_marker(
                 key=build_scheduler_state_key(
                     kind="success", market=market, session_date=session_date
@@ -2611,6 +2635,8 @@ class ScheduledAiBriefRunner:
         reason: str,
         context: dict[str, object],
         now: dt.datetime,
+        main_lock_key: str | None = None,
+        main_owner_token: str | None = None,
     ) -> str:
         sent_key = _late_alert_sent_key(
             market=market,
@@ -2645,6 +2671,13 @@ class ScheduledAiBriefRunner:
         try:
             if self._state_store.get_entry(sent_key) is not None:
                 return "late_alert_already_sent"
+            if (
+                main_lock_key is not None or main_owner_token is not None
+            ) and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return "lock_lost_before_upload"
             try:
                 self._notifier.require_telegram()
                 self._notifier.send_late_alert(reason=reason, context=context)
@@ -2658,6 +2691,13 @@ class ScheduledAiBriefRunner:
                     context,
                 )
                 return "late_alert_send_failed"
+            if (
+                main_lock_key is not None or main_owner_token is not None
+            ) and not self._owns_main_lock(
+                main_lock_key=main_lock_key,
+                main_owner_token=main_owner_token,
+            ):
+                return "lock_lost_before_upload"
             try:
                 self._state_store.upsert_marker(
                     key=sent_key,
