@@ -1319,7 +1319,7 @@ def test_locked_upload_precheck_does_not_record_skip_or_alert_after_lock_loss() 
     assert notifier.late_alerts == []
 
 
-def test_locked_upload_precheck_records_skip_marker_after_post_upload_lock_loss() -> (
+def test_locked_upload_precheck_does_not_record_skip_marker_after_post_upload_lock_loss() -> (
     None
 ):
     state = _FakeStateStore(ownership_results=[True, True, False])
@@ -1347,33 +1347,16 @@ def test_locked_upload_precheck_records_skip_marker_after_post_upload_lock_loss(
     assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
     assert storage.uploads == []
     assert len(storage.skip_uploads) == 1
-    skip_payloads = [
-        payload
-        for key, payload in state.upserts
-        if ":skip-artifact:US:2026-05-28" in key
-    ]
-    assert skip_payloads == [
-        {
-            "storageKey": "2026/05/2026-05-28.ai-brief-skip.json",
-            "market": "US",
-            "sessionDate": "2026-05-28",
-            "skipState": "RUNTIME_GUARD_SKIPPED",
-            "skipReason": "runtime_guard_skipped",
-            "runUrl": "https://github.com/owner/repo/actions/runs/7",
-        }
-    ]
+    assert not any(":skip-artifact:US:2026-05-28" in key for key, _ in state.upserts)
     assert lock_key in state.releases
     assert "pre_upload_guard_failed" not in notifier.sent
     assert notifier.late_alerts == []
 
 
-def test_locked_upload_precheck_does_not_alert_when_skip_marker_fails_after_post_upload_lock_loss() -> (
+def test_locked_upload_precheck_does_not_write_skip_marker_after_post_upload_lock_loss() -> (
     None
 ):
-    state = _FakeStateStore(
-        ownership_results=[True, True, False],
-        fail_skip_artifact_upsert=True,
-    )
+    state = _FakeStateStore(ownership_results=[True, True, False])
     runner, state, _pipeline, storage, notifier = _runner(
         state=state,
         guard=_guard(session_state="INTRADAY"),
@@ -1397,6 +1380,7 @@ def test_locked_upload_precheck_does_not_alert_when_skip_marker_fails_after_post
     assert result.status == "lock_lost_before_upload"
     assert result.storage_key == "2026/05/2026-05-28.ai-brief-skip.json"
     assert len(storage.skip_uploads) == 1
+    assert not any(":skip-artifact:US:2026-05-28" in key for key, _ in state.upserts)
     assert lock_key in state.releases
     assert notifier.sent == []
     assert notifier.late_alerts == []
@@ -1494,7 +1478,7 @@ def test_notification_repair_defers_success_marker_after_main_lock_loss() -> Non
                 expires_at="2026-05-30T00:00:00Z",
             )
         },
-        ownership_results=[False],
+        ownership_results=[True, False],
     )
     runner, state, _pipeline, _storage, _notifier = _runner(state=state)
 
@@ -1513,6 +1497,39 @@ def test_notification_repair_defers_success_marker_after_main_lock_loss() -> Non
     )
 
     assert result.status == "artifact_uploaded_notification_deferred"
+    assert not any(":success:US:2026-05-28" in key for key, _payload in state.upserts)
+
+
+def test_notification_repair_defers_send_after_main_lock_loss() -> None:
+    artifact_entry = RuntimeStateEntry(
+        state_key=build_scheduler_state_key(
+            kind="artifact", market="US", session_date="2026-05-28"
+        ),
+        state_payload={"storageKey": "2026/05/2026-05-28.ai-brief.json"},
+        expires_at="2026-05-30T00:00:00Z",
+    )
+    state = _FakeStateStore(ownership_results=[True, True, False])
+    runner, state, _pipeline, storage, notifier = _runner(state=state)
+
+    result = runner._reconcile_notification(
+        market="US",
+        session_date="2026-05-28",
+        schedule_role="local-primary",
+        runner_role="local-primary",
+        attempt_id="attempt-notification-send-lock-lost",
+        artifact_entry=artifact_entry,
+        require_main_lock=True,
+        main_lock_key=build_scheduler_state_key(
+            kind="lock", market="US", session_date="2026-05-28"
+        ),
+        main_owner_token="attempt-notification-send-lock-lost-owner",
+    )
+
+    assert result.status == "artifact_uploaded_notification_deferred"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief.json"
+    assert storage.downloads == ["2026/05/2026-05-28.ai-brief.json"]
+    assert notifier.sent == []
+    assert not any(":notification:sent:" in key for key, _payload in state.upserts)
     assert not any(":success:US:2026-05-28" in key for key, _payload in state.upserts)
 
 
@@ -2353,7 +2370,7 @@ def test_scheduled_entry_failure_skips_upload_and_alert_when_lock_is_lost_after_
     assert notifier.late_alerts == []
 
 
-def test_scheduled_entry_failure_records_marker_without_alert_when_lock_is_lost_after_upload() -> (
+def test_scheduled_entry_failure_does_not_record_marker_after_post_upload_lock_loss() -> (
     None
 ):
     state = _FakeStateStore(ownership_results=[True, True, False])
@@ -2375,24 +2392,10 @@ def test_scheduled_entry_failure_records_marker_without_alert_when_lock_is_lost_
     assert result.status == "lock_lost_before_upload"
     assert result.storage_key == "2026/05/2026-05-28.entry.json"
     assert storage.entry_uploads == ["reports/current.entry.json"]
-    marker_payloads = [
-        payload
-        for key, payload in state.upserts
-        if ":entry-failure-artifact:US:2026-05-28" in key
-    ]
-    assert marker_payloads == [
-        {
-            "storageKey": "2026/05/2026-05-28.entry.json",
-            "market": "US",
-            "sessionDate": "2026-05-28",
-            "reportDate": "2026-05-28",
-            "entryReportPath": "reports/current.entry.json",
-            "reason": "scheduled_entry_failed",
-            "scheduleRole": "local-primary",
-            "runnerRole": "local-primary",
-            "attemptId": "attempt-entry-lock-lost-after-upload",
-        }
-    ]
+    assert not any(
+        ":entry-failure-artifact:US:2026-05-28" in key
+        for key, _payload in state.upserts
+    )
     assert not any(
         ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
         for key, _payload in state.upserts
@@ -2401,13 +2404,10 @@ def test_scheduled_entry_failure_records_marker_without_alert_when_lock_is_lost_
     assert notifier.late_alerts == []
 
 
-def test_scheduled_entry_failure_does_not_alert_when_marker_fails_after_post_upload_lock_loss() -> (
+def test_scheduled_entry_failure_does_not_write_marker_after_post_upload_lock_loss() -> (
     None
 ):
-    state = _FakeStateStore(
-        ownership_results=[True, True, False],
-        fail_entry_failure_artifact_upsert=True,
-    )
+    state = _FakeStateStore(ownership_results=[True, True, False])
     runner, state, _pipeline, storage, notifier = _runner(
         state=state,
         pipeline=_TypedEntryFailurePipeline(),
@@ -2426,6 +2426,10 @@ def test_scheduled_entry_failure_does_not_alert_when_marker_fails_after_post_upl
     assert result.status == "lock_lost_before_upload"
     assert result.storage_key == "2026/05/2026-05-28.entry.json"
     assert storage.entry_uploads == ["reports/current.entry.json"]
+    assert not any(
+        ":entry-failure-artifact:US:2026-05-28" in key
+        for key, _payload in state.upserts
+    )
     assert not any(
         ":late-alert:sent:US:2026-05-28:scheduled_entry_failed" in key
         for key, _payload in state.upserts
@@ -3858,6 +3862,29 @@ def test_locked_pipeline_failure_helper_releases_lock_and_alerts() -> None:
             "storageKey": "2026/05/2026-05-28.ai-brief.json",
         }
     ]
+
+
+def test_locked_pipeline_failure_defers_late_alert_after_main_lock_loss() -> None:
+    state = _FakeStateStore(ownership_results=[True, False])
+    runner, state, _pipeline, _storage, notifier = _runner(state=state)
+    lock_key = build_scheduler_state_key(
+        kind="lock", market="US", session_date="2026-05-28"
+    )
+
+    result = runner._handle_locked_pipeline_failure(
+        market="US",
+        session_date="2026-05-28",
+        attempt_id="attempt-failure-alert-lock-lost",
+        lock_key=lock_key,
+        owner_token="attempt-failure-alert-lock-lost-owner",
+        reason="pipeline_failed",
+    )
+
+    assert result.status == "lock_lost_before_upload"
+    assert lock_key in state.releases
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
 
 
 def test_runner_releases_main_lock_when_upload_fails(
