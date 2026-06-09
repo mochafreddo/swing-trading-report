@@ -128,7 +128,7 @@ The example above is a placeholder style only. Do not copy real internal URLs, D
 ## Validation
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_secret_policy.py tests/test_config_conflict_policy.py tests/test_env_example_v11.py -q
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_secret_policy.py tests/test_config_conflict_policy.py tests/test_config_validation_layers.py tests/test_runtime_config_contract.py tests/test_env_example_v11.py -q
 pnpm --dir web run build
 ```
 

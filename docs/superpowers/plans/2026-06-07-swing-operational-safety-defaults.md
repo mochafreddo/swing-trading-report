@@ -60,7 +60,7 @@ In `tests/test_config_validation_layers.py`, add `ENTRY_FATAL_MISSING_PRICE_RATI
 Append these tests near the market-regime policy tests:
 
 ```python
-def test_load_config_defaults_entry_fatal_missing_price_ratio(
+def test_load_config_uses_active_entry_fatal_missing_price_ratio_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -74,7 +74,7 @@ def test_load_config_defaults_entry_fatal_missing_price_ratio(
 
     cfg = load_config()
 
-    assert cfg.entry_fatal_missing_price_ratio == 1.0
+    assert cfg.entry_fatal_missing_price_ratio == 0.0
 
 
 def test_load_config_parses_entry_fatal_missing_price_ratio_from_yaml(
@@ -195,7 +195,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_layers.py tests/test_config_conflict_policy.py -q
 ```
 
-Expected: FAIL with an `AttributeError` for `entry_fatal_missing_price_ratio` or missing conflict binding. The strict invalid test should also fail until range validation is added.
+Expected: FAIL with an `AttributeError` for `entry_fatal_missing_price_ratio`, missing conflict binding, or the legacy `1.0` default still being used for a loaded YAML config. The strict invalid test should also fail until range validation is added.
 
 - [x] **Step 3: Implement config parsing and validation**
 

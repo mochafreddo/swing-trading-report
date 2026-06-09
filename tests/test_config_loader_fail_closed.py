@@ -34,6 +34,16 @@ def test_load_yaml_config_rejects_missing_sab_config_env(
         load_yaml_config()
 
 
+def test_load_yaml_config_rejects_blank_sab_config_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SAB_CONFIG", "")
+
+    with pytest.raises(ConfigLoadError, match="SAB_CONFIG"):
+        load_yaml_config()
+
+
 def test_load_yaml_config_uses_suppressed_config_env_view(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

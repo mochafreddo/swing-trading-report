@@ -1584,6 +1584,36 @@ class ScheduledAiBriefRunner:
             exc_info=_scheduled_entry_failure_exc_info(error, safe_log_message),
         )
 
+    def _record_scheduled_entry_failure_artifact_marker(
+        self,
+        *,
+        artifact_key: str,
+        storage_key: str,
+        market: str,
+        session_date: str,
+        schedule_role: str,
+        runner_role: str,
+        attempt_id: str,
+        report_path: str,
+        now: dt.datetime,
+    ) -> None:
+        self._state_store.upsert_marker(
+            key=artifact_key,
+            payload={
+                "storageKey": storage_key,
+                "market": market,
+                "sessionDate": session_date,
+                "reportDate": session_date,
+                "entryReportPath": report_path,
+                "reason": _SCHEDULED_ENTRY_FAILURE_ALERT_REASON,
+                "scheduleRole": schedule_role,
+                "runnerRole": runner_role,
+                "attemptId": attempt_id,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=now,
+        )
+
     def _upload_scheduled_entry_failure_report_once(
         self,
         *,
@@ -1691,24 +1721,45 @@ class ScheduledAiBriefRunner:
                 lock_key,
                 owner_token=owner_token,
             ):
+                try:
+                    self._record_scheduled_entry_failure_artifact_marker(
+                        artifact_key=artifact_key,
+                        storage_key=storage_key,
+                        market=market,
+                        session_date=session_date,
+                        schedule_role=schedule_role,
+                        runner_role=runner_role,
+                        attempt_id=attempt_id,
+                        report_path=report_path,
+                        now=now,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "scheduled entry failure artifact marker failed after "
+                        "main lock loss market=%s session_date=%s "
+                        "schedule_role=%s runner_role=%s attempt_id=%s "
+                        "storage_key=%s",
+                        market,
+                        session_date,
+                        schedule_role,
+                        runner_role,
+                        attempt_id,
+                        storage_key,
+                    )
                 return ScheduledAiBriefResult(
                     status="lock_lost_before_upload",
                     session_date=session_date,
+                    storage_key=storage_key,
                 )
-            self._state_store.upsert_marker(
-                key=artifact_key,
-                payload={
-                    "storageKey": storage_key,
-                    "market": market,
-                    "sessionDate": session_date,
-                    "reportDate": session_date,
-                    "entryReportPath": report_path,
-                    "reason": _SCHEDULED_ENTRY_FAILURE_ALERT_REASON,
-                    "scheduleRole": schedule_role,
-                    "runnerRole": runner_role,
-                    "attemptId": attempt_id,
-                },
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            self._record_scheduled_entry_failure_artifact_marker(
+                artifact_key=artifact_key,
+                storage_key=storage_key,
+                market=market,
+                session_date=session_date,
+                schedule_role=schedule_role,
+                runner_role=runner_role,
+                attempt_id=attempt_id,
+                report_path=report_path,
                 now=now,
             )
             return storage_key
@@ -1754,14 +1805,16 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
                 storage_key=storage_key,
             )
-        self._state_store.release_lock(lock_key, owner_token=owner_token)
-        self._send_late_alert_once(
-            market=market,
-            session_date=session_date,
-            reason=alert_reason or reason,
-            context=context,
-            now=self._now_fn(),
-        )
+        try:
+            self._send_late_alert_once(
+                market=market,
+                session_date=session_date,
+                reason=alert_reason or reason,
+                context=context,
+                now=self._now_fn(),
+            )
+        finally:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
         return ScheduledAiBriefResult(
             status=reason,
             session_date=session_date,
@@ -1819,7 +1872,38 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
         except Exception:
+            try:
+                self._send_late_alert_once(
+                    market=market,
+                    session_date=session_date,
+                    reason="pre_upload_guard_failed",
+                    context=_with_alert_run_context(
+                        _guard_context(
+                            market=market,
+                            session_date=session_date,
+                            guard=pre_upload_guard,
+                        ),
+                        schedule_role=schedule_role,
+                        runner_role=runner_role,
+                        attempt_id=attempt_id,
+                    ),
+                    now=self._now_fn(),
+                )
+            finally:
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="skip_artifact_upload_failed",
+                session_date=session_date,
+            )
+
+        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+            return ScheduledAiBriefResult(
+                status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=skip_key,
+            )
+        try:
             self._send_late_alert_once(
                 market=market,
                 session_date=session_date,
@@ -1836,35 +1920,8 @@ class ScheduledAiBriefRunner:
                 ),
                 now=self._now_fn(),
             )
-            return ScheduledAiBriefResult(
-                status="skip_artifact_upload_failed",
-                session_date=session_date,
-            )
-
-        if not self._state_store.check_ownership(lock_key, owner_token=owner_token):
+        finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
-            return ScheduledAiBriefResult(
-                status="lock_lost_before_upload",
-                session_date=session_date,
-                storage_key=skip_key,
-            )
-        self._state_store.release_lock(lock_key, owner_token=owner_token)
-        self._send_late_alert_once(
-            market=market,
-            session_date=session_date,
-            reason="pre_upload_guard_failed",
-            context=_with_alert_run_context(
-                _guard_context(
-                    market=market,
-                    session_date=session_date,
-                    guard=pre_upload_guard,
-                ),
-                schedule_role=schedule_role,
-                runner_role=runner_role,
-                attempt_id=attempt_id,
-            ),
-            now=self._now_fn(),
-        )
         return ScheduledAiBriefResult(
             status="guard_failed_before_upload",
             session_date=session_date,
@@ -2206,22 +2263,35 @@ class ScheduledAiBriefRunner:
                     main_owner_token=main_owner_token,
                 )
             ):
+                try:
+                    self._record_runtime_guard_skip_marker(
+                        skip_artifact_key=skip_artifact_key,
+                        storage_key=storage_key,
+                        market=market,
+                        session_date=session_date,
+                        run_url=run_url,
+                        now=now,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "scheduled AI brief skip artifact marker failed after "
+                        "main lock loss market=%s session_date=%s "
+                        "storage_key=%s",
+                        market,
+                        session_date,
+                        storage_key,
+                    )
                 return ScheduledAiBriefResult(
                     status="lock_lost_before_upload",
                     session_date=session_date,
                     storage_key=storage_key,
                 )
-            self._state_store.upsert_marker(
-                key=skip_artifact_key,
-                payload={
-                    "storageKey": storage_key,
-                    "market": market,
-                    "sessionDate": session_date,
-                    "skipState": AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
-                    "skipReason": "runtime_guard_skipped",
-                    "runUrl": run_url,
-                },
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            self._record_runtime_guard_skip_marker(
+                skip_artifact_key=skip_artifact_key,
+                storage_key=storage_key,
+                market=market,
+                session_date=session_date,
+                run_url=run_url,
                 now=now,
             )
             return storage_key
@@ -2233,6 +2303,30 @@ class ScheduledAiBriefRunner:
             raise
         finally:
             self._state_store.release_lock(claim_key, owner_token=owner_token)
+
+    def _record_runtime_guard_skip_marker(
+        self,
+        *,
+        skip_artifact_key: str,
+        storage_key: str,
+        market: str,
+        session_date: str,
+        run_url: str,
+        now: dt.datetime,
+    ) -> None:
+        self._state_store.upsert_marker(
+            key=skip_artifact_key,
+            payload={
+                "storageKey": storage_key,
+                "market": market,
+                "sessionDate": session_date,
+                "skipState": AI_BRIEF_SKIP_STATE_RUNTIME_GUARD_SKIPPED,
+                "skipReason": "runtime_guard_skipped",
+                "runUrl": run_url,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=now,
+        )
 
     def _handle_notification_guard_failure(
         self,
