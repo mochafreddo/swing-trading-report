@@ -571,6 +571,11 @@ def _normalize_sql(sql: str) -> str:
     return normalized.replace("( ", "(").replace(" )", ")")
 
 
+def _strip_sql_comments(sql: str) -> str:
+    without_block_comments = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    return re.sub(r"--.*?$", "", without_block_comments, flags=re.MULTILINE)
+
+
 def _extract_in_list_values_after(sql: str, marker: str) -> set[str]:
     start = sql.lower().index(marker.lower())
     segment = sql[start:]
@@ -660,7 +665,9 @@ def test_add_buy_rpc_remains_quantity_only_and_handles_entry_pattern_edges() -> 
     historical_function_sql = historical_sql[
         historical_sql.index("create or replace function public.holdings_add_buy_v1") :
     ]
-    new_migration_sql = _normalize_sql(_MIGRATION_PATH.read_text(encoding="utf-8"))
+    new_migration_sql = _normalize_sql(
+        _strip_sql_comments(_MIGRATION_PATH.read_text(encoding="utf-8"))
+    )
 
     assert "p_entry_pattern" not in historical_function_sql
     assert "p_entry_pattern" not in new_migration_sql
@@ -1225,7 +1232,7 @@ grant execute on function public.holdings_add_buy_v1(
 
 - [ ] **Step 4: Run executable migration smoke**
 
-Run the static contract test first, then apply the migration to a disposable/local database before enabling runtime selects. Preferred path is the repository's local Supabase workflow if available; otherwise use an equivalent disposable Postgres/Supabase target and record the command used in the PR notes.
+Run the static contract test first, then apply the migration to a disposable/local database before enabling runtime selects. Preferred path is the repository's local Supabase workflow if available. If using plain disposable Postgres instead of local Supabase, bootstrap the Supabase-compatible roles (`anon`, `authenticated`, and `service_role`) before applying the migration, or the grant/revoke checks will fail before the actual column/RPC behavior is exercised. Record the command and target type used in the PR notes.
 
 Required smoke assertions after applying the migration:
 
@@ -1260,7 +1267,7 @@ curl -fsS "${SUPABASE_URL%/}/rest/v1/holdings?select=ticker,quantity,entry_price
   -H "Accept: application/json"
 ```
 
-Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data: create or patch a dedicated smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, then clean it up. For Add Buy, use only a dedicated smoke holding and idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
+Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data with a reserved improbable ticker such as `SABSMOKE.NAS`: preflight that no existing row matches the ticker or any canonical alias, create the row only if absent, record the created row identity and idempotency key, and abort cleanup unless the smoke created the row. Never patch, Add Buy, or delete an existing non-smoke holding as part of target smoke. Create or patch the reserved smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, then clean it up only if the preflight proved the row did not exist before the smoke. For Add Buy, use only that reserved smoke holding and a unique smoke idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding only if it was created by the smoke. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
 
 Also verify the effective RPC definitions and privileges after applying the migration, not only the historical migration files:
 
@@ -1430,6 +1437,14 @@ pnpm --dir web run test -- web/src/app/actions/__tests__/holdings.test.ts "web/s
 
 Expected: PASS. The Add Buy negative tests may already pass before implementation because the current strict Add Buy schema rejects unknown keys; their purpose is to lock the quantity-only API contract.
 
+If Task 2 pulled the full `web/src/lib/holdings-yaml.ts` optional-key implementation forward to satisfy typecheck, also run the Task 3 YAML-focused tests before this checkpoint is considered green:
+
+```bash
+pnpm --dir web run test -- web/src/lib/__tests__/holdings-yaml.test.ts web/src/app/api/holdings/yaml/__tests__/route.test.ts
+```
+
+Expected: PASS. Do not commit a Task 2 runtime release that edits YAML parser/export/diff behavior without these YAML tests.
+
 - [ ] **Step 8: Sweep web fixture fallout and typecheck**
 
 Update every `HoldingRecord` or ordinary `HoldingSnapshot` fixture surfaced by these commands to include `entry_pattern: null` or a specific test value, and include every edited fixture file in this task's commit. Fixtures intended to model old YAML import input may use `HoldingReplaceSnapshot` and omit `entry_pattern` deliberately:
@@ -1467,7 +1482,7 @@ git commit -m "feat(holdings): 진입 패턴 런타임 저장 경로 연결" -m 
 - Modify: `web/src/components/holdings/holdings-table.tsx`
 - Modify: `web/src/components/holdings/holdings-import-panel.tsx`
 - Modify: `web/src/components/holdings/use-holdings-import.ts`
-- Modify if using secondary table metadata: `web/src/components/holdings-client.module.css`
+- Modify: `web/src/components/holdings-client.module.css`
 - Test: `web/src/lib/__tests__/holdings-yaml.test.ts`
 - Test: `web/src/app/actions/__tests__/holdings.test.ts`
 - Test: `web/src/app/api/holdings/__tests__/route.test.ts`
@@ -2048,6 +2063,8 @@ In `web/src/components/holdings/holdings-form-panel.tsx`, import `HOLDING_ENTRY_
         </label>
 ```
 
+In `web/src/components/holdings-client.module.css`, include `.form select` in the same sizing, border, font, and focus-visible rules as `.form input` and `.form textarea`. The Entry Pattern control should not rely on unstyled native select defaults, and the visual smoke should check focus/readability as well as overlap.
+
 In `web/src/components/holdings/holdings-import-panel.tsx`, update the explanatory copy so it still says apply replaces the holdings snapshot, but explicitly notes that omitted `entry_pattern` in older YAML preserves the existing DB value and `entry_pattern: null` or blank clears it. Keep this concise; it is an operational warning, not a tutorial.
 
 In `web/src/components/holdings/use-holdings-import.ts`, update the apply confirmation string for the same contract. The confirmation must not say the DB is literally replaced by the uploaded file without qualification. In `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, extend the existing `useHoldingsImport` apply test to assert `confirm.mock.calls[0]?.[0]` contains `entry_pattern`, `preserve`/`보존`, and `null` or `blank`/`빈 값`.
@@ -2261,7 +2278,7 @@ expect(container.textContent).toContain("Pattern: swing_high_breakout");
 Add the negative regression in the same block:
 
 ```ts
-it("does not clear an existing entry pattern when a recent candidate has no pattern", async () => {
+it("clears an existing entry pattern when a no-pattern recent candidate changes ticker", async () => {
   vi.mocked(globalThis.fetch as typeof fetch).mockResolvedValueOnce(
     jsonResponse({
       report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
@@ -2292,6 +2309,46 @@ it("does not clear an existing entry pattern when a recent candidate has no patt
     findButton(container, "MSFT.NAS").dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
+  });
+
+  expect(
+    container.querySelector<HTMLInputElement>('input[name="ticker"]')?.value,
+  ).toBe("MSFT.NAS");
+  expect(
+    container.querySelector<HTMLSelectElement>('select[name="entryPattern"]')?.value,
+  ).toBe("");
+});
+
+it("preserves entry pattern when the user edits it after no-pattern candidate selection", async () => {
+  vi.mocked(globalThis.fetch as typeof fetch).mockResolvedValueOnce(
+    jsonResponse({
+      report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
+      candidates: [{ ticker: "msft.nas", name: "Microsoft", pattern: null }],
+    }),
+  );
+
+  await act(async () => {
+    root.render(
+      React.createElement(HoldingsClient, {
+        initialState: { items: [], hasMore: false, nextCursor: null },
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  act(() => {
+    findButton(container, "MSFT.NAS").dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+  });
+
+  const entryPatternInput = container.querySelector<HTMLSelectElement>(
+    'select[name="entryPattern"]',
+  );
+  act(() => {
+    entryPatternInput!.value = "trend_pullback_bounce";
+    entryPatternInput!.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   expect(
@@ -2544,19 +2601,24 @@ Add the callback before `return`:
 ```tsx
   const selectRecentCandidate = useCallback(
     (candidate: RecentCandidateLookupResult) => {
+      const currentTicker = form.ticker.trim().toUpperCase();
+      const tickerChanged = candidate.ticker !== currentTicker;
       updateField("ticker", candidate.ticker);
       if (candidate.pattern) {
         updateField("entry_pattern", candidate.pattern);
         setRecentCandidateEntryPatternSource(candidate.pattern);
         return;
       }
-      clearCandidateDerivedEntryPattern();
+      setRecentCandidateEntryPatternSource(null);
+      if (tickerChanged) {
+        updateField("entry_pattern", "");
+      }
     },
-    [clearCandidateDerivedEntryPattern, updateField],
+    [form.ticker, updateField],
   );
 ```
 
-Only preserve `entry_pattern` for a no-pattern candidate when the current value is manual/edit-loaded. If the current value was populated by a prior recent candidate, clear it to avoid carrying a stale breakout sell marker to a different ticker. Any non-recent ticker change must also clear candidate-derived values; otherwise a user can select one breakout candidate and accidentally save that marker on a different ticker.
+Clear `entry_pattern` whenever recent-candidate selection changes the ticker and the selected candidate has no pattern. A user can still intentionally set `entry_pattern` after that selection; the `entry_pattern` field handler above marks that value as manual/edit-loaded. If the current value was populated by a prior recent candidate, clear it to avoid carrying a stale breakout sell marker to a different ticker. Any non-recent ticker change must also clear candidate-derived values; otherwise a user can select one breakout candidate and accidentally save that marker on a different ticker.
 
 Pass both the wrapped field handler and the recent-candidate callback:
 
@@ -2653,7 +2715,7 @@ Also add short notes under the workflow holdings bridge sections:
 
 Review `docs/holdings-ticker-lookup.md` and `docs/adr/ADR-0008-holdings-ticker-directory.md` for stale `candidates[].{ticker,name}`-only wording. Update them if they describe recent buy candidate payload shape or holdings candidate selection behavior; leave them unchanged only if they discuss search-directory cache behavior that intentionally remains ticker/name-only.
 
-In `docs/api.md`, update the holdings record/create/patch contract so `entry_pattern?: string | null` is documented for normal holdings create/update and returned holdings rows. Also explicitly state that Add Buy remains quantity-only and rejects marker fields such as `entry_pattern`. Update the `/api/tickers/recent-candidates` response contract so each candidate documents `pattern: string | null`. Make the distinction explicit: ticker search results remain ticker/name-only, while recent buy candidates may carry validated buy-report pattern metadata.
+In `docs/api.md`, update the holdings contract so returned holdings rows and current snapshots document `entry_pattern: string | null` as an owned nullable field, while normal holdings create/patch payloads document `entry_pattern?: string | null`. Reserve omitted-key preserve semantics for YAML/replace-all import inputs only. Also explicitly state that Add Buy remains quantity-only and rejects marker fields such as `entry_pattern`. Update the `/api/tickers/recent-candidates` response contract so each candidate documents `pattern: string | null`. Make the distinction explicit: ticker search results remain ticker/name-only, while recent buy candidates may carry validated buy-report pattern metadata.
 
 - [ ] **Step 5: Update local Docker scheduler docs**
 
@@ -2704,7 +2766,7 @@ git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을
 
 Before merge/deploy, confirm the DB migration that adds `public.holdings.entry_pattern` was applied and the executable migration smoke from Task 2 passed before any runtime containing `entry_pattern` in a PostgREST select or mutation body can run. This includes `.github/workflows/sell.yml`, `.github/workflows/ai-brief.yml`, `sab/scheduler/holdings.py`, and web `HOLDINGS_SELECT` in `web/src/lib/supabase/holdings.ts`. Runtime select changes must stay separate until the migration is applied and verified unless reviewed deployment automation guarantees migration-first ordering.
 
-Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, any PostgREST schema-cache remediation if needed, that `replace_holdings_v1` mutation smoke was run only on disposable data or a reviewed full-snapshot restore procedure, legacy Add Buy replay null-field compatibility without historical event rewrites, inactive Add Buy stale-marker clearing evidence, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
+Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, the reserved target-DB smoke ticker and preflight absence evidence, any PostgREST schema-cache remediation if needed, that `replace_holdings_v1` mutation smoke was run only on disposable data or a reviewed full-snapshot restore procedure, legacy Add Buy replay null-field compatibility without historical event rewrites, inactive Add Buy stale-marker clearing evidence, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
 
 - [ ] **Step 2: Run Python quality gate**
 
