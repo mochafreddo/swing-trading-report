@@ -18,25 +18,27 @@
 
 **Problem:** The durable holdings contract currently exposes only `strategy` and `tags`; scheduled Supabase export and local `holdings.yaml` loading do not preserve `entry_pattern`. A breakout buy that becomes a holding can therefore lose its origin pattern unless the operator manually encodes it in `strategy` or `tags`.
 
-**Goal:** Add a narrow `entry_pattern` contract from recent buy candidate selection/import/export through holdings DB/YAML/scheduled export into `sab sell` and the scheduled AI brief holdings bridge.
+**Goal:** Add a narrow active-position `entry_pattern` contract from recent buy candidate selection/import/export through holdings DB/YAML/scheduled export into `sab sell` and the scheduled AI brief holdings bridge.
 
-**Non-Goals:** Do not redesign holdings as lots, do not add partial exits, do not change failed-breakout thresholds, do not change buy/entry ranking policy, and do not extend the Add Buy flow/RPC to infer or accept `entry_pattern`. Add Buy may clear a stale existing `entry_pattern` only when it reactivates an inactive (`quantity = 0`) holding, because that is a new position rather than a continuation of the old entry. Negative quantity is outside the current holdings schema contract and must not be treated as a supported reactivation state.
+**Non-Goals:** Do not redesign holdings as lots, do not add partial exits, do not change failed-breakout thresholds, do not change buy/entry ranking policy, and do not extend the Add Buy flow/RPC to infer or accept `entry_pattern`. `entry_pattern` is active-position metadata: inactive (`quantity = 0`) holdings must store it as `null`, so every deactivation/reactivation path must prevent a closed position's marker from reaching a later position. Add Buy clears a stale existing `entry_pattern` when it reactivates an inactive holding because that is a new position rather than a continuation of the old entry. Negative quantity is outside the current holdings schema contract and must not be treated as a supported reactivation state.
 
 **Constraints:** Keep backwards compatibility with old holdings rows/YAML files; `entry_pattern` must be optional and nullable. Avoid broad web UI redesign. Update strategy/holdings docs because this changes a public holdings contract.
 
 ## Impact Note
 
-This changes the holdings schema, web holdings DTOs/forms, YAML import/export, scheduled holdings export, Python holdings loader, hybrid sell marker interpretation, and the sell-evaluation bridge that builds the evaluator metadata dict. The likely breakages are mismatched Supabase RPC signatures, TypeScript fixture drift, YAML round-trip omissions, PostgREST `select` omissions, old replace-all callers clearing the new column, YAML import collapsing omitted `entry_pattern` into explicit null, YAML export omitting explicit nulls, overly permissive substring marker parsing, stale candidate-derived form state, stale inactive-holding `entry_pattern` markers surviving Add Buy reactivation, unsafe full-replacement RPC smoke tests, historical Add Buy replay events being rewritten when they should remain immutable, and loader fields that never reach `sab sell`. Tests/docs must cover Python loader/export, `_evaluate_holdings` metadata forwarding, exact `entry_pattern` validation, web schema/YAML helpers, ticker recent-candidate metadata, executable migration/RPC validation on disposable data, shared holdings select queries, create/update persistence bodies, edit-form preservation, Add Buy rejection of `entry_pattern` inputs, active Add Buy preservation, inactive Add Buy stale-marker clearing, and legacy Add Buy replay compatibility without rewriting historical event payloads or timestamps.
+This changes the holdings schema, web holdings DTOs/forms, YAML import/export, scheduled holdings export, Python holdings loader, hybrid sell marker interpretation, and the sell-evaluation bridge that builds the evaluator metadata dict. The likely breakages are mismatched Supabase RPC signatures, TypeScript fixture drift, YAML round-trip omissions, PostgREST `select` omissions, old replace-all callers clearing the new column, YAML import collapsing omitted `entry_pattern` into explicit null, YAML export omitting explicit nulls, overly permissive substring marker parsing, stale candidate-derived form state, stale inactive-holding `entry_pattern` markers surviving Add Buy, normal edit/PATCH, or YAML reactivation, unsafe full-replacement RPC smoke tests, historical Add Buy replay events being rewritten when they should remain immutable, and loader fields that never reach `sab sell`. Tests/docs must cover Python loader/export, `_evaluate_holdings` metadata forwarding, exact `entry_pattern` validation, web schema/YAML helpers, ticker recent-candidate metadata, executable migration/RPC validation on disposable data, shared holdings select queries, create/update persistence bodies, edit-form preservation, Add Buy rejection of `entry_pattern` inputs, active Add Buy preservation, inactive-row null enforcement, inactive-to-active stale-marker clearing across Add Buy/replace-all/web update paths, and legacy Add Buy replay compatibility without rewriting historical event payloads or timestamps.
 
 ## Scope Check
 
 This is one cross-boundary metadata contract, not several independent subsystems. It should stay in one plan because each task moves the same `entry_pattern` field across one adjacent boundary.
 
-Add Buy remains quantity-only in this plan. It should keep returning the full holding row after the schema change and must not accept or infer `entry_pattern`. For existing active holdings (`quantity > 0`), Add Buy preserves `entry_pattern`; for inactive-to-active reactivation (`quantity = 0` before the buy), Add Buy clears any stale `entry_pattern` because the previous marker belongs to a closed position. This clear is deterministic server-side hygiene and must not add `p_entry_pattern` or change the idempotency fingerprint. Do not broaden this to `quantity < 0`; the current DB schema is nonnegative and the Add Buy weighted-average price logic only has defined new-position semantics for exactly zero quantity.
+Add Buy remains quantity-only in this plan. It should keep returning the full holding row after the schema change and must not accept or infer `entry_pattern`. For existing active holdings (`quantity > 0`), Add Buy preserves `entry_pattern`; for inactive-to-active reactivation (`quantity = 0` before the buy), Add Buy clears any stale `entry_pattern` because the previous marker belongs to a closed position. This clear is part of a broader active-position invariant: rows with `quantity = 0` must have `entry_pattern = null`, and generic edit/PATCH plus YAML/replace-all paths must either clear the field when deactivating/reactivating or reject an explicit non-null marker on an inactive row. Do not broaden this to `quantity < 0`; the current DB schema is nonnegative and the Add Buy weighted-average price logic only has defined new-position semantics for exactly zero quantity.
 
-YAML import/replace-all compatibility depends on preserving source key presence. A missing `entry_pattern` key in an old YAML file or foreign replace-all payload means "leave the existing DB value unchanged"; an explicit `entry_pattern: null` or blank string means "clear the value"; a non-empty string means "set the value". Do not normalize missing YAML `entry_pattern` to `null` before building the `replace_holdings_v1` request, because that would turn old YAML imports into destructive clears. Operator-facing YAML import copy must also mention this preserve-on-omit exception, because the import is no longer a literal full replacement for fields that old YAML files do not know about.
+YAML import/replace-all compatibility depends on preserving source key presence. A missing `entry_pattern` key in an old YAML file or foreign replace-all payload means "leave the existing DB value unchanged" only when the resulting row remains active; an explicit `entry_pattern: null` or blank string means "clear the value"; a non-empty string means "set the value" for an active row. Do not normalize missing YAML `entry_pattern` to `null` before building the `replace_holdings_v1` request, because that would turn old active-row YAML imports into destructive clears. Operator-facing YAML import copy must also mention this preserve-on-omit exception, because the import is no longer a literal full replacement for fields that old YAML files do not know about.
 
-YAML export is different from YAML import. Exported YAML is an owned current-DB snapshot, so it must emit `entry_pattern` explicitly even when the DB value is `null`; otherwise a backup of a cleared value becomes an old-style omitted key and later import would preserve a stale DB marker instead of clearing it. Only parser/import/replace-all inputs may omit the key to mean preserve-existing.
+The preserve-on-omit exception applies only while the resulting row remains active. If a replace-all/YAML import row sets `quantity = 0`, `replace_holdings_v1` must clear `entry_pattern` even when the incoming key is omitted, and must reject an explicit non-null `entry_pattern` on that inactive row. If an old inactive row later becomes active through replace-all while omitting `entry_pattern`, the result stays `null`; callers must explicitly set a valid current pattern for the new position if they want the hybrid sell marker. Normal web PATCH/update must apply the same invariant by clearing `entry_pattern` whenever it sends `quantity: 0`, and tests must prove inactive rows cannot keep stale markers through generic update paths.
+
+YAML export is different from YAML import. Exported YAML is an owned current-DB snapshot, so it must emit `entry_pattern` explicitly even when the DB value is `null`; otherwise a backup of a cleared value becomes an old-style omitted key and later import would preserve an active-row DB marker instead of owning the clear. Only parser/import/replace-all inputs may omit the key to mean active-row preserve-existing; inactive rows still clear or reject the marker.
 
 `entry_pattern` values must be exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, or `rsi_oversold_reversal`. The only failed-breakout `entry_pattern` value is `swing_high_breakout`; an unknown value such as `not_a_breakout` must be rejected at external write/import boundaries and must not trigger hybrid sell merely because it contains the substring `breakout`. Existing free-form `strategy`/`tags` marker behavior is preserved for backwards compatibility.
 
@@ -63,13 +65,13 @@ Hard stop: after the DB-only migration commit/release, stop implementation and r
 - Modify `web/src/lib/types.ts`: add required nullable `entry_pattern` to holding record/snapshot/mutation types and add a replace/import snapshot type whose `entry_pattern` key is optional so YAML imports can preserve missing-vs-null semantics.
 - Create `web/src/lib/holding-entry-pattern.ts`: centralize the web-side allowed pattern IDs so schemas, YAML helpers, ticker-directory extraction, and client parsing cannot drift from each other.
 - Modify `web/src/lib/schemas.ts`: accept optional nullable `entry_pattern` on create/patch and validate exact allowed pattern IDs.
-- Modify `web/src/lib/supabase/holdings.ts`: select, create/update, and replace-all `entry_pattern`, omitting the key from replace-all rows only when the incoming replace/import snapshot omitted it.
+- Modify `web/src/lib/supabase/holdings.ts`: select, create/update, and replace-all `entry_pattern`, omitting the key from active replace-all rows only when the incoming replace/import snapshot omitted it, and sending/deriving explicit null when the row is inactive.
 - Modify `web/src/lib/holdings-yaml.ts`: parse/export/diff `entry_pattern`, validate exact allowed pattern IDs, preserve whether the YAML import row omitted the key, and emit explicit `null` in generated exports.
 - Modify `web/src/components/holdings/form-state.ts`: add `entry_pattern` form state.
 - Modify `web/src/components/holdings/helpers.ts`: map `entry_pattern` between records, forms, and mutation payloads.
 - Modify `web/src/components/holdings/holdings-form-panel.tsx`: add a small Entry Pattern select/menu.
 - Modify `web/src/components/holdings/holdings-table.tsx`: display `entry_pattern` as compact Tags-cell metadata without changing row actions.
-- Modify `web/src/components/holdings/holdings-import-panel.tsx`: update import copy to explain omitted `entry_pattern` preserves the existing DB value.
+- Modify `web/src/components/holdings/holdings-import-panel.tsx`: update import copy to explain omitted `entry_pattern` preserves the existing DB value only for active rows.
 - Modify `web/src/components/holdings/use-holdings-import.ts`: update the apply confirmation copy so it no longer claims every DB field is literally replaced by file content.
 - Modify `web/src/components/holdings-client.module.css` if the table uses secondary-line `entry_pattern` metadata.
 - Modify `web/src/components/holdings/use-ticker-lookup.ts`: parse optional `pattern` on recent candidate payloads while preserving ticker-search behavior.
@@ -501,6 +503,8 @@ expect(Object.prototype.hasOwnProperty.call(body, "entry_pattern")).toBe(true);
 expect(body?.entry_pattern).toBeNull();
 ```
 
+Add a deactivation counterpart at the same adapter boundary: call the public update path with a patch that sets `{ quantity: 0, entry_pattern: null }`, inspect the outbound PATCH body, and assert it owns `entry_pattern` with `null`. This locks the active-position invariant and prevents a generic quantity edit from leaving an old failed-breakout marker on an inactive row. Route/action/UI tests should also prove the normal holdings save path sends that null clear when an edited active row is saved with `quantity = 0`; direct PostgREST PATCH callers that omit the clear should fail the DB constraint instead of silently preserving stale metadata.
+
 In `web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts`, add value and explicit-null `entry_pattern` PATCH pass-through regressions against the real route/Supabase request construction, and assert the route's PostgREST `select` includes `entry_pattern`. This file is the existing integration-level guard for actual PATCH request construction and must be included in the runtime fixture/staging list.
 
 In the existing `addBuyToHolding` test named `"calls holdings_add_buy_v1 RPC and returns updated holding"`, return a row with a non-null `entry_pattern`, assert it is present on the returned row, and assert the RPC request body remains quantity-only. Add adjacent adapter/RPC contract regressions for the DB migration smoke plan: an active holding preserves a non-null `entry_pattern`, an inactive-to-active Add Buy from `quantity = 0` clears a stale non-null `entry_pattern`, and a pre-migration-style cached replay payload that lacks `entry_pattern` is still returned with `entry_pattern: null` by the `setof public.holdings` replay path without mutating the historical event row.
@@ -519,7 +523,7 @@ expect(body).not.toHaveProperty("p_entry_pattern");
 
 Add direct Add Buy API/action negative coverage so the public Add Buy surface cannot accidentally start accepting a marker field. In `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts`, add a request with `{ buy_quantity: 1, buy_price: 10, entry_pattern: "swing_high_breakout" }`, assert status 400 with `"Invalid holding add-buy payload"`, and assert `addBuyToHolding` was not called. Add the same rejection test to the public catch-all route at `web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts`. In `web/src/app/actions/__tests__/holdings.test.ts`, call `addBuyToHoldingAction` with the same extra `entry_pattern`, assert `{ ok: false, error: "Invalid holding add-buy payload" }`, and assert `addBuyToHolding` was not called. These tests may already pass because `holdingAddBuySchema.strict()` rejects unknown keys; keep them as contract guards.
 
-In `web/src/lib/__tests__/schemas.test.ts`, add create/patch schema regressions proving normal holdings create/update payloads accept trimmed `entry_pattern`, accept explicit `null`, and reject unknown values such as `not_a_breakout`. This belongs in Task 2, not Task 3, because the first runtime release that can send `entry_pattern` to Supabase must also have public API/action schemas that accept the field after the DB migration is live. Keep Add Buy schema strict and covered by the negative tests above.
+In `web/src/lib/__tests__/schemas.test.ts`, add create/patch schema regressions proving normal holdings create/update payloads accept trimmed `entry_pattern`, accept explicit `null`, and reject unknown values such as `not_a_breakout`. Add inactive-row schema regressions too: `quantity: 0` with a non-null `entry_pattern` must be rejected or normalized to `entry_pattern: null` before persistence, while `quantity: 0` with `entry_pattern: null` is accepted. This belongs in Task 2, not Task 3, because the first runtime release that can send `entry_pattern` to Supabase must also have public API/action schemas that accept the field after the DB migration is live and must not allow inactive rows to keep action-driving markers. Keep Add Buy schema strict and covered by the negative tests above.
 
 In `tests/test_scheduled_holdings_export.py`, add `entry_pattern` to the active fake Supabase row:
 
@@ -622,18 +626,22 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "char_length(entry_pattern) <= 120",
         "add constraint holdings_entry_pattern_value_check",
         "entry_pattern in (",
+        "add constraint holdings_entry_pattern_active_quantity_check",
+        "entry_pattern is null or quantity > 0",
         "jsonb_typeof(incoming.item->'entry_pattern') <> 'string'",
         "incoming holdings entry_pattern must be a string",
         "incoming holdings entry_pattern must be <= 120 chars",
         "incoming holdings entry_pattern must be one of",
+        "inactive holdings entry_pattern must be null",
         "nullif(trim(incoming.item->>'entry_pattern'), '') not in (",
         "has_entry_pattern boolean not null",
         "entry_pattern text null",
         "incoming.item ? 'entry_pattern'",
-        "case when incoming.has_entry_pattern then incoming.entry_pattern else existing.entry_pattern end",
-        "incoming.has_entry_pattern and existing.entry_pattern is distinct from incoming.entry_pattern",
+        "when incoming.quantity = 0 then null",
+        "when incoming.has_entry_pattern then incoming.entry_pattern",
+        "else existing.entry_pattern",
         "entry_pattern text null",
-        "incoming.entry_pattern",
+        "case when incoming.quantity = 0 then null else incoming.entry_pattern end",
         "jsonb_populate_record(null::public.holdings, v_event.result_payload)",
         "create or replace function public.holdings_add_buy_v1(",
         "entry_pattern = case",
@@ -728,7 +736,7 @@ Expected: FAIL because the new migration file does not exist yet or does not yet
 
 Create `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql`:
 
-Compatibility decision: `replace_holdings_v1` must preserve an existing `entry_pattern` when an incoming row omits the key entirely, so old callers and older YAML snapshots do not silently wipe the new marker. A caller can still clear the field explicitly by sending `"entry_pattern": null` or a blank string. Track key presence with `has_entry_pattern`; `jsonb_to_recordset` alone cannot distinguish an absent key from an explicit null.
+Compatibility decision: `replace_holdings_v1` must preserve an existing `entry_pattern` when an incoming active row omits the key entirely, so old callers and older YAML snapshots do not silently wipe the new marker. Inactive rows are different: `quantity = 0` always means `entry_pattern = null`, and an explicit non-null marker on an inactive row is rejected. A caller can still clear the field explicitly by sending `"entry_pattern": null` or a blank string. Track key presence with `has_entry_pattern`; `jsonb_to_recordset` alone cannot distinguish an absent key from an explicit null.
 
 ```sql
 alter table public.holdings
@@ -754,6 +762,13 @@ alter table public.holdings
       'rsi_oversold_reversal'
     )
   );
+
+alter table public.holdings
+  drop constraint if exists holdings_entry_pattern_active_quantity_check;
+
+alter table public.holdings
+  add constraint holdings_entry_pattern_active_quantity_check
+  check (entry_pattern is null or quantity > 0);
 
 -- Do not backfill processed Add Buy replay payloads. The existing
 -- jsonb_populate_record(null::public.holdings, result_payload) replay
@@ -889,6 +904,16 @@ begin
   if exists (
     select 1
     from incoming_holdings
+    where quantity = 0
+      and has_entry_pattern
+      and entry_pattern is not null
+  ) then
+    raise exception 'inactive holdings entry_pattern must be null';
+  end if;
+
+  if exists (
+    select 1
+    from incoming_holdings
     where ticker = ''
   ) then
     raise exception 'incoming holdings rows must include a non-empty ticker';
@@ -920,9 +945,12 @@ begin
     and existing.entry_currency is not distinct from incoming.entry_currency
     and existing.entry_date is not distinct from incoming.entry_date
     and existing.strategy is not distinct from incoming.strategy
-    and (
-      not incoming.has_entry_pattern
-      or existing.entry_pattern is not distinct from incoming.entry_pattern
+    and existing.entry_pattern is not distinct from (
+      case
+        when incoming.quantity = 0 then null
+        when incoming.has_entry_pattern then incoming.entry_pattern
+        else existing.entry_pattern
+      end
     )
     and existing.notes is not distinct from incoming.notes
     and existing.tags is not distinct from incoming.tags
@@ -938,6 +966,7 @@ begin
       entry_date = incoming.entry_date,
       strategy = incoming.strategy,
       entry_pattern = case
+        when incoming.quantity = 0 then null
         when incoming.has_entry_pattern then incoming.entry_pattern
         else existing.entry_pattern
       end,
@@ -953,9 +982,12 @@ begin
         or existing.entry_currency is distinct from incoming.entry_currency
         or existing.entry_date is distinct from incoming.entry_date
         or existing.strategy is distinct from incoming.strategy
-        or (
-          incoming.has_entry_pattern
-          and existing.entry_pattern is distinct from incoming.entry_pattern
+        or existing.entry_pattern is distinct from (
+          case
+            when incoming.quantity = 0 then null
+            when incoming.has_entry_pattern then incoming.entry_pattern
+            else existing.entry_pattern
+          end
         )
         or existing.notes is distinct from incoming.notes
         or existing.tags is distinct from incoming.tags
@@ -987,7 +1019,10 @@ begin
       incoming.entry_currency,
       incoming.entry_date,
       incoming.strategy,
-      incoming.entry_pattern,
+      case
+        when incoming.quantity = 0 then null
+        else incoming.entry_pattern
+      end,
       incoming.notes,
       incoming.tags,
       incoming.stop_override,
@@ -1267,6 +1302,8 @@ Also exercise `replace_holdings_v1` manually or with a DB integration test for t
 - incoming row omitting `entry_pattern` preserves an existing non-null value when no other fields change.
 - incoming row omitting `entry_pattern` preserves an existing non-null value while another field such as `notes` changes, proving the update branch preserves the marker and not only the unchanged branch.
 - incoming row with `"entry_pattern": null` clears it.
+- incoming row with `quantity = 0` and omitted `entry_pattern` clears an existing non-null value instead of preserving a closed-position marker.
+- incoming row with `quantity = 0` and a non-null `entry_pattern` fails with `inactive holdings entry_pattern must be null` or the DB active-quantity constraint.
 - incoming row with an `entry_pattern` longer than 120 characters fails with an actionable error or the DB length constraint.
 - incoming row with an unknown `entry_pattern` such as `not_a_breakout` fails with an actionable error or the DB allowed-value constraint.
 - `holdings_add_buy_v1` updates quantity/price/date while preserving a non-null `entry_pattern` for an already-active holding.
@@ -1284,7 +1321,7 @@ curl -fsS "${SUPABASE_URL%/}/rest/v1/holdings?select=ticker,quantity,entry_price
   -H "Accept: application/json"
 ```
 
-Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data with a reserved improbable ticker such as `SABSMOKE.NAS`: preflight that no existing row matches the ticker or any canonical alias, create the row only if absent, record the created row identity and idempotency key, and abort cleanup unless the smoke created the row. Never patch, Add Buy, or delete an existing non-smoke holding as part of target smoke. Create or patch the reserved smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, patch the same smoke row with explicit `entry_pattern: null`, and verify the returned row plus a follow-up GET show `entry_pattern` as `null`. This proves normal PATCH clears cross the PostgREST boundary instead of being filtered out by the web adapter/runtime path. For Add Buy, use only that reserved smoke holding and a unique smoke idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding only if it was created by the smoke. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
+Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data with a reserved improbable ticker such as `SABSMOKE.NAS`: preflight that no existing row matches the ticker or any canonical alias, create the row only if absent, record the created row identity and idempotency key, and abort cleanup unless the smoke created the row. Never patch, Add Buy, or delete an existing non-smoke holding as part of target smoke. Create or patch the reserved smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, patch the same smoke row with explicit `entry_pattern: null`, and verify the returned row plus a follow-up GET show `entry_pattern` as `null`. Then patch the smoke row to `quantity: 0` with `entry_pattern: null` and verify the inactive row has no marker; optionally verify a controlled direct PATCH that attempts `quantity: 0` with non-null `entry_pattern` fails, proving the DB active-position constraint is effective. This proves normal PATCH clears cross the PostgREST boundary instead of being filtered out by the web adapter/runtime path. For Add Buy, use only that reserved smoke holding and a unique smoke idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding only if it was created by the smoke. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, inactive-row null enforcement, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
 
 When recording target smoke evidence, record only the command class, HTTP status, selected column list, boolean shape checks, smoke ticker, and whether cleanup was performed. Do not paste real holdings rows, response bodies from non-smoke rows, request headers, bearer tokens, API keys, curl verbose output, or environment variable values into PR notes, logs, chat, or docs.
 
@@ -1440,7 +1477,7 @@ Change `replaceAllHoldings` to accept `HoldingReplaceSnapshot[]`. Include the fi
         return payloadRow;
 ```
 
-New create/update callers can send `entry_pattern` explicitly through the normal mutation schemas added in this task. Replace-all callers must preserve key presence: `entry_pattern: null` intentionally clears the field, `entry_pattern: undefined` is treated like omission, and omitting the key preserves the existing DB value through the DB-level compatibility behavior.
+New create/update callers can send `entry_pattern` explicitly through the normal mutation schemas added in this task. Replace-all callers must preserve key presence: `entry_pattern: null` intentionally clears the field, `entry_pattern: undefined` is treated like omission, and omitting the key preserves the existing DB value through the DB-level compatibility behavior only while the resulting row remains active. When the row becomes inactive (`quantity = 0`), the payload must clear `entry_pattern` or rely on `replace_holdings_v1` to clear omitted active-row metadata.
 
 Do not add a temporary `web/src/lib/holdings-yaml.ts` implementation that collapses omitted YAML `entry_pattern` into `null`. The parser, export, diff, and route pass-through changes are one atomic Task 3 checkpoint. If this task's type changes force `holdings-yaml.ts` edits before Task 3, move the full Task 3 YAML optional-key implementation forward and run its tests in the same checkpoint.
 
@@ -1625,7 +1662,7 @@ it("treats entry_pattern-only differences as updates", () => {
 Add three compatibility regressions that distinguish an omitted YAML key from explicit clears. First, old YAML that omits `entry_pattern` must not count as an update against a current DB row that already has an `entry_pattern`:
 
 ```ts
-it("treats omitted entry_pattern as preserve-existing during YAML diff", () => {
+it("treats omitted entry_pattern as preserve-existing for an active row during YAML diff", () => {
   const incoming = parseHoldingsYamlDocument(`
 holdings:
   - ticker: AAPL.NAS
@@ -1690,7 +1727,9 @@ holdings:
 
 Add the blank/whitespace clear counterpart. Parse YAML with `entry_pattern: ""` and, if the YAML parser preserves quoted spaces in the local library version, also `entry_pattern: "   "`; assert the incoming row owns `entry_pattern` and the parsed value is `null`, then assert the diff treats it as an update against a current non-null `entry_pattern`. This closes the plan-level contract that blank string means clear, not preserve.
 
-In `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, account for the route's current `hasChanges` guard before asserting apply-path pass-through. Add one pure preserve-on-omit apply case where old YAML omits `entry_pattern`, the mocked/import summary has no create/update/delete changes, and `replaceAllHoldings` is **not** called. Then add a separate apply-path case with an independent change such as `notes` or `quantity` while still omitting `entry_pattern`; force the mocked summary to report an update, assert `replaceAllHoldings` is called, and assert the row it receives does not own `entry_pattern`. Separately post `entry_pattern: null` and blank `entry_pattern` cases with update summaries and assert the row owns `entry_pattern` with `null`. This catches route-level pass-through without contradicting the no-op apply behavior.
+Add inactive-row import regressions in the same file. A YAML row with `quantity: 0` and omitted `entry_pattern` must parse without owning the key, but `buildHoldingsYamlImportSummary` should still treat it as an update against a current active row with non-null `entry_pattern` because apply will clear the marker when the DB row becomes inactive. A YAML row with `quantity: 0` and non-null `entry_pattern` must be rejected or normalized to an explicit null clear before it can reach `replaceAllHoldings`; choose one behavior and keep it aligned with the schema/RPC invariant.
+
+In `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, account for the route's current `hasChanges` guard before asserting apply-path pass-through. Add one pure preserve-on-omit apply case where old YAML omits `entry_pattern`, the mocked/import summary has no create/update/delete changes, and `replaceAllHoldings` is **not** called. Then add a separate active-row apply-path case with an independent change such as `notes` or active `quantity` while still omitting `entry_pattern`; force the mocked summary to report an update, assert `replaceAllHoldings` is called, and assert the row it receives does not own `entry_pattern`. Separately post `entry_pattern: null` and blank `entry_pattern` cases with update summaries and assert the row owns `entry_pattern` with `null`. Finally add a deactivation apply case where YAML sets `quantity: 0` while omitting `entry_pattern`; assert apply does not send a stale non-null marker and, if the route normalizes before calling `replaceAllHoldings`, the row owns `entry_pattern: null`. This catches route-level pass-through without contradicting the no-op apply behavior.
 
 In `web/src/app/api/holdings/__tests__/route.test.ts`, update the create payload assertion in `"creates holding with slash ticker symbol"`:
 
@@ -1848,7 +1887,7 @@ it("submits entry pattern from the holdings form", async () => {
 });
 ```
 
-Add an edit-preservation regression in the same block. Render a row with `entry_pattern: "swing_high_breakout"`, click `Edit`, assert the `entryPattern` select is prefilled, change an unrelated field such as `notes`, submit, and assert the saved payload still includes the original `entry_pattern`. This catches `recordToForm` mapping mistakes that would clear the marker during ordinary edits:
+Add an active-row edit-preservation regression in the same block. Render an active row with `quantity > 0` and `entry_pattern: "swing_high_breakout"`, click `Edit`, assert the `entryPattern` select is prefilled, change an unrelated field such as `notes`, submit, and assert the saved payload still includes the original `entry_pattern`. This catches `recordToForm` mapping mistakes that would clear the marker during ordinary active-position edits:
 
 ```ts
 it("preserves entry pattern when editing another field", async () => {
@@ -1900,6 +1939,8 @@ it("preserves entry pattern when editing another field", async () => {
   });
 });
 ```
+
+Add the deactivation counterpart in the same block. Render an active row with `entry_pattern: "swing_high_breakout"`, click `Edit`, change `quantity` to `0`, submit, and assert the saved payload owns `entry_pattern: null`. This proves the normal UI edit path enforces the active-position invariant instead of preserving a stale failed-breakout marker on an inactive row. If the implementation rejects deactivation through the generic edit path instead, assert the rejected UI/action behavior explicitly and keep Add Buy as the only reactivation path.
 
 Add a small table rendering regression in the same describe block so the manual visual smoke is not the only coverage for the new metadata:
 
@@ -2057,8 +2098,11 @@ In `web/src/components/holdings/helpers.ts`, update `recordToForm`:
 Update `buildHoldingMutationPayload` after `strategy`:
 
 ```ts
-    entry_pattern: stringOrNull(form.entry_pattern),
+    entry_pattern:
+      Number(form.quantity) === 0 ? null : stringOrNull(form.entry_pattern),
 ```
+
+Use the same quantity-zero guard in any route/action mutation helper that bypasses `buildHoldingMutationPayload`. A disabled or hidden select is not enough; the outbound payload must carry `entry_pattern: null` when a normal holdings edit deactivates a row, so the DB constraint and scheduled export contract remain aligned.
 
 In `web/src/components/holdings/holdings-form-panel.tsx`, import `HOLDING_ENTRY_PATTERN_VALUES` from `web/src/lib/holding-entry-pattern.ts` and add this label after the Strategy input. Use a select/menu instead of free-form text because `entry_pattern` is an enum-like field, but render the options from the shared allowlist instead of hardcoding them:
 
@@ -2084,9 +2128,9 @@ In `web/src/components/holdings/holdings-form-panel.tsx`, import `HOLDING_ENTRY_
 
 In `web/src/components/holdings-client.module.css`, include `.form select` in the same sizing, border, font, and focus-visible rules as `.form input` and `.form textarea`. The Entry Pattern control should not rely on unstyled native select defaults, and the visual smoke should check focus/readability as well as overlap.
 
-In `web/src/components/holdings/holdings-import-panel.tsx`, update the explanatory copy so it still says apply replaces the holdings snapshot, but explicitly notes that omitted `entry_pattern` in older YAML preserves the existing DB value and `entry_pattern: null` or blank clears it. Keep this concise; it is an operational warning, not a tutorial.
+In `web/src/components/holdings/holdings-import-panel.tsx`, update the explanatory copy so it still says apply replaces the holdings snapshot, but explicitly notes that omitted `entry_pattern` in older YAML preserves the existing DB value only while that row remains active, and `entry_pattern: null`, blank, or `quantity: 0` clears it. Keep this concise; it is an operational warning, not a tutorial.
 
-In `web/src/components/holdings/use-holdings-import.ts`, update the apply confirmation string for the same contract. The confirmation must not say the DB is literally replaced by the uploaded file without qualification. In `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, extend the existing `useHoldingsImport` apply test to assert `confirm.mock.calls[0]?.[0]` contains `entry_pattern`, `preserve`/`보존`, and `null` or `blank`/`빈 값`.
+In `web/src/components/holdings/use-holdings-import.ts`, update the apply confirmation string for the same contract. The confirmation must not say the DB is literally replaced by the uploaded file without qualification. In `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, extend the existing `useHoldingsImport` apply test to assert `confirm.mock.calls[0]?.[0]` contains `entry_pattern`, `preserve`/`보존`, active-row wording, and `null`, `blank`/`빈 값`, or `quantity = 0` clear wording.
 
 In `web/src/components/holdings/holdings-table.tsx`, keep the holdings row dense and scannable. The current table has a Tags column but no Strategy column, so do not add a new Strategy or Entry Pattern column in this task. Show `entry_pattern` as a secondary line inside the Tags cell:
 
@@ -2296,10 +2340,10 @@ Add a render assertion to the populated-pattern test so the side effect is visib
 expect(container.textContent).toContain("Pattern: swing_high_breakout");
 ```
 
-Add the negative regression in the same block:
+Add a manual-value preservation regression in the same block:
 
 ```ts
-it("clears an existing entry pattern when a no-pattern recent candidate changes ticker", async () => {
+it("preserves a manual entry pattern when a no-pattern recent candidate changes ticker", async () => {
   vi.mocked(globalThis.fetch as typeof fetch).mockResolvedValueOnce(
     jsonResponse({
       report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
@@ -2337,7 +2381,7 @@ it("clears an existing entry pattern when a no-pattern recent candidate changes 
   ).toBe("MSFT.NAS");
   expect(
     container.querySelector<HTMLSelectElement>('select[name="entryPattern"]')?.value,
-  ).toBe("");
+  ).toBe("trend_pullback_bounce");
 });
 
 it("preserves entry pattern when the user edits it after no-pattern candidate selection", async () => {
@@ -2689,7 +2733,7 @@ git commit -m "feat(web): 최근 매수 후보 패턴 보존" -m "최근 buy 후
 
 - [ ] **Step 1: Update holdings schema docs**
 
-In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `strategy` and document that the value is trimmed, nullable, explicitly exported as `null` when absent, limited to 120 characters, and restricted to the current buy pattern IDs across DB/RPC/YAML/web mutation paths. Also document the import/export semantic exception: generated exports always include `entry_pattern` with either a value or `null`; YAML/import/replace-all inputs that omit the key preserve the existing DB value for that field, while explicit `entry_pattern: null` or blank clears it.
+In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `strategy` and document that the value is trimmed, nullable, explicitly exported as `null` when absent, limited to 120 characters, restricted to the current buy pattern IDs across DB/RPC/YAML/web mutation paths, and valid only for active rows (`quantity > 0`). Also document the import/export semantic exception: generated exports always include `entry_pattern` with either a value or `null`; YAML/import/replace-all inputs that omit the key preserve the existing DB value for that field only while the resulting row remains active, while explicit `entry_pattern: null`, blank, or `quantity: 0` clears it.
 
 ```yaml
     strategy: sma_ema_hybrid
@@ -2699,7 +2743,7 @@ In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `stra
 Add this row to the field table after `strategy`:
 
 ```markdown
-| `entry_pattern` | string (선택, 최대 120자) | buy/entry report의 `pattern`을 보유 상태에 보존한 값. 허용값: `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`; `swing_high_breakout`만 hybrid sell의 failed-breakout 판정에 사용 |
+| `entry_pattern` | string (선택, 최대 120자) | buy/entry report의 `pattern`을 active 보유 상태에 보존한 값. `quantity = 0` 행에서는 `null`이어야 함. 허용값: `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`; `swing_high_breakout`만 hybrid sell의 failed-breakout 판정에 사용 |
 ```
 
 Add this note near the sell command section:
@@ -2713,10 +2757,10 @@ Add this note near the sell command section:
 In `docs/holdings-add-buy.md`, add this contract note near the API/RPC contract section:
 
 ```markdown
-- Add Buy는 수량, 평단, 진입일, 통화만 갱신하며 active holdings row의 기존 `entry_pattern`은 보존합니다. 단, `quantity = 0` 비활성 row를 Add Buy로 재활성화할 때는 닫힌 포지션의 stale marker가 새 포지션에 붙지 않도록 기존 `entry_pattern`을 clear합니다. buy/entry report의 `pattern`을 새로 기록해야 하는 경우 holdings 생성/수정 또는 YAML import 경로에서 `entry_pattern`을 설정하세요. 이 RPC는 `entry_pattern`을 추론하거나 입력으로 받지 않습니다.
+- Add Buy는 수량, 평단, 진입일, 통화만 갱신하며 active holdings row의 기존 `entry_pattern`은 보존합니다. 단, `quantity = 0` 비활성 row를 Add Buy로 재활성화할 때는 닫힌 포지션의 stale marker가 새 포지션에 붙지 않도록 기존 `entry_pattern`을 clear합니다. `entry_pattern`은 active-position metadata이므로 일반 holdings 수정이나 YAML import가 행을 `quantity = 0`으로 만들 때도 clear되어야 합니다. buy/entry report의 `pattern`을 새로 기록해야 하는 경우 holdings 생성/수정 또는 YAML import 경로에서 active row의 `entry_pattern`을 설정하세요. 이 RPC는 `entry_pattern`을 추론하거나 입력으로 받지 않습니다.
 ```
 
-Also update `docs/adr/ADR-0010-holdings-add-buy.md` with a short superseding note under the decision or consequences section. The note must state that Add Buy remains quantity-only, preserves `entry_pattern` for active holdings, clears it only for `quantity = 0` reactivation, and rejects/does not accept `p_entry_pattern`. This keeps the accepted ADR aligned with `docs/holdings-add-buy.md`.
+Also update `docs/adr/ADR-0010-holdings-add-buy.md` with a short superseding note under the decision or consequences section. The note must state that Add Buy remains quantity-only, preserves `entry_pattern` for active holdings, clears it for `quantity = 0` reactivation, and rejects/does not accept `p_entry_pattern`; it should also point to the broader holdings invariant that inactive rows store `entry_pattern` as `null`. This keeps the accepted ADR aligned with `docs/holdings-add-buy.md`.
 
 - [ ] **Step 3: Update strategy docs**
 
@@ -2795,7 +2839,7 @@ git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을
 
 Before merge/deploy, confirm the DB migration that adds `public.holdings.entry_pattern` was applied and the executable migration smoke from Task 2 passed before any runtime containing `entry_pattern` in a PostgREST select or mutation body can run. This includes `.github/workflows/sell.yml`, `.github/workflows/ai-brief.yml`, `sab/scheduler/holdings.py`, and web `HOLDINGS_SELECT` in `web/src/lib/supabase/holdings.ts`. Runtime select changes must stay separate until the migration is applied and verified unless reviewed deployment automation guarantees migration-first ordering.
 
-Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, the reserved target-DB smoke ticker and preflight absence evidence, any PostgREST schema-cache remediation if needed, that `replace_holdings_v1` mutation smoke was run only on disposable data or a reviewed full-snapshot restore procedure, legacy Add Buy replay null-field compatibility without historical event rewrites, inactive Add Buy stale-marker clearing evidence, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
+Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, the reserved target-DB smoke ticker and preflight absence evidence, any PostgREST schema-cache remediation if needed, that `replace_holdings_v1` mutation smoke was run only on disposable data or a reviewed full-snapshot restore procedure, legacy Add Buy replay null-field compatibility without historical event rewrites, inactive Add Buy stale-marker clearing evidence, generic inactive-row `entry_pattern = null` enforcement evidence, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
 
 - [ ] **Step 2: Run Python quality gate**
 
@@ -2918,10 +2962,10 @@ Expected: no output.
 
 ## Self-Review
 
-**Spec coverage:** The plan covers the active TODO: buy `pattern` is preserved into holdings via `entry_pattern`; entry reports already preserve `pattern`; hybrid sell reads structured pattern fields with exact failed-breakout semantics; scheduled sell receives the field through both the Python export helper and the active `.github/workflows/sell.yml` inline export, then through the Python loader and `_evaluate_holdings` metadata bridge. Scheduled AI Brief preserves the field through the Python scheduler export helper, the manual `.github/workflows/ai-brief.yml` inline bridge is tested separately, and `docs/local-docker-scheduler-plan.md` is updated to match. It also covers web recent-candidate selection, web/admin `HOLDINGS_SELECT`, YAML import/export/diff behavior including omitted-vs-null replace-all semantics and explicit export-null ownership, and deployment ordering so the operator does not need manual `strategy`/`tags`. Add Buy is explicitly scoped to preserve active-position `entry_pattern`, clear stale inactive-position markers only on zero-quantity reactivation, reject marker inputs, and not infer a new one.
+**Spec coverage:** The plan covers the active TODO: buy `pattern` is preserved into holdings via `entry_pattern`; entry reports already preserve `pattern`; hybrid sell reads structured pattern fields with exact failed-breakout semantics; scheduled sell receives the field through both the Python export helper and the active `.github/workflows/sell.yml` inline export, then through the Python loader and `_evaluate_holdings` metadata bridge. Scheduled AI Brief preserves the field through the Python scheduler export helper, the manual `.github/workflows/ai-brief.yml` inline bridge is tested separately, and `docs/local-docker-scheduler-plan.md` is updated to match. It also covers web recent-candidate selection, web/admin `HOLDINGS_SELECT`, YAML import/export/diff behavior including omitted-vs-null replace-all semantics and explicit export-null ownership, inactive-row `entry_pattern = null` enforcement, and deployment ordering so the operator does not need manual `strategy`/`tags`. Add Buy is explicitly scoped to preserve active-position `entry_pattern`, clear stale inactive-position markers on zero-quantity reactivation, reject marker inputs, and not infer a new one; generic edit/PATCH and YAML/replace-all paths must also clear or reject inactive-row markers.
 
 **Completeness scan:** Instructions are concrete, with no filler placeholders, conditional mock instructions, or unspecified edge handling. `TODOS.md` references are repository file names, not placeholders.
 
-**Type consistency:** The field name is consistently `entry_pattern` in SQL, Python dataclass/YAML, TypeScript record/snapshot/mutation types, form state, and docs. TypeScript uses required nullable `entry_pattern` for DB/current holdings and an optional key only for replace/import snapshots that must preserve YAML key presence. Buy/entry report source field remains `pattern`, and allowed values are the exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, and `rsi_oversold_reversal`.
+**Type consistency:** The field name is consistently `entry_pattern` in SQL, Python dataclass/YAML, TypeScript record/snapshot/mutation types, form state, and docs. TypeScript uses required nullable `entry_pattern` for DB/current holdings and an optional key only for replace/import snapshots that must preserve YAML key presence on active rows. Buy/entry report source field remains `pattern`, allowed values are the exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, and `rsi_oversold_reversal`, and inactive rows must store `entry_pattern` as `null`.
 
-**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering with a DB-only stop point, active `sell.yml` scheduled export coverage, manual `ai-brief.yml` inline export coverage, local Docker scheduler docs, fail-closed Python/web/RPC `entry_pattern` parsing with allowed-value checks, exact hybrid sell semantics for structured pattern fields, shared PostgREST holdings select coverage plus schema-cache remediation, YAML omitted-vs-null and blank-clear diff/apply behavior, explicit `entry_pattern: null` YAML exports, legacy Add Buy idempotency replay compatibility without event rewrites, Add Buy active preservation/inactive zero-quantity reactivation clearing and marker-input rejection without request-surface expansion, server-action and client form save pass-through, fixture commit completeness, cross-language allowlist drift guards, stale recent-candidate marker clearing, import confirmation copy, API/architecture docs, and table metadata wrapping.
+**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering with a DB-only stop point, active `sell.yml` scheduled export coverage, manual `ai-brief.yml` inline export coverage, local Docker scheduler docs, fail-closed Python/web/RPC `entry_pattern` parsing with allowed-value checks, exact hybrid sell semantics for structured pattern fields, shared PostgREST holdings select coverage plus schema-cache remediation, YAML omitted-vs-null and blank-clear diff/apply behavior, explicit `entry_pattern: null` YAML exports, DB/RPC/web enforcement that inactive rows cannot retain `entry_pattern`, legacy Add Buy idempotency replay compatibility without event rewrites, Add Buy active preservation/inactive zero-quantity reactivation clearing and marker-input rejection without request-surface expansion, server-action and client form save pass-through plus deactivation clear coverage, fixture commit completeness, cross-language allowlist drift guards, stale recent-candidate marker clearing only for candidate-derived values, manual/edit-loaded recent-candidate value preservation, import confirmation copy, API/architecture docs, and table metadata wrapping.
