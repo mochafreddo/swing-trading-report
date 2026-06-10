@@ -157,7 +157,7 @@ def test_loader_rejects_non_string_entry_pattern(tmp_path: Path) -> None:
     assert "expected a string" in message
 ```
 
-Also add optional-value regressions in `tests/test_holdings_yaml_contract.py` so the loader contract is explicit: an omitted `entry_pattern` key loads as `None`, an explicit `entry_pattern: null` loads as `None`, and a blank or whitespace-only `entry_pattern` value also loads as `None`. These lock the backwards-compatible nullable semantics that `_parse_optional_text_field` implements and prove export-style null snapshots are accepted. Add the non-string rejection as a small parameterized set, or equivalent separate tests, covering at least YAML list, mapping, boolean (`true`), and numeric (`123`) values because YAML scalar coercion can otherwise turn marker-looking inputs into non-string Python values. Add an overlong regression with 121 characters and assert the loader reports `field='entry_pattern'` and `<= 120`. Add an unknown-value regression with `entry_pattern: not_a_breakout` and assert the loader reports `field='entry_pattern'` plus `expected one of`; this keeps the action-driving field tied to exact buy pattern IDs instead of arbitrary marker strings. Add a drift guard that imports `HybridPattern` from `sab.signals.hybrid_buy` and asserts the loader allowlist equals `{pattern.value for pattern in HybridPattern}`; if you derive the allowlist directly from the enum, keep the test to catch future accidental divergence.
+Also add optional-value regressions in `tests/test_holdings_yaml_contract.py` so the loader contract is explicit: an omitted `entry_pattern` key loads as `None`, an explicit `entry_pattern: null` loads as `None`, and a blank or whitespace-only `entry_pattern` value also loads as `None`. These lock the backwards-compatible nullable semantics that `_parse_optional_text_field` implements and prove export-style null snapshots are accepted. Add the non-string rejection as a small parameterized set, or equivalent separate tests, covering at least YAML list, mapping, boolean (`true`), and numeric (`123`) values because YAML scalar coercion can otherwise turn marker-looking inputs into non-string Python values. Add an overlong regression with 121 characters and assert the loader reports `field='entry_pattern'` and `<= 120`. Add an unknown-value regression with `entry_pattern: not_a_breakout` and assert the loader reports `field='entry_pattern'` plus `expected one of`; this keeps the action-driving field tied to exact buy pattern IDs instead of arbitrary marker strings. Add a drift guard that imports `HybridPattern` from `sab.signals.hybrid_buy` and asserts the loader allowlist equals `{pattern.value for pattern in HybridPattern}`. The loader implementation below should derive the allowlist from the enum, and the test should still exist so future refactors cannot accidentally decouple the public holdings contract from the current buy pattern IDs.
 
 In `tests/test_hybrid_sell_profit_tiers.py`, add this regression near `test_hybrid_sell_failed_breakout_accepts_entry_tags`:
 
@@ -281,7 +281,7 @@ Keep the direct hybrid sell tests in `tests/test_hybrid_sell_profit_tiers.py`, b
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py -q
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py -q
 ```
 
 Expected: FAIL because `Holding` has no `entry_pattern`, `_evaluate_holdings` does not forward `entry_pattern`, the loader does not yet fail closed on non-string, unknown, or overlong `entry_pattern`, the loader allowlist is not yet tied to the current `HybridPattern` IDs, and `_is_breakout_holding` still substring-matches structured `pattern`, `entry_pattern`, and `signal_pattern` values. The direct positive hybrid sell regression may already pass because `_is_breakout_holding` already recognizes the key; the full `tests/test_hybrid_sell_profit_tiers.py` run is intentional so the structured `pattern`/`signal_pattern` and legacy `strategy`/`tags` compatibility regressions cannot be skipped.
@@ -338,17 +338,15 @@ def _parse_optional_text_field(
     return text or None
 ```
 
-Add the allowed set near the helper; keep it local to holdings loading so this public YAML contract does not depend on evaluator internals:
+Add the allowed set near the helper and derive it from the buy-pattern enum, not from an independent hardcoded set:
 
 ```python
-_ALLOWED_ENTRY_PATTERNS = frozenset(
-    {
-        "trend_pullback_bounce",
-        "swing_high_breakout",
-        "rsi_oversold_reversal",
-    }
-)
+from .signals.hybrid_buy import HybridPattern
+
+_ALLOWED_ENTRY_PATTERNS = frozenset(pattern.value for pattern in HybridPattern)
 ```
+
+This import deliberately depends on the buy-signal contract rather than sell evaluator internals. If the project later chooses to version holdings patterns independently from buy patterns, make that an explicit design change and update the drift guard, SQL constraint, and web helper together.
 
 Do not change existing `strategy` or `settings.default_strategy` parsing in this task; `strategy` is already a sell marker and changing blank/default fallback semantics would be an unrelated behavior change.
 
@@ -384,7 +382,7 @@ This bridge is required because `_evaluate_holdings` builds a plain dict explici
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py -q
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py -q
 ```
 
 Expected: PASS.
@@ -530,10 +528,10 @@ In `tests/test_workflow_holdings_loading.py`, extend `test_sell_workflow_loads_h
         in run_script
     )
     assert '"entry_pattern",' in run_script
-    assert 'key != "entry_pattern"' in run_script
+    # Serializer null/missing-key behavior is verified by the executable helper below.
 ```
 
-Also assert the inline serializer preserves explicit null for `entry_pattern` while continuing to omit null for legacy optional fields. Add a sibling workflow regression for `.github/workflows/ai-brief.yml` that finds its manual `Load holdings from Supabase` step and checks the same selected field string, Python `keys` tuple, and `entry_pattern` null-preservation condition. The scheduled AI Brief job uses `sab ai-brief-scheduled` and the Python scheduler export helper; keep that coverage in `tests/test_scheduled_holdings_export.py` and do not treat the manual inline workflow test as proof of scheduled-job behavior.
+Also assert the inline serializer behavior structurally, not only by substring checks. Add a helper that extracts the embedded Python block from the workflow step and executes it against fixture `holdings.supabase.json` rows, or factor the serializer into a tiny scriptable helper before testing. Cover at least: `entry_pattern: null` is preserved, legacy optional `notes: null` is omitted, and a row missing the selected `entry_pattern` key fails loudly. Add a sibling workflow regression for `.github/workflows/ai-brief.yml` that finds its manual `Load holdings from Supabase` step and checks the same selected field string plus the same executable serializer cases. The scheduled AI Brief job uses `sab ai-brief-scheduled` and the Python scheduler export helper; keep that coverage in `tests/test_scheduled_holdings_export.py` and do not treat the manual inline workflow test as proof of scheduled-job behavior.
 
 Create `tests/test_holdings_entry_pattern_contract.py`. Import `HybridPattern` from `sab.signals.hybrid_buy` and derive the expected pattern IDs from `{pattern.value for pattern in HybridPattern}` for migration allowlist assertions instead of hardcoding an independent Python set. The SQL still stores explicit values, but the static contract test must fail if the buy-pattern enum changes and the migration/RPC constraints are not updated.
 
@@ -542,6 +540,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
+from sab.signals.hybrid_buy import HybridPattern
 
 
 _MIGRATION_PATH = Path(
@@ -557,6 +557,12 @@ def _normalize_sql(sql: str) -> str:
     return normalized.replace("( ", "(").replace(" )", ")")
 
 
+def _extract_quoted_values_after(sql: str, marker: str) -> set[str]:
+    start = sql.lower().index(marker.lower())
+    segment = sql[start : start + 800]
+    return set(re.findall(r"'([^']+)'", segment))
+
+
 def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() -> None:
     sql = _MIGRATION_PATH.read_text(encoding="utf-8")
     normalized_sql = _normalize_sql(sql)
@@ -566,11 +572,12 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "add constraint holdings_entry_pattern_length_check",
         "char_length(entry_pattern) <= 120",
         "add constraint holdings_entry_pattern_value_check",
-        "entry_pattern in ('trend_pullback_bounce', 'swing_high_breakout', 'rsi_oversold_reversal')",
+        "entry_pattern in (",
         "jsonb_typeof(incoming.item->'entry_pattern') <> 'string'",
         "incoming holdings entry_pattern must be a string",
         "incoming holdings entry_pattern must be <= 120 chars",
         "incoming holdings entry_pattern must be one of",
+        "nullif(trim(incoming.item->>'entry_pattern'), '') not in (",
         "has_entry_pattern boolean not null",
         "entry_pattern text null",
         "incoming.item ? 'entry_pattern'",
@@ -587,6 +594,14 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
     ]
     for snippet in required_snippets:
         assert _normalize_sql(snippet) in normalized_sql
+
+    expected_patterns = {pattern.value for pattern in HybridPattern}
+    assert _extract_quoted_values_after(
+        sql, "holdings_entry_pattern_value_check"
+    ) == expected_patterns
+    assert _extract_quoted_values_after(
+        sql, "nullif(trim(incoming.item->>'entry_pattern'), '') not in"
+    ) == expected_patterns
 
     forbidden_snippets = [
         "grant execute on function public.replace_holdings_v1(jsonb) to anon",
@@ -1384,7 +1399,7 @@ holdings:
 
 Add the blank/whitespace clear counterpart. Parse YAML with `entry_pattern: ""` and, if the YAML parser preserves quoted spaces in the local library version, also `entry_pattern: "   "`; assert the incoming row owns `entry_pattern` and the parsed value is `null`, then assert the diff treats it as an update against a current non-null `entry_pattern`. This closes the plan-level contract that blank string means clear, not preserve.
 
-In `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, add apply-path coverage that posts an old YAML document without `entry_pattern`, asserts `replaceAllHoldings` receives a row without an owned `entry_pattern` property, separately posts `entry_pattern: null` and asserts the row owns `entry_pattern` with `null`, and separately posts blank `entry_pattern` and asserts the row owns `entry_pattern` with `null`. This catches the route-level pass-through because the route calls `parseHoldingsYamlDocument(...)` and then `replaceAllHoldings(...)`.
+In `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, account for the route's current `hasChanges` guard before asserting apply-path pass-through. Add one pure preserve-on-omit apply case where old YAML omits `entry_pattern`, the mocked/import summary has no create/update/delete changes, and `replaceAllHoldings` is **not** called. Then add a separate apply-path case with an independent change such as `notes` or `quantity` while still omitting `entry_pattern`; force the mocked summary to report an update, assert `replaceAllHoldings` is called, and assert the row it receives does not own `entry_pattern`. Separately post `entry_pattern: null` and blank `entry_pattern` cases with update summaries and assert the row owns `entry_pattern` with `null`. This catches route-level pass-through without contradicting the no-op apply behavior.
 
 In `web/src/app/api/holdings/__tests__/route.test.ts`, update the create payload assertion in `"creates holding with slash ticker symbol"`:
 
@@ -1754,7 +1769,7 @@ Update `buildHoldingMutationPayload` after `strategy`:
     entry_pattern: stringOrNull(form.entry_pattern),
 ```
 
-In `web/src/components/holdings/holdings-form-panel.tsx`, add this label after the Strategy input. Use a select/menu instead of free-form text because `entry_pattern` is an enum-like field with three allowed IDs:
+In `web/src/components/holdings/holdings-form-panel.tsx`, import `HOLDING_ENTRY_PATTERN_VALUES` from `web/src/lib/holding-entry-pattern.ts` and add this label after the Strategy input. Use a select/menu instead of free-form text because `entry_pattern` is an enum-like field, but render the options from the shared allowlist instead of hardcoding them:
 
 ```tsx
         <label>
@@ -1767,9 +1782,11 @@ In `web/src/components/holdings/holdings-form-panel.tsx`, add this label after t
             }
           >
             <option value="">None</option>
-            <option value="trend_pullback_bounce">trend_pullback_bounce</option>
-            <option value="swing_high_breakout">swing_high_breakout</option>
-            <option value="rsi_oversold_reversal">rsi_oversold_reversal</option>
+            {HOLDING_ENTRY_PATTERN_VALUES.map((pattern) => (
+              <option key={pattern} value={pattern}>
+                {pattern}
+              </option>
+            ))}
           </select>
         </label>
 ```
@@ -1932,7 +1949,7 @@ In `web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts`, update t
 
 Add a negative extraction regression in `web/src/lib/__tests__/ticker-directory.test.ts` where a recent buy report row has `pattern: "not_a_breakout"`; assert the returned candidate has `pattern: null`. Recent-candidate UI should not forward unknown action-driving strings even though the report payload is internal.
 
-Add a client-boundary regression in `web/src/lib/__tests__/holdings-client-hooks.test.tsx` for `parseTickerLookupResults` or `useRecentCandidates`: when the API payload contains `{ ticker: "AAPL.NAS", name: "Apple", pattern: "not_a_breakout" }`, the parsed candidate must keep `ticker`/`name` but expose `pattern: null`. This catches invalid values from stale API payloads or mocked route responses after server extraction has been bypassed.
+Add client-boundary regressions in `web/src/lib/__tests__/holdings-client-hooks.test.tsx` for the recent-candidate parser or `useRecentCandidates`: when the API payload contains `{ ticker: "AAPL.NAS", name: "Apple", pattern: "not_a_breakout" }`, the parsed candidate must keep `ticker`/`name` but expose an owned `pattern: null`; when the API payload omits `pattern` entirely, the parsed recent candidate must still own `pattern: null`. This catches invalid or stale API payloads after server extraction has been bypassed while keeping the client recent-candidate shape stable.
 
 This route test is pass-through coverage only because the route mocks `listRecentBuyCandidates`; do not count it as proof that report `pattern` survives extraction. The real extraction coverage must stay in `web/src/lib/__tests__/ticker-directory.test.ts`, and the client propagation coverage must stay in `web/src/lib/__tests__/holdings-client-hooks.test.tsx`.
 
@@ -2132,65 +2149,79 @@ In `mergeCandidatesFromReport`, no directory search behavior needs to use `patte
 
 - [ ] **Step 4: Parse pattern in client hooks**
 
-In `web/src/components/holdings/use-ticker-lookup.ts`, import `isHoldingEntryPattern` from `web/src/lib/holding-entry-pattern.ts` and extend the type:
+In `web/src/components/holdings/use-ticker-lookup.ts`, import `isHoldingEntryPattern` from `web/src/lib/holding-entry-pattern.ts`. Keep normal ticker-search results focused on ticker/name, and add a recent-candidate-specific type plus parser so recent candidates always own `pattern: string | null`:
 
 ```ts
 export interface TickerLookupResult {
   ticker: string;
   name: string | null;
-  pattern?: string | null;
+}
+
+export interface RecentCandidateLookupResult extends TickerLookupResult {
+  pattern: string | null;
 }
 ```
 
-In `parseTickerLookupResults`, first widen the local raw type:
+Keep `parseTickerLookupResults` for `/api/tickers/search` unchanged except for any shared helper extraction. Add a helper that validates pattern values against the allowed IDs:
 
 ```ts
+function parseCandidatePattern(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text && isHoldingEntryPattern(text) ? text : null;
+}
+```
+
+Add a separate parser for `/api/tickers/recent-candidates` payloads. It should preserve valid ticker/name rows, normalize unknown or omitted pattern values to `null`, and always return objects that own the `pattern` key:
+
+```ts
+export function parseRecentCandidateLookupResults(
+  payload: unknown,
+): RecentCandidateLookupResult[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+  const results: RecentCandidateLookupResult[] = [];
+  for (const item of payload) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
     const raw = item as { ticker?: unknown; name?: unknown; pattern?: unknown };
-```
-
-Then read and validate `pattern` against the allowed IDs. Unknown strings become `null`, not a free-form marker:
-
-```ts
-    const rawPattern = typeof raw.pattern === "string" ? raw.pattern.trim() : "";
-    const pattern =
-      rawPattern && isHoldingEntryPattern(rawPattern) ? rawPattern : null;
-```
-
-Because ticker search responses do not include `pattern`, conditionally omit `pattern` unless the raw payload included that key:
-
-```ts
-    const result: TickerLookupResult = {
+    const ticker =
+      typeof raw.ticker === "string" ? raw.ticker.trim().toUpperCase() : "";
+    if (!ticker) {
+      continue;
+    }
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    results.push({
       ticker,
       name: name || null,
-    };
-    if ("pattern" in raw) {
-      result.pattern = pattern;
-    }
-    results.push(result);
+      pattern: parseCandidatePattern(raw.pattern),
+    });
+  }
+  return results;
+}
 ```
 
-Use the conditional form so existing ticker-search UI tests stay focused on ticker/name.
-
-`web/src/components/holdings/use-recent-candidates.ts` can keep using `parseTickerLookupResults`; its `candidates` now carry `pattern` when the API sends it.
+Update `web/src/components/holdings/use-recent-candidates.ts` to call `parseRecentCandidateLookupResults`, not `parseTickerLookupResults`, so a server/fixture payload that omits `pattern` still becomes a stable client shape with an owned `pattern: null`. Search UI tests should remain focused on ticker/name and should not have to assert a pattern key.
 
 - [ ] **Step 5: Populate `entry_pattern` when selecting a recent candidate**
 
 In `web/src/components/holdings/holdings-form-panel.tsx`, import the shared candidate type if needed and add a small `.lookupPattern` style if no suitable secondary metadata class already exists:
 
 ```tsx
-import type { TickerLookupResult } from "./use-ticker-lookup";
+import type { RecentCandidateLookupResult } from "./use-ticker-lookup";
 ```
 
 Change `recentCandidates` prop from `TickerLookupItem[]` to:
 
 ```ts
-  recentCandidates: TickerLookupResult[];
+  recentCandidates: RecentCandidateLookupResult[];
 ```
 
 Add a callback prop:
 
 ```ts
-  onSelectRecentCandidate: (candidate: TickerLookupResult) => void;
+  onSelectRecentCandidate: (candidate: RecentCandidateLookupResult) => void;
 ```
 
 Change the recent candidate button handler:
@@ -2214,19 +2245,19 @@ In `web/src/components/holdings-client.tsx`, import the types:
 
 ```tsx
 import type { HoldingFormState } from "@/components/holdings/form-state";
-import type { TickerLookupResult } from "@/components/holdings/use-ticker-lookup";
+import type { RecentCandidateLookupResult } from "@/components/holdings/use-ticker-lookup";
 ```
 
-Track whether the current `entry_pattern` came from a recent candidate, including the ticker it belongs to, so a later no-pattern candidate can clear stale candidate-derived metadata without clearing manual/edit-loaded values:
+Track whether the current `entry_pattern` value came from a recent candidate, so a later no-pattern candidate can clear stale candidate-derived metadata without clearing manual/edit-loaded values:
 
 ```tsx
   const [recentCandidateEntryPatternSource, setRecentCandidateEntryPatternSource] =
-    useState<{ ticker: string; pattern: string } | null>(null);
+    useState<string | null>(null);
 
   const clearCandidateDerivedEntryPattern = useCallback(() => {
     if (
       recentCandidateEntryPatternSource !== null &&
-      form.entry_pattern === recentCandidateEntryPatternSource.pattern
+      form.entry_pattern === recentCandidateEntryPatternSource
     ) {
       updateField("entry_pattern", "");
     }
@@ -2255,14 +2286,11 @@ Add the callback before `return`:
 
 ```tsx
   const selectRecentCandidate = useCallback(
-    (candidate: TickerLookupResult) => {
+    (candidate: RecentCandidateLookupResult) => {
       updateField("ticker", candidate.ticker);
       if (candidate.pattern) {
         updateField("entry_pattern", candidate.pattern);
-        setRecentCandidateEntryPatternSource({
-          ticker: candidate.ticker,
-          pattern: candidate.pattern,
-        });
+        setRecentCandidateEntryPatternSource(candidate.pattern);
         return;
       }
       clearCandidateDerivedEntryPattern();
