@@ -2,7 +2,7 @@
 
 # Preserve Entry Pattern Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Only Task 1 and Task 2 Phase A are executable in this file. Sections titled `Runtime Reference ... (Non-Executable)` are requirements to copy into a separate runtime plan after the DB-only stop gate is cleared; do not run them directly from this plan.
 
 **Goal:** Preserve buy-report `pattern` metadata as holdings `entry_pattern` so `sma_ema_hybrid` failed-breakout sell rules work without manual `strategy` or `tags` markers.
 
@@ -38,7 +38,7 @@ Add Buy remains quantity-only in this plan. It should keep returning the full ho
 
 YAML import/replace-all compatibility depends on preserving source key presence. A missing `entry_pattern` key in an old YAML file or canonical replace-all payload means "leave the existing DB value unchanged" only when the resulting row remains active **and** the import is not changing the entry identity. Entry identity changes are `entry_price` or `entry_date` changes on an existing active row; if either changes while the incoming active row omits `entry_pattern`, reject the row before persistence and require the caller to send an explicit valid `entry_pattern` or an explicit clear (`entry_pattern: null` or blank). This prevents an old breakout marker from being silently preserved onto a different active position. An explicit `entry_pattern: null` or blank string means "clear the value"; a non-empty string means "set the value" for an active row. Do not normalize missing YAML `entry_pattern` to `null` before building the `replace_holdings_v1` request, because that would turn old active-row YAML imports into destructive clears for non-entry-identity updates. Operator-facing YAML import copy must also mention this preserve-on-omit exception and the entry-identity exception, because the import is no longer a literal full replacement for fields that old YAML files do not know about.
 
-`replace_holdings_v1` remains a canonical holdings ticker RPC. Web/YAML import paths must normalize slash-class and exchange aliases before calling it, and direct/foreign RPC callers must send stored canonical tickers such as `BRK.B.NYS`, not `BRK/B.NYS`. Do not silently canonicalize inside the replace-all RPC in this plan, because its delete semantics make mixed raw/canonical payloads hazardous; instead, add disposable DB negative coverage that an alias payload is rejected before it can misclassify preserve-on-omit counts or delete/insert the wrong row.
+`replace_holdings_v1` remains a canonical holdings ticker RPC for web/YAML import paths, so those callers must normalize slash-class and exchange aliases before calling it. Direct/foreign RPC callers should send stored canonical tickers such as `BRK.B.NYS`, not `BRK/B.NYS`. Do not silently canonicalize inside the replace-all RPC in this plan, because its delete semantics make mixed raw/canonical payloads hazardous. However, canonical-ticker rejection is DB hardening, not part of the default `entry_pattern` migration: add alias-rejection SQL, static snippets, and disposable negative smoke only if the direct-caller audit explicitly keeps that hardening in this release; otherwise defer it to a separate DB-hardening migration.
 
 The preserve-on-omit exception applies only while the resulting row remains active. If a replace-all/YAML import row sets `quantity = 0`, `replace_holdings_v1` must clear `entry_pattern` even when the incoming key is omitted, and must reject an explicit non-null `entry_pattern` on that inactive row. If an old inactive row later becomes active through replace-all while omitting `entry_pattern`, the result stays `null`; callers must explicitly set a valid current pattern for the new position if they want the hybrid sell marker. Normal web PATCH/update must apply the same invariant by clearing `entry_pattern` whenever it sends `quantity: 0`; this includes public route/action payloads that omit `entry_pattern` entirely, not only UI-generated payloads that already include `entry_pattern: null`. Because public PATCH/action schemas cannot infer the existing DB row's active state from a marker-only payload, a non-null `entry_pattern` create/patch payload must include `quantity > 0` in the same payload, while explicit `entry_pattern: null` remains allowed as a clear without quantity. Tests must prove inactive rows cannot keep stale markers through generic update paths and that marker-only non-null PATCH/action payloads are rejected before persistence.
 
@@ -446,7 +446,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Python contract**
 
 ```bash
-git add sab/holdings_loader.py sab/signals/hybrid_sell.py sab/sell_evaluation.py tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py
+git add sab/entry_pattern_contract.py sab/holdings_loader.py sab/signals/hybrid_sell.py sab/sell_evaluation.py tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py
 git commit -m "feat(holdings): 진입 패턴 YAML 계약 추가" -m "buy 후보의 pattern을 holdings entry_pattern으로 보존할 수 있도록 Python 로더와 sell 평가 경계를 확장한다."
 ```
 
@@ -492,9 +492,9 @@ Before writing the migration static contract test, inspect all known callers of 
 - whether every replace-all caller sends canonical stored tickers, not slash-class aliases such as `BRK/B.NYS`;
 - whether any caller depends on inherited `PUBLIC` execute privileges instead of the service-role key;
 - whether the exact deployed `SUPABASE_SECRET_KEY`/`SUPABASE_SERVICE_ROLE_KEY` is a service-role-capable secret after `REVOKE ... FROM PUBLIC`;
-- the release decision: keep canonical-ticker rejection and `PUBLIC` revoke in this migration, or defer those hardening changes to a separate DB-hardening migration.
+- the release decision: defer canonical-ticker rejection and `PUBLIC` revoke to a separate DB-hardening migration by default, or keep them in this migration only with a recorded audit artifact proving no caller depends on alias input or inherited `PUBLIC` execute.
 
-If the audit is not complete, or if it finds a caller that may depend on alias input or inherited `PUBLIC` execute, defer canonical-ticker rejection and `PUBLIC` execute hardening. In that case, remove `"incoming holdings tickers must be canonical"`, `ticker <> public.canonical_holdings_ticker(ticker)`, `REVOKE ... FROM PUBLIC`, and service-role-only privilege expectations from this migration's required snippets and smoke checklist. Keep the `entry_pattern` column, constraints, preserve-on-omit, entry-identity exception, and Add Buy preservation behavior in the DB-only migration. Do not proceed by leaving the hardening in SQL while calling it backwards-compatible.
+If the audit is not complete, or if it finds a caller that may depend on alias input or inherited `PUBLIC` execute, defer canonical-ticker rejection and `PUBLIC` execute hardening. The default Phase A snippets below already follow that core-only path: they omit `"incoming holdings tickers must be canonical"`, `ticker <> public.canonical_holdings_ticker(ticker)`, `REVOKE ... FROM PUBLIC`, and service-role-only privilege expectations. Keep the `entry_pattern` column, constraints, preserve-on-omit, entry-identity exception, and Add Buy preservation behavior in the DB-only migration. Do not proceed by leaving the hardening in SQL while calling it backwards-compatible. If the audit explicitly keeps hardening in this release, add those SQL blocks and matching static/smoke assertions as a separate, labeled hardening variant in the DB-only PR notes.
 
 - [ ] **Step 1: Phase A - unblock syntax and write the failing DB-only contract test**
 
@@ -705,8 +705,6 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "incoming holdings entry_pattern must be one of",
         "inactive holdings entry_pattern must be null",
         "incoming holdings entry_pattern must be explicit when entry identity changes",
-        "incoming holdings tickers must be canonical",
-        "ticker <> public.canonical_holdings_ticker(ticker)",
         "drop table if exists pg_temp.incoming_holdings",
         "nullif(trim(incoming.item->>'entry_pattern'), '') not in (",
         "has_entry_pattern boolean not null",
@@ -724,7 +722,6 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "else v_target.entry_pattern",
         "revoke all on function public.replace_holdings_v1(jsonb) from anon",
         "revoke all on function public.replace_holdings_v1(jsonb) from authenticated",
-        "revoke all on function public.replace_holdings_v1(jsonb) from public",
         "grant execute on function public.replace_holdings_v1(jsonb) to service_role",
         "revoke all on function public.holdings_add_buy_v1(",
         "grant execute on function public.holdings_add_buy_v1(",
@@ -746,6 +743,10 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "event.result_payload = event.result_payload || jsonb_build_object('entry_pattern', existing.entry_pattern)",
         "update public.holdings_add_buy_events event set result_payload",
         "disable row level security",
+        "incoming holdings tickers must be canonical",
+        "ticker <> public.canonical_holdings_ticker(ticker)",
+        "revoke all on function public.replace_holdings_v1(jsonb) from public",
+        "revoke all on function public.holdings_add_buy_v1(text,numeric,numeric,date,text) from public",
     ]
     for snippet in forbidden_snippets:
         assert _normalize_sql(snippet) not in normalized_sql
@@ -900,7 +901,6 @@ declare
   v_updated_count integer := 0;
   v_deleted_count integer := 0;
   v_unchanged_count integer := 0;
-  v_noncanonical_tickers text;
   v_duplicate_tickers text;
 begin
   if p_holdings is null then
@@ -1046,19 +1046,6 @@ begin
     where ticker = ''
   ) then
     raise exception 'incoming holdings rows must include a non-empty ticker';
-  end if;
-
-  select string_agg(ticker, ', ' order by ticker)
-  into v_noncanonical_tickers
-  from incoming_holdings
-  where ticker <> public.canonical_holdings_ticker(ticker);
-
-  if v_noncanonical_tickers is not null then
-    raise exception using
-      errcode = 'check_violation',
-      message = 'incoming holdings tickers must be canonical',
-      detail = format('Non-canonical tickers: %s', v_noncanonical_tickers),
-      hint = 'Normalize slash-class and exchange aliases before calling replace_holdings_v1.';
   end if;
 
   select string_agg(canonical_ticker, ', ' order by canonical_ticker)
@@ -1391,7 +1378,6 @@ $$;
 
 revoke all on function public.replace_holdings_v1(jsonb) from anon;
 revoke all on function public.replace_holdings_v1(jsonb) from authenticated;
-revoke all on function public.replace_holdings_v1(jsonb) from public;
 grant execute on function public.replace_holdings_v1(jsonb) to service_role;
 
 revoke all on function public.holdings_add_buy_v1(
@@ -1408,13 +1394,6 @@ revoke all on function public.holdings_add_buy_v1(
   date,
   text
 ) from authenticated;
-revoke all on function public.holdings_add_buy_v1(
-  text,
-  numeric,
-  numeric,
-  date,
-  text
-) from public;
 grant execute on function public.holdings_add_buy_v1(
   text,
   numeric,
@@ -1424,7 +1403,7 @@ grant execute on function public.holdings_add_buy_v1(
 ) to service_role;
 ```
 
-If this DB-only migration changes Add Buy behavior or response shape before runtime ships, update `docs/holdings-add-buy.md` and `docs/adr/ADR-0010-holdings-add-buy.md` in the same Phase A commit. At minimum, document that Add Buy remains quantity-only, preserves `entry_pattern` for active holdings, clears it for `quantity = 0` reactivation, rejects/does not accept `p_entry_pattern`, and may return nullable `entry_pattern` because the RPC returns `setof public.holdings`. If the migration keeps `replace_holdings_v1` canonical-ticker rejection or `REVOKE ... FROM PUBLIC`, record the direct-caller audit result and the intentional DB contract hardening in Phase A release notes before applying it to a shared target database.
+This default SQL keeps the migration focused on `entry_pattern` and does not add canonical-ticker rejection or `REVOKE ... FROM PUBLIC`. If the direct-caller audit explicitly approves those hardening changes for this release, add them in a labeled hardening block plus matching static tests, disposable smoke, and release notes. If this DB-only migration changes Add Buy behavior or response shape before runtime ships, update `docs/holdings-add-buy.md` and `docs/adr/ADR-0010-holdings-add-buy.md` in the same Phase A commit. At minimum, document that Add Buy remains quantity-only, preserves `entry_pattern` for active holdings, clears it for `quantity = 0` reactivation, rejects/does not accept `p_entry_pattern`, and may return nullable `entry_pattern` because the RPC returns `setof public.holdings`.
 
 - [ ] **Step 4: Run executable migration smoke**
 
@@ -1459,7 +1438,7 @@ Also exercise `replace_holdings_v1` with the executable disposable-DB smoke for 
 - incoming row with `quantity = 0` and a non-null `entry_pattern` fails with `inactive holdings entry_pattern must be null` or the DB active-quantity constraint.
 - incoming row with an `entry_pattern` longer than 120 characters fails with an actionable error or the DB length constraint.
 - incoming row with an unknown `entry_pattern` such as `not_a_breakout` fails with an actionable error or the DB allowed-value constraint.
-- incoming row with a non-canonical alias ticker such as `BRK/B.NYS` fails before mutation; `replace_holdings_v1` preserve-on-omit is defined only for canonical stored tickers because the RPC is full-replacement and delete-capable.
+- if the reviewed DB contract keeps canonical-ticker hardening in this release, incoming row with a non-canonical alias ticker such as `BRK/B.NYS` fails before mutation; if hardening is deferred, use a no-op compatibility smoke for the old accepted alias shape and cover alias rejection in the later DB-hardening release.
 - two `replace_holdings_v1` calls in one transaction both complete or fail only on the asserted business condition, not because `incoming_holdings` already exists.
 - `holdings_add_buy_v1` updates quantity/price/date while preserving a non-null `entry_pattern` for an already-active holding.
 - `holdings_add_buy_v1` reactivates a normal inactive holding with `quantity = 0` and `entry_pattern = null`, and the returned row still has `entry_pattern = null`.
@@ -1687,7 +1666,7 @@ git commit -m "feat(db): 보유 종목 진입 패턴 컬럼 추가" -m "holdings
 # git commit -m "feat(holdings): 진입 패턴 런타임 저장 경로 연결" -m "DB 적용 이후 scheduled export와 웹 Supabase 클라이언트가 entry_pattern을 선택·보존하도록 확장한다."
 ```
 
-## Task 3: Web Form, Table, And Remaining UI
+## Runtime Reference Task 3: Web Form, Table, And Remaining UI (Non-Executable)
 
 **Files:**
 - Do not edit in Task 3; Task 2 Phase B owns parser/export/diff semantics: `web/src/lib/holdings-yaml.ts`
@@ -1706,7 +1685,7 @@ git commit -m "feat(db): 보유 종목 진입 패턴 컬럼 추가" -m "holdings
 - Do not edit in Task 3; Task 2 Phase B owns YAML route tests: `web/src/app/api/holdings/yaml/__tests__/route.test.ts`
 - Test: `web/src/lib/__tests__/holdings-client-hooks.test.tsx`
 
-- [ ] **Step 1: Write failing web route pass-through and UI tests**
+- **Reference Step 1: Write failing web route pass-through and UI tests**
 
 Schema create/patch validation, persistence normalization, marker-only API/action rejection, and YAML parser/export/diff behavior were added in Task 2 with the first web runtime persistence release. Do not duplicate those API/action contract tests here. Task 3 owns the remaining UI/form/table/import-copy tests and only revisits YAML helpers if Task 2 deliberately left a reviewed follow-up that does not affect deployable runtime correctness.
 
@@ -2133,7 +2112,7 @@ it("renders entry pattern metadata in the holdings table", async () => {
 });
 ```
 
-- [ ] **Step 2: Run targeted web tests to verify failure**
+- **Reference Step 2: Run targeted web tests to verify failure**
 
 Run:
 
@@ -2143,7 +2122,7 @@ pnpm --dir web run test -- web/src/lib/__tests__/holdings-client-hooks.test.tsx 
 
 Expected: FAIL because the import panel and apply-confirmation copy still need the reviewed YAML-contract warning, and the form/table do not expose or submit the field yet. YAML parser/export/diff behavior and strict create/patch schema acceptance were already covered in Task 2 Phase B.
 
-- [ ] **Step 3: Verify YAML helpers were completed in Task 2**
+- **Reference Step 3: Verify YAML helpers were completed in Task 2**
 
 Task 3 must not introduce YAML parser/export/diff behavior. Verify the Task 2 Phase B runtime commit already used the shared `web/src/lib/holding-entry-pattern.ts` helper for all web-side `entry_pattern` validation and did not redeclare the allowed set in this module. If any item below is still incomplete, stop and move the missing YAML work back to Task 2 Phase B before deploying runtime. The snippets below are verification targets for the earlier runtime plan, not permission to edit YAML files during Task 3.
 
@@ -2270,7 +2249,7 @@ Update `parseHoldingsYamlDocument` snapshot construction after strategy so it on
       return snapshot;
 ```
 
-- [ ] **Step 4: Update form state, payload helpers, import copy, and UI**
+- **Reference Step 4: Update form state, payload helpers, import copy, and UI**
 
 In `web/src/components/holdings/form-state.ts`, add:
 
@@ -2354,7 +2333,7 @@ If using the secondary-line fallback, add a block-level CSS class so the metadat
 }
 ```
 
-- [ ] **Step 5: Run targeted web tests**
+- **Reference Step 5: Run targeted web tests**
 
 Run:
 
@@ -2364,7 +2343,7 @@ pnpm --dir web run test -- web/src/lib/__tests__/holdings-client-hooks.test.tsx 
 
 Expected: PASS.
 
-- [ ] **Step 6: Run holdings UI smoke check**
+- **Reference Step 6: Run holdings UI smoke check**
 
 Run:
 
@@ -2376,14 +2355,14 @@ If a local web target is available, open `/holdings` at desktop and mobile width
 
 Expected: typecheck passes, and the holdings table/form remains readable at both widths. The Entry Pattern control is a select/menu with the empty value plus the three allowed pattern IDs, so users cannot create schema-invalid values from the normal UI.
 
-- [ ] **Step 7: Commit web holdings surface**
+- **Reference Step 7: Commit web holdings surface**
 
 ```bash
 git add web/src/components/holdings/form-state.ts web/src/components/holdings/helpers.ts web/src/components/holdings/holdings-form-panel.tsx web/src/components/holdings/holdings-table.tsx web/src/components/holdings/holdings-import-panel.tsx web/src/components/holdings/use-holdings-import.ts web/src/components/holdings-client.module.css web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts"
 git commit -m "feat(web): 보유 종목 진입 패턴 입력 추가" -m "웹 holdings 입력 화면과 YAML import/export 경로에서 entry_pattern을 보존한다."
 ```
 
-## Task 4: Recent Buy Candidate Pattern Propagation
+## Runtime Reference Task 4: Recent Buy Candidate Pattern Propagation (Non-Executable)
 
 **Files:**
 - Modify: `web/src/lib/ticker-directory.ts`
@@ -2396,7 +2375,7 @@ git commit -m "feat(web): 보유 종목 진입 패턴 입력 추가" -m "웹 hol
 - Test: `web/src/lib/__tests__/holdings-client-hooks.test.tsx`
 - Test: `web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts`
 
-- [ ] **Step 1: Write failing recent-candidate tests**
+- **Reference Step 1: Write failing recent-candidate tests**
 
 In `web/src/lib/__tests__/ticker-directory.test.ts`, keep `"extracts ticker/name pairs and canonicalizes slash class ticker"` focused on ticker/name-only directory extraction. If the fixture row includes `pattern`, assert the directory candidate result still omits it:
 
@@ -2672,7 +2651,7 @@ Add stale-state regressions in the same block:
 
 These tests distinguish manual/edit-loaded values from candidate-derived values and catch stale breakout markers moving to a different ticker.
 
-- [ ] **Step 2: Run recent-candidate tests to verify failure**
+- **Reference Step 2: Run recent-candidate tests to verify failure**
 
 Run:
 
@@ -2682,7 +2661,7 @@ pnpm --dir web run test -- web/src/lib/__tests__/ticker-directory.test.ts web/sr
 
 Expected: FAIL because recent candidate parsing drops `pattern`, the client parser does not yet null out unknown pattern IDs, the UI does not expose pattern metadata, candidate-derived entry patterns are not yet cleared when a later no-pattern candidate is selected, and stale candidate-derived markers are not yet cleared on manual ticker changes, ticker-search selection, or form lifecycle transitions.
 
-- [ ] **Step 3: Preserve `pattern` in ticker-directory recent candidates**
+- **Reference Step 3: Preserve `pattern` in ticker-directory recent candidates**
 
 In `web/src/lib/ticker-directory.ts`, import `isHoldingEntryPattern` from `web/src/lib/holding-entry-pattern.ts`, but keep `TickerDirectoryCandidate` and `TickerDirectorySearchResult` ticker/name-only. Add a separate recent-candidate type so action-driving `pattern` metadata never becomes part of the persisted ticker-directory cache or `/api/tickers/search` response:
 
@@ -2722,7 +2701,7 @@ For duplicate rows inside a single report, do not keep pure first-seen skip beha
 
 In `tryLoadBuyReportCandidates`/`mergeCandidatesFromReport`, keep directory search behavior pattern-free and aliasing based on ticker/name only. In `listRecentBuyCandidates`, call the new recent-candidate helper so `/api/tickers/recent-candidates` returns `pattern: string | null` without persisting that field into the directory cache. Add a negative test that `refreshTickerDirectory`/cache payload entries and `/api/tickers/search` results do not include `pattern`.
 
-- [ ] **Step 4: Parse pattern in client hooks**
+- **Reference Step 4: Parse pattern in client hooks**
 
 In `web/src/components/holdings/use-ticker-lookup.ts`, import `isHoldingEntryPattern` from `web/src/lib/holding-entry-pattern.ts`. Keep normal ticker-search results focused on ticker/name, and add a recent-candidate-specific type plus parser so recent candidates always own `pattern: string | null`:
 
@@ -2779,7 +2758,7 @@ export function parseRecentCandidateLookupResults(
 
 Update `web/src/components/holdings/use-recent-candidates.ts` to call `parseRecentCandidateLookupResults`, not `parseTickerLookupResults`, so a server/fixture payload that omits `pattern` still becomes a stable client shape with an owned `pattern: null`. Search UI tests should remain focused on ticker/name and should not have to assert a pattern key.
 
-- [ ] **Step 5: Populate `entry_pattern` when selecting a recent candidate**
+- **Reference Step 5: Populate `entry_pattern` when selecting a recent candidate**
 
 In `web/src/components/holdings/holdings-form-panel.tsx`, import the shared candidate type if needed and add a small `.lookupPattern` style if no suitable secondary metadata class already exists:
 
@@ -2821,13 +2800,14 @@ In `web/src/components/holdings-client.tsx`, import the types:
 ```tsx
 import type { HoldingFormState } from "@/components/holdings/form-state";
 import type { RecentCandidateLookupResult } from "@/components/holdings/use-ticker-lookup";
+import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 ```
 
 Track whether the current `entry_pattern` value came from a recent candidate and which ticker it belongs to. Clear on ticker identity changes, not on every ticker-field edit, so edit-loaded or manual values are not dropped when the user touches the ticker field but keeps the same canonical identity:
 
 ```tsx
   const normalizeTickerIdentity = useCallback(
-    (ticker: string) => ticker.trim().toUpperCase(),
+    (ticker: string) => normalizeHoldingTickerForMutation(ticker),
     [],
   );
   const [
@@ -2912,7 +2892,7 @@ Add the callback before `return`:
   );
 ```
 
-Clear candidate-derived `entry_pattern` whenever a no-pattern recent candidate is selected, even when the ticker stays the same. A user can still intentionally set `entry_pattern` after that selection; the `entry_pattern` field handler above marks that value as manual/edit-loaded for the current ticker. If the ticker identity changes through recent-candidate selection, ticker-search selection, or manual ticker typing, clear the current `entry_pattern` unless it was selected after the new ticker was already set. Otherwise a marker chosen for one ticker can be saved on a different ticker and later trigger an unrelated failed-breakout sell.
+Clear candidate-derived `entry_pattern` whenever a no-pattern recent candidate is selected, even when the ticker stays the same. A user can still intentionally set `entry_pattern` after that selection; the `entry_pattern` field handler above marks that value as manual/edit-loaded for the current ticker. If the canonical ticker identity changes through recent-candidate selection, ticker-search selection, or manual ticker typing, clear the current `entry_pattern` unless it was selected after the new ticker was already set. Otherwise a marker chosen for one ticker can be saved on a different ticker and later trigger an unrelated failed-breakout sell. Cover canonical-equivalent aliases such as `BRK/B.NYS` versus `BRK.B.NYS`, and suffix aliases such as `AAPL.NASD` versus `AAPL.NAS`, so the stale-marker guard matches the same identity rules as holdings mutations.
 
 Pass both the wrapped field handler and the recent-candidate callback:
 
@@ -2921,7 +2901,7 @@ Pass both the wrapped field handler and the recent-candidate callback:
           onSelectRecentCandidate={selectRecentCandidate}
 ```
 
-- [ ] **Step 6: Run recent-candidate tests**
+- **Reference Step 6: Run recent-candidate tests**
 
 Run:
 
@@ -2931,14 +2911,14 @@ pnpm --dir web run test -- web/src/lib/__tests__/ticker-directory.test.ts web/sr
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit recent-candidate propagation**
+- **Reference Step 7: Commit recent-candidate propagation**
 
 ```bash
 git add web/src/lib/ticker-directory.ts web/src/components/holdings/use-ticker-lookup.ts web/src/components/holdings/use-recent-candidates.ts web/src/components/holdings/holdings-form-panel.tsx web/src/components/holdings-client.tsx web/src/components/holdings-client.module.css web/src/lib/__tests__/ticker-directory.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts
 git commit -m "feat(web): 최근 매수 후보 패턴 보존" -m "최근 buy 후보 API와 holdings 입력 플로우가 후보 pattern을 entry_pattern으로 전달하도록 연결한다."
 ```
 
-## Task 5: Documentation
+## Runtime Reference Task 5: Documentation (Non-Executable)
 
 Task 5 is a documentation checklist, not permission to defer public-contract docs until after runtime deployment. The docs that describe runtime-visible behavior (`docs/holdings-schema.md`, `docs/holdings-add-buy.md`, `docs/STRATEGY.md`, `docs/api.md`, `docs/local-docker-scheduler-plan.md`, `docs/adr/ADR-0010-holdings-add-buy.md`, and any architecture/scheduler note that would otherwise contradict the runtime) must be included in the same deployable boundary as the DB/runtime behavior they describe. If those files were already staged and committed with the DB or runtime boundary, use this task to verify them and finish remaining ADR/example updates, not to introduce the first public documentation after deploy.
 
@@ -2955,7 +2935,7 @@ Task 5 is a documentation checklist, not permission to defer public-contract doc
 - Modify: `docs/adr/ADR-0010-holdings-add-buy.md`
 - Modify: `holdings.example.yaml`
 
-- [ ] **Step 1: Update holdings schema docs**
+- **Reference Step 1: Update holdings schema docs**
 
 In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `strategy` and document that the value is trimmed, nullable, explicitly exported as `null` when absent, limited to 120 characters, restricted to the append-only holdings storage pattern IDs across DB/RPC/YAML/web mutation paths, and valid only for active rows (`quantity > 0`). Also document the import/export semantic exception: generated exports always include `entry_pattern` with either a value or `null`; YAML/import/replace-all inputs that omit the key preserve the existing DB value for that field only while the resulting row remains active and entry identity is unchanged, while explicit `entry_pattern: null`, blank, or `quantity: 0` clears it.
 
@@ -2976,7 +2956,7 @@ Add this note near the sell command section:
 - `sma_ema_hybrid` breakout 후보를 보유로 전환할 때는 `entry_pattern`에 buy/entry report의 `pattern` 값을 보존하세요. `sab sell`은 `entry_pattern: swing_high_breakout`을 exact pattern marker로 인식해 `strategy`/`tags` 수동 마커 없이 failed-breakout 규칙을 적용합니다.
 ```
 
-- [ ] **Step 2: Update Add Buy docs**
+- **Reference Step 2: Update Add Buy docs**
 
 In `docs/holdings-add-buy.md`, add this contract note near the API/RPC contract section:
 
@@ -2986,7 +2966,7 @@ In `docs/holdings-add-buy.md`, add this contract note near the API/RPC contract 
 
 Also update `docs/adr/ADR-0010-holdings-add-buy.md` with a short superseding note under the decision or consequences section. The note must state that Add Buy remains quantity-only, preserves `entry_pattern` for active holdings, clears it for `quantity = 0` reactivation, and rejects/does not accept `p_entry_pattern`; it should also point to the broader holdings invariant that inactive rows store `entry_pattern` as `null`. This keeps the accepted ADR aligned with `docs/holdings-add-buy.md`.
 
-- [ ] **Step 3: Update strategy docs**
+- **Reference Step 3: Update strategy docs**
 
 In `docs/STRATEGY.md`, replace the note that says holdings only forwards `strategy` and `tags` with:
 
@@ -2994,7 +2974,7 @@ In `docs/STRATEGY.md`, replace the note that says holdings only forwards `strate
   - 하위 hybrid sell evaluator는 `strategy`, `tags`, `pattern`, `entry_pattern`, `signal_pattern` marker를 인식합니다. 운영 holdings 계약은 buy/entry report의 `pattern`을 `entry_pattern`으로 보존해 breakout 매수의 failed-breakout sell 규칙이 수동 태그 없이도 적용되도록 합니다.
 ```
 
-- [ ] **Step 4: Update architecture docs**
+- **Reference Step 4: Update architecture docs**
 
 In `docs/ARCHITECTURE.md`, update the web holdings CRUD flow note that currently says ticker directory candidates are derived from `candidates[].{ticker,name}`. Replace it with:
 
@@ -3016,7 +2996,7 @@ In `docs/api.md`, update the holdings contract so returned holdings rows and cur
 
 In `docs/configuration.md`, update the `SUPABASE_SECRET_KEY` and `SUPABASE_SERVICE_ROLE_KEY` rows so they state holdings replace/add-buy RPCs and scheduled holdings export require a service-role-capable server secret. "Not publishable" is a necessary guard but not sufficient after service-role-only RPC grants; deployment smoke must prove the exact configured secret can run the holdings projection and Add Buy RPC.
 
-- [ ] **Step 5: Update local Docker scheduler docs**
+- **Reference Step 5: Update local Docker scheduler docs**
 
 In `docs/local-docker-scheduler-plan.md`, update the scheduled AI Brief holdings export field list that currently says the active export uses `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `notes`, `tags`, `stop_override`, and `target_override`. Insert `entry_pattern` immediately after `strategy`, matching the Python scheduler helper and the manual GitHub workflow bridge:
 
@@ -3024,7 +3004,7 @@ In `docs/local-docker-scheduler-plan.md`, update the scheduled AI Brief holdings
    - 필드는 current GitHub workflow와 같은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`를 사용합니다.
 ```
 
-- [ ] **Step 6: Update example YAML**
+- **Reference Step 6: Update example YAML**
 
 In `holdings.example.yaml`, add `entry_pattern` to the first swing example:
 
@@ -3035,7 +3015,7 @@ In `holdings.example.yaml`, add `entry_pattern` to the first swing example:
 
 If the example currently uses `strategy: swing`, change only that example row to `sma_ema_hybrid`; leave unrelated examples unchanged.
 
-- [ ] **Step 7: Run static docs check**
+- **Reference Step 7: Run static docs check**
 
 Run:
 
@@ -3050,27 +3030,27 @@ rg -n 'candidates\[\].*\{ticker,name\}' docs/holdings-ticker-lookup.md docs/adr/
 
 Expected: output shows `entry_pattern` documented in holdings schema, Add Buy docs, Add Buy ADR, strategy docs, architecture flow docs, API docs, local Docker scheduler docs, and example YAML; `docs/configuration.md` documents the service-role-capable secret requirement for holdings RPC/write paths; `docs/api.md` covers holdings create/patch/record responses plus Add Buy marker rejection; `docs/holdings-ticker-lookup.md` and ADR-0008 positively document that recent candidates carry `pattern: string | null`; the negative check produces no stale contradictory wording. Any remaining `candidates[].{ticker,name}` hits in `docs/holdings-ticker-lookup.md` or ADR-0008 must explicitly refer to the ticker/name-only search-directory cache, not recent-candidate API payloads or holdings candidate-selection behavior.
 
-- [ ] **Step 8: Commit docs**
+- **Reference Step 8: Commit docs**
 
 ```bash
 git add docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/api.md docs/configuration.md docs/local-docker-scheduler-plan.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md docs/adr/ADR-0010-holdings-add-buy.md holdings.example.yaml
 git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을 holdings 공개 계약으로 설명한다."
 ```
 
-## Task 6: Final Verification
+## Runtime Reference Task 6: Final Verification (Non-Executable)
 
 **Files:**
 - No source changes unless verification exposes a bug.
 
 Targeted task tests are checkpoints only. Do not mark the plan complete, move `TODOS.md`, or deploy runtime changes until the full Python, web, workflow, DB-ordering, and visual checks in this task are either passed or explicitly recorded as blocked with a concrete reason.
 
-- [ ] **Step 1: Confirm migration/runtime deployment ordering**
+- **Reference Step 1: Confirm migration/runtime deployment ordering**
 
 Before merge/deploy, confirm the DB migration that adds `public.holdings.entry_pattern` was applied and the executable migration smoke from Task 2 passed before any runtime containing `entry_pattern` in a PostgREST select or mutation body can run. This includes `.github/workflows/sell.yml`, `.github/workflows/ai-brief.yml`, `sab/scheduler/holdings.py`, and web `HOLDINGS_SELECT` in `web/src/lib/supabase/holdings.ts`. Runtime select changes must stay separate until the migration is applied and verified unless reviewed deployment automation guarantees migration-first ordering.
 
 Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, the reserved target-DB smoke ticker and preflight absence evidence, any PostgREST schema-cache remediation if needed, that `replace_holdings_v1` mutation smoke was run only on disposable data or a reviewed full-snapshot restore procedure, legacy Add Buy replay null-field compatibility without historical event rewrites, normal inactive Add Buy reactivation from `entry_pattern = null`, static/disposable evidence for the defensive stale-clearing branch if claimed, generic inactive-row `entry_pattern = null` enforcement evidence, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
 
-- [ ] **Step 2: Run Python quality gate**
+- **Reference Step 2: Run Python quality gate**
 
 Run:
 
@@ -3084,7 +3064,7 @@ Expected: PASS. If `just` cannot find pinned tools, rerun:
 mise exec -- just quality
 ```
 
-- [ ] **Step 3: Run web CI gate**
+- **Reference Step 3: Run web CI gate**
 
 Run:
 
@@ -3098,7 +3078,7 @@ Expected: PASS. If `pnpm` is not on `PATH`, rerun:
 mise exec -- just ci-web
 ```
 
-- [ ] **Step 4: Run workflow audit**
+- **Reference Step 4: Run workflow audit**
 
 Run:
 
@@ -3108,7 +3088,7 @@ just workflow-audit
 
 Expected: PASS. This gate is required because Task 2 edits inline shell/Python in `.github/workflows/sell.yml` and `.github/workflows/ai-brief.yml`; `just quality` and `just ci-web` are not sufficient to catch workflow YAML, heredoc, or shell-lint regressions.
 
-- [ ] **Step 5: Run holdings page visual smoke**
+- **Reference Step 5: Run holdings page visual smoke**
 
 Before opening the page, verify the web target points at a database whose PostgREST schema cache already exposes `entry_pattern`. Reuse the Task 2 full-projection `limit=0` smoke with the same environment values the web target uses, or record the migrated target URL/evidence from the runtime release notes. Do not treat a `/holdings` failure against an unmigrated local/target DB as a frontend regression; fix the DB ordering or point the smoke at the migrated target first.
 
@@ -3126,7 +3106,7 @@ docker compose up -d --build web
 
 Then open the same route. Check desktop and mobile widths. Expected: the form Entry Pattern select, recent candidate selection, and holdings table Entry Pattern display are visible; no table text overlaps Tags, Updated, or Action controls.
 
-- [ ] **Step 6: Review focused diff**
+- **Reference Step 6: Review focused diff**
 
 Run:
 
@@ -3139,12 +3119,12 @@ git diff --name-only "${MERGE_BASE}"..HEAD
 
 Expected: diff is limited to the `entry_pattern` contract and its tests/docs, including all planned Python tests, Supabase migration/tests, scheduled export tests, `sell.yml`, `ai-brief.yml`, web schemas/helpers/routes/components/tests, docs, example YAML, and `TODOS.md` only after quality gates pass. If `origin/main` is unavailable, use the actual PR base branch and record it.
 
-## Task 7: TODO Closure
+## Runtime Reference Task 7: TODO Closure (Non-Executable)
 
 **Files:**
 - Modify: `TODOS.md`
 
-- [ ] **Step 1: Move active TODO to completed**
+- **Reference Step 1: Move active TODO to completed**
 
 In `TODOS.md`, remove this active bullet:
 
@@ -3164,7 +3144,7 @@ Add this completed entry at the top of `## Completed`:
   `strategy`/`tags` markers.
 ```
 
-- [ ] **Step 2: Run TODO closure check**
+- **Reference Step 2: Run TODO closure check**
 
 Run:
 
@@ -3177,14 +3157,14 @@ fi
 
 Expected: completed entry is present, old active bullet is absent, and no unrelated TODO text changed. The check must fail if the active bullet remains.
 
-- [ ] **Step 3: Commit TODO closure**
+- **Reference Step 3: Commit TODO closure**
 
 ```bash
 git add TODOS.md
 git commit -m "docs: 진입 패턴 TODO 완료 처리" -m "품질 게이트 통과 후 entry_pattern 보존 작업을 완료 항목으로 이동한다."
 ```
 
-- [ ] **Step 4: Confirm no uncommitted changes**
+- **Reference Step 4: Confirm no uncommitted changes**
 
 Run:
 
