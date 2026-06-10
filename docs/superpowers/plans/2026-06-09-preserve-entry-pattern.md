@@ -74,7 +74,7 @@ Hard stop: after the DB-only migration commit/release, stop implementation and r
 - Modify `web/src/components/holdings-client.module.css` if the table uses secondary-line `entry_pattern` metadata.
 - Modify `web/src/components/holdings/use-ticker-lookup.ts`: parse optional `pattern` on recent candidate payloads while preserving ticker-search behavior.
 - Modify `web/src/components/holdings/use-recent-candidates.ts`: expose recent candidate `pattern`.
-- Modify `web/src/components/holdings-client.tsx`: when selecting a recent buy candidate, always populate ticker, populate `entry_pattern` only when the candidate has a non-empty `pattern`, and clear stale candidate-derived `entry_pattern` when the ticker changes outside recent-candidate selection.
+- Modify `web/src/components/holdings-client.tsx`: when selecting a recent buy candidate, always populate ticker, populate `entry_pattern` only when the candidate has a non-empty `pattern`, and clear stale candidate-derived `entry_pattern` on no-pattern candidate selection or non-recent ticker changes without clearing manual/edit-loaded values.
 - Modify `web/src/lib/ticker-directory.ts`: carry buy report row `pattern` in recent candidates; cache/search directory can keep pattern optional.
 - Modify web tests:
   - `web/src/lib/__tests__/schemas.test.ts`
@@ -86,6 +86,7 @@ Hard stop: after the DB-only migration commit/release, stop implementation and r
   - `web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts`
   - `web/src/app/api/holdings/__tests__/route.test.ts`
   - `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`
+  - `web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts`
   - `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`
   - `web/src/app/api/holdings/yaml/__tests__/route.test.ts`
   - add-buy route/precheck tests that use `HoldingRecord` fixtures
@@ -488,6 +489,20 @@ expect(JSON.parse(String(requestInit?.body))).toEqual(
 );
 ```
 
+Add the explicit-clear counterpart at the same Supabase adapter boundary. Call `updateHolding`/`patchHoldingByExactTicker` through the public adapter path with `{ entry_pattern: null }`, inspect the outbound PATCH body, and assert the body owns `entry_pattern` with `null`. Do not accept a test that only mocks `updateHolding`, because that does not prove the PostgREST mutation body preserves null clears:
+
+```ts
+const body =
+  typeof requestInit?.body === "string"
+    ? (JSON.parse(requestInit.body) as Record<string, unknown>)
+    : null;
+
+expect(Object.prototype.hasOwnProperty.call(body, "entry_pattern")).toBe(true);
+expect(body?.entry_pattern).toBeNull();
+```
+
+In `web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts`, add value and explicit-null `entry_pattern` PATCH pass-through regressions against the real route/Supabase request construction, and assert the route's PostgREST `select` includes `entry_pattern`. This file is the existing integration-level guard for actual PATCH request construction and must be included in the runtime fixture/staging list.
+
 In the existing `addBuyToHolding` test named `"calls holdings_add_buy_v1 RPC and returns updated holding"`, return a row with a non-null `entry_pattern`, assert it is present on the returned row, and assert the RPC request body remains quantity-only. Add adjacent adapter/RPC contract regressions for the DB migration smoke plan: an active holding preserves a non-null `entry_pattern`, an inactive-to-active Add Buy from `quantity = 0` clears a stale non-null `entry_pattern`, and a pre-migration-style cached replay payload that lacks `entry_pattern` is still returned with `entry_pattern: null` by the `setof public.holdings` replay path without mutating the historical event row.
 
 ```ts
@@ -529,6 +544,8 @@ Update the expected YAML payload:
 ```
 
 Add a second active fake Supabase row with `"entry_pattern": None` and assert the generated YAML owns the key with `None`. This protects the export-side contract that scheduled generated holdings files are current DB snapshots, not old-style import payloads; omitting `entry_pattern` on export would later preserve a stale DB marker instead of clearing it.
+
+Add a fail-loud scheduled export regression where the fake Supabase response returns an active row that omits the `entry_pattern` key entirely. Assert `export_active_holdings_snapshot` raises `SupabaseHoldingsExportError` and the message contains `omitted entry_pattern`. This directly locks the `_normalize_rows` safety requirement from Step 5; value-present and explicit-null cases are not enough because a projection bug otherwise becomes a destructive clear snapshot.
 
 In `tests/test_workflow_holdings_loading.py`, extend `test_sell_workflow_loads_holdings_from_supabase_before_run_sell` so it fails if the cron workflow's inline Supabase export omits `entry_pattern`:
 
@@ -695,7 +712,7 @@ def test_add_buy_rpc_remains_quantity_only_and_handles_entry_pattern_edges() -> 
     assert "entry_pattern" not in fingerprint_sql
 ```
 
-After `web/src/lib/holding-entry-pattern.ts` exists, add a cross-language drift guard to `tests/test_holdings_entry_pattern_contract.py` or an equivalent focused web/Python contract test. It must assert the TypeScript `HOLDING_ENTRY_PATTERN_VALUES` set equals `{pattern.value for pattern in HybridPattern}` so the manually duplicated web allowlist cannot diverge silently from the buy-pattern enum. This test should fail before the TS helper exists and pass after Step 6.
+After `web/src/lib/holding-entry-pattern.ts` exists, add a cross-language drift guard to `tests/test_holdings_entry_pattern_contract.py` or an equivalent focused web/Python contract test. It must assert the TypeScript `HOLDING_ENTRY_PATTERN_VALUES` set equals `{pattern.value for pattern in HybridPattern}` so the manually duplicated web allowlist cannot diverge silently from the buy-pattern enum. This test should fail before the TS helper exists and pass after Step 6. Make the implementation concrete: read `web/src/lib/holding-entry-pattern.ts`, extract the quoted values inside the `HOLDING_ENTRY_PATTERN_VALUES = [...] as const` array with a small regex, and compare that set to `{pattern.value for pattern in HybridPattern}`. Do not parse arbitrary TypeScript or rely on importing TS from Python.
 
 - [ ] **Step 2: Run Supabase contract tests to verify failure**
 
@@ -1258,16 +1275,18 @@ Also exercise `replace_holdings_v1` manually or with a DB integration test for t
 
 Historical replay compatibility before runtime rollout: do not backfill processed `holdings_add_buy_events.result_payload` from the current `public.holdings` row. Current holdings may represent a later position, and updating processed event rows fires the `holdings_add_buy_events_set_updated_at` trigger. The migration should rely on the existing `jsonb_populate_record(null::public.holdings, v_event.result_payload)` replay branch to expose missing nullable `entry_pattern` as `null`. Record a disposable DB replay smoke proving a legacy payload without the key returns a row with `entry_pattern: null` and that the processed event row's payload and timestamps remain unchanged. Do not redefine the Add Buy RPC signature or add `p_entry_pattern`; Add Buy remains quantity-only.
 
-Before enabling runtime code that selects or mutates `entry_pattern`, run service-role PostgREST smoke against the target database, not only SQL introspection. At minimum, verify the exact full runtime column projection used by web and workflows succeeds, not just a reduced `ticker,entry_pattern` projection:
+Before enabling runtime code that selects or mutates `entry_pattern`, run service-role PostgREST smoke against the target database, not only SQL introspection. At minimum, verify the exact full runtime column projection used by web and workflows succeeds, not just a reduced `ticker,entry_pattern` projection. Use `limit=0` for the target schema-cache smoke so the response validates the projection without returning real holdings rows:
 
 ```bash
-curl -fsS "${SUPABASE_URL%/}/rest/v1/holdings?select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,created_at,updated_at&limit=1" \
+curl -fsS "${SUPABASE_URL%/}/rest/v1/holdings?select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,created_at,updated_at&limit=0" \
   -H "apikey: ${SUPABASE_SECRET_KEY}" \
   -H "Authorization: Bearer ${SUPABASE_SECRET_KEY}" \
   -H "Accept: application/json"
 ```
 
-Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data with a reserved improbable ticker such as `SABSMOKE.NAS`: preflight that no existing row matches the ticker or any canonical alias, create the row only if absent, record the created row identity and idempotency key, and abort cleanup unless the smoke created the row. Never patch, Add Buy, or delete an existing non-smoke holding as part of target smoke. Create or patch the reserved smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, then clean it up only if the preflight proved the row did not exist before the smoke. For Add Buy, use only that reserved smoke holding and a unique smoke idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding only if it was created by the smoke. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
+Also run PostgREST write/RPC smoke before runtime rollout, but keep full-replacement RPC tests off production/target data. On the target database, use only controlled smoke data with a reserved improbable ticker such as `SABSMOKE.NAS`: preflight that no existing row matches the ticker or any canonical alias, create the row only if absent, record the created row identity and idempotency key, and abort cleanup unless the smoke created the row. Never patch, Add Buy, or delete an existing non-smoke holding as part of target smoke. Create or patch the reserved smoke holding with `entry_pattern` and `Prefer: return=representation`, verify the returned shape, patch the same smoke row with explicit `entry_pattern: null`, and verify the returned row plus a follow-up GET show `entry_pattern` as `null`. This proves normal PATCH clears cross the PostgREST boundary instead of being filtered out by the web adapter/runtime path. For Add Buy, use only that reserved smoke holding and a unique smoke idempotency key, verify active preservation, inactive reactivation clearing, and replay shape, then clean up the smoke holding only if it was created by the smoke. Do **not** call `replace_holdings_v1` on a production/target database with a partial `p_holdings` payload; that RPC deletes every row absent from the payload. Exercise `replace_holdings_v1` set, preserve-on-omit, clear, and delete behavior only on a disposable/local database, or with a reviewed full-snapshot transaction/restore procedure that cannot run with a partial snapshot. This catches PostgREST schema-cache, representation, or privilege issues without risking real holdings. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
+
+When recording target smoke evidence, record only the command class, HTTP status, selected column list, boolean shape checks, smoke ticker, and whether cleanup was performed. Do not paste real holdings rows, response bodies from non-smoke rows, request headers, bearer tokens, API keys, curl verbose output, or environment variable values into PR notes, logs, chat, or docs.
 
 Also verify the effective RPC definitions and privileges after applying the migration, not only the historical migration files:
 
@@ -1432,7 +1451,7 @@ Run:
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_entry_pattern_contract.py tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py -q
 pnpm --dir web run test -- web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/supabase-admin.test.ts
-pnpm --dir web run test -- web/src/app/actions/__tests__/holdings.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
+pnpm --dir web run test -- web/src/app/actions/__tests__/holdings.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
 ```
 
 Expected: PASS. The Add Buy negative tests may already pass before implementation because the current strict Add Buy schema rejects unknown keys; their purpose is to lock the quantity-only API contract.
@@ -1454,7 +1473,7 @@ rg -n "HoldingRecord|HoldingSnapshot|HoldingReplaceSnapshot|strategy: null|strat
 pnpm --dir web run typecheck
 ```
 
-Expected: `rg` identifies only reviewed fixture locations, and `pnpm --dir web run typecheck` passes after those fixtures and, if required by TypeScript, the full Task 3 YAML optional-key implementation is present. Do not satisfy typecheck by temporarily normalizing omitted import keys to `null`. At minimum, check these existing fixture-heavy tests: `web/src/lib/__tests__/holding-activity.test.ts`, `web/src/lib/__tests__/add-buy-precheck.test.ts`, `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, `web/src/app/actions/__tests__/holdings.test.ts`, `web/src/app/api/holdings/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts`, and `web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts`.
+Expected: `rg` identifies only reviewed fixture locations, and `pnpm --dir web run typecheck` passes after those fixtures and, if required by TypeScript, the full Task 3 YAML optional-key implementation is present. Do not satisfy typecheck by temporarily normalizing omitted import keys to `null`. At minimum, check these existing fixture-heavy tests: `web/src/lib/__tests__/holding-activity.test.ts`, `web/src/lib/__tests__/add-buy-precheck.test.ts`, `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, `web/src/app/actions/__tests__/holdings.test.ts`, `web/src/app/api/holdings/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts`, `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts`, and `web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts`.
 
 - [ ] **Step 9: Commit Supabase contract**
 
@@ -1468,7 +1487,7 @@ git commit -m "feat(db): 보유 종목 진입 패턴 컬럼 추가" -m "holdings
 # After DB apply/smoke is recorded:
 # Include `tests/test_holdings_entry_pattern_contract.py` again if the Phase B cross-language drift guard is added there after `web/src/lib/holding-entry-pattern.ts` exists.
 # If Task 3 YAML optional-key work was pulled forward to satisfy this task's typecheck, stage `web/src/lib/holdings-yaml.ts` and `web/src/lib/__tests__/holdings-yaml.test.ts` in this runtime commit too.
-git add sab/scheduler/holdings.py .github/workflows/sell.yml .github/workflows/ai-brief.yml tests/test_holdings_entry_pattern_contract.py tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py web/src/lib/types.ts web/src/lib/holding-entry-pattern.ts web/src/lib/schemas.ts web/src/lib/supabase/holdings.ts web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/supabase-admin.test.ts web/src/lib/__tests__/holding-activity.test.ts web/src/lib/__tests__/add-buy-precheck.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
+git add sab/scheduler/holdings.py .github/workflows/sell.yml .github/workflows/ai-brief.yml tests/test_holdings_entry_pattern_contract.py tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py web/src/lib/types.ts web/src/lib/holding-entry-pattern.ts web/src/lib/schemas.ts web/src/lib/supabase/holdings.ts web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/supabase-admin.test.ts web/src/lib/__tests__/holding-activity.test.ts web/src/lib/__tests__/add-buy-precheck.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/__tests__/route.integration.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
 git commit -m "feat(holdings): 진입 패턴 런타임 저장 경로 연결" -m "DB 적용 이후 scheduled export와 웹 Supabase 클라이언트가 entry_pattern을 선택·보존하도록 확장한다."
 ```
 
@@ -2223,6 +2242,8 @@ In `web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts`, update t
 
 Add a negative extraction regression in `web/src/lib/__tests__/ticker-directory.test.ts` where a recent buy report row has `pattern: "not_a_breakout"`; assert the returned candidate has `pattern: null`. Recent-candidate UI should not forward unknown action-driving strings even though the report payload is internal.
 
+Add duplicate-candidate merge regressions in the same file. Keep first-seen display order and first-seen ticker/name behavior, but if a later duplicate row for the same canonical ticker has the first valid `pattern`, promote that valid pattern onto the already-returned candidate. Cover both first row omitted/null then second row `pattern: "swing_high_breakout"`, and first row `pattern: "not_a_breakout"` then second row `pattern: "swing_high_breakout"`. This prevents the current first-seen dedupe behavior from discarding valid action-driving metadata when report rows contain duplicates.
+
 Add client-boundary regressions in `web/src/lib/__tests__/holdings-client-hooks.test.tsx` for the recent-candidate parser or `useRecentCandidates`: when the API payload contains `{ ticker: "AAPL.NAS", name: "Apple", pattern: "not_a_breakout" }`, the parsed candidate must keep `ticker`/`name` but expose an owned `pattern: null`; when the API payload omits `pattern` entirely, the parsed recent candidate must still own `pattern: null`. This catches invalid or stale API payloads after server extraction has been bypassed while keeping the client recent-candidate shape stable.
 
 This route test is pass-through coverage only because the route mocks `listRecentBuyCandidates`; do not count it as proof that report `pattern` survives extraction. The real extraction coverage must stay in `web/src/lib/__tests__/ticker-directory.test.ts`, and the client propagation coverage must stay in `web/src/lib/__tests__/holdings-client-hooks.test.tsx`.
@@ -2406,6 +2427,7 @@ it("clears candidate-derived entry pattern when the next recent candidate has no
 
 Add stale-state regressions in the same block:
 
+- Select a recent candidate with `pattern`, then select a no-pattern recent candidate for the same ticker; assert the candidate-derived `entryPattern` is cleared. Then repeat with a manually edited `entryPattern` after the first selection and assert the manual value is preserved when selecting the same-ticker no-pattern candidate.
 - Select a recent candidate with `pattern`, then manually type a different ticker in the main `ticker` input; assert the candidate-derived `entryPattern` is cleared.
 - Select a recent candidate with `pattern`, then use ticker search to select another ticker; assert the candidate-derived `entryPattern` is cleared.
 - Select a recent candidate with `pattern`, then click `Edit` on an existing holding with its own `entry_pattern`; assert the edit-loaded value is shown and later no-pattern candidate selection does not treat the edit-loaded value as candidate-derived.
@@ -2458,6 +2480,8 @@ and return it:
 ```ts
       pattern: normalizeCandidatePattern(raw.pattern),
 ```
+
+For duplicate rows inside a single report, do not keep the existing pure first-seen skip if it discards pattern metadata. Keep the first candidate's position, ticker, and name, but if the first candidate's `pattern` is `null` and a later duplicate has a valid normalized pattern, update the first candidate's `pattern` to that value. One straightforward implementation is to keep a `Map<string, number>` from ticker to result index instead of a `Set<string>` and promote `results[index].pattern` only when it is currently `null`.
 
 In `mergeCandidatesFromReport`, no directory search behavior needs to use `pattern`; keep aliasing based on ticker/name only.
 
@@ -2601,24 +2625,29 @@ Add the callback before `return`:
 ```tsx
   const selectRecentCandidate = useCallback(
     (candidate: RecentCandidateLookupResult) => {
-      const currentTicker = form.ticker.trim().toUpperCase();
-      const tickerChanged = candidate.ticker !== currentTicker;
       updateField("ticker", candidate.ticker);
       if (candidate.pattern) {
         updateField("entry_pattern", candidate.pattern);
         setRecentCandidateEntryPatternSource(candidate.pattern);
         return;
       }
-      setRecentCandidateEntryPatternSource(null);
-      if (tickerChanged) {
+      if (
+        recentCandidateEntryPatternSource !== null &&
+        form.entry_pattern === recentCandidateEntryPatternSource
+      ) {
         updateField("entry_pattern", "");
       }
+      setRecentCandidateEntryPatternSource(null);
     },
-    [form.ticker, updateField],
+    [
+      form.entry_pattern,
+      recentCandidateEntryPatternSource,
+      updateField,
+    ],
   );
 ```
 
-Clear `entry_pattern` whenever recent-candidate selection changes the ticker and the selected candidate has no pattern. A user can still intentionally set `entry_pattern` after that selection; the `entry_pattern` field handler above marks that value as manual/edit-loaded. If the current value was populated by a prior recent candidate, clear it to avoid carrying a stale breakout sell marker to a different ticker. Any non-recent ticker change must also clear candidate-derived values; otherwise a user can select one breakout candidate and accidentally save that marker on a different ticker.
+Clear candidate-derived `entry_pattern` whenever a no-pattern recent candidate is selected, even when the ticker stays the same. A user can still intentionally set `entry_pattern` after that selection; the `entry_pattern` field handler above marks that value as manual/edit-loaded. If the current value was populated by a prior recent candidate, clear it to avoid carrying a stale breakout sell marker to a different ticker or to a newer no-pattern candidate for the same ticker. Any non-recent ticker change must also clear candidate-derived values; otherwise a user can select one breakout candidate and accidentally save that marker on a different ticker.
 
 Pass both the wrapped field handler and the recent-candidate callback:
 
