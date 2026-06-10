@@ -44,6 +44,8 @@ YAML export is different from YAML import. Exported YAML is an owned current-DB 
 
 No runtime may run a PostgREST `select` or mutation body containing `entry_pattern` against a database that has not applied the `holdings.entry_pattern` migration. This includes the Python scheduled export helper, the inline `.github/workflows/sell.yml` and `.github/workflows/ai-brief.yml` holdings exports, and the web/admin `HOLDINGS_SELECT` shared by list/create/update/YAML import/export. To make the task checkpoints executable and safe for this repo, Task 1 is limited to local Python YAML loading and sell-evaluation forwarding. Task 2 must be split into mandatory deployment gates: first land/apply/verify a DB-only migration release, then enable runtime select/body changes in a separate runtime release only after `public.holdings.entry_pattern`, `replace_holdings_v1`, `holdings_add_buy_v1`, and service-role PostgREST smoke checks have passed against the target database. Two commits in one branch or PR are not a deployment boundary; do not merge/deploy runtime changes with the DB migration unless reviewed deployment automation proves migrations are applied before any runtime code can execute.
 
+Hard stop: after the DB-only migration commit/release, stop implementation and record the target database smoke evidence before editing, staging, or deploying runtime files that mention `entry_pattern` in PostgREST selects or mutation bodies. If PostgREST sees the SQL migration in `information_schema` but rejects `entry_pattern`, reload/wait for the PostgREST schema cache, rerun the service-role select/write smoke, and do not proceed to runtime rollout until that smoke passes.
+
 ## File Structure
 
 - Modify `sab/holdings_loader.py`: add optional `Holding.entry_pattern` and parse it from `holdings.yaml`.
@@ -92,6 +94,7 @@ No runtime may run a PostgREST `select` or mutation body containing `entry_patte
 - Modify `docs/holdings-add-buy.md`: document that Add Buy preserves existing `entry_pattern` but does not infer a new one.
 - Modify `docs/STRATEGY.md`: update the hybrid sell note that currently says holdings only forwards `strategy`/`tags`.
 - Modify `docs/ARCHITECTURE.md`: update the holdings CRUD and ticker-directory flow notes that now carry buy candidate `pattern` into holdings `entry_pattern`.
+- Modify `docs/api.md`: document that `/api/tickers/recent-candidates` now returns `pattern: string | null`.
 - Modify `docs/local-docker-scheduler-plan.md`: update the scheduled AI Brief holdings export field list to include `entry_pattern`.
 - Modify `docs/holdings-ticker-lookup.md` and `docs/adr/ADR-0008-holdings-ticker-directory.md` only if they contain stale recent-candidate payload wording.
 - Modify `holdings.example.yaml`: add a commented/example `entry_pattern`.
@@ -394,9 +397,11 @@ git add sab/holdings_loader.py sab/signals/hybrid_sell.py sab/sell_evaluation.py
 git commit -m "feat(holdings): 진입 패턴 YAML 계약 추가" -m "buy 후보의 pattern을 holdings entry_pattern으로 보존할 수 있도록 Python 로더와 sell 평가 경계를 확장한다."
 ```
 
-## Task 2: Supabase Schema, RPC, Runtime Selects, And Web Mutation Schema
+## Task 2: Supabase DB Migration Gate, Then Runtime Selects And Web Mutation Schema
 
 Deployment rule for this task: do not combine the DB migration and any runtime `entry_pattern` select/body changes in one deployable release unless reviewed deployment automation proves migrations run before runtime. The default path is two deployable PRs/releases: a DB-only migration release with executable smoke, then a runtime storage/export/web-mutation release after the target database has the column and RPC behavior. Keeping two commits in one branch is useful for review, but it is not sufficient as a deployment boundary.
+
+Phase A is DB-only: create the migration, add the static migration/RPC contract test, apply the migration, complete executable SQL and PostgREST smoke, and commit/release only those DB artifacts. Phase B is runtime: only after Phase A smoke evidence is recorded may the worker edit scheduled exports, workflows, web Supabase selects/bodies, mutation schemas, runtime fixtures, or runtime tests. The detailed Step 1 instructions include both Phase A and Phase B test ideas for review locality; execute only the migration/static-contract pieces before the STOP and defer export/web/runtime test file edits until Phase B.
 
 **Files:**
 - Create: `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql`
@@ -415,7 +420,9 @@ Deployment rule for this task: do not combine the DB migration and any runtime `
 - Test: `web/src/lib/__tests__/supabase-admin.test.ts`
 - Test fixtures if surfaced by typecheck: `web/src/app/api/holdings/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`, and `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`
 
-- [ ] **Step 1: Write failing DB, export, and Supabase adapter tests**
+- [ ] **Step 1: Unblock scheduler import, then write failing DB, export, and Supabase adapter tests**
+
+First make a syntax-only prerequisite fix in `sab/scheduler/holdings.py` if it is still present: `except TypeError, ValueError:` must be `except (TypeError, ValueError):`. Do this before adding or running scheduled export tests so the Task 2 red phase fails on the new `entry_pattern` contract, not on an existing import-time syntax error. Keep this prerequisite change narrowly scoped; do not add `entry_pattern` to runtime selects or serializer bodies before the DB-only migration gate.
 
 In `web/src/lib/__tests__/supabase-admin.test.ts`, update the local holding fixture helper or individual expected `HoldingRecord` objects to include:
 
@@ -640,6 +647,8 @@ def test_add_buy_rpc_does_not_accept_or_update_entry_pattern() -> None:
         assert snippet not in function_sql
 ```
 
+After `web/src/lib/holding-entry-pattern.ts` exists, add a cross-language drift guard to `tests/test_holdings_entry_pattern_contract.py` or an equivalent focused web/Python contract test. It must assert the TypeScript `HOLDING_ENTRY_PATTERN_VALUES` set equals `{pattern.value for pattern in HybridPattern}` so the manually duplicated web allowlist cannot diverge silently from the buy-pattern enum. This test should fail before the TS helper exists and pass after Step 6.
+
 - [ ] **Step 2: Run Supabase contract tests to verify failure**
 
 Run:
@@ -650,7 +659,7 @@ pnpm --dir web run test -- web/src/lib/__tests__/schemas.test.ts web/src/lib/__t
 pnpm --dir web run test -- web/src/app/actions/__tests__/holdings.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
 ```
 
-Expected: FAIL from TypeScript/type drift, because `replaceAllHoldings` does not include `entry_pattern`, because shared holdings select queries and create/update response selects do not include `entry_pattern`, because scheduled export paths do not select/write it yet, because `sell.yml` and `ai-brief.yml` inline exports do not select/write it yet, and because the new migration file does not exist yet. The Add Buy negative route/action tests may already pass because the current strict schema rejects unknown keys; keep them in the command as non-regression contract guards.
+Expected: FAIL from TypeScript/type drift, because `replaceAllHoldings` does not include `entry_pattern`, because shared holdings select queries and create/update response selects do not include `entry_pattern`, because scheduled export paths do not select/write it yet, because `sell.yml` and `ai-brief.yml` inline exports do not select/write it yet, and because the new migration file does not exist yet. The Add Buy negative route/action tests may already pass because the current strict schema rejects unknown keys; keep them in the command as non-regression contract guards. If the first failure is still a scheduler import `SyntaxError`, return to Step 1 and fix only that syntax blocker before treating the red phase as meaningful.
 
 - [ ] **Step 3: Add the migration**
 
@@ -1001,7 +1010,7 @@ Also exercise `replace_holdings_v1` manually or with a DB integration test for t
 - incoming row with an unknown `entry_pattern` such as `not_a_breakout` fails with an actionable error or the DB allowed-value constraint.
 - `holdings_add_buy_v1` updates quantity/price/date while preserving a non-null `entry_pattern`, including idempotent replay from a post-migration idempotency event.
 
-Record the historical replay decision explicitly: pre-migration `holdings_add_buy_events.result_payload` rows cannot contain `entry_pattern`, so either backfill/expire those events before rollout or document that only post-migration idempotency replays preserve a non-null `entry_pattern` in the replay response.
+Mandatory historical replay mitigation before runtime rollout: pre-migration `holdings_add_buy_events.result_payload` rows cannot contain `entry_pattern`, so documentation alone is not sufficient. Choose and execute one mitigation before Phase B runtime deploy: expire/delete or backfill stale `holdings_add_buy_events.result_payload` rows so old replay payloads cannot return a false `entry_pattern: null`, or explicitly extend the migration/RPC plan so `holdings_add_buy_v1` re-reads the current `public.holdings` row when replay payload lacks the new key. Record the chosen mitigation, command or SQL used, row counts, and verification result in the PR/release notes.
 
 Before enabling runtime code that selects or mutates `entry_pattern`, run a service-role PostgREST smoke against the target database, not only SQL introspection. At minimum, verify the exact column projection used by runtime succeeds:
 
@@ -1012,7 +1021,7 @@ curl -fsS "${SUPABASE_URL%/}/rest/v1/holdings?select=ticker,entry_pattern&limit=
   -H "Accept: application/json"
 ```
 
-Also run one rollback-safe PostgREST write path before runtime rollout: either a temporary insert/patch/delete through `/rest/v1/holdings` using `entry_pattern`, or a `replace_holdings_v1` RPC call through `/rest/v1/rpc/replace_holdings_v1` that sets, preserves-on-omit, and clears `entry_pattern`. This catches PostgREST schema-cache or privilege issues that `information_schema` checks can miss.
+Also run one rollback-safe PostgREST write path before runtime rollout: either a temporary insert/patch/delete through `/rest/v1/holdings` using `entry_pattern`, or a `replace_holdings_v1` RPC call through `/rest/v1/rpc/replace_holdings_v1` that sets, preserves-on-omit, and clears `entry_pattern`. This catches PostgREST schema-cache or privilege issues that `information_schema` checks can miss. If SQL introspection shows the column/function exists but PostgREST rejects `entry_pattern` or the updated RPC shape, reload or wait for the PostgREST schema cache according to the target platform, rerun the exact service-role select/write/RPC smoke, and keep Phase B runtime rollout blocked until the PostgREST smoke passes.
 
 Also verify the effective RPC definitions and privileges after applying the migration, not only the historical migration files:
 
@@ -1026,6 +1035,8 @@ The effective `holdings_add_buy_v1` definition must not contain `p_entry_pattern
 
 If no executable DB target is available, do not mark the migration fully verified; record that only static SQL contract tests ran and keep final verification blocked until an executable migration apply is completed.
 
+STOP after this step. Do not continue to Step 5 runtime files, do not stage runtime tests/fixtures, and do not deploy code containing `entry_pattern` PostgREST selects/bodies until the DB-only migration has been applied to the target database and the SQL plus service-role PostgREST smoke evidence is recorded.
+
 - [ ] **Step 5: Add `entry_pattern` to scheduled holdings export paths**
 
 In `sab/scheduler/holdings.py`, add the field to `_HOLDINGS_FIELDS` immediately after `strategy`:
@@ -1036,7 +1047,7 @@ In `sab/scheduler/holdings.py`, add the field to `_HOLDINGS_FIELDS` immediately 
     "notes",
 ```
 
-Before editing the export field list, fix the existing Python syntax blocker in this module if still present: `except TypeError, ValueError:` must be `except (TypeError, ValueError):`. Otherwise the scheduled export tests can fail before exercising the `entry_pattern` contract.
+The syntax-only scheduler import fix should already be complete from Step 1. If `except TypeError, ValueError:` is still present, fix it before editing the export field list; otherwise the scheduled export tests can fail before exercising the `entry_pattern` contract.
 
 Update `_normalize_rows` so it still omits `None` for legacy optional fields, but always writes an owned `entry_pattern` key when the field is present in the Supabase response, including `None` values. If the runtime projection ever omits the selected `entry_pattern` key, fail loudly instead of turning a missing projection into an explicit clearing snapshot:
 
@@ -1188,12 +1199,13 @@ Expected: `rg` identifies only reviewed fixture locations, and `pnpm --dir web r
 
 - [ ] **Step 9: Commit Supabase contract**
 
-Use two deployable PRs/releases by default. First commit/PR only the migration and DB/static contract tests, then apply and smoke the migration against the target database. After that smoke is recorded and the DB-only release is live, commit/deploy the runtime select/body/export/schema changes. A single combined deployable change is allowed only if a reviewed deployment automation guarantees migrations apply before runtime execution.
+Use two deployable PRs/releases by default. First commit/PR only the migration and DB/static contract tests, then apply and smoke the migration against the target database. After that smoke is recorded and the DB-only release is live, commit/deploy the runtime select/body/export/schema changes. A single combined deployable change is allowed only if a reviewed deployment automation guarantees migrations apply before runtime execution. Do not treat two commits in one unreviewed deployable PR as a deployment boundary.
 
 ```bash
 git add supabase/migrations/20260609000000_add_holdings_entry_pattern.sql tests/test_holdings_entry_pattern_contract.py
 git commit -m "feat(db): 보유 종목 진입 패턴 컬럼 추가" -m "holdings.entry_pattern 컬럼과 replace_holdings_v1 보존 계약을 추가한다. 런타임 select 변경은 DB 적용 smoke 이후 별도 커밋에서 진행한다."
 
+# STOP: apply/release the DB-only migration and record SQL + PostgREST smoke evidence before running the next git add.
 # After DB apply/smoke is recorded:
 # If Task 3 YAML optional-key work was pulled forward to satisfy this task's typecheck, stage `web/src/lib/holdings-yaml.ts` and `web/src/lib/__tests__/holdings-yaml.test.ts` in this runtime commit too.
 git add sab/scheduler/holdings.py .github/workflows/sell.yml .github/workflows/ai-brief.yml tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py web/src/lib/types.ts web/src/lib/holding-entry-pattern.ts web/src/lib/schemas.ts web/src/lib/supabase/holdings.ts web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/supabase-admin.test.ts web/src/lib/__tests__/holding-activity.test.ts web/src/lib/__tests__/add-buy-precheck.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
@@ -2332,6 +2344,7 @@ git commit -m "feat(web): 최근 매수 후보 패턴 보존" -m "최근 buy 후
 - Modify: `docs/holdings-add-buy.md`
 - Modify: `docs/STRATEGY.md`
 - Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/api.md`
 - Modify: `docs/local-docker-scheduler-plan.md`
 - Modify if stale wording exists: `docs/holdings-ticker-lookup.md`
 - Modify if stale wording exists: `docs/adr/ADR-0008-holdings-ticker-directory.md`
@@ -2379,7 +2392,7 @@ In `docs/STRATEGY.md`, replace the note that says holdings only forwards `strate
 In `docs/ARCHITECTURE.md`, update the web holdings CRUD flow note that currently says ticker directory candidates are derived from `candidates[].{ticker,name}`. Replace it with:
 
 ```markdown
-   - 검색/후보 데이터는 buy 리포트(`candidates[].{ticker,name,pattern}`)에서 파생한 “티커 디렉토리(캐시)”를 사용합니다. 최근 buy 후보 선택은 후보 `pattern`을 holdings 입력의 `entry_pattern`으로 전달해, breakout 매수의 sell marker를 보존합니다.
+   - 티커 검색 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용하며, 캐시/검색 entry shape는 ticker/name 중심으로 유지합니다. 최근 buy 후보 API와 후보 선택 경로는 최신 buy 리포트의 `candidates[].{ticker,name,pattern}`을 읽고, 후보 `pattern`을 holdings 입력의 `entry_pattern`으로 전달해 breakout 매수의 sell marker를 보존합니다.
 ```
 
 Also add short notes under the workflow holdings bridge sections:
@@ -2391,6 +2404,8 @@ Also add short notes under the workflow holdings bridge sections:
 ```
 
 Review `docs/holdings-ticker-lookup.md` and `docs/adr/ADR-0008-holdings-ticker-directory.md` for stale `candidates[].{ticker,name}`-only wording. Update them if they describe recent buy candidate payload shape or holdings candidate selection behavior; leave them unchanged only if they discuss search-directory cache behavior that intentionally remains ticker/name-only.
+
+In `docs/api.md`, update the `/api/tickers/recent-candidates` response contract so each candidate documents `pattern: string | null`. Make the distinction explicit: ticker search results remain ticker/name-only, while recent buy candidates may carry validated buy-report pattern metadata.
 
 - [ ] **Step 5: Update local Docker scheduler docs**
 
@@ -2416,19 +2431,19 @@ If the example currently uses `strategy: swing`, change only that example row to
 Run:
 
 ```bash
-rg -n 'entry_pattern|failed-breakout|failed breakout|candidates\[\].*pattern' docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md holdings.example.yaml
+rg -n 'entry_pattern|failed-breakout|failed breakout|candidates\[\].*pattern|recent-candidates.*pattern' docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/api.md docs/local-docker-scheduler-plan.md holdings.example.yaml
 if rg -n 'holdings.*only.*strategy.*tags|strategy.*tags.*만|`strategy`, `notes`' docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md; then
   exit 1
 fi
 rg -n 'candidates\[\].*\{ticker,name\}' docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md || true
 ```
 
-Expected: output shows `entry_pattern` documented in holdings schema, Add Buy docs, strategy docs, architecture flow docs, local Docker scheduler docs, and example YAML; the negative check produces no stale contradictory wording. Any remaining `candidates[].{ticker,name}` hits in `docs/holdings-ticker-lookup.md` or ADR-0008 must be manually classified: update them if they describe recent buy candidate payload or holdings candidate-selection behavior, but leave them only if they intentionally describe the ticker/name-only search-directory cache.
+Expected: output shows `entry_pattern` documented in holdings schema, Add Buy docs, strategy docs, architecture flow docs, API docs, local Docker scheduler docs, and example YAML; the negative check produces no stale contradictory wording. Any remaining `candidates[].{ticker,name}` hits in `docs/holdings-ticker-lookup.md` or ADR-0008 must be manually classified: update them if they describe recent buy candidate payload or holdings candidate-selection behavior, but leave them only if they intentionally describe the ticker/name-only search-directory cache.
 
 - [ ] **Step 8: Commit docs**
 
 ```bash
-git add docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md holdings.example.yaml
+git add docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/api.md docs/local-docker-scheduler-plan.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md holdings.example.yaml
 git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을 holdings 공개 계약으로 설명한다."
 ```
 
@@ -2441,7 +2456,7 @@ git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을
 
 Before merge/deploy, confirm the DB migration that adds `public.holdings.entry_pattern` was applied and the executable migration smoke from Task 2 passed before any runtime containing `entry_pattern` in a PostgREST select or mutation body can run. This includes `.github/workflows/sell.yml`, `.github/workflows/ai-brief.yml`, `sab/scheduler/holdings.py`, and web `HOLDINGS_SELECT` in `web/src/lib/supabase/holdings.ts`. Runtime select changes must stay separate until the migration is applied and verified unless reviewed deployment automation guarantees migration-first ordering.
 
-Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, the historical Add Buy idempotency replay decision, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
+Expected: the release notes or PR checklist explicitly records the migration apply command, SQL smoke result, service-role PostgREST select/write smoke result, any PostgREST schema-cache remediation if needed, the mandatory historical Add Buy idempotency replay mitigation, and that `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql` is applied before scheduled workflow, AI brief workflow, Python helper, or web/admin runtime rollout.
 
 - [ ] **Step 2: Run Python quality gate**
 
@@ -2570,4 +2585,4 @@ Expected: no output.
 
 **Type consistency:** The field name is consistently `entry_pattern` in SQL, Python dataclass/YAML, TypeScript record/snapshot/mutation types, form state, and docs. TypeScript uses required nullable `entry_pattern` for DB/current holdings and an optional key only for replace/import snapshots that must preserve YAML key presence. Buy/entry report source field remains `pattern`, and allowed values are the exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, and `rsi_oversold_reversal`.
 
-**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering, active `sell.yml` scheduled export coverage, manual `ai-brief.yml` inline export coverage, local Docker scheduler docs, fail-closed Python/web/RPC `entry_pattern` parsing with allowed-value checks, exact hybrid sell semantics for structured pattern fields, shared PostgREST holdings select coverage, YAML omitted-vs-null and blank-clear diff/apply behavior, explicit `entry_pattern: null` YAML exports, Add Buy preservation and marker-input rejection without request-surface expansion, server-action and client form save pass-through, fixture commit completeness, stale recent-candidate marker clearing, import confirmation copy, architecture docs, and table metadata wrapping.
+**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering with a DB-only stop point, active `sell.yml` scheduled export coverage, manual `ai-brief.yml` inline export coverage, local Docker scheduler docs, fail-closed Python/web/RPC `entry_pattern` parsing with allowed-value checks, exact hybrid sell semantics for structured pattern fields, shared PostgREST holdings select coverage plus schema-cache remediation, YAML omitted-vs-null and blank-clear diff/apply behavior, explicit `entry_pattern: null` YAML exports, mandatory historical Add Buy idempotency replay mitigation, Add Buy preservation and marker-input rejection without request-surface expansion, server-action and client form save pass-through, fixture commit completeness, cross-language allowlist drift guards, stale recent-candidate marker clearing, import confirmation copy, API/architecture docs, and table metadata wrapping.
