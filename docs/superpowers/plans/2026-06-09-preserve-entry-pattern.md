@@ -6,7 +6,7 @@
 
 **Goal:** Preserve buy-report `pattern` metadata as holdings `entry_pattern` so `sma_ema_hybrid` failed-breakout sell rules work without manual `strategy` or `tags` markers.
 
-**Architecture:** Treat `entry_pattern` as the durable holdings-side copy of a buy signal's `pattern`. Keep `pattern` in buy/entry report rows, add `entry_pattern` at holdings boundaries, and rely on the existing hybrid sell marker reader, which already recognizes `entry_pattern`.
+**Architecture:** Treat `entry_pattern` as the durable holdings-side copy of a buy signal's `pattern`, not as a free-form sell marker. Keep `pattern` in buy/entry report rows, add `entry_pattern` at holdings boundaries, validate it against the current buy pattern IDs, and tighten hybrid sell so structured pattern fields use exact pattern semantics while legacy `strategy`/`tags` markers keep their existing substring behavior.
 
 **Tech Stack:** Python dataclasses and pytest, Supabase SQL migrations/RPCs, Next.js 16 + TypeScript + Zod + Vitest, existing `just` quality gates.
 
@@ -26,7 +26,7 @@
 
 ## Impact Note
 
-This changes the holdings schema, web holdings DTOs/forms, YAML import/export, scheduled holdings export, Python holdings loader, and the sell-evaluation bridge that builds the evaluator metadata dict. The likely breakages are mismatched Supabase RPC signatures, TypeScript fixture drift, YAML round-trip omissions, PostgREST `select` omissions, old replace-all callers clearing the new column, YAML import collapsing omitted `entry_pattern` into explicit null, overly permissive YAML marker parsing, stale candidate-derived form state, and loader fields that never reach `sab sell`. Tests/docs must cover Python loader/export, `_evaluate_holdings` metadata forwarding, web schema/YAML helpers, ticker recent-candidate metadata, executable migration/RPC validation, shared holdings select queries, create/update persistence bodies, edit-form preservation, Add Buy rejection of `entry_pattern` inputs, and the Add Buy decision to preserve existing `entry_pattern` without inferring a new one.
+This changes the holdings schema, web holdings DTOs/forms, YAML import/export, scheduled holdings export, Python holdings loader, hybrid sell marker interpretation, and the sell-evaluation bridge that builds the evaluator metadata dict. The likely breakages are mismatched Supabase RPC signatures, TypeScript fixture drift, YAML round-trip omissions, PostgREST `select` omissions, old replace-all callers clearing the new column, YAML import collapsing omitted `entry_pattern` into explicit null, YAML export omitting explicit nulls, overly permissive substring marker parsing, stale candidate-derived form state, and loader fields that never reach `sab sell`. Tests/docs must cover Python loader/export, `_evaluate_holdings` metadata forwarding, exact `entry_pattern` validation, web schema/YAML helpers, ticker recent-candidate metadata, executable migration/RPC validation, shared holdings select queries, create/update persistence bodies, edit-form preservation, Add Buy rejection of `entry_pattern` inputs, and the Add Buy decision to preserve existing `entry_pattern` without inferring a new one.
 
 ## Scope Check
 
@@ -36,6 +36,10 @@ Add Buy remains quantity-only in this plan. It should keep returning the full ho
 
 YAML import/replace-all compatibility depends on preserving source key presence. A missing `entry_pattern` key in an old YAML file or foreign replace-all payload means "leave the existing DB value unchanged"; an explicit `entry_pattern: null` or blank string means "clear the value"; a non-empty string means "set the value". Do not normalize missing YAML `entry_pattern` to `null` before building the `replace_holdings_v1` request, because that would turn old YAML imports into destructive clears. Operator-facing YAML import copy must also mention this preserve-on-omit exception, because the import is no longer a literal full replacement for fields that old YAML files do not know about.
 
+YAML export is different from YAML import. Exported YAML is an owned current-DB snapshot, so it must emit `entry_pattern` explicitly even when the DB value is `null`; otherwise a backup of a cleared value becomes an old-style omitted key and later import would preserve a stale DB marker instead of clearing it. Only parser/import/replace-all inputs may omit the key to mean preserve-existing.
+
+`entry_pattern` values must be exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, or `rsi_oversold_reversal`. The only failed-breakout `entry_pattern` value is `swing_high_breakout`; an unknown value such as `not_a_breakout` must be rejected at external write/import boundaries and must not trigger hybrid sell merely because it contains the substring `breakout`. Existing free-form `strategy`/`tags` marker behavior is preserved for backwards compatibility.
+
 ## Deployment Ordering
 
 No runtime may run a PostgREST `select` or mutation body containing `entry_pattern` against a database that has not applied the `holdings.entry_pattern` migration. This includes the Python scheduled export helper, the inline `.github/workflows/sell.yml` and `.github/workflows/ai-brief.yml` holdings exports, and the web/admin `HOLDINGS_SELECT` shared by list/create/update/YAML import/export. To make the task checkpoints executable and safe for this repo, Task 1 is limited to local Python YAML loading and sell-evaluation forwarding. Task 2 must be split into mandatory deployment gates: first land/apply/verify the DB-only migration, then enable runtime select/body changes in the web Supabase adapter, scheduled export helper, and workflows only after `public.holdings.entry_pattern` and the RPC smoke checks have passed against the target database. Do not use a combined migration/runtime commit unless a reviewed deployment automation proves migrations are applied before any runtime code can execute.
@@ -43,6 +47,7 @@ No runtime may run a PostgREST `select` or mutation body containing `entry_patte
 ## File Structure
 
 - Modify `sab/holdings_loader.py`: add optional `Holding.entry_pattern` and parse it from `holdings.yaml`.
+- Modify `sab/signals/hybrid_sell.py`: make structured pattern fields use exact failed-breakout pattern semantics instead of substring matching.
 - Modify `sab/sell_evaluation.py`: forward `Holding.entry_pattern` into the evaluator holding dict.
 - Modify `sab/scheduler/holdings.py`: include `entry_pattern` in Supabase active-holdings select and generated YAML.
 - Modify `.github/workflows/sell.yml`: include `entry_pattern` in the active scheduled sell holdings export query and generated YAML keys.
@@ -52,16 +57,17 @@ No runtime may run a PostgREST `select` or mutation body containing `entry_patte
 - Modify `tests/test_sell_evaluation_pnl.py`: verify `_evaluate_holdings` forwards `entry_pattern` into hybrid sell metadata.
 - Modify `tests/test_hybrid_sell_profit_tiers.py`: add a direct evaluator regression that a holding with only `entry_pattern=swing_high_breakout` triggers failed-breakout sell.
 - Modify `tests/test_workflow_holdings_loading.py`: verify `sell.yml` and `ai-brief.yml` inline scheduled holdings exports select and write `entry_pattern`.
-- Create `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql`: add nullable `entry_pattern` with a 120-character length constraint, replace `replace_holdings_v1` to import/export the field while preserving existing values when old callers omit the key, and keep replace/add-buy grants explicit.
+- Create `supabase/migrations/20260609000000_add_holdings_entry_pattern.sql`: add nullable `entry_pattern` with length and allowed-value constraints, replace `replace_holdings_v1` to import/export the field while preserving existing values when old callers omit the key, and keep replace/add-buy grants explicit.
 - Modify `web/src/lib/types.ts`: add required nullable `entry_pattern` to holding record/snapshot/mutation types and add a replace/import snapshot type whose `entry_pattern` key is optional so YAML imports can preserve missing-vs-null semantics.
-- Modify `web/src/lib/schemas.ts`: accept optional nullable `entry_pattern` on create/patch.
+- Modify `web/src/lib/schemas.ts`: accept optional nullable `entry_pattern` on create/patch and validate exact allowed pattern IDs.
 - Modify `web/src/lib/supabase/holdings.ts`: select, create/update, and replace-all `entry_pattern`, omitting the key from replace-all rows only when the incoming replace/import snapshot omitted it.
-- Modify `web/src/lib/holdings-yaml.ts`: parse/export/diff `entry_pattern` while preserving whether the YAML row omitted the key.
+- Modify `web/src/lib/holdings-yaml.ts`: parse/export/diff `entry_pattern`, validate exact allowed pattern IDs, preserve whether the YAML import row omitted the key, and emit explicit `null` in generated exports.
 - Modify `web/src/components/holdings/form-state.ts`: add `entry_pattern` form state.
 - Modify `web/src/components/holdings/helpers.ts`: map `entry_pattern` between records, forms, and mutation payloads.
 - Modify `web/src/components/holdings/holdings-form-panel.tsx`: add a small Entry Pattern input.
 - Modify `web/src/components/holdings/holdings-table.tsx`: display `entry_pattern` as compact Tags-cell metadata without changing row actions.
 - Modify `web/src/components/holdings/holdings-import-panel.tsx`: update import copy to explain omitted `entry_pattern` preserves the existing DB value.
+- Modify `web/src/components/holdings/use-holdings-import.ts`: update the apply confirmation copy so it no longer claims every DB field is literally replaced by file content.
 - Modify `web/src/components/holdings-client.module.css` if the table uses secondary-line `entry_pattern` metadata.
 - Modify `web/src/components/holdings/use-ticker-lookup.ts`: parse optional `pattern` on recent candidate payloads while preserving ticker-search behavior.
 - Modify `web/src/components/holdings/use-recent-candidates.ts`: expose recent candidate `pattern`.
@@ -81,10 +87,11 @@ No runtime may run a PostgREST `select` or mutation body containing `entry_patte
   - `web/src/app/api/holdings/yaml/__tests__/route.test.ts`
   - add-buy route/precheck tests that use `HoldingRecord` fixtures
   - add-buy single-ticker route, catch-all route, and action negative tests proving `entry_pattern` payloads are rejected
-- Modify `docs/holdings-schema.md`: document optional `entry_pattern`.
+- Modify `docs/holdings-schema.md`: document optional `entry_pattern`, allowed pattern IDs, and explicit export-null behavior.
 - Modify `docs/holdings-add-buy.md`: document that Add Buy preserves existing `entry_pattern` but does not infer a new one.
 - Modify `docs/STRATEGY.md`: update the hybrid sell note that currently says holdings only forwards `strategy`/`tags`.
 - Modify `docs/ARCHITECTURE.md`: update the holdings CRUD and ticker-directory flow notes that now carry buy candidate `pattern` into holdings `entry_pattern`.
+- Modify `docs/local-docker-scheduler-plan.md`: update the scheduled AI Brief holdings export field list to include `entry_pattern`.
 - Modify `docs/holdings-ticker-lookup.md` and `docs/adr/ADR-0008-holdings-ticker-directory.md` only if they contain stale recent-candidate payload wording.
 - Modify `holdings.example.yaml`: add a commented/example `entry_pattern`.
 - Modify `TODOS.md`: move the completed active bullet to Completed only after implementation and full verification pass.
@@ -93,6 +100,7 @@ No runtime may run a PostgREST `select` or mutation body containing `entry_patte
 
 **Files:**
 - Modify: `sab/holdings_loader.py`
+- Modify: `sab/signals/hybrid_sell.py`
 - Modify: `sab/sell_evaluation.py`
 - Test: `tests/test_holdings_yaml_contract.py`
 - Test: `tests/test_sell_evaluation_pnl.py`
@@ -148,7 +156,7 @@ def test_loader_rejects_non_string_entry_pattern(tmp_path: Path) -> None:
     assert "expected a string" in message
 ```
 
-Also add optional-value regressions in `tests/test_holdings_yaml_contract.py` so the loader contract is explicit: an omitted `entry_pattern` key loads as `None`, and a blank or whitespace-only `entry_pattern` value also loads as `None`. These lock the backwards-compatible nullable semantics that `_parse_optional_text_field` implements. Add the non-string rejection as a small parameterized set, or equivalent separate tests, covering at least YAML list, mapping, boolean (`true`), and numeric (`123`) values because YAML scalar coercion can otherwise turn marker-looking inputs into non-string Python values. Add an overlong regression with 121 characters and assert the loader reports `field='entry_pattern'` and `<= 120`.
+Also add optional-value regressions in `tests/test_holdings_yaml_contract.py` so the loader contract is explicit: an omitted `entry_pattern` key loads as `None`, and a blank or whitespace-only `entry_pattern` value also loads as `None`. These lock the backwards-compatible nullable semantics that `_parse_optional_text_field` implements. Add the non-string rejection as a small parameterized set, or equivalent separate tests, covering at least YAML list, mapping, boolean (`true`), and numeric (`123`) values because YAML scalar coercion can otherwise turn marker-looking inputs into non-string Python values. Add an overlong regression with 121 characters and assert the loader reports `field='entry_pattern'` and `<= 120`. Add an unknown-value regression with `entry_pattern: not_a_breakout` and assert the loader reports `field='entry_pattern'` plus `expected one of`; this keeps the action-driving field tied to exact buy pattern IDs instead of arbitrary marker strings.
 
 In `tests/test_hybrid_sell_profit_tiers.py`, add this regression near `test_hybrid_sell_failed_breakout_accepts_entry_tags`:
 
@@ -173,7 +181,7 @@ def test_hybrid_sell_failed_breakout_accepts_entry_pattern(monkeypatch):
     assert any("Failed breakout" in reason for reason in result.reasons)
 ```
 
-Add the negative regression next to it so non-breakout `entry_pattern` values do not trigger failed-breakout exits merely because the key is present:
+Add the negative regressions next to it so non-breakout and unknown `entry_pattern` values do not trigger failed-breakout exits merely because the key is present or contains the substring `breakout`:
 
 ```python
 def test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern(monkeypatch):
@@ -187,6 +195,29 @@ def test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern(monkeypa
         stop_loss_pct_max=0.20,
     )
     holding = {"entry_price": 100.0, "entry_pattern": "trend_pullback_bounce"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert not any("Failed breakout" in reason for reason in result.reasons)
+```
+
+Add the substring-smuggling counterpart immediately after it:
+
+```python
+def test_hybrid_sell_failed_breakout_ignores_unknown_entry_pattern_with_breakout_substring(monkeypatch):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+    holding = {"entry_price": 100.0, "entry_pattern": "not_a_breakout"}
 
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(96.5), holding, settings
@@ -247,14 +278,14 @@ Keep the direct hybrid sell tests in `tests/test_hybrid_sell_profit_tiers.py`, b
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_accepts_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern -q
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_accepts_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_unknown_entry_pattern_with_breakout_substring -q
 ```
 
-Expected: FAIL because `Holding` has no `entry_pattern`, `_evaluate_holdings` does not forward `entry_pattern`, the loader does not yet fail closed on non-string `entry_pattern`, and the loader does not yet enforce the 120-character contract. The direct hybrid sell regression may already pass because `_is_breakout_holding` already recognizes the key.
+Expected: FAIL because `Holding` has no `entry_pattern`, `_evaluate_holdings` does not forward `entry_pattern`, the loader does not yet fail closed on non-string, unknown, or overlong `entry_pattern`, and `_is_breakout_holding` still substring-matches structured `entry_pattern` values. The direct positive hybrid sell regression may already pass because `_is_breakout_holding` already recognizes the key.
 
 - [ ] **Step 3: Add `entry_pattern` to the Python loader**
 
-In `sab/holdings_loader.py`, append the field to `Holding` after `target_override`, not in the middle of the dataclass. Existing repo call sites appear keyword-based, but appending avoids breaking any positional construction semantics for external or future callers:
+In `sab/holdings_loader.py`, append the field to `Holding` after `target_override`, not in the middle of the dataclass. At least one test constructs `Holding(...)` positionally, and appending avoids breaking positional construction semantics for existing or external callers:
 
 ```python
     entry_pattern: str | None = None
@@ -271,6 +302,7 @@ def _parse_optional_text_field(
     item_index: int,
     ticker: str,
     max_length: int | None = None,
+    allowed_values: frozenset[str] | None = None,
 ) -> str | None:
     if value is None:
         return None
@@ -291,7 +323,28 @@ def _parse_optional_text_field(
             item_index=item_index,
             ticker=ticker,
         )
+    if allowed_values is not None and text and text not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise _invalid_holdings_value(
+            p,
+            f"expected one of {allowed}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
     return text or None
+```
+
+Add the allowed set near the helper; keep it local to holdings loading so this public YAML contract does not depend on evaluator internals:
+
+```python
+_ALLOWED_ENTRY_PATTERNS = frozenset(
+    {
+        "trend_pullback_bounce",
+        "swing_high_breakout",
+        "rsi_oversold_reversal",
+    }
+)
 ```
 
 Do not change existing `strategy` or `settings.default_strategy` parsing in this task; `strategy` is already a sell marker and changing blank/default fallback semantics would be an unrelated behavior change.
@@ -307,10 +360,13 @@ In `_parse_holding`, keep the current `strategy` assignment and set the new fiel
             item_index=item_index,
             ticker=ticker,
             max_length=120,
+            allowed_values=_ALLOWED_ENTRY_PATTERNS,
         ),
 ```
 
-- [ ] **Step 4: Forward `entry_pattern` through sell evaluation**
+- [ ] **Step 4: Tighten hybrid sell structured pattern semantics and forward `entry_pattern`**
+
+In `sab/signals/hybrid_sell.py`, change `_is_breakout_holding` so `pattern`, `entry_pattern`, and `signal_pattern` are treated as exact structured buy pattern fields. Only `swing_high_breakout` should satisfy the failed-breakout pattern check. Keep the existing substring behavior for legacy free-form `strategy` and `tags` markers so older holdings are not broken.
 
 In `sab/sell_evaluation.py`, add the field to `holding_dict` immediately after `strategy`:
 
@@ -325,7 +381,7 @@ This bridge is required because `_evaluate_holdings` builds a plain dict explici
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_accepts_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern -q
+UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell tests/test_sell_evaluation_pnl.py::test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_accepts_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_non_breakout_entry_pattern tests/test_hybrid_sell_profit_tiers.py::test_hybrid_sell_failed_breakout_ignores_unknown_entry_pattern_with_breakout_substring -q
 ```
 
 Expected: PASS.
@@ -333,7 +389,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit Python contract**
 
 ```bash
-git add sab/holdings_loader.py sab/sell_evaluation.py tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py
+git add sab/holdings_loader.py sab/signals/hybrid_sell.py sab/sell_evaluation.py tests/test_holdings_yaml_contract.py tests/test_sell_evaluation_pnl.py tests/test_hybrid_sell_profit_tiers.py
 git commit -m "feat(holdings): 진입 패턴 YAML 계약 추가" -m "buy 후보의 pattern을 holdings entry_pattern으로 보존할 수 있도록 Python 로더와 sell 평가 경계를 확장한다."
 ```
 
@@ -353,6 +409,7 @@ Deployment rule for this task: do not combine the DB migration and any runtime `
 - Test: `tests/test_scheduled_holdings_export.py`
 - Test: `tests/test_workflow_holdings_loading.py`
 - Test: `web/src/lib/__tests__/supabase-admin.test.ts`
+- Test fixtures if surfaced by typecheck: `web/src/app/api/holdings/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`, and `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`
 
 - [ ] **Step 1: Write failing DB, export, and Supabase adapter tests**
 
@@ -495,9 +552,12 @@ def test_holdings_entry_pattern_migration_updates_replace_holdings_contract() ->
         "add column if not exists entry_pattern text null",
         "add constraint holdings_entry_pattern_length_check",
         "char_length(entry_pattern) <= 120",
+        "add constraint holdings_entry_pattern_value_check",
+        "entry_pattern in ('trend_pullback_bounce', 'swing_high_breakout', 'rsi_oversold_reversal')",
         "jsonb_typeof(incoming.item->'entry_pattern') <> 'string'",
         "incoming holdings entry_pattern must be a string",
         "incoming holdings entry_pattern must be <= 120 chars",
+        "incoming holdings entry_pattern must be one of",
         "has_entry_pattern boolean not null",
         "entry_pattern text null",
         "incoming.item ? 'entry_pattern'",
@@ -581,6 +641,20 @@ alter table public.holdings
   add constraint holdings_entry_pattern_length_check
   check (entry_pattern is null or char_length(entry_pattern) <= 120);
 
+alter table public.holdings
+  drop constraint if exists holdings_entry_pattern_value_check;
+
+alter table public.holdings
+  add constraint holdings_entry_pattern_value_check
+  check (
+    entry_pattern is null
+    or entry_pattern in (
+      'trend_pullback_bounce',
+      'swing_high_breakout',
+      'rsi_oversold_reversal'
+    )
+  );
+
 create or replace function public.replace_holdings_v1(
   p_holdings jsonb default '[]'::jsonb
 )
@@ -626,6 +700,22 @@ begin
       and char_length(nullif(trim(incoming.item->>'entry_pattern'), '')) > 120
   ) then
     raise exception 'incoming holdings entry_pattern must be <= 120 chars';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_holdings) as incoming(item)
+    where incoming.item ? 'entry_pattern'
+      and incoming.item->'entry_pattern' <> 'null'::jsonb
+      and jsonb_typeof(incoming.item->'entry_pattern') = 'string'
+      and nullif(trim(incoming.item->>'entry_pattern'), '') is not null
+      and nullif(trim(incoming.item->>'entry_pattern'), '') not in (
+        'trend_pullback_bounce',
+        'swing_high_breakout',
+        'rsi_oversold_reversal'
+      )
+  ) then
+    raise exception 'incoming holdings entry_pattern must be one of trend_pullback_bounce, swing_high_breakout, rsi_oversold_reversal';
   end if;
 
   create temporary table incoming_holdings (
@@ -879,6 +969,7 @@ Also exercise `replace_holdings_v1` manually or with a DB integration test for t
 - incoming row omitting `entry_pattern` preserves an existing non-null value.
 - incoming row with `"entry_pattern": null` clears it.
 - incoming row with an `entry_pattern` longer than 120 characters fails with an actionable error or the DB length constraint.
+- incoming row with an unknown `entry_pattern` such as `not_a_breakout` fails with an actionable error or the DB allowed-value constraint.
 - `holdings_add_buy_v1` updates quantity/price/date while preserving a non-null `entry_pattern`, including idempotent replay.
 
 Also verify the effective RPC definitions and privileges after applying the migration, not only the historical migration files:
@@ -1001,7 +1092,7 @@ rg -n "HoldingRecord|HoldingSnapshot|HoldingReplaceSnapshot|strategy: null|strat
 pnpm --dir web run typecheck
 ```
 
-Expected: `rg` identifies only reviewed fixture locations, and `pnpm --dir web run typecheck` passes after those fixtures and, if required by TypeScript, the full Task 3 YAML optional-key implementation is present. Do not satisfy typecheck by temporarily normalizing omitted import keys to `null`. At minimum, check these existing fixture-heavy tests: `web/src/lib/__tests__/holding-activity.test.ts`, `web/src/lib/__tests__/add-buy-precheck.test.ts`, `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, `web/src/app/actions/__tests__/holdings.test.ts`, `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts`, and `web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts`.
+Expected: `rg` identifies only reviewed fixture locations, and `pnpm --dir web run typecheck` passes after those fixtures and, if required by TypeScript, the full Task 3 YAML optional-key implementation is present. Do not satisfy typecheck by temporarily normalizing omitted import keys to `null`. At minimum, check these existing fixture-heavy tests: `web/src/lib/__tests__/holding-activity.test.ts`, `web/src/lib/__tests__/add-buy-precheck.test.ts`, `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, `web/src/app/actions/__tests__/holdings.test.ts`, `web/src/app/api/holdings/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts`, `web/src/app/api/holdings/yaml/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts`, `web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts`, and `web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts`.
 
 - [ ] **Step 9: Commit Supabase contract**
 
@@ -1012,7 +1103,8 @@ git add supabase/migrations/20260609000000_add_holdings_entry_pattern.sql tests/
 git commit -m "feat(db): 보유 종목 진입 패턴 컬럼 추가" -m "holdings.entry_pattern 컬럼과 replace_holdings_v1 보존 계약을 추가한다. 런타임 select 변경은 DB 적용 smoke 이후 별도 커밋에서 진행한다."
 
 # After DB apply/smoke is recorded:
-git add sab/scheduler/holdings.py .github/workflows/sell.yml .github/workflows/ai-brief.yml tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py web/src/lib/types.ts web/src/lib/supabase/holdings.ts web/src/lib/__tests__/supabase-admin.test.ts web/src/lib/__tests__/holding-activity.test.ts web/src/lib/__tests__/add-buy-precheck.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/yaml/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
+# If Task 3 YAML optional-key work was pulled forward to satisfy this task's typecheck, stage `web/src/lib/holdings-yaml.ts` and `web/src/lib/__tests__/holdings-yaml.test.ts` in this runtime commit too.
+git add sab/scheduler/holdings.py .github/workflows/sell.yml .github/workflows/ai-brief.yml tests/test_scheduled_holdings_export.py tests/test_workflow_holdings_loading.py web/src/lib/types.ts web/src/lib/supabase/holdings.ts web/src/lib/__tests__/supabase-admin.test.ts web/src/lib/__tests__/holding-activity.test.ts web/src/lib/__tests__/add-buy-precheck.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.test.ts" "web/src/app/api/holdings/[ticker]/add-buy/__tests__/route.integration.test.ts" "web/src/app/api/holdings/add-buy/[...ticker]/__tests__/route.test.ts"
 git commit -m "feat(holdings): 진입 패턴 런타임 저장 경로 연결" -m "DB 적용 이후 scheduled export와 웹 Supabase 클라이언트가 entry_pattern을 선택·보존하도록 확장한다."
 ```
 
@@ -1026,6 +1118,7 @@ git commit -m "feat(holdings): 진입 패턴 런타임 저장 경로 연결" -m 
 - Modify: `web/src/components/holdings/holdings-form-panel.tsx`
 - Modify: `web/src/components/holdings/holdings-table.tsx`
 - Modify: `web/src/components/holdings/holdings-import-panel.tsx`
+- Modify: `web/src/components/holdings/use-holdings-import.ts`
 - Modify if using secondary table metadata: `web/src/components/holdings-client.module.css`
 - Test: `web/src/lib/__tests__/schemas.test.ts`
 - Test: `web/src/lib/__tests__/holdings-yaml.test.ts`
@@ -1056,6 +1149,15 @@ it("accepts nullable entry_pattern on holding mutations", () => {
   });
 
   expect(patchParsed.entry_pattern).toBeNull();
+
+  expect(() =>
+    holdingCreateSchema.parse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 100,
+      entry_pattern: "not_a_breakout",
+    }),
+  ).toThrow(/entry_pattern/);
 });
 ```
 
@@ -1112,7 +1214,22 @@ holdings:
 `),
   ).toThrow(/entry_pattern.*120/);
 });
+
+it("rejects unknown entry_pattern values", () => {
+  expect(() =>
+    parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+    entry_pattern: not_a_breakout
+`),
+  ).toThrow(/entry_pattern.*one of/);
+});
 ```
+
+Add an export regression before the diff tests so generated backups keep explicit null ownership: build YAML from a `HoldingSnapshot` whose `entry_pattern` is `null`, assert the document contains `entry_pattern: null`, parse it back, and assert the parsed row owns `entry_pattern` with `null`. This prevents a generated backup from turning a cleared value into an old-style preserve-on-omit import.
 
 Add a diff regression so YAML apply does not skip `entry_pattern`-only changes:
 
@@ -1462,14 +1579,28 @@ Run:
 pnpm --dir web run test -- web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/holdings-yaml.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts
 ```
 
-Expected: FAIL because `entry_pattern` is rejected by strict schemas, is not round-tripped/diffed by YAML helpers, non-string and overlong YAML values are not rejected yet, omitted YAML `entry_pattern` is not preserved as an omitted replace-all key yet, blank YAML `entry_pattern` is not treated as an explicit clear yet, the import panel copy still describes a literal full replacement, and the form/table do not expose or submit the field yet.
+Expected: FAIL because `entry_pattern` is rejected by strict schemas, is not round-tripped/diffed by YAML helpers, generated YAML export omits explicit `entry_pattern: null`, non-string, unknown, and overlong YAML values are not rejected yet, omitted YAML `entry_pattern` is not preserved as an omitted replace-all key yet, blank YAML `entry_pattern` is not treated as an explicit clear yet, the import panel and apply-confirmation copy still describe a literal full replacement, and the form/table do not expose or submit the field yet.
 
 - [ ] **Step 3: Update schemas and YAML helpers**
 
-In `web/src/lib/schemas.ts`, add to both `holdingCreateSchema` and `holdingPatchSchema` after `strategy`:
+In `web/src/lib/schemas.ts`, define a shared allowed set near the holdings schemas and use it for both `holdingCreateSchema` and `holdingPatchSchema` after `strategy`:
 
 ```ts
-    entry_pattern: toNullableTrimmedString(120).optional(),
+const HOLDING_ENTRY_PATTERNS = new Set([
+  "trend_pullback_bounce",
+  "swing_high_breakout",
+  "rsi_oversold_reversal",
+]);
+
+const holdingEntryPatternSchema = toNullableTrimmedString(120)
+  .refine(
+    (value) => value === null || HOLDING_ENTRY_PATTERNS.has(value),
+    "entry_pattern must be one of trend_pullback_bounce, swing_high_breakout, rsi_oversold_reversal",
+  )
+  .optional();
+
+// in both holdingCreateSchema and holdingPatchSchema
+entry_pattern: holdingEntryPatternSchema,
 ```
 
 In `web/src/lib/holdings-yaml.ts`, import `HoldingReplaceSnapshot` from `web/src/lib/types.ts`, then add this stricter parser near `parseOptionalText`. Keep `parseOptionalText` unchanged for legacy fields because changing `strategy`/`notes` coercion would be a broader behavior change:
@@ -1496,9 +1627,16 @@ function parseOptionalStringField(
       `${context}: '${fieldName}' must be <= ${maxLength} characters.`,
     );
   }
+  if (!HOLDING_ENTRY_PATTERNS.has(text)) {
+    throw new HoldingsYamlError(
+      `${context}: '${fieldName}' must be one of ${[...HOLDING_ENTRY_PATTERNS].join(", ")}.`,
+    );
+  }
   return text;
 }
 ```
+
+Define `HOLDING_ENTRY_PATTERNS` in this helper module as the same exact set used by `web/src/lib/schemas.ts`. If duplication becomes awkward, extract a tiny shared constant in `web/src/lib/holding-entry-pattern.ts`, but do not introduce a broader abstraction for one field.
 
 Update `toHoldingSnapshot`:
 
@@ -1529,12 +1667,10 @@ function hasOwnEntryPattern(
 }
 ```
 
-Update `buildYamlRow` after strategy:
+Update `buildYamlRow` after strategy. This function is used for generated exports, so it must always write the owned DB snapshot value, including explicit `null`:
 
 ```ts
-  if (snapshot.entry_pattern) {
-    row.entry_pattern = snapshot.entry_pattern;
-  }
+  row.entry_pattern = snapshot.entry_pattern ?? null;
 ```
 
 Update `areSnapshotsEqual`:
@@ -1608,6 +1744,8 @@ In `web/src/components/holdings/holdings-form-panel.tsx`, add this label after t
 
 In `web/src/components/holdings/holdings-import-panel.tsx`, update the explanatory copy so it still says apply replaces the holdings snapshot, but explicitly notes that omitted `entry_pattern` in older YAML preserves the existing DB value and `entry_pattern: null` or blank clears it. Keep this concise; it is an operational warning, not a tutorial.
 
+In `web/src/components/holdings/use-holdings-import.ts`, update the apply confirmation string for the same contract. The confirmation must not say the DB is literally replaced by the uploaded file without qualification. In `web/src/lib/__tests__/holdings-client-hooks.test.tsx`, extend the existing `useHoldingsImport` apply test to assert `confirm.mock.calls[0]?.[0]` contains `entry_pattern`, `preserve`/`보존`, and `null` or `blank`/`빈 값`.
+
 In `web/src/components/holdings/holdings-table.tsx`, keep the holdings row dense and scannable. The current table has a Tags column but no Strategy column, so do not add a new Strategy or Entry Pattern column in this task. Show `entry_pattern` as a secondary line inside the Tags cell:
 
 ```tsx
@@ -1660,7 +1798,7 @@ Expected: typecheck passes, and the holdings table/form remains readable at both
 - [ ] **Step 7: Commit web holdings surface**
 
 ```bash
-git add web/src/lib/schemas.ts web/src/lib/holdings-yaml.ts web/src/components/holdings/form-state.ts web/src/components/holdings/helpers.ts web/src/components/holdings/holdings-form-panel.tsx web/src/components/holdings/holdings-table.tsx web/src/components/holdings/holdings-import-panel.tsx web/src/components/holdings-client.module.css web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/holdings-yaml.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts
+git add web/src/lib/schemas.ts web/src/lib/holdings-yaml.ts web/src/components/holdings/form-state.ts web/src/components/holdings/helpers.ts web/src/components/holdings/holdings-form-panel.tsx web/src/components/holdings/holdings-table.tsx web/src/components/holdings/holdings-import-panel.tsx web/src/components/holdings/use-holdings-import.ts web/src/components/holdings-client.module.css web/src/lib/__tests__/schemas.test.ts web/src/lib/__tests__/holdings-yaml.test.ts web/src/lib/__tests__/holdings-client-hooks.test.tsx web/src/app/actions/__tests__/holdings.test.ts web/src/app/api/holdings/__tests__/route.test.ts "web/src/app/api/holdings/[ticker]/__tests__/route.test.ts" "web/src/app/api/holdings/[...ticker]/__tests__/route.test.ts" web/src/app/api/holdings/yaml/__tests__/route.test.ts
 git commit -m "feat(web): 보유 종목 진입 패턴 입력 추가" -m "웹 holdings 생성·수정·YAML import/export 화면과 검증 스키마에서 entry_pattern을 보존한다."
 ```
 
@@ -1759,6 +1897,8 @@ In `web/src/app/api/tickers/recent-candidates/__tests__/route.test.ts`, update t
 ```ts
     expect(payload.candidates[0]?.pattern).toBe("swing_high_breakout");
 ```
+
+Add a negative extraction regression in `web/src/lib/__tests__/ticker-directory.test.ts` where a recent buy report row has `pattern: "not_a_breakout"`; assert the returned candidate has `pattern: null`. Recent-candidate UI should not forward unknown action-driving strings even though the report payload is internal.
 
 This route test is pass-through coverage only because the route mocks `listRecentBuyCandidates`; do not count it as proof that report `pattern` survives extraction. The real extraction coverage must stay in `web/src/lib/__tests__/ticker-directory.test.ts`, and the client propagation coverage must stay in `web/src/lib/__tests__/holdings-client-hooks.test.tsx`.
 
@@ -1933,9 +2073,18 @@ export interface TickerDirectoryCandidate {
 Add helper near `normalizeCandidateName`:
 
 ```ts
+const HOLDING_ENTRY_PATTERNS = new Set([
+  "trend_pullback_bounce",
+  "swing_high_breakout",
+  "rsi_oversold_reversal",
+]);
+
 function normalizeCandidatePattern(value: unknown): string | null {
   const text = toCleanString(value);
-  return text ? text : null;
+  if (!text || !HOLDING_ENTRY_PATTERNS.has(text)) {
+    return null;
+  }
+  return text;
 }
 ```
 
@@ -2128,13 +2277,14 @@ git commit -m "feat(web): 최근 매수 후보 패턴 보존" -m "최근 buy 후
 - Modify: `docs/holdings-add-buy.md`
 - Modify: `docs/STRATEGY.md`
 - Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/local-docker-scheduler-plan.md`
 - Modify if stale wording exists: `docs/holdings-ticker-lookup.md`
 - Modify if stale wording exists: `docs/adr/ADR-0008-holdings-ticker-directory.md`
 - Modify: `holdings.example.yaml`
 
 - [ ] **Step 1: Update holdings schema docs**
 
-In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `strategy` and document that the value is trimmed, nullable, and limited to 120 characters across DB/RPC/YAML/web mutation paths:
+In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `strategy` and document that the value is trimmed, nullable, explicitly exported as `null` when absent, limited to 120 characters, and restricted to the current buy pattern IDs across DB/RPC/YAML/web mutation paths:
 
 ```yaml
     strategy: sma_ema_hybrid
@@ -2144,13 +2294,13 @@ In `docs/holdings-schema.md`, add `entry_pattern` to the example row after `stra
 Add this row to the field table after `strategy`:
 
 ```markdown
-| `entry_pattern` | string (선택, 최대 120자) | buy/entry report의 `pattern`을 보유 상태에 보존한 값. 예: `swing_high_breakout`; hybrid sell의 failed-breakout 판정에 사용 |
+| `entry_pattern` | string (선택, 최대 120자) | buy/entry report의 `pattern`을 보유 상태에 보존한 값. 허용값: `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`; `swing_high_breakout`만 hybrid sell의 failed-breakout 판정에 사용 |
 ```
 
 Add this note near the sell command section:
 
 ```markdown
-- `sma_ema_hybrid` breakout 후보를 보유로 전환할 때는 `entry_pattern`에 buy/entry report의 `pattern` 값을 보존하세요. `sab sell`은 `strategy`/`tags` 수동 마커 없이도 `entry_pattern`의 `breakout` 문자열로 failed-breakout 규칙을 적용합니다.
+- `sma_ema_hybrid` breakout 후보를 보유로 전환할 때는 `entry_pattern`에 buy/entry report의 `pattern` 값을 보존하세요. `sab sell`은 `entry_pattern: swing_high_breakout`을 exact pattern marker로 인식해 `strategy`/`tags` 수동 마커 없이 failed-breakout 규칙을 적용합니다.
 ```
 
 - [ ] **Step 2: Update Add Buy docs**
@@ -2186,7 +2336,15 @@ Also add short notes under the workflow holdings bridge sections:
 
 Review `docs/holdings-ticker-lookup.md` and `docs/adr/ADR-0008-holdings-ticker-directory.md` for stale `candidates[].{ticker,name}`-only wording. Update them if they describe recent buy candidate payload shape or holdings candidate selection behavior; leave them unchanged only if they discuss search-directory cache behavior that intentionally remains ticker/name-only.
 
-- [ ] **Step 5: Update example YAML**
+- [ ] **Step 5: Update local Docker scheduler docs**
+
+In `docs/local-docker-scheduler-plan.md`, update the scheduled AI Brief holdings export field list that currently says the active export uses `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `notes`, `tags`, `stop_override`, and `target_override`. Insert `entry_pattern` immediately after `strategy`, matching the Python scheduler helper and GitHub workflow bridge:
+
+```markdown
+   - 필드는 current GitHub workflow와 같은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`를 사용합니다.
+```
+
+- [ ] **Step 6: Update example YAML**
 
 In `holdings.example.yaml`, add `entry_pattern` to the first swing example:
 
@@ -2197,23 +2355,23 @@ In `holdings.example.yaml`, add `entry_pattern` to the first swing example:
 
 If the example currently uses `strategy: swing`, change only that example row to `sma_ema_hybrid`; leave unrelated examples unchanged.
 
-- [ ] **Step 6: Run static docs check**
+- [ ] **Step 7: Run static docs check**
 
 Run:
 
 ```bash
-rg -n "entry_pattern|failed-breakout|failed breakout|candidates\\[\\].*pattern" docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md holdings.example.yaml
-if rg -n "holdings.*only.*strategy.*tags|candidates\\[\\].*\\{ticker,name\\}" docs/STRATEGY.md docs/ARCHITECTURE.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md; then
+rg -n 'entry_pattern|failed-breakout|failed breakout|candidates\[\].*pattern' docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md holdings.example.yaml
+if rg -n 'holdings.*only.*strategy.*tags|candidates\[\].*\{ticker,name\}|`strategy`, `notes`' docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md; then
   exit 1
 fi
 ```
 
-Expected: output shows `entry_pattern` documented in holdings schema, Add Buy docs, strategy docs, architecture flow docs, and example YAML; the negative check produces no stale contradictory wording.
+Expected: output shows `entry_pattern` documented in holdings schema, Add Buy docs, strategy docs, architecture flow docs, local Docker scheduler docs, and example YAML; the negative check produces no stale contradictory wording.
 
-- [ ] **Step 7: Commit docs**
+- [ ] **Step 8: Commit docs**
 
 ```bash
-git add docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md holdings.example.yaml
+git add docs/holdings-schema.md docs/holdings-add-buy.md docs/STRATEGY.md docs/ARCHITECTURE.md docs/local-docker-scheduler-plan.md docs/holdings-ticker-lookup.md docs/adr/ADR-0008-holdings-ticker-directory.md holdings.example.yaml
 git commit -m "docs: 진입 패턴 보유 계약 문서화" -m "entry_pattern을 holdings 공개 계약으로 설명한다."
 ```
 
@@ -2339,10 +2497,10 @@ Expected: no output.
 
 ## Self-Review
 
-**Spec coverage:** The plan covers the active TODO: buy `pattern` is preserved into holdings via `entry_pattern`; entry reports already preserve `pattern`; hybrid sell already reads `entry_pattern`; scheduled sell receives the field through both the Python export helper and the active `.github/workflows/sell.yml` inline export, then through the Python loader and `_evaluate_holdings` metadata bridge. The scheduled AI brief holdings bridge also preserves the same field through `.github/workflows/ai-brief.yml`. It also covers web recent-candidate selection, web/admin `HOLDINGS_SELECT`, YAML import/export/diff behavior including omitted-vs-null replace-all semantics, and deployment ordering so the operator does not need manual `strategy`/`tags`. Add Buy is explicitly scoped to preserve existing `entry_pattern` only, reject marker inputs, and not infer a new one.
+**Spec coverage:** The plan covers the active TODO: buy `pattern` is preserved into holdings via `entry_pattern`; entry reports already preserve `pattern`; hybrid sell reads structured pattern fields with exact failed-breakout semantics; scheduled sell receives the field through both the Python export helper and the active `.github/workflows/sell.yml` inline export, then through the Python loader and `_evaluate_holdings` metadata bridge. The scheduled AI brief holdings bridge also preserves the same field through `.github/workflows/ai-brief.yml`, and `docs/local-docker-scheduler-plan.md` is updated to match. It also covers web recent-candidate selection, web/admin `HOLDINGS_SELECT`, YAML import/export/diff behavior including omitted-vs-null replace-all semantics and explicit export-null ownership, and deployment ordering so the operator does not need manual `strategy`/`tags`. Add Buy is explicitly scoped to preserve existing `entry_pattern` only, reject marker inputs, and not infer a new one.
 
 **Completeness scan:** Instructions are concrete, with no filler placeholders, conditional mock instructions, or unspecified edge handling. `TODOS.md` references are repository file names, not placeholders.
 
-**Type consistency:** The field name is consistently `entry_pattern` in SQL, Python dataclass/YAML, TypeScript record/snapshot/mutation types, form state, and docs. TypeScript uses required nullable `entry_pattern` for DB/current holdings and an optional key only for replace/import snapshots that must preserve YAML key presence. Buy/entry report source field remains `pattern`.
+**Type consistency:** The field name is consistently `entry_pattern` in SQL, Python dataclass/YAML, TypeScript record/snapshot/mutation types, form state, and docs. TypeScript uses required nullable `entry_pattern` for DB/current holdings and an optional key only for replace/import snapshots that must preserve YAML key presence. Buy/entry report source field remains `pattern`, and allowed values are the exact current buy pattern IDs: `trend_pullback_bounce`, `swing_high_breakout`, and `rsi_oversold_reversal`.
 
-**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering, active `sell.yml` and `ai-brief.yml` export coverage, fail-closed Python/web/RPC `entry_pattern` parsing, shared PostgREST holdings select coverage, YAML omitted-vs-null and blank-clear diff/apply behavior, Add Buy preservation and marker-input rejection without request-surface expansion, server-action and client form save pass-through, fixture commit completeness, stale recent-candidate marker clearing, architecture docs, and table metadata wrapping.
+**Review hardening:** The plan now explicitly guards migration-before-any-runtime deployment ordering, active `sell.yml` and `ai-brief.yml` export coverage, local Docker scheduler docs, fail-closed Python/web/RPC `entry_pattern` parsing with allowed-value checks, exact hybrid sell semantics for structured pattern fields, shared PostgREST holdings select coverage, YAML omitted-vs-null and blank-clear diff/apply behavior, explicit `entry_pattern: null` YAML exports, Add Buy preservation and marker-input rejection without request-surface expansion, server-action and client form save pass-through, fixture commit completeness, stale recent-candidate marker clearing, import confirmation copy, architecture docs, and table metadata wrapping.
