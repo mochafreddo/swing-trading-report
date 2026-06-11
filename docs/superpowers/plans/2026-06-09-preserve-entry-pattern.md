@@ -1,4 +1,4 @@
-상태: Draft
+상태: Backlog
 
 # Preserve Entry Pattern Implementation Plan
 
