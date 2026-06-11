@@ -169,10 +169,13 @@ jobs:
           set -euo pipefail
           mkdir -p reports
 
+          set +e
           uv run -m sab scan \
             --provider "${{ steps.params.outputs.provider }}" \
             --markets "${{ steps.params.outputs.markets }}" \
             --universe "${{ steps.params.outputs.scan_universe_flag }}" 2>&1 | tee scan.log
+          scan_status=${PIPESTATUS[0]}
+          set -e
 
           report_path="$(sed -n 's/.*Buy report written to: //p' scan.log | tail -n 1 | tr -d '\r')"
           if [[ -z "${report_path}" ]]; then
@@ -195,6 +198,17 @@ jobs:
           fi
 
           uploaded_key="$(sed -n 's/.*Buy report uploaded to Supabase: //p' scan.log | tail -n 1 | tr -d '\r')"
+
+          allow_empty_scan="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            if grep -Fq "No tickers provided (watchlist empty or missing)" scan.log; then
+              allow_empty_scan="true"
+              echo "Scheduled scan produced no tickers; continuing with empty buy report."
+            fi
+          fi
+          if [[ "${scan_status}" -ne 0 && "${allow_empty_scan}" != "true" ]]; then
+            exit "${scan_status}"
+          fi
 
           {
             echo "report_path=${report_path}"

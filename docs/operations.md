@@ -106,7 +106,7 @@ NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자,
 
 | Workflow | Normal Signal | Failure Start Point |
 | --- | --- | --- |
-| `scan.yml` | report uploaded and indexed | KIS credentials, provider availability, upload step |
+| `scan.yml` | report uploaded and indexed; scheduled empty-universe reports require issue review | KIS credentials, provider availability, upload step, report `system_issues` |
 | `sell.yml` | Supabase holdings snapshot then sell report | holdings query, KIS/pykrx provider, upload step |
 | `ai-brief.yml` | manual or scheduled artifact/skip marker | context resolve, runtime_state lock, source/model provider |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |

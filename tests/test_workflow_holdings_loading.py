@@ -24,6 +24,12 @@ def _has_step(steps: list[dict[str, Any]], name: str) -> bool:
     return any(step.get("name") == name for step in steps)
 
 
+def _script_index(script: str, needle: str) -> int:
+    index = script.find(needle)
+    assert index >= 0, f"Script fragment not found: {needle}"
+    return index
+
+
 def test_scan_workflow_does_not_load_holdings_from_supabase() -> None:
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]
@@ -42,6 +48,57 @@ def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
     run_script = str(ensure_step.get("run") or "")
     assert "watchlist.txt" in run_script
     assert ": > watchlist.txt" in run_script
+
+
+def test_scan_workflow_allows_empty_scheduled_scan_only() -> None:
+    workflow = _load_workflow(".github/workflows/scan.yml")
+    steps = workflow["jobs"]["scan"]["steps"]
+
+    run_scan_step = _find_step_by_name(steps, "Run scan")
+    run_script = str(run_scan_step.get("run") or "")
+
+    run_scan_index = _script_index(run_script, "uv run -m sab scan")
+    scan_status_index = _script_index(run_script, "scan_status=${PIPESTATUS[0]}")
+    report_lookup_index = _script_index(
+        run_script,
+        "report_path=\"$(sed -n 's/.*Buy report written to: //p' scan.log",
+    )
+    missing_report_check_index = _script_index(
+        run_script,
+        'if [[ -z "${report_path}" || ! -f "${report_path}" ]]; then',
+    )
+    empty_scan_default_index = _script_index(
+        run_script,
+        'allow_empty_scan="false"',
+    )
+    scheduled_guard_index = _script_index(
+        run_script,
+        'if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then',
+    )
+    no_tickers_match_index = _script_index(
+        run_script,
+        '"No tickers provided (watchlist empty or missing)"',
+    )
+    allow_empty_index = _script_index(run_script, 'allow_empty_scan="true"')
+    failure_exit_index = _script_index(
+        run_script,
+        'if [[ "${scan_status}" -ne 0 && "${allow_empty_scan}" != "true" ]]; then',
+    )
+    output_index = _script_index(run_script, 'echo "report_path=${report_path}"')
+
+    assert (
+        run_scan_index
+        < scan_status_index
+        < report_lookup_index
+        < missing_report_check_index
+        < empty_scan_default_index
+        < scheduled_guard_index
+        < no_tickers_match_index
+        < allow_empty_index
+        < failure_exit_index
+        < output_index
+    )
+    assert _script_index(run_script, 'exit "${scan_status}"') > failure_exit_index
 
 
 def test_scan_workflow_sends_telegram_message_chunks() -> None:
