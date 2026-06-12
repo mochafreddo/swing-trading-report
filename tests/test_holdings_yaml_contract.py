@@ -6,6 +6,26 @@ import pytest
 from sab.holdings_loader import HoldingsLoadError, load_holdings
 
 
+def _write_single_holding_yaml(
+    tmp_path: Path,
+    *,
+    quantity: int = 1,
+    entry_price: int = 100,
+    entry_pattern_yaml: str = "",
+) -> Path:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        "holdings:\n"
+        "  - ticker: AAPL.NAS\n"
+        f"    quantity: {quantity}\n"
+        f"    entry_price: {entry_price}\n"
+        "    entry_currency: USD\n"
+        f"{entry_pattern_yaml}",
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_loader_accepts_export_style_holdings_yaml(tmp_path) -> None:
     path = tmp_path / "holdings.yaml"
     path.write_text(
@@ -53,15 +73,9 @@ def test_loader_accepts_export_style_holdings_yaml(tmp_path) -> None:
 def test_loader_accepts_nullable_entry_pattern_values(
     tmp_path: Path, entry_pattern_yaml: str, expected: str | None
 ) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 1\n"
-        "    entry_price: 100\n"
-        "    entry_currency: USD\n"
-        f"{entry_pattern_yaml}",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        entry_pattern_yaml=entry_pattern_yaml,
     )
 
     loaded = load_holdings(path.as_posix())
@@ -81,15 +95,9 @@ def test_loader_accepts_nullable_entry_pattern_values(
 def test_loader_rejects_non_string_entry_pattern(
     tmp_path: Path, entry_pattern_yaml: str
 ) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 1\n"
-        "    entry_price: 100\n"
-        "    entry_currency: USD\n"
-        f"{entry_pattern_yaml}",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        entry_pattern_yaml=entry_pattern_yaml,
     )
 
     with pytest.raises(HoldingsLoadError) as excinfo:
@@ -101,15 +109,9 @@ def test_loader_rejects_non_string_entry_pattern(
 
 
 def test_loader_rejects_overlong_entry_pattern(tmp_path: Path) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 1\n"
-        "    entry_price: 100\n"
-        "    entry_currency: USD\n"
-        f"    entry_pattern: {'x' * 121}\n",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        entry_pattern_yaml=f"    entry_pattern: {'x' * 121}\n",
     )
 
     with pytest.raises(HoldingsLoadError) as excinfo:
@@ -121,15 +123,9 @@ def test_loader_rejects_overlong_entry_pattern(tmp_path: Path) -> None:
 
 
 def test_loader_rejects_unknown_entry_pattern(tmp_path: Path) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 1\n"
-        "    entry_price: 100\n"
-        "    entry_currency: USD\n"
-        "    entry_pattern: not_a_breakout\n",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        entry_pattern_yaml="    entry_pattern: not_a_breakout\n",
     )
 
     with pytest.raises(HoldingsLoadError) as excinfo:
@@ -141,15 +137,10 @@ def test_loader_rejects_unknown_entry_pattern(tmp_path: Path) -> None:
 
 
 def test_loader_rejects_inactive_holding_entry_pattern(tmp_path: Path) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 0\n"
-        "    entry_price: 100\n"
-        "    entry_currency: USD\n"
-        "    entry_pattern: swing_high_breakout\n",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        quantity=0,
+        entry_pattern_yaml="    entry_pattern: swing_high_breakout\n",
     )
 
     with pytest.raises(HoldingsLoadError) as excinfo:
@@ -172,15 +163,11 @@ def test_loader_rejects_inactive_holding_entry_pattern(tmp_path: Path) -> None:
 def test_loader_accepts_empty_inactive_holding_entry_pattern(
     tmp_path: Path, entry_pattern_yaml: str
 ) -> None:
-    path = tmp_path / "holdings.yaml"
-    path.write_text(
-        "holdings:\n"
-        "  - ticker: AAPL.NAS\n"
-        "    quantity: 0\n"
-        "    entry_price: 0\n"
-        "    entry_currency: USD\n"
-        f"{entry_pattern_yaml}",
-        encoding="utf-8",
+    path = _write_single_holding_yaml(
+        tmp_path,
+        quantity=0,
+        entry_price=0,
+        entry_pattern_yaml=entry_pattern_yaml,
     )
 
     loaded = load_holdings(path.as_posix())

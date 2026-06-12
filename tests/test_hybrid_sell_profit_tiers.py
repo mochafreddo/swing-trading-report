@@ -85,6 +85,17 @@ def _patch_indicators(monkeypatch):
     )
 
 
+def _failed_breakout_settings() -> HybridSellSettings:
+    return HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+
+
 def _patch_indicator_series(
     monkeypatch,
     *,
@@ -963,14 +974,7 @@ def test_hybrid_sell_loss_between_min_and_max_sets_review(monkeypatch):
 
 def test_hybrid_sell_failed_breakout_accepts_entry_tags(monkeypatch):
     _patch_indicators(monkeypatch)
-    settings = HybridSellSettings(
-        min_bars=2,
-        ema_short_period=2,
-        ema_mid_period=2,
-        sma_trend_period=2,
-        stop_loss_pct_min=0.10,
-        stop_loss_pct_max=0.20,
-    )
+    settings = _failed_breakout_settings()
     holding = {"entry_price": 100.0, "tags": ["swing_high_breakout"]}
 
     result = evaluate_sell_signals_hybrid(
@@ -986,14 +990,7 @@ def test_hybrid_sell_failed_breakout_accepts_structured_pattern_field(
     monkeypatch, field_name: str
 ):
     _patch_indicators(monkeypatch)
-    settings = HybridSellSettings(
-        min_bars=2,
-        ema_short_period=2,
-        ema_mid_period=2,
-        sma_trend_period=2,
-        stop_loss_pct_min=0.10,
-        stop_loss_pct_max=0.20,
-    )
+    settings = _failed_breakout_settings()
     holding = {"entry_price": 100.0, field_name: "swing_high_breakout"}
 
     result = evaluate_sell_signals_hybrid(
@@ -1013,14 +1010,7 @@ def test_hybrid_sell_failed_breakout_ignores_non_breakout_structured_patterns(
     monkeypatch, field_name: str, pattern_value: str
 ):
     _patch_indicators(monkeypatch)
-    settings = HybridSellSettings(
-        min_bars=2,
-        ema_short_period=2,
-        ema_mid_period=2,
-        sma_trend_period=2,
-        stop_loss_pct_min=0.10,
-        stop_loss_pct_max=0.20,
-    )
+    settings = _failed_breakout_settings()
     holding = {"entry_price": 100.0, field_name: pattern_value}
 
     result = evaluate_sell_signals_hybrid(
@@ -1045,14 +1035,7 @@ def test_hybrid_sell_failed_breakout_ignores_malformed_structured_patterns(
     monkeypatch, field_name: str, pattern_value: object
 ):
     _patch_indicators(monkeypatch)
-    settings = HybridSellSettings(
-        min_bars=2,
-        ema_short_period=2,
-        ema_mid_period=2,
-        sma_trend_period=2,
-        stop_loss_pct_min=0.10,
-        stop_loss_pct_max=0.20,
-    )
+    settings = _failed_breakout_settings()
     holding = {"entry_price": 100.0, field_name: pattern_value}
 
     result = evaluate_sell_signals_hybrid(
@@ -1074,14 +1057,7 @@ def test_hybrid_sell_failed_breakout_keeps_legacy_substring_markers(
     monkeypatch, holding: dict[str, object]
 ):
     _patch_indicators(monkeypatch)
-    settings = HybridSellSettings(
-        min_bars=2,
-        ema_short_period=2,
-        ema_mid_period=2,
-        sma_trend_period=2,
-        stop_loss_pct_min=0.10,
-        stop_loss_pct_max=0.20,
-    )
+    settings = _failed_breakout_settings()
 
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(96.5), holding, settings
