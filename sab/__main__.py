@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 
 from .ai_brief import run_ai_brief
 from .entry import run_entry
@@ -14,6 +15,8 @@ from .observability import sanitize_log_text, structured_log_fields
 from .scan import run_scan
 from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
 from .sell import run_sell
+
+_CommandHandler = Callable[[argparse.Namespace], int]
 
 
 def _normalize_log_timezone(value: str | None) -> str:
@@ -293,69 +296,96 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _run_scan_command(ns: argparse.Namespace) -> int:
+    return run_scan(
+        limit=ns.limit,
+        watchlist_path=ns.watchlist,
+        provider=ns.provider,
+        screener_limit=ns.screener_limit,
+        universe=ns.universe,
+        markets=ns.markets,
+    )
+
+
+def _run_sell_command(ns: argparse.Namespace) -> int:
+    return run_sell(provider=ns.provider, holdings_path=ns.holdings)
+
+
+def _run_entry_command(ns: argparse.Namespace) -> int:
+    return run_entry(
+        buy_report_path=ns.buy_report,
+        provider=ns.provider,
+        mode=ns.mode,
+        market=ns.market,
+        upload=ns.upload,
+    )
+
+
+def _run_ai_brief_command(ns: argparse.Namespace) -> int:
+    return run_ai_brief(
+        entry_report_path=ns.entry_report,
+        buy_report_path=ns.buy_report,
+        market=ns.market,
+        model_provider=ns.model_provider,
+        model_name=ns.model_name,
+        model_timeout_seconds=ns.model_timeout_seconds,
+        source_provider=ns.source_provider,
+        source_report_path=ns.source_report,
+        source_api_url=ns.source_api_url,
+        source_timeout_seconds=ns.source_timeout_seconds,
+        report_date=ns.report_date,
+        upload=ns.upload,
+    )
+
+
+def _scheduled_ai_brief_request_from_args(
+    ns: argparse.Namespace,
+) -> ScheduledAiBriefRequest:
+    return ScheduledAiBriefRequest(
+        market=ns.market,
+        schedule_role=ns.schedule_role,
+        runner_role=ns.runner_role,
+        scheduled_tick=ns.scheduled_tick,
+        attempt_id=ns.attempt_id,
+        dry_run=ns.dry_run,
+        run_url=ns.run_url,
+        source_provider=ns.source_provider,
+        model_provider=ns.model_provider,
+    )
+
+
+def _run_scheduled_ai_brief_command(ns: argparse.Namespace) -> int:
+    return run_scheduled_ai_brief(
+        request=_scheduled_ai_brief_request_from_args(ns),
+        guard_only=ns.guard_only,
+    )
+
+
+def _dispatch_command(
+    ns: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> int:
+    handlers: dict[str, _CommandHandler] = {
+        "scan": _run_scan_command,
+        "sell": _run_sell_command,
+        "entry": _run_entry_command,
+        "ai-brief": _run_ai_brief_command,
+        "ai-brief-scheduled": _run_scheduled_ai_brief_command,
+    }
+    handler = handlers.get(ns.cmd)
+    if handler is None:
+        parser.print_help()
+        return 2
+    return handler(ns)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     load_dotenv_if_available(override=False)
     _configure_logging()
     parser = _build_parser()
     ns = parser.parse_args(argv)
-
-    if ns.cmd == "scan":
-        return run_scan(
-            limit=ns.limit,
-            watchlist_path=ns.watchlist,
-            provider=ns.provider,
-            screener_limit=ns.screener_limit,
-            universe=ns.universe,
-            markets=ns.markets,
-        )
-
-    if ns.cmd == "sell":
-        return run_sell(provider=ns.provider, holdings_path=ns.holdings)
-
-    if ns.cmd == "entry":
-        return run_entry(
-            buy_report_path=ns.buy_report,
-            provider=ns.provider,
-            mode=ns.mode,
-            market=ns.market,
-            upload=ns.upload,
-        )
-
-    if ns.cmd == "ai-brief":
-        return run_ai_brief(
-            entry_report_path=ns.entry_report,
-            buy_report_path=ns.buy_report,
-            market=ns.market,
-            model_provider=ns.model_provider,
-            model_name=ns.model_name,
-            model_timeout_seconds=ns.model_timeout_seconds,
-            source_provider=ns.source_provider,
-            source_report_path=ns.source_report,
-            source_api_url=ns.source_api_url,
-            source_timeout_seconds=ns.source_timeout_seconds,
-            report_date=ns.report_date,
-            upload=ns.upload,
-        )
-
-    if ns.cmd == "ai-brief-scheduled":
-        return run_scheduled_ai_brief(
-            request=ScheduledAiBriefRequest(
-                market=ns.market,
-                schedule_role=ns.schedule_role,
-                runner_role=ns.runner_role,
-                scheduled_tick=ns.scheduled_tick,
-                attempt_id=ns.attempt_id,
-                dry_run=ns.dry_run,
-                run_url=ns.run_url,
-                source_provider=ns.source_provider,
-                model_provider=ns.model_provider,
-            ),
-            guard_only=ns.guard_only,
-        )
-
-    parser.print_help()
-    return 2
+    return _dispatch_command(ns, parser)
 
 
 if __name__ == "__main__":  # pragma: no cover
