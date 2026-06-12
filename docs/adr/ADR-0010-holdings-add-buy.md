@@ -46,6 +46,12 @@ Holdings에 “추가매수(Add Buy)” 입력을 도입하며, 다음 정책을
   - 동일 키에 서로 다른 payload가 들어오면 `409` 충돌로 차단합니다.
   - DB 이벤트 테이블(`holdings_add_buy_events`)은 `request_fingerprint`를 저장하고, 처리 완료 이벤트 및 장기 미처리 이벤트는 별도 cleanup 스케줄 작업으로 90일 보존 후 배치 정리합니다.
 
+8. **2026-06 Phase A superseding note: `entry_pattern` active-position metadata**
+  - Add Buy는 계속 quantity-only RPC입니다. `p_entry_pattern`을 받지 않고, buy/entry report `pattern`을 추론하지 않습니다.
+  - 기존 active holding(`quantity > 0`)의 `entry_pattern`은 scale-in/continuation으로 보고 보존합니다.
+  - 비활성 holding(`quantity = 0`)을 재활성화할 때는 이전에 닫힌 포지션 marker가 새 포지션에 붙지 않도록 `entry_pattern`을 `null`로 둡니다.
+  - broader holdings invariant는 inactive row의 `entry_pattern`을 `null`로 저장하는 것입니다. RPC가 `setof public.holdings`를 반환하므로 DB migration 이후 Add Buy 응답에는 nullable `entry_pattern` 필드가 포함될 수 있습니다.
+
 ### 결과/영향
 
 - 장점

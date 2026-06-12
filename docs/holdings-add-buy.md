@@ -189,6 +189,13 @@ Request:
 
 Response: 기존 `HoldingRecord`(갱신된 row) 반환.
 
+Phase A `entry_pattern` DB 계약 이후:
+
+- Add Buy는 계속 수량, 평단, 진입일, 통화만 갱신하며 `entry_pattern` 입력을 받거나 추론하지 않습니다.
+- 활성 holding(`quantity > 0`)에 대한 Add Buy는 기존 active-position `entry_pattern`을 보존합니다.
+- 비활성 holding(`quantity = 0`)을 Add Buy로 재활성화할 때는 닫힌 포지션의 stale marker가 새 포지션으로 넘어가지 않도록 `entry_pattern`을 `null`로 둡니다.
+- RPC가 `setof public.holdings`를 반환하므로 DB migration 이후 응답 row에는 nullable `entry_pattern` 필드가 포함될 수 있습니다.
+
 Header:
 
 - `Idempotency-Key: <uuid>`
