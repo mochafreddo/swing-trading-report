@@ -1,7 +1,13 @@
 import "server-only";
 
 import { getSupabaseEnv } from "@/lib/env.server";
-import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
+import {
+  collectTickerAliases,
+  extractBuyCandidatesFromRows,
+  normalizeCandidateName,
+  normalizeCandidateTicker,
+  type TickerDirectoryCandidate,
+} from "@/lib/ticker-directory-candidates";
 import {
   downloadStorageJson,
   fetchReportIndexPage,
@@ -18,10 +24,7 @@ const DIRECTORY_BUILD_REPORT_LIMIT = 60;
 const REPORT_PAGE_SIZE = 20;
 const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
 
-export interface TickerDirectoryCandidate {
-  ticker: string;
-  name: string | null;
-}
+export type { TickerDirectoryCandidate } from "@/lib/ticker-directory-candidates";
 
 interface TickerDirectoryEntryV1 {
   ticker: string;
@@ -91,52 +94,6 @@ function normalizeSearchText(value: string): string {
   const normalized = value.trim().toUpperCase().normalize("NFKC");
   const compact = normalized.replace(/[^\p{L}\p{N}]+/gu, "");
   return compact || normalized;
-}
-
-function toCleanString(value: unknown): string {
-  if (typeof value !== "string") {
-    return "";
-  }
-  return value.trim();
-}
-
-function normalizeCandidateTicker(value: unknown): string {
-  const raw = toCleanString(value).toUpperCase();
-  if (!raw) {
-    return "";
-  }
-  return normalizeHoldingTickerForMutation(raw);
-}
-
-function normalizeCandidateName(value: unknown): string | null {
-  const text = toCleanString(value);
-  return text ? text : null;
-}
-
-function collectTickerAliases(ticker: string, name: string | null): string[] {
-  const aliases = new Set<string>();
-  const upperTicker = ticker.toUpperCase();
-  aliases.add(upperTicker);
-
-  const lastDotIndex = upperTicker.lastIndexOf(".");
-  if (lastDotIndex > 0) {
-    const symbol = upperTicker.slice(0, lastDotIndex);
-    const suffix = upperTicker.slice(lastDotIndex + 1);
-    aliases.add(symbol);
-
-    const classMatch = symbol.match(/^([A-Z][A-Z0-9]*)\.([ABC])$/);
-    if (classMatch) {
-      aliases.add(`${classMatch[1]}/${classMatch[2]}`);
-      aliases.add(`${classMatch[1]}/${classMatch[2]}.${suffix}`);
-    }
-  }
-
-  if (name) {
-    aliases.add(name);
-    aliases.add(name.replace(/\s+/g, ""));
-  }
-
-  return Array.from(aliases);
 }
 
 function parseTickerDirectoryPayload(
@@ -530,24 +487,7 @@ export function extractBuyCandidatesFromReport(
   report: Record<string, unknown>,
 ): TickerDirectoryCandidate[] {
   const rows = Array.isArray(report.candidates) ? report.candidates : [];
-  const seen = new Set<string>();
-  const results: TickerDirectoryCandidate[] = [];
-  for (const row of rows) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) {
-      continue;
-    }
-    const raw = row as { ticker?: unknown; name?: unknown };
-    const ticker = normalizeCandidateTicker(raw.ticker);
-    if (!ticker || seen.has(ticker)) {
-      continue;
-    }
-    seen.add(ticker);
-    results.push({
-      ticker,
-      name: normalizeCandidateName(raw.name),
-    });
-  }
-  return results;
+  return extractBuyCandidatesFromRows(rows);
 }
 
 export async function searchTickerDirectory(
