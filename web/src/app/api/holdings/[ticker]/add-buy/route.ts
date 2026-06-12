@@ -11,12 +11,16 @@ import {
   type ApiLogFields,
 } from "@/lib/api-request-log";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
-import { toErrorMessage } from "@/lib/error-utils";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingAddBuySchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
+import {
+  holdingsDependency,
+  holdingsJsonError,
+  holdingsStatusCode,
+} from "../../holding-api-errors";
 import {
   parseHoldingTickerRouteParam,
   type SingleTickerRouteContext,
@@ -69,6 +73,23 @@ function logRejectedAddBuy(
     duration_ms: elapsedMs(startedAtMs),
     ...fields,
   });
+}
+
+function addBuyJsonError(error: unknown): NextResponse {
+  if (
+    error instanceof SupabaseApiError &&
+    error.status === 409 &&
+    error.code === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
+  ) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
+      },
+      { status: error.status },
+    );
+  }
+  return holdingsJsonError(error);
 }
 
 export async function POST(
@@ -182,7 +203,7 @@ export async function POST(
     });
     return withApiRequestId(response, requestId);
   } catch (error) {
-    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    const statusCode = holdingsStatusCode(error);
     logApiError(error, {
       event: "web_api_request_failed",
       request_id: requestId,
@@ -191,36 +212,12 @@ export async function POST(
       operation: OPERATION,
       status: "failed",
       status_code: statusCode,
-      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      dependency: holdingsDependency(error),
       duration_ms: elapsedMs(startedAtMs),
       retryable: statusCode >= 500,
       ticker_count: 1,
       idempotency_key_present: true,
     });
-    if (error instanceof SupabaseApiError) {
-      if (
-        error.status === 409 &&
-        error.code === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
-      ) {
-        return withApiRequestId(
-          NextResponse.json(
-            {
-              error: error.message,
-              code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
-            },
-            { status: error.status },
-          ),
-          requestId,
-        );
-      }
-      return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
-        requestId,
-      );
-    }
-    return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
-      requestId,
-    );
+    return withApiRequestId(addBuyJsonError(error), requestId);
   }
 }

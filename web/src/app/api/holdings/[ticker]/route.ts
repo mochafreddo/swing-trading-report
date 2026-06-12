@@ -10,15 +10,15 @@ import {
   withApiRequestId,
   type ApiLogFields,
 } from "@/lib/api-request-log";
-import { toErrorMessage } from "@/lib/error-utils";
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { holdingPatchSchema } from "@/lib/schemas";
-import {
-  deleteHolding,
-  SupabaseApiError,
-  updateHolding,
-} from "@/lib/supabase-admin";
+import { deleteHolding, updateHolding } from "@/lib/supabase-admin";
 
+import {
+  holdingsDependency,
+  holdingsJsonError,
+  holdingsStatusCode,
+} from "../holding-api-errors";
 import {
   parseHoldingTickerRouteParam,
   type SingleTickerRouteContext,
@@ -49,10 +49,6 @@ function logRejectedHoldingMutation(
     duration_ms: elapsedMs(startedAtMs),
     ...fields,
   });
-}
-
-function supabaseStatusCode(error: unknown): number {
-  return error instanceof SupabaseApiError ? error.status : 500;
 }
 
 export async function PATCH(
@@ -163,7 +159,7 @@ export async function PATCH(
     });
     return withApiRequestId(response, requestId);
   } catch (error) {
-    const statusCode = supabaseStatusCode(error);
+    const statusCode = holdingsStatusCode(error);
     logApiError(error, {
       event: "web_api_request_failed",
       request_id: requestId,
@@ -172,21 +168,12 @@ export async function PATCH(
       operation,
       status: "failed",
       status_code: statusCode,
-      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      dependency: holdingsDependency(error),
       duration_ms: elapsedMs(startedAtMs),
       retryable: statusCode >= 500,
       ticker_count: 1,
     });
-    if (error instanceof SupabaseApiError) {
-      return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
-        requestId,
-      );
-    }
-    return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
-      requestId,
-    );
+    return withApiRequestId(holdingsJsonError(error), requestId);
   }
 }
 
@@ -261,7 +248,7 @@ export async function DELETE(
     });
     return withApiRequestId(response, requestId);
   } catch (error) {
-    const statusCode = supabaseStatusCode(error);
+    const statusCode = holdingsStatusCode(error);
     logApiError(error, {
       event: "web_api_request_failed",
       request_id: requestId,
@@ -270,20 +257,11 @@ export async function DELETE(
       operation,
       status: "failed",
       status_code: statusCode,
-      dependency: error instanceof SupabaseApiError ? "supabase" : undefined,
+      dependency: holdingsDependency(error),
       duration_ms: elapsedMs(startedAtMs),
       retryable: statusCode >= 500,
       ticker_count: 1,
     });
-    if (error instanceof SupabaseApiError) {
-      return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
-        requestId,
-      );
-    }
-    return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
-      requestId,
-    );
+    return withApiRequestId(holdingsJsonError(error), requestId);
   }
 }

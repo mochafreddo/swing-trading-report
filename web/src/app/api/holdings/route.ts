@@ -10,7 +10,6 @@ import {
   withApiRequestId,
   type ApiLogFields,
 } from "@/lib/api-request-log";
-import { toErrorMessage } from "@/lib/error-utils";
 import {
   decodeHoldingCursor,
   HoldingCursorError,
@@ -22,6 +21,12 @@ import {
   fetchHoldingsPage,
   SupabaseApiError,
 } from "@/lib/supabase-admin";
+
+import {
+  holdingsDependency,
+  holdingsJsonError,
+  holdingsStatusCode,
+} from "./holding-api-errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,10 +54,6 @@ function logRejectedHoldingsRequest(
     duration_ms: elapsedMs(startedAtMs),
     ...fields,
   });
-}
-
-function holdingsFailureDependency(error: unknown): string | undefined {
-  return error instanceof SupabaseApiError ? "supabase" : undefined;
 }
 
 function holdingsRetryable(error: unknown, statusCode: number): boolean {
@@ -143,7 +144,7 @@ export async function GET(request: NextRequest) {
         requestId,
       );
     }
-    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    const statusCode = holdingsStatusCode(error);
     logApiError(error, {
       event: "web_api_request_failed",
       request_id: requestId,
@@ -152,21 +153,12 @@ export async function GET(request: NextRequest) {
       operation,
       status: "failed",
       status_code: statusCode,
-      dependency: holdingsFailureDependency(error),
+      dependency: holdingsDependency(error),
       duration_ms: elapsedMs(startedAtMs),
       retryable: holdingsRetryable(error, statusCode),
       limit: parsedQuery.data.limit,
     });
-    if (error instanceof SupabaseApiError) {
-      return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
-        requestId,
-      );
-    }
-    return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
-      requestId,
-    );
+    return withApiRequestId(holdingsJsonError(error), requestId);
   }
 }
 
@@ -240,7 +232,7 @@ export async function POST(request: NextRequest) {
     });
     return withApiRequestId(response, requestId);
   } catch (error) {
-    const statusCode = error instanceof SupabaseApiError ? error.status : 500;
+    const statusCode = holdingsStatusCode(error);
     logApiError(error, {
       event: "web_api_request_failed",
       request_id: requestId,
@@ -249,20 +241,10 @@ export async function POST(request: NextRequest) {
       operation,
       status: "failed",
       status_code: statusCode,
-      dependency: holdingsFailureDependency(error),
+      dependency: holdingsDependency(error),
       duration_ms: elapsedMs(startedAtMs),
       retryable: holdingsRetryable(error, statusCode),
     });
-    if (error instanceof SupabaseApiError) {
-      return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
-        requestId,
-      );
-    }
-
-    return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
-      requestId,
-    );
+    return withApiRequestId(holdingsJsonError(error), requestId);
   }
 }
