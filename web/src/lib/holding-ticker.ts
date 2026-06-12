@@ -66,6 +66,20 @@ export function normalizeHoldingTickerForMutation(ticker: string): string {
   return `${parts.base}.${parts.suffix}`;
 }
 
+export function parseHoldingTickerForMutation(ticker: string): string | null {
+  const normalized = ticker.trim().toUpperCase();
+  if (normalized.length < 1 || normalized.length > 32) {
+    return null;
+  }
+  if (
+    !KR_TICKER_PATTERN.test(normalized) &&
+    !US_TICKER_PATTERN.test(normalized)
+  ) {
+    return null;
+  }
+  return normalizeHoldingTickerForMutation(normalized);
+}
+
 export function buildHoldingTickerAliases(ticker: string): string[] {
   const canonical = normalizeHoldingTickerForMutation(ticker);
   const aliases = [canonical];

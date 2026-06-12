@@ -12,22 +12,22 @@ import {
 } from "@/lib/api-request-log";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { toErrorMessage } from "@/lib/error-utils";
-import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import { parseJsonBody } from "@/lib/parse-json-body";
-import { holdingAddBuySchema, holdingTickerSchema } from "@/lib/schemas";
+import { holdingAddBuySchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
-export const runtime = "nodejs";
-
-type RouteContext = {
-  params: { ticker: string } | Promise<{ ticker: string }>;
-};
+import {
+  parseHoldingTickerRouteParam,
+  type SingleTickerRouteContext,
+} from "../../ticker-route-params";
 
 type ParsedIdempotencyKeyHeader = {
   key: string | null;
   invalid: boolean;
 };
+
+export const runtime = "nodejs";
 
 const ROUTE = "/api/holdings/[ticker]/add-buy";
 const METHOD = "POST";
@@ -48,18 +48,6 @@ function parseIdempotencyKeyHeader(
     return { key: null, invalid: true };
   }
   return { key, invalid: false };
-}
-
-function parseTickerParam(rawTicker: string): string | null {
-  const candidate = (() => {
-    try {
-      return decodeURIComponent(rawTicker);
-    } catch {
-      return rawTicker;
-    }
-  })();
-  const parsed = holdingTickerSchema.safeParse(candidate);
-  return parsed.success ? normalizeHoldingTickerForMutation(parsed.data) : null;
 }
 
 function logRejectedAddBuy(
@@ -83,7 +71,10 @@ function logRejectedAddBuy(
   });
 }
 
-export async function POST(request: NextRequest, context: RouteContext) {
+export async function POST(
+  request: NextRequest,
+  context: SingleTickerRouteContext,
+) {
   const requestId = getApiRequestId(request);
   const startedAtMs = Date.now();
 
@@ -94,7 +85,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const ticker = parseTickerParam(params.ticker);
+  const ticker = parseHoldingTickerRouteParam(params.ticker);
   if (!ticker) {
     logRejectedAddBuy(requestId, startedAtMs, 400, "invalid_ticker");
     return withApiRequestId(

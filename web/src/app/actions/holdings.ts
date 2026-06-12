@@ -3,13 +3,12 @@
 import { requireAdminActionSession } from "@/lib/admin-action-auth";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { toErrorMessage } from "@/lib/error-utils";
-import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
+import { parseHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import {
   holdingAddBuySchema,
   holdingCreateSchema,
   holdingPatchSchema,
-  holdingTickerSchema,
 } from "@/lib/schemas";
 import {
   addBuyToHolding,
@@ -40,11 +39,6 @@ export interface AddBuyToHoldingActionInput {
   payload: unknown;
 }
 
-function parseTicker(ticker: string): string | null {
-  const parsed = holdingTickerSchema.safeParse(ticker);
-  return parsed.success ? normalizeHoldingTickerForMutation(parsed.data) : null;
-}
-
 function toUnknownError(error: unknown): HoldingsActionResult {
   return {
     ok: false,
@@ -62,7 +56,7 @@ export async function saveHoldingAction(
   }
 
   if (input.editingTicker) {
-    const ticker = parseTicker(input.editingTicker);
+    const ticker = parseHoldingTickerForMutation(input.editingTicker);
     if (!ticker) {
       return { ok: false, error: "Invalid ticker" };
     }
@@ -111,7 +105,7 @@ export async function deleteHoldingAction(
     return toUnknownError(error);
   }
 
-  const ticker = parseTicker(tickerInput);
+  const ticker = parseHoldingTickerForMutation(tickerInput);
   if (!ticker) {
     return { ok: false, error: "Invalid ticker" };
   }
@@ -139,7 +133,7 @@ export async function addBuyToHoldingAction(
     return toUnknownError(error);
   }
 
-  const ticker = parseTicker(input.ticker);
+  const ticker = parseHoldingTickerForMutation(input.ticker);
   if (!ticker) {
     return { ok: false, error: "Invalid ticker" };
   }

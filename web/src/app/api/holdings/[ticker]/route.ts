@@ -11,34 +11,22 @@ import {
   type ApiLogFields,
 } from "@/lib/api-request-log";
 import { toErrorMessage } from "@/lib/error-utils";
-import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import { parseJsonBody } from "@/lib/parse-json-body";
-import { holdingPatchSchema, holdingTickerSchema } from "@/lib/schemas";
+import { holdingPatchSchema } from "@/lib/schemas";
 import {
   deleteHolding,
   SupabaseApiError,
   updateHolding,
 } from "@/lib/supabase-admin";
 
+import {
+  parseHoldingTickerRouteParam,
+  type SingleTickerRouteContext,
+} from "../ticker-route-params";
+
 export const runtime = "nodejs";
 
-type RouteContext = {
-  params: { ticker: string } | Promise<{ ticker: string }>;
-};
-
 const ROUTE = "/api/holdings/[ticker]";
-
-function parseTickerParam(rawTicker: string): string | null {
-  const candidate = (() => {
-    try {
-      return decodeURIComponent(rawTicker);
-    } catch {
-      return rawTicker;
-    }
-  })();
-  const parsed = holdingTickerSchema.safeParse(candidate);
-  return parsed.success ? normalizeHoldingTickerForMutation(parsed.data) : null;
-}
 
 function logRejectedHoldingMutation(
   requestId: string,
@@ -67,7 +55,10 @@ function supabaseStatusCode(error: unknown): number {
   return error instanceof SupabaseApiError ? error.status : 500;
 }
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export async function PATCH(
+  request: NextRequest,
+  context: SingleTickerRouteContext,
+) {
   const requestId = getApiRequestId(request);
   const startedAtMs = Date.now();
   const method = "PATCH";
@@ -87,7 +78,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const ticker = parseTickerParam(params.ticker);
+  const ticker = parseHoldingTickerRouteParam(params.ticker);
   if (!ticker) {
     logRejectedHoldingMutation(
       requestId,
@@ -199,7 +190,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export async function DELETE(
+  request: NextRequest,
+  context: SingleTickerRouteContext,
+) {
   const requestId = getApiRequestId(request);
   const startedAtMs = Date.now();
   const method = "DELETE";
@@ -219,7 +213,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   const params = await context.params;
-  const ticker = parseTickerParam(params.ticker);
+  const ticker = parseHoldingTickerRouteParam(params.ticker);
   if (!ticker) {
     logRejectedHoldingMutation(
       requestId,

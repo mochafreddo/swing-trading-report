@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHoldingTickerAliases,
   normalizeHoldingTickerForMutation,
+  parseHoldingTickerForMutation,
   US_TICKER_PATTERN,
 } from "@/lib/holding-ticker";
 
@@ -36,6 +37,15 @@ describe("holding ticker helpers", () => {
 
   it("normalizes US suffix synonym to canonical exchange", () => {
     expect(normalizeHoldingTickerForMutation("aapl.nasdaq")).toBe("AAPL.NAS");
+  });
+
+  it("parses valid mutation tickers to canonical values", () => {
+    expect(parseHoldingTickerForMutation(" brk/b.nyse ")).toBe("BRK.B.NYS");
+  });
+
+  it("rejects invalid mutation tickers", () => {
+    expect(parseHoldingTickerForMutation("AAPL.US")).toBeNull();
+    expect(parseHoldingTickerForMutation("")).toBeNull();
   });
 
   it("does not normalize multi-dot base ticker", () => {
