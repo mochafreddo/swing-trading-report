@@ -1145,6 +1145,16 @@ jobs:
             ai-brief.telegram.txt
           if-no-files-found: error
 
+      - name: Evaluate AI brief quality
+        if: success() && (github.event_name != 'schedule' || steps.schedule_guard.outputs.should_run == 'true')
+        run: |
+          set -euo pipefail
+          uv run python scripts/eval_ai_brief_recommendations.py \
+            --entry-report "${{ steps.run_entry.outputs.entry_report_path }}" \
+            --ai-brief-report "${{ steps.run_ai_brief.outputs.ai_brief_report_path }}" \
+            --market "${{ steps.params.outputs.market }}" \
+            --pretty
+
       - name: Send Telegram notification
         if: success() && (github.event_name != 'schedule' || steps.schedule_guard.outputs.should_run == 'true') && steps.params.outputs.send_notifications == 'true'
         continue-on-error: true

@@ -667,6 +667,41 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     ) in text
 
 
+def test_build_ai_brief_telegram_report_text_includes_vetoed_candidates() -> None:
+    report = {
+        "generated_at": "2026-05-20T02:19:26+00:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-5.4-mini",
+        "summary": {
+            "preselected_count": 2,
+            "recommendation_count": 0,
+            "vetoed_count": 1,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": ["AXTI.NAS", "WELL.NYS"],
+        "recommendations": [],
+        "vetoed_candidates": [
+            {
+                "ticker": "AXTI.NAS",
+                "action": "SKIP",
+                "reason": "earnings event risk blocks the setup",
+            }
+        ],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "AI 판단 제외 1건" in text
+    assert "AXTI.NAS | SKIP | earnings event risk blocks the setup" in text
+
+
 def test_build_ai_brief_telegram_report_text_limits_eligible_ticker_preview() -> None:
     report = {
         "generated_at": "2026-05-20T02:19:26+00:00",
@@ -779,6 +814,7 @@ def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
         "summary": {
             "preselected_count": 5,
             "recommendation_count": 3,
+            "vetoed_count": 0,
             "source_issue_count": 1,
             "system_issue_count": 0,
         },
@@ -805,6 +841,7 @@ def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
         "brief_reason=weak_news_coverage",
         "preselected_count=5",
         "recommendation_count=3",
+        "vetoed_count=0",
         "source_issue_count=1",
         "system_issue_count=0",
         "storage_key=2026/05/2026-05-05.ai-brief.json",
@@ -818,6 +855,7 @@ def test_build_ai_brief_slack_summary_text_falls_back_to_top_level_counts() -> N
         "market": "KR",
         "preselected_count": "4",
         "recommendation_count": "2",
+        "vetoed_count": "0",
         "source_issue_count": "1",
         "system_issue_count": "3",
         "recommendations": [],
@@ -842,10 +880,46 @@ def test_build_ai_brief_slack_summary_text_falls_back_to_top_level_counts() -> N
         "brief_reason=model_or_system_issue",
         "preselected_count=4",
         "recommendation_count=2",
+        "vetoed_count=0",
         "source_issue_count=1",
         "system_issue_count=3",
         "run_url=https://github.com/mocha/swing-trading-report/actions/runs/793",
     ]
+
+
+def test_build_ai_brief_slack_summary_text_counts_vetoed_candidates() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "preselected_count": 1,
+            "recommendation_count": 0,
+            "vetoed_count": 1,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": ["AAPL.NAS"],
+        "recommendations": [],
+        "vetoed_candidates": [
+            {
+                "ticker": "AAPL.NAS",
+                "action": "SKIP",
+                "reason": "headline risk",
+            }
+        ],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_slack_summary_text(
+        report=report,
+        repo="mocha/swing-trading-report",
+        run_url="https://github.com/mocha/swing-trading-report/actions/runs/793",
+    )
+
+    assert "vetoed_count=1" in text
 
 
 def test_build_ai_brief_skipped_telegram_text_explains_delayed_preopen() -> None:

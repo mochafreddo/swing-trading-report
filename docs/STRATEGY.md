@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-09
+최종 확인: 2026-06-13
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -485,7 +485,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `REVIEW`/`SKIP` 행은 추천으로 승격하지 않고 `excluded_candidates[]`에 남깁니다.
 - provider 호출 전 후보는 최대 5개로 제한하며, 최종 `recommendations[]`는 최대 3개입니다.
 - `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
-- `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `REVIEW`/`SKIP` 승격, 자동 주문/체결 언어를 허용하지 않습니다.
+- `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `REVIEW`/`SKIP` 승격, 한국어/영어 자동 주문·체결 언어를 허용하지 않습니다.
 - `local-json` source provider는 로컬 source report를 후보 context로 붙일 수 있지만, entry report의 후보 universe를 확장하지 않습니다.
 - `http-json` source provider는 HTTPS 외부 source API에 eligible ticker 목록을 POST하고, 응답 `sources[]`를 같은 source row 계약으로 정규화합니다. Source API fetch는 HTTPS/local-private/redirect/body-size 제한을 적용하고, 반환 row URL은 syntax/local-private/DNS 검증을 통과해야 합니다. 반환 ticker가 후보 universe 밖이거나 stale/future-time/invalid URL/cap 초과이면 모델 입력에서 제외하고 `source_issues[]`로 남깁니다.
 - `finnhub` source provider는 `FINNHUB_API_KEY`로 Finnhub Company News를 호출하는 US-only vendor adapter입니다. Repo ticker는 `AAPL.NAS`→`AAPL`, `BRK.B.NYS`→`BRK.B`처럼 Finnhub symbol로 변환하고, KR ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환된 `headline`/`url`/Unix `datetime`은 기존 source row 계약으로 정규화되며, freshness/future-time/duplicate/cap/URL safety/DNS 검증을 통과한 row만 모델 입력에 들어갑니다.
@@ -496,12 +496,14 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - `naver-news` source provider는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 Naver Search API 뉴스 endpoint(`https://openapi.naver.com/v1/search/news.json`)를 호출하는 KR-only vendor adapter입니다. Repo ticker는 buy report 회사명을 검색어로 우선 사용하고, 없으면 6자리 ticker를 사용하며, `display=10`, `start=1`, `sort=date`로 요청합니다. US ticker는 요청하지 않고 `source_issues[]` WARN으로 남깁니다. 반환된 `title`(HTML 제거), `originallink` 또는 `link`, `pubDate`는 기존 source row 계약으로 정규화되며, freshness/future-time/duplicate/cap/URL safety/DNS 검증을 통과한 row만 모델 입력에 들어갑니다.
 - AI Brief source URL은 HTTP(S)와 hostname이 필요하며, whitespace/control char, userinfo, literal local/private IP, localhost를 허용하지 않습니다. Offline `local-json`/source eval 경로는 DNS를 조회하지 않고, live/http 경로에서만 hostname DNS 검증을 수행합니다. `published_at`은 offset 포함 ISO 8601이어야 하고 72시간 freshness 및 15분 future skew 정책을 통과해야 합니다.
 - RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL은 `scripts/collect_ai_brief_sources.py`로 `sab.ai_brief_sources.v1` payload를 생성한 뒤 `local-json` 주입이나 source eval에 사용할 수 있습니다. 로컬 feed 파일은 offline으로 처리하고, live feed URL은 HTTPS/local-private/redirect/body-size 제한과 live item URL DNS 검증을 통과해야 합니다. fetch/timeout/invalid feed 실패는 collector top-level `issues[]` WARN으로 남습니다. collector의 top-level `issues[]` 중 eligible ticker에 속한 항목은 `local-json` provider 주입 시 `source_issues[]`로 보존되며, source eval은 같은 diagnostics를 eval 결과의 `issues[]`로 보고합니다.
-- OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있습니다.
+- OpenAI provider는 candidate에 주입된 source URL만 cite할 수 있으며, `recommendations[].rank`는 배열 순서대로 `1..N` 연속값이어야 합니다.
+- OpenAI가 추천하지 않기로 판단한 후보는 `vetoed_candidates[]`에 남기며, 알림과 웹 상세 화면에서 추천과 별도로 표시합니다.
+- `summary`는 `recommendation_count`와 별도로 `vetoed_count`, `excluded_count`, `cap_excluded_count`를 기록해 추천/제외/모델 보류 후보를 분리해 검증할 수 있어야 합니다.
 - OpenAI provider timeout/요청 실패/출력 계약 실패는 추천을 비우고 `system_issues[]`로 남깁니다.
 - source provider timeout/HTTP/JSON 실패는 추천 생성을 중단하지 않고 `system_issues[]`로 남기며, 추천에 소스가 없으면 ticker별 `source_issues[]`로 disclose해야 합니다.
 - 새로 작성되는 `sab.ai_brief.v1` artifact는 top-level `brief_state`와 `brief_reason`을 항상 포함합니다. `NO_SIGNAL/no_enter_candidates`는 장전 ENTER 후보가 없는 날이며, `FINAL_JUDGMENT/source_backed_final`은 표시 추천이 모두 source-backed이고 source/system issue가 없는 최종 판단입니다.
 - 그 외 후보가 있었지만 뉴스 근거가 약하거나 모델/source/system 문제가 있으면 `NEEDS_REVIEW_WEAK_NEWS`로 낮춰 표시합니다. reason은 `model_or_system_issue`, `weak_news_coverage`, `model_deferred` 중 하나이며 런타임 AI가 아니라 artifact count, recommendation source, issue 배열로만 결정합니다.
-- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. eligible/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다.
+- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. eligible/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다. 수동 GitHub workflow와 scheduled runner는 이 평가가 `FAIL`이면 알림 전송/성공 처리를 중단합니다.
 - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
 - mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 

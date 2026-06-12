@@ -9,6 +9,7 @@ from ..ai_brief_eval_common import (
     ALLOWED_CONFIDENCE,
     ALLOWED_ISSUE_SEVERITY,
     ALLOWED_MARKETS,
+    contains_automated_order_language,
 )
 from ..ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
@@ -31,14 +32,6 @@ _REPORT_TYPE = "ai_brief"
 _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
-_AUTOMATED_ORDER_PHRASES = (
-    "buy now",
-    "execute order",
-    "place order",
-    "submit order",
-    "automatic order",
-    "automated order",
-)
 
 
 class AiBriefValidationError(ValueError):
@@ -163,8 +156,8 @@ def _validate_recommendation_language(
         recommendation.get("checklist"),
         field_name=f"recommendations[{recommendation_index}].checklist",
     )
-    text = " ".join(str(item).lower() for item in fields)
-    if any(phrase in text for phrase in _AUTOMATED_ORDER_PHRASES):
+    text = " ".join(str(item) for item in fields)
+    if contains_automated_order_language(text):
         raise AiBriefValidationError(
             "recommendations[] must avoid automated-order language"
         )
@@ -188,6 +181,7 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
     }
     source_issue_tickers = _source_issue_tickers(payload)
     seen_ranks: set[int] = set()
+    ranks: list[int] = []
     for idx, raw_recommendation in enumerate(recommendations):
         recommendation = _require_mapping(
             raw_recommendation, field_name=f"recommendations[{idx}]"
@@ -200,6 +194,7 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
         if rank in seen_ranks:
             raise AiBriefValidationError("recommendations[].rank must be unique")
         seen_ranks.add(rank)
+        ranks.append(rank)
         ticker = str(recommendation.get("ticker") or "").strip()
         if not ticker:
             raise AiBriefValidationError(f"recommendations[{idx}].ticker is required")
@@ -237,6 +232,12 @@ def _validate_recommendations(payload: Mapping[str, Any], *, now: dt.datetime) -
             raise AiBriefValidationError(
                 "recommendations with no sources must have a source issue"
             )
+    expected_ranks = list(range(1, len(recommendations) + 1))
+    if ranks != expected_ranks:
+        raise AiBriefValidationError(
+            "recommendations[].rank must be contiguous from 1 to N in "
+            "recommendation order"
+        )
 
 
 def _eligible_tickers(payload: Mapping[str, Any]) -> set[str]:

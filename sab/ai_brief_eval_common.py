@@ -13,6 +13,25 @@ ALLOWED_MARKETS = frozenset({"KR", "US"})
 ALLOWED_ENTRY_REPORT_MARKETS = frozenset({"KR", "US", "MIXED"})
 ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
 ALLOWED_ISSUE_SEVERITY = frozenset({"INFO", "WARN", "ERROR"})
+AUTOMATED_ORDER_PHRASES = (
+    "buy now",
+    "execute order",
+    "place order",
+    "submit order",
+    "automatic order",
+    "automated order",
+    "지금 매수",
+    "즉시 매수",
+    "바로 매수",
+    "매수하세요",
+    "주문 실행",
+    "주문하세요",
+    "자동 매수",
+    "자동 주문",
+)
+AUTOMATED_ORDER_PROMPT_EXAMPLES = (
+    "buy now, execute order, place order, 지금 매수, or 주문 실행"
+)
 MARKET_OVERRIDE_INVALID_MESSAGE = "market must be KR or US"
 ENTRY_REPORT_MARKET_INVALID_MESSAGE = "entry report market must be KR, US, or MIXED"
 MIXED_ENTRY_REPORT_MARKET_REQUIRED_MESSAGE = (
@@ -87,6 +106,11 @@ def string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def contains_automated_order_language(value: str) -> bool:
+    text = value.lower()
+    return any(phrase in text for phrase in AUTOMATED_ORDER_PHRASES)
 
 
 def optional_text(value: object) -> str | None:

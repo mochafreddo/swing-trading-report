@@ -5963,6 +5963,129 @@ def test_run_ai_brief_openai_rejects_unprovided_source_url(
     assert "source url must be supplied" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_openai_rejects_non_contiguous_ranks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[_entry_row("AAPL.NAS"), _entry_row("MSFT.NAS")],
+    )
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [],
+                },
+                {
+                    "ticker": "MSFT.NAS",
+                    "rank": 3,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "sources": [],
+                },
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                },
+                {
+                    "ticker": "MSFT.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                },
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "contiguous" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_openai_rejects_korean_automated_order_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["지금 매수하고 주문 실행"],
+                    "sources": [],
+                }
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "automated-order" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_preserves_source_issues_when_openai_provider_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

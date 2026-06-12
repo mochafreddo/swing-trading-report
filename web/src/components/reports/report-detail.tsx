@@ -336,6 +336,9 @@ export function ReportDetail({
   );
   const systemIssues = asIssueArray(detail?.system_issues);
   const sourceIssues = asIssueArray(detail?.source_issues);
+  const aiBriefVetoRows = isAiBriefReport
+    ? asRecordArray(detail?.vetoed_candidates)
+    : [];
   const screenOuts = asStringArray(detail?.screen_outs);
   const combinedIssues = asStringArray(detail?.issues);
   const issueSections = [
@@ -761,6 +764,32 @@ export function ReportDetail({
                         {asStringArray(row.checklist).join(" · ") || "-"}
                       </td>
                       <td data-label="Sources">{formatSources(row.sources)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {aiBriefVetoRows.length > 0 && (
+            <div className={styles.tableWrap}>
+              <h3 className={styles.sectionTitle}>
+                Vetoed candidates ({aiBriefVetoRows.length})
+              </h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiBriefVetoRows.map((row, idx) => (
+                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Action">{String(row.action ?? "-")}</td>
+                      <td data-label="Reason">{String(row.reason ?? "-")}</td>
                     </tr>
                   ))}
                 </tbody>

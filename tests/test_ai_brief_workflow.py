@@ -378,6 +378,33 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 
+def test_ai_brief_workflow_evaluates_quality_after_upload_before_delivery() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = _steps(workflow)
+    step_names = [str(step.get("name") or "") for step in steps]
+
+    eval_step = _find_step_by_name(steps, "Evaluate AI brief quality")
+    eval_script = str(eval_step.get("run") or "")
+
+    assert step_names.index("Upload generated AI brief artifacts") < step_names.index(
+        "Evaluate AI brief quality"
+    )
+    assert step_names.index("Evaluate AI brief quality") < step_names.index(
+        "Send Telegram notification"
+    )
+    assert step_names.index("Evaluate AI brief quality") < step_names.index(
+        "Send Slack notification"
+    )
+    assert "scripts/eval_ai_brief_recommendations.py" in eval_script
+    assert '--entry-report "${{ steps.run_entry.outputs.entry_report_path }}"' in (
+        eval_script
+    )
+    assert "--ai-brief-report" in eval_script
+    assert "steps.run_ai_brief.outputs.ai_brief_report_path" in eval_script
+    assert '--market "${{ steps.params.outputs.market }}"' in eval_script
+    assert "--pretty" in eval_script
+
+
 def test_ai_brief_workflow_top_level_concurrency_does_not_cancel_monitor_runs() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
 

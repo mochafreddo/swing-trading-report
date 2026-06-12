@@ -83,11 +83,15 @@ def evaluate_ai_brief_recommendation_report(
     try:
         validate_ai_brief_artifact(ai_brief_report, now=validation_now)
     except AiBriefValidationError as exc:
+        message = str(exc)
+        issue_code = "ai_brief_report_invalid"
+        if "rank must be contiguous" in message:
+            issue_code = "recommendation_ranks_not_contiguous"
         return _issue_only_result(
             AiBriefRecommendationEvalIssue(
-                code="ai_brief_report_invalid",
+                code=issue_code,
                 severity="FAIL",
-                message=str(exc),
+                message=message,
             )
         )
 

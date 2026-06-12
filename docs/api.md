@@ -60,6 +60,13 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
 | `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
 
+### AI Brief Artifact Notes
+
+- `ai-brief.summary` includes `entry_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, and `system_issue_count`.
+- `recommendations[]` is capped at 3 rows. Its `rank` values must match the displayed array order as contiguous `1..N`, and recommendation text must avoid automated order/execution language.
+- `vetoed_candidates[]` records preselected `ENTER` candidates that the model did not recommend. It is displayed separately from `recommendations[]` in notifications and the web report detail view.
+- `scripts/eval_ai_brief_recommendations.py` is the offline recommendation quality gate. The manual GitHub AI Brief workflow and scheduled runner treat `FAIL` as a stop before normal notification/success handling.
+
 ## Web API Routes
 
 | Method | Path | Purpose | Request Contract | Response/Status |

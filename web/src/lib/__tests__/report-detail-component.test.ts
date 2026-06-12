@@ -215,6 +215,42 @@ describe("ReportDetail component", () => {
     expect(html).toContain("openai_no_external_sources");
   });
 
+  it("renders AI brief vetoed candidates", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "US",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      brief_state: "NEEDS_REVIEW_WEAK_NEWS",
+      brief_reason: "model_deferred",
+      source_entry_report: "2026-05-05.entry.json",
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 0,
+        vetoed_count: 1,
+      },
+      recommendations: [],
+      vetoed_candidates: [
+        {
+          ticker: "AAPL.NAS",
+          action: "SKIP",
+          reason: "earnings event risk blocks the setup",
+        },
+      ],
+      source_issues: [],
+      system_issues: [],
+    };
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("Vetoed candidates (1)");
+    expect(html).toContain("AAPL.NAS");
+    expect(html).toContain("SKIP");
+    expect(html).toContain("earnings event risk blocks the setup");
+  });
+
   it("renders AI brief skip guard state without recommendation rows", () => {
     const detail: ReportJson = {
       schema: "sab.ai_brief_skip.v1",

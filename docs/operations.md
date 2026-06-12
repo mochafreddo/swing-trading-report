@@ -100,6 +100,8 @@ order by report_type;
 
 If a run creates `ai-brief-skip`, inspect `skip_state`, `skip_reason`, `session_date`, and `run_url` before rerunning. Do not delete runtime markers unless the operator intentionally wants deduped work to reprocess.
 
+If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `recommendations[].rank`, `vetoed_candidates[]`, and summary count drift before rerunning. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic artifacts first, then blocks Telegram/Slack delivery on a quality `FAIL`.
+
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 
 ## GitHub Actions
@@ -108,7 +110,7 @@ NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자,
 | --- | --- | --- |
 | `scan.yml` | report uploaded and indexed; scheduled empty-universe reports require issue review | KIS credentials, provider availability, upload step, report `system_issues` |
 | `sell.yml` | Supabase holdings snapshot then sell report | holdings query, KIS/pykrx provider, upload step |
-| `ai-brief.yml` | manual or scheduled artifact/skip marker | context resolve, runtime_state lock, source/model provider |
+| `ai-brief.yml` | manual artifact passes recommendation quality gate before opt-in notifications; scheduled artifact/skip marker after runtime_state guard and quality gate | context resolve, runtime_state lock, source/model provider, recommendation quality gate |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |
 | `ci.yml` | Python and web checks green | first failing job logs |
 | `audit.yml` | workflow/security audit green | actionlint/shellcheck/security finding logs |

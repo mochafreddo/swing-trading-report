@@ -22,6 +22,7 @@ import requests  # type: ignore[import-untyped]
 
 from .. import ai_brief_url_safety as url_safety
 from ..ai_brief import run_ai_brief
+from ..ai_brief_eval import evaluate_ai_brief_recommendation_report
 from ..ai_brief_eval_common import parse_iso_offset_datetime
 from ..ai_brief_sources import (
     SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
@@ -3384,6 +3385,19 @@ class DefaultScheduledPipeline:
             ai_brief_report_paths,
             report_type="ai-brief",
         )
+        quality_result = evaluate_ai_brief_recommendation_report(
+            entry_report_path=entry_report_path,
+            ai_brief_report_path=ai_brief_report_path,
+            market=market,
+        )
+        if quality_result.status == "FAIL":
+            issue_summary = "; ".join(
+                f"{issue.code}: {issue.message}" for issue in quality_result.issues[:3]
+            )
+            raise RuntimeError(
+                "scheduled ai-brief quality gate failed"
+                + (f": {issue_summary}" if issue_summary else "")
+            )
         _LOGGER.info(
             "scheduled AI brief pipeline step completed "
             "step=ai_brief market=%s report_date=%s report_path=%s",

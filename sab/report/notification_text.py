@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from dataclasses import dataclass
 from typing import Any
 
 from ..utils.numeric import to_finite_float as _to_finite_float
@@ -16,6 +17,19 @@ from .ai_brief_state import (
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
 _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
+
+
+@dataclass(frozen=True)
+class _AiBriefCounts:
+    preselected_count: int
+    recommendation_count: int
+    vetoed_count: int
+    source_issue_count: int
+    system_issue_count: int
+    recommendations: list[dict[str, Any]]
+    vetoed_candidates: list[dict[str, Any]]
+    source_issues: list[dict[str, Any]]
+    system_issues: list[dict[str, Any]]
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -110,14 +124,12 @@ def _sell_counts(
     return evaluated_count, issue_count, action_counts, evaluated
 
 
-def _ai_brief_counts(
-    report: dict[str, Any],
-) -> tuple[
-    int, int, int, int, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
-]:
+def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     summary = _as_dict(report.get("summary"))
     recommendations_raw = _as_list(report.get("recommendations"))
     recommendations = [row for row in recommendations_raw if isinstance(row, dict)]
+    vetoed_raw = _as_list(report.get("vetoed_candidates"))
+    vetoed_candidates = [row for row in vetoed_raw if isinstance(row, dict)]
     source_issues_raw = _as_list(report.get("source_issues"))
     source_issues = [row for row in source_issues_raw if isinstance(row, dict)]
     system_issues_raw = _as_list(report.get("system_issues"))
@@ -131,12 +143,19 @@ def _ai_brief_counts(
         _safe_int(report.get("recommendation_count"), default=0),
         len(recommendations),
     )
+    vetoed_count = max(
+        _safe_int(summary.get("vetoed_count"), default=0),
+        _safe_int(report.get("vetoed_count"), default=0),
+        len(vetoed_candidates),
+    )
     preselected_count = max(
         _safe_int(summary.get("preselected_count"), default=0),
         _safe_int(report.get("preselected_count"), default=0),
         eligible_count,
         len(recommendations),
+        len(recommendations) + len(vetoed_candidates),
         recommendation_count,
+        vetoed_count,
     )
     source_issue_count = max(
         _safe_int(summary.get("source_issue_count"), default=0),
@@ -148,14 +167,16 @@ def _ai_brief_counts(
         _safe_int(report.get("system_issue_count"), default=0),
         len(system_issues),
     )
-    return (
-        preselected_count,
-        recommendation_count,
-        source_issue_count,
-        system_issue_count,
-        recommendations,
-        source_issues,
-        system_issues,
+    return _AiBriefCounts(
+        preselected_count=preselected_count,
+        recommendation_count=recommendation_count,
+        vetoed_count=vetoed_count,
+        source_issue_count=source_issue_count,
+        system_issue_count=system_issue_count,
+        recommendations=recommendations,
+        vetoed_candidates=vetoed_candidates,
+        source_issues=source_issues,
+        system_issues=system_issues,
     )
 
 
@@ -340,15 +361,7 @@ def build_ai_brief_slack_summary_text(
     run_url: str,
     storage_key: str | None = None,
 ) -> str:
-    (
-        preselected_count,
-        recommendation_count,
-        source_issue_count,
-        system_issue_count,
-        _,
-        _source_issues,
-        _system_issues,
-    ) = _ai_brief_counts(report)
+    counts = _ai_brief_counts(report)
     brief_state = read_ai_brief_state(report)
 
     lines = [
@@ -360,10 +373,11 @@ def build_ai_brief_slack_summary_text(
         f"generated_at={_generated_at(report)}",
         f"brief_state={brief_state.state}",
         f"brief_reason={brief_state.reason}",
-        f"preselected_count={preselected_count}",
-        f"recommendation_count={recommendation_count}",
-        f"source_issue_count={source_issue_count}",
-        f"system_issue_count={system_issue_count}",
+        f"preselected_count={counts.preselected_count}",
+        f"recommendation_count={counts.recommendation_count}",
+        f"vetoed_count={counts.vetoed_count}",
+        f"source_issue_count={counts.source_issue_count}",
+        f"system_issue_count={counts.system_issue_count}",
     ]
     key = _safe_str(storage_key)
     if key:
@@ -521,16 +535,8 @@ def build_ai_brief_telegram_report_text(
     storage_key: str | None = None,
     max_items: int = 5,
 ) -> str:
-    (
-        preselected_count,
-        _recommendation_count,
-        source_issue_count,
-        system_issue_count,
-        recommendations,
-        source_issues,
-        system_issues,
-    ) = _ai_brief_counts(report)
-    total = len(recommendations)
+    counts = _ai_brief_counts(report)
+    total = len(counts.recommendations)
     shown = min(total, max(max_items, 0), 3)
     model_provider = _safe_str(report.get("model_provider"), default="fake")
     model_name = _safe_str(report.get("model_name"), default="-")
@@ -543,9 +549,12 @@ def build_ai_brief_telegram_report_text(
         f"generated_at={_generated_at(report)}",
         f"brief_state={brief_state.state}",
         f"brief_reason={brief_state.reason}",
-        f"entry_preselected_count={preselected_count}",
+        f"entry_preselected_count={counts.preselected_count}",
         f"추천 후보 {total}건 (표시 {shown}건)",
-        f"issues source={source_issue_count} system={system_issue_count}",
+        (
+            f"issues source={counts.source_issue_count} "
+            f"system={counts.system_issue_count}"
+        ),
     ]
 
     if brief_state.state == BRIEF_STATE_NO_SIGNAL:
@@ -561,7 +570,7 @@ def build_ai_brief_telegram_report_text(
 
     if (
         brief_state.state == BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS
-        and preselected_count > 0
+        and counts.preselected_count > 0
         and total > 0
     ):
         ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
@@ -571,17 +580,17 @@ def build_ai_brief_telegram_report_text(
 
     if total == 0:
         lines.append("추천 후보 없음")
-        if preselected_count > 0:
+        if counts.preselected_count > 0:
             lines.append(
                 "추천 생성 실패/보류: ENTER 후보 "
-                f"{preselected_count}건이 있었지만 추천 결과가 비었습니다."
+                f"{counts.preselected_count}건이 있었지만 추천 결과가 비었습니다."
             )
             ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
             if ticker_preview:
                 suffix = f", 외 {extra}건" if extra > 0 else ""
                 lines.append(f"대상: {ticker_preview}{suffix}")
     else:
-        for idx, row in enumerate(recommendations[:shown], start=1):
+        for idx, row in enumerate(counts.recommendations[:shown], start=1):
             ticker = _safe_str(row.get("ticker"), default="-")
             name = _safe_str(row.get("name"))
             ticker_name = f"{ticker} {name}".strip()
@@ -599,9 +608,22 @@ def build_ai_brief_telegram_report_text(
         if extra > 0:
             lines.append(f"외 {extra}건")
 
-    for issue in source_issues[:3]:
+    vetoed_total = len(counts.vetoed_candidates)
+    vetoed_shown = min(vetoed_total, max(max_items, 0), 3)
+    if vetoed_total > 0:
+        lines.append(f"AI 판단 제외 {vetoed_total}건")
+        for row in counts.vetoed_candidates[:vetoed_shown]:
+            ticker = _safe_str(row.get("ticker"), default="-")
+            action = _safe_str(row.get("action"), default="-").upper()
+            reason = _safe_single_line(row.get("reason"), default="-")
+            lines.append(f"- {ticker} | {action} | {reason}")
+        extra = vetoed_total - vetoed_shown
+        if extra > 0:
+            lines.append(f"제외 외 {extra}건")
+
+    for issue in counts.source_issues[:3]:
         lines.append(_format_issue("source issue", issue))
-    for issue in system_issues[:3]:
+    for issue in counts.system_issues[:3]:
         lines.append(_format_issue("system issue", issue))
 
     key = _safe_str(storage_key)

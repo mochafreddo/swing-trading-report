@@ -6,6 +6,7 @@ import os
 import threading
 import unicodedata
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import pytest
 import sab.scheduler.runner as scheduler_runner
@@ -41,6 +42,15 @@ _SCHEDULED_SOURCE_ENV_KEYS = (
 def _clear_scheduled_source_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in _SCHEDULED_SOURCE_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _scheduled_ai_brief_quality_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        scheduler_runner,
+        "evaluate_ai_brief_recommendation_report",
+        lambda **_kwargs: SimpleNamespace(status="PASS", issues=[]),
+    )
 
 
 def _log_records_for_event(
@@ -4497,6 +4507,82 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert ai_brief_inputs[0]["buy_report_path"] == "reports/current.buy.json"
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
+
+
+def test_default_pipeline_fails_when_ai_brief_quality_gate_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_calls: list[dict[str, object]] = []
+
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.ai-brief.json")
+        return 0
+
+    def fake_evaluate_ai_brief_recommendation_report(
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        eval_calls.append(dict(kwargs))
+        return SimpleNamespace(
+            status="FAIL",
+            issues=[
+                SimpleNamespace(
+                    code="reported_system_error",
+                    message="AI brief reported a model provider error",
+                )
+            ],
+        )
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.evaluate_ai_brief_recommendation_report",
+        fake_evaluate_ai_brief_recommendation_report,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+
+    with pytest.raises(RuntimeError, match="quality gate failed"):
+        DefaultScheduledPipeline().run(
+            market="US",
+            session_date="2026-05-28",
+            report_date="2026-05-28",
+            source_provider=None,
+            model_provider="fake",
+            dry_run=False,
+        )
+
+    assert eval_calls == [
+        {
+            "entry_report_path": "reports/current.entry.json",
+            "ai_brief_report_path": "reports/current.ai-brief.json",
+            "market": "US",
+        }
+    ]
 
 
 def test_default_pipeline_suppresses_ambient_github_actions_report_uploads(

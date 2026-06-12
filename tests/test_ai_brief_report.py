@@ -313,6 +313,36 @@ def test_write_ai_brief_report_rejects_duplicate_recommendation_ranks(
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 
+def test_write_ai_brief_report_rejects_non_contiguous_recommendation_ranks(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    second = {
+        **artifact["recommendations"][0],  # type: ignore[index]
+        "ticker": "MSFT.NAS",
+        "rank": 3,
+    }
+    artifact["eligible_tickers"] = ["AAPL.NAS", "MSFT.NAS"]
+    artifact["recommendations"] = [
+        artifact["recommendations"][0],  # type: ignore[index]
+        second,
+    ]
+    source_issues = artifact["source_issues"]
+    assert isinstance(source_issues, list)
+    artifact["source_issues"] = [
+        *source_issues,
+        {
+            "ticker": "MSFT.NAS",
+            "code": "fake_provider_no_external_sources",
+            "severity": "WARN",
+            "message": "fake provider does not collect external sources",
+        },
+    ]
+
+    with pytest.raises(AiBriefValidationError, match="contiguous"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
 def test_write_ai_brief_report_rejects_more_than_three_sources(
     tmp_path: Path,
 ) -> None:
@@ -412,6 +442,18 @@ def test_write_ai_brief_report_rejects_automated_order_language(
     artifact = _artifact()
     recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
     recommendation["checklist"] = ["buy now without any manual review"]
+    artifact["recommendations"] = [recommendation]
+
+    with pytest.raises(AiBriefValidationError, match="automated-order"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_korean_automated_order_language(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["checklist"] = ["지금 매수하고 주문 실행"]
     artifact["recommendations"] = [recommendation]
 
     with pytest.raises(AiBriefValidationError, match="automated-order"):
