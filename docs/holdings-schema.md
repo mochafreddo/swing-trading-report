@@ -14,6 +14,7 @@
 - 보유 목록의 단일 운영 소스는 Supabase `holdings`이며, `holdings.yaml`은 백업/import-export 입력으로 지원합니다.
 - YAML import는 dry-run + replace-all semantics, export는 전체 snapshot(`quantity=0` 포함) 기준으로 동작합니다.
 - 통화/티커 fail-closed 계약은 앱과 CLI 로더 양쪽에서 강제됩니다.
+- 로컬 Python 로더는 선택적 `entry_pattern`을 받아 sell 평가에 전달합니다. Supabase는 Phase A에서 nullable 컬럼/RPC 계약만 준비했고, 웹과 scheduled export가 필드를 소유하기 전까지 non-null DB write는 닫아둡니다.
 
 ### 실험
 
@@ -58,6 +59,7 @@ holdings:
 | `entry_price` | number | 평균 매입가 (기본 통화). DB는 `numeric(20,4)`(`>=0`)이며, `quantity>0` row는 `entry_price>0`을 요구합니다. |
 | `entry_currency` | string (선택) | 통화 표시 (예: `KRW`, `USD`). 수동 작성 파일에서는 US-only + `settings.default_currency: USD`일 때만 row 생략 허용. 웹 export는 모든 row에 명시적으로 기록 |
 | `entry_date` | string (YYYY-MM-DD) | 최초(또는 평균) 매입일 |
+| `entry_pattern` | string (선택) | buy/entry report의 `pattern`을 보존하는 진입 패턴 marker. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`입니다. 현재 로컬 CLI 로더/sell 평가 입력용이며, 웹 import/export와 scheduled holdings export는 Phase A에서 non-null 값을 보존하지 않습니다. |
 | `strategy` | string (선택) | 전략 구분 (예: `swing`, `core`). 미지정 시 `settings.default_strategy` 적용 |
 | `notes` | string (선택) | 메모 |
 | `tags` | list[string] (선택) | 태그 목록 |
@@ -89,12 +91,21 @@ settings:
 - `entry_currency: USD`를 쓸 때는 티커도 US suffix를 가져야 합니다(예: `AAPL.NAS`).
 - `entry_currency` 허용값은 `KRW`, `USD`만 지원합니다. 그 외 값(`EUR` 등)은 즉시 실패합니다.
 
+### Fail-closed entry_pattern 규칙
+
+- `entry_pattern`은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`만 허용합니다.
+- 빈 문자열, 공백 문자열, 명시적 `null`, 미지정은 모두 marker 없음으로 처리합니다.
+- 비활성 row(`quantity=0`)는 `entry_pattern`을 가질 수 없습니다. 미지정 또는 null/empty로 남겨야 합니다.
+- `sab sell`은 로드된 `entry_pattern`을 hybrid sell evaluator에 전달합니다. 현재 failed-breakout 손실 marker로 쓰이는 구조화 값은 `swing_high_breakout`뿐이며, 기존 `strategy`/`tags`의 `breakout` substring marker는 호환용으로 계속 동작합니다.
+- Phase A Supabase migration은 nullable `holdings.entry_pattern` 컬럼과 RPC 검증 계약을 추가하지만, `holdings_entry_pattern_write_closed_check`로 non-null DB write를 막습니다. 웹 CRUD, 웹 YAML import/export, scheduled holdings export가 필드를 선택/쓰기 전까지 DB는 null-only입니다.
+
 ## 웹 import/export 계약
 
 - Holdings 화면의 `Export YAML`은 항상 `version: 1` 문서를 생성합니다.
 - export는 현재 DB의 전체 snapshot을 내보내며, `quantity=0` 비활성 row도 포함합니다.
 - export는 복구 충실도를 위해 `settings`를 생략하고 row별 필드를 명시합니다.
 - export 정렬 순서는 `ticker asc`입니다.
+- Phase A에서는 웹 export/import payload가 `entry_pattern`을 소유하지 않습니다. 로컬 CLI 입력에는 사용할 수 있지만, 웹 import/export 백업 경로로 non-null marker를 왕복시키는 것은 아직 지원하지 않습니다.
 - Holdings 화면 import는 항상 **Replace All** semantics로 동작합니다.
 - import는 apply 전에 dry-run diff(create/update/delete/unchanged)를 보여줍니다.
 - import apply 시 파일에 없는 ticker는 삭제됩니다.
@@ -122,6 +133,7 @@ settings:
 ## 활용
 
 - `sab sell` 서브커맨드는 `holdings.yaml`을 로드하여 보유 종목의 Sell/Review 리포트를 생성합니다.
+- 로컬 `holdings.yaml`에 `entry_pattern`이 있으면 `sab sell`이 hybrid sell 평가로 전달합니다.
 - `holdings.example.yaml`을 복사해 개인 보유 목록을 작성한 뒤, `HOLDINGS_FILE` 또는 `config.yaml`의 `files.holdings` 경로를 지정하세요.
 
 ## 백로그 메모
