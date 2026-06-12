@@ -1,4 +1,5 @@
 import type { HoldingCursor } from "@/lib/types";
+import { quotePostgrestValue } from "@/lib/postgrest-filter";
 
 export class HoldingCursorError extends Error {
   readonly status = 400;
@@ -6,11 +7,6 @@ export class HoldingCursorError extends Error {
   constructor(message: string) {
     super(message);
   }
-}
-
-function quotePostgrestValue(value: string): string {
-  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return `"${escaped}"`;
 }
 
 function isValidCursorPayload(payload: unknown): payload is HoldingCursor {

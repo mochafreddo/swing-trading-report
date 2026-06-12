@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSupabaseEnv } from "@/lib/env.server";
+import { quotePostgrestValue } from "@/lib/postgrest-filter";
 import { isReportType, type ReportType } from "@/lib/types";
 import {
   buildAuthHeaders,
@@ -75,13 +76,31 @@ function parseContentRangeTotal(headerValue: string | null): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function quotePostgrestValue(value: string): string {
-  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return `"${escaped}"`;
-}
-
 function trimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function nonNegativeNumber(
+  value: unknown,
+  options: { integer?: boolean } = {},
+): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  if (options.integer === true && !Number.isInteger(value)) {
+    return null;
+  }
+  return value;
+}
+
+function normalizedStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
@@ -96,20 +115,12 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
   };
 
   const reportDate = trimmedString(raw.report_date);
-  const duplicateIndex =
-    typeof raw.duplicate_index === "number" &&
-    Number.isFinite(raw.duplicate_index) &&
-    Number.isInteger(raw.duplicate_index)
-      ? raw.duplicate_index
-      : null;
+  const duplicateIndex = nonNegativeNumber(raw.duplicate_index, {
+    integer: true,
+  });
   const reportKey = trimmedString(raw.report_key);
 
-  if (
-    !reportDate ||
-    duplicateIndex === null ||
-    duplicateIndex < 0 ||
-    !reportKey
-  ) {
+  if (!reportDate || duplicateIndex === null || !reportKey) {
     return null;
   }
 
@@ -150,18 +161,8 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     const reportKey = trimmedString(raw.report_key);
     const reportType = isReportType(raw.report_type) ? raw.report_type : null;
     const reportDate = trimmedString(raw.report_date);
-    const duplicateIndex =
-      typeof raw.duplicate_index === "number" &&
-      Number.isFinite(raw.duplicate_index)
-        ? raw.duplicate_index
-        : null;
-    if (
-      !reportKey ||
-      !reportType ||
-      !reportDate ||
-      duplicateIndex === null ||
-      duplicateIndex < 0
-    ) {
+    const duplicateIndex = nonNegativeNumber(raw.duplicate_index);
+    if (!reportKey || !reportType || !reportDate || duplicateIndex === null) {
       continue;
     }
 
@@ -175,12 +176,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
       !Array.isArray(raw.summary)
         ? (raw.summary as Record<string, unknown>)
         : null;
-    const tickers = Array.isArray(raw.tickers)
-      ? raw.tickers
-          .filter((value): value is string => typeof value === "string")
-          .map((value) => value.trim())
-          .filter(Boolean)
-      : [];
+    const tickers = normalizedStringArray(raw.tickers);
     const tickersHydrated = raw.tickers_hydrated === true;
 
     rows.push({
@@ -267,9 +263,7 @@ export async function upsertReportIndexEntry(
     duplicate_index: Math.max(0, Math.trunc(input.duplicateIndex)),
     generated_at: input.generatedAt ?? null,
     summary: input.summary ?? null,
-    tickers: (input.tickers ?? [])
-      .map((ticker) => ticker.trim())
-      .filter(Boolean),
+    tickers: normalizedStringArray(input.tickers),
     tickers_hydrated: input.tickersHydrated === true,
   };
 

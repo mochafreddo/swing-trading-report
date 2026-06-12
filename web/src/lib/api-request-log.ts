@@ -94,7 +94,7 @@ export function withApiRequestId<T extends Response>(
   return response;
 }
 
-export function sanitizeApiLogFields(fields: ApiLogFields): ApiLogFields {
+function sanitizeApiLogFields(fields: ApiLogFields): ApiLogFields {
   return Object.fromEntries(
     Object.entries(fields)
       .map(([key, value]) => [key, sanitizeValue(key, value)])
