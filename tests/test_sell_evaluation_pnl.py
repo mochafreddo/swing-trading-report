@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sab.holdings_loader import load_holdings
 from sab.report.sell_report import SellReportRow
 from sab.sell_evaluation import _evaluate_holdings
 
@@ -169,6 +170,100 @@ def test_evaluate_holdings_passes_tags_to_hybrid_sell() -> None:
 
     assert len(rows) == 1
     assert captured["tags"] == ["swing_high_breakout"]
+
+
+def test_evaluate_holdings_passes_entry_pattern_to_hybrid_sell() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.cfg.sell_mode = "sma_ema_hybrid"
+    runtime.holdings[0].entry_pattern = "swing_high_breakout"
+    captured: dict[str, Any] = {}
+
+    def _evaluate(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        holding: dict[str, Any],
+        _settings: Any,
+    ) -> SimpleNamespace:
+        captured.update(holding)
+        return SimpleNamespace(
+            action="HOLD",
+            reasons=["ok"],
+            stop_price=None,
+            target_price=None,
+            eval_price=100.0,
+            eval_date="20250102",
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=lambda *_args, **_kwargs: pytest.fail(
+            "generic sell evaluator should not be called"
+        ),
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert captured["entry_pattern"] == "swing_high_breakout"
+
+
+def test_evaluate_holdings_passes_loaded_entry_pattern_to_hybrid_sell(
+    tmp_path,
+) -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.cfg.sell_mode = "sma_ema_hybrid"
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        "holdings:\n"
+        "  - ticker: AAPL.NASD\n"
+        "    quantity: 1\n"
+        "    entry_price: 100\n"
+        "    entry_currency: USD\n"
+        "    entry_pattern: swing_high_breakout\n",
+        encoding="utf-8",
+    )
+    loaded = load_holdings(path.as_posix())
+    loaded_ticker = loaded.holdings[0].ticker
+    runtime.holdings = loaded.holdings
+    runtime.market_data = {loaded_ticker: runtime.market_data["AAPL.NASD"]}
+    runtime.ticker_currency = {loaded_ticker: "USD"}
+    captured: dict[str, Any] = {}
+
+    def _evaluate(
+        _ticker: str,
+        _candles: list[dict[str, float]],
+        holding: dict[str, Any],
+        _settings: Any,
+    ) -> SimpleNamespace:
+        captured.update(holding)
+        return SimpleNamespace(
+            action="HOLD",
+            reasons=["ok"],
+            stop_price=None,
+            target_price=None,
+            eval_price=100.0,
+            eval_date="20250102",
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=lambda *_args, **_kwargs: pytest.fail(
+            "generic sell evaluator should not be called"
+        ),
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    assert captured["entry_pattern"] == "swing_high_breakout"
 
 
 def test_evaluate_holdings_skips_last_price_fallback_for_invalid_candle_data() -> None:

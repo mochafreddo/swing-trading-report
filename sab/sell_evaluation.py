@@ -152,6 +152,7 @@ def _evaluate_holdings(
             "stop_override": holding.stop_override,
             "target_override": holding.target_override,
             "strategy": holding.strategy,
+            "entry_pattern": getattr(holding, "entry_pattern", None),
             "tags": getattr(holding, "tags", []),
             "entry_currency": holding.entry_currency
             or runtime.ticker_currency.get(ticker),

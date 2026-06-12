@@ -12,6 +12,8 @@ from .corporate_action import detect_corporate_action_move
 from .eval_index import choose_eval_index
 from .indicators import ema, rsi, sma
 
+_FAILED_BREAKOUT_PATTERN = "swing_high_breakout"
+
 
 @dataclass
 class HybridSellSettings:
@@ -235,8 +237,13 @@ def _compute_peak_pnl_pct_since_entry(
 
 
 def _is_breakout_holding(holding: dict[str, Any]) -> bool:
+    for key in ("pattern", "entry_pattern", "signal_pattern"):
+        value = holding.get(key)
+        if isinstance(value, str) and value.strip() == _FAILED_BREAKOUT_PATTERN:
+            return True
+
     markers: list[str] = []
-    for key in ("strategy", "pattern", "entry_pattern", "signal_pattern"):
+    for key in ("strategy",):
         value = holding.get(key)
         if value is not None:
             markers.append(str(value))

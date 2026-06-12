@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .entry_pattern_contract import HOLDINGS_ENTRY_PATTERNS
 from .tickers import (
     SUPPORTED_ENTRY_CURRENCIES,
     parse_ticker,
@@ -33,6 +34,7 @@ class Holding:
     tags: list[str] = field(default_factory=list)
     stop_override: float | None = None
     target_override: float | None = None
+    entry_pattern: str | None = None
 
 
 @dataclass
@@ -442,6 +444,47 @@ def _parse_entry_date(value: Any) -> str | None:
     return str(value)
 
 
+def _parse_optional_text_field(
+    p: Path,
+    *,
+    value: Any,
+    field_name: str,
+    item_index: int,
+    ticker: str,
+    max_length: int | None = None,
+    allowed_values: frozenset[str] | None = None,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _invalid_holdings_value(
+            p,
+            f"expected a string, got {type(value).__name__}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    text = value.strip()
+    if max_length is not None and len(text) > max_length:
+        raise _invalid_holdings_value(
+            p,
+            f"expected a string <= {max_length} characters, got {len(text)}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    if allowed_values is not None and text and text not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise _invalid_holdings_value(
+            p,
+            f"expected one of {allowed}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    return text or None
+
+
 def _parse_holding(
     p: Path,
     *,
@@ -505,6 +548,23 @@ def _parse_holding(
         item_index=item_index,
         ticker=ticker,
     )
+    entry_pattern = _parse_optional_text_field(
+        p,
+        value=item.get("entry_pattern"),
+        field_name="entry_pattern",
+        item_index=item_index,
+        ticker=ticker,
+        max_length=120,
+        allowed_values=HOLDINGS_ENTRY_PATTERNS,
+    )
+    if quantity == 0 and entry_pattern is not None:
+        raise _invalid_holdings_value(
+            p,
+            "inactive holdings entry_pattern must be null.",
+            field_name="entry_pattern",
+            item_index=item_index,
+            ticker=ticker,
+        )
 
     return Holding(
         ticker=ticker,
@@ -529,6 +589,7 @@ def _parse_holding(
             item_index=item_index,
             ticker=ticker,
         ),
+        entry_pattern=entry_pattern,
     )
 
 

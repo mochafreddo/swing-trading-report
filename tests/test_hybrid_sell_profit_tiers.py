@@ -981,6 +981,116 @@ def test_hybrid_sell_failed_breakout_accepts_entry_tags(monkeypatch):
     assert any("Failed breakout" in reason for reason in result.reasons)
 
 
+@pytest.mark.parametrize("field_name", ["pattern", "entry_pattern", "signal_pattern"])
+def test_hybrid_sell_failed_breakout_accepts_structured_pattern_field(
+    monkeypatch, field_name: str
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+    holding = {"entry_price": 100.0, field_name: "swing_high_breakout"}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "SELL"
+    assert any("Failed breakout" in reason for reason in result.reasons)
+
+
+@pytest.mark.parametrize("field_name", ["pattern", "entry_pattern", "signal_pattern"])
+@pytest.mark.parametrize(
+    "pattern_value",
+    ["trend_pullback_bounce", "rsi_oversold_reversal", "not_a_breakout"],
+)
+def test_hybrid_sell_failed_breakout_ignores_non_breakout_structured_patterns(
+    monkeypatch, field_name: str, pattern_value: str
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+    holding = {"entry_price": 100.0, field_name: pattern_value}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert not any("Failed breakout" in reason for reason in result.reasons)
+
+
+@pytest.mark.parametrize("field_name", ["pattern", "entry_pattern", "signal_pattern"])
+@pytest.mark.parametrize(
+    "pattern_value",
+    [
+        ["swing_high_breakout"],
+        {"value": "swing_high_breakout"},
+        True,
+        123,
+    ],
+)
+def test_hybrid_sell_failed_breakout_ignores_malformed_structured_patterns(
+    monkeypatch, field_name: str, pattern_value: object
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+    holding = {"entry_price": 100.0, field_name: pattern_value}
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "HOLD"
+    assert not any("Failed breakout" in reason for reason in result.reasons)
+
+
+@pytest.mark.parametrize(
+    "holding",
+    [
+        {"entry_price": 100.0, "strategy": "legacy breakout setup"},
+        {"entry_price": 100.0, "tags": ["legacy breakout setup"]},
+    ],
+)
+def test_hybrid_sell_failed_breakout_keeps_legacy_substring_markers(
+    monkeypatch, holding: dict[str, object]
+):
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_min=0.10,
+        stop_loss_pct_max=0.20,
+    )
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US", _simple_candles(96.5), holding, settings
+    )
+
+    assert result.action == "SELL"
+    assert any("Failed breakout" in reason for reason in result.reasons)
+
+
 def test_hybrid_sell_stop_override_triggers_sell(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
