@@ -169,6 +169,10 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
         resolve_script
     )
     assert (
+        'out.write(f"source_provider_chain_memberships={source_provider_chain_memberships}\\n")'
+        in resolve_script
+    )
+    assert (
         'out.write(f"source_provider_chain_origin={source_provider_chain_origin}\\n")'
         in resolve_script
     )
@@ -176,6 +180,10 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert (
         jobs["resolve_context"]["outputs"].get("source_provider_chain")
         == "${{ steps.context.outputs.source_provider_chain }}"
+    )
+    assert (
+        jobs["resolve_context"]["outputs"].get("source_provider_chain_memberships")
+        == "${{ steps.context.outputs.source_provider_chain_memberships }}"
     )
     assert (
         jobs["resolve_context"]["outputs"].get("source_provider_chain_origin")
@@ -226,7 +234,7 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     )
     assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'http-json' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'http-json')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',http-json,')) && "
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
     )
     assert (
@@ -235,37 +243,37 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     )
     assert run_env.get("FINNHUB_API_KEY") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'finnhub' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'finnhub')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',finnhub,')) && "
         "secrets.FINNHUB_API_KEY || '' }}"
     )
     assert run_env.get("POLYGON_API_KEY") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'polygon-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'polygon-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',polygon-news,')) && "
         "secrets.POLYGON_API_KEY || '' }}"
     )
     assert run_env.get("ALPHA_VANTAGE_API_KEY") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'alpha-vantage-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',alpha-vantage-news,')) && "
         "secrets.ALPHA_VANTAGE_API_KEY || '' }}"
     )
     assert run_env.get("MARKETAUX_API_TOKEN") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'marketaux-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'marketaux-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',marketaux-news,')) && "
         "secrets.MARKETAUX_API_TOKEN || '' }}"
     )
     assert run_env.get("BENZINGA_API_TOKEN") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'benzinga-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'benzinga-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',benzinga-news,')) && "
         "secrets.BENZINGA_API_TOKEN || '' }}"
     )
     assert run_env.get("NAVER_CLIENT_ID") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',naver-news,')) && "
         "secrets.NAVER_CLIENT_ID || '' }}"
     )
     assert run_env.get("NAVER_CLIENT_SECRET") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || "
-        "contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && "
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',naver-news,')) && "
         "secrets.NAVER_CLIENT_SECRET || '' }}"
     )
 
@@ -317,8 +325,48 @@ def test_ai_brief_workflow_scheduled_resolve_trims_chain_tokens_for_http_json(
     )
 
     assert outputs["source_provider_chain"] == "finnhub, http-json"
+    assert outputs["source_provider_chain_memberships"] == ",finnhub,http-json,"
     assert outputs["source_provider_chain_origin"] == "env_market"
     assert outputs["source_api_url"] == "https://source.example/us"
+
+
+def test_ai_brief_workflow_scheduled_secret_chain_membership_is_exact(
+    tmp_path: Path,
+) -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    run_env = (
+        _find_step_by_name(
+            _job_steps(workflow, "scheduled_ai_brief"),
+            "Run scheduled AI Brief monitor",
+        ).get("env")
+        or {}
+    )
+
+    invalid_outputs = _run_scheduled_resolve_context(
+        tmp_path,
+        env={"DEFAULT_SOURCE_PROVIDER_CHAIN_US": "not-finnhub"},
+    )
+    assert invalid_outputs["source_provider_chain"] == "not-finnhub"
+    assert invalid_outputs["source_provider_chain_memberships"] == ",not-finnhub,"
+    assert ",finnhub," not in invalid_outputs["source_provider_chain_memberships"]
+
+    valid_outputs = _run_scheduled_resolve_context(
+        tmp_path,
+        env={"DEFAULT_SOURCE_PROVIDER_CHAIN_US": "finnhub,benzinga-news"},
+    )
+    assert valid_outputs["source_provider_chain_memberships"] == (
+        ",finnhub,benzinga-news,"
+    )
+    assert ",finnhub," in valid_outputs["source_provider_chain_memberships"]
+    assert ",benzinga-news," in valid_outputs["source_provider_chain_memberships"]
+    assert (
+        "contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',finnhub,')"
+        in str(run_env.get("FINNHUB_API_KEY") or "")
+    )
+    assert (
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'finnhub')"
+        not in str(run_env.get("FINNHUB_API_KEY") or "")
+    )
 
 
 def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None:
@@ -335,6 +383,10 @@ def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None
     )
     assert (
         'source_provider_chain = _single_line_output_value("source_provider_chain", source_provider_chain)'
+        in resolve_script
+    )
+    assert (
+        'source_provider_chain_memberships = _single_line_output_value("source_provider_chain_memberships", source_provider_chain_memberships)'
         in resolve_script
     )
     assert (

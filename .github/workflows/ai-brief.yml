@@ -125,6 +125,7 @@ jobs:
       scheduled_tick: ${{ steps.context.outputs.scheduled_tick }}
       source_provider: ${{ steps.context.outputs.source_provider }}
       source_provider_chain: ${{ steps.context.outputs.source_provider_chain }}
+      source_provider_chain_memberships: ${{ steps.context.outputs.source_provider_chain_memberships }}
       source_provider_chain_origin: ${{ steps.context.outputs.source_provider_chain_origin }}
       source_api_url: ${{ steps.context.outputs.source_api_url }}
 
@@ -217,10 +218,16 @@ jobs:
           source_provider_chain_tokens = [
               part.strip() for part in source_provider_chain.split(",") if part.strip()
           ]
+          source_provider_chain_memberships = (
+              "," + ",".join(source_provider_chain_tokens) + ","
+              if source_provider_chain_tokens
+              else ""
+          )
           if source_provider == "http-json" or "http-json" in source_provider_chain_tokens:
               source_api_url = default_source_api_url
           source_provider = _single_line_output_value("source_provider", source_provider)
           source_provider_chain = _single_line_output_value("source_provider_chain", source_provider_chain)
+          source_provider_chain_memberships = _single_line_output_value("source_provider_chain_memberships", source_provider_chain_memberships)
           source_provider_chain_origin = _single_line_output_value("source_provider_chain_origin", source_provider_chain_origin)
           source_api_url = _single_line_output_value("source_api_url", source_api_url)
           should_run = True
@@ -241,6 +248,7 @@ jobs:
               out.write(f"scheduled_tick={scheduled_tick}\n")
               out.write(f"source_provider={source_provider}\n")
               out.write(f"source_provider_chain={source_provider_chain}\n")
+              out.write(f"source_provider_chain_memberships={source_provider_chain_memberships}\n")
               out.write(f"source_provider_chain_origin={source_provider_chain_origin}\n")
               out.write(f"source_api_url={source_api_url}\n")
           PY
@@ -294,14 +302,14 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
-          AI_BRIEF_SOURCE_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'http-json' || contains(needs.resolve_context.outputs.source_provider_chain, 'http-json')) && secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}
-          FINNHUB_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'finnhub' || contains(needs.resolve_context.outputs.source_provider_chain, 'finnhub')) && secrets.FINNHUB_API_KEY || '' }}
-          POLYGON_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'polygon-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'polygon-news')) && secrets.POLYGON_API_KEY || '' }}
-          ALPHA_VANTAGE_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'alpha-vantage-news')) && secrets.ALPHA_VANTAGE_API_KEY || '' }}
-          MARKETAUX_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'marketaux-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'marketaux-news')) && secrets.MARKETAUX_API_TOKEN || '' }}
-          BENZINGA_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'benzinga-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'benzinga-news')) && secrets.BENZINGA_API_TOKEN || '' }}
-          NAVER_CLIENT_ID: ${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && secrets.NAVER_CLIENT_ID || '' }}
-          NAVER_CLIENT_SECRET: ${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && secrets.NAVER_CLIENT_SECRET || '' }}
+          AI_BRIEF_SOURCE_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'http-json' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',http-json,')) && secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}
+          FINNHUB_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'finnhub' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',finnhub,')) && secrets.FINNHUB_API_KEY || '' }}
+          POLYGON_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'polygon-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',polygon-news,')) && secrets.POLYGON_API_KEY || '' }}
+          ALPHA_VANTAGE_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',alpha-vantage-news,')) && secrets.ALPHA_VANTAGE_API_KEY || '' }}
+          MARKETAUX_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'marketaux-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',marketaux-news,')) && secrets.MARKETAUX_API_TOKEN || '' }}
+          BENZINGA_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'benzinga-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',benzinga-news,')) && secrets.BENZINGA_API_TOKEN || '' }}
+          NAVER_CLIENT_ID: ${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',naver-news,')) && secrets.NAVER_CLIENT_ID || '' }}
+          NAVER_CLIENT_SECRET: ${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',naver-news,')) && secrets.NAVER_CLIENT_SECRET || '' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
