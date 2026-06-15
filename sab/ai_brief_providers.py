@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, cast
 
 import requests  # type: ignore[import-untyped]
 
@@ -36,11 +36,23 @@ type _JsonValue = (
 )
 
 
+class _AiBriefProviderResponse(Protocol):
+    status_code: int
+    text: str
+
+    def json(self) -> object: ...
+
+
+class _AiBriefProviderSession(Protocol):
+    def post(self, url: str, **kwargs: object) -> _AiBriefProviderResponse: ...
+
+
 @dataclass(frozen=True)
 class AiBriefProviderResult:
     recommendations: list[dict[str, object]]
     source_issues: list[dict[str, object]]
     vetoed_candidates: list[dict[str, object]] = field(default_factory=list)
+    watch_candidates: list[dict[str, object]] = field(default_factory=list)
 
 
 class AiBriefProviderError(RuntimeError):
@@ -60,12 +72,17 @@ class FakeAiBriefProvider:
         self.model_name = model_name
 
     def build_recommendations(
-        self, *, candidates: list[dict[str, object]]
+        self,
+        *,
+        recommendable_candidates: list[dict[str, object]],
+        watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
         as_of = _offset_now_iso()
         recommendations: list[dict[str, object]] = []
         source_issues: list[dict[str, object]] = []
-        for rank, candidate in enumerate(candidates[:RECOMMENDATION_LIMIT], start=1):
+        for rank, candidate in enumerate(
+            recommendable_candidates[:RECOMMENDATION_LIMIT], start=1
+        ):
             ticker = str(candidate["ticker"])
             sources = _candidate_sources(candidate)
             recommendations.append(
@@ -94,9 +111,29 @@ class FakeAiBriefProvider:
                         "message": "fake provider does not collect external sources",
                     }
                 )
+        watch_rows: list[dict[str, object]] = []
+        for candidate in watch_candidates:
+            ticker = str(candidate["ticker"])
+            watch_rows.append(
+                {
+                    "ticker": ticker,
+                    "action": "WATCH",
+                    "reason": str(
+                        candidate.get("ai_role_reason")
+                        or "entry trigger requires re-confirmation"
+                    ),
+                    "retrigger_conditions": [
+                        "price must satisfy the original entry trigger again",
+                        "manual review must confirm source and market context",
+                    ],
+                    "sources": _candidate_sources(candidate),
+                    "as_of": as_of,
+                }
+            )
         return AiBriefProviderResult(
             recommendations=recommendations,
             source_issues=source_issues,
+            watch_candidates=watch_rows,
         )
 
 
@@ -107,22 +144,30 @@ class OpenAiBriefProvider:
         model_name: str,
         api_key: str,
         timeout_seconds: float,
-        session: requests.Session | None = None,
+        session: _AiBriefProviderSession | None = None,
     ) -> None:
         self.model_name = model_name
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
-        self._session = session or requests.Session()
+        self._session = (
+            session
+            if session is not None
+            else cast(_AiBriefProviderSession, requests.Session())
+        )
 
     def build_recommendations(
-        self, *, candidates: list[dict[str, object]]
+        self,
+        *,
+        recommendable_candidates: list[dict[str, object]],
+        watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
-        if not candidates:
+        if not recommendable_candidates and not watch_candidates:
             return AiBriefProviderResult(recommendations=[], source_issues=[])
 
         request_payload = _build_openai_request_payload(
             model_name=self.model_name,
-            candidates=candidates,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
         )
         try:
             response = self._session.post(
@@ -153,25 +198,43 @@ class OpenAiBriefProvider:
             ) from exc
 
         parsed = _parse_openai_structured_output(response_payload)
-        source_rows_by_ticker = _source_rows_by_ticker(candidates)
+        recommendable_source_rows_by_ticker = _source_rows_by_ticker(
+            recommendable_candidates
+        )
+        watch_source_rows_by_ticker = _source_rows_by_ticker(watch_candidates)
+        source_rows_by_ticker = {
+            **watch_source_rows_by_ticker,
+            **recommendable_source_rows_by_ticker,
+        }
         result = _normalize_openai_provider_result(
             parsed,
-            candidates=candidates,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
             source_rows_by_ticker=source_rows_by_ticker,
         )
         _validate_provider_result_contract(
             result,
-            eligible_tickers={str(candidate["ticker"]) for candidate in candidates},
+            eligible_tickers={
+                str(candidate["ticker"]) for candidate in recommendable_candidates
+            },
+            watch_tickers={str(candidate["ticker"]) for candidate in watch_candidates},
             source_urls_by_ticker={
                 ticker: set(rows_by_url)
-                for ticker, rows_by_url in source_rows_by_ticker.items()
+                for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
+            },
+            watch_source_urls_by_ticker={
+                ticker: set(rows_by_url)
+                for ticker, rows_by_url in watch_source_rows_by_ticker.items()
             },
         )
         return result
 
 
 def _build_openai_request_payload(
-    *, model_name: str, candidates: list[dict[str, object]]
+    *,
+    model_name: str,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
 ) -> dict[str, _JsonValue]:
     return {
         "model": model_name,
@@ -195,13 +258,12 @@ def _build_openai_request_payload(
                 "content": json.dumps(
                     {
                         "task": (
-                            "Rank up to three ENTER candidates from the supplied "
-                            "entry report candidates. Use only candidate.sources "
-                            "for recommendation sources. If a candidate has no "
-                            "usable sources, leave sources empty and add a source "
-                            "issue for the ticker."
+                            "Rank up to three recommendable swing-trading candidates. "
+                            "Summarize watch candidates separately; never place watch "
+                            "candidates in recommendations or vetoed_candidates."
                         ),
-                        "candidates": candidates,
+                        "recommendable_candidates": recommendable_candidates,
+                        "watch_candidates": watch_candidates,
                     },
                     ensure_ascii=False,
                     sort_keys=True,
@@ -223,7 +285,12 @@ def _openai_result_schema() -> dict[str, _JsonValue]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["recommendations", "vetoed_candidates", "source_issues"],
+        "required": [
+            "recommendations",
+            "vetoed_candidates",
+            "watch_candidates",
+            "source_issues",
+        ],
         "properties": {
             "recommendations": {
                 "type": "array",
@@ -281,6 +348,43 @@ def _openai_result_schema() -> dict[str, _JsonValue]:
                         "ticker": {"type": "string"},
                         "action": {"type": "string", "enum": ["PASS", "SKIP"]},
                         "reason": {"type": "string"},
+                    },
+                },
+            },
+            "watch_candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "ticker",
+                        "action",
+                        "reason",
+                        "retrigger_conditions",
+                        "sources",
+                    ],
+                    "properties": {
+                        "ticker": {"type": "string"},
+                        "action": {"type": "string", "enum": ["WATCH"]},
+                        "reason": {"type": "string"},
+                        "retrigger_conditions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "sources": {
+                            "type": "array",
+                            "maxItems": 3,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["title", "url", "published_at"],
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "url": {"type": "string"},
+                                    "published_at": {"type": "string"},
+                                },
+                            },
+                        },
                     },
                 },
             },
@@ -351,11 +455,15 @@ def _extract_openai_output_text(payload: Mapping[str, Any]) -> str:
 def _normalize_openai_provider_result(
     parsed: Mapping[str, Any],
     *,
-    candidates: list[dict[str, object]],
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
     source_rows_by_ticker: Mapping[str, Mapping[str, dict[str, object]]],
 ) -> AiBriefProviderResult:
     candidate_by_ticker = {
-        str(candidate["ticker"]): candidate for candidate in candidates
+        str(candidate["ticker"]): candidate for candidate in recommendable_candidates
+    }
+    watch_candidate_by_ticker = {
+        str(candidate["ticker"]): candidate for candidate in watch_candidates
     }
     recommendations: list[dict[str, object]] = []
     for raw_recommendation in _as_provider_mapping_rows(
@@ -394,10 +502,37 @@ def _normalize_openai_provider_result(
     vetoed_candidates = _as_provider_mapping_rows(
         parsed.get("vetoed_candidates"), field_name="vetoed_candidates"
     )
+    normalized_watch_candidates: list[dict[str, object]] = []
+    for raw_watch in _as_provider_mapping_rows(
+        parsed.get("watch_candidates"), field_name="watch_candidates"
+    ):
+        ticker = str(raw_watch.get("ticker") or "").strip()
+        if ticker not in watch_candidate_by_ticker:
+            raise AiBriefProviderContractError(
+                f"OpenAI output included ineligible watch ticker {ticker!r}"
+            )
+        normalized_watch_candidates.append(
+            {
+                "ticker": ticker,
+                "action": "WATCH",
+                "reason": str(raw_watch.get("reason") or "").strip(),
+                "retrigger_conditions": string_list(
+                    raw_watch.get("retrigger_conditions")
+                ),
+                "sources": _canonicalize_provider_sources(
+                    _as_provider_mapping_rows(
+                        raw_watch.get("sources"),
+                        field_name="watch_candidates.sources",
+                    ),
+                    canonical_sources_by_url=source_rows_by_ticker.get(ticker, {}),
+                ),
+            }
+        )
     return AiBriefProviderResult(
         recommendations=recommendations,
         source_issues=source_issues,
         vetoed_candidates=vetoed_candidates,
+        watch_candidates=normalized_watch_candidates,
     )
 
 
@@ -527,7 +662,9 @@ def _validate_provider_result_contract(
     result: AiBriefProviderResult,
     *,
     eligible_tickers: set[str],
+    watch_tickers: set[str],
     source_urls_by_ticker: dict[str, set[str]] | None = None,
+    watch_source_urls_by_ticker: dict[str, set[str]] | None = None,
 ) -> None:
     if len(result.recommendations) > RECOMMENDATION_LIMIT:
         raise AiBriefProviderContractError(
@@ -537,6 +674,11 @@ def _validate_provider_result_contract(
     _validate_provider_issue_list(result.source_issues)
     _validate_provider_vetoed_candidates(
         result.vetoed_candidates, eligible_tickers=eligible_tickers
+    )
+    _validate_provider_watch_candidates(
+        result.watch_candidates,
+        watch_tickers=watch_tickers,
+        source_urls_by_ticker=watch_source_urls_by_ticker,
     )
     source_issue_tickers = _provider_source_issue_tickers(result.source_issues)
     seen_ranks: set[int] = set()
@@ -596,6 +738,85 @@ def _validate_provider_result_contract(
             "OpenAI output recommendations[].rank must be contiguous from 1 to N "
             "in recommendation order"
         )
+
+
+def _validate_provider_watch_candidates(
+    watch_candidates: list[dict[str, object]],
+    *,
+    watch_tickers: set[str],
+    source_urls_by_ticker: dict[str, set[str]] | None = None,
+) -> None:
+    for idx, candidate in enumerate(watch_candidates):
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            raise AiBriefProviderContractError(
+                f"OpenAI output watch_candidates[{idx}].ticker is required"
+            )
+        if ticker not in watch_tickers:
+            raise AiBriefProviderContractError(
+                f"OpenAI output included ineligible watch ticker {ticker!r}"
+            )
+        action = str(candidate.get("action") or "").strip().upper()
+        if action != "WATCH":
+            raise AiBriefProviderContractError(
+                "OpenAI output watch_candidates[].action must be WATCH"
+            )
+        if not str(candidate.get("reason") or "").strip():
+            raise AiBriefProviderContractError(
+                f"OpenAI output watch_candidates[{idx}].reason is required"
+            )
+        if not string_list(candidate.get("retrigger_conditions")):
+            raise AiBriefProviderContractError(
+                "OpenAI output watch_candidates[].retrigger_conditions is required"
+            )
+        _validate_provider_watch_candidate_sources(
+            candidate,
+            watch_index=idx,
+            allowed_source_urls=(source_urls_by_ticker or {}).get(ticker, set()),
+        )
+
+
+def _validate_provider_watch_candidate_sources(
+    watch_candidate: Mapping[str, object],
+    *,
+    watch_index: int,
+    allowed_source_urls: set[str],
+) -> None:
+    sources = watch_candidate.get("sources")
+    if not isinstance(sources, list):
+        raise AiBriefProviderContractError(
+            f"OpenAI output watch_candidates[{watch_index}].sources must be a list"
+        )
+    if len(sources) > _MAX_SOURCES_PER_TICKER:
+        raise AiBriefProviderContractError(
+            "OpenAI output watch_candidates[].sources must contain at most "
+            f"{_MAX_SOURCES_PER_TICKER} sources"
+        )
+    for source_index, raw_source in enumerate(sources):
+        if not isinstance(raw_source, Mapping):
+            raise AiBriefProviderContractError(
+                "OpenAI output watch_candidates"
+                f"[{watch_index}].sources[{source_index}] must be an object"
+            )
+        if not str(raw_source.get("title") or "").strip():
+            raise AiBriefProviderContractError(
+                "OpenAI output watch candidate source title is required"
+            )
+        if not str(raw_source.get("published_at") or "").strip():
+            raise AiBriefProviderContractError(
+                "OpenAI output watch candidate source.published_at is required"
+            )
+        try:
+            source_url = validate_ai_brief_source_url(
+                raw_source.get("url"), field_name="source url"
+            )
+        except ValueError as exc:
+            raise AiBriefProviderContractError(f"OpenAI output {exc}") from exc
+        if source_url not in allowed_source_urls:
+            raise AiBriefProviderContractError(
+                "OpenAI output watch candidate source url must be supplied in "
+                "candidate.sources"
+            )
 
 
 def _validate_provider_issue_list(source_issues: list[dict[str, object]]) -> None:
