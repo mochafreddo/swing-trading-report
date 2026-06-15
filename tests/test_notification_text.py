@@ -658,13 +658,78 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     assert "brief_reason=model_or_system_issue" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert (
-        "추천 생성 실패/보류: ENTER 후보 3건이 있었지만 추천 결과가 비었습니다." in text
+        "추천 생성 실패/보류: recommendable 후보 3건이 있었지만 추천 결과가 비었습니다."
+        in text
     )
+    assert "ENTER 후보" not in text
     assert "대상: AXTI.NAS, WELL.NYS, BABA.NYS" in text
     assert (
         "system issue: model_provider_failed - OpenAI request failed with HTTP 429: "
         "quota exceeded"
     ) in text
+
+
+def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -> None:
+    report = {
+        "generated_at": "2026-05-20T02:19:26+00:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-5.4-mini",
+        "summary": {
+            "recommendable_count": 7,
+            "watch_count": 2,
+            "preselected_count": 5,
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 1,
+        },
+        "eligible_tickers": ["AXTI.NAS", "WELL.NYS", "BABA.NYS"],
+        "watch_tickers": ["AAPL.NAS", "MSFT.NAS"],
+        "recommendations": [],
+        "source_provider_summary": {
+            "chain": ["finnhub", "benzinga-news"],
+            "providers": [
+                {"provider": "finnhub", "status": "success", "covered": 3, "total": 7},
+                {
+                    "provider": "benzinga-news",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 4,
+                },
+            ],
+            "final": {
+                "recommendable_covered": 3,
+                "recommendable_total": 7,
+                "watch_covered": 1,
+                "watch_total": 2,
+            },
+        },
+        "source_issues": [],
+        "system_issues": [
+            {
+                "ticker": None,
+                "code": "model_provider_failed",
+                "severity": "ERROR",
+                "message": "OpenAI request failed.",
+            }
+        ],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "watch 후보 2건: AAPL.NAS, MSFT.NAS" in text
+    assert (
+        "source_chain=finnhub,benzinga-news final recommendable=3/7 watch=1/2" in text
+    )
+    assert "source_providers=finnhub success 3/7; benzinga-news success 0/4" in text
+    assert (
+        "추천 생성 실패/보류: recommendable 후보 5건이 있었지만 추천 결과가 비었습니다."
+        in text
+    )
+    assert "ENTER 후보" not in text
 
 
 def test_build_ai_brief_telegram_report_text_includes_vetoed_candidates() -> None:
@@ -920,6 +985,59 @@ def test_build_ai_brief_slack_summary_text_counts_vetoed_candidates() -> None:
     )
 
     assert "vetoed_count=1" in text
+
+
+def test_build_ai_brief_slack_summary_text_includes_watch_and_source_chain() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "recommendable_count": 7,
+            "watch_count": 2,
+            "preselected_count": 5,
+            "recommendation_count": 3,
+            "vetoed_count": 0,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "watch_tickers": ["AAPL.NAS", "MSFT.NAS"],
+        "recommendations": [{}, {}, {}],
+        "source_provider_summary": {
+            "chain": ["finnhub", "benzinga-news"],
+            "providers": [
+                {"provider": "finnhub", "status": "success", "covered": 3, "total": 7},
+                {
+                    "provider": "benzinga-news",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 4,
+                },
+            ],
+            "final": {
+                "recommendable_covered": 3,
+                "recommendable_total": 7,
+                "watch_covered": 1,
+                "watch_total": 2,
+            },
+        },
+        "source_issues": [{}],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_slack_summary_text(
+        report=report,
+        repo="mocha/swing-trading-report",
+        run_url="https://github.com/mocha/swing-trading-report/actions/runs/789",
+    )
+
+    assert "watch_count=2" in text
+    assert "watch_tickers=AAPL.NAS, MSFT.NAS" in text
+    assert "source_chain=finnhub,benzinga-news" in text
+    assert "source_final_recommendable=3/7" in text
+    assert "source_final_watch=1/2" in text
+    assert "source_providers=finnhub success 3/7; benzinga-news success 0/4" in text
 
 
 def test_build_ai_brief_skipped_telegram_text_explains_delayed_preopen() -> None:

@@ -62,6 +62,43 @@ function formatNullableNumber(value: unknown): string {
   return String(parsed);
 }
 
+function formatStringList(items: string[]): string {
+  return items.length > 0 ? items.join(", ") : "-";
+}
+
+function formatSourceCoverage(covered: unknown, total: unknown): string {
+  const coveredValue = readNumberLike(covered);
+  const totalValue = readNumberLike(total);
+  return `${coveredValue ?? "-"}/${totalValue ?? "-"}`;
+}
+
+function formatSourceFinalCoverage(final: ReportJson | null): string {
+  if (!final) {
+    return "-";
+  }
+  const recommendable = formatSourceCoverage(
+    final.recommendable_covered,
+    final.recommendable_total,
+  );
+  const watch = formatSourceCoverage(final.watch_covered, final.watch_total);
+  return `recommendable=${recommendable} watch=${watch}`;
+}
+
+function formatSourceProviderStatuses(providers: ReportJson[]): string {
+  const parts = providers
+    .map((provider) => {
+      const name = readString(provider.provider);
+      if (!name) {
+        return null;
+      }
+      const status = readString(provider.status) ?? "-";
+      const coverage = formatSourceCoverage(provider.covered, provider.total);
+      return `${name} ${status} ${coverage}`;
+    })
+    .filter((item): item is string => Boolean(item));
+  return parts.length > 0 ? parts.join(" · ") : "-";
+}
+
 function formatScoreValue(row: ReportJson): string {
   const scoreValue = readNumberLike(row.score_value);
   if (scoreValue !== null) {
@@ -131,6 +168,18 @@ export function ReportDetail({
   const aiBriefVetoRows = isAiBriefReport
     ? asRecordArray(detail?.vetoed_candidates)
     : [];
+  const aiBriefWatchTickers = isAiBriefReport
+    ? asStringArray(detail?.watch_tickers)
+    : [];
+  const aiBriefWatchRows = isAiBriefReport
+    ? asRecordArray(detail?.watch_candidates)
+    : [];
+  const sourceProviderSummary = isAiBriefReport
+    ? asRecord(detail?.source_provider_summary)
+    : null;
+  const sourceProviderChain = asStringArray(sourceProviderSummary?.chain);
+  const sourceProviderFinal = asRecord(sourceProviderSummary?.final);
+  const sourceProviderRows = asRecordArray(sourceProviderSummary?.providers);
   const screenOuts = asStringArray(detail?.screen_outs);
   const combinedIssues = asStringArray(detail?.issues);
   const issueSections = [
@@ -246,6 +295,30 @@ export function ReportDetail({
                 <dd>{aiBriefState?.reason ?? "-"}</dd>
               </div>
             )}
+            {isAiBriefReport && (
+              <div>
+                <dt>watch_tickers</dt>
+                <dd>{formatStringList(aiBriefWatchTickers)}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>source_chain</dt>
+                <dd>{sourceProviderChain.join(",") || "-"}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>source_final_coverage</dt>
+                <dd>{formatSourceFinalCoverage(sourceProviderFinal)}</dd>
+              </div>
+            )}
+            {isAiBriefReport && (
+              <div>
+                <dt>source_provider_statuses</dt>
+                <dd>{formatSourceProviderStatuses(sourceProviderRows)}</dd>
+              </div>
+            )}
             {isAiBriefSkipReport && (
               <div>
                 <dt>skip_state</dt>
@@ -342,8 +415,8 @@ export function ReportDetail({
           )}
           {isAiBriefReport && (
             <p className={styles.infoNote}>
-              AI Brief는 entry 리포트의 ENTER 후보를 모델 provider로 요약한 수동
-              검토용 결과입니다.
+              AI Brief는 entry 리포트의 recommendable 후보를 모델 provider로
+              요약한 수동 검토용 결과입니다.
             </p>
           )}
           {isAiBriefSkipReport && (
@@ -554,6 +627,39 @@ export function ReportDetail({
                       </td>
                       <td data-label="Checklist">
                         {asStringArray(row.checklist).join(" · ") || "-"}
+                      </td>
+                      <td data-label="Sources">{formatSources(row.sources)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {aiBriefWatchRows.length > 0 && (
+            <div className={styles.tableWrap}>
+              <h3 className={styles.sectionTitle}>
+                Watch candidates ({aiBriefWatchRows.length})
+              </h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Reason</th>
+                    <th>Retrigger</th>
+                    <th>Sources</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiBriefWatchRows.map((row, idx) => (
+                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Action">{String(row.action ?? "-")}</td>
+                      <td data-label="Reason">{String(row.reason ?? "-")}</td>
+                      <td data-label="Retrigger">
+                        {asStringArray(row.retrigger_conditions).join(" · ") ||
+                          "-"}
                       </td>
                       <td data-label="Sources">{formatSources(row.sources)}</td>
                     </tr>

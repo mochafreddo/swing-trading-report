@@ -251,6 +251,83 @@ describe("ReportDetail component", () => {
     expect(html).toContain("earnings event risk blocks the setup");
   });
 
+  it("renders AI brief watch candidates and source provider coverage", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "US",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_entry_report: "2026-05-05.entry.json",
+      summary: {
+        recommendable_count: 7,
+        watch_count: 2,
+        preselected_count: 5,
+        recommendation_count: 0,
+      },
+      eligible_tickers: ["AAPL.NAS"],
+      watch_tickers: ["MSFT.NAS", "NVDA.NAS"],
+      watch_candidates: [
+        {
+          ticker: "MSFT.NAS",
+          action: "WATCH",
+          reason: "hybrid trigger guard failed",
+          retrigger_conditions: ["close back above ema10"],
+          sources: [
+            {
+              title: "Microsoft source",
+              url: "https://example.test/msft",
+            },
+          ],
+        },
+        {
+          ticker: "NVDA.NAS",
+          action: "WATCH",
+          reason: "gap guard needs reset",
+          retrigger_conditions: ["gap normalizes"],
+          sources: [],
+        },
+      ],
+      source_provider_summary: {
+        chain: ["finnhub", "benzinga-news"],
+        providers: [
+          { provider: "finnhub", status: "success", covered: 3, total: 7 },
+          {
+            provider: "benzinga-news",
+            status: "success",
+            covered: 0,
+            total: 4,
+          },
+        ],
+        final: {
+          recommendable_covered: 3,
+          recommendable_total: 7,
+          watch_covered: 1,
+          watch_total: 2,
+        },
+      },
+      recommendations: [],
+      source_issues: [],
+      system_issues: [],
+    };
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("watch_tickers");
+    expect(html).toContain("MSFT.NAS, NVDA.NAS");
+    expect(html).toContain("source_chain");
+    expect(html).toContain("finnhub,benzinga-news");
+    expect(html).toContain("source_final_coverage");
+    expect(html).toContain("recommendable=3/7 watch=1/2");
+    expect(html).toContain("source_provider_statuses");
+    expect(html).toContain("benzinga-news success 0/4");
+    expect(html).toContain("Watch candidates (2)");
+    expect(html).toContain("hybrid trigger guard failed");
+    expect(html).toContain("close back above ema10");
+    expect(html).toContain("Microsoft source");
+  });
+
   it("renders AI brief skip guard state without recommendation rows", () => {
     const detail: ReportJson = {
       schema: "sab.ai_brief_skip.v1",

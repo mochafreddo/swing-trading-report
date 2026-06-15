@@ -22,10 +22,13 @@ _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 @dataclass(frozen=True)
 class _AiBriefCounts:
     preselected_count: int
+    watch_count: int
+    watch_present: bool
     recommendation_count: int
     vetoed_count: int
     source_issue_count: int
     system_issue_count: int
+    watch_tickers: list[str]
     recommendations: list[dict[str, Any]]
     vetoed_candidates: list[dict[str, Any]]
     source_issues: list[dict[str, Any]]
@@ -130,6 +133,8 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     recommendations = [row for row in recommendations_raw if isinstance(row, dict)]
     vetoed_raw = _as_list(report.get("vetoed_candidates"))
     vetoed_candidates = [row for row in vetoed_raw if isinstance(row, dict)]
+    watch_raw = _as_list(report.get("watch_candidates"))
+    watch_candidates = [row for row in watch_raw if isinstance(row, dict)]
     source_issues_raw = _as_list(report.get("source_issues"))
     source_issues = [row for row in source_issues_raw if isinstance(row, dict)]
     system_issues_raw = _as_list(report.get("system_issues"))
@@ -137,11 +142,29 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     eligible_count = len(
         [item for item in _as_list(report.get("eligible_tickers")) if _safe_str(item)]
     )
+    watch_tickers = [_safe_str(item) for item in _as_list(report.get("watch_tickers"))]
+    watch_tickers = [ticker for ticker in watch_tickers if ticker]
+    if not watch_tickers:
+        watch_tickers = [
+            _safe_str(row.get("ticker"))
+            for row in watch_candidates
+            if _safe_str(row.get("ticker"))
+        ]
+    watch_present = (
+        "watch_tickers" in report
+        or "watch_candidates" in report
+        or "watch_count" in summary
+    )
 
     recommendation_count = max(
         _safe_int(summary.get("recommendation_count"), default=0),
         _safe_int(report.get("recommendation_count"), default=0),
         len(recommendations),
+    )
+    watch_count = max(
+        _safe_int(summary.get("watch_count"), default=0),
+        len(watch_tickers),
+        len(watch_candidates),
     )
     vetoed_count = max(
         _safe_int(summary.get("vetoed_count"), default=0),
@@ -169,10 +192,13 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     )
     return _AiBriefCounts(
         preselected_count=preselected_count,
+        watch_count=watch_count,
+        watch_present=watch_present,
         recommendation_count=recommendation_count,
         vetoed_count=vetoed_count,
         source_issue_count=source_issue_count,
         system_issue_count=system_issue_count,
+        watch_tickers=watch_tickers,
         recommendations=recommendations,
         vetoed_candidates=vetoed_candidates,
         source_issues=source_issues,
@@ -379,6 +405,23 @@ def build_ai_brief_slack_summary_text(
         f"source_issue_count={counts.source_issue_count}",
         f"system_issue_count={counts.system_issue_count}",
     ]
+    if counts.watch_present:
+        watch_tickers = ", ".join(counts.watch_tickers) if counts.watch_tickers else "-"
+        lines.append(f"watch_count={counts.watch_count}")
+        lines.append(f"watch_tickers={watch_tickers}")
+    source_chain_summary = _format_source_chain_summary(report)
+    if source_chain_summary:
+        source_chain, _, source_final = source_chain_summary.partition(" final ")
+        lines.append(source_chain)
+        if source_final:
+            recommendable_part, _, watch_part = source_final.partition(" watch=")
+            lines.append(
+                f"source_final_recommendable={recommendable_part.removeprefix('recommendable=')}"
+            )
+            lines.append(f"source_final_watch={watch_part}")
+    source_provider_statuses = _format_source_provider_statuses(report)
+    if source_provider_statuses:
+        lines.append(source_provider_statuses)
     key = _safe_str(storage_key)
     if key:
         lines.append(f"storage_key={key}")
@@ -528,6 +571,44 @@ def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:
     return preview, max(len(tickers) - len(shown), 0)
 
 
+def _format_coverage(covered: Any, total: Any) -> str:
+    return f"{_safe_int(covered, default=0)}/{_safe_int(total, default=0)}"
+
+
+def _format_source_chain_summary(report: dict[str, Any]) -> str:
+    source_provider_summary = _as_dict(report.get("source_provider_summary"))
+    chain = [_safe_str(item) for item in _as_list(source_provider_summary.get("chain"))]
+    chain = [provider for provider in chain if provider]
+    if not chain:
+        return ""
+
+    final = _as_dict(source_provider_summary.get("final"))
+    if not final:
+        return f"source_chain={','.join(chain)}"
+    recommendable = _format_coverage(
+        final.get("recommendable_covered"),
+        final.get("recommendable_total"),
+    )
+    watch = _format_coverage(final.get("watch_covered"), final.get("watch_total"))
+    return f"source_chain={','.join(chain)} final recommendable={recommendable} watch={watch}"
+
+
+def _format_source_provider_statuses(report: dict[str, Any]) -> str:
+    source_provider_summary = _as_dict(report.get("source_provider_summary"))
+    parts: list[str] = []
+    for raw_provider in _as_list(source_provider_summary.get("providers")):
+        provider = _as_dict(raw_provider)
+        name = _safe_str(provider.get("provider"))
+        if not name:
+            continue
+        status = _safe_str(provider.get("status"), default="-")
+        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
+        parts.append(f"{name} {status} {coverage}")
+    if not parts:
+        return ""
+    return f"source_providers={'; '.join(parts)}"
+
+
 def build_ai_brief_telegram_report_text(
     *,
     report: dict[str, Any],
@@ -556,6 +637,17 @@ def build_ai_brief_telegram_report_text(
             f"system={counts.system_issue_count}"
         ),
     ]
+    if counts.watch_present:
+        ticker_preview, extra = _ticker_preview(counts.watch_tickers)
+        suffix = f", 외 {extra}건" if extra > 0 else ""
+        detail = f": {ticker_preview}{suffix}" if ticker_preview else ""
+        lines.append(f"watch 후보 {counts.watch_count}건{detail}")
+    source_chain_summary = _format_source_chain_summary(report)
+    if source_chain_summary:
+        lines.append(source_chain_summary)
+    source_provider_statuses = _format_source_provider_statuses(report)
+    if source_provider_statuses:
+        lines.append(source_provider_statuses)
 
     if brief_state.state == BRIEF_STATE_NO_SIGNAL:
         lines.append("오늘은 볼 종목 없음. 쉬어도 됨")
@@ -582,7 +674,7 @@ def build_ai_brief_telegram_report_text(
         lines.append("추천 후보 없음")
         if counts.preselected_count > 0:
             lines.append(
-                "추천 생성 실패/보류: ENTER 후보 "
+                "추천 생성 실패/보류: recommendable 후보 "
                 f"{counts.preselected_count}건이 있었지만 추천 결과가 비었습니다."
             )
             ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
