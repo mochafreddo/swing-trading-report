@@ -36,12 +36,20 @@ def parse_source_provider_chain(value: str | None) -> tuple[str, ...]:
     text = str(value or "").strip()
     if not text:
         return ()
-    providers = tuple(part.strip().lower() for part in text.split(",") if part.strip())
-    if len(set(providers)) != len(providers):
+    return _validate_source_provider_chain(text.split(","))
+
+
+def _validate_source_provider_chain(providers: Sequence[str]) -> tuple[str, ...]:
+    chain = tuple(
+        provider
+        for raw_provider in providers
+        if (provider := raw_provider.strip().lower())
+    )
+    if len(set(chain)) != len(chain):
         raise ValueError("source provider chain must not contain duplicate providers")
-    if SOURCE_PROVIDER_NONE in providers and len(providers) > 1:
+    if SOURCE_PROVIDER_NONE in chain and len(chain) > 1:
         raise ValueError("source provider chain cannot combine none with providers")
-    return providers
+    return chain
 
 
 def _provider_issue_prefix(provider: str) -> str:
@@ -152,7 +160,7 @@ def load_ai_brief_source_chain(
     ticker_names: Mapping[str, str],
     now: dt.datetime | None = None,
 ) -> AiBriefSourceChainResult:
-    chain = tuple(source_providers)
+    chain = _validate_source_provider_chain(source_providers)
     if not chain or chain == (SOURCE_PROVIDER_NONE,):
         return AiBriefSourceChainResult(
             summary={
@@ -213,15 +221,16 @@ def load_ai_brief_source_chain(
             )
             continue
 
-        covered_tickers = {
-            ticker
+        incoming_sources = {
+            ticker: sources
             for ticker, sources in provider_result.sources_by_ticker.items()
-            if ticker in requested_tickers and sources
+            if ticker in requested_tickers
+        }
+        covered_tickers = {
+            ticker for ticker, sources in incoming_sources.items() if sources
         }
         source_issues.extend(provider_result.source_issues)
-        source_issues.extend(
-            _merge_sources(sources_by_ticker, provider_result.sources_by_ticker)
-        )
+        source_issues.extend(_merge_sources(sources_by_ticker, incoming_sources))
         no_result_issues.extend(
             _no_result_issues(
                 provider=provider,

@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 import sab.ai_brief_source_chain as source_chain
 from sab.ai_brief_sources import (
+    MAX_SOURCES_PER_TICKER,
     AiBriefSourceProviderError,
     AiBriefSourceProviderResult,
 )
@@ -147,6 +148,139 @@ def test_source_chain_preserves_zero_result_issue_after_later_coverage(
         }
     ]
     assert "AAPL.NAS" in result.sources_by_ticker
+
+
+def test_source_chain_ignores_unrequested_provider_tickers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_issue: dict[str, object] = {
+        "ticker": "TSLA.NAS",
+        "code": "provider_unexpected_ticker",
+        "severity": "WARN",
+        "message": "provider returned an unexpected ticker",
+    }
+
+    def fake_load(**_kwargs: object) -> AiBriefSourceProviderResult:
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [_source("AAPL.NAS", "expected")],
+                "TSLA.NAS": [_source("TSLA.NAS", "unexpected")],
+            },
+            source_issues=[provider_issue],
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub",),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert sorted(result.sources_by_ticker) == ["AAPL.NAS"]
+    assert result.source_issues == [provider_issue]
+
+
+def test_source_chain_dedupes_duplicate_urls_across_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_load(**_kwargs: object) -> AiBriefSourceProviderResult:
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={"AAPL.NAS": [_source("AAPL.NAS", "shared")]}
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub", "benzinga-news"),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.sources_by_ticker["AAPL.NAS"] == [_source("AAPL.NAS", "shared")]
+
+
+def test_source_chain_skips_later_provider_after_ticker_reaches_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, set[str]]] = []
+
+    def fake_load(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        tickers = set(cast(set[str], kwargs["eligible_tickers"]))
+        calls.append((provider, tickers))
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [
+                    _source("AAPL.NAS", f"finnhub-{idx}")
+                    for idx in range(MAX_SOURCES_PER_TICKER)
+                ]
+            }
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub", "benzinga-news"),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    providers = cast(list[dict[str, object]], result.summary["providers"])
+    assert calls == [("finnhub", {"AAPL.NAS"})]
+    assert providers[1] == {
+        "provider": "benzinga-news",
+        "status": "skipped",
+        "covered": 0,
+        "total": 0,
+    }
+    assert len(result.sources_by_ticker["AAPL.NAS"]) == MAX_SOURCES_PER_TICKER
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "finnhub,finnhub",
+        "none,finnhub",
+        "polygon-news,none",
+    ],
+)
+def test_parse_source_provider_chain_rejects_invalid_chains(value: str) -> None:
+    with pytest.raises(ValueError):
+        source_chain.parse_source_provider_chain(value)
+
+
+def test_source_chain_rejects_none_combined_with_providers() -> None:
+    with pytest.raises(ValueError, match="cannot combine none"):
+        source_chain.load_ai_brief_source_chain(
+            source_providers=("none", "finnhub"),
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=2.0,
+            source_universe_tickers={"AAPL.NAS"},
+            recommendable_tickers={"AAPL.NAS"},
+            watch_tickers=set(),
+            ticker_names={},
+            now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+        )
 
 
 def test_source_chain_converts_http_429_to_provider_failure_summary(
