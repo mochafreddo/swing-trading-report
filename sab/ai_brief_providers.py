@@ -708,15 +708,16 @@ def _validate_provider_result_contract(
         eligible_tickers=eligible_tickers,
         watch_tickers=watch_tickers,
     )
+    now = dt.datetime.now().astimezone()
     _validate_provider_watch_candidates(
         result.watch_candidates,
         watch_tickers=watch_tickers,
+        now=now,
         source_urls_by_ticker=watch_source_urls_by_ticker,
     )
     source_issue_tickers = _provider_source_issue_tickers(result.source_issues)
     seen_ranks: set[int] = set()
     ranks: list[int] = []
-    now = dt.datetime.now().astimezone()
     for idx, recommendation in enumerate(result.recommendations):
         ticker = str(recommendation.get("ticker") or "").strip()
         if ticker not in eligible_tickers:
@@ -777,6 +778,7 @@ def _validate_provider_watch_candidates(
     watch_candidates: list[dict[str, object]],
     *,
     watch_tickers: set[str],
+    now: dt.datetime,
     source_urls_by_ticker: dict[str, set[str]] | None = None,
 ) -> None:
     for idx, candidate in enumerate(watch_candidates):
@@ -794,17 +796,25 @@ def _validate_provider_watch_candidates(
             raise AiBriefProviderContractError(
                 "OpenAI output watch_candidates[].action must be WATCH"
             )
-        if not str(candidate.get("reason") or "").strip():
+        reason = str(candidate.get("reason") or "").strip()
+        if not reason:
             raise AiBriefProviderContractError(
                 f"OpenAI output watch_candidates[{idx}].reason is required"
             )
-        if not string_list(candidate.get("retrigger_conditions")):
+        retrigger_conditions = string_list(candidate.get("retrigger_conditions"))
+        if not retrigger_conditions:
             raise AiBriefProviderContractError(
                 "OpenAI output watch_candidates[].retrigger_conditions is required"
+            )
+        language_text = " ".join([reason, *retrigger_conditions])
+        if contains_automated_order_language(language_text):
+            raise AiBriefProviderContractError(
+                "OpenAI output must avoid automated-order language"
             )
         _validate_provider_watch_candidate_sources(
             candidate,
             watch_index=idx,
+            now=now,
             allowed_source_urls=(source_urls_by_ticker or {}).get(ticker, set()),
         )
 
@@ -813,6 +823,7 @@ def _validate_provider_watch_candidate_sources(
     watch_candidate: Mapping[str, object],
     *,
     watch_index: int,
+    now: dt.datetime,
     allowed_source_urls: set[str],
 ) -> None:
     sources = watch_candidate.get("sources")
@@ -835,16 +846,24 @@ def _validate_provider_watch_candidate_sources(
             raise AiBriefProviderContractError(
                 "OpenAI output watch candidate source title is required"
             )
-        if not str(raw_source.get("published_at") or "").strip():
-            raise AiBriefProviderContractError(
-                "OpenAI output watch candidate source.published_at is required"
-            )
         try:
             source_url = validate_ai_brief_source_url(
                 raw_source.get("url"), field_name="source url"
             )
         except ValueError as exc:
             raise AiBriefProviderContractError(f"OpenAI output {exc}") from exc
+        published_at = _parse_provider_offset_datetime(
+            raw_source.get("published_at"), field_name="source.published_at"
+        )
+        if is_ai_brief_source_stale(published_at, now=now):
+            raise AiBriefProviderContractError(
+                "OpenAI output source.published_at must be within 72h"
+            )
+        if is_ai_brief_source_future(published_at, now=now):
+            raise AiBriefProviderContractError(
+                "OpenAI output source.published_at must not be more than "
+                f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
+            )
         if source_url not in allowed_source_urls:
             raise AiBriefProviderContractError(
                 "OpenAI output watch candidate source url must be supplied in "

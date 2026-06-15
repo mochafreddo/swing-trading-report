@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 import pytest
@@ -10,7 +11,25 @@ from sab.ai_brief_providers import (
 )
 
 
-def _candidate(ticker: str, *, role: str) -> dict[str, object]:
+def _fresh_published_at() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+
+
+def _published_at(offset: dt.timedelta) -> str:
+    return (dt.datetime.now(dt.UTC) + offset).replace(microsecond=0).isoformat()
+
+
+def _source(ticker: str, *, published_at: str | None = None) -> dict[str, object]:
+    return {
+        "title": f"{ticker} source",
+        "url": f"https://news.example/{ticker}",
+        "published_at": published_at or _fresh_published_at(),
+    }
+
+
+def _candidate(
+    ticker: str, *, role: str, published_at: str | None = None
+) -> dict[str, object]:
     return {
         "ticker": ticker,
         "name": None,
@@ -25,13 +44,7 @@ def _candidate(ticker: str, *, role: str) -> dict[str, object]:
         "strategy_mode": "ema_cross",
         "pattern": None,
         "entry_state": "READY",
-        "sources": [
-            {
-                "title": f"{ticker} source",
-                "url": f"https://news.example/{ticker}",
-                "published_at": "2026-06-15T12:00:00+00:00",
-            }
-        ],
+        "sources": [_source(ticker, published_at=published_at)],
     }
 
 
@@ -73,7 +86,7 @@ def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
                             {
                                 "title": "MSFT source",
                                 "url": "https://news.example/MSFT.NAS",
-                                "published_at": "2026-06-15T12:00:00+00:00",
+                                "published_at": _fresh_published_at(),
                             }
                         ],
                     }
@@ -153,7 +166,7 @@ def test_openai_rejects_overlapping_candidate_roles() -> None:
                             {
                                 "title": "AAPL source",
                                 "url": "https://news.example/AAPL.NAS",
-                                "published_at": "2026-06-15T12:00:00+00:00",
+                                "published_at": _fresh_published_at(),
                             }
                         ],
                     }
@@ -221,7 +234,7 @@ def test_openai_rejects_watch_candidate_with_skip_action() -> None:
                             {
                                 "title": "MSFT source",
                                 "url": "https://news.example/MSFT.NAS",
-                                "published_at": "2026-06-15T12:00:00+00:00",
+                                "published_at": _fresh_published_at(),
                             }
                         ],
                     }
@@ -259,7 +272,7 @@ def test_openai_rejects_watch_candidate_with_missing_action() -> None:
                             {
                                 "title": "MSFT source",
                                 "url": "https://news.example/MSFT.NAS",
-                                "published_at": "2026-06-15T12:00:00+00:00",
+                                "published_at": _fresh_published_at(),
                             }
                         ],
                     }
@@ -276,6 +289,110 @@ def test_openai_rejects_watch_candidate_with_missing_action() -> None:
         provider.build_recommendations(
             recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
             watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
+def test_openai_rejects_watch_candidate_with_automated_order_language() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "buy now when price crosses trigger",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [_source("MSFT.NAS")],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="automated-order"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
+def test_openai_rejects_watch_candidate_stale_source() -> None:
+    stale_published_at = _published_at(-dt.timedelta(hours=73))
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [
+                            _source("MSFT.NAS", published_at=stale_published_at)
+                        ],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="within 72h"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[
+                _candidate(
+                    "MSFT.NAS", role="watch_only", published_at=stale_published_at
+                )
+            ],
+        )
+
+
+def test_openai_rejects_watch_candidate_future_source() -> None:
+    future_published_at = _published_at(dt.timedelta(minutes=30))
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [
+                            _source("MSFT.NAS", published_at=future_published_at)
+                        ],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="15m"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[
+                _candidate(
+                    "MSFT.NAS", role="watch_only", published_at=future_published_at
+                )
+            ],
         )
 
 
