@@ -76,6 +76,80 @@ def _unbacked_payload(*, confidence: str = "LOW") -> dict[str, Any]:
     return payload
 
 
+def _entry_row(
+    ticker: str,
+    *,
+    action: str = "ENTER",
+    reasons: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "action": action,
+        "reasons": reasons or ["entry conditions satisfied"],
+        "entry_state": "READY",
+        "entry_price_status": "available",
+    }
+
+
+def _ai_brief_recommendation(ticker: str, *, rank: int = 1) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "name": None,
+        "rank": rank,
+        "action": "ENTER",
+        "confidence": "MEDIUM",
+        "rationale": ["AI brief inclusion is supported by classifier role"],
+        "checklist": ["manually confirm current price and risk limits"],
+        "sources": [
+            {
+                "title": f"{ticker} source",
+                "url": f"https://news.example.test/{ticker.lower()}",
+                "published_at": "2026-05-06T10:00:00+00:00",
+            }
+        ],
+        "as_of": "2026-05-06T12:00:00+00:00",
+    }
+
+
+def _ai_brief_payload(
+    *,
+    entry_count: int,
+    eligible_tickers: list[str],
+    recommendations: list[dict[str, object]],
+    excluded_candidates: list[dict[str, object]] | None = None,
+    cap_excluded_candidates: list[dict[str, object]] | None = None,
+) -> dict[str, Any]:
+    excluded_candidates = excluded_candidates or []
+    cap_excluded_candidates = cap_excluded_candidates or []
+    return {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-06T12:00:00+00:00",
+        "report_date": "2026-05-06",
+        "source_entry_report": "entry.us.json",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {
+            "entry_count": entry_count,
+            "preselected_count": len(eligible_tickers),
+            "recommendation_count": len(recommendations),
+            "excluded_count": len(excluded_candidates),
+            "vetoed_count": 0,
+            "cap_excluded_count": len(cap_excluded_candidates),
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "recommendations": recommendations,
+        "excluded_candidates": excluded_candidates,
+        "vetoed_candidates": [],
+        "cap_excluded_candidates": cap_excluded_candidates,
+        "source_issues": [],
+        "system_issues": [],
+        "eligible_tickers": eligible_tickers,
+    }
+
+
 def test_ai_brief_eval_passes_source_backed_artifact() -> None:
     legacy_payload = _load_good_ai_brief()
     assert "brief_state" not in legacy_payload
@@ -92,6 +166,70 @@ def test_ai_brief_eval_passes_source_backed_artifact() -> None:
     assert result.summary["recommendation_count"] == 3
     assert result.summary["source_backed_recommendation_count"] == 3
     assert result.summary["source_backed_ratio"] == 1.0
+    assert result.issues == []
+
+
+def test_ai_brief_eval_accepts_promoted_recommendable_skip_and_review(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.promoted.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "CAT.NYS",
+                    action="SKIP",
+                    reasons=["portfolio market cap reached (US)"],
+                ),
+                _entry_row(
+                    "CIFR.NAS",
+                    action="REVIEW",
+                    reasons=[
+                        "hybrid risk_alignment requires manual review "
+                        "(tight_stop_vs_volatility: gap_guard_exceeds_stop_max)"
+                    ],
+                ),
+                _entry_row(
+                    "NVDA.NAS",
+                    action="REVIEW",
+                    reasons=["manual review required by analyst"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.promoted.json",
+        _ai_brief_payload(
+            entry_count=4,
+            eligible_tickers=["AAPL.NAS", "CAT.NYS", "CIFR.NAS"],
+            recommendations=[
+                _ai_brief_recommendation("CAT.NYS", rank=1),
+                _ai_brief_recommendation("CIFR.NAS", rank=2),
+            ],
+            excluded_candidates=[
+                {
+                    "ticker": "NVDA.NAS",
+                    "action": "REVIEW",
+                    "reason": "action REVIEW did not match an AI brief inclusion rule",
+                }
+            ],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
     assert result.issues == []
 
 
@@ -189,6 +327,88 @@ def test_ai_brief_eval_fails_when_excluded_candidates_do_not_match_entry_report(
 
     assert result.status == "FAIL"
     assert {
+        "excluded_candidates_mismatch",
+        "cap_excluded_candidates_mismatch",
+    }.issubset(_issue_codes(result))
+
+
+def test_ai_brief_eval_fails_expanded_candidate_alignment_mismatches(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.expanded-mismatch.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "CAT.NYS",
+                    action="SKIP",
+                    reasons=["portfolio market cap reached (US)"],
+                ),
+                _entry_row(
+                    "CIFR.NAS",
+                    action="REVIEW",
+                    reasons=[
+                        "hybrid risk_alignment requires manual review "
+                        "(tight_stop_vs_volatility: gap_guard_exceeds_stop_max)"
+                    ],
+                ),
+                _entry_row("MSFT.NAS"),
+                _entry_row("TSLA.NAS"),
+                _entry_row("AMZN.NAS"),
+                _entry_row(
+                    "IREN.NAS",
+                    action="REVIEW",
+                    reasons=[
+                        "hybrid risk_alignment requires manual review "
+                        "(tight_stop_vs_volatility: gap_guard_exceeds_stop_max)"
+                    ],
+                ),
+                _entry_row(
+                    "NVDA.NAS",
+                    action="REVIEW",
+                    reasons=["manual review required by analyst"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.expanded-mismatch.json",
+        _ai_brief_payload(
+            entry_count=8,
+            eligible_tickers=["AAPL.NAS", "CIFR.NAS", "MSFT.NAS", "TSLA.NAS"],
+            recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+            excluded_candidates=[],
+            cap_excluded_candidates=[
+                {
+                    "ticker": "AMZN.NAS",
+                    "action": "ENTER",
+                    "reason": "preselection cap 5 exceeded",
+                },
+                {
+                    "ticker": "IREN.NAS",
+                    "action": "ENTER",
+                    "reason": "preselection cap 5 exceeded",
+                },
+            ],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert {
+        "eligible_tickers_mismatch",
         "excluded_candidates_mismatch",
         "cap_excluded_candidates_mismatch",
     }.issubset(_issue_codes(result))
@@ -665,16 +885,16 @@ def _mixed_entry_payload() -> dict[str, object]:
         "type": "entry",
         "market": "MIXED",
         "entries": [
-            {"ticker": "005930", "action": "ENTER"},
-            {"ticker": "AAPL.NAS", "action": "ENTER"},
-            {"ticker": "MSFT.NAS", "action": "ENTER"},
-            {"ticker": "NVDA.NAS", "action": "REVIEW"},
-            {"ticker": "META.NAS", "action": "SKIP"},
-            {"ticker": "TSLA.NAS", "action": "ENTER"},
-            {"ticker": "AMZN.NAS", "action": "ENTER"},
-            {"ticker": "GOOGL.NAS", "action": "ENTER"},
-            {"ticker": "NFLX.NAS", "action": "ENTER"},
-            {"ticker": "000660.KS", "action": "SKIP"},
+            _entry_row("005930"),
+            _entry_row("AAPL.NAS"),
+            _entry_row("MSFT.NAS"),
+            _entry_row("NVDA.NAS", action="REVIEW"),
+            _entry_row("META.NAS", action="SKIP"),
+            _entry_row("TSLA.NAS"),
+            _entry_row("AMZN.NAS"),
+            _entry_row("GOOGL.NAS"),
+            _entry_row("NFLX.NAS"),
+            _entry_row("000660.KS", action="SKIP"),
         ],
         "system_issues": [],
     }

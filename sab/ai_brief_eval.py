@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from .ai_brief_candidates import classify_ai_brief_entry_rows
 from .ai_brief_eval_common import (
     ENTRY_REPORT_MARKET_INVALID_MESSAGE,
     MIXED_ENTRY_REPORT_MARKET_REQUIRED_MESSAGE,
@@ -25,6 +26,8 @@ from .tickers import infer_market_from_ticker
 
 AiBriefRecommendationEvalStatus = AiBriefEvalStatus
 AiBriefRecommendationEvalSeverity = AiBriefEvalSeverity
+
+_SUPPORTED_ENTRY_ACTIONS = frozenset({"ENTER", "REVIEW", "SKIP"})
 
 
 @dataclass(frozen=True)
@@ -136,7 +139,7 @@ def evaluate_ai_brief_recommendation_report(
                 severity="FAIL",
                 message=(
                     "AI brief eligible_tickers must match the entry report's "
-                    f"first {PRESELECTION_LIMIT} ENTER tickers"
+                    f"first {PRESELECTION_LIMIT} preselected recommendable tickers"
                 ),
             )
         )
@@ -194,7 +197,7 @@ def evaluate_ai_brief_recommendation_report(
                 severity="FAIL",
                 message=(
                     "AI brief must not silently omit recommendations and vetoes "
-                    "when preselected ENTER candidates exist"
+                    "when preselected recommendable candidates exist"
                 ),
             )
         )
@@ -343,36 +346,39 @@ def _load_entry_context(
             message="entry report entries must be a list",
         )
 
-    target_entry_count = 0
-    enter_tickers: list[str] = []
-    excluded_candidates: list[tuple[str, str]] = []
+    target_rows: list[Mapping[str, object]] = []
     for raw_row in rows:
         if not isinstance(raw_row, Mapping):
             continue
         ticker = str(raw_row.get("ticker") or "").strip()
         if not ticker or infer_market_from_ticker(ticker) != market:
             continue
-        target_entry_count += 1
         action = str(raw_row.get("action") or "").strip().upper()
-        if action == "ENTER":
-            enter_tickers.append(ticker)
-        elif action in {"REVIEW", "SKIP"}:
-            excluded_candidates.append((ticker, action))
-        else:
+        if action not in _SUPPORTED_ENTRY_ACTIONS:
             return None, AiBriefRecommendationEvalIssue(
                 code="entry_report_invalid",
                 severity="FAIL",
                 message="entry row action must be ENTER, REVIEW, or SKIP",
             )
+        target_rows.append(raw_row)
 
+    classified_rows = classify_ai_brief_entry_rows(target_rows)
+    recommendable_candidates = classified_rows.recommendable
     assert market is not None
     return _EntryContext(
         market=market,
-        target_entry_count=target_entry_count,
-        expected_preselected_tickers=enter_tickers[:PRESELECTION_LIMIT],
-        expected_excluded_candidates=excluded_candidates,
+        target_entry_count=len(target_rows),
+        expected_preselected_tickers=[
+            candidate.ticker
+            for candidate in recommendable_candidates[:PRESELECTION_LIMIT]
+        ],
+        expected_excluded_candidates=[
+            (candidate.ticker, candidate.action)
+            for candidate in classified_rows.excluded
+        ],
         expected_cap_excluded_candidates=[
-            (ticker, "ENTER") for ticker in enter_tickers[PRESELECTION_LIMIT:]
+            (candidate.ticker, candidate.action)
+            for candidate in recommendable_candidates[PRESELECTION_LIMIT:]
         ],
     ), None
 
@@ -419,7 +425,10 @@ def _recommendation_ticker_issues(
                     ticker=ticker,
                     code="recommendation_ticker_not_preselected",
                     severity="FAIL",
-                    message="recommendation ticker must be an expected preselected ENTER ticker",
+                    message=(
+                        "recommendation ticker must be an expected preselected "
+                        "recommendable ticker"
+                    ),
                 )
             )
         if ticker in seen_tickers:

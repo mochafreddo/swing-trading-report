@@ -5,35 +5,75 @@
   "entries": [
     {
       "ticker": "AAPL.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "MSFT.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "NVDA.NAS",
-      "action": "REVIEW"
+      "action": "REVIEW",
+      "reasons": [
+        "manual review required by analyst"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "META.NAS",
-      "action": "SKIP"
+      "action": "SKIP",
+      "reasons": [
+        "entry conditions not satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "TSLA.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "AMZN.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "GOOGL.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     },
     {
       "ticker": "NFLX.NAS",
-      "action": "ENTER"
+      "action": "ENTER",
+      "reasons": [
+        "entry conditions satisfied"
+      ],
+      "entry_state": "READY",
+      "entry_price_status": "available"
     }
   ],
   "summary": {
