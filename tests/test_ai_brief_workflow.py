@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +49,51 @@ def _script_index(script: str, needle: str) -> int:
     index = script.find(needle)
     assert index >= 0, f"Script fragment not found: {needle}"
     return index
+
+
+def _resolve_context_python_script(workflow: dict[Any, Any]) -> str:
+    resolve_steps = _job_steps(workflow, "resolve_context")
+    resolve_step = _find_step_by_name(resolve_steps, "Resolve schedule context")
+    resolve_script = str(resolve_step.get("run") or "")
+    marker = "python - <<'PY'\n"
+    start = resolve_script.index(marker) + len(marker)
+    end = resolve_script.rindex("\nPY")
+    return resolve_script[start:end]
+
+
+def _run_scheduled_resolve_context(
+    tmp_path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    output_path = tmp_path / "github-output.txt"
+    merged_env = {
+        **os.environ,
+        "EVENT_NAME": "schedule",
+        "EVENT_SCHEDULE": "55 12 * * 1-5",
+        "GITHUB_OUTPUT": output_path.as_posix(),
+        "RAW_MARKET": "",
+        "DEFAULT_SOURCE_PROVIDER_CHAIN": "",
+        "DEFAULT_SOURCE_PROVIDER_CHAIN_US": "",
+        "DEFAULT_SOURCE_PROVIDER": "",
+        "DEFAULT_SOURCE_PROVIDER_US": "",
+        "DEFAULT_SOURCE_API_URL": "",
+        "DEFAULT_SOURCE_API_URL_US": "",
+        **(env or {}),
+    }
+    subprocess.run(
+        [sys.executable, "-c", _resolve_context_python_script(workflow)],
+        check=True,
+        cwd=Path(__file__).parents[1],
+        env=merged_env,
+    )
+    outputs: dict[str, str] = {}
+    for line in output_path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        assert separator
+        outputs[key] = value
+    return outputs
 
 
 def test_ai_brief_workflow_has_manual_and_scheduled_triggers() -> None:
@@ -120,10 +168,18 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert 'out.write(f"source_provider_chain={source_provider_chain}\\n")' in (
         resolve_script
     )
+    assert (
+        'out.write(f"source_provider_chain_origin={source_provider_chain_origin}\\n")'
+        in resolve_script
+    )
     assert 'out.write(f"source_api_url={source_api_url}\\n")' in resolve_script
     assert (
         jobs["resolve_context"]["outputs"].get("source_provider_chain")
         == "${{ steps.context.outputs.source_provider_chain }}"
+    )
+    assert (
+        jobs["resolve_context"]["outputs"].get("source_provider_chain_origin")
+        == "${{ steps.context.outputs.source_provider_chain_origin }}"
     )
 
     workflow_env = workflow.get("env") or {}
@@ -160,7 +216,13 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert "KIS_BASE_URL" not in run_env
     assert (
         run_env.get("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US")
-        == "${{ needs.resolve_context.outputs.source_provider_chain }}"
+        == "${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_market' "
+        "&& needs.resolve_context.outputs.source_provider_chain || '' }}"
+    )
+    assert (
+        run_env.get("AI_BRIEF_SOURCE_PROVIDER_CHAIN")
+        == "${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_global' "
+        "&& needs.resolve_context.outputs.source_provider_chain || '' }}"
     )
     assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
         "${{ (needs.resolve_context.outputs.source_provider == 'http-json' || "
@@ -208,6 +270,57 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     )
 
 
+def test_ai_brief_workflow_scheduled_resolve_preserves_global_chain_origin(
+    tmp_path: Path,
+) -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    jobs = workflow["jobs"]
+
+    outputs = _run_scheduled_resolve_context(
+        tmp_path,
+        env={"DEFAULT_SOURCE_PROVIDER_CHAIN": "finnhub,benzinga-news"},
+    )
+
+    assert outputs["source_provider_chain"] == "finnhub,benzinga-news"
+    assert outputs["source_provider_chain_origin"] == "env_global"
+    assert (
+        jobs["resolve_context"]["outputs"].get("source_provider_chain_origin")
+        == "${{ steps.context.outputs.source_provider_chain_origin }}"
+    )
+
+    run_env = (
+        _find_step_by_name(
+            _job_steps(workflow, "scheduled_ai_brief"),
+            "Run scheduled AI Brief monitor",
+        ).get("env")
+        or {}
+    )
+    assert run_env.get("AI_BRIEF_SOURCE_PROVIDER_CHAIN") == (
+        "${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_global' "
+        "&& needs.resolve_context.outputs.source_provider_chain || '' }}"
+    )
+    assert run_env.get("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US") == (
+        "${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_market' "
+        "&& needs.resolve_context.outputs.source_provider_chain || '' }}"
+    )
+
+
+def test_ai_brief_workflow_scheduled_resolve_trims_chain_tokens_for_http_json(
+    tmp_path: Path,
+) -> None:
+    outputs = _run_scheduled_resolve_context(
+        tmp_path,
+        env={
+            "DEFAULT_SOURCE_PROVIDER_CHAIN_US": "finnhub, http-json",
+            "DEFAULT_SOURCE_API_URL_US": "https://source.example/us",
+        },
+    )
+
+    assert outputs["source_provider_chain"] == "finnhub, http-json"
+    assert outputs["source_provider_chain_origin"] == "env_market"
+    assert outputs["source_api_url"] == "https://source.example/us"
+
+
 def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     resolve_steps = _job_steps(workflow, "resolve_context")
@@ -222,6 +335,10 @@ def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None
     )
     assert (
         'source_provider_chain = _single_line_output_value("source_provider_chain", source_provider_chain)'
+        in resolve_script
+    )
+    assert (
+        'source_provider_chain_origin = _single_line_output_value("source_provider_chain_origin", source_provider_chain_origin)'
         in resolve_script
     )
     assert (

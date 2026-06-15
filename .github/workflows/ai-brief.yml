@@ -125,6 +125,7 @@ jobs:
       scheduled_tick: ${{ steps.context.outputs.scheduled_tick }}
       source_provider: ${{ steps.context.outputs.source_provider }}
       source_provider_chain: ${{ steps.context.outputs.source_provider_chain }}
+      source_provider_chain_origin: ${{ steps.context.outputs.source_provider_chain_origin }}
       source_api_url: ${{ steps.context.outputs.source_api_url }}
 
     steps:
@@ -184,12 +185,20 @@ jobs:
           local_now = now.astimezone(market_zone(market))
           session_date = local_now.date().isoformat()
           source_provider_chain = ""
+          source_provider_chain_origin = ""
           if is_schedule:
-              source_provider_chain = (
-                  os.environ.get("DEFAULT_SOURCE_PROVIDER_CHAIN_US")
-                  or os.environ.get("DEFAULT_SOURCE_PROVIDER_CHAIN")
-                  or ""
+              market_source_provider_chain = (
+                  os.environ.get("DEFAULT_SOURCE_PROVIDER_CHAIN_US") or ""
               ).strip().lower()
+              global_source_provider_chain = (
+                  os.environ.get("DEFAULT_SOURCE_PROVIDER_CHAIN") or ""
+              ).strip().lower()
+              if market_source_provider_chain:
+                  source_provider_chain = market_source_provider_chain
+                  source_provider_chain_origin = "env_market"
+              elif global_source_provider_chain:
+                  source_provider_chain = global_source_provider_chain
+                  source_provider_chain_origin = "env_global"
           source_provider = ""
           if not source_provider_chain:
               source_provider = (
@@ -205,10 +214,14 @@ jobs:
           ).strip()
           if is_schedule and not source_provider and not source_provider_chain and default_source_api_url:
               source_provider = "http-json"
-          if source_provider == "http-json" or "http-json" in source_provider_chain.split(","):
+          source_provider_chain_tokens = [
+              part.strip() for part in source_provider_chain.split(",") if part.strip()
+          ]
+          if source_provider == "http-json" or "http-json" in source_provider_chain_tokens:
               source_api_url = default_source_api_url
           source_provider = _single_line_output_value("source_provider", source_provider)
           source_provider_chain = _single_line_output_value("source_provider_chain", source_provider_chain)
+          source_provider_chain_origin = _single_line_output_value("source_provider_chain_origin", source_provider_chain_origin)
           source_api_url = _single_line_output_value("source_api_url", source_api_url)
           should_run = True
           if is_schedule:
@@ -228,6 +241,7 @@ jobs:
               out.write(f"scheduled_tick={scheduled_tick}\n")
               out.write(f"source_provider={source_provider}\n")
               out.write(f"source_provider_chain={source_provider_chain}\n")
+              out.write(f"source_provider_chain_origin={source_provider_chain_origin}\n")
               out.write(f"source_api_url={source_api_url}\n")
           PY
 
@@ -272,7 +286,8 @@ jobs:
           RUNNER_ROLE: ${{ needs.resolve_context.outputs.runner_role }}
           SCHEDULED_TICK: ${{ needs.resolve_context.outputs.scheduled_tick }}
           SOURCE_PROVIDER: ${{ needs.resolve_context.outputs.source_provider }}
-          AI_BRIEF_SOURCE_PROVIDER_CHAIN_US: ${{ needs.resolve_context.outputs.source_provider_chain }}
+          AI_BRIEF_SOURCE_PROVIDER_CHAIN_US: ${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_market' && needs.resolve_context.outputs.source_provider_chain || '' }}
+          AI_BRIEF_SOURCE_PROVIDER_CHAIN: ${{ needs.resolve_context.outputs.source_provider_chain_origin == 'env_global' && needs.resolve_context.outputs.source_provider_chain || '' }}
           AI_BRIEF_SOURCE_API_URL: ${{ needs.resolve_context.outputs.source_api_url }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
