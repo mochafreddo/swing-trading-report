@@ -30,11 +30,17 @@ def test_source_chain_merges_remaining_tickers_and_records_coverage(
         calls.append((provider, tickers))
         if provider == "finnhub":
             return AiBriefSourceProviderResult(
-                sources_by_ticker={"AAPL.NAS": [_source("AAPL.NAS", "finnhub")]}
+                sources_by_ticker={
+                    "AAPL.NAS": [_source("AAPL.NAS", "finnhub")],
+                    "MSFT.NAS": [_source("MSFT.NAS", "finnhub")],
+                }
             )
         if provider == "benzinga-news":
             return AiBriefSourceProviderResult(
-                sources_by_ticker={"MSFT.NAS": [_source("MSFT.NAS", "benzinga")]}
+                sources_by_ticker={
+                    "AAPL.NAS": [_source("AAPL.NAS", "benzinga")],
+                    "MSFT.NAS": [_source("MSFT.NAS", "benzinga")],
+                }
             )
         return AiBriefSourceProviderResult()
 
@@ -54,9 +60,11 @@ def test_source_chain_merges_remaining_tickers_and_records_coverage(
 
     assert calls == [
         ("finnhub", {"AAPL.NAS", "MSFT.NAS"}),
-        ("benzinga-news", {"MSFT.NAS"}),
+        ("benzinga-news", {"AAPL.NAS", "MSFT.NAS"}),
     ]
     assert sorted(result.sources_by_ticker) == ["AAPL.NAS", "MSFT.NAS"]
+    assert len(result.sources_by_ticker["AAPL.NAS"]) == 2
+    assert len(result.sources_by_ticker["MSFT.NAS"]) == 2
     assert result.source_issues == []
     assert result.system_issues == []
     assert result.summary["chain"] == ["finnhub", "benzinga-news"]
@@ -103,6 +111,42 @@ def test_source_chain_records_provider_zero_results_per_remaining_ticker(
         "covered": 0,
         "total": 2,
     }
+
+
+def test_source_chain_preserves_zero_result_issue_after_later_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_load(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        if provider == "finnhub":
+            return AiBriefSourceProviderResult()
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={"AAPL.NAS": [_source("AAPL.NAS", "fallback")]}
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub", "polygon-news"),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "finnhub_source_no_results",
+            "severity": "WARN",
+            "message": "finnhub returned no usable sources for AAPL.NAS",
+        }
+    ]
+    assert "AAPL.NAS" in result.sources_by_ticker
 
 
 def test_source_chain_converts_http_429_to_provider_failure_summary(

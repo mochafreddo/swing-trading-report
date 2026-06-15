@@ -129,7 +129,7 @@ def _remaining_tickers(
     return {
         ticker
         for ticker in source_universe_tickers
-        if not sources_by_ticker.get(ticker)
+        if len(sources_by_ticker.get(ticker, [])) < MAX_SOURCES_PER_TICKER
     }
 
 
@@ -138,21 +138,6 @@ def _coverage(
     sources_by_ticker: Mapping[str, list[dict[str, object]]],
 ) -> int:
     return sum(1 for ticker in tickers if sources_by_ticker.get(ticker))
-
-
-def _unresolved_no_result_issues(
-    *,
-    issues: list[dict[str, object]],
-    sources_by_ticker: Mapping[str, list[dict[str, object]]],
-) -> list[dict[str, object]]:
-    covered_tickers = {
-        ticker for ticker, sources in sources_by_ticker.items() if len(sources) > 0
-    }
-    return [
-        issue
-        for issue in issues
-        if str(issue.get("ticker") or "") not in covered_tickers
-    ]
 
 
 def load_ai_brief_source_chain(
@@ -255,13 +240,7 @@ def load_ai_brief_source_chain(
 
     return AiBriefSourceChainResult(
         sources_by_ticker=sources_by_ticker,
-        source_issues=[
-            *source_issues,
-            *_unresolved_no_result_issues(
-                issues=no_result_issues,
-                sources_by_ticker=sources_by_ticker,
-            ),
-        ],
+        source_issues=[*source_issues, *no_result_issues],
         system_issues=system_issues,
         summary={
             "chain": list(chain),
