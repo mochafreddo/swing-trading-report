@@ -79,6 +79,42 @@ def _artifact(*, generated_at: str | None = None) -> dict[str, object]:
     return artifact
 
 
+def _watch_candidate(
+    ticker: str = "MSFT.NAS",
+    *,
+    action: str = "WATCH",
+    reason: str = "entry trigger is pending re-confirmation",
+    retrigger_conditions: list[str] | None = None,
+    sources: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "action": action,
+        "reason": reason,
+        "retrigger_conditions": retrigger_conditions
+        if retrigger_conditions is not None
+        else ["price must satisfy the original entry trigger again"],
+        "sources": [] if sources is None else sources,
+        "as_of": "2026-05-05T08:40:00+00:00",
+    }
+
+
+def _artifact_with_watch() -> dict[str, object]:
+    artifact = _artifact()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "recommendable_count": 1,
+        "watch_count": 1,
+        "source_issue_count": 1,
+        "system_issue_count": 0,
+    }
+    artifact["watch_tickers"] = ["MSFT.NAS"]
+    artifact["watch_candidates"] = [_watch_candidate()]
+    return artifact
+
+
 def test_write_ai_brief_report_writes_schema_and_offset_generated_at(
     tmp_path: Path,
 ) -> None:
@@ -162,7 +198,7 @@ def test_write_ai_brief_report_marks_source_backed_final_judgment(
     assert payload["brief_reason"] == "source_backed_final"
 
 
-def test_write_ai_brief_report_counts_issue_arrays_when_summary_is_stale(
+def test_write_ai_brief_report_rejects_stale_issue_summary_counts(
     tmp_path: Path,
 ) -> None:
     artifact = _artifact()
@@ -183,15 +219,12 @@ def test_write_ai_brief_report_counts_issue_arrays_when_summary_is_stale(
         "system_issue_count": 0,
     }
 
-    out_path = write_ai_brief_report(
-        report_dir=tmp_path.as_posix(),
-        artifact=artifact,
-        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
-    )
-
-    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
-    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
-    assert payload["brief_reason"] == "weak_news_coverage"
+    with pytest.raises(AiBriefValidationError, match="source_issue_count"):
+        write_ai_brief_report(
+            report_dir=tmp_path.as_posix(),
+            artifact=artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
 
 
 def test_write_ai_brief_report_accepts_cap_excluded_review_and_skip_actions(
@@ -550,6 +583,146 @@ def test_write_ai_brief_report_rejects_unknown_vetoed_candidate(
     ]
 
     with pytest.raises(AiBriefValidationError, match="vetoed_candidates"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_watch_candidate_blank_ticker(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["watch_candidates"] = [_watch_candidate("")]
+
+    with pytest.raises(AiBriefValidationError, match=r"watch_candidates\[0\].ticker"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"reason": ""}, "reason"),
+        ({"retrigger_conditions": []}, "retrigger_conditions"),
+    ],
+)
+def test_write_ai_brief_report_rejects_watch_candidate_required_text(
+    tmp_path: Path,
+    override: dict[str, object],
+    message: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    watch_candidate = _watch_candidate()
+    watch_candidate.update(override)
+    artifact["watch_candidates"] = [watch_candidate]
+
+    with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_watch_candidate_automated_order_language(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["watch_candidates"] = [
+        _watch_candidate(
+            reason="buy now when the trigger recovers",
+            retrigger_conditions=["execute order immediately"],
+        )
+    ]
+
+    with pytest.raises(AiBriefValidationError, match="automated-order"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            {
+                "title": "bad url",
+                "url": "https://token@example.test/source",
+                "published_at": "2026-05-05T08:00:00+00:00",
+            },
+            "userinfo",
+        ),
+        (
+            {
+                "title": "stale source",
+                "url": "https://example.test/stale",
+                "published_at": "2026-05-01T08:39:59+00:00",
+            },
+            "72h",
+        ),
+    ],
+)
+def test_write_ai_brief_report_rejects_bad_watch_candidate_sources(
+    tmp_path: Path,
+    source: dict[str, object],
+    message: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["watch_candidates"] = [_watch_candidate(sources=[source])]
+
+    with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(
+            report_dir=tmp_path.as_posix(),
+            artifact=artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_write_ai_brief_report_rejects_watch_candidate_order_mismatch(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {**summary, "watch_count": 2}
+    artifact["watch_tickers"] = ["MSFT.NAS", "TSLA.NAS"]
+    artifact["watch_candidates"] = [
+        _watch_candidate("TSLA.NAS"),
+        _watch_candidate("MSFT.NAS"),
+    ]
+
+    with pytest.raises(AiBriefValidationError, match="watch_candidates"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_bad_summary_counts(tmp_path: Path) -> None:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "recommendation_count": 99,
+        "watch_count": 42,
+    }
+
+    with pytest.raises(AiBriefValidationError, match="recommendation_count"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_rejects_bad_source_provider_summary_totals(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["source_provider_summary"] = {
+        "chain": ["finnhub"],
+        "providers": [
+            {
+                "provider": "finnhub",
+                "status": "completed",
+                "covered": 1,
+                "total": 2,
+            }
+        ],
+        "final": {
+            "recommendable_covered": 1,
+            "recommendable_total": 1,
+            "watch_covered": 0,
+            "watch_total": 99,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match="watch_total"):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 

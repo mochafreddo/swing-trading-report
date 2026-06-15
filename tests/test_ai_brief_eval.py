@@ -329,11 +329,8 @@ def test_ai_brief_eval_fails_when_watch_fields_do_not_match_classifier(
             entry_count=2,
             eligible_tickers=["AAPL.NAS"],
             recommendations=[_ai_brief_recommendation("AAPL.NAS")],
-            watch_tickers=[],
-            watch_candidates=[
-                _watch_candidate("MSFT.NAS"),
-                _watch_candidate("MSFT.NAS", action="SKIP"),
-            ],
+            watch_tickers=["TSLA.NAS"],
+            watch_candidates=[_watch_candidate("TSLA.NAS")],
         ),
     )
 
@@ -347,9 +344,50 @@ def test_ai_brief_eval_fails_when_watch_fields_do_not_match_classifier(
     assert {
         "watch_tickers_mismatch",
         "watch_candidates_mismatch",
-        "watch_candidate_duplicate",
-        "watch_candidate_action_invalid",
     }.issubset(_issue_codes(result))
+
+
+def test_ai_brief_eval_fails_closed_for_malformed_watch_artifact(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.malformed-watch.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "MSFT.NAS",
+                    action="SKIP",
+                    reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.malformed-watch.json",
+        _ai_brief_payload(
+            entry_count=2,
+            eligible_tickers=["AAPL.NAS"],
+            recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+            watch_tickers=["MSFT.NAS"],
+            watch_candidates=[_watch_candidate("")],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
 
 
 def test_ai_brief_eval_fails_when_expanded_summary_counts_are_wrong(
@@ -394,7 +432,7 @@ def test_ai_brief_eval_fails_when_expanded_summary_counts_are_wrong(
     )
 
     assert result.status == "FAIL"
-    assert "summary_count_mismatch" in _issue_codes(result)
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
 
 
 def test_ai_brief_eval_fails_when_eligible_tickers_do_not_match_entry_report(
@@ -402,6 +440,10 @@ def test_ai_brief_eval_fails_when_eligible_tickers_do_not_match_entry_report(
 ) -> None:
     payload = _load_good_ai_brief()
     payload["eligible_tickers"] = ["AAPL.NAS", "MSFT.NAS", "TSLA.NAS"]
+    summary = _copy_mapping(payload["summary"])
+    summary["preselected_count"] = 3
+    summary["recommendable_count"] = 4
+    payload["summary"] = summary
     report_path = _write_payload(tmp_path, "bad-eligible.ai-brief.json", payload)
 
     result = evaluate_ai_brief_recommendation_report(
@@ -430,7 +472,7 @@ def test_ai_brief_eval_fails_when_summary_counts_do_not_match_arrays(
     )
 
     assert result.status == "FAIL"
-    assert "summary_count_mismatch" in _issue_codes(result)
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
 
 
 def test_ai_brief_eval_fails_when_recommendation_ranks_are_not_contiguous(
@@ -480,6 +522,7 @@ def test_ai_brief_eval_fails_when_excluded_candidates_do_not_match_entry_report(
     summary = _copy_mapping(payload["summary"])
     summary["excluded_count"] = 0
     summary["cap_excluded_count"] = 0
+    summary["recommendable_count"] = 5
     payload["summary"] = summary
     report_path = _write_payload(tmp_path, "bad-exclusions.ai-brief.json", payload)
 

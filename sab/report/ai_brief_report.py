@@ -71,6 +71,12 @@ def _require_list(value: object, *, field_name: str) -> list[Any]:
     return value
 
 
+def _optional_list(payload: Mapping[str, Any], field_name: str) -> list[Any] | None:
+    if field_name not in payload:
+        return None
+    return _require_list(payload.get(field_name), field_name=field_name)
+
+
 def _validate_issue_list(payload: Mapping[str, Any], field_name: str) -> None:
     issues = _require_list(payload.get(field_name), field_name=field_name)
     for idx, raw_issue in enumerate(issues):
@@ -89,25 +95,21 @@ def _validate_issue_list(payload: Mapping[str, Any], field_name: str) -> None:
             )
 
 
-def _validate_sources(
+def _validate_source_rows(
     *,
-    recommendation: Mapping[str, Any],
-    recommendation_index: int,
+    sources: object,
+    field_name: str,
     now: dt.datetime,
 ) -> int:
-    sources = _require_list(
-        recommendation.get("sources"),
-        field_name=f"recommendations[{recommendation_index}].sources",
-    )
-    if len(sources) > _MAX_SOURCES_PER_TICKER:
+    source_rows = _require_list(sources, field_name=field_name)
+    if len(source_rows) > _MAX_SOURCES_PER_TICKER:
         raise AiBriefValidationError(
-            "recommendations[].sources must contain at most "
-            f"{_MAX_SOURCES_PER_TICKER} sources"
+            f"{field_name} must contain at most {_MAX_SOURCES_PER_TICKER} sources"
         )
-    for source_index, raw_source in enumerate(sources):
+    for source_index, raw_source in enumerate(source_rows):
         source = _require_mapping(
             raw_source,
-            field_name=f"recommendations[{recommendation_index}].sources[{source_index}]",
+            field_name=f"{field_name}[{source_index}]",
         )
         title = str(source.get("title") or "").strip()
         if not title:
@@ -127,7 +129,20 @@ def _validate_sources(
                 "source.published_at must not be more than "
                 f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
             )
-    return len(sources)
+    return len(source_rows)
+
+
+def _validate_sources(
+    *,
+    recommendation: Mapping[str, Any],
+    recommendation_index: int,
+    now: dt.datetime,
+) -> int:
+    return _validate_source_rows(
+        sources=recommendation.get("sources"),
+        field_name=f"recommendations[{recommendation_index}].sources",
+        now=now,
+    )
 
 
 def _source_issue_tickers(payload: Mapping[str, Any]) -> set[str | None]:
@@ -250,6 +265,25 @@ def _eligible_tickers(payload: Mapping[str, Any]) -> set[str]:
     }
 
 
+def _watch_tickers(payload: Mapping[str, Any]) -> list[str] | None:
+    raw_tickers = _optional_list(payload, "watch_tickers")
+    if raw_tickers is None:
+        return None
+    tickers: list[str] = []
+    seen_tickers: set[str] = set()
+    for idx, raw_ticker in enumerate(raw_tickers):
+        if not isinstance(raw_ticker, str):
+            raise AiBriefValidationError(f"watch_tickers[{idx}] must be a string")
+        ticker = raw_ticker.strip()
+        if not ticker:
+            raise AiBriefValidationError(f"watch_tickers[{idx}] is required")
+        if ticker in seen_tickers:
+            raise AiBriefValidationError("watch_tickers must be unique")
+        seen_tickers.add(ticker)
+        tickers.append(ticker)
+    return tickers
+
+
 def _validate_candidate_list(
     payload: Mapping[str, Any],
     field_name: str,
@@ -274,6 +308,217 @@ def _validate_candidate_list(
             raise AiBriefValidationError(f"{field_name}[{idx}].reason is required")
 
 
+def _validate_watch_candidates(
+    payload: Mapping[str, Any],
+    *,
+    watch_tickers: list[str] | None,
+    now: dt.datetime,
+) -> None:
+    rows = _optional_list(payload, "watch_candidates")
+    if rows is None:
+        return
+
+    allowed_tickers = set(watch_tickers) if watch_tickers is not None else None
+    actual_tickers: list[str] = []
+    seen_tickers: set[str] = set()
+    for idx, raw_row in enumerate(rows):
+        row = _require_mapping(raw_row, field_name=f"watch_candidates[{idx}]")
+        ticker = str(row.get("ticker") or "").strip()
+        action = str(row.get("action") or "").strip().upper()
+        reason = str(row.get("reason") or "").strip()
+        if not ticker:
+            raise AiBriefValidationError(f"watch_candidates[{idx}].ticker is required")
+        if allowed_tickers is not None and ticker not in allowed_tickers:
+            raise AiBriefValidationError(
+                f"watch_candidates[{idx}].ticker must be in watch_tickers"
+            )
+        if ticker in seen_tickers:
+            raise AiBriefValidationError("watch_candidates[].ticker must be unique")
+        seen_tickers.add(ticker)
+        actual_tickers.append(ticker)
+        if action != "WATCH":
+            raise AiBriefValidationError("watch_candidates[].action must be WATCH")
+        if not reason:
+            raise AiBriefValidationError(f"watch_candidates[{idx}].reason is required")
+        retrigger_conditions = _require_list(
+            row.get("retrigger_conditions"),
+            field_name=f"watch_candidates[{idx}].retrigger_conditions",
+        )
+        if not retrigger_conditions:
+            raise AiBriefValidationError(
+                "watch_candidates[].retrigger_conditions is required"
+            )
+        language_text = " ".join(
+            [reason, *(str(condition) for condition in retrigger_conditions)]
+        )
+        if contains_automated_order_language(language_text):
+            raise AiBriefValidationError(
+                "watch_candidates[] must avoid automated-order language"
+            )
+        _validate_source_rows(
+            sources=row.get("sources"),
+            field_name=f"watch_candidates[{idx}].sources",
+            now=now,
+        )
+
+    if watch_tickers is not None and actual_tickers != watch_tickers:
+        raise AiBriefValidationError(
+            "watch_candidates[].ticker order must match watch_tickers"
+        )
+
+
+def _array_count(payload: Mapping[str, Any], field_name: str) -> int:
+    return len(_require_list(payload.get(field_name), field_name=field_name))
+
+
+def _summary_int(summary: Mapping[str, Any], field_name: str) -> int | None:
+    if field_name not in summary:
+        return None
+    value = summary.get(field_name)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise AiBriefValidationError(f"summary.{field_name} must be a non-negative int")
+    return value
+
+
+def _validate_summary_counts(
+    payload: Mapping[str, Any],
+    *,
+    summary: Mapping[str, Any],
+    watch_tickers: list[str] | None,
+) -> None:
+    expected_counts = {
+        "preselected_count": _array_count(payload, "eligible_tickers"),
+        "recommendation_count": _array_count(payload, "recommendations"),
+        "excluded_count": _array_count(payload, "excluded_candidates"),
+        "vetoed_count": _array_count(payload, "vetoed_candidates"),
+        "cap_excluded_count": _array_count(payload, "cap_excluded_candidates"),
+        "source_issue_count": _array_count(payload, "source_issues"),
+        "system_issue_count": _array_count(payload, "system_issues"),
+        "recommendable_count": _array_count(payload, "eligible_tickers")
+        + _array_count(payload, "cap_excluded_candidates"),
+        "watch_count": (
+            len(watch_tickers)
+            if watch_tickers is not None
+            else len(_optional_list(payload, "watch_candidates") or [])
+        ),
+    }
+    for field_name, expected_count in expected_counts.items():
+        actual_count = _summary_int(summary, field_name)
+        if actual_count is not None and actual_count != expected_count:
+            raise AiBriefValidationError(
+                f"summary.{field_name} must be {expected_count}, got {actual_count!r}"
+            )
+
+
+def _non_negative_int(value: object, *, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise AiBriefValidationError(f"{field_name} must be a non-negative int")
+    return value
+
+
+def _validate_source_provider_summary(
+    payload: Mapping[str, Any],
+    *,
+    summary: Mapping[str, Any],
+) -> None:
+    if "source_provider_summary" not in payload:
+        return
+    source_provider_summary = _require_mapping(
+        payload.get("source_provider_summary"),
+        field_name="source_provider_summary",
+    )
+    chain = _require_list(
+        source_provider_summary.get("chain"),
+        field_name="source_provider_summary.chain",
+    )
+    for idx, raw_provider in enumerate(chain):
+        if not isinstance(raw_provider, str):
+            raise AiBriefValidationError(
+                f"source_provider_summary.chain[{idx}] must be a string"
+            )
+        if not raw_provider.strip():
+            raise AiBriefValidationError(
+                f"source_provider_summary.chain[{idx}] is required"
+            )
+
+    providers = _require_list(
+        source_provider_summary.get("providers"),
+        field_name="source_provider_summary.providers",
+    )
+    for idx, raw_provider_summary in enumerate(providers):
+        provider_summary = _require_mapping(
+            raw_provider_summary,
+            field_name=f"source_provider_summary.providers[{idx}]",
+        )
+        if (
+            not isinstance(provider_summary.get("provider"), str)
+            or not str(provider_summary.get("provider")).strip()
+        ):
+            raise AiBriefValidationError(
+                f"source_provider_summary.providers[{idx}].provider is required"
+            )
+        if (
+            not isinstance(provider_summary.get("status"), str)
+            or not str(provider_summary.get("status")).strip()
+        ):
+            raise AiBriefValidationError(
+                f"source_provider_summary.providers[{idx}].status is required"
+            )
+        covered = _non_negative_int(
+            provider_summary.get("covered"),
+            field_name=f"source_provider_summary.providers[{idx}].covered",
+        )
+        total = _non_negative_int(
+            provider_summary.get("total"),
+            field_name=f"source_provider_summary.providers[{idx}].total",
+        )
+        if covered > total:
+            raise AiBriefValidationError(
+                f"source_provider_summary.providers[{idx}].covered must be <= total"
+            )
+
+    final = _require_mapping(
+        source_provider_summary.get("final"),
+        field_name="source_provider_summary.final",
+    )
+    final_counts = {
+        field_name: _non_negative_int(
+            final.get(field_name),
+            field_name=f"source_provider_summary.final.{field_name}",
+        )
+        for field_name in (
+            "recommendable_covered",
+            "recommendable_total",
+            "watch_covered",
+            "watch_total",
+        )
+    }
+    if final_counts["recommendable_covered"] > final_counts["recommendable_total"]:
+        raise AiBriefValidationError(
+            "source_provider_summary.final.recommendable_covered must be <= "
+            "recommendable_total"
+        )
+    if final_counts["watch_covered"] > final_counts["watch_total"]:
+        raise AiBriefValidationError(
+            "source_provider_summary.final.watch_covered must be <= watch_total"
+        )
+
+    recommendable_count = _summary_int(summary, "recommendable_count")
+    if (
+        recommendable_count is not None
+        and final_counts["recommendable_total"] != recommendable_count
+    ):
+        raise AiBriefValidationError(
+            "source_provider_summary.final.recommendable_total must match "
+            "summary.recommendable_count"
+        )
+    watch_count = _summary_int(summary, "watch_count")
+    if watch_count is not None and final_counts["watch_total"] != watch_count:
+        raise AiBriefValidationError(
+            "source_provider_summary.final.watch_total must match summary.watch_count"
+        )
+
+
 def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) -> None:
     if payload.get("schema") != _ARTIFACT_SCHEMA:
         raise AiBriefValidationError(f"schema must be {_ARTIFACT_SCHEMA!r}")
@@ -293,7 +538,8 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
     if not str(payload.get("source_entry_report") or "").strip():
         raise AiBriefValidationError("source_entry_report is required")
 
-    _require_mapping(payload.get("summary"), field_name="summary")
+    summary = _require_mapping(payload.get("summary"), field_name="summary")
+    watch_tickers = _watch_tickers(payload)
     _validate_recommendations(payload, now=now)
     _validate_candidate_list(
         payload,
@@ -311,8 +557,11 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         "cap_excluded_candidates",
         allowed_actions={"ENTER", "REVIEW", "SKIP"},
     )
+    _validate_watch_candidates(payload, watch_tickers=watch_tickers, now=now)
     _validate_issue_list(payload, "source_issues")
     _validate_issue_list(payload, "system_issues")
+    _validate_summary_counts(payload, summary=summary, watch_tickers=watch_tickers)
+    _validate_source_provider_summary(payload, summary=summary)
     try:
         validate_optional_ai_brief_state_fields(payload)
     except ValueError as exc:
