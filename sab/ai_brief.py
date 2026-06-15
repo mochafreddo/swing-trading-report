@@ -7,6 +7,10 @@ import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from .ai_brief_candidates import (
+    AiBriefEntryCandidate,
+    classify_ai_brief_entry_rows,
+)
 from .ai_brief_eval_common import normalize_market, resolve_entry_report_market
 from .ai_brief_providers import (
     DEFAULT_MODEL_TIMEOUT_SECONDS,
@@ -18,6 +22,10 @@ from .ai_brief_providers import (
     AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
+)
+from .ai_brief_source_chain import (
+    load_ai_brief_source_chain,
+    parse_source_provider_chain,
 )
 from .ai_brief_sources import (
     DEFAULT_SOURCE_TIMEOUT_SECONDS,
@@ -31,7 +39,6 @@ from .ai_brief_sources import (
     SOURCE_PROVIDER_NONE,
     SOURCE_PROVIDER_POLYGON_NEWS,
     AiBriefSourceProviderError,
-    load_ai_brief_sources,
 )
 from .config import ConfigLoadError, load_config
 from .observability import current_run_id
@@ -205,6 +212,33 @@ def _normalize_source_timeout_seconds(
     return float(value)
 
 
+def _source_chain_env_value(market: str, explicit_chain: str | None) -> str | None:
+    explicit = str(explicit_chain or "").strip()
+    if explicit:
+        return explicit
+    market_value = os.getenv(f"AI_BRIEF_SOURCE_PROVIDER_CHAIN_{market}")
+    if market_value and market_value.strip():
+        return market_value
+    global_value = os.getenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN")
+    if global_value and global_value.strip():
+        return global_value
+    return None
+
+
+def _resolve_source_provider_chain(
+    *,
+    target_market: str,
+    normalized_source_provider: str,
+    source_provider_chain: str | None,
+) -> tuple[str, ...]:
+    configured = parse_source_provider_chain(
+        _source_chain_env_value(target_market, source_provider_chain)
+    )
+    if configured:
+        return configured
+    return (normalized_source_provider,)
+
+
 def _load_json_object(path: str, *, label: str) -> dict[str, Any]:
     try:
         with open(path, encoding="utf-8") as fp:
@@ -287,9 +321,11 @@ def _extract_buy_reason_labels(candidate: Mapping[str, Any] | None) -> list[str]
 
 
 def _build_model_candidate(
-    entry: Mapping[str, Any], buy_candidate: Mapping[str, Any] | None
+    classified: AiBriefEntryCandidate, buy_candidate: Mapping[str, Any] | None
 ) -> dict[str, object]:
+    entry = classified.entry
     ticker = str(entry.get("ticker") or "").strip()
+    raw_reasons = entry.get("reasons")
     name = None
     if buy_candidate is not None:
         raw_name = buy_candidate.get("name")
@@ -298,12 +334,13 @@ def _build_model_candidate(
     return {
         "ticker": ticker,
         "name": name,
+        "action": classified.action,
+        "ai_role": classified.role,
+        "ai_role_reason": classified.reason,
         "entry_reasons": [
-            str(reason).strip()
-            for reason in entry.get("reasons", [])
-            if str(reason).strip()
+            str(reason).strip() for reason in raw_reasons if str(reason).strip()
         ]
-        if isinstance(entry.get("reasons"), list)
+        if isinstance(raw_reasons, list)
         else [],
         "buy_reason_labels": _extract_buy_reason_labels(buy_candidate),
         "entry_price": entry.get("entry_price"),
@@ -316,13 +353,13 @@ def _build_model_candidate(
     }
 
 
-def _build_excluded_candidate(entry: Mapping[str, Any]) -> dict[str, object]:
-    ticker = str(entry.get("ticker") or "").strip()
-    action = str(entry.get("action") or "").strip().upper()
+def _build_excluded_candidate(
+    classified: AiBriefEntryCandidate,
+) -> dict[str, object]:
     return {
-        "ticker": ticker,
-        "action": action,
-        "reason": f"entry report action was {action}",
+        "ticker": classified.ticker,
+        "action": classified.action,
+        "reason": classified.reason,
     }
 
 
@@ -330,6 +367,7 @@ def _build_cap_excluded_candidate(candidate: Mapping[str, object]) -> dict[str, 
     return {
         "ticker": str(candidate["ticker"]),
         "action": "ENTER",
+        "entry_action": str(candidate.get("action") or ""),
         "reason": f"preselection cap {_PRESELECTION_LIMIT} exceeded",
     }
 
@@ -357,6 +395,8 @@ def _entry_system_issues(source_report: Mapping[str, Any]) -> list[dict[str, obj
 def _build_summary(
     *,
     entry_count: int,
+    recommendable_count: int,
+    watch_count: int,
     preselected_count: int,
     recommendation_count: int,
     excluded_count: int,
@@ -367,6 +407,8 @@ def _build_summary(
 ) -> dict[str, object]:
     return {
         "entry_count": entry_count,
+        "recommendable_count": recommendable_count,
+        "watch_count": watch_count,
         "preselected_count": preselected_count,
         "recommendation_count": recommendation_count,
         "excluded_count": excluded_count,
@@ -444,6 +486,7 @@ def run_ai_brief(
     model_timeout_seconds: float | None = None,
     source_provider: str | None = None,
     source_report_path: str | None = None,
+    source_provider_chain: str | None = None,
     source_api_url: str | None = None,
     source_timeout_seconds: float | None = None,
     report_date: str | None = None,
@@ -505,6 +548,7 @@ def run_ai_brief(
             "model_provider": normalized_model_provider,
             "model_name": normalized_model_name,
             "source_provider": normalized_source_provider,
+            "source_provider_chain": source_provider_chain,
             "upload": upload,
         },
     )
@@ -535,6 +579,11 @@ def run_ai_brief(
         target_market = _resolve_target_market(
             report_market=source_report.get("market"),
             market_override=normalized_market,
+        )
+        resolved_source_provider_chain = _resolve_source_provider_chain(
+            target_market=target_market,
+            normalized_source_provider=normalized_source_provider,
+            source_provider_chain=source_provider_chain,
         )
         target_rows = _filter_rows_for_market(entry_rows, market=target_market)
         buy_enrichment, enrichment_issues = _load_buy_enrichment(buy_report_path)
@@ -572,33 +621,18 @@ def run_ai_brief(
         },
     )
 
-    eligible_candidates: list[dict[str, object]] = []
-    excluded_candidates: list[dict[str, object]] = []
-    for entry in target_rows:
-        ticker = str(entry.get("ticker") or "").strip()
-        action = str(entry.get("action") or "").strip().upper()
-        if action == "ENTER":
-            eligible_candidates.append(
-                _build_model_candidate(entry, buy_enrichment.get(ticker))
-            )
-        elif action in {"REVIEW", "SKIP"}:
-            excluded_candidates.append(_build_excluded_candidate(entry))
-        else:
-            logger.error(
-                "entry row action must be ENTER, REVIEW, or SKIP",
-                extra={
-                    "event": "ai_brief_failed",
-                    "run_id": run_id,
-                    "operation": operation,
-                    "status": "failed",
-                    "stage": "validate_entry_action",
-                    "market": target_market,
-                    "ticker": ticker,
-                    "action": action,
-                    "retryable": False,
-                },
-            )
-            return 1
+    classified_rows = classify_ai_brief_entry_rows(target_rows)
+    eligible_candidates = [
+        _build_model_candidate(classified, buy_enrichment.get(classified.ticker))
+        for classified in classified_rows.recommendable
+    ]
+    watch_candidates = [
+        _build_model_candidate(classified, buy_enrichment.get(classified.ticker))
+        for classified in classified_rows.watch_only
+    ]
+    excluded_candidates = [
+        _build_excluded_candidate(classified) for classified in classified_rows.excluded
+    ]
 
     preselected_candidates = eligible_candidates[:_PRESELECTION_LIMIT]
     cap_excluded_candidates = [
@@ -608,27 +642,72 @@ def run_ai_brief(
 
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
     source_provider_issues: list[dict[str, object]] = []
+    source_provider_summary: dict[str, object] = {}
+    source_universe_candidates = [*preselected_candidates, *watch_candidates]
+    source_universe_tickers = {
+        str(candidate["ticker"]) for candidate in source_universe_candidates
+    }
+    recommendable_tickers = {
+        str(candidate["ticker"]) for candidate in preselected_candidates
+    }
+    watch_ticker_set = {str(candidate["ticker"]) for candidate in watch_candidates}
     ticker_names = {
         str(candidate["ticker"]): str(candidate.get("name") or "").strip()
-        for candidate in preselected_candidates
+        for candidate in source_universe_candidates
         if str(candidate.get("name") or "").strip()
     }
     try:
-        source_provider_result = load_ai_brief_sources(
-            source_provider=normalized_source_provider,
+        source_chain_result = load_ai_brief_source_chain(
+            source_providers=resolved_source_provider_chain,
             source_report_path=source_report_path,
             source_api_url=normalized_source_api_url,
             source_timeout_seconds=normalized_source_timeout_seconds,
-            eligible_tickers={
-                str(candidate["ticker"]) for candidate in preselected_candidates
-            },
+            source_universe_tickers=source_universe_tickers,
+            recommendable_tickers=recommendable_tickers,
+            watch_tickers=watch_ticker_set,
             ticker_names=ticker_names,
         )
         preselected_candidates = _attach_candidate_sources(
             preselected_candidates,
-            source_provider_result.sources_by_ticker,
+            source_chain_result.sources_by_ticker,
         )
-        source_provider_issues = source_provider_result.source_issues
+        watch_candidates = _attach_candidate_sources(
+            watch_candidates,
+            source_chain_result.sources_by_ticker,
+        )
+        source_provider_issues = source_chain_result.source_issues
+        system_issues.extend(source_chain_result.system_issues)
+        source_provider_summary = source_chain_result.summary
+        provider_summaries = source_provider_summary.get("providers")
+        failed_provider = None
+        if isinstance(provider_summaries, list):
+            failed_provider = next(
+                (
+                    provider
+                    for provider in provider_summaries
+                    if isinstance(provider, Mapping)
+                    and provider.get("status") == "failed"
+                ),
+                None,
+            )
+        if isinstance(failed_provider, Mapping):
+            failed_provider_name = str(failed_provider.get("provider") or "")
+            logger.error(
+                "AI brief source provider failed",
+                extra={
+                    "event": "ai_brief_source_provider_failed",
+                    "run_id": run_id,
+                    "operation": operation,
+                    "status": "degraded",
+                    "source_provider": failed_provider_name,
+                    "dependency": failed_provider_name,
+                    "market": target_market,
+                    "ticker_count": len(source_universe_candidates),
+                    "source_report_path": source_report_path,
+                    "error_type": "AiBriefSourceProviderError",
+                    "retryable": _source_provider_retryable(failed_provider_name),
+                },
+            )
         logger.info(
             "AI brief source provider completed",
             extra={
@@ -637,12 +716,13 @@ def run_ai_brief(
                 "operation": operation,
                 "status": "success",
                 "source_provider": normalized_source_provider,
-                "dependency": normalized_source_provider,
+                "source_provider_chain": list(resolved_source_provider_chain),
+                "dependency": ",".join(resolved_source_provider_chain),
                 "market": target_market,
-                "ticker_count": len(preselected_candidates),
+                "ticker_count": len(source_universe_candidates),
                 "source_count": sum(
                     len(sources)
-                    for sources in source_provider_result.sources_by_ticker.values()
+                    for sources in source_chain_result.sources_by_ticker.values()
                 ),
                 "source_issue_count": len(source_provider_issues),
             },
@@ -657,16 +737,58 @@ def run_ai_brief(
                 "operation": operation,
                 "status": "degraded",
                 "source_provider": normalized_source_provider,
-                "dependency": normalized_source_provider,
+                "source_provider_chain": list(resolved_source_provider_chain),
+                "dependency": ",".join(resolved_source_provider_chain),
                 "market": target_market,
-                "ticker_count": len(preselected_candidates),
+                "ticker_count": len(source_universe_candidates),
                 "source_report_path": source_report_path,
                 "error_type": type(exc).__name__,
-                "retryable": _source_provider_retryable(normalized_source_provider),
+                "retryable": any(
+                    _source_provider_retryable(provider)
+                    for provider in resolved_source_provider_chain
+                ),
             },
         )
         preselected_candidates = _attach_candidate_sources(preselected_candidates, {})
+        watch_candidates = _attach_candidate_sources(watch_candidates, {})
         system_issues.append(_source_provider_system_issue(exc))
+        source_provider_summary = {
+            "chain": list(resolved_source_provider_chain),
+            "providers": [
+                {
+                    "provider": provider,
+                    "status": "failed",
+                    "code": exc.code,
+                    "covered": 0,
+                    "total": len(source_universe_tickers),
+                }
+                for provider in resolved_source_provider_chain
+            ],
+            "final": {
+                "recommendable_covered": 0,
+                "recommendable_total": len(recommendable_tickers),
+                "watch_covered": 0,
+                "watch_total": len(watch_ticker_set),
+            },
+        }
+    except ValueError as exc:
+        logger.error(
+            "%s",
+            exc,
+            extra={
+                "event": "ai_brief_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "stage": "load_source_chain",
+                "source_provider": normalized_source_provider,
+                "source_provider_chain": list(resolved_source_provider_chain),
+                "market": target_market,
+                "error_type": type(exc).__name__,
+                "retryable": False,
+            },
+        )
+        return 1
 
     try:
         provider = _build_provider(
@@ -675,11 +797,13 @@ def run_ai_brief(
             model_timeout_seconds=normalized_model_timeout_seconds,
         )
         provider_result = provider.build_recommendations(
-            candidates=preselected_candidates
+            recommendable_candidates=preselected_candidates,
+            watch_candidates=watch_candidates,
         )
         recommendations = provider_result.recommendations
         source_issues = [*source_provider_issues, *provider_result.source_issues]
         vetoed_candidates = provider_result.vetoed_candidates
+        model_watch_candidates = provider_result.watch_candidates
         logger.info(
             "AI brief model provider completed",
             extra={
@@ -692,6 +816,7 @@ def run_ai_brief(
                 "model_name": normalized_model_name,
                 "market": target_market,
                 "ticker_count": len(preselected_candidates),
+                "watch_count": len(watch_candidates),
                 "recommendation_count": len(recommendations),
                 "vetoed_count": len(vetoed_candidates),
                 "source_issue_count": len(source_issues),
@@ -718,6 +843,7 @@ def run_ai_brief(
         recommendations = []
         source_issues = source_provider_issues
         vetoed_candidates = []
+        model_watch_candidates = []
         system_issues.append(_provider_system_issue(exc))
     except ValueError as exc:
         logger.error(
@@ -750,6 +876,8 @@ def run_ai_brief(
         "model_name": normalized_model_name,
         "summary": _build_summary(
             entry_count=len(target_rows),
+            recommendable_count=len(eligible_candidates),
+            watch_count=len(watch_candidates),
             preselected_count=len(preselected_candidates),
             recommendation_count=len(recommendations),
             excluded_count=len(excluded_candidates),
@@ -761,12 +889,15 @@ def run_ai_brief(
         "recommendations": recommendations,
         "excluded_candidates": excluded_candidates,
         "vetoed_candidates": vetoed_candidates,
+        "watch_candidates": model_watch_candidates,
         "cap_excluded_candidates": cap_excluded_candidates,
         "source_issues": source_issues,
         "system_issues": system_issues,
         "eligible_tickers": [
             str(candidate["ticker"]) for candidate in preselected_candidates
         ],
+        "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
+        "source_provider_summary": source_provider_summary,
     }
 
     try:
