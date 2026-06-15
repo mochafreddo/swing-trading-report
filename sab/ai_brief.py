@@ -54,6 +54,7 @@ _DEFAULT_MODEL_NAME = "fake-ai-brief-v1"
 _DEFAULT_MODEL_TIMEOUT_SECONDS = DEFAULT_MODEL_TIMEOUT_SECONDS
 _PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
+_SUPPORTED_ENTRY_ACTIONS = frozenset({"ENTER", "REVIEW", "SKIP"})
 _ALLOWED_SOURCE_PROVIDERS = frozenset(
     {
         SOURCE_PROVIDER_NONE,
@@ -229,10 +230,16 @@ def _resolve_source_provider_chain(
     *,
     target_market: str,
     normalized_source_provider: str,
+    source_provider: str | None,
     source_provider_chain: str | None,
 ) -> tuple[str, ...]:
+    configured = parse_source_provider_chain(str(source_provider_chain or "").strip())
+    if configured:
+        return configured
+    if str(source_provider or "").strip():
+        return (normalized_source_provider,)
     configured = parse_source_provider_chain(
-        _source_chain_env_value(target_market, source_provider_chain)
+        _source_chain_env_value(target_market, None)
     )
     if configured:
         return configured
@@ -276,6 +283,17 @@ def _filter_rows_for_market(
         if infer_market_from_ticker(ticker) == market:
             filtered.append(row)
     return filtered
+
+
+def _validate_supported_entry_actions(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        action = str(row.get("action") or "").strip().upper()
+        if action not in _SUPPORTED_ENTRY_ACTIONS:
+            ticker = str(row.get("ticker") or "").strip() or "-"
+            raise ValueError(
+                "entry row action must be ENTER, REVIEW, or SKIP: "
+                f"ticker={ticker}, action={action or '-'}"
+            )
 
 
 def _load_buy_enrichment(
@@ -582,9 +600,11 @@ def run_ai_brief(
         resolved_source_provider_chain = _resolve_source_provider_chain(
             target_market=target_market,
             normalized_source_provider=normalized_source_provider,
+            source_provider=source_provider,
             source_provider_chain=source_provider_chain,
         )
         target_rows = _filter_rows_for_market(entry_rows, market=target_market)
+        _validate_supported_entry_actions(target_rows)
         buy_enrichment, enrichment_issues = _load_buy_enrichment(buy_report_path)
     except ValueError as exc:
         logger.error(
@@ -642,12 +662,12 @@ def run_ai_brief(
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
     source_provider_issues: list[dict[str, object]] = []
     source_provider_summary: dict[str, object] = {}
-    source_universe_candidates = [*preselected_candidates, *watch_candidates]
+    source_universe_candidates = [*eligible_candidates, *watch_candidates]
     source_universe_tickers = {
         str(candidate["ticker"]) for candidate in source_universe_candidates
     }
     recommendable_tickers = {
-        str(candidate["ticker"]) for candidate in preselected_candidates
+        str(candidate["ticker"]) for candidate in eligible_candidates
     }
     watch_ticker_set = {str(candidate["ticker"]) for candidate in watch_candidates}
     ticker_names = {

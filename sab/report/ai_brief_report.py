@@ -296,7 +296,9 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
     _require_mapping(payload.get("summary"), field_name="summary")
     _validate_recommendations(payload, now=now)
     _validate_candidate_list(
-        payload, "excluded_candidates", allowed_actions={"REVIEW", "SKIP"}
+        payload,
+        "excluded_candidates",
+        allowed_actions={"ENTER", "REVIEW", "SKIP"},
     )
     _validate_candidate_list(
         payload,

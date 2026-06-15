@@ -571,6 +571,238 @@ def test_run_ai_brief_source_chain_uses_recommendable_plus_watch_universe(
     assert captured["watch_tickers"] == {"MSFT.NAS"}
 
 
+def test_run_ai_brief_source_chain_includes_cap_excluded_recommendables(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[
+            _entry_row("AAPL.NAS", action="ENTER"),
+            _entry_row("MSFT.NAS", action="ENTER"),
+            _entry_row("NVDA.NAS", action="ENTER"),
+            _entry_row("META.NAS", action="ENTER"),
+            _entry_row("AMZN.NAS", action="ENTER"),
+            _entry_row(
+                "CAT.NYS",
+                action="SKIP",
+                reasons=["portfolio market cap reached (US)"],
+            ),
+            _entry_row(
+                "MO.NYS",
+                action="SKIP",
+                reasons=["hybrid trigger guard failed (70.43 < ema10 71.59)"],
+            ),
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    captured: dict[str, object] = {}
+
+    def fake_chain(**kwargs: object):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={
+                "chain": ["none"],
+                "providers": [],
+                "final": {
+                    "recommendable_covered": 0,
+                    "recommendable_total": 6,
+                    "watch_covered": 0,
+                    "watch_total": 1,
+                },
+            },
+        )
+
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider=None,
+            source_report_path=None,
+        )
+        == 0
+    )
+
+    assert captured["source_universe_tickers"] == {
+        "AAPL.NAS",
+        "MSFT.NAS",
+        "NVDA.NAS",
+        "META.NAS",
+        "AMZN.NAS",
+        "CAT.NYS",
+        "MO.NYS",
+    }
+    assert captured["recommendable_tickers"] == {
+        "AAPL.NAS",
+        "MSFT.NAS",
+        "NVDA.NAS",
+        "META.NAS",
+        "AMZN.NAS",
+        "CAT.NYS",
+    }
+    assert captured["watch_tickers"] == {"MO.NYS"}
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["eligible_tickers"] == [
+        "AAPL.NAS",
+        "MSFT.NAS",
+        "NVDA.NAS",
+        "META.NAS",
+        "AMZN.NAS",
+    ]
+    assert [row["ticker"] for row in payload["cap_excluded_candidates"]] == ["CAT.NYS"]
+
+
+def test_run_ai_brief_explicit_source_provider_overrides_env_chain(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    captured: dict[str, object] = {}
+
+    def fake_chain(**kwargs: object):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={
+                "chain": ["local-json"],
+                "providers": [],
+                "final": {
+                    "recommendable_covered": 0,
+                    "recommendable_total": 1,
+                    "watch_covered": 0,
+                    "watch_total": 0,
+                },
+            },
+        )
+
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub,benzinga-news")
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider="local-json",
+            source_report_path=source_report.as_posix(),
+        )
+        == 0
+    )
+
+    assert captured["source_providers"] == ("local-json",)
+
+
+def test_run_ai_brief_excludes_base_gate_enter_rows_without_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[_entry_row("AAPL.NAS", action="ENTER", entry_state="WAITING")],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["eligible_tickers"] == []
+    assert payload["excluded_candidates"][0]["action"] == "ENTER"
+    assert "entry_state=WAITING" in payload["excluded_candidates"][0]["reason"]
+
+
+def test_run_ai_brief_rejects_unsupported_action_before_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[_entry_row("AAPL.NAS", action="HOLD")],
+    )
+    report_dir = tmp_path / "reports"
+    calls: dict[str, int] = {"source": 0, "model": 0}
+    original_build = FakeAiBriefProvider.build_recommendations
+
+    def fake_chain(**kwargs: object):
+        calls["source"] += 1
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={},
+        )
+
+    def spy_build(
+        self: FakeAiBriefProvider,
+        *,
+        recommendable_candidates: list[dict[str, object]],
+        watch_candidates: list[dict[str, object]],
+    ) -> object:
+        calls["model"] += 1
+        return original_build(
+            self,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
+
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(FakeAiBriefProvider, "build_recommendations", spy_build)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider=None,
+            source_report_path=None,
+        )
+        == 1
+    )
+    assert calls == {"source": 0, "model": 0}
+    assert list(report_dir.glob("*.ai-brief.json")) == []
+
+
 def test_run_ai_brief_applies_provider_boundary_before_output_cap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

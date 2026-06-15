@@ -227,6 +227,40 @@ def test_write_ai_brief_report_accepts_cap_excluded_review_and_skip_actions(
     ]
 
 
+def test_write_ai_brief_report_accepts_excluded_enter_action(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    artifact["excluded_candidates"] = [
+        {
+            "ticker": "AAPL.NAS",
+            "action": "ENTER",
+            "reason": "entry row failed AI brief base gates: entry_state=WAITING",
+        }
+    ]
+    artifact["recommendations"] = []
+    artifact["eligible_tickers"] = []
+    artifact["source_issues"] = []
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "preselected_count": 0,
+        "recommendation_count": 0,
+        "excluded_count": 1,
+        "source_issue_count": 0,
+    }
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["excluded_candidates"][0]["action"] == "ENTER"
+
+
 def test_validate_ai_brief_artifact_accepts_legacy_missing_state() -> None:
     payload = {
         "schema": "sab.ai_brief.v1",
