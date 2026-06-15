@@ -77,7 +77,7 @@ class FakeAiBriefProvider:
         recommendable_candidates: list[dict[str, object]],
         watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
-        _candidate_role_ticker_sets(
+        eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
         )
@@ -134,11 +134,29 @@ class FakeAiBriefProvider:
                     "as_of": as_of,
                 }
             )
-        return AiBriefProviderResult(
+        result = AiBriefProviderResult(
             recommendations=recommendations,
             source_issues=source_issues,
             watch_candidates=watch_rows,
         )
+        recommendable_source_rows_by_ticker = _source_rows_by_ticker(
+            recommendable_candidates
+        )
+        watch_source_rows_by_ticker = _source_rows_by_ticker(watch_candidates)
+        _validate_provider_result_contract(
+            result,
+            eligible_tickers=eligible_tickers,
+            watch_tickers=watch_tickers,
+            source_urls_by_ticker={
+                ticker: set(rows_by_url)
+                for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
+            },
+            watch_source_urls_by_ticker={
+                ticker: set(rows_by_url)
+                for ticker, rows_by_url in watch_source_rows_by_ticker.items()
+            },
+        )
+        return result
 
 
 class OpenAiBriefProvider:

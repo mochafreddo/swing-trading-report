@@ -28,14 +28,18 @@ def _source(ticker: str, *, published_at: str | None = None) -> dict[str, object
 
 
 def _candidate(
-    ticker: str, *, role: str, published_at: str | None = None
+    ticker: str,
+    *,
+    role: str,
+    ai_role_reason: str = "test role reason",
+    published_at: str | None = None,
 ) -> dict[str, object]:
     return {
         "ticker": ticker,
         "name": None,
         "action": "ENTER" if role == "recommendable" else "SKIP",
         "ai_role": role,
-        "ai_role_reason": "test role reason",
+        "ai_role_reason": ai_role_reason,
         "entry_reasons": ["entry reason"],
         "buy_reason_labels": [],
         "entry_price": 100.0,
@@ -62,38 +66,39 @@ def test_fake_provider_returns_watch_candidates_separately() -> None:
 
 
 def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "action": "SKIP",
+                    "reason": "source risk",
+                }
+            ],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "sources": [
+                        {
+                            "title": "MSFT source",
+                            "url": "https://news.example/MSFT.NAS",
+                            "published_at": _fresh_published_at(),
+                        }
+                    ],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
         api_key="test-key",
         timeout_seconds=1.0,
-        session=_CapturingSession(
-            {
-                "recommendations": [],
-                "vetoed_candidates": [
-                    {
-                        "ticker": "AAPL.NAS",
-                        "action": "SKIP",
-                        "reason": "source risk",
-                    }
-                ],
-                "watch_candidates": [
-                    {
-                        "ticker": "MSFT.NAS",
-                        "action": "WATCH",
-                        "reason": "trigger pending",
-                        "retrigger_conditions": ["price back above trigger"],
-                        "sources": [
-                            {
-                                "title": "MSFT source",
-                                "url": "https://news.example/MSFT.NAS",
-                                "published_at": _fresh_published_at(),
-                            }
-                        ],
-                    }
-                ],
-                "source_issues": [],
-            }
-        ),
+        session=session,
     )
 
     result = provider.build_recommendations(
@@ -101,13 +106,36 @@ def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
         watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
     )
 
-    request = provider._session.requests[0]["json"]  # type: ignore[attr-defined]
-    user_payload = json.loads(request["input"][1]["content"])
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    request_input = request["input"]
+    assert isinstance(request_input, list)
+    user_message = request_input[1]
+    assert isinstance(user_message, dict)
+    user_content = user_message["content"]
+    assert isinstance(user_content, str)
+    user_payload = json.loads(user_content)
     assert [row["ticker"] for row in user_payload["recommendable_candidates"]] == [
         "AAPL.NAS"
     ]
     assert [row["ticker"] for row in user_payload["watch_candidates"]] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["ticker"] == "MSFT.NAS"
+
+
+def test_fake_provider_rejects_watch_candidate_with_automated_order_language() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+
+    with pytest.raises(AiBriefProviderContractError, match="automated-order"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[
+                _candidate(
+                    "MSFT.NAS",
+                    role="watch_only",
+                    ai_role_reason="buy now when price crosses trigger",
+                )
+            ],
+        )
 
 
 def test_openai_rejects_watch_candidate_returned_as_recommendation() -> None:
@@ -359,6 +387,41 @@ def test_openai_rejects_watch_candidate_stale_source() -> None:
         )
 
 
+def test_openai_rejects_watch_candidate_when_canonical_source_is_stale() -> None:
+    stale_published_at = _published_at(-dt.timedelta(hours=73))
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [_source("MSFT.NAS")],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="within 72h"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[
+                _candidate(
+                    "MSFT.NAS", role="watch_only", published_at=stale_published_at
+                )
+            ],
+        )
+
+
 def test_openai_rejects_watch_candidate_future_source() -> None:
     future_published_at = _published_at(dt.timedelta(minutes=30))
     provider = OpenAiBriefProvider(
@@ -393,6 +456,42 @@ def test_openai_rejects_watch_candidate_future_source() -> None:
                     "MSFT.NAS", role="watch_only", published_at=future_published_at
                 )
             ],
+        )
+
+
+def test_openai_rejects_watch_candidate_unprovided_source_url() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [
+                            {
+                                "title": "Unprovided source",
+                                "url": "https://news.example/unprovided",
+                                "published_at": _fresh_published_at(),
+                            }
+                        ],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="source url must be supplied"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
         )
 
 
