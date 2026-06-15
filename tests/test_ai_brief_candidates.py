@@ -45,6 +45,11 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
                 reasons=["portfolio market cap reached (US)"],
             ),
             _row(
+                "TOTAL.NAS",
+                action="SKIP",
+                reasons=["portfolio max active holdings reached"],
+            ),
+            _row(
                 "CIFR.NAS",
                 action="REVIEW",
                 reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
@@ -71,6 +76,7 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
         "ELV.NYS",
         "CAT.NYS",
         "TSM.NYS",
+        "TOTAL.NAS",
         "CIFR.NAS",
         "IREN.NAS",
         "COHR.NYS",

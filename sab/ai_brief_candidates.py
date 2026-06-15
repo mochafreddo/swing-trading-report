@@ -6,7 +6,10 @@ from typing import Literal
 
 AiBriefCandidateRole = Literal["recommendable", "watch_only", "excluded"]
 
-_PORTFOLIO_CAP_REASON_PREFIX = "portfolio market cap reached"
+_PORTFOLIO_BLOCK_REASON_PREFIXES = (
+    "portfolio market cap reached",
+    "portfolio max active holdings reached",
+)
 _RISK_ALIGNMENT_REASON_TOKEN = "risk_alignment"
 _TIGHT_STOP_VS_VOLATILITY_REASON_TOKEN = "tight_stop_vs_volatility"
 _HYBRID_TRIGGER_GUARD_REASON = "hybrid trigger guard failed"
@@ -35,8 +38,10 @@ def entry_reasons(entry: Mapping[str, object]) -> list[str]:
     return [str(reason).strip() for reason in raw_reasons if str(reason).strip()]
 
 
-def _has_reason_prefix(reasons: Iterable[str], prefix: str) -> bool:
-    return any(reason.lower().startswith(prefix) for reason in reasons)
+def _has_any_reason_prefix(reasons: Iterable[str], prefixes: Iterable[str]) -> bool:
+    return any(
+        reason.lower().startswith(prefix) for reason in reasons for prefix in prefixes
+    )
 
 
 def _has_reason_text(reasons: Iterable[str], text: str) -> bool:
@@ -96,7 +101,9 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
             reason="entry report action was ENTER",
             entry=entry,
         )
-    if action == "SKIP" and _has_reason_prefix(reasons, _PORTFOLIO_CAP_REASON_PREFIX):
+    if action == "SKIP" and _has_any_reason_prefix(
+        reasons, _PORTFOLIO_BLOCK_REASON_PREFIXES
+    ):
         return AiBriefEntryCandidate(
             ticker=ticker,
             action=action,
