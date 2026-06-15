@@ -135,6 +135,73 @@ def test_openai_rejects_watch_candidate_returned_as_recommendation() -> None:
         )
 
 
+def test_openai_rejects_overlapping_candidate_roles() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["bad role"],
+                        "checklist": ["manual check"],
+                        "sources": [
+                            {
+                                "title": "AAPL source",
+                                "url": "https://news.example/AAPL.NAS",
+                                "published_at": "2026-06-15T12:00:00+00:00",
+                            }
+                        ],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefProviderContractError, match="candidate ticker roles must be disjoint"
+    ):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("AAPL.NAS", role="watch_only")],
+        )
+
+
+def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "SKIP",
+                        "reason": "bad role",
+                    }
+                ],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="watch ticker"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
 class _Response:
     status_code = 200
 

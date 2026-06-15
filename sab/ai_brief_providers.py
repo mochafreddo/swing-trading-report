@@ -77,6 +77,10 @@ class FakeAiBriefProvider:
         recommendable_candidates: list[dict[str, object]],
         watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
+        _candidate_role_ticker_sets(
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
         as_of = _offset_now_iso()
         recommendations: list[dict[str, object]] = []
         source_issues: list[dict[str, object]] = []
@@ -161,6 +165,10 @@ class OpenAiBriefProvider:
         recommendable_candidates: list[dict[str, object]],
         watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
+        eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
         if not recommendable_candidates and not watch_candidates:
             return AiBriefProviderResult(recommendations=[], source_issues=[])
 
@@ -202,22 +210,17 @@ class OpenAiBriefProvider:
             recommendable_candidates
         )
         watch_source_rows_by_ticker = _source_rows_by_ticker(watch_candidates)
-        source_rows_by_ticker = {
-            **watch_source_rows_by_ticker,
-            **recommendable_source_rows_by_ticker,
-        }
         result = _normalize_openai_provider_result(
             parsed,
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
-            source_rows_by_ticker=source_rows_by_ticker,
+            recommendable_source_rows_by_ticker=recommendable_source_rows_by_ticker,
+            watch_source_rows_by_ticker=watch_source_rows_by_ticker,
         )
         _validate_provider_result_contract(
             result,
-            eligible_tickers={
-                str(candidate["ticker"]) for candidate in recommendable_candidates
-            },
-            watch_tickers={str(candidate["ticker"]) for candidate in watch_candidates},
+            eligible_tickers=eligible_tickers,
+            watch_tickers=watch_tickers,
             source_urls_by_ticker={
                 ticker: set(rows_by_url)
                 for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
@@ -457,7 +460,10 @@ def _normalize_openai_provider_result(
     *,
     recommendable_candidates: list[dict[str, object]],
     watch_candidates: list[dict[str, object]],
-    source_rows_by_ticker: Mapping[str, Mapping[str, dict[str, object]]],
+    recommendable_source_rows_by_ticker: Mapping[
+        str, Mapping[str, dict[str, object]]
+    ],
+    watch_source_rows_by_ticker: Mapping[str, Mapping[str, dict[str, object]]],
 ) -> AiBriefProviderResult:
     candidate_by_ticker = {
         str(candidate["ticker"]): candidate for candidate in recommendable_candidates
@@ -490,7 +496,9 @@ def _normalize_openai_provider_result(
                     _as_provider_mapping_rows(
                         raw_recommendation.get("sources"), field_name="sources"
                     ),
-                    canonical_sources_by_url=source_rows_by_ticker.get(ticker, {}),
+                    canonical_sources_by_url=recommendable_source_rows_by_ticker.get(
+                        ticker, {}
+                    ),
                 ),
                 "as_of": _offset_now_iso(),
             }
@@ -524,7 +532,9 @@ def _normalize_openai_provider_result(
                         raw_watch.get("sources"),
                         field_name="watch_candidates.sources",
                     ),
-                    canonical_sources_by_url=source_rows_by_ticker.get(ticker, {}),
+                    canonical_sources_by_url=watch_source_rows_by_ticker.get(
+                        ticker, {}
+                    ),
                 ),
             }
         )
@@ -596,6 +606,27 @@ def _source_rows_by_ticker(
                 rows_by_url[source_url] = source
         rows_by_ticker[ticker] = rows_by_url
     return rows_by_ticker
+
+
+def _candidate_role_ticker_sets(
+    *,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+) -> tuple[set[str], set[str]]:
+    eligible_tickers = _candidate_ticker_set(recommendable_candidates)
+    watch_tickers = _candidate_ticker_set(watch_candidates)
+    if eligible_tickers & watch_tickers:
+        raise AiBriefProviderContractError("candidate ticker roles must be disjoint")
+    return eligible_tickers, watch_tickers
+
+
+def _candidate_ticker_set(candidates: list[dict[str, object]]) -> set[str]:
+    tickers: set[str] = set()
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").strip()
+        if ticker:
+            tickers.add(ticker)
+    return tickers
 
 
 def _parse_provider_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
@@ -673,7 +704,9 @@ def _validate_provider_result_contract(
 
     _validate_provider_issue_list(result.source_issues)
     _validate_provider_vetoed_candidates(
-        result.vetoed_candidates, eligible_tickers=eligible_tickers
+        result.vetoed_candidates,
+        eligible_tickers=eligible_tickers,
+        watch_tickers=watch_tickers,
     )
     _validate_provider_watch_candidates(
         result.watch_candidates,
@@ -840,12 +873,18 @@ def _validate_provider_vetoed_candidates(
     vetoed_candidates: list[dict[str, object]],
     *,
     eligible_tickers: set[str],
+    watch_tickers: set[str],
 ) -> None:
     for idx, candidate in enumerate(vetoed_candidates):
         ticker = str(candidate.get("ticker") or "").strip()
         if not ticker:
             raise AiBriefProviderContractError(
                 f"OpenAI output vetoed_candidates[{idx}].ticker is required"
+            )
+        if ticker in watch_tickers:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].ticker must not be a "
+                "watch ticker"
             )
         if ticker not in eligible_tickers:
             raise AiBriefProviderContractError(
