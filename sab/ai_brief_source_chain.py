@@ -7,9 +7,31 @@ from dataclasses import dataclass, field
 from .ai_brief_source_report import source_issue
 from .ai_brief_sources import (
     MAX_SOURCES_PER_TICKER,
+    SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+    SOURCE_PROVIDER_BENZINGA_NEWS,
+    SOURCE_PROVIDER_FINNHUB,
+    SOURCE_PROVIDER_HTTP_JSON,
+    SOURCE_PROVIDER_LOCAL_JSON,
+    SOURCE_PROVIDER_MARKETAUX_NEWS,
+    SOURCE_PROVIDER_NAVER_NEWS,
     SOURCE_PROVIDER_NONE,
+    SOURCE_PROVIDER_POLYGON_NEWS,
     AiBriefSourceProviderError,
     load_ai_brief_sources,
+)
+
+_ALLOWED_SOURCE_PROVIDERS = frozenset(
+    {
+        SOURCE_PROVIDER_NONE,
+        SOURCE_PROVIDER_LOCAL_JSON,
+        SOURCE_PROVIDER_HTTP_JSON,
+        SOURCE_PROVIDER_FINNHUB,
+        SOURCE_PROVIDER_POLYGON_NEWS,
+        SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
+        SOURCE_PROVIDER_MARKETAUX_NEWS,
+        SOURCE_PROVIDER_BENZINGA_NEWS,
+        SOURCE_PROVIDER_NAVER_NEWS,
+    }
 )
 
 _PROVIDER_ISSUE_PREFIX = {
@@ -36,10 +58,11 @@ def parse_source_provider_chain(value: str | None) -> tuple[str, ...]:
     text = str(value or "").strip()
     if not text:
         return ()
-    return _validate_source_provider_chain(text.split(","))
+    providers = tuple(part.strip().lower() for part in text.split(",") if part.strip())
+    return _validate_source_provider_chain(providers)
 
 
-def _validate_source_provider_chain(providers: Sequence[str]) -> tuple[str, ...]:
+def _validate_source_provider_chain(providers: tuple[str, ...]) -> tuple[str, ...]:
     chain = tuple(
         provider
         for raw_provider in providers
@@ -49,6 +72,9 @@ def _validate_source_provider_chain(providers: Sequence[str]) -> tuple[str, ...]
         raise ValueError("source provider chain must not contain duplicate providers")
     if SOURCE_PROVIDER_NONE in chain and len(chain) > 1:
         raise ValueError("source provider chain cannot combine none with providers")
+    unsupported = sorted(set(chain) - _ALLOWED_SOURCE_PROVIDERS)
+    if unsupported:
+        raise ValueError(f"unsupported source provider {unsupported[0]!r}")
     return chain
 
 
@@ -71,7 +97,7 @@ def _provider_system_issue(
     code = _failure_code(exc)
     return {
         "ticker": None,
-        "code": "source_provider_chain_failed" if code != "http_429" else code,
+        "code": code,
         "severity": "WARN",
         "message": f"{provider} source provider failed: {exc}",
     }
@@ -160,7 +186,7 @@ def load_ai_brief_source_chain(
     ticker_names: Mapping[str, str],
     now: dt.datetime | None = None,
 ) -> AiBriefSourceChainResult:
-    chain = _validate_source_provider_chain(source_providers)
+    chain = _validate_source_provider_chain(tuple(source_providers))
     if not chain or chain == (SOURCE_PROVIDER_NONE,):
         return AiBriefSourceChainResult(
             summary={

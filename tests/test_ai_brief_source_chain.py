@@ -9,6 +9,7 @@ from sab.ai_brief_sources import (
     MAX_SOURCES_PER_TICKER,
     AiBriefSourceProviderError,
     AiBriefSourceProviderResult,
+    AiBriefSourceProviderTimeoutError,
 )
 
 
@@ -255,12 +256,75 @@ def test_source_chain_skips_later_provider_after_ticker_reaches_cap(
     assert len(result.sources_by_ticker["AAPL.NAS"]) == MAX_SOURCES_PER_TICKER
 
 
+def test_source_chain_records_cap_issue_when_later_provider_overfills_remaining_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_provider_sources = [
+        _source("AAPL.NAS", f"finnhub-{idx}")
+        for idx in range(MAX_SOURCES_PER_TICKER - 1)
+    ]
+    second_provider_sources = [
+        _source("AAPL.NAS", "benzinga-extra-1"),
+        _source("AAPL.NAS", "benzinga-extra-2"),
+    ]
+
+    def fake_load(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        if provider == "finnhub":
+            return AiBriefSourceProviderResult(
+                sources_by_ticker={"AAPL.NAS": first_provider_sources}
+            )
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={"AAPL.NAS": second_provider_sources}
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub", "benzinga-news"),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert len(result.sources_by_ticker["AAPL.NAS"]) == MAX_SOURCES_PER_TICKER
+    assert result.sources_by_ticker["AAPL.NAS"] == [
+        *first_provider_sources,
+        second_provider_sources[0],
+    ]
+    assert [issue["code"] for issue in result.source_issues] == [
+        "source_chain_cap_exceeded"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, ()),
+        ("", ()),
+        ("   ", ()),
+        (" Finnhub, BENZINGA-news ", ("finnhub", "benzinga-news")),
+    ],
+)
+def test_parse_source_provider_chain_normalizes_successful_values(
+    value: str | None,
+    expected: tuple[str, ...],
+) -> None:
+    assert source_chain.parse_source_provider_chain(value) == expected
+
+
 @pytest.mark.parametrize(
     "value",
     [
         "finnhub,finnhub",
         "none,finnhub",
         "polygon-news,none",
+        "typo-provider",
     ],
 )
 def test_parse_source_provider_chain_rejects_invalid_chains(value: str) -> None:
@@ -272,6 +336,36 @@ def test_source_chain_rejects_none_combined_with_providers() -> None:
     with pytest.raises(ValueError, match="cannot combine none"):
         source_chain.load_ai_brief_source_chain(
             source_providers=("none", "finnhub"),
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=2.0,
+            source_universe_tickers={"AAPL.NAS"},
+            recommendable_tickers={"AAPL.NAS"},
+            watch_tickers=set(),
+            ticker_names={},
+            now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+        )
+
+
+def test_source_chain_rejects_duplicate_providers() -> None:
+    with pytest.raises(ValueError, match="duplicate"):
+        source_chain.load_ai_brief_source_chain(
+            source_providers=("finnhub", "finnhub"),
+            source_report_path=None,
+            source_api_url=None,
+            source_timeout_seconds=2.0,
+            source_universe_tickers={"AAPL.NAS"},
+            recommendable_tickers={"AAPL.NAS"},
+            watch_tickers=set(),
+            ticker_names={},
+            now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+        )
+
+
+def test_source_chain_rejects_unsupported_provider() -> None:
+    with pytest.raises(ValueError, match="unsupported"):
+        source_chain.load_ai_brief_source_chain(
+            source_providers=("typo-provider",),
             source_report_path=None,
             source_api_url=None,
             source_timeout_seconds=2.0,
@@ -324,3 +418,34 @@ def test_source_chain_converts_http_429_to_provider_failure_summary(
         "total": 1,
     }
     assert "AAPL.NAS" in result.sources_by_ticker
+
+
+def test_source_chain_preserves_non_429_provider_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_load(**_kwargs: object) -> AiBriefSourceProviderResult:
+        raise AiBriefSourceProviderTimeoutError("source API request timed out")
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fail_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("http-json",),
+        source_report_path=None,
+        source_api_url="https://source.example/api",
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.system_issues[0]["code"] == "source_provider_timeout"
+    providers = cast(list[dict[str, object]], result.summary["providers"])
+    assert providers[0] == {
+        "provider": "http-json",
+        "status": "failed",
+        "code": "source_provider_timeout",
+        "covered": 0,
+        "total": 1,
+    }
