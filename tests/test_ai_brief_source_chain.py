@@ -21,6 +21,68 @@ def _source(ticker: str, suffix: str) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("source_providers", [(), ("none",)])
+def test_source_chain_no_source_provider_returns_empty_result(
+    source_providers: tuple[str, ...],
+) -> None:
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=source_providers,
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers={"MSFT.NAS"},
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.sources_by_ticker == {}
+    assert result.source_issues == []
+    assert result.system_issues == []
+    assert result.summary == {
+        "chain": ["none"],
+        "providers": [],
+        "final": {
+            "recommendable_covered": 0,
+            "recommendable_total": 1,
+            "watch_covered": 0,
+            "watch_total": 1,
+        },
+    }
+
+
+def test_source_chain_accepts_string_provider_as_single_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        calls.append(provider)
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={"AAPL.NAS": [_source("AAPL.NAS", provider)]}
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers="finnhub",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    assert calls == ["finnhub"]
+    assert result.summary["chain"] == ["finnhub"]
+    assert result.sources_by_ticker == {"AAPL.NAS": [_source("AAPL.NAS", "finnhub")]}
+
+
 def test_source_chain_merges_remaining_tickers_and_records_coverage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -213,6 +275,45 @@ def test_source_chain_dedupes_duplicate_urls_across_providers(
     assert result.sources_by_ticker["AAPL.NAS"] == [_source("AAPL.NAS", "shared")]
 
 
+def test_source_chain_duplicate_only_provider_counts_as_no_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_load(**_kwargs: object) -> AiBriefSourceProviderResult:
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={"AAPL.NAS": [_source("AAPL.NAS", "shared")]}
+        )
+
+    monkeypatch.setattr(source_chain, "load_ai_brief_sources", fake_load)
+
+    result = source_chain.load_ai_brief_source_chain(
+        source_providers=("finnhub", "benzinga-news"),
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=2.0,
+        source_universe_tickers={"AAPL.NAS"},
+        recommendable_tickers={"AAPL.NAS"},
+        watch_tickers=set(),
+        ticker_names={},
+        now=dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC),
+    )
+
+    providers = cast(list[dict[str, object]], result.summary["providers"])
+    assert providers[1] == {
+        "provider": "benzinga-news",
+        "status": "success",
+        "covered": 0,
+        "total": 1,
+    }
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "benzinga_news_source_no_results",
+            "severity": "WARN",
+            "message": "benzinga-news returned no usable sources for AAPL.NAS",
+        }
+    ]
+
+
 def test_source_chain_skips_later_provider_after_ticker_reaches_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -300,6 +401,13 @@ def test_source_chain_records_cap_issue_when_later_provider_overfills_remaining_
     assert [issue["code"] for issue in result.source_issues] == [
         "source_chain_cap_exceeded"
     ]
+    providers = cast(list[dict[str, object]], result.summary["providers"])
+    assert providers[1] == {
+        "provider": "benzinga-news",
+        "status": "success",
+        "covered": 1,
+        "total": 1,
+    }
 
 
 @pytest.mark.parametrize(
