@@ -792,7 +792,7 @@ def test_ai_brief_eval_fails_for_reported_system_error(
         }
     ]
     summary = _copy_mapping(payload["summary"])
-    summary["entry_count"] = True
+    summary["entry_count"] = 999
     summary["system_issue_count"] = 1
     payload["summary"] = summary
     report_path = _write_payload(tmp_path, "system-error.ai-brief.json", payload)

@@ -714,6 +714,20 @@ def test_write_ai_brief_report_rejects_bad_summary_counts(tmp_path: Path) -> Non
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 
+@pytest.mark.parametrize("entry_count", [True, "2", -1])
+def test_write_ai_brief_report_rejects_bad_summary_entry_count(
+    tmp_path: Path,
+    entry_count: object,
+) -> None:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {**summary, "entry_count": entry_count}
+
+    with pytest.raises(AiBriefValidationError, match=r"summary\.entry_count"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
 def test_write_ai_brief_report_rejects_bad_source_provider_summary_totals(
     tmp_path: Path,
 ) -> None:
@@ -773,6 +787,88 @@ def test_write_ai_brief_report_rejects_bad_source_provider_summary_provider_stat
     }
 
     with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("chain", "providers"),
+    [
+        (
+            ["none"],
+            [
+                {
+                    "provider": "none",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 0,
+                }
+            ],
+        ),
+        (
+            ["finnhub", "benzinga-news"],
+            [
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 1,
+                    "total": 1,
+                }
+            ],
+        ),
+        (
+            ["finnhub", "benzinga-news"],
+            [
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 1,
+                    "total": 1,
+                },
+                {
+                    "provider": "finnhub",
+                    "status": "skipped",
+                    "covered": 0,
+                    "total": 1,
+                },
+            ],
+        ),
+        (
+            ["finnhub", "benzinga-news"],
+            [
+                {
+                    "provider": "benzinga-news",
+                    "status": "success",
+                    "covered": 1,
+                    "total": 1,
+                },
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 1,
+                    "total": 1,
+                },
+            ],
+        ),
+    ],
+)
+def test_write_ai_brief_report_rejects_source_provider_summary_chain_mismatch(
+    tmp_path: Path,
+    chain: list[str],
+    providers: list[dict[str, object]],
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["source_provider_summary"] = {
+        "chain": chain,
+        "providers": providers,
+        "final": {
+            "recommendable_covered": 1,
+            "recommendable_total": 1,
+            "watch_covered": 0,
+            "watch_total": 1,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match="providers"):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 

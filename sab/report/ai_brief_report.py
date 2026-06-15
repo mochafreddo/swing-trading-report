@@ -403,6 +403,7 @@ def _validate_summary_counts(
     summary: Mapping[str, Any],
     watch_tickers: list[str] | None,
 ) -> None:
+    _summary_int(summary, "entry_count")
     expected_counts = {
         "preselected_count": _array_count(payload, "eligible_tickers"),
         "recommendation_count": _array_count(payload, "recommendations"),
@@ -457,12 +458,14 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.chain[{idx}] is required"
             )
-    chain_values = {provider.strip() for provider in chain}
+    chain_providers = [provider.strip() for provider in chain]
+    chain_values = set(chain_providers)
 
     providers = _require_list(
         source_provider_summary.get("providers"),
         field_name="source_provider_summary.providers",
     )
+    provider_names: list[str] = []
     for idx, raw_provider_summary in enumerate(providers):
         provider_summary = _require_mapping(
             raw_provider_summary,
@@ -478,6 +481,7 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].provider must be in chain"
             )
+        provider_names.append(provider)
         raw_status = provider_summary.get("status")
         if not isinstance(raw_status, str) or not raw_status.strip():
             raise AiBriefValidationError(
@@ -501,6 +505,17 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].covered must be <= total"
             )
+
+    if chain_providers == ["none"]:
+        if provider_names:
+            raise AiBriefValidationError(
+                "source_provider_summary.providers must be empty when chain is ['none']"
+            )
+    elif provider_names != chain_providers:
+        raise AiBriefValidationError(
+            "source_provider_summary.providers must match "
+            "source_provider_summary.chain order"
+        )
 
     final = _require_mapping(
         source_provider_summary.get("final"),

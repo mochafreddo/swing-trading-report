@@ -36,6 +36,35 @@ def _assert_timeout_tuple_not_expired(
     assert read_timeout == pytest.approx(min(connect_timeout, 1.0), abs=0.01)
 
 
+def _source_chain_summary(
+    chain: list[str],
+    *,
+    recommendable_total: int = 1,
+    watch_total: int = 0,
+) -> dict[str, object]:
+    total = recommendable_total + watch_total
+    return {
+        "chain": chain,
+        "providers": []
+        if chain == ["none"]
+        else [
+            {
+                "provider": provider,
+                "status": "success",
+                "covered": 0,
+                "total": total,
+            }
+            for provider in chain
+        ],
+        "final": {
+            "recommendable_covered": 0,
+            "recommendable_total": recommendable_total,
+            "watch_covered": 0,
+            "watch_total": watch_total,
+        },
+    }
+
+
 @pytest.fixture(autouse=True)
 def _mock_source_api_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -533,16 +562,11 @@ def test_run_ai_brief_source_chain_uses_recommendable_plus_watch_universe(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["finnhub", "benzinga-news"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 1,
-                },
-            },
+            summary=_source_chain_summary(
+                ["finnhub", "benzinga-news"],
+                recommendable_total=1,
+                watch_total=1,
+            ),
         )
 
     monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
@@ -679,16 +703,7 @@ def test_run_ai_brief_explicit_source_provider_overrides_env_chain(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["local-json"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["local-json"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub,benzinga-news")
@@ -729,16 +744,7 @@ def test_run_ai_brief_implicit_source_report_provider_overrides_env_chain(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["local-json"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["local-json"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub,benzinga-news")
@@ -778,16 +784,7 @@ def test_run_ai_brief_implicit_source_api_provider_overrides_env_chain(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["http-json"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["http-json"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub,benzinga-news")
@@ -829,16 +826,7 @@ def test_run_ai_brief_env_http_json_chain_uses_env_source_api_url(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["http-json"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["http-json"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "http-json")
@@ -880,16 +868,7 @@ def test_run_ai_brief_direct_http_json_chain_uses_env_source_api_url(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["http-json"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["http-json"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/api")
@@ -932,16 +911,7 @@ def test_run_ai_brief_rejects_direct_source_api_url_for_non_http_json_chain(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["finnhub"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["finnhub"]),
         )
 
     monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
@@ -982,16 +952,7 @@ def test_run_ai_brief_direct_source_chain_accepts_timeout(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["finnhub"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["finnhub"]),
         )
 
     monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
@@ -1033,16 +994,7 @@ def test_run_ai_brief_env_source_chain_uses_env_timeout(
             sources_by_ticker={},
             source_issues=[],
             system_issues=[],
-            summary={
-                "chain": ["finnhub"],
-                "providers": [],
-                "final": {
-                    "recommendable_covered": 0,
-                    "recommendable_total": 1,
-                    "watch_covered": 0,
-                    "watch_total": 0,
-                },
-            },
+            summary=_source_chain_summary(["finnhub"]),
         )
 
     monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub")
