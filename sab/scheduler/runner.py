@@ -24,6 +24,7 @@ from .. import ai_brief_url_safety as url_safety
 from ..ai_brief import run_ai_brief
 from ..ai_brief_eval import evaluate_ai_brief_recommendation_report
 from ..ai_brief_eval_common import parse_iso_offset_datetime
+from ..ai_brief_source_chain import parse_source_provider_chain
 from ..ai_brief_sources import (
     SOURCE_PROVIDER_ALPHA_VANTAGE_NEWS,
     SOURCE_PROVIDER_BENZINGA_NEWS,
@@ -95,6 +96,9 @@ _SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_MARKET = "env_market"
 _SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_GLOBAL = "env_global"
 _SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_MARKET = "api_url_market"
 _SCHEDULED_SOURCE_PROVIDER_ORIGIN_API_URL_GLOBAL = "api_url_global"
+_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE = "none"
+_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_MARKET = "env_market"
+_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_GLOBAL = "env_global"
 _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_MARKET = "env_market"
 _SCHEDULED_SOURCE_API_URL_ORIGIN_ENV_GLOBAL = "env_global"
 _SCHEDULED_SOURCE_API_URL_ALLOWED_SCHEMES = frozenset({"https"})
@@ -190,6 +194,8 @@ class _ScheduledRunContext:
 class _ScheduledSourceContext:
     source_provider: str | None
     source_provider_origin: str
+    source_provider_chain: tuple[str, ...] | None
+    source_provider_chain_origin: str
     source_api_url: str | None
     source_api_url_origin: str
     source_api_url_configured: bool
@@ -258,6 +264,7 @@ class SchedulerPipeline(Protocol):
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult: ...
 
 
@@ -310,15 +317,7 @@ def _normalize_optional_source_provider(value: str | None) -> str | None:
     return normalized or None
 
 
-def _scheduled_source_provider_candidate(
-    *,
-    market: str,
-    source_provider: str | None,
-) -> tuple[str | None, str]:
-    request_provider = _normalize_optional_source_provider(source_provider)
-    if request_provider:
-        return request_provider, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_REQUEST
-
+def _scheduled_env_source_provider_candidate(*, market: str) -> tuple[str | None, str]:
     market_provider = _normalize_optional_source_provider(
         _optional_env(f"AI_BRIEF_SOURCE_PROVIDER_{market}")
     )
@@ -332,6 +331,56 @@ def _scheduled_source_provider_candidate(
         return global_provider, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_ENV_GLOBAL
 
     return None, _SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE
+
+
+def _scheduled_source_provider_chain_candidate(
+    *,
+    market: str,
+) -> tuple[tuple[str, ...] | None, str]:
+    market_chain = _optional_env(f"AI_BRIEF_SOURCE_PROVIDER_CHAIN_{market}")
+    if market_chain:
+        return (
+            _parse_scheduled_source_provider_chain(
+                market_chain,
+                origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_MARKET,
+            ),
+            _SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_MARKET,
+        )
+
+    global_chain = _optional_env("AI_BRIEF_SOURCE_PROVIDER_CHAIN")
+    if global_chain:
+        return (
+            _parse_scheduled_source_provider_chain(
+                global_chain,
+                origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_GLOBAL,
+            ),
+            _SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_ENV_GLOBAL,
+        )
+
+    return None, _SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE
+
+
+def _parse_scheduled_source_provider_chain(
+    value: str,
+    *,
+    origin: str,
+) -> tuple[str, ...]:
+    try:
+        return parse_source_provider_chain(value)
+    except ValueError as exc:
+        raise _ScheduledSourceConfigError(
+            "scheduled AI brief source provider chain is invalid",
+            error_code="invalid_source_provider_chain",
+            source_context=_ScheduledSourceContext(
+                source_provider=None,
+                source_provider_origin=_SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE,
+                source_provider_chain=("unsupported",),
+                source_provider_chain_origin=origin,
+                source_api_url=None,
+                source_api_url_origin=_SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
+                source_api_url_configured=False,
+            ),
+        ) from exc
 
 
 def _scheduled_source_api_url_candidate(*, market: str) -> tuple[str | None, str]:
@@ -374,11 +423,53 @@ def _resolve_scheduled_source_context(
     market: str,
     source_provider: str | None,
 ) -> _ScheduledSourceContext:
-    resolved_provider, provider_origin = _scheduled_source_provider_candidate(
-        market=market,
-        source_provider=source_provider,
-    )
+    request_provider = _normalize_optional_source_provider(source_provider)
     resolved_api_url, api_url_origin = _scheduled_source_api_url_candidate(
+        market=market
+    )
+
+    if request_provider:
+        source_context = _ScheduledSourceContext(
+            source_provider=request_provider,
+            source_provider_origin=_SCHEDULED_SOURCE_PROVIDER_ORIGIN_REQUEST,
+            source_provider_chain=None,
+            source_provider_chain_origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE,
+            source_api_url=resolved_api_url
+            if request_provider == SOURCE_PROVIDER_HTTP_JSON
+            else None,
+            source_api_url_origin=api_url_origin
+            if request_provider == SOURCE_PROVIDER_HTTP_JSON
+            else _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
+            source_api_url_configured=bool(resolved_api_url)
+            if request_provider == SOURCE_PROVIDER_HTTP_JSON
+            else False,
+        )
+        _validate_scheduled_source_context(source_context)
+        return source_context
+
+    resolved_chain, chain_origin = _scheduled_source_provider_chain_candidate(
+        market=market
+    )
+    if resolved_chain:
+        source_context = _ScheduledSourceContext(
+            source_provider=None,
+            source_provider_origin=_SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE,
+            source_provider_chain=resolved_chain,
+            source_provider_chain_origin=chain_origin,
+            source_api_url=resolved_api_url
+            if SOURCE_PROVIDER_HTTP_JSON in resolved_chain
+            else None,
+            source_api_url_origin=api_url_origin
+            if SOURCE_PROVIDER_HTTP_JSON in resolved_chain
+            else _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
+            source_api_url_configured=bool(resolved_api_url)
+            if SOURCE_PROVIDER_HTTP_JSON in resolved_chain
+            else False,
+        )
+        _validate_scheduled_source_context(source_context)
+        return source_context
+
+    resolved_provider, provider_origin = _scheduled_env_source_provider_candidate(
         market=market
     )
 
@@ -386,6 +477,8 @@ def _resolve_scheduled_source_context(
         source_context = _ScheduledSourceContext(
             source_provider=resolved_provider,
             source_provider_origin=provider_origin,
+            source_provider_chain=None,
+            source_provider_chain_origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE,
             source_api_url=resolved_api_url
             if resolved_provider == SOURCE_PROVIDER_HTTP_JSON
             else None,
@@ -405,6 +498,8 @@ def _resolve_scheduled_source_context(
             source_provider_origin=_source_provider_origin_for_api_url_origin(
                 api_url_origin
             ),
+            source_provider_chain=None,
+            source_provider_chain_origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE,
             source_api_url=resolved_api_url,
             source_api_url_origin=api_url_origin,
             source_api_url_configured=True,
@@ -415,6 +510,8 @@ def _resolve_scheduled_source_context(
     return _ScheduledSourceContext(
         source_provider=None,
         source_provider_origin=_SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE,
+        source_provider_chain=None,
+        source_provider_chain_origin=_SCHEDULED_SOURCE_PROVIDER_CHAIN_ORIGIN_NONE,
         source_api_url=None,
         source_api_url_origin=_SCHEDULED_SOURCE_API_URL_ORIGIN_NONE,
         source_api_url_configured=False,
@@ -425,6 +522,32 @@ def _validate_scheduled_source_context(
     source_context: _ScheduledSourceContext,
 ) -> None:
     provider = source_context.source_provider
+    chain = source_context.source_provider_chain
+    if chain is not None:
+        if set(chain) - _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
+            raise _ScheduledSourceConfigError(
+                "unsupported scheduled AI brief source provider",
+                error_code="unsupported_source_provider",
+                source_context=source_context,
+            )
+        if SOURCE_PROVIDER_HTTP_JSON not in chain:
+            return
+        if not source_context.source_api_url:
+            raise _ScheduledSourceConfigError(
+                "scheduled source provider chain with http-json requires source API URL",
+                error_code="missing_source_api_url",
+                source_context=source_context,
+            )
+        try:
+            _validate_scheduled_source_api_url(source_context.source_api_url)
+        except ValueError as exc:
+            raise _ScheduledSourceConfigError(
+                "scheduled source API URL is invalid",
+                error_code="invalid_source_api_url",
+                source_context=source_context,
+            ) from exc
+        return
+
     if provider not in _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
         raise _ScheduledSourceConfigError(
             "unsupported scheduled AI brief source provider",
@@ -458,6 +581,17 @@ def _scheduled_source_provider_for_log(
     if provider not in _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
         return "unsupported"
     return provider
+
+
+def _scheduled_source_provider_chain_for_log(
+    source_context: _ScheduledSourceContext,
+) -> str:
+    chain = source_context.source_provider_chain
+    if not chain:
+        return SOURCE_PROVIDER_NONE
+    if set(chain) - _ALLOWED_SCHEDULED_SOURCE_PROVIDERS:
+        return "unsupported"
+    return ",".join(chain)
 
 
 def _local_zone(market: str) -> ZoneInfo:
@@ -1097,6 +1231,7 @@ class ScheduledAiBriefRunner:
             attempt_id=attempt_id,
             run_url=run_url,
             source_provider=source_context.source_provider,
+            source_provider_chain=source_context.source_provider_chain,
             source_api_url=source_context.source_api_url,
             model_provider=model_provider,
             artifact_key=artifact_key,
@@ -1117,6 +1252,7 @@ class ScheduledAiBriefRunner:
             "scheduled AI brief source context resolved "
             "market=%s session_date=%s schedule_role=%s runner_role=%s "
             "attempt_id=%s source_provider=%s source_provider_origin=%s "
+            "source_provider_chain=%s source_provider_chain_origin=%s "
             "source_api_url_configured=%s source_api_url_origin=%s",
             market,
             session_date,
@@ -1125,6 +1261,8 @@ class ScheduledAiBriefRunner:
             attempt_id,
             _scheduled_source_provider_for_log(source_context),
             source_context.source_provider_origin,
+            _scheduled_source_provider_chain_for_log(source_context),
+            source_context.source_provider_chain_origin,
             source_context.source_api_url_configured,
             source_context.source_api_url_origin,
             extra={
@@ -1137,6 +1275,12 @@ class ScheduledAiBriefRunner:
                 "attempt_id": attempt_id,
                 "source_provider": _scheduled_source_provider_for_log(source_context),
                 "source_provider_origin": source_context.source_provider_origin,
+                "source_provider_chain": _scheduled_source_provider_chain_for_log(
+                    source_context
+                ),
+                "source_provider_chain_origin": (
+                    source_context.source_provider_chain_origin
+                ),
                 "source_api_url_configured": source_context.source_api_url_configured,
                 "source_api_url_origin": source_context.source_api_url_origin,
             },
@@ -1157,7 +1301,8 @@ class ScheduledAiBriefRunner:
             "scheduled AI brief source config invalid "
             "market=%s session_date=%s schedule_role=%s runner_role=%s "
             "attempt_id=%s error_code=%s source_provider=%s "
-            "source_provider_origin=%s source_api_url_configured=%s "
+            "source_provider_origin=%s source_provider_chain=%s "
+            "source_provider_chain_origin=%s source_api_url_configured=%s "
             "source_api_url_origin=%s",
             market,
             session_date,
@@ -1167,6 +1312,8 @@ class ScheduledAiBriefRunner:
             error.error_code,
             _scheduled_source_provider_for_log(source_context),
             source_context.source_provider_origin,
+            _scheduled_source_provider_chain_for_log(source_context),
+            source_context.source_provider_chain_origin,
             source_context.source_api_url_configured,
             source_context.source_api_url_origin,
             extra={
@@ -1181,6 +1328,12 @@ class ScheduledAiBriefRunner:
                 "error_type": type(error).__name__,
                 "source_provider": _scheduled_source_provider_for_log(source_context),
                 "source_provider_origin": source_context.source_provider_origin,
+                "source_provider_chain": _scheduled_source_provider_chain_for_log(
+                    source_context
+                ),
+                "source_provider_chain_origin": (
+                    source_context.source_provider_chain_origin
+                ),
                 "source_api_url_configured": source_context.source_api_url_configured,
                 "source_api_url_origin": source_context.source_api_url_origin,
                 "retryable": False,
@@ -1267,6 +1420,7 @@ class ScheduledAiBriefRunner:
         attempt_id: str,
         run_url: str,
         source_provider: str | None,
+        source_provider_chain: tuple[str, ...] | None,
         source_api_url: str | None,
         model_provider: str,
         artifact_key: str,
@@ -1290,6 +1444,7 @@ class ScheduledAiBriefRunner:
             attempt_id=attempt_id,
             run_url=run_url,
             source_provider=source_provider,
+            source_provider_chain=source_provider_chain,
             source_api_url=source_api_url,
             model_provider=model_provider,
             lock_key=main_lock.lock_key,
@@ -1308,6 +1463,7 @@ class ScheduledAiBriefRunner:
         attempt_id: str,
         run_url: str,
         source_provider: str | None,
+        source_provider_chain: tuple[str, ...] | None = None,
         source_api_url: str | None = None,
         model_provider: str,
         lock_key: str,
@@ -1332,6 +1488,7 @@ class ScheduledAiBriefRunner:
                 report_date=session_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=False,
             )
@@ -3336,6 +3493,7 @@ class DefaultScheduledPipeline:
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
         del session_date, dry_run
         buy_report_path = self._run_scan_step(
@@ -3356,14 +3514,18 @@ class DefaultScheduledPipeline:
             holdings_path=holdings_path_str,
         )
         ai_brief_report_paths: list[str] = []
+        source_provider_chain_value = (
+            ",".join(source_provider_chain) if source_provider_chain else None
+        )
         _LOGGER.info(
             "scheduled AI brief pipeline step started "
             "step=ai_brief market=%s report_date=%s entry_report_path=%s "
-            "source_provider=%s model_provider=%s",
+            "source_provider=%s source_provider_chain=%s model_provider=%s",
             market,
             report_date,
             entry_report_path,
             source_provider or "",
+            source_provider_chain_value or "",
             model_provider,
         )
         with _suppress_scheduled_step_side_effects():
@@ -3374,6 +3536,7 @@ class DefaultScheduledPipeline:
                 model_provider=model_provider,
                 model_name="fake-ai-brief-v1",
                 source_provider=source_provider,
+                source_provider_chain=source_provider_chain_value,
                 source_api_url=source_api_url,
                 report_date=report_date,
                 upload=False,

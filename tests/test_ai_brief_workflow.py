@@ -96,6 +96,14 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
 
     assert resolve_env.get("EVENT_NAME") == "${{ github.event_name }}"
     assert resolve_env.get("EVENT_SCHEDULE") == "${{ github.event.schedule }}"
+    assert (
+        resolve_env.get("DEFAULT_SOURCE_PROVIDER_CHAIN_US")
+        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_CHAIN_US }}"
+    )
+    assert (
+        resolve_env.get("DEFAULT_SOURCE_PROVIDER_CHAIN")
+        == "${{ vars.AI_BRIEF_SOURCE_PROVIDER_CHAIN }}"
+    )
     assert "from sab.scheduler.schedule_policy import" in resolve_script
     assert "dispatch_for_github_cron" in resolve_script
     assert "is_within_role_window" in resolve_script
@@ -109,7 +117,14 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert "should_run = is_within_role_window(" in resolve_script
     assert 'out.write(f"should_run={str(should_run).lower()}\\n")' in resolve_script
     assert 'out.write("should_run=true\\n")' not in resolve_script
+    assert 'out.write(f"source_provider_chain={source_provider_chain}\\n")' in (
+        resolve_script
+    )
     assert 'out.write(f"source_api_url={source_api_url}\\n")' in resolve_script
+    assert (
+        jobs["resolve_context"]["outputs"].get("source_provider_chain")
+        == "${{ steps.context.outputs.source_provider_chain }}"
+    )
 
     workflow_env = workflow.get("env") or {}
     assert "KIS_BASE_URL" not in workflow_env
@@ -143,8 +158,13 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
     assert run_env.get("KIS_APP_KEY") == "${{ secrets.KIS_APP_KEY }}"
     assert run_env.get("KIS_APP_SECRET") == "${{ secrets.KIS_APP_SECRET }}"
     assert "KIS_BASE_URL" not in run_env
+    assert (
+        run_env.get("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US")
+        == "${{ needs.resolve_context.outputs.source_provider_chain }}"
+    )
     assert run_env.get("AI_BRIEF_SOURCE_API_TOKEN") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'http-json' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'http-json' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'http-json')) && "
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
     )
     assert (
@@ -152,31 +172,38 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
         == "${{ needs.resolve_context.outputs.source_api_url }}"
     )
     assert run_env.get("FINNHUB_API_KEY") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'finnhub' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'finnhub' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'finnhub')) && "
         "secrets.FINNHUB_API_KEY || '' }}"
     )
     assert run_env.get("POLYGON_API_KEY") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'polygon-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'polygon-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'polygon-news')) && "
         "secrets.POLYGON_API_KEY || '' }}"
     )
     assert run_env.get("ALPHA_VANTAGE_API_KEY") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'alpha-vantage-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'alpha-vantage-news')) && "
         "secrets.ALPHA_VANTAGE_API_KEY || '' }}"
     )
     assert run_env.get("MARKETAUX_API_TOKEN") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'marketaux-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'marketaux-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'marketaux-news')) && "
         "secrets.MARKETAUX_API_TOKEN || '' }}"
     )
     assert run_env.get("BENZINGA_API_TOKEN") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'benzinga-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'benzinga-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'benzinga-news')) && "
         "secrets.BENZINGA_API_TOKEN || '' }}"
     )
     assert run_env.get("NAVER_CLIENT_ID") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'naver-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && "
         "secrets.NAVER_CLIENT_ID || '' }}"
     )
     assert run_env.get("NAVER_CLIENT_SECRET") == (
-        "${{ needs.resolve_context.outputs.source_provider == 'naver-news' && "
+        "${{ (needs.resolve_context.outputs.source_provider == 'naver-news' || "
+        "contains(needs.resolve_context.outputs.source_provider_chain, 'naver-news')) && "
         "secrets.NAVER_CLIENT_SECRET || '' }}"
     )
 
@@ -191,6 +218,10 @@ def test_ai_brief_workflow_scheduled_context_rejects_multiline_outputs() -> None
     assert "must be a single-line value" in resolve_script
     assert (
         'source_provider = _single_line_output_value("source_provider", source_provider)'
+        in resolve_script
+    )
+    assert (
+        'source_provider_chain = _single_line_output_value("source_provider_chain", source_provider_chain)'
         in resolve_script
     )
     assert (

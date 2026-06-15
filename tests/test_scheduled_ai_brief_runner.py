@@ -29,6 +29,9 @@ from sab.scheduler.state import (
 )
 
 _SCHEDULED_SOURCE_ENV_KEYS = (
+    "AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR",
+    "AI_BRIEF_SOURCE_PROVIDER_CHAIN_US",
+    "AI_BRIEF_SOURCE_PROVIDER_CHAIN",
     "AI_BRIEF_SOURCE_PROVIDER_KR",
     "AI_BRIEF_SOURCE_PROVIDER_US",
     "AI_BRIEF_SOURCE_PROVIDER",
@@ -172,6 +175,7 @@ class _FakePipeline:
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> None:
         self.calls.append(
             (
@@ -182,6 +186,7 @@ class _FakePipeline:
                     "report_date": report_date,
                     "source_provider": source_provider,
                     "source_api_url": source_api_url,
+                    "source_provider_chain": source_provider_chain,
                     "model_provider": model_provider,
                     "dry_run": dry_run,
                 },
@@ -198,6 +203,7 @@ class _FakePipeline:
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
         self._record_call(
             market=market,
@@ -205,6 +211,7 @@ class _FakePipeline:
             report_date=report_date,
             source_provider=source_provider,
             source_api_url=source_api_url,
+            source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
         )
@@ -229,6 +236,7 @@ class _TypedEntryFailurePipeline(_FakePipeline):
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
         self._record_call(
             market=market,
@@ -236,6 +244,7 @@ class _TypedEntryFailurePipeline(_FakePipeline):
             report_date=report_date,
             source_provider=source_provider,
             source_api_url=source_api_url,
+            source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
         )
@@ -257,6 +266,7 @@ class _BlockingPipeline(_FakePipeline):
         model_provider: str,
         dry_run: bool,
         source_api_url: str | None = None,
+        source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
         self._record_call(
             market=market,
@@ -264,6 +274,7 @@ class _BlockingPipeline(_FakePipeline):
             report_date=report_date,
             source_provider=source_provider,
             source_api_url=source_api_url,
+            source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
         )
@@ -1795,6 +1806,155 @@ def test_runner_source_provider_request_overrides_env(
     assert pipeline.calls[0][1]["source_api_url"] is None
 
 
+def test_runner_source_provider_chain_env_wins_over_single_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "AI_BRIEF_SOURCE_PROVIDER_CHAIN_US",
+        "finnhub,benzinga-news,polygon-news",
+    )
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN", "naver-news")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_US", "marketaux-news")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-chain-env",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] is None
+    assert pipeline.calls[0][1]["source_provider_chain"] == (
+        "finnhub",
+        "benzinga-news",
+        "polygon-news",
+    )
+    assert pipeline.calls[0][1]["source_api_url"] is None
+
+
+def test_runner_source_provider_request_overrides_chain_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "finnhub,benzinga-news")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-chain-override",
+            source_provider="polygon-news",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] == "polygon-news"
+    assert pipeline.calls[0][1]["source_provider_chain"] is None
+    assert pipeline.calls[0][1]["source_api_url"] is None
+
+
+def test_runner_source_provider_chain_http_json_uses_source_api_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "http-json,finnhub")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL_US", "https://source.example/us")
+    runner, _state, pipeline, _storage, _notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-chain-http-json",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["source_provider"] is None
+    assert pipeline.calls[0][1]["source_provider_chain"] == ("http-json", "finnhub")
+    assert pipeline.calls[0][1]["source_api_url"] == "https://source.example/us"
+
+
+def test_runner_fails_fast_when_chain_http_json_source_api_url_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "http-json,finnhub")
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-chain-missing-url",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["error_code"] == "missing_source_api_url"
+    assert record.__dict__["source_provider_chain"] == "http-json,finnhub"
+    assert record.__dict__["source_provider_chain_origin"] == "env_market"
+
+
+@pytest.mark.parametrize(
+    "chain",
+    [
+        "finnhub,finnhub",
+        "none,finnhub",
+        "bogus-news",
+    ],
+)
+def test_runner_fails_fast_for_invalid_source_provider_chain_env(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    chain: str,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", chain)
+    runner, _state, pipeline, storage, notifier = _runner()
+    caplog.set_level("ERROR", logger="sab.scheduler.runner")
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-source-provider-chain-invalid",
+        )
+    )
+
+    assert result.status == "source_config_invalid"
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    records = _log_records_for_event(
+        caplog,
+        "scheduled_ai_brief_source_config_invalid",
+    )
+    assert len(records) == 1
+    assert records[0].__dict__["error_code"] == "invalid_source_provider_chain"
+
+
 def test_runner_source_api_url_env_implies_http_json_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2321,6 +2481,7 @@ def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> N
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -2328,6 +2489,7 @@ def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> N
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -2773,6 +2935,7 @@ def test_wrapped_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipe
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -2780,6 +2943,7 @@ def test_wrapped_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipe
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3170,6 +3334,7 @@ def test_runner_pipeline_failure_log_keeps_original_exception_type_for_sanitized
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3177,6 +3342,7 @@ def test_runner_pipeline_failure_log_keeps_original_exception_type_for_sanitized
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3232,6 +3398,7 @@ def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3239,6 +3406,7 @@ def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3298,6 +3466,7 @@ def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3305,6 +3474,7 @@ def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3359,6 +3529,7 @@ def test_runner_pipeline_failure_log_classifies_exception_group_entry_failure(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3366,6 +3537,7 @@ def test_runner_pipeline_failure_log_classifies_exception_group_entry_failure(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3551,6 +3723,7 @@ def test_runner_pipeline_failure_log_redacts_noted_windows_entry_report_path(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3558,6 +3731,7 @@ def test_runner_pipeline_failure_log_redacts_noted_windows_entry_report_path(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3606,6 +3780,7 @@ def test_runner_pipeline_failure_log_redacts_split_scheduled_entry_note_path(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3613,6 +3788,7 @@ def test_runner_pipeline_failure_log_redacts_split_scheduled_entry_note_path(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3657,6 +3833,7 @@ def test_runner_pipeline_failure_log_redacts_wrapped_scheduled_entry_exception_o
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3664,6 +3841,7 @@ def test_runner_pipeline_failure_log_redacts_wrapped_scheduled_entry_exception_o
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3712,6 +3890,7 @@ def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3719,6 +3898,7 @@ def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -3767,6 +3947,7 @@ def test_runner_pipeline_failure_log_omits_noted_unsafe_entry_report_path(
             model_provider: str,
             dry_run: bool,
             source_api_url: str | None = None,
+            source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
             self._record_call(
                 market=market,
@@ -3774,6 +3955,7 @@ def test_runner_pipeline_failure_log_omits_noted_unsafe_entry_report_path(
                 report_date=report_date,
                 source_provider=source_provider,
                 source_api_url=source_api_url,
+                source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=dry_run,
             )
@@ -4496,6 +4678,7 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
         session_date="2026-05-28",
         report_date="2026-05-28",
         source_provider=None,
+        source_provider_chain=("finnhub", "benzinga-news"),
         model_provider="fake",
         dry_run=False,
     )
@@ -4506,6 +4689,8 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert entry_holdings_paths == [expected_holdings_path]
     assert ai_brief_inputs[0]["buy_report_path"] == "reports/current.buy.json"
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
+    assert ai_brief_inputs[0]["source_provider"] is None
+    assert ai_brief_inputs[0]["source_provider_chain"] == "finnhub,benzinga-news"
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
