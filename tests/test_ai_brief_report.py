@@ -791,6 +791,107 @@ def test_write_ai_brief_report_rejects_bad_source_provider_summary_provider_stat
 
 
 @pytest.mark.parametrize(
+    ("chain", "providers", "message"),
+    [
+        ([], [], "chain"),
+        (
+            ["bogus-news"],
+            [
+                {
+                    "provider": "bogus-news",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 2,
+                }
+            ],
+            "unsupported",
+        ),
+        (
+            ["finnhub", "finnhub"],
+            [
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 2,
+                },
+                {
+                    "provider": "finnhub",
+                    "status": "skipped",
+                    "covered": 0,
+                    "total": 0,
+                },
+            ],
+            "duplicate",
+        ),
+        (
+            ["none", "finnhub"],
+            [
+                {
+                    "provider": "none",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 0,
+                },
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 2,
+                },
+            ],
+            "none",
+        ),
+    ],
+)
+def test_write_ai_brief_report_rejects_invalid_source_provider_summary_chain(
+    tmp_path: Path,
+    chain: list[str],
+    providers: list[dict[str, object]],
+    message: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["source_provider_summary"] = {
+        "chain": chain,
+        "providers": providers,
+        "final": {
+            "recommendable_covered": 0,
+            "recommendable_total": 1,
+            "watch_covered": 0,
+            "watch_total": 1,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("recommendable_covered", "watch_covered"),
+    [(1, 0), (0, 1)],
+)
+def test_write_ai_brief_report_rejects_none_source_provider_summary_coverage(
+    tmp_path: Path,
+    recommendable_covered: int,
+    watch_covered: int,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["source_provider_summary"] = {
+        "chain": ["none"],
+        "providers": [],
+        "final": {
+            "recommendable_covered": recommendable_covered,
+            "recommendable_total": 1,
+            "watch_covered": watch_covered,
+            "watch_total": 1,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match="covered"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
     ("chain", "providers"),
     [
         (

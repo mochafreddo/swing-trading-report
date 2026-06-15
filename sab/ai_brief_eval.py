@@ -553,7 +553,15 @@ def _summary_count_issues(
         ]
 
     issues: list[AiBriefRecommendationEvalIssue] = []
+    legacy_expanded_counts_absent = (
+        "recommendable_count" not in summary and "watch_count" not in summary
+    )
     for field_name, expected_count in expected_counts.items():
+        if legacy_expanded_counts_absent and field_name in {
+            "recommendable_count",
+            "watch_count",
+        }:
+            continue
         actual = _int_value(summary.get(field_name))
         if actual != expected_count:
             issues.append(

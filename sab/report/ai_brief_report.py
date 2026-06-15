@@ -11,6 +11,7 @@ from ..ai_brief_eval_common import (
     ALLOWED_MARKETS,
     contains_automated_order_language,
 )
+from ..ai_brief_source_chain import parse_source_provider_chain
 from ..ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
     is_ai_brief_source_future,
@@ -458,7 +459,13 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.chain[{idx}] is required"
             )
-    chain_providers = [provider.strip() for provider in chain]
+    chain_providers = [provider.strip().lower() for provider in chain]
+    if not chain_providers:
+        raise AiBriefValidationError("source_provider_summary.chain is required")
+    try:
+        chain_providers = list(parse_source_provider_chain(",".join(chain_providers)))
+    except ValueError as exc:
+        raise AiBriefValidationError(f"source_provider_summary.chain {exc}") from exc
     chain_values = set(chain_providers)
 
     providers = _require_list(
@@ -476,7 +483,7 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].provider is required"
             )
-        provider = raw_provider.strip()
+        provider = raw_provider.strip().lower()
         if provider not in chain_values:
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].provider must be in chain"
@@ -541,6 +548,13 @@ def _validate_source_provider_summary(
     if final_counts["watch_covered"] > final_counts["watch_total"]:
         raise AiBriefValidationError(
             "source_provider_summary.final.watch_covered must be <= watch_total"
+        )
+    if chain_providers == ["none"] and (
+        final_counts["recommendable_covered"] != 0 or final_counts["watch_covered"] != 0
+    ):
+        raise AiBriefValidationError(
+            "source_provider_summary.final covered counts must be 0 when "
+            "chain is ['none']"
         )
 
     recommendable_count = _summary_int(summary, "recommendable_count")

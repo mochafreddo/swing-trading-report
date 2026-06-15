@@ -194,6 +194,26 @@ def test_ai_brief_eval_passes_source_backed_artifact() -> None:
     assert result.issues == []
 
 
+def test_ai_brief_eval_accepts_legacy_artifact_without_expanded_summary_counts(
+    tmp_path: Path,
+) -> None:
+    payload = _load_good_ai_brief()
+    summary = _copy_mapping(payload["summary"])
+    summary.pop("recommendable_count")
+    summary.pop("watch_count")
+    payload["summary"] = summary
+    report_path = _write_payload(tmp_path, "legacy-counts.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.issues == []
+
+
 def test_ai_brief_eval_accepts_promoted_recommendable_skip_and_review(
     tmp_path: Path,
 ) -> None:
@@ -433,6 +453,27 @@ def test_ai_brief_eval_fails_when_expanded_summary_counts_are_wrong(
 
     assert result.status == "FAIL"
     assert _issue_codes(result) == {"ai_brief_report_invalid"}
+
+
+@pytest.mark.parametrize("missing_field", ["recommendable_count", "watch_count"])
+def test_ai_brief_eval_fails_when_only_one_expanded_summary_count_is_missing(
+    tmp_path: Path,
+    missing_field: str,
+) -> None:
+    payload = _load_good_ai_brief()
+    summary = _copy_mapping(payload["summary"])
+    summary.pop(missing_field)
+    payload["summary"] = summary
+    report_path = _write_payload(tmp_path, "partial-expanded.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"summary_count_mismatch"}
 
 
 def test_ai_brief_eval_fails_when_eligible_tickers_do_not_match_entry_report(
