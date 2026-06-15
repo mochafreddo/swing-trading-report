@@ -105,10 +105,12 @@ def evaluate_ai_brief_recommendation_report(
             )
         )
 
+    legacy_artifact_contract = _is_legacy_artifact_contract(ai_brief_report)
     normalized_market = normalize_market(market)
     entry_context, entry_issue = _load_entry_context(
         entry_report_path,
         market=normalized_market,
+        legacy_artifact_contract=legacy_artifact_contract,
     )
     if entry_issue is not None:
         return _issue_only_result(entry_issue)
@@ -209,9 +211,7 @@ def evaluate_ai_brief_recommendation_report(
                 "source_issue_count": len(source_issues),
                 "system_issue_count": len(system_issues),
             },
-            allow_legacy_missing_expanded_counts=_allows_legacy_missing_expanded_counts(
-                ai_brief_report
-            ),
+            allow_legacy_missing_expanded_counts=legacy_artifact_contract,
         )
     )
     issues.extend(_reported_issue_issues(source_issues, issue_type="source"))
@@ -343,6 +343,7 @@ def _load_entry_context(
     entry_report_path: str,
     *,
     market: str | None,
+    legacy_artifact_contract: bool,
 ) -> tuple[_EntryContext | None, AiBriefRecommendationEvalIssue | None]:
     entry_report, load_issue = _load_json_mapping(
         entry_report_path,
@@ -396,10 +397,16 @@ def _load_entry_context(
             )
         target_rows.append(raw_row)
 
+    assert market is not None
+    if legacy_artifact_contract:
+        return _legacy_entry_context(
+            market=market,
+            target_rows=target_rows,
+        ), None
+
     classified_rows = classify_ai_brief_entry_rows(target_rows)
     recommendable_candidates = classified_rows.recommendable
     watch_candidates = classified_rows.watch_only
-    assert market is not None
     return _EntryContext(
         market=market,
         target_entry_count=len(target_rows),
@@ -419,6 +426,35 @@ def _load_entry_context(
             for candidate in recommendable_candidates[PRESELECTION_LIMIT:]
         ],
     ), None
+
+
+def _legacy_entry_context(
+    *,
+    market: str,
+    target_rows: list[Mapping[str, object]],
+) -> _EntryContext:
+    enter_tickers: list[str] = []
+    excluded_candidates: list[tuple[str, str]] = []
+    for row in target_rows:
+        ticker = str(row.get("ticker") or "").strip()
+        action = str(row.get("action") or "").strip().upper()
+        if action == "ENTER":
+            enter_tickers.append(ticker)
+        else:
+            excluded_candidates.append((ticker, action))
+
+    return _EntryContext(
+        market=market,
+        target_entry_count=len(target_rows),
+        recommendable_count=len(enter_tickers),
+        watch_count=0,
+        expected_preselected_tickers=enter_tickers[:PRESELECTION_LIMIT],
+        expected_watch_tickers=[],
+        expected_excluded_candidates=excluded_candidates,
+        expected_cap_excluded_candidates=[
+            (ticker, "ENTER") for ticker in enter_tickers[PRESELECTION_LIMIT:]
+        ],
+    )
 
 
 def _candidate_alignment_issues(
@@ -583,7 +619,7 @@ def _summary_count_issues(
     return issues
 
 
-def _allows_legacy_missing_expanded_counts(payload: Mapping[str, Any]) -> bool:
+def _is_legacy_artifact_contract(payload: Mapping[str, Any]) -> bool:
     summary = payload.get("summary")
     if not isinstance(summary, Mapping):
         return False

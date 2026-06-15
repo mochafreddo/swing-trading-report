@@ -214,6 +214,51 @@ def test_ai_brief_eval_accepts_legacy_artifact_without_expanded_summary_counts(
     assert result.issues == []
 
 
+def test_ai_brief_eval_accepts_legacy_artifact_with_old_style_entry_rows(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.legacy-shape.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                {"ticker": "AAPL.NAS", "action": "ENTER"},
+                {"ticker": "MSFT.NAS", "action": "ENTER"},
+                {"ticker": "NVDA.NAS", "action": "REVIEW"},
+                {"ticker": "META.NAS", "action": "SKIP"},
+                {"ticker": "TSLA.NAS", "action": "ENTER"},
+                {"ticker": "AMZN.NAS", "action": "ENTER"},
+                {"ticker": "GOOGL.NAS", "action": "ENTER"},
+                {"ticker": "NFLX.NAS", "action": "ENTER"},
+            ],
+            "summary": {"entry_count": 8},
+            "system_issues": [],
+        },
+    )
+    payload = _load_good_ai_brief()
+    summary = _copy_mapping(payload["summary"])
+    summary.pop("recommendable_count")
+    summary.pop("watch_count")
+    payload["summary"] = summary
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.legacy-entry-shape.json",
+        payload,
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.issues == []
+
+
 def test_ai_brief_eval_accepts_promoted_recommendable_skip_and_review(
     tmp_path: Path,
 ) -> None:
