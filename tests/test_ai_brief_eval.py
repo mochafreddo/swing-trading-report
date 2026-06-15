@@ -111,14 +111,31 @@ def _ai_brief_recommendation(ticker: str, *, rank: int = 1) -> dict[str, object]
     }
 
 
+def _watch_candidate(ticker: str, *, action: str = "WATCH") -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "action": action,
+        "reason": "entry trigger is pending re-confirmation",
+        "retrigger_conditions": ["price must satisfy the original trigger again"],
+        "sources": [],
+        "as_of": "2026-05-06T12:00:00+00:00",
+    }
+
+
 def _ai_brief_payload(
     *,
     entry_count: int,
+    recommendable_count: int | None = None,
+    watch_count: int | None = None,
     eligible_tickers: list[str],
     recommendations: list[dict[str, object]],
+    watch_tickers: list[str] | None = None,
+    watch_candidates: list[dict[str, object]] | None = None,
     excluded_candidates: list[dict[str, object]] | None = None,
     cap_excluded_candidates: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
+    watch_tickers = watch_tickers or []
+    watch_candidates = watch_candidates or []
     excluded_candidates = excluded_candidates or []
     cap_excluded_candidates = cap_excluded_candidates or []
     return {
@@ -132,6 +149,12 @@ def _ai_brief_payload(
         "model_name": "fake-ai-brief-v1",
         "summary": {
             "entry_count": entry_count,
+            "recommendable_count": (
+                len(eligible_tickers) + len(cap_excluded_candidates)
+                if recommendable_count is None
+                else recommendable_count
+            ),
+            "watch_count": len(watch_tickers) if watch_count is None else watch_count,
             "preselected_count": len(eligible_tickers),
             "recommendation_count": len(recommendations),
             "excluded_count": len(excluded_candidates),
@@ -143,10 +166,12 @@ def _ai_brief_payload(
         "recommendations": recommendations,
         "excluded_candidates": excluded_candidates,
         "vetoed_candidates": [],
+        "watch_candidates": watch_candidates,
         "cap_excluded_candidates": cap_excluded_candidates,
         "source_issues": [],
         "system_issues": [],
         "eligible_tickers": eligible_tickers,
+        "watch_tickers": watch_tickers,
     }
 
 
@@ -231,6 +256,145 @@ def test_ai_brief_eval_accepts_promoted_recommendable_skip_and_review(
 
     assert result.status == "PASS"
     assert result.issues == []
+
+
+def test_ai_brief_eval_accepts_watch_only_candidate_contract(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.watch.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "MSFT.NAS",
+                    action="SKIP",
+                    reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.watch.json",
+        _ai_brief_payload(
+            entry_count=2,
+            eligible_tickers=["AAPL.NAS"],
+            recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+            watch_tickers=["MSFT.NAS"],
+            watch_candidates=[_watch_candidate("MSFT.NAS")],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.issues == []
+
+
+def test_ai_brief_eval_fails_when_watch_fields_do_not_match_classifier(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.bad-watch.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "MSFT.NAS",
+                    action="SKIP",
+                    reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.bad-watch.json",
+        _ai_brief_payload(
+            entry_count=2,
+            eligible_tickers=["AAPL.NAS"],
+            recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+            watch_tickers=[],
+            watch_candidates=[
+                _watch_candidate("MSFT.NAS"),
+                _watch_candidate("MSFT.NAS", action="SKIP"),
+            ],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert {
+        "watch_tickers_mismatch",
+        "watch_candidates_mismatch",
+        "watch_candidate_duplicate",
+        "watch_candidate_action_invalid",
+    }.issubset(_issue_codes(result))
+
+
+def test_ai_brief_eval_fails_when_expanded_summary_counts_are_wrong(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.bad-summary-expanded.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "MSFT.NAS",
+                    action="SKIP",
+                    reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.bad-summary-expanded.json",
+        _ai_brief_payload(
+            entry_count=2,
+            recommendable_count=99,
+            watch_count=42,
+            eligible_tickers=["AAPL.NAS"],
+            recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+            watch_tickers=["MSFT.NAS"],
+            watch_candidates=[_watch_candidate("MSFT.NAS")],
+        ),
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert "summary_count_mismatch" in _issue_codes(result)
 
 
 def test_ai_brief_eval_fails_when_eligible_tickers_do_not_match_entry_report(

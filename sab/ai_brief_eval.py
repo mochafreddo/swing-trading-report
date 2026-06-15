@@ -53,7 +53,10 @@ class AiBriefRecommendationEvalResult:
 class _EntryContext:
     market: str
     target_entry_count: int
+    recommendable_count: int
+    watch_count: int
     expected_preselected_tickers: list[str]
+    expected_watch_tickers: list[str]
     expected_excluded_candidates: list[tuple[str, str]]
     expected_cap_excluded_candidates: list[tuple[str, str]]
 
@@ -116,6 +119,8 @@ def evaluate_ai_brief_recommendation_report(
     source_issues = _mapping_rows(ai_brief_report.get("source_issues"))
     system_issues = _mapping_rows(ai_brief_report.get("system_issues"))
     eligible_tickers = string_list(ai_brief_report.get("eligible_tickers"))
+    watch_tickers = string_list(ai_brief_report.get("watch_tickers"))
+    watch_candidates = _mapping_rows(ai_brief_report.get("watch_candidates"))
 
     issues: list[AiBriefRecommendationEvalIssue] = []
     report_market = str(ai_brief_report.get("market") or "").strip().upper()
@@ -144,6 +149,18 @@ def evaluate_ai_brief_recommendation_report(
             )
         )
 
+    if watch_tickers != entry_context.expected_watch_tickers:
+        issues.append(
+            AiBriefRecommendationEvalIssue(
+                code="watch_tickers_mismatch",
+                severity="FAIL",
+                message=(
+                    "AI brief watch_tickers must match the entry report's "
+                    "watch-only tickers in order"
+                ),
+            )
+        )
+
     issues.extend(
         _candidate_alignment_issues(
             field_name="excluded_candidates",
@@ -156,6 +173,12 @@ def evaluate_ai_brief_recommendation_report(
             field_name="cap_excluded_candidates",
             actual_candidates=cap_excluded_candidates,
             expected_candidates=entry_context.expected_cap_excluded_candidates,
+        )
+    )
+    issues.extend(
+        _watch_candidate_issues(
+            watch_candidates,
+            expected_watch_tickers=entry_context.expected_watch_tickers,
         )
     )
 
@@ -172,6 +195,8 @@ def evaluate_ai_brief_recommendation_report(
             ai_brief_report.get("summary"),
             {
                 "entry_count": entry_context.target_entry_count,
+                "recommendable_count": entry_context.recommendable_count,
+                "watch_count": entry_context.watch_count,
                 "preselected_count": len(eligible_tickers),
                 "recommendation_count": len(recommendations),
                 "excluded_count": len(excluded_candidates),
@@ -258,6 +283,8 @@ def evaluate_ai_brief_recommendation_report(
         status=status,
         summary={
             "entry_count": entry_context.target_entry_count,
+            "expected_recommendable_count": entry_context.recommendable_count,
+            "expected_watch_count": entry_context.watch_count,
             "expected_preselected_count": len(
                 entry_context.expected_preselected_tickers
             ),
@@ -364,14 +391,18 @@ def _load_entry_context(
 
     classified_rows = classify_ai_brief_entry_rows(target_rows)
     recommendable_candidates = classified_rows.recommendable
+    watch_candidates = classified_rows.watch_only
     assert market is not None
     return _EntryContext(
         market=market,
         target_entry_count=len(target_rows),
+        recommendable_count=len(recommendable_candidates),
+        watch_count=len(watch_candidates),
         expected_preselected_tickers=[
             candidate.ticker
             for candidate in recommendable_candidates[:PRESELECTION_LIMIT]
         ],
+        expected_watch_tickers=[candidate.ticker for candidate in watch_candidates],
         expected_excluded_candidates=[
             (candidate.ticker, candidate.action)
             for candidate in classified_rows.excluded
@@ -408,6 +439,54 @@ def _candidate_signatures(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
         if ticker:
             signatures.append((ticker, action))
     return signatures
+
+
+def _watch_candidate_issues(
+    rows: list[dict[str, Any]],
+    *,
+    expected_watch_tickers: list[str],
+) -> list[AiBriefRecommendationEvalIssue]:
+    issues: list[AiBriefRecommendationEvalIssue] = []
+    actual_tickers: list[str] = []
+    seen_tickers: set[str] = set()
+    duplicate_tickers: set[str] = set()
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip()
+        action = str(row.get("action") or "").strip().upper()
+        if ticker:
+            actual_tickers.append(ticker)
+            if ticker in seen_tickers and ticker not in duplicate_tickers:
+                issues.append(
+                    AiBriefRecommendationEvalIssue(
+                        ticker=ticker,
+                        code="watch_candidate_duplicate",
+                        severity="FAIL",
+                        message="watch candidate ticker must be unique",
+                    )
+                )
+                duplicate_tickers.add(ticker)
+            seen_tickers.add(ticker)
+        if action != "WATCH":
+            issues.append(
+                AiBriefRecommendationEvalIssue(
+                    ticker=ticker or None,
+                    code="watch_candidate_action_invalid",
+                    severity="FAIL",
+                    message="watch_candidates[].action must be WATCH",
+                )
+            )
+    if actual_tickers != expected_watch_tickers:
+        issues.append(
+            AiBriefRecommendationEvalIssue(
+                code="watch_candidates_mismatch",
+                severity="FAIL",
+                message=(
+                    "watch_candidates[].ticker must match expected watch-only "
+                    "tickers in order"
+                ),
+            )
+        )
+    return issues
 
 
 def _recommendation_ticker_issues(

@@ -10,6 +10,8 @@
   "model_name": "gpt-test",
   "summary": {
     "entry_count": 8,
+    "recommendable_count": 6,
+    "watch_count": 0,
     "preselected_count": 5,
     "recommendation_count": 3,
     "excluded_count": 2,
