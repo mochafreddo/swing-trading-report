@@ -7,7 +7,8 @@ from typing import Literal
 AiBriefCandidateRole = Literal["recommendable", "watch_only", "excluded"]
 
 _PORTFOLIO_CAP_REASON_PREFIX = "portfolio market cap reached"
-_RISK_ALIGNMENT_REASON = "risk_alignment=tight_stop_vs_volatility"
+_RISK_ALIGNMENT_REASON_TOKEN = "risk_alignment"
+_TIGHT_STOP_VS_VOLATILITY_REASON_TOKEN = "tight_stop_vs_volatility"
 _HYBRID_TRIGGER_GUARD_REASON = "hybrid trigger guard failed"
 
 
@@ -40,6 +41,14 @@ def _has_reason_prefix(reasons: Iterable[str], prefix: str) -> bool:
 
 def _has_reason_text(reasons: Iterable[str], text: str) -> bool:
     return any(text in reason.lower() for reason in reasons)
+
+
+def _has_risk_alignment_tight_stop_reason(reasons: Iterable[str]) -> bool:
+    return any(
+        _RISK_ALIGNMENT_REASON_TOKEN in reason.lower()
+        and _TIGHT_STOP_VS_VOLATILITY_REASON_TOKEN in reason.lower()
+        for reason in reasons
+    )
 
 
 def _base_gate_failure(entry: Mapping[str, object]) -> str | None:
@@ -95,7 +104,7 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
             reason="portfolio policy blocked automatic entry",
             entry=entry,
         )
-    if action == "REVIEW" and _has_reason_text(reasons, _RISK_ALIGNMENT_REASON):
+    if action == "REVIEW" and _has_risk_alignment_tight_stop_reason(reasons):
         return AiBriefEntryCandidate(
             ticker=ticker,
             action=action,
@@ -109,6 +118,14 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
             action=action,
             role="watch_only",
             reason="entry trigger is pending re-confirmation",
+            entry=entry,
+        )
+    if action in {"SKIP", "REVIEW"}:
+        return AiBriefEntryCandidate(
+            ticker=ticker,
+            action=action,
+            role="excluded",
+            reason=f"action {action} did not match an AI brief inclusion rule",
             entry=entry,
         )
 

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from sab.ai_brief_candidates import classify_ai_brief_entry_rows
 
+_RISK_ALIGNMENT_REVIEW_REASON = (
+    "hybrid risk_alignment requires manual review "
+    "(tight_stop_vs_volatility: gap_guard_exceeds_stop_max)"
+)
+
 
 def _row(
     ticker: str,
@@ -42,22 +47,22 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
             _row(
                 "CIFR.NAS",
                 action="REVIEW",
-                reasons=["risk_alignment=tight_stop_vs_volatility"],
+                reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
             ),
             _row(
                 "IREN.NAS",
                 action="REVIEW",
-                reasons=["risk_alignment=tight_stop_vs_volatility"],
+                reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
             ),
             _row(
                 "COHR.NYS",
                 action="REVIEW",
-                reasons=["risk_alignment=tight_stop_vs_volatility"],
+                reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
             ),
             _row(
                 "ANET.NYS",
                 action="REVIEW",
-                reasons=["risk_alignment=tight_stop_vs_volatility"],
+                reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
             ),
         ]
     )
@@ -104,3 +109,43 @@ def test_classifier_excludes_rows_that_fail_base_ready_gates() -> None:
     assert "entry_price_status=missing" in result.excluded[0].reason
     assert "entry_state=WATCH" in result.excluded[1].reason
     assert "unsupported action HOLD" in result.excluded[2].reason
+
+
+def test_classifier_explains_supported_actions_that_do_not_match_rules() -> None:
+    result = classify_ai_brief_entry_rows(
+        [
+            _row("SKIP.NAS", action="SKIP", reasons=["below score threshold"]),
+            _row(
+                "REVIEW.NAS",
+                action="REVIEW",
+                reasons=["hybrid risk_alignment requires manual review (unknown)"],
+            ),
+        ]
+    )
+
+    assert result.recommendable == []
+    assert result.watch_only == []
+    assert [(row.ticker, row.action) for row in result.excluded] == [
+        ("SKIP.NAS", "SKIP"),
+        ("REVIEW.NAS", "REVIEW"),
+    ]
+    assert (
+        result.excluded[0].reason
+        == "action SKIP did not match an AI brief inclusion rule"
+    )
+    assert (
+        result.excluded[1].reason
+        == "action REVIEW did not match an AI brief inclusion rule"
+    )
+    assert "unsupported action" not in result.excluded[0].reason
+    assert "unsupported action" not in result.excluded[1].reason
+
+
+def test_classifier_excludes_missing_ticker() -> None:
+    result = classify_ai_brief_entry_rows([_row("", action="ENTER")])
+
+    assert result.recommendable == []
+    assert result.watch_only == []
+    assert [(row.ticker, row.action, row.reason) for row in result.excluded] == [
+        ("", "ENTER", "entry row ticker is required")
+    ]
