@@ -413,6 +413,10 @@ describe("ReportDetail component", () => {
     expect(html).toContain("NEEDS_REVIEW_WEAK_NEWS");
     expect(html).toContain("brief_reason");
     expect(html).toContain("weak_news_coverage");
+    expect(html).not.toContain("watch_tickers");
+    expect(html).not.toContain("source_chain");
+    expect(html).not.toContain("source_final_coverage");
+    expect(html).not.toContain("source_provider_statuses");
   });
 
   it.each([

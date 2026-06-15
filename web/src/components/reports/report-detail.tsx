@@ -54,6 +54,14 @@ function asStringArray(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+function hasOwnField(value: unknown, field: string): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, field)
+  );
+}
+
 function formatNullableNumber(value: unknown): string {
   const parsed = readNumberLike(value);
   if (parsed === null) {
@@ -180,6 +188,15 @@ export function ReportDetail({
   const sourceProviderChain = asStringArray(sourceProviderSummary?.chain);
   const sourceProviderFinal = asRecord(sourceProviderSummary?.final);
   const sourceProviderRows = asRecordArray(sourceProviderSummary?.providers);
+  const showAiBriefWatchTickers =
+    isAiBriefReport &&
+    (hasOwnField(detail, "watch_tickers") || aiBriefWatchTickers.length > 0);
+  const showSourceProviderChain =
+    isAiBriefReport && sourceProviderChain.length > 0;
+  const showSourceProviderFinal =
+    isAiBriefReport && sourceProviderFinal !== null;
+  const showSourceProviderStatuses =
+    isAiBriefReport && sourceProviderRows.length > 0;
   const screenOuts = asStringArray(detail?.screen_outs);
   const combinedIssues = asStringArray(detail?.issues);
   const issueSections = [
@@ -295,25 +312,25 @@ export function ReportDetail({
                 <dd>{aiBriefState?.reason ?? "-"}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {showAiBriefWatchTickers && (
               <div>
                 <dt>watch_tickers</dt>
                 <dd>{formatStringList(aiBriefWatchTickers)}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {showSourceProviderChain && (
               <div>
                 <dt>source_chain</dt>
                 <dd>{sourceProviderChain.join(",") || "-"}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {showSourceProviderFinal && (
               <div>
                 <dt>source_final_coverage</dt>
                 <dd>{formatSourceFinalCoverage(sourceProviderFinal)}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {showSourceProviderStatuses && (
               <div>
                 <dt>source_provider_statuses</dt>
                 <dd>{formatSourceProviderStatuses(sourceProviderRows)}</dd>

@@ -726,8 +726,8 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
     )
     assert "source_providers=finnhub success 3/7; benzinga-news success 0/4" in text
     assert (
-        "추천 생성 실패/보류: recommendable 후보 5건이 있었지만 추천 결과가 비었습니다."
-        in text
+        "추천 생성 실패/보류: recommendable 후보 7건(모델 입력 5건)이 있었지만 "
+        "추천 결과가 비었습니다." in text
     )
     assert "ENTER 후보" not in text
 

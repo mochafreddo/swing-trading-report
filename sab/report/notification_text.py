@@ -22,6 +22,7 @@ _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 @dataclass(frozen=True)
 class _AiBriefCounts:
     preselected_count: int
+    recommendable_count: int
     watch_count: int
     watch_present: bool
     recommendation_count: int
@@ -180,6 +181,11 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
         recommendation_count,
         vetoed_count,
     )
+    recommendable_count = max(
+        _safe_int(summary.get("recommendable_count"), default=0),
+        _safe_int(report.get("recommendable_count"), default=0),
+        preselected_count,
+    )
     source_issue_count = max(
         _safe_int(summary.get("source_issue_count"), default=0),
         _safe_int(report.get("source_issue_count"), default=0),
@@ -192,6 +198,7 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     )
     return _AiBriefCounts(
         preselected_count=preselected_count,
+        recommendable_count=recommendable_count,
         watch_count=watch_count,
         watch_present=watch_present,
         recommendation_count=recommendation_count,
@@ -672,10 +679,15 @@ def build_ai_brief_telegram_report_text(
 
     if total == 0:
         lines.append("추천 후보 없음")
-        if counts.preselected_count > 0:
+        if counts.recommendable_count > 0:
+            candidate_count_text = f"{counts.recommendable_count}건"
+            if counts.preselected_count != counts.recommendable_count:
+                candidate_count_text = (
+                    f"{candidate_count_text}(모델 입력 {counts.preselected_count}건)"
+                )
             lines.append(
                 "추천 생성 실패/보류: recommendable 후보 "
-                f"{counts.preselected_count}건이 있었지만 추천 결과가 비었습니다."
+                f"{candidate_count_text}이 있었지만 추천 결과가 비었습니다."
             )
             ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
             if ticker_preview:
