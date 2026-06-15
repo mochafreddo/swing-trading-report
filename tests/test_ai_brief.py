@@ -815,6 +815,159 @@ def test_run_ai_brief_implicit_source_api_provider_overrides_env_chain(
     assert captured["source_api_url"] == "https://source.example/api"
 
 
+def test_run_ai_brief_env_http_json_chain_uses_env_source_api_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    captured: dict[str, object] = {}
+
+    def fake_chain(**kwargs: object):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={
+                "chain": ["http-json"],
+                "providers": [],
+                "final": {
+                    "recommendable_covered": 0,
+                    "recommendable_total": 1,
+                    "watch_covered": 0,
+                    "watch_total": 0,
+                },
+            },
+        )
+
+    monkeypatch.setenv("AI_BRIEF_SOURCE_PROVIDER_CHAIN_US", "http-json")
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/api")
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider=None,
+            source_report_path=None,
+        )
+        == 0
+    )
+
+    assert captured["source_providers"] == ("http-json",)
+    assert captured["source_api_url"] == "https://source.example/api"
+
+
+def test_run_ai_brief_direct_http_json_chain_uses_env_source_api_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    captured: dict[str, object] = {}
+
+    def fake_chain(**kwargs: object):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={
+                "chain": ["http-json"],
+                "providers": [],
+                "final": {
+                    "recommendable_covered": 0,
+                    "recommendable_total": 1,
+                    "watch_covered": 0,
+                    "watch_total": 0,
+                },
+            },
+        )
+
+    monkeypatch.setenv("AI_BRIEF_SOURCE_API_URL", "https://source.example/api")
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider=None,
+            source_report_path=None,
+            source_provider_chain="http-json",
+        )
+        == 0
+    )
+
+    assert captured["source_providers"] == ("http-json",)
+    assert captured["source_api_url"] == "https://source.example/api"
+
+
+def test_run_ai_brief_rejects_direct_source_api_url_for_non_http_json_chain(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    source_called = False
+
+    def fake_chain(**_kwargs: object):
+        nonlocal source_called
+        source_called = True
+        return SimpleNamespace(
+            sources_by_ticker={},
+            source_issues=[],
+            system_issues=[],
+            summary={
+                "chain": ["finnhub"],
+                "providers": [],
+                "final": {
+                    "recommendable_covered": 0,
+                    "recommendable_total": 1,
+                    "watch_covered": 0,
+                    "watch_total": 0,
+                },
+            },
+        )
+
+    monkeypatch.setattr("sab.ai_brief.load_ai_brief_source_chain", fake_chain)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    assert (
+        run_ai_brief(
+            entry_report_path=entry_report.as_posix(),
+            buy_report_path=None,
+            market=None,
+            model_provider="fake",
+            model_name="fake-ai-brief-v1",
+            source_provider=None,
+            source_report_path=None,
+            source_provider_chain="finnhub",
+            source_api_url="https://source.example/api",
+        )
+        == 1
+    )
+
+    assert source_called is False
+
+
 def test_run_ai_brief_direct_source_chain_accepts_timeout(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

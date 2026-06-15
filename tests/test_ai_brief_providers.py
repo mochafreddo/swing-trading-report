@@ -31,13 +31,14 @@ def _candidate(
     ticker: str,
     *,
     role: str,
+    action: str | None = None,
     ai_role_reason: str = "test role reason",
     published_at: str | None = None,
 ) -> dict[str, object]:
     return {
         "ticker": ticker,
         "name": None,
-        "action": "ENTER" if role == "recommendable" else "SKIP",
+        "action": action or ("ENTER" if role == "recommendable" else "SKIP"),
         "ai_role": role,
         "ai_role_reason": ai_role_reason,
         "entry_reasons": ["entry reason"],
@@ -63,6 +64,38 @@ def test_fake_provider_returns_watch_candidates_separately() -> None:
     assert [row["ticker"] for row in result.recommendations] == ["AAPL.NAS"]
     assert [row["ticker"] for row in result.watch_candidates] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["action"] == "WATCH"
+
+
+def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[
+            _candidate(
+                "CAT.NYS",
+                role="recommendable",
+                action="SKIP",
+                ai_role_reason="portfolio policy blocked automatic entry",
+            ),
+            _candidate(
+                "CIFR.NAS",
+                role="recommendable",
+                action="REVIEW",
+                ai_role_reason="risk alignment requires manual review",
+            ),
+        ],
+        watch_candidates=[],
+    )
+
+    rationale_items: list[str] = []
+    for recommendation in result.recommendations:
+        rationale = recommendation["rationale"]
+        assert isinstance(rationale, list)
+        rationale_items.extend(str(item) for item in rationale)
+    rationale_text = "\n".join(rationale_items)
+    assert "portfolio policy blocked automatic entry" in rationale_text
+    assert "risk alignment requires manual review" in rationale_text
+    assert "entry report marked this candidate ENTER" not in rationale_text
 
 
 def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
@@ -120,6 +153,64 @@ def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
     ]
     assert [row["ticker"] for row in user_payload["watch_candidates"]] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["ticker"] == "MSFT.NAS"
+
+
+def test_openai_prompt_allows_promoted_recommendable_review_skip_candidates() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[
+            _candidate(
+                "CAT.NYS",
+                role="recommendable",
+                action="SKIP",
+                ai_role_reason="portfolio policy blocked automatic entry",
+            ),
+            _candidate(
+                "CIFR.NAS",
+                role="recommendable",
+                action="REVIEW",
+                ai_role_reason="risk alignment requires manual review",
+            ),
+        ],
+        watch_candidates=[],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    request_input = request["input"]
+    assert isinstance(request_input, list)
+    system_message = request_input[0]
+    assert isinstance(system_message, dict)
+    system_content = str(system_message["content"])
+    assert "Do not recommend REVIEW or SKIP rows" not in system_content
+    assert "recommendable" in system_content
+    user_message = request_input[1]
+    assert isinstance(user_message, dict)
+    user_payload = json.loads(str(user_message["content"]))
+    assert [row["action"] for row in user_payload["recommendable_candidates"]] == [
+        "SKIP",
+        "REVIEW",
+    ]
+    assert [
+        row["ai_role_reason"] for row in user_payload["recommendable_candidates"]
+    ] == [
+        "portfolio policy blocked automatic entry",
+        "risk alignment requires manual review",
+    ]
 
 
 def test_fake_provider_rejects_watch_candidate_with_automated_order_language() -> None:
@@ -488,7 +579,9 @@ def test_openai_rejects_watch_candidate_unprovided_source_url() -> None:
         ),
     )
 
-    with pytest.raises(AiBriefProviderContractError, match="source url must be supplied"):
+    with pytest.raises(
+        AiBriefProviderContractError, match="source url must be supplied"
+    ):
         provider.build_recommendations(
             recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
             watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],

@@ -176,10 +176,18 @@ def _normalize_source_provider(
     return provider
 
 
-def _normalize_source_api_url(*, provider: str, value: str | None) -> str | None:
-    if provider != SOURCE_PROVIDER_HTTP_JSON:
+def _normalize_source_api_url(
+    *, source_providers: tuple[str, ...], value: str | None
+) -> str | None:
+    explicit = str(value or "").strip()
+    if SOURCE_PROVIDER_HTTP_JSON not in source_providers:
+        if explicit:
+            raise ValueError(
+                "--source-api-url is only valid with a source provider chain "
+                "containing http-json"
+            )
         return None
-    api_url = str(value or os.getenv("AI_BRIEF_SOURCE_API_URL") or "").strip()
+    api_url = str(explicit or os.getenv("AI_BRIEF_SOURCE_API_URL") or "").strip()
     if not api_url:
         raise ValueError(
             "--source-provider http-json requires --source-api-url or "
@@ -535,10 +543,6 @@ def run_ai_brief(
             source_report_path=source_report_path,
             source_api_url=source_api_url_input,
         )
-        normalized_source_api_url = _normalize_source_api_url(
-            provider=normalized_source_provider,
-            value=source_api_url_input,
-        )
     except ValueError as exc:
         logger.error(
             "%s",
@@ -605,8 +609,12 @@ def run_ai_brief(
             normalized_source_provider=normalized_source_provider,
             source_provider=source_provider,
             source_report_path=source_report_path,
-            source_api_url=normalized_source_api_url,
+            source_api_url=source_api_url_input,
             source_provider_chain=source_provider_chain,
+        )
+        normalized_source_api_url = _normalize_source_api_url(
+            source_providers=resolved_source_provider_chain,
+            value=source_api_url_input,
         )
         normalized_source_timeout_seconds = _normalize_source_timeout_seconds(
             source_providers=resolved_source_provider_chain,
