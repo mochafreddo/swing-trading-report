@@ -601,6 +601,8 @@ def test_write_ai_brief_report_rejects_watch_candidate_blank_ticker(
     [
         ({"reason": ""}, "reason"),
         ({"retrigger_conditions": []}, "retrigger_conditions"),
+        ({"retrigger_conditions": ["   "]}, "retrigger_conditions"),
+        ({"retrigger_conditions": [{}]}, "retrigger_conditions"),
     ],
 )
 def test_write_ai_brief_report_rejects_watch_candidate_required_text(
@@ -614,6 +616,18 @@ def test_write_ai_brief_report_rejects_watch_candidate_required_text(
     artifact["watch_candidates"] = [watch_candidate]
 
     with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize("missing_field", ["watch_tickers", "watch_candidates"])
+def test_write_ai_brief_report_requires_watch_fields_together(
+    tmp_path: Path,
+    missing_field: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact.pop(missing_field)
+
+    with pytest.raises(AiBriefValidationError, match=missing_field):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 
@@ -709,7 +723,7 @@ def test_write_ai_brief_report_rejects_bad_source_provider_summary_totals(
         "providers": [
             {
                 "provider": "finnhub",
-                "status": "completed",
+                "status": "success",
                 "covered": 1,
                 "total": 2,
             }
@@ -723,6 +737,42 @@ def test_write_ai_brief_report_rejects_bad_source_provider_summary_totals(
     }
 
     with pytest.raises(AiBriefValidationError, match="watch_total"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("provider", "status", "message"),
+    [
+        ("polygon-news", "success", "chain"),
+        ("finnhub", "completed", "status"),
+    ],
+)
+def test_write_ai_brief_report_rejects_bad_source_provider_summary_provider_status(
+    tmp_path: Path,
+    provider: str,
+    status: str,
+    message: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    artifact["source_provider_summary"] = {
+        "chain": ["finnhub"],
+        "providers": [
+            {
+                "provider": provider,
+                "status": status,
+                "covered": 1,
+                "total": 1,
+            }
+        ],
+        "final": {
+            "recommendable_covered": 1,
+            "recommendable_total": 1,
+            "watch_covered": 0,
+            "watch_total": 1,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match=message):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 

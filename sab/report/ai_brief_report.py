@@ -32,6 +32,7 @@ _REPORT_TYPE = "ai_brief"
 _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
+_ALLOWED_SOURCE_PROVIDER_STATUSES = frozenset({"success", "failed", "skipped"})
 
 
 class AiBriefValidationError(ValueError):
@@ -268,6 +269,10 @@ def _eligible_tickers(payload: Mapping[str, Any]) -> set[str]:
 def _watch_tickers(payload: Mapping[str, Any]) -> list[str] | None:
     raw_tickers = _optional_list(payload, "watch_tickers")
     if raw_tickers is None:
+        if "watch_candidates" in payload:
+            raise AiBriefValidationError(
+                "watch_tickers is required when watch_candidates is present"
+            )
         return None
     tickers: list[str] = []
     seen_tickers: set[str] = set()
@@ -316,9 +321,14 @@ def _validate_watch_candidates(
 ) -> None:
     rows = _optional_list(payload, "watch_candidates")
     if rows is None:
+        if watch_tickers is not None:
+            raise AiBriefValidationError(
+                "watch_candidates is required when watch_tickers is present"
+            )
         return
 
-    allowed_tickers = set(watch_tickers) if watch_tickers is not None else None
+    assert watch_tickers is not None
+    allowed_tickers = set(watch_tickers)
     actual_tickers: list[str] = []
     seen_tickers: set[str] = set()
     for idx, raw_row in enumerate(rows):
@@ -348,9 +358,16 @@ def _validate_watch_candidates(
             raise AiBriefValidationError(
                 "watch_candidates[].retrigger_conditions is required"
             )
-        language_text = " ".join(
-            [reason, *(str(condition) for condition in retrigger_conditions)]
-        )
+        normalized_conditions: list[str] = []
+        for condition_index, raw_condition in enumerate(retrigger_conditions):
+            if not isinstance(raw_condition, str) or not raw_condition.strip():
+                raise AiBriefValidationError(
+                    "watch_candidates"
+                    f"[{idx}].retrigger_conditions[{condition_index}] "
+                    "must be a non-empty string"
+                )
+            normalized_conditions.append(raw_condition.strip())
+        language_text = " ".join([reason, *normalized_conditions])
         if contains_automated_order_language(language_text):
             raise AiBriefValidationError(
                 "watch_candidates[] must avoid automated-order language"
@@ -361,7 +378,7 @@ def _validate_watch_candidates(
             now=now,
         )
 
-    if watch_tickers is not None and actual_tickers != watch_tickers:
+    if actual_tickers != watch_tickers:
         raise AiBriefValidationError(
             "watch_candidates[].ticker order must match watch_tickers"
         )
@@ -440,6 +457,7 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.chain[{idx}] is required"
             )
+    chain_values = {provider.strip() for provider in chain}
 
     providers = _require_list(
         source_provider_summary.get("providers"),
@@ -450,19 +468,26 @@ def _validate_source_provider_summary(
             raw_provider_summary,
             field_name=f"source_provider_summary.providers[{idx}]",
         )
-        if (
-            not isinstance(provider_summary.get("provider"), str)
-            or not str(provider_summary.get("provider")).strip()
-        ):
+        raw_provider = provider_summary.get("provider")
+        if not isinstance(raw_provider, str) or not raw_provider.strip():
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].provider is required"
             )
-        if (
-            not isinstance(provider_summary.get("status"), str)
-            or not str(provider_summary.get("status")).strip()
-        ):
+        provider = raw_provider.strip()
+        if provider not in chain_values:
+            raise AiBriefValidationError(
+                f"source_provider_summary.providers[{idx}].provider must be in chain"
+            )
+        raw_status = provider_summary.get("status")
+        if not isinstance(raw_status, str) or not raw_status.strip():
             raise AiBriefValidationError(
                 f"source_provider_summary.providers[{idx}].status is required"
+            )
+        status = raw_status.strip()
+        if status not in _ALLOWED_SOURCE_PROVIDER_STATUSES:
+            raise AiBriefValidationError(
+                f"source_provider_summary.providers[{idx}].status must be one of "
+                f"{sorted(_ALLOWED_SOURCE_PROVIDER_STATUSES)}"
             )
         covered = _non_negative_int(
             provider_summary.get("covered"),
