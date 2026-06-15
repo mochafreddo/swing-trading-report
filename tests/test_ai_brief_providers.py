@@ -202,6 +202,83 @@ def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
         )
 
 
+def test_openai_rejects_watch_candidate_with_skip_action() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "SKIP",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [
+                            {
+                                "title": "MSFT source",
+                                "url": "https://news.example/MSFT.NAS",
+                                "published_at": "2026-06-15T12:00:00+00:00",
+                            }
+                        ],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefProviderContractError,
+        match=r"watch_candidates\[\]\.action must be WATCH",
+    ):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
+def test_openai_rejects_watch_candidate_with_missing_action() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [
+                            {
+                                "title": "MSFT source",
+                                "url": "https://news.example/MSFT.NAS",
+                                "published_at": "2026-06-15T12:00:00+00:00",
+                            }
+                        ],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefProviderContractError,
+        match=r"watch_candidates\[\]\.action must be WATCH",
+    ):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
 class _Response:
     status_code = 200
 

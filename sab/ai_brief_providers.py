@@ -522,7 +522,7 @@ def _normalize_openai_provider_result(
         normalized_watch_candidates.append(
             {
                 "ticker": ticker,
-                "action": "WATCH",
+                "action": str(raw_watch.get("action") or "").strip().upper(),
                 "reason": str(raw_watch.get("reason") or "").strip(),
                 "retrigger_conditions": string_list(
                     raw_watch.get("retrigger_conditions")
