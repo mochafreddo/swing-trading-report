@@ -34,6 +34,10 @@ _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_SOURCE_PROVIDER_STATUSES = frozenset({"success", "failed", "skipped"})
+_EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
+_NEW_FORMAT_ARTIFACT_FIELDS = frozenset(
+    {"watch_tickers", "watch_candidates", "source_provider_summary"}
+)
 
 
 class AiBriefValidationError(ValueError):
@@ -389,6 +393,22 @@ def _array_count(payload: Mapping[str, Any], field_name: str) -> int:
     return len(_require_list(payload.get(field_name), field_name=field_name))
 
 
+def _recommendable_count(payload: Mapping[str, Any]) -> int:
+    return _array_count(payload, "eligible_tickers") + _array_count(
+        payload, "cap_excluded_candidates"
+    )
+
+
+def _watch_count(
+    payload: Mapping[str, Any],
+    *,
+    watch_tickers: list[str] | None,
+) -> int:
+    if watch_tickers is not None:
+        return len(watch_tickers)
+    return len(_optional_list(payload, "watch_candidates") or [])
+
+
 def _summary_int(summary: Mapping[str, Any], field_name: str) -> int | None:
     if field_name not in summary:
         return None
@@ -398,6 +418,17 @@ def _summary_int(summary: Mapping[str, Any], field_name: str) -> int | None:
     return value
 
 
+def _is_legacy_without_expanded_counts(
+    payload: Mapping[str, Any],
+    summary: Mapping[str, Any],
+) -> bool:
+    return not any(
+        field_name in payload for field_name in _NEW_FORMAT_ARTIFACT_FIELDS
+    ) and all(
+        field_name not in summary for field_name in _EXPANDED_SUMMARY_COUNT_FIELDS
+    )
+
+
 def _validate_summary_counts(
     payload: Mapping[str, Any],
     *,
@@ -405,6 +436,10 @@ def _validate_summary_counts(
     watch_tickers: list[str] | None,
 ) -> None:
     _summary_int(summary, "entry_count")
+    legacy_without_expanded_counts = _is_legacy_without_expanded_counts(
+        payload,
+        summary,
+    )
     expected_counts = {
         "preselected_count": _array_count(payload, "eligible_tickers"),
         "recommendation_count": _array_count(payload, "recommendations"),
@@ -413,14 +448,16 @@ def _validate_summary_counts(
         "cap_excluded_count": _array_count(payload, "cap_excluded_candidates"),
         "source_issue_count": _array_count(payload, "source_issues"),
         "system_issue_count": _array_count(payload, "system_issues"),
-        "recommendable_count": _array_count(payload, "eligible_tickers")
-        + _array_count(payload, "cap_excluded_candidates"),
-        "watch_count": (
-            len(watch_tickers)
-            if watch_tickers is not None
-            else len(_optional_list(payload, "watch_candidates") or [])
-        ),
     }
+    expanded_counts = {
+        "recommendable_count": _recommendable_count(payload),
+        "watch_count": _watch_count(payload, watch_tickers=watch_tickers),
+    }
+    if not legacy_without_expanded_counts:
+        for field_name in _EXPANDED_SUMMARY_COUNT_FIELDS:
+            if field_name not in summary:
+                raise AiBriefValidationError(f"summary.{field_name} is required")
+        expected_counts.update(expanded_counts)
     for field_name, expected_count in expected_counts.items():
         actual_count = _summary_int(summary, field_name)
         if actual_count is not None and actual_count != expected_count:
@@ -439,6 +476,7 @@ def _validate_source_provider_summary(
     payload: Mapping[str, Any],
     *,
     summary: Mapping[str, Any],
+    watch_tickers: list[str] | None,
 ) -> None:
     if "source_provider_summary" not in payload:
         return
@@ -459,7 +497,14 @@ def _validate_source_provider_summary(
             raise AiBriefValidationError(
                 f"source_provider_summary.chain[{idx}] is required"
             )
-    chain_providers = [provider.strip().lower() for provider in chain]
+    chain_providers: list[str] = []
+    for idx, raw_provider in enumerate(chain):
+        provider = raw_provider.strip().lower()
+        if "," in provider:
+            raise AiBriefValidationError(
+                f"source_provider_summary.chain[{idx}] must be a provider id"
+            )
+        chain_providers.append(provider)
     if not chain_providers:
         raise AiBriefValidationError("source_provider_summary.chain is required")
     try:
@@ -556,6 +601,17 @@ def _validate_source_provider_summary(
             "source_provider_summary.final covered counts must be 0 when "
             "chain is ['none']"
         )
+    expected_recommendable_total = _recommendable_count(payload)
+    if final_counts["recommendable_total"] != expected_recommendable_total:
+        raise AiBriefValidationError(
+            "source_provider_summary.final.recommendable_total must match "
+            "artifact recommendable count"
+        )
+    expected_watch_total = _watch_count(payload, watch_tickers=watch_tickers)
+    if final_counts["watch_total"] != expected_watch_total:
+        raise AiBriefValidationError(
+            "source_provider_summary.final.watch_total must match artifact watch count"
+        )
 
     recommendable_count = _summary_int(summary, "recommendable_count")
     if (
@@ -614,8 +670,12 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
     _validate_watch_candidates(payload, watch_tickers=watch_tickers, now=now)
     _validate_issue_list(payload, "source_issues")
     _validate_issue_list(payload, "system_issues")
+    _validate_source_provider_summary(
+        payload,
+        summary=summary,
+        watch_tickers=watch_tickers,
+    )
     _validate_summary_counts(payload, summary=summary, watch_tickers=watch_tickers)
-    _validate_source_provider_summary(payload, summary=summary)
     try:
         validate_optional_ai_brief_state_fields(payload)
     except ValueError as exc:

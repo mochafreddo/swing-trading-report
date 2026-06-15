@@ -807,6 +807,24 @@ def test_write_ai_brief_report_rejects_bad_source_provider_summary_provider_stat
             "unsupported",
         ),
         (
+            ["finnhub,benzinga-news"],
+            [
+                {
+                    "provider": "finnhub",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 2,
+                },
+                {
+                    "provider": "benzinga-news",
+                    "status": "success",
+                    "covered": 0,
+                    "total": 2,
+                },
+            ],
+            "provider id",
+        ),
+        (
             ["finnhub", "finnhub"],
             [
                 {
@@ -859,6 +877,78 @@ def test_write_ai_brief_report_rejects_invalid_source_provider_summary_chain(
             "recommendable_total": 1,
             "watch_covered": 0,
             "watch_total": 1,
+        },
+    }
+
+    with pytest.raises(AiBriefValidationError, match=message):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize("field_name", ["watch_tickers", "source_provider_summary"])
+def test_write_ai_brief_report_rejects_new_format_missing_expanded_summary_counts(
+    tmp_path: Path,
+    field_name: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    summary.pop("recommendable_count")
+    summary.pop("watch_count")
+    artifact["summary"] = summary
+    if field_name == "watch_tickers":
+        artifact.pop("source_provider_summary", None)
+    else:
+        artifact.pop("watch_tickers")
+        artifact.pop("watch_candidates")
+        artifact["source_provider_summary"] = {
+            "chain": ["none"],
+            "providers": [],
+            "final": {
+                "recommendable_covered": 0,
+                "recommendable_total": 1,
+                "watch_covered": 0,
+                "watch_total": 0,
+            },
+        }
+
+    with pytest.raises(AiBriefValidationError, match="recommendable_count"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    ("recommendable_total", "watch_total", "message"),
+    [
+        (99, 1, "recommendable_total"),
+        (1, 99, "watch_total"),
+    ],
+)
+def test_write_ai_brief_report_rejects_source_provider_summary_final_totals_without_summary_counts(
+    tmp_path: Path,
+    recommendable_total: int,
+    watch_total: int,
+    message: str,
+) -> None:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    summary.pop("recommendable_count")
+    summary.pop("watch_count")
+    artifact["summary"] = summary
+    artifact["source_provider_summary"] = {
+        "chain": ["finnhub"],
+        "providers": [
+            {
+                "provider": "finnhub",
+                "status": "success",
+                "covered": 0,
+                "total": 2,
+            }
+        ],
+        "final": {
+            "recommendable_covered": 0,
+            "recommendable_total": recommendable_total,
+            "watch_covered": 0,
+            "watch_total": watch_total,
         },
     }
 

@@ -321,6 +321,54 @@ def test_ai_brief_eval_accepts_watch_only_candidate_contract(
     assert result.issues == []
 
 
+def test_ai_brief_eval_rejects_new_format_watch_artifact_without_expanded_summary_counts(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.watch-missing-counts.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                _entry_row("AAPL.NAS"),
+                _entry_row(
+                    "MSFT.NAS",
+                    action="SKIP",
+                    reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+                ),
+            ],
+            "system_issues": [],
+        },
+    )
+    payload = _ai_brief_payload(
+        entry_count=2,
+        eligible_tickers=["AAPL.NAS"],
+        recommendations=[_ai_brief_recommendation("AAPL.NAS")],
+        watch_tickers=["MSFT.NAS"],
+        watch_candidates=[_watch_candidate("MSFT.NAS")],
+    )
+    summary = _copy_mapping(payload["summary"])
+    summary.pop("recommendable_count")
+    summary.pop("watch_count")
+    payload["summary"] = summary
+    report_path = _write_payload(
+        tmp_path,
+        "ai-brief.watch-missing-counts.json",
+        payload,
+    )
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
+
+
 def test_ai_brief_eval_fails_when_watch_fields_do_not_match_classifier(
     tmp_path: Path,
 ) -> None:
@@ -473,7 +521,7 @@ def test_ai_brief_eval_fails_when_only_one_expanded_summary_count_is_missing(
     )
 
     assert result.status == "FAIL"
-    assert _issue_codes(result) == {"summary_count_mismatch"}
+    assert _issue_codes(result) == {"ai_brief_report_invalid"}
 
 
 def test_ai_brief_eval_fails_when_eligible_tickers_do_not_match_entry_report(

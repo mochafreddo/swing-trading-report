@@ -28,6 +28,10 @@ AiBriefRecommendationEvalStatus = AiBriefEvalStatus
 AiBriefRecommendationEvalSeverity = AiBriefEvalSeverity
 
 _SUPPORTED_ENTRY_ACTIONS = frozenset({"ENTER", "REVIEW", "SKIP"})
+_EXPANDED_SUMMARY_COUNT_FIELDS = frozenset({"recommendable_count", "watch_count"})
+_NEW_FORMAT_ARTIFACT_FIELDS = frozenset(
+    {"watch_tickers", "watch_candidates", "source_provider_summary"}
+)
 
 
 @dataclass(frozen=True)
@@ -205,6 +209,9 @@ def evaluate_ai_brief_recommendation_report(
                 "source_issue_count": len(source_issues),
                 "system_issue_count": len(system_issues),
             },
+            allow_legacy_missing_expanded_counts=_allows_legacy_missing_expanded_counts(
+                ai_brief_report
+            ),
         )
     )
     issues.extend(_reported_issue_issues(source_issues, issue_type="source"))
@@ -542,6 +549,8 @@ def _rank_issues(
 def _summary_count_issues(
     summary: object,
     expected_counts: Mapping[str, int],
+    *,
+    allow_legacy_missing_expanded_counts: bool = False,
 ) -> list[AiBriefRecommendationEvalIssue]:
     if not isinstance(summary, Mapping):
         return [
@@ -553,14 +562,11 @@ def _summary_count_issues(
         ]
 
     issues: list[AiBriefRecommendationEvalIssue] = []
-    legacy_expanded_counts_absent = (
-        "recommendable_count" not in summary and "watch_count" not in summary
-    )
     for field_name, expected_count in expected_counts.items():
-        if legacy_expanded_counts_absent and field_name in {
-            "recommendable_count",
-            "watch_count",
-        }:
+        if (
+            allow_legacy_missing_expanded_counts
+            and field_name in _EXPANDED_SUMMARY_COUNT_FIELDS
+        ):
             continue
         actual = _int_value(summary.get(field_name))
         if actual != expected_count:
@@ -575,6 +581,17 @@ def _summary_count_issues(
                 )
             )
     return issues
+
+
+def _allows_legacy_missing_expanded_counts(payload: Mapping[str, Any]) -> bool:
+    summary = payload.get("summary")
+    if not isinstance(summary, Mapping):
+        return False
+    return not any(
+        field_name in payload for field_name in _NEW_FORMAT_ARTIFACT_FIELDS
+    ) and all(
+        field_name not in summary for field_name in _EXPANDED_SUMMARY_COUNT_FIELDS
+    )
 
 
 def _reported_issue_issues(
