@@ -191,14 +191,15 @@ def _normalize_source_api_url(*, provider: str, value: str | None) -> str | None
 
 
 def _normalize_source_timeout_seconds(
-    *, provider: str, value: float | None
+    *, source_providers: tuple[str, ...], value: float | None
 ) -> float | None:
-    if provider not in _TIMEOUT_SOURCE_PROVIDERS:
+    if not any(provider in _TIMEOUT_SOURCE_PROVIDERS for provider in source_providers):
         if value is not None:
             raise ValueError(
                 "--source-timeout-seconds is only valid with "
-                "--source-provider http-json, finnhub, polygon-news, "
-                "alpha-vantage-news, marketaux-news, benzinga-news, or naver-news"
+                "a source provider chain containing http-json, finnhub, "
+                "polygon-news, alpha-vantage-news, marketaux-news, "
+                "benzinga-news, or naver-news"
             )
         return None
     if value is None:
@@ -231,12 +232,18 @@ def _resolve_source_provider_chain(
     target_market: str,
     normalized_source_provider: str,
     source_provider: str | None,
+    source_report_path: str | None,
+    source_api_url: str | None,
     source_provider_chain: str | None,
 ) -> tuple[str, ...]:
     configured = parse_source_provider_chain(str(source_provider_chain or "").strip())
     if configured:
         return configured
-    if str(source_provider or "").strip():
+    if (
+        str(source_provider or "").strip()
+        or str(source_report_path or "").strip()
+        or str(source_api_url or "").strip()
+    ):
         return (normalized_source_provider,)
     configured = parse_source_provider_chain(
         _source_chain_env_value(target_market, None)
@@ -532,10 +539,6 @@ def run_ai_brief(
             provider=normalized_source_provider,
             value=source_api_url_input,
         )
-        normalized_source_timeout_seconds = _normalize_source_timeout_seconds(
-            provider=normalized_source_provider,
-            value=source_timeout_seconds,
-        )
     except ValueError as exc:
         logger.error(
             "%s",
@@ -601,7 +604,13 @@ def run_ai_brief(
             target_market=target_market,
             normalized_source_provider=normalized_source_provider,
             source_provider=source_provider,
+            source_report_path=source_report_path,
+            source_api_url=normalized_source_api_url,
             source_provider_chain=source_provider_chain,
+        )
+        normalized_source_timeout_seconds = _normalize_source_timeout_seconds(
+            source_providers=resolved_source_provider_chain,
+            value=source_timeout_seconds,
         )
         target_rows = _filter_rows_for_market(entry_rows, market=target_market)
         _validate_supported_entry_actions(target_rows)
