@@ -1,5 +1,6 @@
 # AI Brief Candidate And Source Expansion Design
 
+상태: Accepted
 Status: Approved design, pending written-spec review
 Date: 2026-06-15
 Scope: Scheduled and manual `sab ai-brief` candidate selection, source provider coverage, artifact/evaluator contracts

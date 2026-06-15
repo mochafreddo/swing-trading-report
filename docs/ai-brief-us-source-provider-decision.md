@@ -4,10 +4,17 @@
 
 ## Decision
 
-2026-05-23 기준 US scheduled AI Brief 기본 source provider는
-`AI_BRIEF_SOURCE_PROVIDER_US=finnhub`로 확정한다. GitHub repository variable도
-같은 값으로 변경하고 확인했다. KR 기본값은
-`AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`를 유지한다.
+2026-06-15 기준 US scheduled AI Brief 기본 source provider는 Finnhub-first
+chain으로 운용한다:
+
+- Preferred chain: `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US=finnhub,benzinga-news,polygon-news`
+- Rollback/single-provider fallback: `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`
+- KR fallback remains: `AI_BRIEF_SOURCE_PROVIDER_KR=naver-news`
+
+2026-05-23의 원 결정은 `AI_BRIEF_SOURCE_PROVIDER_US=finnhub` 단일 provider를
+US 기본값으로 확정한 것이다. 2026-06-15 변경은 Finnhub를 첫 provider로 유지하되,
+Benzinga/Polygon을 source chain fallback/diagnostic coverage 후보로 붙이는 운영
+개선이다.
 
 근거는 `reports/2026-05-20.entry.json`의 US `ENTER` 후보
 `AXTI.NAS`, `WELL.NYS`, `BABA.NYS`에 대한 3회 live comparison이다. Finnhub는
@@ -165,8 +172,10 @@ Polygon:
 Repository runtime estimate:
 
 - The adapter calls the provider once per eligible US ticker.
-- AI Brief preselection is capped at 5 candidates, so a scheduled US run makes up
-  to 5 source-provider requests.
+- AI Brief model preselection is capped at 5 recommendable candidates, but the
+  source provider universe includes all recommendable candidates plus watch-only
+  candidates. A chain provider therefore makes up to one request per remaining
+  uncovered source-universe ticker, not only the model-input tickers.
 - The 2026-05-20 US evidence set had 3 eligible `ENTER` tickers.
 
 Finnhub:
@@ -190,7 +199,9 @@ Benzinga:
 
 Required current configuration:
 
-- Repository variable: `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`
+- Preferred repository variable:
+  `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US=finnhub,benzinga-news,polygon-news`
+- Rollback repository variable: `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`
 - Repository secret: `FINNHUB_API_KEY`
 - Backup/comparison candidate secrets: `POLYGON_API_KEY`, `BENZINGA_API_TOKEN`
 - Scheduled model provider requirements: `OPENAI_API_KEY`,
@@ -204,8 +215,9 @@ If US scheduled runs later produce source-backed failures, quota failures, or
 provider errors:
 
 1. Inspect the scheduled artifacts and provider issues before changing defaults.
-2. Temporarily unset `AI_BRIEF_SOURCE_PROVIDER_US` to use the existing fallback
-   chain, or set it to another provider only after live comparison and eval pass.
+2. Temporarily unset `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` to fall back to
+   `AI_BRIEF_SOURCE_PROVIDER_US=finnhub`, or set the chain to another provider
+   order only after live comparison and eval pass.
 3. Keep `FINNHUB_API_KEY` available until failed Finnhub runs are inspected.
 4. Re-run live comparison with Finnhub, Polygon, and Benzinga against the next
    suitable US `PRE_OPEN` entry report.
@@ -213,7 +225,8 @@ provider errors:
 
 ## Follow-ups
 
-1. Monitor the next US scheduled AI Brief run with `source_provider=finnhub`.
+1. Monitor the next US scheduled AI Brief run with
+   `source_provider_chain=finnhub,benzinga-news,polygon-news`.
 2. Capture another comparison set when the US entry candidate set changes.
 3. Keep Polygon as a backup/comparison provider, but do not promote it without
    fresh coverage and rate-limit evidence.

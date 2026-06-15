@@ -89,9 +89,12 @@
 | `AI_BRIEF_SOURCE_API_URL_US` | no | none | `https://source.example/us` | scheduled workflow | US scheduled source API URL | GitHub variable. |
 | `AI_BRIEF_SOURCE_API_TOKEN` | no | none | `replace-with-source-token` | source provider | Bearer token for matching configured source API URL | Secret. Only sent when the request URL matches `AI_BRIEF_SOURCE_API_URL`, `_KR`, or `_US`. |
 | `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` | no | provider default | `10` | source providers | Source provider timeout | Positive number. |
-| `AI_BRIEF_SOURCE_PROVIDER_KR` | no | fallback chain | `naver-news` | scheduled workflow | KR scheduled source provider | GitHub variable. |
-| `AI_BRIEF_SOURCE_PROVIDER_US` | no | fallback chain | `finnhub` | scheduled workflow | US scheduled source provider | Current docs identify Finnhub as default candidate. |
-| `AI_BRIEF_SOURCE_PROVIDER` | no | fallback chain | `finnhub` | scheduled workflow | Global source provider fallback | Market-specific wins. |
+| `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR` | no | global chain/single-provider fallback | `naver-news` | scheduled runner | KR scheduled source provider chain | Market-specific chain wins over global chain and single-provider env. |
+| `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | no | global chain/single-provider fallback | `finnhub,benzinga-news,polygon-news` | scheduled workflow, scheduled runner | US scheduled source provider chain | Each provider's secret must be configured when that provider appears in the chain. |
+| `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | no | single-provider fallback | `finnhub,benzinga-news` | `sab ai-brief`, scheduled runner | Global source provider chain fallback | Used only when no explicit single provider/source path/API URL overrides it. |
+| `AI_BRIEF_SOURCE_PROVIDER_KR` | no | global provider/API URL fallback | `naver-news` | scheduled workflow | KR scheduled source provider | GitHub variable. |
+| `AI_BRIEF_SOURCE_PROVIDER_US` | no | global provider/API URL fallback | `finnhub` | scheduled workflow | US scheduled source provider | Current docs identify Finnhub as default single-provider fallback. |
+| `AI_BRIEF_SOURCE_PROVIDER` | no | API URL fallback | `finnhub` | scheduled workflow | Global source provider fallback | Market-specific wins. |
 | `FINNHUB_API_KEY` | provider-specific | none | `replace-with-finnhub-key` | `finnhub` | US news provider key | Secret. US-only. |
 | `POLYGON_API_KEY` | provider-specific | none | `replace-with-polygon-key` | `polygon-news` | US news provider key | Secret. US-only. |
 | `ALPHA_VANTAGE_API_KEY` | provider-specific | none | `replace-with-alpha-vantage-key` | `alpha-vantage-news` | US news provider key | Secret. US-only. |

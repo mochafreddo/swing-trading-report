@@ -47,7 +47,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `scan` | watchlist/screener universe를 평가해 buy report 생성 | `--limit`, `--watchlist`, `--provider kis|pykrx`, `--screener-limit`, `--universe watchlist|screener|both`, `--markets KR,US` | `reports/YYYY-MM-DD(-n).buy.json` |
 | `sell` | active holdings 평가 후 sell report 생성 | `--provider kis|pykrx`, `--holdings <path>` | `reports/YYYY-MM-DD(-n).sell.json` |
 | `entry` | buy report 후보의 다음 세션 진입 조건 평가 | `--buy-report`, `--provider kis|pykrx`, `--mode PRE_OPEN|INTRADAY|AFTER_CLOSE`, `--market KR|US`, `--upload` | `reports/YYYY-MM-DD(-n).entry.json` |
-| `ai-brief` | entry report의 `ENTER` 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--source-provider`, `--source-report`, `--source-api-url`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
+| `ai-brief` | entry report의 recommendable/watch 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--source-provider`, `--source-report`, `--source-api-url`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
 | `ai-brief-scheduled` | runtime_state guard와 marker를 사용하는 scheduled runner | `--market`, `--schedule-role`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--source-provider`, `--model-provider`, `--dry-run`, `--guard-only` | `ai-brief` 또는 `ai-brief-skip` report, runtime_state marker |
 
 ## Report Artifacts
@@ -62,9 +62,12 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 
 ### AI Brief Artifact Notes
 
-- `ai-brief.summary` includes `entry_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, and `system_issue_count`.
+- `ai-brief.summary` includes `entry_count`, `recommendable_count`, `watch_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, and `system_issue_count`.
+- `eligible_tickers[]` is the preselected recommendable model-input ticker list after the 5-candidate cap. `watch_tickers[]` is tracked separately and never contributes to recommendation rank.
 - `recommendations[]` is capped at 3 rows. Its `rank` values must match the displayed array order as contiguous `1..N`, and recommendation text must avoid automated order/execution language.
-- `vetoed_candidates[]` records preselected `ENTER` candidates that the model did not recommend. It is displayed separately from `recommendations[]` in notifications and the web report detail view.
+- `watch_candidates[]` records watch-only candidates with `action=WATCH`, manual reason, retrigger conditions, and optional source rows. It is displayed separately from `recommendations[]`.
+- `vetoed_candidates[]` records preselected recommendable candidates that the model did not recommend. It is displayed separately from `recommendations[]` in notifications and the web report detail view.
+- `source_provider_summary` records the configured source chain, provider-level `status|covered|total`, and final recommendable/watch coverage. A chain of `none` has no provider rows and zero final coverage.
 - `scripts/eval_ai_brief_recommendations.py` is the offline recommendation quality gate. The manual GitHub AI Brief workflow and scheduled runner treat `FAIL` as a stop before normal notification/success handling.
 
 ## Web API Routes

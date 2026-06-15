@@ -74,13 +74,15 @@ Scheduled AI Brief has two cooperating paths:
 - Local primary: macOS `launchd` wrapper runs the Docker scheduler.
 - GitHub fallback/monitor: `.github/workflows/ai-brief.yml` runs monitor, fallback, and cutoff alert roles.
 
-The scheduled 기본값 for source providers is market-specific where possible:
+The scheduled 기본값 for source providers is market-specific where possible.
+Prefer a chain when multiple provider credentials are configured; keep the
+single-provider variables as fallback/rollback controls.
 
-| Market | Variable | Current Documented Default Candidate | Notes |
-| --- | --- | --- | --- |
-| KR | `AI_BRIEF_SOURCE_PROVIDER_KR` | `naver-news` | Requires Naver credentials. |
-| US | `AI_BRIEF_SOURCE_PROVIDER_US` | `finnhub` | Backup/comparison providers remain available. |
-| fallback | `AI_BRIEF_SOURCE_PROVIDER` | provider-specific | Used when market-specific value is absent. |
+| Market | Preferred Variable | Current Documented Default Candidate | Fallback Variable | Notes |
+| --- | --- | --- | --- | --- |
+| KR | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR` | `naver-news` | `AI_BRIEF_SOURCE_PROVIDER_KR` | Requires Naver credentials. GitHub scheduled fallback currently dispatches US roles only; local scheduler still resolves KR chain. |
+| US | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | `finnhub,benzinga-news,polygon-news` | `AI_BRIEF_SOURCE_PROVIDER_US=finnhub` | Finnhub remains first because live evidence was strongest; Benzinga/Polygon are fallback/diagnostic coverage attempts. |
+| fallback | `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | provider-specific | `AI_BRIEF_SOURCE_PROVIDER` | Used when market-specific value is absent. |
 
 Operational checks:
 
@@ -100,7 +102,7 @@ order by report_type;
 
 If a run creates `ai-brief-skip`, inspect `skip_state`, `skip_reason`, `session_date`, and `run_url` before rerunning. Do not delete runtime markers unless the operator intentionally wants deduped work to reprocess.
 
-If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `recommendations[].rank`, `vetoed_candidates[]`, and summary count drift before rerunning. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic artifacts first, then blocks Telegram/Slack delivery on a quality `FAIL`.
+If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `source_provider_summary`, `watch_candidates[]`, `recommendations[].rank`, `vetoed_candidates[]`, and summary count drift before rerunning. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic artifacts first, then blocks Telegram/Slack delivery on a quality `FAIL`.
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 

@@ -9,6 +9,7 @@ ARCHIVE_DOC_DIRS = (
     Path("docs/adr"),
     Path("docs/reviews"),
 )
+LOCAL_PLANNING_DOC_DIRS = (Path("docs/superpowers/plans"),)
 
 ARTIFACT_DOC_GLOBS = ("docs/governance/*.json",)
 
@@ -70,6 +71,9 @@ def _iter_status_docs() -> list[Path]:
             len(path.parts) >= 3
             and path.parts[:2] == ("docs", "reviews")
             and path.name != "README.md"
+        )
+        and not any(
+            path.is_relative_to(local_dir) for local_dir in LOCAL_PLANNING_DOC_DIRS
         )
     ]
 
