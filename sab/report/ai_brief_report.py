@@ -305,7 +305,9 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         allowed_tickers=_eligible_tickers(payload),
     )
     _validate_candidate_list(
-        payload, "cap_excluded_candidates", allowed_actions={"ENTER"}
+        payload,
+        "cap_excluded_candidates",
+        allowed_actions={"ENTER", "REVIEW", "SKIP"},
     )
     _validate_issue_list(payload, "source_issues")
     _validate_issue_list(payload, "system_issues")

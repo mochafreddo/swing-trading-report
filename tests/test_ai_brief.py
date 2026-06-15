@@ -500,7 +500,7 @@ def test_run_ai_brief_expands_ready_candidates_by_ai_role(
         "COHR.NYS",
         "ANET.NYS",
     ]
-    assert [row["entry_action"] for row in payload["cap_excluded_candidates"]] == [
+    assert [row["action"] for row in payload["cap_excluded_candidates"]] == [
         "REVIEW",
         "REVIEW",
     ]

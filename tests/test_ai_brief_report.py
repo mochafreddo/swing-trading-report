@@ -194,6 +194,39 @@ def test_write_ai_brief_report_counts_issue_arrays_when_summary_is_stale(
     assert payload["brief_reason"] == "weak_news_coverage"
 
 
+def test_write_ai_brief_report_accepts_cap_excluded_review_and_skip_actions(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {**summary, "cap_excluded_count": 2}
+    artifact["cap_excluded_candidates"] = [
+        {
+            "ticker": "COHR.NYS",
+            "action": "REVIEW",
+            "reason": "preselection cap 5 exceeded",
+        },
+        {
+            "ticker": "CAT.NYS",
+            "action": "SKIP",
+            "reason": "preselection cap 5 exceeded",
+        },
+    ]
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert [row["action"] for row in payload["cap_excluded_candidates"]] == [
+        "REVIEW",
+        "SKIP",
+    ]
+
+
 def test_validate_ai_brief_artifact_accepts_legacy_missing_state() -> None:
     payload = {
         "schema": "sab.ai_brief.v1",

@@ -366,8 +366,7 @@ def _build_excluded_candidate(
 def _build_cap_excluded_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
     return {
         "ticker": str(candidate["ticker"]),
-        "action": "ENTER",
-        "entry_action": str(candidate.get("action") or ""),
+        "action": str(candidate.get("action") or ""),
         "reason": f"preselection cap {_PRESELECTION_LIMIT} exceeded",
     }
 
