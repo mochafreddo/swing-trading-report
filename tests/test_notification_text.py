@@ -469,20 +469,137 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
         max_items=5,
     )
 
-    assert "[SAB][ai-brief][schedule]" in text
-    assert "market=US" in text
-    assert "model=openai/gpt-test" in text
-    assert "brief_state=FINAL_JUDGMENT" in text
-    assert "brief_reason=source_backed_final" in text
-    assert "AI 최종 판단: 뉴스 근거 확인된 후보 2건" in text
-    assert "추천 후보 2건 (표시 2건)" in text
-    assert "issues source=0 system=0" in text
+    assert "<b>SAB AI Brief</b>" in text
+    assert "시장 <code>US</code>" in text
+    assert "모델 <code>openai/gpt-test</code>" in text
+    assert "상태 <code>FINAL_JUDGMENT</code>" in text
+    assert "사유 <code>source_backed_final</code>" in text
+    assert "뉴스 근거 확인된 추천 후보 2건" in text
+    assert "<b>추천 후보 2건</b> (표시 <code>2</code>건)" in text
+    assert "source <code>0</code> · system <code>0</code>" in text
+    assert "1. <b>AAPL.NAS Apple</b> · <code>HIGH</code>" in text
+    assert "source-backed context supports manual review" in text
+    assert "근거 <code>1</code>개 · Apple supply chain update" in text
+    assert "2. <b>MSFT.NAS</b> · <code>MEDIUM</code>" in text
+    assert "entry setup remains valid" in text
+
+
+def test_build_ai_brief_telegram_report_text_uses_html_rich_text() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-test",
+        "summary": {
+            "preselected_count": 2,
+            "recommendation_count": 1,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "recommendations": [
+            {
+                "ticker": "AAPL.NAS",
+                "name": "Apple",
+                "confidence": "HIGH",
+                "rationale": ["source-backed context supports manual review"],
+                "sources": [{"title": "Apple supply chain update"}],
+            }
+        ],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+        storage_key="2026/05/2026-05-05.ai-brief.json",
+    )
+
+    assert text.startswith("<b>SAB AI Brief</b>")
+    assert "시장 <code>US</code>" in text
+    assert "모델 <code>openai/gpt-test</code>" in text
+    assert "<b>판단</b>" in text
+    assert "상태 <code>FINAL_JUDGMENT</code>" in text
+    assert "사유 <code>source_backed_final</code>" in text
+    assert "뉴스 근거 확인된 추천 후보 1건" in text
+    assert "<b>추천 후보 1건</b> (표시 <code>1</code>건)" in text
+    assert "1. <b>AAPL.NAS Apple</b> · <code>HIGH</code>" in text
+    assert "근거 <code>1</code>개 · Apple supply chain update" in text
+    assert "<b>진단</b>" in text
+    assert "source <code>0</code> · system <code>0</code>" in text
+    assert "보관 <code>2026/05/2026-05-05.ai-brief.json</code>" in text
     assert (
-        "1. AAPL.NAS Apple | HIGH | source-backed context supports manual review | "
-        "sources 1"
+        '<a href="https://github.com/example/repo/actions/runs/789">실행 보기</a>'
+        in text
+    )
+
+
+def test_build_ai_brief_telegram_report_text_escapes_html_values() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt<&test>",
+        "summary": {
+            "preselected_count": 1,
+            "recommendation_count": 1,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "recommendations": [
+            {
+                "ticker": "AAPL.NAS",
+                "name": 'AT&T <Alpha "A">',
+                "confidence": "HIGH",
+                "rationale": ['2 < 3 & "quoted"'],
+                "sources": [{"title": "News <b>bold</b> & supply"}],
+            }
+        ],
+        "source_issues": [
+            {
+                "ticker": "AAPL.NAS",
+                "code": "source_coverage_below_threshold",
+                "message": 'bad <tag> & "quoted"',
+            }
+        ],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789?x=1&y=2",
+    )
+
+    assert "모델 <code>openai/gpt&lt;&amp;test&gt;</code>" in text
+    assert "<b>AAPL.NAS AT&amp;T &lt;Alpha &quot;A&quot;&gt;</b>" in text
+    assert "2 &lt; 3 &amp; &quot;quoted&quot;" in text
+    assert "News &lt;b&gt;bold&lt;/b&gt; &amp; supply" in text
+    assert "bad &lt;tag&gt; &amp; &quot;quoted&quot;" in text
+    assert (
+        '<a href="https://github.com/example/repo/actions/runs/789?x=1&amp;y=2">'
+        "실행 보기</a>"
     ) in text
-    assert "source: Apple supply chain update" in text
-    assert "2. MSFT.NAS | MEDIUM | entry setup remains valid | sources 1" in text
+
+
+def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 0},
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="javascript:alert(1)",
+    )
+
+    assert '<a href="javascript:alert(1)">' not in text
+    assert "실행 javascript:alert(1)" in text
 
 
 def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> None:
@@ -523,8 +640,8 @@ def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> No
         max_items=5,
     )
 
-    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
-    assert "brief_reason=weak_news_coverage" in text
+    assert "상태 <code>NEEDS_REVIEW_WEAK_NEWS</code>" in text
+    assert "사유 <code>weak_news_coverage</code>" in text
     assert "뉴스 근거 약함, 기술 신호만 있음" in text
     assert "대상: AAPL.NAS, MSFT.NAS" in text
     assert (
@@ -578,9 +695,9 @@ def test_build_ai_brief_telegram_report_text_counts_issue_arrays_when_summary_is
         run_url="https://github.com/example/repo/actions/runs/789",
     )
 
-    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
-    assert "brief_reason=weak_news_coverage" in text
-    assert "issues source=1 system=0" in text
+    assert "상태 <code>NEEDS_REVIEW_WEAK_NEWS</code>" in text
+    assert "사유 <code>weak_news_coverage</code>" in text
+    assert "source <code>1</code> · system <code>0</code>" in text
 
 
 def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> None:
@@ -613,9 +730,9 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
-    assert "추천 후보 0건 (표시 0건)" in text
-    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
-    assert "brief_reason=model_or_system_issue" in text
+    assert "추천 <code>0</code>건 · 표시 <code>0</code>건" in text
+    assert "상태 <code>NEEDS_REVIEW_WEAK_NEWS</code>" in text
+    assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert "추천 후보 없음" in text
     assert "system issue: model_provider_timeout - OpenAI request timed out." in text
@@ -654,8 +771,8 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
-    assert "entry_preselected_count=3" in text
-    assert "brief_reason=model_or_system_issue" in text
+    assert "추천 <code>0</code>건 · 표시 <code>0</code>건" in text
+    assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert (
         "추천 생성 실패/보류: recommendable 후보 3건이 있었지만 추천 결과가 비었습니다."
@@ -720,11 +837,15 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
-    assert "watch 후보 2건: AAPL.NAS, MSFT.NAS" in text
+    assert "watch 후보 <code>2</code>건: AAPL.NAS, MSFT.NAS" in text
     assert (
-        "source_chain=finnhub,benzinga-news final recommendable=3/7 watch=1/2" in text
+        "<code>source_chain=finnhub,benzinga-news final recommendable=3/7 "
+        "watch=1/2</code>" in text
     )
-    assert "source_providers=finnhub success 3/7; benzinga-news success 0/4" in text
+    assert (
+        "<code>source_providers=finnhub success 3/7; "
+        "benzinga-news success 0/4</code>" in text
+    )
     assert (
         "추천 생성 실패/보류: recommendable 후보 7건(모델 입력 5건)이 있었지만 "
         "추천 결과가 비었습니다." in text
@@ -768,9 +889,9 @@ def test_build_ai_brief_telegram_report_text_explains_watch_only_state() -> None
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
-    assert "brief_state=NEEDS_REVIEW_WATCH_ONLY" in text
-    assert "brief_reason=watch_only_trigger_pending" in text
-    assert "watch 후보 1건: MSFT.NAS" in text
+    assert "상태 <code>NEEDS_REVIEW_WATCH_ONLY</code>" in text
+    assert "사유 <code>watch_only_trigger_pending</code>" in text
+    assert "watch 후보 <code>1</code>건: MSFT.NAS" in text
     assert "watch 후보만 있음. 재트리거 조건 확인 필요" in text
     assert "오늘은 볼 종목 없음" not in text
 
@@ -807,7 +928,10 @@ def test_build_ai_brief_telegram_report_text_includes_vetoed_candidates() -> Non
     )
 
     assert "AI 판단 제외 1건" in text
-    assert "AXTI.NAS | SKIP | earnings event risk blocks the setup" in text
+    assert (
+        "<code>AXTI.NAS</code> · <code>SKIP</code> · "
+        "earnings event risk blocks the setup"
+    ) in text
 
 
 def test_build_ai_brief_telegram_report_text_limits_eligible_ticker_preview() -> None:
@@ -848,7 +972,6 @@ def test_build_ai_brief_telegram_report_text_limits_eligible_ticker_preview() ->
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
-    assert "entry_preselected_count=7" in text
     assert "대상: T000.NAS, T001.NAS, T002.NAS, T003.NAS, T004.NAS, 외 2건" in text
     assert "T005.NAS" not in text
 
@@ -882,10 +1005,10 @@ def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() 
         max_items=5,
     )
 
-    assert "추천 후보 7건 (표시 3건)" in text
-    assert "brief_state=NEEDS_REVIEW_WEAK_NEWS" in text
-    assert "brief_reason=weak_news_coverage" in text
-    assert "외 4건" in text
+    assert "<b>추천 후보 7건</b> (표시 <code>3</code>건)" in text
+    assert "상태 <code>NEEDS_REVIEW_WEAK_NEWS</code>" in text
+    assert "사유 <code>weak_news_coverage</code>" in text
+    assert "외 <code>4</code>건" in text
     assert "T002.NAS Name2" in text
     assert "T003.NAS Name3" not in text
 
@@ -908,9 +1031,11 @@ def test_build_ai_brief_telegram_report_text_includes_storage_key() -> None:
         storage_key="2026/05/2026-05-05.ai-brief.json",
     )
 
-    assert "storage_key=2026/05/2026-05-05.ai-brief.json" in text
+    assert "보관 <code>2026/05/2026-05-05.ai-brief.json</code>" in text
     assert "오늘은 볼 종목 없음. 쉬어도 됨" in text
-    assert text.endswith("run_url=https://github.com/example/repo/actions/runs/792")
+    assert text.endswith(
+        '<a href="https://github.com/example/repo/actions/runs/792">실행 보기</a>'
+    )
 
 
 def test_build_ai_brief_slack_summary_text_keeps_key_value_format() -> None:
