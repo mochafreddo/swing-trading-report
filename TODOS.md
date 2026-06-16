@@ -19,6 +19,10 @@
 
 ## Deferred
 
+- 2026-06-16: Add a favicon asset or route for the local web UI. Browser QA
+  on `http://127.0.0.1:55300/login` reports `GET /favicon.ico` as a 404 console
+  error. Severity is low because login, auth redirects, and build/test gates
+  still pass, but the missing asset keeps the console from being clean.
 - 2026-06-09: Add stop-distance-based position sizing, including per-trade
   account risk, gross exposure, and currency-aware sizing. Deferred while
   buy/portfolio state is manually maintained without Toss Securities API;
