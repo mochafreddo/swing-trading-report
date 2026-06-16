@@ -772,6 +772,7 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     )
 
     assert "추천 <code>0</code>건 · 표시 <code>0</code>건" in text
+    assert "모델 입력 <code>3</code>건" in text
     assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert (
@@ -972,6 +973,7 @@ def test_build_ai_brief_telegram_report_text_limits_eligible_ticker_preview() ->
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
+    assert "모델 입력 <code>7</code>건" in text
     assert "대상: T000.NAS, T001.NAS, T002.NAS, T003.NAS, T004.NAS, 외 2건" in text
     assert "T005.NAS" not in text
 

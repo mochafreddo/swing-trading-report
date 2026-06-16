@@ -696,6 +696,7 @@ def build_ai_brief_telegram_report_text(
         _html_escape(decision),
         (
             f"추천 {_html_code(total)}건 · 표시 {_html_code(shown)}건 · "
+            f"모델 입력 {_html_code(counts.preselected_count)}건 · "
             f"source {_html_code(counts.source_issue_count)} · "
             f"system {_html_code(counts.system_issue_count)}"
         ),
