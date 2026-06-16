@@ -550,10 +550,10 @@ Expected: commit succeeds.
 
 - [ ] **Step 1: Add failing scheduled notifier payload assertions**
 
-Replace `test_default_scheduled_notifier_sends_slack_best_effort` in `tests/test_scheduled_ai_brief_runner.py` with this version:
+Replace `test_default_notifier_treats_slack_failure_as_best_effort` in `tests/test_scheduled_ai_brief_runner.py` with this version:
 
 ```python
-def test_default_scheduled_notifier_sends_slack_best_effort(
+def test_default_notifier_treats_slack_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
@@ -630,7 +630,7 @@ Run:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
@@ -684,7 +684,7 @@ Run:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
@@ -723,7 +723,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
   tests/test_notification_text.py \
   tests/test_ai_brief_workflow.py::test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
