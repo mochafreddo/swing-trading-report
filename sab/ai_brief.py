@@ -508,6 +508,39 @@ def _attach_candidate_sources(
     return enriched
 
 
+def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
+    ticker = str(candidate["ticker"])
+    reason = str(
+        candidate.get("ai_role_reason") or "entry trigger is pending re-confirmation"
+    ).strip()
+    sources = candidate.get("sources")
+    source_rows = (
+        [dict(source) for source in sources if isinstance(source, Mapping)]
+        if isinstance(sources, list)
+        else []
+    )
+    row: dict[str, object] = {
+        "ticker": ticker,
+        "action": "WATCH",
+        "reason": reason,
+        "retrigger_conditions": [
+            "price must satisfy the original entry trigger again",
+            "manual review must confirm source and market context",
+        ],
+        "sources": source_rows,
+    }
+    name = str(candidate.get("name") or "").strip()
+    if name:
+        row["name"] = name
+    return row
+
+
+def _fallback_watch_candidates(
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [_fallback_watch_candidate(candidate) for candidate in candidates]
+
+
 def run_ai_brief(
     *,
     entry_report_path: str,
@@ -879,7 +912,7 @@ def run_ai_brief(
         recommendations = []
         source_issues = source_provider_issues
         vetoed_candidates = []
-        model_watch_candidates = []
+        model_watch_candidates = _fallback_watch_candidates(watch_candidates)
         system_issues.append(_provider_system_issue(exc))
     except ValueError as exc:
         logger.error(

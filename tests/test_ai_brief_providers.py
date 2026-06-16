@@ -267,6 +267,68 @@ def test_openai_rejects_watch_candidate_returned_as_recommendation() -> None:
         )
 
 
+def test_openai_rejects_missing_watch_candidate_output() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="watch_candidates"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
+def test_openai_rejects_reordered_watch_candidate_output() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "TSLA.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [_source("TSLA.NAS")],
+                    },
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "sources": [_source("MSFT.NAS")],
+                    },
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="watch_candidates"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[
+                _candidate("MSFT.NAS", role="watch_only"),
+                _candidate("TSLA.NAS", role="watch_only"),
+            ],
+        )
+
+
 def test_openai_rejects_overlapping_candidate_roles() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",

@@ -6920,6 +6920,51 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
     assert payload["brief_reason"] == "model_or_system_issue"
 
 
+def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[
+            _entry_row("AAPL.NAS", action="ENTER"),
+            _entry_row(
+                "MSFT.NAS",
+                action="SKIP",
+                reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+            ),
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session", lambda: _TimeoutSession()
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["watch_tickers"] == ["MSFT.NAS"]
+    assert payload["watch_candidates"][0]["ticker"] == "MSFT.NAS"
+    assert payload["watch_candidates"][0]["action"] == "WATCH"
+    assert payload["watch_candidates"][0]["retrigger_conditions"]
+    assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+
+
 def test_run_ai_brief_openai_http_error_writes_empty_artifact_with_system_issue(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

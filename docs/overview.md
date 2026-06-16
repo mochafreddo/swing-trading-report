@@ -37,7 +37,7 @@
 1. `sab scan`이 watchlist와 screener 후보를 평가해 `buy` 리포트를 생성합니다.
 2. `sab sell`이 Supabase 또는 `holdings.yaml` 기반 보유 종목을 평가해 `sell` 리포트를 생성합니다.
 3. `sab entry`가 `buy` 리포트 후보를 다음 세션 진입 관점으로 재평가해 `entry` 리포트를 생성합니다.
-4. `sab ai-brief`가 `entry` 리포트의 `ENTER` 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
+4. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
 5. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
 6. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당합니다.
 

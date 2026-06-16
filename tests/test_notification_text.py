@@ -732,6 +732,49 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
     assert "ENTER 후보" not in text
 
 
+def test_build_ai_brief_telegram_report_text_explains_watch_only_state() -> None:
+    report = {
+        "generated_at": "2026-05-20T02:19:26+00:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": "gpt-5.4-mini",
+        "summary": {
+            "recommendable_count": 0,
+            "watch_count": 1,
+            "preselected_count": 0,
+            "recommendation_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "eligible_tickers": [],
+        "watch_tickers": ["MSFT.NAS"],
+        "watch_candidates": [
+            {
+                "ticker": "MSFT.NAS",
+                "action": "WATCH",
+                "reason": "entry trigger is pending re-confirmation",
+                "retrigger_conditions": [
+                    "price must satisfy the original entry trigger again"
+                ],
+            }
+        ],
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "brief_state=NEEDS_REVIEW_WATCH_ONLY" in text
+    assert "brief_reason=watch_only_trigger_pending" in text
+    assert "watch 후보 1건: MSFT.NAS" in text
+    assert "watch 후보만 있음. 재트리거 조건 확인 필요" in text
+    assert "오늘은 볼 종목 없음" not in text
+
+
 def test_build_ai_brief_telegram_report_text_includes_vetoed_candidates() -> None:
     report = {
         "generated_at": "2026-05-20T02:19:26+00:00",

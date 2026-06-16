@@ -164,6 +164,41 @@ def test_write_ai_brief_report_marks_no_signal_when_no_enter_candidates(
     assert payload["brief_reason"] == "no_enter_candidates"
 
 
+def test_write_ai_brief_report_marks_watch_only_when_no_preselected_candidates(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact()
+    artifact["recommendations"] = []
+    artifact["excluded_candidates"] = []
+    artifact["source_issues"] = []
+    artifact["system_issues"] = []
+    artifact["eligible_tickers"] = []
+    artifact["watch_tickers"] = ["MSFT.NAS"]
+    artifact["watch_candidates"] = [_watch_candidate("MSFT.NAS")]
+    artifact["summary"] = {
+        "entry_count": 1,
+        "recommendable_count": 0,
+        "watch_count": 1,
+        "preselected_count": 0,
+        "recommendation_count": 0,
+        "excluded_count": 0,
+        "vetoed_count": 0,
+        "cap_excluded_count": 0,
+        "source_issue_count": 0,
+        "system_issue_count": 0,
+    }
+
+    out_path = write_ai_brief_report(
+        report_dir=tmp_path.as_posix(),
+        artifact=artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert payload["brief_state"] == "NEEDS_REVIEW_WATCH_ONLY"
+    assert payload["brief_reason"] == "watch_only_trigger_pending"
+
+
 def test_write_ai_brief_report_marks_source_backed_final_judgment(
     tmp_path: Path,
 ) -> None:
@@ -1090,6 +1125,26 @@ def test_ai_brief_state_contract_matches_committed_web_artifact() -> None:
             },
             "NO_SIGNAL",
             "no_enter_candidates",
+        ),
+        (
+            "watch_only",
+            {
+                "summary": {
+                    "preselected_count": 0,
+                    "recommendation_count": 0,
+                    "watch_count": 1,
+                    "source_issue_count": 0,
+                    "system_issue_count": 0,
+                },
+                "eligible_tickers": [],
+                "watch_tickers": ["MSFT.NAS"],
+                "watch_candidates": [_watch_candidate("MSFT.NAS")],
+                "recommendations": [],
+                "source_issues": [],
+                "system_issues": [],
+            },
+            "NEEDS_REVIEW_WATCH_ONLY",
+            "watch_only_trigger_pending",
         ),
         (
             "source_backed_final",

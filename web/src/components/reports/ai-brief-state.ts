@@ -9,6 +9,7 @@ interface AiBriefStateView {
 
 interface AiBriefStateInputsView {
   preselectedCount: number;
+  watchCount: number;
   recommendationCount: number;
   sourceIssueCount: number;
   systemIssueCount: number;
@@ -34,7 +35,10 @@ const AI_BRIEF_RULE_PREDICATES: Record<
   AiBriefStateRuleId,
   (inputs: AiBriefStateInputsView) => boolean
 > = {
-  no_signal: (inputs) => inputs.preselectedCount === 0,
+  watch_only: (inputs) =>
+    inputs.preselectedCount === 0 && inputs.watchCount > 0,
+  no_signal: (inputs) =>
+    inputs.preselectedCount === 0 && inputs.watchCount === 0,
   source_backed_final: (inputs) =>
     inputs.hasRecommendations &&
     inputs.recommendationCount > 0 &&
@@ -114,8 +118,12 @@ export function resolveAiBriefState(
   const explicitReason = readString(detail?.brief_reason);
 
   const shownRecommendations = asRecordArray(detail?.recommendations);
+  const watchCandidates = asRecordArray(detail?.watch_candidates);
   const eligibleTickers = Array.isArray(detail?.eligible_tickers)
     ? detail.eligible_tickers
+    : [];
+  const watchTickers = Array.isArray(detail?.watch_tickers)
+    ? detail.watch_tickers
     : [];
   const sourceIssues = asRecordArray(detail?.source_issues);
   const systemIssues = asRecordArray(detail?.system_issues);
@@ -133,6 +141,11 @@ export function resolveAiBriefState(
     detail,
     "preselected_count",
     preselectedFloor,
+  );
+  const watchCount = readCountAtLeast(
+    detail,
+    "watch_count",
+    Math.max(watchTickers.length, watchCandidates.length),
   );
   const sourceIssueCount = readCountAtLeast(
     detail,
@@ -153,6 +166,7 @@ export function resolveAiBriefState(
     explicitReason,
     inferAiBriefStateFromContract({
       preselectedCount,
+      watchCount,
       recommendationCount,
       sourceIssueCount,
       systemIssueCount,

@@ -7,16 +7,19 @@ from typing import Any, TypedDict
 from ..utils.numeric import to_int as _safe_int
 
 BRIEF_STATE_NO_SIGNAL = "NO_SIGNAL"
+BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY = "NEEDS_REVIEW_WATCH_ONLY"
 BRIEF_STATE_FINAL_JUDGMENT = "FINAL_JUDGMENT"
 BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS = "NEEDS_REVIEW_WEAK_NEWS"
 
 BRIEF_REASON_NO_ENTER_CANDIDATES = "no_enter_candidates"
+BRIEF_REASON_WATCH_ONLY_TRIGGER_PENDING = "watch_only_trigger_pending"
 BRIEF_REASON_SOURCE_BACKED_FINAL = "source_backed_final"
 BRIEF_REASON_WEAK_NEWS_COVERAGE = "weak_news_coverage"
 BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE = "model_or_system_issue"
 BRIEF_REASON_MODEL_DEFERRED = "model_deferred"
 
 BRIEF_RULE_NO_SIGNAL = "no_signal"
+BRIEF_RULE_WATCH_ONLY = "watch_only"
 BRIEF_RULE_SOURCE_BACKED_FINAL = "source_backed_final"
 BRIEF_RULE_SYSTEM_ISSUE = "system_issue"
 BRIEF_RULE_WEAK_NEWS_COVERAGE = "weak_news_coverage"
@@ -25,6 +28,7 @@ BRIEF_RULE_MODEL_DEFERRED = "model_deferred"
 AI_BRIEF_STATES = frozenset(
     {
         BRIEF_STATE_NO_SIGNAL,
+        BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY,
         BRIEF_STATE_FINAL_JUDGMENT,
         BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
     }
@@ -32,6 +36,7 @@ AI_BRIEF_STATES = frozenset(
 AI_BRIEF_REASONS = frozenset(
     {
         BRIEF_REASON_NO_ENTER_CANDIDATES,
+        BRIEF_REASON_WATCH_ONLY_TRIGGER_PENDING,
         BRIEF_REASON_SOURCE_BACKED_FINAL,
         BRIEF_REASON_WEAK_NEWS_COVERAGE,
         BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
@@ -65,6 +70,10 @@ AI_BRIEF_STATE_RULES = {
         state=BRIEF_STATE_NO_SIGNAL,
         reason=BRIEF_REASON_NO_ENTER_CANDIDATES,
     ),
+    BRIEF_RULE_WATCH_ONLY: AiBriefState(
+        state=BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY,
+        reason=BRIEF_REASON_WATCH_ONLY_TRIGGER_PENDING,
+    ),
     BRIEF_RULE_SOURCE_BACKED_FINAL: AiBriefState(
         state=BRIEF_STATE_FINAL_JUDGMENT,
         reason=BRIEF_REASON_SOURCE_BACKED_FINAL,
@@ -87,15 +96,18 @@ AI_BRIEF_INFERENCE_PRECEDENCE = (
     BRIEF_RULE_SOURCE_BACKED_FINAL,
     BRIEF_RULE_SYSTEM_ISSUE,
     BRIEF_RULE_WEAK_NEWS_COVERAGE,
+    BRIEF_RULE_WATCH_ONLY,
     BRIEF_RULE_MODEL_DEFERRED,
 )
 AI_BRIEF_STATE_ORDER = (
     BRIEF_STATE_NO_SIGNAL,
+    BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY,
     BRIEF_STATE_FINAL_JUDGMENT,
     BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
 )
 AI_BRIEF_REASON_ORDER = (
     BRIEF_REASON_NO_ENTER_CANDIDATES,
+    BRIEF_REASON_WATCH_ONLY_TRIGGER_PENDING,
     BRIEF_REASON_SOURCE_BACKED_FINAL,
     BRIEF_REASON_WEAK_NEWS_COVERAGE,
     BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
@@ -114,6 +126,7 @@ AI_BRIEF_REASONS_BY_STATE = {
 @dataclass(frozen=True)
 class AiBriefStateInputs:
     preselected_count: int
+    watch_count: int
     recommendation_count: int
     source_issue_count: int
     system_issue_count: int
@@ -148,8 +161,11 @@ def _brief_state_inputs(payload: Mapping[str, Any]) -> AiBriefStateInputs:
     recommendations = _mapping_rows(payload.get("recommendations"))
     source_issues = _mapping_rows(payload.get("source_issues"))
     system_issues = _mapping_rows(payload.get("system_issues"))
+    watch_candidates = _mapping_rows(payload.get("watch_candidates"))
     eligible_tickers = payload.get("eligible_tickers")
     eligible_count = len(eligible_tickers) if isinstance(eligible_tickers, list) else 0
+    watch_tickers = payload.get("watch_tickers")
+    watch_ticker_count = len(watch_tickers) if isinstance(watch_tickers, list) else 0
 
     recommendation_count = _count_with_row_floor(
         summary.get("recommendation_count"),
@@ -160,6 +176,11 @@ def _brief_state_inputs(payload: Mapping[str, Any]) -> AiBriefStateInputs:
         summary.get("preselected_count"),
         payload.get("preselected_count"),
         row_count=max(eligible_count, len(recommendations), recommendation_count),
+    )
+    watch_count = _count_with_row_floor(
+        summary.get("watch_count"),
+        payload.get("watch_count"),
+        row_count=max(watch_ticker_count, len(watch_candidates)),
     )
     source_issue_count = _count_with_row_floor(
         summary.get("source_issue_count"),
@@ -173,6 +194,7 @@ def _brief_state_inputs(payload: Mapping[str, Any]) -> AiBriefStateInputs:
     )
     return AiBriefStateInputs(
         preselected_count=preselected_count,
+        watch_count=watch_count,
         recommendation_count=recommendation_count,
         source_issue_count=source_issue_count,
         system_issue_count=system_issue_count,
@@ -195,7 +217,7 @@ def infer_ai_brief_state(payload: Mapping[str, Any]) -> AiBriefState:
         for recommendation in inputs.recommendations
     )
 
-    if inputs.preselected_count == 0:
+    if inputs.preselected_count == 0 and inputs.watch_count == 0:
         return _state_for_rule(BRIEF_RULE_NO_SIGNAL)
     if (
         inputs.recommendations
@@ -209,6 +231,8 @@ def infer_ai_brief_state(payload: Mapping[str, Any]) -> AiBriefState:
         return _state_for_rule(BRIEF_RULE_SYSTEM_ISSUE)
     elif inputs.source_issue_count > 0 or missing_recommendation_sources:
         return _state_for_rule(BRIEF_RULE_WEAK_NEWS_COVERAGE)
+    if inputs.preselected_count == 0 and inputs.watch_count > 0:
+        return _state_for_rule(BRIEF_RULE_WATCH_ONLY)
     return _state_for_rule(BRIEF_RULE_MODEL_DEFERRED)
 
 
@@ -297,13 +321,16 @@ __all__ = [
     "BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE",
     "BRIEF_REASON_NO_ENTER_CANDIDATES",
     "BRIEF_REASON_SOURCE_BACKED_FINAL",
+    "BRIEF_REASON_WATCH_ONLY_TRIGGER_PENDING",
     "BRIEF_REASON_WEAK_NEWS_COVERAGE",
     "BRIEF_RULE_MODEL_DEFERRED",
     "BRIEF_RULE_NO_SIGNAL",
     "BRIEF_RULE_SOURCE_BACKED_FINAL",
     "BRIEF_RULE_SYSTEM_ISSUE",
+    "BRIEF_RULE_WATCH_ONLY",
     "BRIEF_RULE_WEAK_NEWS_COVERAGE",
     "BRIEF_STATE_FINAL_JUDGMENT",
+    "BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY",
     "BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS",
     "BRIEF_STATE_NO_SIGNAL",
     "AiBriefState",

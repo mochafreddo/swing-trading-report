@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -62,11 +63,20 @@ def _base_gate_failure(entry: Mapping[str, object]) -> str | None:
     failures: list[str] = []
     if entry_state != "READY":
         failures.append(f"entry_state={entry_state or '-'}")
-    if entry_price_status != "available":
+    if entry_price_status != "available" and not _legacy_entry_price_available(entry):
         failures.append(f"entry_price_status={entry_price_status or '-'}")
     if failures:
         return "entry row failed AI brief base gates: " + ", ".join(failures)
     return None
+
+
+def _legacy_entry_price_available(entry: Mapping[str, object]) -> bool:
+    if "entry_price_status" in entry:
+        return False
+    entry_price = entry.get("entry_price")
+    if isinstance(entry_price, bool) or not isinstance(entry_price, (int, float)):
+        return False
+    return math.isfinite(float(entry_price)) and float(entry_price) > 0
 
 
 def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCandidate:

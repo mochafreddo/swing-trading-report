@@ -634,6 +634,32 @@ function legacyAiBriefFixtureForRule(ruleId: string): ReportJson {
       system_issues: [],
     };
   }
+  if (ruleId === "watch_only") {
+    return {
+      summary: {
+        preselected_count: 0,
+        recommendation_count: 0,
+        watch_count: 1,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: [],
+      watch_tickers: ["MSFT.NAS"],
+      watch_candidates: [
+        {
+          ticker: "MSFT.NAS",
+          action: "WATCH",
+          reason: "entry trigger is pending re-confirmation",
+          retrigger_conditions: [
+            "price must satisfy the original entry trigger again",
+          ],
+        },
+      ],
+      recommendations: [],
+      source_issues: [],
+      system_issues: [],
+    };
+  }
   if (ruleId === "system_issue") {
     return {
       summary: {

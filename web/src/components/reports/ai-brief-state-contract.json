@@ -1,8 +1,14 @@
 {
   "version": 1,
-  "states": ["NO_SIGNAL", "FINAL_JUDGMENT", "NEEDS_REVIEW_WEAK_NEWS"],
+  "states": [
+    "NO_SIGNAL",
+    "NEEDS_REVIEW_WATCH_ONLY",
+    "FINAL_JUDGMENT",
+    "NEEDS_REVIEW_WEAK_NEWS"
+  ],
   "reasons": [
     "no_enter_candidates",
+    "watch_only_trigger_pending",
     "source_backed_final",
     "weak_news_coverage",
     "model_or_system_issue",
@@ -10,6 +16,7 @@
   ],
   "reasons_by_state": {
     "NO_SIGNAL": ["no_enter_candidates"],
+    "NEEDS_REVIEW_WATCH_ONLY": ["watch_only_trigger_pending"],
     "FINAL_JUDGMENT": ["source_backed_final"],
     "NEEDS_REVIEW_WEAK_NEWS": [
       "weak_news_coverage",
@@ -22,12 +29,17 @@
     "source_backed_final",
     "system_issue",
     "weak_news_coverage",
+    "watch_only",
     "model_deferred"
   ],
   "rules": {
     "no_signal": {
       "state": "NO_SIGNAL",
       "reason": "no_enter_candidates"
+    },
+    "watch_only": {
+      "state": "NEEDS_REVIEW_WATCH_ONLY",
+      "reason": "watch_only_trigger_pending"
     },
     "source_backed_final": {
       "state": "FINAL_JUDGMENT",

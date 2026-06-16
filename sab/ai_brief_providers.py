@@ -81,6 +81,7 @@ class FakeAiBriefProvider:
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
         )
+        expected_watch_tickers = _candidate_ticker_order(watch_candidates)
         as_of = _offset_now_iso()
         recommendations: list[dict[str, object]] = []
         source_issues: list[dict[str, object]] = []
@@ -147,6 +148,7 @@ class FakeAiBriefProvider:
             result,
             eligible_tickers=eligible_tickers,
             watch_tickers=watch_tickers,
+            expected_watch_tickers=expected_watch_tickers,
             source_urls_by_ticker={
                 ticker: set(rows_by_url)
                 for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
@@ -187,6 +189,7 @@ class OpenAiBriefProvider:
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
         )
+        expected_watch_tickers = _candidate_ticker_order(watch_candidates)
         if not recommendable_candidates and not watch_candidates:
             return AiBriefProviderResult(recommendations=[], source_issues=[])
 
@@ -239,6 +242,7 @@ class OpenAiBriefProvider:
             result,
             eligible_tickers=eligible_tickers,
             watch_tickers=watch_tickers,
+            expected_watch_tickers=expected_watch_tickers,
             source_urls_by_ticker={
                 ticker: set(rows_by_url)
                 for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
@@ -640,12 +644,15 @@ def _candidate_role_ticker_sets(
 
 
 def _candidate_ticker_set(candidates: list[dict[str, object]]) -> set[str]:
-    tickers: set[str] = set()
-    for candidate in candidates:
-        ticker = str(candidate.get("ticker") or "").strip()
-        if ticker:
-            tickers.add(ticker)
-    return tickers
+    return set(_candidate_ticker_order(candidates))
+
+
+def _candidate_ticker_order(candidates: list[dict[str, object]]) -> list[str]:
+    return [
+        ticker
+        for candidate in candidates
+        if (ticker := str(candidate.get("ticker") or "").strip())
+    ]
 
 
 def _parse_provider_offset_datetime(value: object, *, field_name: str) -> dt.datetime:
@@ -713,6 +720,7 @@ def _validate_provider_result_contract(
     *,
     eligible_tickers: set[str],
     watch_tickers: set[str],
+    expected_watch_tickers: list[str] | None = None,
     source_urls_by_ticker: dict[str, set[str]] | None = None,
     watch_source_urls_by_ticker: dict[str, set[str]] | None = None,
 ) -> None:
@@ -731,6 +739,7 @@ def _validate_provider_result_contract(
     _validate_provider_watch_candidates(
         result.watch_candidates,
         watch_tickers=watch_tickers,
+        expected_watch_tickers=expected_watch_tickers,
         now=now,
         source_urls_by_ticker=watch_source_urls_by_ticker,
     )
@@ -797,9 +806,11 @@ def _validate_provider_watch_candidates(
     watch_candidates: list[dict[str, object]],
     *,
     watch_tickers: set[str],
+    expected_watch_tickers: list[str] | None = None,
     now: dt.datetime,
     source_urls_by_ticker: dict[str, set[str]] | None = None,
 ) -> None:
+    actual_tickers: list[str] = []
     for idx, candidate in enumerate(watch_candidates):
         ticker = str(candidate.get("ticker") or "").strip()
         if not ticker:
@@ -810,6 +821,7 @@ def _validate_provider_watch_candidates(
             raise AiBriefProviderContractError(
                 f"OpenAI output included ineligible watch ticker {ticker!r}"
             )
+        actual_tickers.append(ticker)
         action = str(candidate.get("action") or "").strip().upper()
         if action != "WATCH":
             raise AiBriefProviderContractError(
@@ -835,6 +847,11 @@ def _validate_provider_watch_candidates(
             watch_index=idx,
             now=now,
             allowed_source_urls=(source_urls_by_ticker or {}).get(ticker, set()),
+        )
+    if expected_watch_tickers is not None and actual_tickers != expected_watch_tickers:
+        raise AiBriefProviderContractError(
+            "OpenAI output watch_candidates[].ticker must match input watch "
+            "candidates in order"
         )
 
 

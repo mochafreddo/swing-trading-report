@@ -10,6 +10,7 @@ from .ai_brief_state import (
     BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE,
     BRIEF_REASON_WEAK_NEWS_COVERAGE,
     BRIEF_STATE_FINAL_JUDGMENT,
+    BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY,
     BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS,
     BRIEF_STATE_NO_SIGNAL,
     read_ai_brief_state,
@@ -658,6 +659,8 @@ def build_ai_brief_telegram_report_text(
 
     if brief_state.state == BRIEF_STATE_NO_SIGNAL:
         lines.append("오늘은 볼 종목 없음. 쉬어도 됨")
+    elif brief_state.state == BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY:
+        lines.append("watch 후보만 있음. 재트리거 조건 확인 필요")
     elif brief_state.state == BRIEF_STATE_FINAL_JUDGMENT:
         lines.append(f"AI 최종 판단: 뉴스 근거 확인된 후보 {total}건")
     elif brief_state.reason == BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE:

@@ -121,6 +121,16 @@ def _no_result_issues(
     ]
 
 
+def _issues_for_uncovered_tickers(
+    issues: list[dict[str, object]],
+    *,
+    uncovered_tickers: set[str],
+) -> list[dict[str, object]]:
+    return [
+        issue for issue in issues if str(issue.get("ticker") or "") in uncovered_tickers
+    ]
+
+
 def _merge_sources(
     target: dict[str, list[dict[str, object]]],
     incoming: Mapping[str, list[dict[str, object]]],
@@ -209,8 +219,9 @@ def load_ai_brief_source_chain(
 
     sources_by_ticker: dict[str, list[dict[str, object]]] = {}
     source_issues: list[dict[str, object]] = []
+    provider_ticker_issues: list[dict[str, object]] = []
     no_result_issues: list[dict[str, object]] = []
-    system_issues: list[dict[str, object]] = []
+    provider_failure_issues: list[tuple[set[str], dict[str, object]]] = []
     provider_summaries: list[dict[str, object]] = []
     resolved_now = now or dt.datetime.now().astimezone()
 
@@ -241,7 +252,12 @@ def load_ai_brief_source_chain(
             )
         except AiBriefSourceProviderError as exc:
             code = _failure_code(exc)
-            system_issues.append(_provider_system_issue(provider=provider, exc=exc))
+            provider_failure_issues.append(
+                (
+                    set(requested_tickers),
+                    _provider_system_issue(provider=provider, exc=exc),
+                )
+            )
             provider_summaries.append(
                 {
                     "provider": provider,
@@ -262,7 +278,12 @@ def load_ai_brief_source_chain(
             sources_by_ticker,
             incoming_sources,
         )
-        source_issues.extend(provider_result.source_issues)
+        for issue in provider_result.source_issues:
+            ticker = str(issue.get("ticker") or "").strip()
+            if ticker in source_universe_tickers:
+                provider_ticker_issues.append(issue)
+            else:
+                source_issues.append(issue)
         source_issues.extend(merge_issues)
         no_result_issues.extend(
             _no_result_issues(
@@ -280,10 +301,33 @@ def load_ai_brief_source_chain(
             }
         )
 
+    uncovered_tickers = {
+        ticker
+        for ticker in source_universe_tickers
+        if not sources_by_ticker.get(ticker)
+    }
+    final_no_result_issues = _issues_for_uncovered_tickers(
+        no_result_issues,
+        uncovered_tickers=uncovered_tickers,
+    )
+    final_provider_ticker_issues = _issues_for_uncovered_tickers(
+        provider_ticker_issues,
+        uncovered_tickers=uncovered_tickers,
+    )
+    final_provider_failure_issues = [
+        issue
+        for requested_tickers, issue in provider_failure_issues
+        if requested_tickers & uncovered_tickers
+    ]
+
     return AiBriefSourceChainResult(
         sources_by_ticker=sources_by_ticker,
-        source_issues=[*source_issues, *no_result_issues],
-        system_issues=system_issues,
+        source_issues=[
+            *source_issues,
+            *final_provider_ticker_issues,
+            *final_no_result_issues,
+        ],
+        system_issues=final_provider_failure_issues,
         summary={
             "chain": list(chain),
             "providers": provider_summaries,
