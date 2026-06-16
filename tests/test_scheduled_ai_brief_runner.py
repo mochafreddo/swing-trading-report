@@ -5318,14 +5318,13 @@ def test_monitor_only_classifies_local_primary_lock_without_alerting() -> None:
 def test_default_notifier_treats_slack_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     class _Response:
         status_code = 200
 
     def fake_post(url: str, **kwargs: object) -> _Response:
-        del kwargs
-        calls.append(url)
+        calls.append((url, kwargs))
         if "hooks.slack.com" in url:
             raise RuntimeError("slack down")
         return _Response()
@@ -5340,8 +5339,48 @@ def test_default_notifier_treats_slack_failure_as_best_effort(
         storage_key="2026/05/2026-05-28.ai-brief.json",
     )
 
-    assert any("api.telegram.org" in url for url in calls)
-    assert any("hooks.slack.com" in url for url in calls)
+    telegram_call = next(
+        (kwargs for url, kwargs in calls if "api.telegram.org" in url),
+        None,
+    )
+    assert telegram_call is not None
+    telegram_data = telegram_call.get("data")
+    assert isinstance(telegram_data, dict)
+    assert telegram_data["parse_mode"] == "HTML"
+    assert telegram_data["disable_web_page_preview"] == "true"
+    assert any("hooks.slack.com" in url for url, _kwargs in calls)
+
+
+def test_default_scheduled_notifier_late_alert_stays_plain_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _Response:
+        status_code = 200
+
+    def fake_post(url: str, **kwargs: object) -> _Response:
+        calls.append((url, kwargs))
+        return _Response()
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat")
+    monkeypatch.setattr("sab.scheduler.runner.requests.post", fake_post)
+
+    DefaultScheduledNotifier().send_late_alert(
+        reason="docker_failed",
+        context={"detail": "plain <text> & safe"},
+    )
+
+    telegram_call = next(
+        (kwargs for url, kwargs in calls if "api.telegram.org" in url),
+        None,
+    )
+    assert telegram_call is not None
+    telegram_data = telegram_call.get("data")
+    assert isinstance(telegram_data, dict)
+    assert "parse_mode" not in telegram_data
+    assert "plain <text> & safe" in str(telegram_data["text"])
 
 
 def test_build_attempt_id_includes_tick_and_utc_started_at() -> None:

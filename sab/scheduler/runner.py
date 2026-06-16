@@ -3668,16 +3668,24 @@ class DefaultScheduledNotifier:
         if not os.getenv("TELEGRAM_BOT_TOKEN") or not os.getenv("TELEGRAM_CHAT_ID"):
             raise RuntimeError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
 
-    def _post_telegram_message(self, text: str) -> None:
+    def _post_telegram_message(
+        self,
+        text: str,
+        *,
+        parse_mode: str | None = None,
+    ) -> None:
         bot_token = str(os.environ["TELEGRAM_BOT_TOKEN"])
         chat_id = str(os.environ["TELEGRAM_CHAT_ID"])
+        data = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": "true",
+        }
+        if parse_mode:
+            data["parse_mode"] = parse_mode
         response = requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            data={
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": "true",
-            },
+            data=data,
             timeout=10,
         )
         if response.status_code >= 300:
@@ -3691,7 +3699,7 @@ class DefaultScheduledNotifier:
             storage_key=storage_key,
         )
         for part in split_telegram_message_text(text):
-            self._post_telegram_message(part)
+            self._post_telegram_message(part, parse_mode="HTML")
         slack_webhook_url = str(os.getenv("SLACK_WEBHOOK_URL") or "").strip()
         if slack_webhook_url:
             slack_text = build_ai_brief_slack_summary_text(
