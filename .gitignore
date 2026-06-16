@@ -48,6 +48,7 @@ mise.local.lock
 
 # Local project data
 /.gstack/
+/.worktrees/
 /data/
 /logs/launchd/*.log
 /reports/
