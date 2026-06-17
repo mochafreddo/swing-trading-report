@@ -13,6 +13,13 @@ from sab.report.notification_text import (
 )
 
 
+def _assert_balanced_html_tags(parts: list[str]) -> None:
+    for part in parts:
+        assert part.count("<b>") == part.count("</b>")
+        assert part.count("<code>") == part.count("</code>")
+        assert part.count("<a href=") == part.count("</a>")
+
+
 def test_build_scan_telegram_report_text_includes_buy_candidates() -> None:
     report = {
         "generated_at": "2026-02-11 21:03 KST",
@@ -635,8 +642,38 @@ def test_build_ai_brief_telegram_report_text_bounds_long_html_fields() -> None:
     assert all(
         0 < len(part) <= notification_text.TELEGRAM_MESSAGE_MAX_CHARS for part in parts
     )
-    assert all(part.count("<b>") == part.count("</b>") for part in parts)
-    assert all(part.count("<code>") == part.count("</code>") for part in parts)
+    _assert_balanced_html_tags(parts)
+
+
+def test_build_ai_brief_telegram_report_text_does_not_link_too_long_run_url() -> None:
+    long_run_url = "https://example.test/" + ("u" * 5000)
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 0},
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url=long_run_url,
+    )
+    parts = notification_text.split_telegram_message_text(text)
+
+    assert "<a href=" not in text
+    assert "URL too long" in text
+    assert all(
+        len(line) < notification_text.TELEGRAM_MESSAGE_MAX_CHARS
+        for line in text.splitlines()
+    )
+    assert all(
+        0 < len(part) <= notification_text.TELEGRAM_MESSAGE_MAX_CHARS for part in parts
+    )
+    _assert_balanced_html_tags(parts)
 
 
 def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> None:

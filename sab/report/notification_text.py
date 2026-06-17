@@ -19,6 +19,8 @@ from .ai_brief_state import (
 )
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
+_HTML_LINK_MAX_CHARS = 1024
+_HTML_LINK_TOO_LONG_TEXT = "URL too long"
 _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 
 
@@ -119,9 +121,12 @@ def _html_link(url: Any, label: str) -> str:
         return ""
     if not _is_http_url(text):
         return _html_single_line(text)
-    return (
-        f'<a href="{_html_escape(text)}">{_html_single_line(label, max_chars=60)}</a>'
-    )
+    href = _html_escape(text)
+    label_text = _html_single_line(label, max_chars=60)
+    link = f'<a href="{href}">{label_text}</a>'
+    if len(link) > _HTML_LINK_MAX_CHARS:
+        return _HTML_LINK_TOO_LONG_TEXT
+    return link
 
 
 def _generated_at(report: dict[str, Any]) -> str:
