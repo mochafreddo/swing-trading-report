@@ -152,8 +152,8 @@ Update only the paths that send the AI Brief report body:
 
 - `DefaultScheduledNotifier._post_telegram_message()` should send
   `parse_mode=HTML` for AI Brief schedule messages.
-- `.github/workflows/ai-brief.yml` should pass `-d parse_mode=HTML` when sending
-  `ai-brief.telegram.txt`.
+- `.github/workflows/ai-brief.yml` should send each split `ai-brief.telegram.txt`
+  part with `parse_mode=HTML`.
 
 Skipped schedule notifications in `.github/workflows/ai-brief.yml`, host wrapper
 failure alerts, scan notifications, and sell notifications stay unchanged.

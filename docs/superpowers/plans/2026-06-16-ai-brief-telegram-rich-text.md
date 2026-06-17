@@ -1,6 +1,7 @@
 # AI Brief Telegram Rich Text Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution status:** This file is preserved as the implementation recipe for this branch. After execution, the checklist below is not maintained as live task status; use the branch commits and verification output as the completion record.
 
 **Goal:** Render AI Brief Telegram report notifications as decision-first Telegram HTML while preserving existing scan/sell, Slack, skipped, and failure alert behavior.
 
@@ -37,7 +38,7 @@ This changes AI Brief Telegram rendering and the AI Brief report send payload. T
   - Pass `parse_mode="HTML"` from `send_schedule(...)`.
   - Leave `send_late_alert(...)` plain text.
 - Modify `.github/workflows/ai-brief.yml`
-  - Add `-d parse_mode=HTML` only to the `Send Telegram notification` step that sends `ai-brief.telegram.txt`.
+  - Send each split `ai-brief.telegram.txt` part with `parse_mode=HTML` only from the `Send Telegram notification` step.
   - Leave `Send skipped Telegram notification` unchanged.
 - Modify `tests/test_notification_text.py`
   - Update AI Brief Telegram expectations for HTML.
@@ -787,7 +788,7 @@ git diff -- sab/report/notification_text.py sab/scheduler/runner.py .github/work
 Expected:
 
 - `build_ai_brief_telegram_report_text(...)` is the only Telegram builder converted to HTML.
-- `.github/workflows/ai-brief.yml` adds `parse_mode=HTML` only to the `ai-brief.telegram.txt` send step.
+- `.github/workflows/ai-brief.yml` sends split `ai-brief.telegram.txt` parts with `parse_mode=HTML` only from the report send step.
 - `DefaultScheduledNotifier.send_schedule(...)` passes `parse_mode="HTML"`.
 - `DefaultScheduledNotifier.send_late_alert(...)` does not pass a parse mode.
 - Slack builders, scan Telegram builder, and sell Telegram builder are unchanged.
@@ -817,5 +818,5 @@ Expected: no uncommitted changes.
 
 - Spec coverage: builder formatting, escaping, run link handling, GitHub parse mode, scheduled parse mode, skipped/failure alert exclusions, Slack exclusion, docs, and tests are covered by Tasks 1-4.
 - Scope: one implementation plan is sufficient because the spec covers one subsystem: AI Brief Telegram report notification rendering and delivery.
-- Type consistency: the plan uses existing function names and adds only `_html_escape`, `_html_bold`, `_html_code`, `_is_http_url`, `_html_link`, and `_ai_brief_decision_text`.
-- Out-of-scope behavior: the plan intentionally does not implement HTML-aware splitting and keeps output compact.
+- Type consistency: the plan keeps existing public builder names and adds small private HTML/link helpers inside `notification_text.py`.
+- Out-of-scope behavior: a generic parser-aware Telegram HTML splitter remains out of scope; generated AI Brief lines are bounded so the existing splitter does not cut generated tags.
