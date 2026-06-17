@@ -71,6 +71,13 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - `brief_state` is one of `NO_SIGNAL`, `NEEDS_REVIEW_WATCH_ONLY`, `FINAL_JUDGMENT`, or `NEEDS_REVIEW_WEAK_NEWS`. `NO_SIGNAL` means no recommendable or watch candidates; `NEEDS_REVIEW_WATCH_ONLY` means only trigger-pending watch candidates remain.
 - `scripts/eval_ai_brief_recommendations.py` is the offline recommendation quality gate. The manual GitHub AI Brief workflow and scheduled runner treat `FAIL` as a stop before normal notification/success handling.
 
+### Notification Text Contracts
+
+- AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first and uses only `<b>`, `<code>`, and `<a>` tags.
+- Report-derived values are HTML-escaped, normalized to single-line text where needed, and length-bounded before rendering. Unsafe, malformed, too-long, or whitespace/control-character HTTP(S) `run_url` values are not emitted as Telegram links.
+- GitHub Actions and the scheduled notifier split the AI Brief Telegram report body with `split_telegram_message_text()` and send each part through `sendMessage` with `parse_mode=HTML` and web previews disabled.
+- AI Brief skipped notifications, scan/sell Telegram notifications, host late alerts, and Slack summaries remain plain text. Slack keeps the key-value summary format.
+
 ## Web API Routes
 
 | Method | Path | Purpose | Request Contract | Response/Status |
