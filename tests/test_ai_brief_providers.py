@@ -495,6 +495,41 @@ def test_openai_rejects_watch_candidate_with_skip_action() -> None:
         )
 
 
+def test_openai_rejects_watch_candidate_with_skip_action_and_invalid_source_ref() -> (
+    None
+):
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "SKIP",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "source_refs": ["MSFT.NAS:404"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefProviderContractError,
+        match=r"watch_candidates\[\]\.action must be WATCH",
+    ):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
 def test_openai_rejects_watch_candidate_with_missing_action() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
@@ -662,7 +697,66 @@ def test_openai_rejects_watch_candidate_future_source() -> None:
         )
 
 
-def test_openai_rejects_watch_candidate_unprovided_source_ref() -> None:
+def test_openai_replaces_watch_candidate_with_invalid_source_ref_with_fallback() -> (
+    None
+):
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "model watch reason",
+                        "retrigger_conditions": ["model condition"],
+                        "source_refs": ["MSFT.NAS:404"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[
+            _candidate(
+                "MSFT.NAS",
+                role="watch_only",
+                ai_role_reason="entry trigger requires re-confirmation",
+            )
+        ],
+    )
+
+    assert result.watch_candidates[0]["ticker"] == "MSFT.NAS"
+    assert result.watch_candidates[0]["action"] == "WATCH"
+    assert result.watch_candidates[0]["reason"] == (
+        "entry trigger requires re-confirmation"
+    )
+    assert result.watch_candidates[0]["retrigger_conditions"] == [
+        "price must satisfy the original entry trigger again",
+        "manual review must confirm source and market context",
+    ]
+    sources = result.watch_candidates[0]["sources"]
+    assert isinstance(sources, list)
+    assert sources[0]["title"] == "MSFT.NAS source"
+    assert sources[0]["url"] == "https://news.example/MSFT.NAS"
+    assert result.source_issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_watch_source_ref_invalid",
+            "severity": "WARN",
+            "message": "watch row source_refs were invalid and fallback was used",
+        }
+    ]
+
+
+def test_openai_resolves_watch_source_refs_to_canonical_sources() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
         api_key="test-key",
@@ -677,7 +771,7 @@ def test_openai_rejects_watch_candidate_unprovided_source_ref() -> None:
                         "action": "WATCH",
                         "reason": "trigger pending",
                         "retrigger_conditions": ["price back above trigger"],
-                        "source_refs": ["MSFT.NAS:999"],
+                        "source_refs": ["MSFT.NAS:1"],
                     }
                 ],
                 "source_issues": [],
@@ -685,11 +779,15 @@ def test_openai_rejects_watch_candidate_unprovided_source_ref() -> None:
         ),
     )
 
-    with pytest.raises(AiBriefProviderContractError, match="source_refs"):
-        provider.build_recommendations(
-            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
-            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
-        )
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    sources = result.watch_candidates[0]["sources"]
+    assert isinstance(sources, list)
+    assert sources[0]["title"] == "MSFT.NAS source"
+    assert sources[0]["url"] == "https://news.example/MSFT.NAS"
 
 
 def test_openai_resolves_recommendation_source_refs_to_canonical_sources() -> None:

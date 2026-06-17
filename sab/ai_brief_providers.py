@@ -560,28 +560,47 @@ def _normalize_openai_provider_result(
         parsed.get("vetoed_candidates"), field_name="vetoed_candidates"
     )
     normalized_watch_candidates: list[dict[str, object]] = []
-    for raw_watch in _as_provider_mapping_rows(
-        parsed.get("watch_candidates"), field_name="watch_candidates"
+    for watch_index, raw_watch in enumerate(
+        _as_provider_mapping_rows(
+            parsed.get("watch_candidates"), field_name="watch_candidates"
+        )
     ):
         ticker = str(raw_watch.get("ticker") or "").strip()
         if ticker not in watch_candidate_by_ticker:
             raise AiBriefProviderContractError(
                 f"OpenAI output included ineligible watch ticker {ticker!r}"
             )
+        action, reason, retrigger_conditions = _validate_watch_non_source_fields(
+            raw_watch, watch_index=watch_index
+        )
+        source_refs = _provider_source_refs(
+            raw_watch.get("source_refs"),
+            field_name="watch_candidates.source_refs",
+        )
+        sources, invalid_refs = watch_source_catalog.sources_for_refs(
+            ticker=ticker,
+            source_refs=source_refs,
+        )
+        watch_has_sources = bool(watch_source_catalog.source_ids_for(ticker))
+        if invalid_refs or (watch_has_sources and not sources):
+            source_issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_watch_source_ref_invalid",
+                    message="watch row source_refs were invalid and fallback was used",
+                )
+            )
+            normalized_watch_candidates.append(
+                _provider_fallback_watch_candidate(watch_candidate_by_ticker[ticker])
+            )
+            continue
         normalized_watch_candidates.append(
             {
                 "ticker": ticker,
-                "action": str(raw_watch.get("action") or "").strip().upper(),
-                "reason": str(raw_watch.get("reason") or "").strip(),
-                "retrigger_conditions": string_list(
-                    raw_watch.get("retrigger_conditions")
-                ),
-                "sources": _provider_sources_from_source_refs(
-                    raw_row=raw_watch,
-                    ticker=ticker,
-                    field_name="watch_candidates[].source_refs",
-                    source_catalog=watch_source_catalog,
-                ),
+                "action": action,
+                "reason": reason,
+                "retrigger_conditions": retrigger_conditions,
+                "sources": sources,
             }
         )
     return AiBriefProviderResult(
@@ -658,27 +677,6 @@ class _SourceReferenceCatalog:
         return list(self._sources_by_ticker.get(ticker, {}))
 
 
-def _provider_sources_from_source_refs(
-    *,
-    raw_row: Mapping[str, object],
-    ticker: str,
-    field_name: str,
-    source_catalog: _SourceReferenceCatalog,
-) -> list[dict[str, object]]:
-    source_refs = _provider_source_refs(
-        raw_row.get("source_refs"), field_name=field_name
-    )
-    sources, invalid_refs = source_catalog.sources_for_refs(
-        ticker=ticker,
-        source_refs=source_refs,
-    )
-    if invalid_refs:
-        raise AiBriefProviderContractError(
-            "OpenAI output source_refs must be supplied in candidate.sources"
-        )
-    return sources
-
-
 def _provider_source_issue_tickers(source_issues: list[dict[str, object]]) -> set[str]:
     tickers: set[str] = set()
     for issue in source_issues:
@@ -719,6 +717,29 @@ def _model_source_issue(
         "severity": "WARN",
         "message": message,
     }
+
+
+def _provider_fallback_watch_candidate(
+    candidate: Mapping[str, object],
+) -> dict[str, object]:
+    ticker = str(candidate.get("ticker") or "").strip()
+    reason = str(
+        candidate.get("ai_role_reason") or "entry trigger is pending re-confirmation"
+    ).strip()
+    row: dict[str, object] = {
+        "ticker": ticker,
+        "action": "WATCH",
+        "reason": reason,
+        "retrigger_conditions": [
+            "price must satisfy the original entry trigger again",
+            "manual review must confirm source and market context",
+        ],
+        "sources": _candidate_sources(candidate),
+    }
+    name = str(candidate.get("name") or "").strip()
+    if name:
+        row["name"] = name
+    return row
 
 
 def _validate_raw_recommendation_ranks(
@@ -921,6 +942,34 @@ def _validate_provider_result_contract(
         )
 
 
+def _validate_watch_non_source_fields(
+    candidate: Mapping[str, object],
+    *,
+    watch_index: int,
+) -> tuple[str, str, list[str]]:
+    action = str(candidate.get("action") or "").strip().upper()
+    if action != "WATCH":
+        raise AiBriefProviderContractError(
+            "OpenAI output watch_candidates[].action must be WATCH"
+        )
+    reason = str(candidate.get("reason") or "").strip()
+    if not reason:
+        raise AiBriefProviderContractError(
+            f"OpenAI output watch_candidates[{watch_index}].reason is required"
+        )
+    retrigger_conditions = string_list(candidate.get("retrigger_conditions"))
+    if not retrigger_conditions:
+        raise AiBriefProviderContractError(
+            "OpenAI output watch_candidates[].retrigger_conditions is required"
+        )
+    language_text = " ".join([reason, *retrigger_conditions])
+    if contains_automated_order_language(language_text):
+        raise AiBriefProviderContractError(
+            "OpenAI output must avoid automated-order language"
+        )
+    return action, reason, retrigger_conditions
+
+
 def _validate_provider_watch_candidates(
     watch_candidates: list[dict[str, object]],
     *,
@@ -941,26 +990,7 @@ def _validate_provider_watch_candidates(
                 f"OpenAI output included ineligible watch ticker {ticker!r}"
             )
         actual_tickers.append(ticker)
-        action = str(candidate.get("action") or "").strip().upper()
-        if action != "WATCH":
-            raise AiBriefProviderContractError(
-                "OpenAI output watch_candidates[].action must be WATCH"
-            )
-        reason = str(candidate.get("reason") or "").strip()
-        if not reason:
-            raise AiBriefProviderContractError(
-                f"OpenAI output watch_candidates[{idx}].reason is required"
-            )
-        retrigger_conditions = string_list(candidate.get("retrigger_conditions"))
-        if not retrigger_conditions:
-            raise AiBriefProviderContractError(
-                "OpenAI output watch_candidates[].retrigger_conditions is required"
-            )
-        language_text = " ".join([reason, *retrigger_conditions])
-        if contains_automated_order_language(language_text):
-            raise AiBriefProviderContractError(
-                "OpenAI output must avoid automated-order language"
-            )
+        _validate_watch_non_source_fields(candidate, watch_index=idx)
         _validate_provider_watch_candidate_sources(
             candidate,
             watch_index=idx,
