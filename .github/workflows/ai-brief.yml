@@ -1053,8 +1053,7 @@ jobs:
           BENZINGA_API_TOKEN: ${{ steps.params.outputs.source_provider == 'benzinga-news' && secrets.BENZINGA_API_TOKEN || '' }}
           NAVER_CLIENT_ID: ${{ steps.params.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_ID || '' }}
           NAVER_CLIENT_SECRET: ${{ steps.params.outputs.source_provider == 'naver-news' && secrets.NAVER_CLIENT_SECRET || '' }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SAB_SUPPRESS_REPORT_UPLOADS: "true"
           PARAM_MODEL_NAME: ${{ steps.params.outputs.model_name }}
           PARAM_MODEL_TIMEOUT_SECONDS: ${{ steps.params.outputs.model_timeout_seconds }}
           PARAM_SOURCE_PROVIDER: ${{ steps.params.outputs.source_provider }}
@@ -1071,7 +1070,6 @@ jobs:
             --market "${{ steps.params.outputs.market }}"
             --model-provider "${{ steps.params.outputs.model_provider }}"
             --model-name "${PARAM_MODEL_NAME}"
-            --upload
           )
           if [[ -n "${PARAM_MODEL_TIMEOUT_SECONDS}" ]]; then
             cmd+=(--model-timeout-seconds "${PARAM_MODEL_TIMEOUT_SECONDS}")
@@ -1192,6 +1190,29 @@ jobs:
             --ai-brief-report "${{ steps.run_ai_brief.outputs.ai_brief_report_path }}" \
             --market "${{ steps.params.outputs.market }}" \
             --pretty
+
+      - name: Upload AI brief to Supabase
+        if: success() && (github.event_name != 'schedule' || steps.schedule_guard.outputs.should_run == 'true')
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          AI_BRIEF_REPORT_PATH: ${{ steps.run_ai_brief.outputs.ai_brief_report_path }}
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import logging
+          import os
+
+          from sab.report.supabase_storage import maybe_upload_report_artifact
+
+          logging.basicConfig(level=logging.INFO)
+          maybe_upload_report_artifact(
+              artifact_path=os.environ["AI_BRIEF_REPORT_PATH"],
+              run_type="ai-brief",
+              logger=logging.getLogger("sab.workflow.ai_brief_upload"),
+              force=True,
+          )
+          PY
 
       - name: Send Telegram notification
         if: success() && (github.event_name != 'schedule' || steps.schedule_guard.outputs.should_run == 'true') && steps.params.outputs.send_notifications == 'true'

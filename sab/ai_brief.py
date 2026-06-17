@@ -141,7 +141,7 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
         )
         if value is None:
             return _DEFAULT_MODEL_TIMEOUT_SECONDS
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
 

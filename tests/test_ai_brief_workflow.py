@@ -414,11 +414,10 @@ def test_ai_brief_workflow_runs_scan_entry_then_ai_brief() -> None:
     ai_brief_script = str(steps[run_ai_brief_idx].get("run") or "")
     ai_brief_env = steps[run_ai_brief_idx].get("env") or {}
     assert "uv run -m sab ai-brief" in ai_brief_script
-    assert "--upload" in ai_brief_script
-    assert ai_brief_env.get("SUPABASE_URL") == "${{ secrets.SUPABASE_URL }}"
-    assert (
-        ai_brief_env.get("SUPABASE_SECRET_KEY") == "${{ secrets.SUPABASE_SECRET_KEY }}"
-    )
+    assert "--upload" not in ai_brief_script
+    assert ai_brief_env.get("SAB_SUPPRESS_REPORT_UPLOADS") == "true"
+    assert "SUPABASE_URL" not in ai_brief_env
+    assert "SUPABASE_SECRET_KEY" not in ai_brief_env
     assert "buy_report_path" in str(steps[run_scan_idx].get("run") or "")
     assert "entry_report_path" in str(steps[run_entry_idx].get("run") or "")
     assert "ai_brief_report_path" in ai_brief_script
@@ -593,21 +592,29 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 
-def test_ai_brief_workflow_evaluates_quality_after_upload_before_delivery() -> None:
+def test_ai_brief_workflow_evaluates_quality_before_supabase_upload_and_delivery() -> (
+    None
+):
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = _steps(workflow)
     step_names = [str(step.get("name") or "") for step in steps]
 
     eval_step = _find_step_by_name(steps, "Evaluate AI brief quality")
     eval_script = str(eval_step.get("run") or "")
+    supabase_upload_step = _find_step_by_name(steps, "Upload AI brief to Supabase")
+    supabase_upload_script = str(supabase_upload_step.get("run") or "")
+    supabase_upload_env = supabase_upload_step.get("env") or {}
 
     assert step_names.index("Upload generated AI brief artifacts") < step_names.index(
         "Evaluate AI brief quality"
     )
     assert step_names.index("Evaluate AI brief quality") < step_names.index(
+        "Upload AI brief to Supabase"
+    )
+    assert step_names.index("Upload AI brief to Supabase") < step_names.index(
         "Send Telegram notification"
     )
-    assert step_names.index("Evaluate AI brief quality") < step_names.index(
+    assert step_names.index("Upload AI brief to Supabase") < step_names.index(
         "Send Slack notification"
     )
     assert "scripts/eval_ai_brief_recommendations.py" in eval_script
@@ -618,6 +625,18 @@ def test_ai_brief_workflow_evaluates_quality_after_upload_before_delivery() -> N
     assert "steps.run_ai_brief.outputs.ai_brief_report_path" in eval_script
     assert '--market "${{ steps.params.outputs.market }}"' in eval_script
     assert "--pretty" in eval_script
+    assert "maybe_upload_report_artifact" in supabase_upload_script
+    assert 'run_type="ai-brief"' in supabase_upload_script
+    assert "force=True" in supabase_upload_script
+    assert (
+        supabase_upload_env.get("AI_BRIEF_REPORT_PATH")
+        == "${{ steps.run_ai_brief.outputs.ai_brief_report_path }}"
+    )
+    assert supabase_upload_env.get("SUPABASE_URL") == "${{ secrets.SUPABASE_URL }}"
+    assert (
+        supabase_upload_env.get("SUPABASE_SECRET_KEY")
+        == "${{ secrets.SUPABASE_SECRET_KEY }}"
+    )
 
 
 def test_ai_brief_workflow_top_level_concurrency_does_not_cancel_monitor_runs() -> None:

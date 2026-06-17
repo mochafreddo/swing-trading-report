@@ -50,6 +50,8 @@ def suppress_report_uploads() -> Iterator[None]:
 
 
 def _report_uploads_suppressed() -> bool:
+    if env_flag("SAB_SUPPRESS_REPORT_UPLOADS", default=False):
+        return True
     state = _REPORT_UPLOADS_SUPPRESSED.get()
     if state is None:
         return False

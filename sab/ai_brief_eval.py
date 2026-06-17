@@ -220,8 +220,6 @@ def evaluate_ai_brief_recommendation_report(
         entry_context.expected_preselected_tickers
         and not recommendations
         and not vetoed_candidates
-        and not source_issues
-        and not system_issues
     ):
         issues.append(
             AiBriefRecommendationEvalIssue(

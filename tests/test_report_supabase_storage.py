@@ -822,6 +822,27 @@ def test_maybe_upload_report_artifact_requires_supabase_env_on_github_actions(
         )
 
 
+def test_maybe_upload_report_artifact_suppresses_env_uploads_on_github_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "2026-02-13.ai-brief.json"
+    report_path.write_text('{"schema":"sab.ai_brief.v1"}', encoding="utf-8")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("SAB_SUPPRESS_REPORT_UPLOADS", "true")
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+
+    uploaded = maybe_upload_report_artifact(
+        artifact_path=report_path.as_posix(),
+        run_type="ai-brief",
+        logger=logging.getLogger("test"),
+    )
+
+    assert uploaded is None
+
+
 def test_maybe_upload_report_artifact_prefers_supabase_secret_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
