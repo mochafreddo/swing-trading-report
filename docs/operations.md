@@ -104,6 +104,13 @@ If a run creates `ai-brief-skip`, inspect `skip_state`, `skip_reason`, `session_
 
 If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `source_provider_summary`, `watch_candidates[]`, `recommendations[].rank`, `vetoed_candidates[]`, and summary count drift before rerunning. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic artifacts first, then blocks Telegram/Slack delivery on a quality `FAIL`.
 
+Notification checks:
+
+- AI Brief report Telegram messages are rich text and are sent with `parse_mode=HTML`. The GitHub workflow reads `ai-brief.telegram.txt`, splits it with `split_telegram_message_text()`, and sends each part separately.
+- Scheduled AI Brief report notifications use the same HTML body and parse mode through `DefaultScheduledNotifier`; late alerts stay plain text.
+- Skipped schedule Telegram messages use `ai-brief.skipped.telegram.txt` and remain plain text. Do not troubleshoot skipped notifications as HTML parse-mode failures.
+- If a successful run uploaded an AI Brief artifact but no report notification arrived, check `notification:claim` and `notification:sent` runtime markers first, then the Telegram/Slack delivery step logs. Missing `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, or `SLACK_WEBHOOK_URL` is a delivery configuration issue, not an AI Brief generation issue.
+
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 
 ## GitHub Actions

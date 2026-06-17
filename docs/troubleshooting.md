@@ -240,6 +240,9 @@ NEEDS_CONFIRMATION: report_index backfill ownership and accepted recovery path.
   invalid port, or contains whitespace/control chars. Scheduler returns
   `source_config_invalid` before scan/entry.
 - Notification token/webhook is missing.
+- Telegram accepted skipped/plain text paths but rejected the AI Brief report
+  HTML body. The report body is sent with `parse_mode=HTML`, while skipped
+  notifications and late alerts are plain text.
 
 ### Checks
 
@@ -262,6 +265,10 @@ gh run list --workflow ai-brief.yml --limit 10
 docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --guard-only
 ```
 
+For a manual GitHub run, inspect the uploaded `ai-brief.telegram.txt` artifact
+when the `Send Telegram notification` step fails. The workflow sends that file
+in chunks with `split_telegram_message_text()` and `parse_mode=HTML`.
+
 ### Resolution
 
 - Treat `ai-brief-skip` as an artifact, not a silent failure.
@@ -270,6 +277,11 @@ docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm sc
 - For `source_config_invalid`, inspect scheduler logs for
   `scheduled_ai_brief_source_config_invalid`; it includes provider/API URL
   origin metadata but does not log the source API URL value.
+- For Telegram `Bad Request` parse errors on AI Brief report notifications,
+  inspect the generated `ai-brief.telegram.txt` rather than the plain skipped
+  message. Report-derived values should be escaped and long/malformed run URLs
+  should fall back to plain text; if that invariant is broken, treat it as a
+  notification renderer bug.
 
 ### Escalation
 

@@ -1,6 +1,7 @@
 # AI Brief Telegram Rich Text Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution status:** This file is preserved as the implementation recipe for this branch. After execution, the checklist below is not maintained as live task status; use the branch commits and verification output as the completion record.
 
 **Goal:** Render AI Brief Telegram report notifications as decision-first Telegram HTML while preserving existing scan/sell, Slack, skipped, and failure alert behavior.
 
@@ -37,7 +38,7 @@ This changes AI Brief Telegram rendering and the AI Brief report send payload. T
   - Pass `parse_mode="HTML"` from `send_schedule(...)`.
   - Leave `send_late_alert(...)` plain text.
 - Modify `.github/workflows/ai-brief.yml`
-  - Add `-d parse_mode=HTML` only to the `Send Telegram notification` step that sends `ai-brief.telegram.txt`.
+  - Send each split `ai-brief.telegram.txt` part with `parse_mode=HTML` only from the `Send Telegram notification` step.
   - Leave `Send skipped Telegram notification` unchanged.
 - Modify `tests/test_notification_text.py`
   - Update AI Brief Telegram expectations for HTML.
@@ -489,9 +490,13 @@ In `tests/test_ai_brief_workflow.py`, update `test_ai_brief_workflow_uploads_art
     )
     skipped_telegram_script = str(skipped_telegram_step.get("run") or "")
 
-    assert "-d parse_mode=HTML" in telegram_script
-    assert "text@ai-brief.telegram.txt" in telegram_script
-    assert "-d parse_mode=HTML" not in skipped_telegram_script
+    assert "split_telegram_message_text" in telegram_script
+    assert 'Path("ai-brief.telegram.txt").read_text' in telegram_script
+    assert '"parse_mode": "HTML"' in telegram_script
+    assert "for message_text in split_telegram_message_text(" in telegram_script
+    assert '"text": message_text' in telegram_script
+    assert "text@ai-brief.telegram.txt" not in telegram_script
+    assert "parse_mode" not in skipped_telegram_script
     assert "text@ai-brief.skipped.telegram.txt" in skipped_telegram_script
 ```
 
@@ -504,18 +509,42 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
   tests/test_ai_brief_workflow.py::test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in
 ```
 
-Expected: FAIL because the AI Brief Telegram send step does not yet include `parse_mode=HTML`.
+Expected: FAIL because the AI Brief Telegram send step does not yet split long
+rich-text messages and send each part with `parse_mode=HTML`.
 
-- [ ] **Step 3: Add `parse_mode=HTML` to AI Brief report delivery**
+- [ ] **Step 3: Add HTML chunked delivery to AI Brief report delivery**
 
-In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification` step that sends `ai-brief.telegram.txt`:
+In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification`
+step that sends `ai-brief.telegram.txt`:
 
 ```yaml
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text@ai-brief.telegram.txt" \
-            -d parse_mode=HTML \
-            -d disable_web_page_preview=true
+          python - <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          from sab.report.notification_text import split_telegram_message_text
+
+          bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+          telegram_text = Path("ai-brief.telegram.txt").read_text(encoding="utf-8")
+
+          for message_text in split_telegram_message_text(telegram_text):
+              payload = urllib.parse.urlencode(
+                  {
+                      "chat_id": chat_id,
+                      "text": message_text,
+                      "parse_mode": "HTML",
+                      "disable_web_page_preview": "true",
+                  }
+              ).encode("utf-8")
+              req = urllib.request.Request(url, data=payload, method="POST")
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  if resp.status >= 300:
+                      raise RuntimeError(f"Telegram returned HTTP {resp.status}")
+          PY
 ```
 
 Do not modify the earlier `Send skipped Telegram notification` curl command.
@@ -537,7 +566,7 @@ Run:
 
 ```bash
 git add .github/workflows/ai-brief.yml tests/test_ai_brief_workflow.py
-git commit -m "fix(ai-brief): 텔레그램 HTML parse mode 전송" -m "AI Brief 리포트 텔레그램 전송에만 parse_mode=HTML을 추가하고 skipped 알림은 plain text로 유지한다."
+git commit -m "fix(ai-brief): 텔레그램 HTML 장문 전송 보강" -m "AI Brief 리포트 텔레그램 전송에 HTML parse mode와 메시지 분할 전송을 적용하고 skipped 알림은 plain text로 유지한다."
 ```
 
 Expected: commit succeeds.
@@ -550,10 +579,10 @@ Expected: commit succeeds.
 
 - [ ] **Step 1: Add failing scheduled notifier payload assertions**
 
-Replace `test_default_scheduled_notifier_sends_slack_best_effort` in `tests/test_scheduled_ai_brief_runner.py` with this version:
+Replace `test_default_notifier_treats_slack_failure_as_best_effort` in `tests/test_scheduled_ai_brief_runner.py` with this version:
 
 ```python
-def test_default_scheduled_notifier_sends_slack_best_effort(
+def test_default_notifier_treats_slack_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
@@ -630,7 +659,7 @@ Run:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
@@ -684,7 +713,7 @@ Run:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
@@ -723,7 +752,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
   tests/test_notification_text.py \
   tests/test_ai_brief_workflow.py::test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in \
-  tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_sends_slack_best_effort \
+  tests/test_scheduled_ai_brief_runner.py::test_default_notifier_treats_slack_failure_as_best_effort \
   tests/test_scheduled_ai_brief_runner.py::test_default_scheduled_notifier_late_alert_stays_plain_text
 ```
 
@@ -759,7 +788,7 @@ git diff -- sab/report/notification_text.py sab/scheduler/runner.py .github/work
 Expected:
 
 - `build_ai_brief_telegram_report_text(...)` is the only Telegram builder converted to HTML.
-- `.github/workflows/ai-brief.yml` adds `parse_mode=HTML` only to the `ai-brief.telegram.txt` send step.
+- `.github/workflows/ai-brief.yml` sends split `ai-brief.telegram.txt` parts with `parse_mode=HTML` only from the report send step.
 - `DefaultScheduledNotifier.send_schedule(...)` passes `parse_mode="HTML"`.
 - `DefaultScheduledNotifier.send_late_alert(...)` does not pass a parse mode.
 - Slack builders, scan Telegram builder, and sell Telegram builder are unchanged.
@@ -789,5 +818,5 @@ Expected: no uncommitted changes.
 
 - Spec coverage: builder formatting, escaping, run link handling, GitHub parse mode, scheduled parse mode, skipped/failure alert exclusions, Slack exclusion, docs, and tests are covered by Tasks 1-4.
 - Scope: one implementation plan is sufficient because the spec covers one subsystem: AI Brief Telegram report notification rendering and delivery.
-- Type consistency: the plan uses existing function names and adds only `_html_escape`, `_html_bold`, `_html_code`, `_is_http_url`, `_html_link`, and `_ai_brief_decision_text`.
-- Out-of-scope behavior: the plan intentionally does not implement HTML-aware splitting and keeps output compact.
+- Type consistency: the plan keeps existing public builder names and adds small private HTML/link helpers inside `notification_text.py`.
+- Out-of-scope behavior: a generic parser-aware Telegram HTML splitter remains out of scope; generated AI Brief lines are bounded so the existing splitter does not cut generated tags.

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import html
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from ..utils.numeric import to_finite_float as _to_finite_float
 from ..utils.numeric import to_int as _safe_int
@@ -17,6 +19,8 @@ from .ai_brief_state import (
 )
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
+_HTML_LINK_MAX_CHARS = 1024
+_HTML_LINK_TOO_LONG_TEXT = "URL too long"
 _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 
 
@@ -63,6 +67,72 @@ def _safe_single_line(value: Any, *, default: str = "", max_chars: int = 140) ->
     if len(text) <= max_chars:
         return text
     return f"{text[: max_chars - 3].rstrip()}..."
+
+
+def _html_escape(value: Any, *, default: str = "") -> str:
+    return html.escape(_safe_str(value, default=default), quote=True)
+
+
+def _html_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return _html_escape(_safe_single_line(value, default=default, max_chars=max_chars))
+
+
+def _html_bold(value: Any, *, default: str = "") -> str:
+    return f"<b>{_html_escape(value, default=default)}</b>"
+
+
+def _html_code(value: Any, *, default: str = "") -> str:
+    return f"<code>{_html_escape(value, default=default)}</code>"
+
+
+def _html_bold_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return f"<b>{_html_single_line(value, default=default, max_chars=max_chars)}</b>"
+
+
+def _html_code_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return (
+        f"<code>{_html_single_line(value, default=default, max_chars=max_chars)}</code>"
+    )
+
+
+def _is_http_url(value: str) -> bool:
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        return False
+    try:
+        parsed = urlparse(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _html_link(url: Any, label: str) -> str:
+    text = _safe_str(url)
+    if not text:
+        return ""
+    if not _is_http_url(text):
+        return _html_single_line(text)
+    href = _html_escape(text)
+    label_text = _html_single_line(label, max_chars=60)
+    link = f'<a href="{href}">{label_text}</a>'
+    if len(link) > _HTML_LINK_MAX_CHARS:
+        return _HTML_LINK_TOO_LONG_TEXT
+    return link
 
 
 def _generated_at(report: dict[str, Any]) -> str:
@@ -562,9 +632,9 @@ def _first_source_title(recommendation: dict[str, Any]) -> str:
 
 
 def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
-    ticker = _safe_str(issue.get("ticker"))
-    code = _safe_str(issue.get("code"), default="-")
-    message = _safe_single_line(issue.get("message"))
+    ticker = _safe_single_line(issue.get("ticker"), max_chars=48)
+    code = _safe_single_line(issue.get("code"), default="-", max_chars=80)
+    message = _safe_single_line(issue.get("message"), max_chars=180)
     base = f"{prefix}: {ticker} {code}" if ticker else f"{prefix}: {code}"
     if message:
         return f"{base} - {message}"
@@ -572,7 +642,7 @@ def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
 
 
 def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:
-    tickers = [_safe_str(item) for item in _as_list(value)]
+    tickers = [_safe_single_line(item, max_chars=48) for item in _as_list(value)]
     tickers = [ticker for ticker in tickers if ticker]
     shown = tickers[: max(max_items, 0)]
     preview = ", ".join(shown)
@@ -617,6 +687,25 @@ def _format_source_provider_statuses(report: dict[str, Any]) -> str:
     return f"source_providers={'; '.join(parts)}"
 
 
+def _ai_brief_decision_text(
+    *,
+    state: str,
+    reason: str,
+    recommendation_count: int,
+) -> str:
+    if state == BRIEF_STATE_NO_SIGNAL:
+        return "오늘은 볼 종목 없음. 쉬어도 됨"
+    if state == BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY:
+        return "watch 후보만 있음. 재트리거 조건 확인 필요"
+    if state == BRIEF_STATE_FINAL_JUDGMENT:
+        return f"뉴스 근거 확인된 추천 후보 {recommendation_count}건"
+    if reason == BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE:
+        return "AI 판단 보류: 모델/시스템 이슈 확인 필요"
+    if reason == BRIEF_REASON_WEAK_NEWS_COVERAGE:
+        return "뉴스 근거 약함, 기술 신호만 있음"
+    return "AI 판단 보류: 추천을 확정하지 않음"
+
+
 def build_ai_brief_telegram_report_text(
     *,
     report: dict[str, Any],
@@ -629,46 +718,45 @@ def build_ai_brief_telegram_report_text(
     shown = min(total, max(max_items, 0), 3)
     model_provider = _safe_str(report.get("model_provider"), default="fake")
     model_name = _safe_str(report.get("model_name"), default="-")
+    model_label = f"{model_provider}/{model_name}"
     brief_state = read_ai_brief_state(report)
+    decision = _ai_brief_decision_text(
+        state=brief_state.state,
+        reason=brief_state.reason,
+        recommendation_count=total,
+    )
 
     lines = [
-        "[SAB][ai-brief][schedule]",
-        f"market={_safe_str(report.get('market'), default='-')}",
-        f"model={model_provider}/{model_name}",
-        f"generated_at={_generated_at(report)}",
-        f"brief_state={brief_state.state}",
-        f"brief_reason={brief_state.reason}",
-        f"entry_preselected_count={counts.preselected_count}",
-        f"추천 후보 {total}건 (표시 {shown}건)",
+        _html_bold("SAB AI Brief"),
         (
-            f"issues source={counts.source_issue_count} "
-            f"system={counts.system_issue_count}"
+            f"시장 {_html_code_single_line(report.get('market'), default='-', max_chars=24)} · "
+            f"모델 {_html_code_single_line(model_label)}"
+        ),
+        f"생성 {_html_code_single_line(_generated_at(report), max_chars=80)}",
+        "",
+        _html_bold("판단"),
+        (
+            f"상태 {_html_code_single_line(brief_state.state, max_chars=80)} · "
+            f"사유 {_html_code_single_line(brief_state.reason, max_chars=80)}"
+        ),
+        _html_escape(decision),
+        (
+            f"추천 {_html_code(total)}건 · 표시 {_html_code(shown)}건 · "
+            f"모델 입력 {_html_code(counts.preselected_count)}건 · "
+            f"source {_html_code(counts.source_issue_count)} · "
+            f"system {_html_code(counts.system_issue_count)}"
         ),
     ]
+
     if counts.watch_present:
         ticker_preview, extra = _ticker_preview(counts.watch_tickers)
         suffix = f", 외 {extra}건" if extra > 0 else ""
-        detail = f": {ticker_preview}{suffix}" if ticker_preview else ""
-        lines.append(f"watch 후보 {counts.watch_count}건{detail}")
-    source_chain_summary = _format_source_chain_summary(report)
-    if source_chain_summary:
-        lines.append(source_chain_summary)
-    source_provider_statuses = _format_source_provider_statuses(report)
-    if source_provider_statuses:
-        lines.append(source_provider_statuses)
-
-    if brief_state.state == BRIEF_STATE_NO_SIGNAL:
-        lines.append("오늘은 볼 종목 없음. 쉬어도 됨")
-    elif brief_state.state == BRIEF_STATE_NEEDS_REVIEW_WATCH_ONLY:
-        lines.append("watch 후보만 있음. 재트리거 조건 확인 필요")
-    elif brief_state.state == BRIEF_STATE_FINAL_JUDGMENT:
-        lines.append(f"AI 최종 판단: 뉴스 근거 확인된 후보 {total}건")
-    elif brief_state.reason == BRIEF_REASON_MODEL_OR_SYSTEM_ISSUE:
-        lines.append("AI 판단 보류: 모델/시스템 이슈 확인 필요")
-    elif brief_state.reason == BRIEF_REASON_WEAK_NEWS_COVERAGE:
-        lines.append("뉴스 근거 약함, 기술 신호만 있음")
-    else:
-        lines.append("AI 판단 보류: 추천을 확정하지 않음")
+        detail = (
+            f": {_html_escape(ticker_preview)}{_html_escape(suffix)}"
+            if ticker_preview
+            else ""
+        )
+        lines.append(f"watch 후보 {_html_code(counts.watch_count)}건{detail}")
 
     if (
         brief_state.state == BRIEF_STATE_NEEDS_REVIEW_WEAK_NEWS
@@ -678,10 +766,11 @@ def build_ai_brief_telegram_report_text(
         ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
         if ticker_preview:
             suffix = f", 외 {extra}건" if extra > 0 else ""
-            lines.append(f"대상: {ticker_preview}{suffix}")
+            lines.append(f"대상: {_html_escape(ticker_preview)}{_html_escape(suffix)}")
 
+    lines.append("")
     if total == 0:
-        lines.append("추천 후보 없음")
+        lines.extend([_html_bold("추천 후보"), "추천 후보 없음"])
         if counts.recommendable_count > 0:
             candidate_count_text = f"{counts.recommendable_count}건"
             if counts.preselected_count != counts.recommendable_count:
@@ -690,53 +779,102 @@ def build_ai_brief_telegram_report_text(
                 )
             lines.append(
                 "추천 생성 실패/보류: recommendable 후보 "
-                f"{candidate_count_text}이 있었지만 추천 결과가 비었습니다."
+                f"{_html_escape(candidate_count_text)}이 있었지만 추천 결과가 비었습니다."
             )
             ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))
             if ticker_preview:
                 suffix = f", 외 {extra}건" if extra > 0 else ""
-                lines.append(f"대상: {ticker_preview}{suffix}")
+                lines.append(
+                    f"대상: {_html_escape(ticker_preview)}{_html_escape(suffix)}"
+                )
     else:
+        lines.append(
+            f"{_html_bold(f'추천 후보 {total}건')} (표시 {_html_code(shown)}건)"
+        )
         for idx, row in enumerate(counts.recommendations[:shown], start=1):
-            ticker = _safe_str(row.get("ticker"), default="-")
-            name = _safe_str(row.get("name"))
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            name = _safe_single_line(row.get("name"), max_chars=96)
             ticker_name = f"{ticker} {name}".strip()
-            confidence = _safe_str(row.get("confidence"), default="-").upper()
+            confidence = _safe_single_line(
+                row.get("confidence"),
+                default="-",
+                max_chars=24,
+            ).upper()
             rationale = _first_list_text(row.get("rationale"))
             source_count = len(_recommendation_sources(row))
             lines.append(
-                f"{idx}. {ticker_name} | {confidence} | {rationale} | "
-                f"sources {source_count}"
+                f"{idx}. {_html_bold_single_line(ticker_name)} · "
+                f"{_html_code_single_line(confidence, max_chars=24)}"
             )
+            lines.append(f"   {_html_single_line(rationale)}")
             source_title = _first_source_title(row)
             if source_title:
-                lines.append(f"   source: {source_title}")
+                lines.append(
+                    f"   근거 {_html_code(source_count)}개 · "
+                    f"{_html_single_line(source_title)}"
+                )
+            else:
+                lines.append(f"   근거 {_html_code(source_count)}개")
         extra = total - shown
         if extra > 0:
-            lines.append(f"외 {extra}건")
+            lines.append(f"외 {_html_code(extra)}건")
 
     vetoed_total = len(counts.vetoed_candidates)
     vetoed_shown = min(vetoed_total, max(max_items, 0), 3)
     if vetoed_total > 0:
-        lines.append(f"AI 판단 제외 {vetoed_total}건")
+        lines.extend(["", _html_bold(f"AI 판단 제외 {vetoed_total}건")])
         for row in counts.vetoed_candidates[:vetoed_shown]:
-            ticker = _safe_str(row.get("ticker"), default="-")
-            action = _safe_str(row.get("action"), default="-").upper()
-            reason = _safe_single_line(row.get("reason"), default="-")
-            lines.append(f"- {ticker} | {action} | {reason}")
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            action = _safe_single_line(
+                row.get("action"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            reason = _safe_single_line(row.get("reason"), default="-", max_chars=180)
+            lines.append(
+                f"- {_html_code_single_line(ticker, max_chars=48)} · "
+                f"{_html_code_single_line(action, max_chars=24)} · "
+                f"{_html_single_line(reason)}"
+            )
         extra = vetoed_total - vetoed_shown
         if extra > 0:
-            lines.append(f"제외 외 {extra}건")
+            lines.append(f"제외 외 {_html_code(extra)}건")
+
+    lines.extend(
+        [
+            "",
+            _html_bold("진단"),
+            (
+                f"source {_html_code(counts.source_issue_count)} · "
+                f"system {_html_code(counts.system_issue_count)}"
+            ),
+        ]
+    )
+    source_chain_summary = _format_source_chain_summary(report)
+    if source_chain_summary:
+        lines.append(_html_code_single_line(source_chain_summary, max_chars=360))
+    source_provider_statuses = _format_source_provider_statuses(report)
+    if source_provider_statuses:
+        lines.append(_html_code_single_line(source_provider_statuses, max_chars=360))
 
     for issue in counts.source_issues[:3]:
-        lines.append(_format_issue("source issue", issue))
+        lines.append(
+            _html_single_line(_format_issue("source issue", issue), max_chars=360)
+        )
     for issue in counts.system_issues[:3]:
-        lines.append(_format_issue("system issue", issue))
+        lines.append(
+            _html_single_line(_format_issue("system issue", issue), max_chars=360)
+        )
 
     key = _safe_str(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(f"보관 {_html_code_single_line(key)}")
+    run_link = _html_link(run_url, "실행 보기")
+    if run_link:
+        if _is_http_url(_safe_str(run_url)):
+            lines.append(run_link)
+        else:
+            lines.append(f"실행 {run_link}")
     return "\n".join(lines)
 
 

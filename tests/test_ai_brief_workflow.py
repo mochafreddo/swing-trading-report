@@ -575,6 +575,21 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert telegram_step.get("continue-on-error") is True
     assert slack_step.get("continue-on-error") is True
     assert "TELEGRAM_BOT_TOKEN" in str(telegram_step.get("env") or {})
+    telegram_script = str(telegram_step.get("run") or "")
+    skipped_telegram_step = _find_step_by_name(
+        steps,
+        "Send skipped Telegram notification",
+    )
+    skipped_telegram_script = str(skipped_telegram_step.get("run") or "")
+
+    assert "split_telegram_message_text" in telegram_script
+    assert 'Path("ai-brief.telegram.txt").read_text' in telegram_script
+    assert '"parse_mode": "HTML"' in telegram_script
+    assert "for message_text in split_telegram_message_text(" in telegram_script
+    assert '"text": message_text' in telegram_script
+    assert "text@ai-brief.telegram.txt" not in telegram_script
+    assert "parse_mode" not in skipped_telegram_script
+    assert "text@ai-brief.skipped.telegram.txt" in skipped_telegram_script
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 
