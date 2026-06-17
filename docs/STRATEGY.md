@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-15
+최종 확인: 2026-06-17
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -510,7 +510,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 - source provider timeout/HTTP/JSON 실패는 추천 생성을 중단하지 않습니다. 단일 provider 또는 chain 최종 결과에서도 미커버 ticker가 남으면 `system_issues[]`/ticker별 `source_issues[]`로 disclose하고, fallback provider가 source를 채우면 provider summary에만 남깁니다.
 - 새로 작성되는 `sab.ai_brief.v1` artifact는 top-level `brief_state`와 `brief_reason`을 항상 포함합니다. `NO_SIGNAL/no_enter_candidates`의 reason 문자열은 legacy 이름을 유지하지만 현재 의미는 preselected recommendable 후보와 watch 후보가 모두 없는 상태입니다. `NEEDS_REVIEW_WATCH_ONLY/watch_only_trigger_pending`은 모델 ranking 후보는 없고 재트리거 확인용 watch 후보만 있는 상태입니다. `FINAL_JUDGMENT/source_backed_final`은 표시 추천이 모두 source-backed이고 source/system issue가 없는 최종 판단입니다.
 - 그 외 후보가 있었지만 뉴스 근거가 약하거나 모델/source/system 문제가 있으면 `NEEDS_REVIEW_WEAK_NEWS`로 낮춰 표시합니다. reason은 `model_or_system_issue`, `weak_news_coverage`, `model_deferred` 중 하나이며 런타임 AI가 아니라 artifact count, watch count, recommendation source, issue 배열로만 결정합니다.
-- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. recommendable/watch/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, watch 후보 계약, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다. 수동 GitHub workflow와 scheduled runner는 이 평가가 `FAIL`이면 알림 전송/성공 처리를 중단합니다.
+- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. recommendable/watch/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, watch 후보 계약, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다. Preselected recommendable 후보가 있는데 `recommendations[]`와 `vetoed_candidates[]`가 모두 비면 source/system issue 존재 여부와 관계없이 `FAIL`입니다. 수동 GitHub workflow와 scheduled runner는 이 평가가 `FAIL`이면 Supabase 업로드, 알림 전송, 성공 처리를 중단합니다.
 - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
 - mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 

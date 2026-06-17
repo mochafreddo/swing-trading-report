@@ -56,6 +56,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | fallback | none | `replace-with-service-role-key` | web, workflows, scheduler | Legacy server-side Supabase key fallback | Secret. Prefer `SUPABASE_SECRET_KEY`. |
 | `SUPABASE_REPORTS_BUCKET` | no | `reports` | `reports` | web, `sab` upload | Storage bucket for report JSON | Bucket should be private. |
 | `SAB_UPLOAD_REPORTS` | no | `false` | `true` | `sab` CLI | Upload local reports to Supabase | Local CLI otherwise writes files only. |
+| `SAB_SUPPRESS_REPORT_UPLOADS` | no | `false` | `true` | `sab` CLI, workflows | Suppress report uploads in the current process | Overrides local/GitHub Actions upload detection and forced uploads. Use only for generation steps that have a separate gated upload. |
 | `SAB_BASIC_AUTH_USER` | yes for web | none | `admin` | web | Admin login username | Required by `web/scripts/validate-env.mjs`. |
 | `SAB_BASIC_AUTH_PASS` | yes for web | none | `replace-with-password` | web | Admin login password | Secret. |
 | `SAB_SESSION_SECRET` | yes for web | none | `replace-with-32-plus-char-secret` | web | HMAC session cookie secret | Must be at least 32 chars. |
@@ -83,7 +84,7 @@
 | `SAB_SCHEDULER_ENV_FILE` | no | `.env.scheduler.local` | `.env.scheduler.local` | Docker scheduler | Env file path for one-shot scheduler | File is ignored by git. |
 | `OPENAI_API_KEY` | required for OpenAI brief | none | `replace-with-openai-key` | `sab ai-brief`, scheduler | OpenAI model provider API key | Secret. |
 | `OPENAI_AI_BRIEF_MODEL` | no | CLI model name | `gpt-...` | `sab ai-brief` | OpenAI model fallback | NEEDS_CONFIRMATION: production default model policy. |
-| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | provider default | `20` | `sab ai-brief` | Model timeout | Positive number. |
+| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | provider default | `20` | `sab ai-brief` | Model timeout | Positive finite number. |
 | `AI_BRIEF_SOURCE_API_URL` | required for `http-json` provider | none | `https://source.example/api` | `sab ai-brief` | External source API URL | HTTPS only; no internal real URL in docs. |
 | `AI_BRIEF_SOURCE_API_URL_KR` | no | none | `https://source.example/kr` | scheduled workflow | KR scheduled source API URL | GitHub variable. |
 | `AI_BRIEF_SOURCE_API_URL_US` | no | none | `https://source.example/us` | scheduled workflow | US scheduled source API URL | GitHub variable. |

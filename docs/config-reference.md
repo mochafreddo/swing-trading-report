@@ -57,6 +57,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | server-side Supabase 접근 | legacy fallback |
 | `SUPABASE_REPORTS_BUCKET` | report upload/web 조회 | 기본 `reports` |
 | `SAB_UPLOAD_REPORTS` | 로컬 CLI upload | true면 로컬 scan/sell/entry/ai-brief 업로드 |
+| `SAB_SUPPRESS_REPORT_UPLOADS` | CLI/workflow report upload helper | true면 현재 process의 report upload를 강제로 비활성화. 별도 품질 게이트 이후 upload step이 있는 생성 단계에서만 사용 |
 | `SAB_BASIC_AUTH_USER`, `SAB_BASIC_AUTH_PASS` | web login | 관리자 계정 |
 | `SAB_SESSION_SECRET` | web session cookie 서명 | 32자 이상 |
 | `SAB_LOGIN_MAX_ATTEMPTS` | web login throttle | 기본 5 |
@@ -79,7 +80,7 @@
 | `SAB_SCHEDULER_ENV_FILE` | Docker scheduler env_file | 기본 `.env.scheduler.local` |
 | `OPENAI_API_KEY` | `sab ai-brief --model-provider openai` | scheduled AI Brief에서 필요 |
 | `OPENAI_AI_BRIEF_MODEL` | AI Brief model fallback | CLI `--model-name`으로도 지정 가능 |
-| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | AI Brief model timeout | 선택 |
+| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | AI Brief model timeout | 선택. 양의 finite 숫자만 허용 |
 | `AI_BRIEF_SOURCE_API_URL` | `http-json` source provider | HTTPS URL 필요 |
 | `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` | scheduled provider URL | GitHub Actions variable 용도 |
 | `AI_BRIEF_SOURCE_API_TOKEN` | `http-json` source provider | 실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `_KR`, `_US` 중 하나와 일치할 때만 Bearer 전송 |
