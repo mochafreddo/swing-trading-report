@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from sab.report import notification_text
 from sab.report.notification_text import (
@@ -18,6 +20,21 @@ def _assert_balanced_html_tags(parts: list[str]) -> None:
         assert part.count("<b>") == part.count("</b>")
         assert part.count("<code>") == part.count("</code>")
         assert part.count("<a href=") == part.count("</a>")
+
+
+def _minimal_ai_brief_report(**overrides: Any) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 0},
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+    report.update(overrides)
+    return report
 
 
 def test_build_scan_telegram_report_text_includes_buy_candidates() -> None:
@@ -647,16 +664,7 @@ def test_build_ai_brief_telegram_report_text_bounds_long_html_fields() -> None:
 
 def test_build_ai_brief_telegram_report_text_does_not_link_too_long_run_url() -> None:
     long_run_url = "https://example.test/" + ("u" * 5000)
-    report = {
-        "generated_at": "2026-05-05T08:40:00+09:00",
-        "market": "US",
-        "model_provider": "fake",
-        "model_name": "fake-ai-brief-v1",
-        "summary": {"recommendation_count": 0},
-        "recommendations": [],
-        "source_issues": [],
-        "system_issues": [],
-    }
+    report = _minimal_ai_brief_report()
 
     text = build_ai_brief_telegram_report_text(
         report=report,
@@ -677,16 +685,7 @@ def test_build_ai_brief_telegram_report_text_does_not_link_too_long_run_url() ->
 
 
 def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> None:
-    report = {
-        "generated_at": "2026-05-05T08:40:00+09:00",
-        "market": "US",
-        "model_provider": "fake",
-        "model_name": "fake-ai-brief-v1",
-        "summary": {"recommendation_count": 0},
-        "recommendations": [],
-        "source_issues": [],
-        "system_issues": [],
-    }
+    report = _minimal_ai_brief_report()
 
     text = build_ai_brief_telegram_report_text(
         report=report,
@@ -710,16 +709,7 @@ def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> Non
 def test_build_ai_brief_telegram_report_text_keeps_malformed_http_run_url_plain(
     run_url: str,
 ) -> None:
-    report = {
-        "generated_at": "2026-05-05T08:40:00+09:00",
-        "market": "US",
-        "model_provider": "fake",
-        "model_name": "fake-ai-brief-v1",
-        "summary": {"recommendation_count": 0},
-        "recommendations": [],
-        "source_issues": [],
-        "system_issues": [],
-    }
+    report = _minimal_ai_brief_report()
 
     text = build_ai_brief_telegram_report_text(report=report, run_url=run_url)
     parts = notification_text.split_telegram_message_text(text)
@@ -1120,16 +1110,10 @@ def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() 
                 "sources": [],
             }
         )
-    report = {
-        "generated_at": "2026-05-05T08:40:00+09:00",
-        "market": "US",
-        "model_provider": "fake",
-        "model_name": "fake-ai-brief-v1",
-        "summary": {"recommendation_count": 7},
-        "recommendations": recommendations,
-        "source_issues": [],
-        "system_issues": [],
-    }
+    report = _minimal_ai_brief_report(
+        summary={"recommendation_count": 7},
+        recommendations=recommendations,
+    )
 
     text = build_ai_brief_telegram_report_text(
         report=report,
@@ -1146,16 +1130,7 @@ def test_build_ai_brief_telegram_report_text_limits_items_and_adds_rest_count() 
 
 
 def test_build_ai_brief_telegram_report_text_includes_storage_key() -> None:
-    report = {
-        "generated_at": "2026-05-05T08:40:00+09:00",
-        "market": "US",
-        "model_provider": "fake",
-        "model_name": "fake-ai-brief-v1",
-        "summary": {"recommendation_count": 0},
-        "recommendations": [],
-        "source_issues": [],
-        "system_issues": [],
-    }
+    report = _minimal_ai_brief_report()
 
     text = build_ai_brief_telegram_report_text(
         report=report,
