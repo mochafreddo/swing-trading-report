@@ -489,9 +489,13 @@ In `tests/test_ai_brief_workflow.py`, update `test_ai_brief_workflow_uploads_art
     )
     skipped_telegram_script = str(skipped_telegram_step.get("run") or "")
 
-    assert "-d parse_mode=HTML" in telegram_script
-    assert "text@ai-brief.telegram.txt" in telegram_script
-    assert "-d parse_mode=HTML" not in skipped_telegram_script
+    assert "split_telegram_message_text" in telegram_script
+    assert 'Path("ai-brief.telegram.txt").read_text' in telegram_script
+    assert '"parse_mode": "HTML"' in telegram_script
+    assert "for message_text in split_telegram_message_text(" in telegram_script
+    assert '"text": message_text' in telegram_script
+    assert "text@ai-brief.telegram.txt" not in telegram_script
+    assert "parse_mode" not in skipped_telegram_script
     assert "text@ai-brief.skipped.telegram.txt" in skipped_telegram_script
 ```
 
@@ -504,18 +508,42 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
   tests/test_ai_brief_workflow.py::test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in
 ```
 
-Expected: FAIL because the AI Brief Telegram send step does not yet include `parse_mode=HTML`.
+Expected: FAIL because the AI Brief Telegram send step does not yet split long
+rich-text messages and send each part with `parse_mode=HTML`.
 
-- [ ] **Step 3: Add `parse_mode=HTML` to AI Brief report delivery**
+- [ ] **Step 3: Add HTML chunked delivery to AI Brief report delivery**
 
-In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification` step that sends `ai-brief.telegram.txt`:
+In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification`
+step that sends `ai-brief.telegram.txt`:
 
 ```yaml
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text@ai-brief.telegram.txt" \
-            -d parse_mode=HTML \
-            -d disable_web_page_preview=true
+          python - <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          from sab.report.notification_text import split_telegram_message_text
+
+          bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+          telegram_text = Path("ai-brief.telegram.txt").read_text(encoding="utf-8")
+
+          for message_text in split_telegram_message_text(telegram_text):
+              payload = urllib.parse.urlencode(
+                  {
+                      "chat_id": chat_id,
+                      "text": message_text,
+                      "parse_mode": "HTML",
+                      "disable_web_page_preview": "true",
+                  }
+              ).encode("utf-8")
+              req = urllib.request.Request(url, data=payload, method="POST")
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  if resp.status >= 300:
+                      raise RuntimeError(f"Telegram returned HTTP {resp.status}")
+          PY
 ```
 
 Do not modify the earlier `Send skipped Telegram notification` curl command.
@@ -537,7 +565,7 @@ Run:
 
 ```bash
 git add .github/workflows/ai-brief.yml tests/test_ai_brief_workflow.py
-git commit -m "fix(ai-brief): 텔레그램 HTML parse mode 전송" -m "AI Brief 리포트 텔레그램 전송에만 parse_mode=HTML을 추가하고 skipped 알림은 plain text로 유지한다."
+git commit -m "fix(ai-brief): 텔레그램 HTML 장문 전송 보강" -m "AI Brief 리포트 텔레그램 전송에 HTML parse mode와 메시지 분할 전송을 적용하고 skipped 알림은 plain text로 유지한다."
 ```
 
 Expected: commit succeeds.

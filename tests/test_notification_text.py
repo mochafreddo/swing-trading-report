@@ -697,6 +697,32 @@ def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> Non
     assert "실행 javascript:alert(1)" in text
 
 
+@pytest.mark.parametrize("run_url", ["http://[", "https://example.test:bad/path"])
+def test_build_ai_brief_telegram_report_text_keeps_malformed_http_run_url_plain(
+    run_url: str,
+) -> None:
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "summary": {"recommendation_count": 0},
+        "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(report=report, run_url=run_url)
+    parts = notification_text.split_telegram_message_text(text)
+
+    assert "<a href=" not in text
+    assert "실행 " in text
+    assert all(
+        0 < len(part) <= notification_text.TELEGRAM_MESSAGE_MAX_CHARS for part in parts
+    )
+    _assert_balanced_html_tags(parts)
+
+
 def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> None:
     report = {
         "generated_at": "2026-05-05T08:40:00+09:00",
