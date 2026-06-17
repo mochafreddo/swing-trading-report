@@ -692,6 +692,98 @@ def test_openai_rejects_watch_candidate_unprovided_source_ref() -> None:
         )
 
 
+def test_openai_resolves_recommendation_source_refs_to_canonical_sources() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["entry setup remains valid"],
+                        "checklist": ["manually confirm price and risk before order"],
+                        "source_refs": ["AAPL.NAS:1"],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    sources = result.recommendations[0]["sources"]
+    assert isinstance(sources, list)
+    assert sources[0]["title"] == "AAPL.NAS source"
+    assert sources[0]["url"] == "https://news.example/AAPL.NAS"
+    assert sources[0]["published_at"]
+
+
+def test_openai_drops_recommendation_with_invalid_source_ref_and_reranks() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["bad source ref"],
+                        "checklist": ["manually confirm price and risk before order"],
+                        "source_refs": ["AAPL.NAS:404"],
+                    },
+                    {
+                        "ticker": "MSFT.NAS",
+                        "rank": 2,
+                        "confidence": "LOW",
+                        "rationale": ["valid source ref"],
+                        "checklist": ["manually confirm price and risk before order"],
+                        "source_refs": ["MSFT.NAS:1"],
+                    },
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[
+            _candidate("AAPL.NAS", role="recommendable"),
+            _candidate("MSFT.NAS", role="recommendable"),
+        ],
+        watch_candidates=[],
+    )
+
+    assert [row["ticker"] for row in result.recommendations] == ["MSFT.NAS"]
+    assert result.recommendations[0]["rank"] == 1
+    sources = result.recommendations[0]["sources"]
+    assert isinstance(sources, list)
+    assert sources[0]["title"] == "MSFT.NAS source"
+    assert sources[0]["url"] == "https://news.example/MSFT.NAS"
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "model_source_ref_invalid",
+            "severity": "WARN",
+            "message": "model returned source_refs not present in candidate.sources",
+        }
+    ]
+
+
 class _Response:
     status_code = 200
 

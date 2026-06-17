@@ -486,15 +486,58 @@ def _normalize_openai_provider_result(
     watch_candidate_by_ticker = {
         str(candidate["ticker"]): candidate for candidate in watch_candidates
     }
-    recommendations: list[dict[str, object]] = []
-    for raw_recommendation in _as_provider_mapping_rows(
+    source_issues = _as_provider_mapping_rows(
+        parsed.get("source_issues"), field_name="source_issues"
+    )
+    source_issue_tickers = _provider_source_issue_tickers(source_issues)
+    raw_recommendations = _as_provider_mapping_rows(
         parsed.get("recommendations"), field_name="recommendations"
-    ):
+    )
+    _validate_raw_recommendation_ranks(raw_recommendations)
+    recommendations: list[dict[str, object]] = []
+    for raw_recommendation in raw_recommendations:
         ticker = str(raw_recommendation.get("ticker") or "").strip()
         if ticker not in candidate_by_ticker:
             raise AiBriefProviderContractError(
                 f"OpenAI output included ineligible ticker {ticker!r}"
             )
+        source_refs = _provider_source_refs(
+            raw_recommendation.get("source_refs"),
+            field_name="recommendations[].source_refs",
+        )
+        sources, invalid_refs = recommendable_source_catalog.sources_for_refs(
+            ticker=ticker,
+            source_refs=source_refs,
+        )
+        candidate_has_sources = bool(
+            recommendable_source_catalog.source_ids_for(ticker)
+        )
+        if invalid_refs or (candidate_has_sources and not sources):
+            source_issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_source_ref_invalid"
+                    if invalid_refs
+                    else "model_source_ref_missing",
+                    message=(
+                        "model returned source_refs not present in candidate.sources"
+                        if invalid_refs
+                        else "model omitted source_refs for a sourced candidate"
+                    ),
+                )
+            )
+            continue
+        if not sources and ticker not in source_issue_tickers:
+            source_issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_unbacked_recommendation_dropped",
+                    message=(
+                        "recommendation was dropped because it was not source-backed"
+                    ),
+                )
+            )
+            continue
         candidate = candidate_by_ticker[ticker]
         recommendations.append(
             {
@@ -507,19 +550,12 @@ def _normalize_openai_provider_result(
                 ).upper(),
                 "rationale": string_list(raw_recommendation.get("rationale")),
                 "checklist": string_list(raw_recommendation.get("checklist")),
-                "sources": _provider_sources_from_source_refs(
-                    raw_row=raw_recommendation,
-                    ticker=ticker,
-                    field_name="recommendations[].source_refs",
-                    source_catalog=recommendable_source_catalog,
-                ),
+                "sources": sources,
                 "as_of": _offset_now_iso(),
             }
         )
-
-    source_issues = _as_provider_mapping_rows(
-        parsed.get("source_issues"), field_name="source_issues"
-    )
+    for rank, recommendation in enumerate(recommendations, start=1):
+        recommendation["rank"] = rank
     vetoed_candidates = _as_provider_mapping_rows(
         parsed.get("vetoed_candidates"), field_name="vetoed_candidates"
     )
@@ -606,17 +642,20 @@ class _SourceReferenceCatalog:
         *,
         ticker: str,
         source_refs: list[str],
-    ) -> list[dict[str, object]]:
+    ) -> tuple[list[dict[str, object]], list[str]]:
         rows_by_id = self._sources_by_ticker.get(ticker, {})
         resolved: list[dict[str, object]] = []
+        invalid_refs: list[str] = []
         for source_ref in source_refs:
             source = rows_by_id.get(source_ref)
             if source is None:
-                raise AiBriefProviderContractError(
-                    "OpenAI output source_refs must be supplied in candidate.sources"
-                )
+                invalid_refs.append(source_ref)
+                continue
             resolved.append(dict(source))
-        return resolved
+        return resolved, invalid_refs
+
+    def source_ids_for(self, ticker: str) -> list[str]:
+        return list(self._sources_by_ticker.get(ticker, {}))
 
 
 def _provider_sources_from_source_refs(
@@ -626,13 +665,18 @@ def _provider_sources_from_source_refs(
     field_name: str,
     source_catalog: _SourceReferenceCatalog,
 ) -> list[dict[str, object]]:
-    source_refs = raw_row.get("source_refs")
-    if not isinstance(source_refs, list):
-        raise AiBriefProviderContractError(f"OpenAI output {field_name} must be a list")
-    return source_catalog.sources_for_refs(
-        ticker=ticker,
-        source_refs=string_list(source_refs),
+    source_refs = _provider_source_refs(
+        raw_row.get("source_refs"), field_name=field_name
     )
+    sources, invalid_refs = source_catalog.sources_for_refs(
+        ticker=ticker,
+        source_refs=source_refs,
+    )
+    if invalid_refs:
+        raise AiBriefProviderContractError(
+            "OpenAI output source_refs must be supplied in candidate.sources"
+        )
+    return sources
 
 
 def _provider_source_issue_tickers(source_issues: list[dict[str, object]]) -> set[str]:
@@ -642,6 +686,51 @@ def _provider_source_issue_tickers(source_issues: list[dict[str, object]]) -> se
         if ticker:
             tickers.add(ticker)
     return tickers
+
+
+def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise AiBriefProviderContractError(f"OpenAI output {field_name} must be a list")
+    source_refs: list[str] = []
+    for idx, raw_ref in enumerate(value):
+        source_ref = str(raw_ref or "").strip()
+        if not source_ref:
+            raise AiBriefProviderContractError(
+                f"OpenAI output {field_name}[{idx}] must be a non-empty string"
+            )
+        source_refs.append(source_ref)
+    if len(source_refs) > _MAX_SOURCES_PER_TICKER:
+        raise AiBriefProviderContractError(
+            "OpenAI output source_refs must contain at most "
+            f"{_MAX_SOURCES_PER_TICKER} refs"
+        )
+    return source_refs
+
+
+def _model_source_issue(
+    *,
+    ticker: str,
+    code: str,
+    message: str,
+) -> dict[str, object]:
+    return {
+        "ticker": ticker,
+        "code": code,
+        "severity": "WARN",
+        "message": message,
+    }
+
+
+def _validate_raw_recommendation_ranks(
+    rows: list[dict[str, object]],
+) -> None:
+    ranks = [row.get("rank") for row in rows]
+    expected = list(range(1, len(rows) + 1))
+    if ranks != expected:
+        raise AiBriefProviderContractError(
+            "OpenAI output recommendations[].rank must be contiguous from 1 to N "
+            "in recommendation order"
+        )
 
 
 def _source_rows_by_ticker(
