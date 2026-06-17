@@ -581,6 +581,64 @@ def test_build_ai_brief_telegram_report_text_escapes_html_values() -> None:
     ) in text
 
 
+def test_build_ai_brief_telegram_report_text_bounds_long_html_fields() -> None:
+    very_long_model = "model-" + ("M" * 5000)
+    very_long_ticker = "TICKER" + ("T" * 5000)
+    very_long_name = "Name " + ("N" * 5000)
+    very_long_rationale = "rationale " + ("R" * 5000)
+    very_long_title = "source title " + ("S" * 5000)
+    very_long_issue = "issue message " + ("I" * 5000)
+    very_long_storage_key = "reports/" + ("K" * 5000) + ".ai-brief.json"
+    unsafe_run_url = "javascript:alert(" + ("U" * 5000) + ")"
+    report = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "openai",
+        "model_name": very_long_model,
+        "summary": {
+            "preselected_count": 1,
+            "recommendation_count": 1,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        "recommendations": [
+            {
+                "ticker": very_long_ticker,
+                "name": very_long_name,
+                "confidence": "HIGH",
+                "rationale": [very_long_rationale],
+                "sources": [{"title": very_long_title}],
+            }
+        ],
+        "source_issues": [
+            {
+                "ticker": very_long_ticker,
+                "code": "source_coverage_below_threshold",
+                "message": very_long_issue,
+            }
+        ],
+        "system_issues": [],
+    }
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url=unsafe_run_url,
+        storage_key=very_long_storage_key,
+    )
+    parts = notification_text.split_telegram_message_text(text)
+
+    assert text.count("...") >= 7
+    assert all(
+        len(line) < notification_text.TELEGRAM_MESSAGE_MAX_CHARS
+        for line in text.splitlines()
+    )
+    assert all(
+        0 < len(part) <= notification_text.TELEGRAM_MESSAGE_MAX_CHARS for part in parts
+    )
+    assert all(part.count("<b>") == part.count("</b>") for part in parts)
+    assert all(part.count("<code>") == part.count("</code>") for part in parts)
+
+
 def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> None:
     report = {
         "generated_at": "2026-05-05T08:40:00+09:00",

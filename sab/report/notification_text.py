@@ -71,12 +71,41 @@ def _html_escape(value: Any, *, default: str = "") -> str:
     return html.escape(_safe_str(value, default=default), quote=True)
 
 
+def _html_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return _html_escape(_safe_single_line(value, default=default, max_chars=max_chars))
+
+
 def _html_bold(value: Any, *, default: str = "") -> str:
     return f"<b>{_html_escape(value, default=default)}</b>"
 
 
 def _html_code(value: Any, *, default: str = "") -> str:
     return f"<code>{_html_escape(value, default=default)}</code>"
+
+
+def _html_bold_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return f"<b>{_html_single_line(value, default=default, max_chars=max_chars)}</b>"
+
+
+def _html_code_single_line(
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 180,
+) -> str:
+    return (
+        f"<code>{_html_single_line(value, default=default, max_chars=max_chars)}</code>"
+    )
 
 
 def _is_http_url(value: str) -> bool:
@@ -89,8 +118,10 @@ def _html_link(url: Any, label: str) -> str:
     if not text:
         return ""
     if not _is_http_url(text):
-        return _html_escape(text)
-    return f'<a href="{_html_escape(text)}">{_html_escape(label)}</a>'
+        return _html_single_line(text)
+    return (
+        f'<a href="{_html_escape(text)}">{_html_single_line(label, max_chars=60)}</a>'
+    )
 
 
 def _generated_at(report: dict[str, Any]) -> str:
@@ -590,9 +621,9 @@ def _first_source_title(recommendation: dict[str, Any]) -> str:
 
 
 def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
-    ticker = _safe_str(issue.get("ticker"))
-    code = _safe_str(issue.get("code"), default="-")
-    message = _safe_single_line(issue.get("message"))
+    ticker = _safe_single_line(issue.get("ticker"), max_chars=48)
+    code = _safe_single_line(issue.get("code"), default="-", max_chars=80)
+    message = _safe_single_line(issue.get("message"), max_chars=180)
     base = f"{prefix}: {ticker} {code}" if ticker else f"{prefix}: {code}"
     if message:
         return f"{base} - {message}"
@@ -600,7 +631,7 @@ def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
 
 
 def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:
-    tickers = [_safe_str(item) for item in _as_list(value)]
+    tickers = [_safe_single_line(item, max_chars=48) for item in _as_list(value)]
     tickers = [ticker for ticker in tickers if ticker]
     shown = tickers[: max(max_items, 0)]
     preview = ", ".join(shown)
@@ -676,6 +707,7 @@ def build_ai_brief_telegram_report_text(
     shown = min(total, max(max_items, 0), 3)
     model_provider = _safe_str(report.get("model_provider"), default="fake")
     model_name = _safe_str(report.get("model_name"), default="-")
+    model_label = f"{model_provider}/{model_name}"
     brief_state = read_ai_brief_state(report)
     decision = _ai_brief_decision_text(
         state=brief_state.state,
@@ -686,13 +718,16 @@ def build_ai_brief_telegram_report_text(
     lines = [
         _html_bold("SAB AI Brief"),
         (
-            f"시장 {_html_code(report.get('market'), default='-')} · "
-            f"모델 {_html_code(f'{model_provider}/{model_name}')}"
+            f"시장 {_html_code_single_line(report.get('market'), default='-', max_chars=24)} · "
+            f"모델 {_html_code_single_line(model_label)}"
         ),
-        f"생성 {_html_code(_generated_at(report))}",
+        f"생성 {_html_code_single_line(_generated_at(report), max_chars=80)}",
         "",
         _html_bold("판단"),
-        f"상태 {_html_code(brief_state.state)} · 사유 {_html_code(brief_state.reason)}",
+        (
+            f"상태 {_html_code_single_line(brief_state.state, max_chars=80)} · "
+            f"사유 {_html_code_single_line(brief_state.reason, max_chars=80)}"
+        ),
         _html_escape(decision),
         (
             f"추천 {_html_code(total)}건 · 표시 {_html_code(shown)}건 · "
@@ -746,18 +781,26 @@ def build_ai_brief_telegram_report_text(
             f"{_html_bold(f'추천 후보 {total}건')} (표시 {_html_code(shown)}건)"
         )
         for idx, row in enumerate(counts.recommendations[:shown], start=1):
-            ticker = _safe_str(row.get("ticker"), default="-")
-            name = _safe_str(row.get("name"))
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            name = _safe_single_line(row.get("name"), max_chars=96)
             ticker_name = f"{ticker} {name}".strip()
-            confidence = _safe_str(row.get("confidence"), default="-").upper()
+            confidence = _safe_single_line(
+                row.get("confidence"),
+                default="-",
+                max_chars=24,
+            ).upper()
             rationale = _first_list_text(row.get("rationale"))
             source_count = len(_recommendation_sources(row))
-            lines.append(f"{idx}. {_html_bold(ticker_name)} · {_html_code(confidence)}")
-            lines.append(f"   {_html_escape(rationale)}")
+            lines.append(
+                f"{idx}. {_html_bold_single_line(ticker_name)} · "
+                f"{_html_code_single_line(confidence, max_chars=24)}"
+            )
+            lines.append(f"   {_html_single_line(rationale)}")
             source_title = _first_source_title(row)
             if source_title:
                 lines.append(
-                    f"   근거 {_html_code(source_count)}개 · {_html_escape(source_title)}"
+                    f"   근거 {_html_code(source_count)}개 · "
+                    f"{_html_single_line(source_title)}"
                 )
             else:
                 lines.append(f"   근거 {_html_code(source_count)}개")
@@ -770,11 +813,17 @@ def build_ai_brief_telegram_report_text(
     if vetoed_total > 0:
         lines.extend(["", _html_bold(f"AI 판단 제외 {vetoed_total}건")])
         for row in counts.vetoed_candidates[:vetoed_shown]:
-            ticker = _safe_str(row.get("ticker"), default="-")
-            action = _safe_str(row.get("action"), default="-").upper()
-            reason = _safe_single_line(row.get("reason"), default="-")
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            action = _safe_single_line(
+                row.get("action"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            reason = _safe_single_line(row.get("reason"), default="-", max_chars=180)
             lines.append(
-                f"- {_html_code(ticker)} · {_html_code(action)} · {_html_escape(reason)}"
+                f"- {_html_code_single_line(ticker, max_chars=48)} · "
+                f"{_html_code_single_line(action, max_chars=24)} · "
+                f"{_html_single_line(reason)}"
             )
         extra = vetoed_total - vetoed_shown
         if extra > 0:
@@ -792,19 +841,23 @@ def build_ai_brief_telegram_report_text(
     )
     source_chain_summary = _format_source_chain_summary(report)
     if source_chain_summary:
-        lines.append(_html_code(source_chain_summary))
+        lines.append(_html_code_single_line(source_chain_summary, max_chars=360))
     source_provider_statuses = _format_source_provider_statuses(report)
     if source_provider_statuses:
-        lines.append(_html_code(source_provider_statuses))
+        lines.append(_html_code_single_line(source_provider_statuses, max_chars=360))
 
     for issue in counts.source_issues[:3]:
-        lines.append(_html_escape(_format_issue("source issue", issue)))
+        lines.append(
+            _html_single_line(_format_issue("source issue", issue), max_chars=360)
+        )
     for issue in counts.system_issues[:3]:
-        lines.append(_html_escape(_format_issue("system issue", issue)))
+        lines.append(
+            _html_single_line(_format_issue("system issue", issue), max_chars=360)
+        )
 
     key = _safe_str(storage_key)
     if key:
-        lines.append(f"보관 {_html_code(key)}")
+        lines.append(f"보관 {_html_code_single_line(key)}")
     run_link = _html_link(run_url, "실행 보기")
     if run_link:
         if _is_http_url(_safe_str(run_url)):
