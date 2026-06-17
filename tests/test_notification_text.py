@@ -697,7 +697,16 @@ def test_build_ai_brief_telegram_report_text_keeps_unsafe_run_url_plain() -> Non
     assert "실행 javascript:alert(1)" in text
 
 
-@pytest.mark.parametrize("run_url", ["http://[", "https://example.test:bad/path"])
+@pytest.mark.parametrize(
+    "run_url",
+    [
+        "http://[",
+        "https://example.test:bad/path",
+        "https://example.test/a b",
+        "https://example.test/\npath",
+        "https://example.test/\tpath",
+    ],
+)
 def test_build_ai_brief_telegram_report_text_keeps_malformed_http_run_url_plain(
     run_url: str,
 ) -> None:

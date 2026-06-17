@@ -111,6 +111,8 @@ def _html_code_single_line(
 
 
 def _is_http_url(value: str) -> bool:
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        return False
     try:
         parsed = urlparse(value)
         _ = parsed.port
