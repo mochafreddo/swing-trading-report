@@ -1,5 +1,6 @@
 # AI Brief Source Ref Partial Publish Design
 
+상태: Accepted
 Status: Approved design, pending written-spec review
 Date: 2026-06-17
 Scope: AI Brief OpenAI source contract, provider result normalization, scheduled publish behavior
