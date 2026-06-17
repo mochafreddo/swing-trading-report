@@ -691,7 +691,11 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
         raise AiBriefProviderContractError(f"OpenAI output {field_name} must be a list")
     source_refs: list[str] = []
     for idx, raw_ref in enumerate(value):
-        source_ref = str(raw_ref or "").strip()
+        if not isinstance(raw_ref, str):
+            raise AiBriefProviderContractError(
+                f"OpenAI output {field_name}[{idx}] must be a string"
+            )
+        source_ref = raw_ref.strip()
         if not source_ref:
             raise AiBriefProviderContractError(
                 f"OpenAI output {field_name}[{idx}] must be a non-empty string"

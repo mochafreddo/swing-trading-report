@@ -882,6 +882,37 @@ def test_openai_drops_recommendation_with_invalid_source_ref_and_reranks() -> No
     ]
 
 
+def test_openai_rejects_non_string_source_ref_items() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["source ref has wrong item type"],
+                        "checklist": ["manually confirm price and risk before order"],
+                        "source_refs": [1],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="must be a string"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+
 class _Response:
     status_code = 200
 
