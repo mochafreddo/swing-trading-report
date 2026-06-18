@@ -6539,7 +6539,7 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
                     "checklist": [
                         "manually confirm price, cash, and risk before order"
                     ],
-                    "sources": [],
+                    "source_refs": [],
                 }
             ],
             "vetoed_candidates": [],
@@ -6589,6 +6589,98 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
     assert request_json["text"]["format"]["type"] == "json_schema"  # type: ignore[index]
 
 
+def test_run_ai_brief_openai_invalid_watch_source_ref_uses_partial_publish_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[
+            _entry_row("AAPL.NAS", action="ENTER"),
+            _entry_row(
+                "MSFT.NAS",
+                action="SKIP",
+                reasons=["hybrid trigger guard failed (302.00 < ema10 303.00)"],
+            ),
+        ],
+    )
+    source_report = _write_source_report(
+        tmp_path,
+        sources=[
+            {
+                "ticker": "AAPL.NAS",
+                "title": "Apple supply chain update",
+                "url": "https://example.test/aapl",
+                "published_at": _fresh_published_at(),
+            },
+            {
+                "ticker": "MSFT.NAS",
+                "title": "Microsoft trigger context",
+                "url": "https://example.test/msft",
+                "published_at": _fresh_published_at(),
+            },
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["source-backed context supports manual review"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "source_refs": ["AAPL.NAS:1"],
+                }
+            ],
+            "vetoed_candidates": [],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "model returned a watch row with a bad source ref",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:404"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=7.5,
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"][0]["ticker"] == "AAPL.NAS"
+    assert payload["recommendations"][0]["sources"][0]["url"] == (
+        "https://example.test/aapl"
+    )
+    assert payload["watch_candidates"][0]["ticker"] == "MSFT.NAS"
+    assert payload["watch_candidates"][0]["sources"][0]["url"] == (
+        "https://example.test/msft"
+    )
+    assert payload["source_issues"][0]["code"] == "model_watch_source_ref_invalid"
+    assert payload["system_issues"] == []
+    assert payload["summary"]["source_issue_count"] == 1
+    assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
+    assert payload["brief_reason"] == "weak_news_coverage"
+
+
 def test_run_ai_brief_openai_payload_includes_local_sources(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -6615,13 +6707,7 @@ def test_run_ai_brief_openai_payload_includes_local_sources(
                     "confidence": "LOW",
                     "rationale": ["source-backed context supports manual review"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [
-                        {
-                            "title": "Invented source title",
-                            "url": "https://example.test/aapl",
-                            "published_at": "2100-01-01T00:00:00+00:00",
-                        }
-                    ],
+                    "source_refs": ["AAPL.NAS:1"],
                 }
             ],
             "vetoed_candidates": [],
@@ -6663,7 +6749,7 @@ def test_run_ai_brief_openai_payload_includes_local_sources(
     assert output_source["published_at"] != "2100-01-01T00:00:00+00:00"
 
 
-def test_run_ai_brief_openai_rejects_unprovided_source_url(
+def test_run_ai_brief_openai_drops_recommendation_with_invalid_source_ref(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
@@ -6678,13 +6764,7 @@ def test_run_ai_brief_openai_rejects_unprovided_source_url(
                     "confidence": "LOW",
                     "rationale": ["source-backed context supports manual review"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [
-                        {
-                            "title": "Invented source",
-                            "url": "https://example.test/not-supplied",
-                            "published_at": _fresh_published_at(),
-                        }
-                    ],
+                    "source_refs": ["AAPL.NAS:404"],
                 }
             ],
             "vetoed_candidates": [],
@@ -6712,8 +6792,8 @@ def test_run_ai_brief_openai_rejects_unprovided_source_url(
     assert exit_code == 0
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["recommendations"] == []
-    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
-    assert "source url must be supplied" in payload["system_issues"][0]["message"]
+    assert payload["source_issues"][0]["code"] == "model_source_ref_invalid"
+    assert payload["system_issues"] == []
 
 
 def test_run_ai_brief_openai_rejects_non_contiguous_ranks(
@@ -6733,7 +6813,7 @@ def test_run_ai_brief_openai_rejects_non_contiguous_ranks(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [],
+                    "source_refs": [],
                 },
                 {
                     "ticker": "MSFT.NAS",
@@ -6741,7 +6821,7 @@ def test_run_ai_brief_openai_rejects_non_contiguous_ranks(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [],
+                    "source_refs": [],
                 },
             ],
             "vetoed_candidates": [],
@@ -6800,7 +6880,7 @@ def test_run_ai_brief_openai_rejects_korean_automated_order_language(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["지금 매수하고 주문 실행"],
-                    "sources": [],
+                    "source_refs": [],
                 }
             ],
             "vetoed_candidates": [],
@@ -7009,14 +7089,21 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
                 {
                     "ticker": "AAPL.NAS",
                     "rank": 1,
-                    "confidence": "LOW",
+                    "confidence": "BAD",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [],
+                    "source_refs": [],
                 }
             ],
             "vetoed_candidates": [],
-            "source_issues": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
         }
     )
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -7045,7 +7132,7 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
 
 
-def test_run_ai_brief_openai_rejects_stale_sources(
+def test_run_ai_brief_openai_rejects_too_many_source_refs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
@@ -7059,12 +7146,11 @@ def test_run_ai_brief_openai_rejects_stale_sources(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [
-                        {
-                            "title": "Old source",
-                            "url": "https://example.test/old",
-                            "published_at": "2000-01-01T00:00:00+00:00",
-                        }
+                    "source_refs": [
+                        "AAPL.NAS:1",
+                        "AAPL.NAS:2",
+                        "AAPL.NAS:3",
+                        "AAPL.NAS:4",
                     ],
                 }
             ],
@@ -7094,10 +7180,10 @@ def test_run_ai_brief_openai_rejects_stale_sources(
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["recommendations"] == []
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
-    assert "within 72h" in payload["system_issues"][0]["message"]
+    assert "at most 3 refs" in payload["system_issues"][0]["message"]
 
 
-def test_run_ai_brief_openai_rejects_invalid_source_urls(
+def test_run_ai_brief_openai_rejects_non_list_source_refs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
@@ -7111,13 +7197,7 @@ def test_run_ai_brief_openai_rejects_invalid_source_urls(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [
-                        {
-                            "title": "Bad source",
-                            "url": "https://token@example.test/secret",
-                            "published_at": _fresh_published_at(),
-                        }
-                    ],
+                    "source_refs": "AAPL.NAS:1",
                 }
             ],
             "vetoed_candidates": [],
@@ -7146,10 +7226,10 @@ def test_run_ai_brief_openai_rejects_invalid_source_urls(
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["recommendations"] == []
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
-    assert "userinfo" in payload["system_issues"][0]["message"]
+    assert "source_refs" in payload["system_issues"][0]["message"]
 
 
-def test_run_ai_brief_openai_rejects_future_sources(
+def test_run_ai_brief_openai_rejects_blank_source_refs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
@@ -7163,13 +7243,7 @@ def test_run_ai_brief_openai_rejects_future_sources(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [
-                        {
-                            "title": "Future source",
-                            "url": "https://example.test/future",
-                            "published_at": "2100-01-01T00:00:00+00:00",
-                        }
-                    ],
+                    "source_refs": [""],
                 }
             ],
             "vetoed_candidates": [],
@@ -7198,7 +7272,7 @@ def test_run_ai_brief_openai_rejects_future_sources(
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["recommendations"] == []
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
-    assert "15m" in payload["system_issues"][0]["message"]
+    assert "non-empty string" in payload["system_issues"][0]["message"]
 
 
 def test_run_ai_brief_openai_invalid_source_issue_writes_contract_error_artifact(
@@ -7215,7 +7289,7 @@ def test_run_ai_brief_openai_invalid_source_issue_writes_contract_error_artifact
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "sources": [],
+                    "source_refs": [],
                 }
             ],
             "vetoed_candidates": [],

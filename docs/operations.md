@@ -104,6 +104,8 @@ If a run creates `ai-brief-skip`, inspect `skip_state`, `skip_reason`, `session_
 
 If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `source_provider_summary`, `watch_candidates[]`, `recommendations[].rank`, `vetoed_candidates[]`, and summary count drift before rerunning. A report with preselected recommendable candidates but no recommendation and no veto is invalid even when source/system issues are present. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic GitHub artifacts first, then blocks Supabase upload and Telegram/Slack delivery on a quality `FAIL`.
 
+`model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, `model_watch_source_ref_invalid`은 모델이 canonical source catalog의 ref를 제대로 선택하지 못했다는 뜻입니다. 이 진단이 `WARN`이고 최종 추천이 source-backed이면 scheduled run은 partial publish로 정상 업로드될 수 있습니다. 같은 진단 뒤 추천이 모두 제거되거나 source-backed ratio가 부족하면 기존처럼 quality `FAIL`로 처리됩니다.
+
 Notification checks:
 
 - AI Brief report Telegram messages are rich text and are sent with `parse_mode=HTML`. The GitHub workflow reads `ai-brief.telegram.txt`, splits it with `split_telegram_message_text()`, and sends each part separately.

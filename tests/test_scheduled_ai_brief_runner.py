@@ -4694,7 +4694,7 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
-def test_default_pipeline_fails_when_ai_brief_quality_gate_fails(
+def test_default_pipeline_raises_when_ai_brief_quality_gate_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     eval_calls: list[dict[str, object]] = []
@@ -4768,6 +4768,72 @@ def test_default_pipeline_fails_when_ai_brief_quality_gate_fails(
             "market": "US",
         }
     ]
+
+
+def test_default_pipeline_returns_result_when_ai_brief_quality_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run_scan(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.buy.json")
+        return 0
+
+    def fake_run_entry(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.entry.json")
+        return 0
+
+    def fake_run_ai_brief(**kwargs: object) -> int:
+        callback = kwargs.get("report_path_callback")
+        if callable(callback):
+            callback("reports/current.ai-brief.json")
+        return 0
+
+    def fake_evaluate_ai_brief_recommendation_report(
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            status="WARN",
+            issues=[
+                SimpleNamespace(
+                    code="ai_brief_source_issue_reported",
+                    message="watch source ref fallback was used",
+                )
+            ],
+        )
+
+    monkeypatch.setattr("sab.scheduler.runner.run_scan", fake_run_scan)
+    monkeypatch.setattr("sab.scheduler.runner.run_entry", fake_run_entry)
+    monkeypatch.setattr("sab.scheduler.runner.run_ai_brief", fake_run_ai_brief)
+    monkeypatch.setattr(
+        "sab.scheduler.runner.evaluate_ai_brief_recommendation_report",
+        fake_evaluate_ai_brief_recommendation_report,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.SupabaseHoldingsExportConfig.from_env",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner.export_active_holdings_snapshot",
+        lambda **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        "sab.scheduler.runner._default_guard_snapshot",
+        lambda _market, _now: _guard(session_state="PRE_OPEN"),
+    )
+
+    result = DefaultScheduledPipeline().run(
+        market="US",
+        session_date="2026-05-28",
+        report_date="2026-05-28",
+        source_provider=None,
+        model_provider="fake",
+        dry_run=False,
+    )
+
+    assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
 def test_default_pipeline_suppresses_ambient_github_actions_report_uploads(

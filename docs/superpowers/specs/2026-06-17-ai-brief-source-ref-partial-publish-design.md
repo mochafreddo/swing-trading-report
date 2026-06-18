@@ -1,6 +1,7 @@
 # AI Brief Source Ref Partial Publish Design
 
-Status: Approved design, pending written-spec review
+상태: Accepted (implemented and verified 2026-06-18)
+Status: Implemented after source-ref contract hardening and normal/adversarial review
 Date: 2026-06-17
 Scope: AI Brief OpenAI source contract, provider result normalization, scheduled publish behavior
 
@@ -397,6 +398,17 @@ Docs and contract tests:
 - No database migration is required.
 - No web schema migration is required. New source issue codes render through the
   existing generic issue display.
+
+## Implementation Outcome
+
+Implemented on branch `ai-brief-source-ref-partial-publish`.
+
+- OpenAI model input now carries request-local `source_id` values, and structured output accepts `source_refs[]` instead of returned source objects.
+- Provider normalization restores canonical local `sources[]` rows before writing final artifacts.
+- Bad recommendation source refs are isolated to that recommendation, recorded as `source_issues[]`, and remaining recommendations are re-ranked.
+- Bad watch source refs use deterministic watch fallback rows and are recorded as `model_watch_source_ref_invalid`.
+- Source-ref contract hardening rejects non-list refs, non-string ref items, blank refs, more than three refs, duplicate refs, and raw recommendation ranks that are bool/float/non-int.
+- Final verification passed with `just quality` on 2026-06-18: ruff, format check, mypy, and 1843 pytest tests.
 
 ## Acceptance Criteria
 
