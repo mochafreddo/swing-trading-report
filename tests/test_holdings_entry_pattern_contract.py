@@ -8,9 +8,13 @@ from sab.signals.hybrid_buy import HybridPattern
 
 _MIGRATIONS_DIR = Path("supabase/migrations")
 _MIGRATION_PATH = _MIGRATIONS_DIR / "20260609000000_add_holdings_entry_pattern.sql"
+_ENABLEMENT_MIGRATION_PATH = (
+    _MIGRATIONS_DIR / "20260609010000_enable_holdings_entry_pattern_writes.sql"
+)
 _ADD_BUY_MIGRATION_PATH = (
     _MIGRATIONS_DIR / "20260304002000_add_holdings_add_buy_idempotency.sql"
 )
+_SMOKE_PATH = Path("scripts/smoke_holdings_entry_pattern.sql")
 _INITIAL_ENTRY_PATTERN_IDS = {
     "trend_pullback_bounce",
     "swing_high_breakout",
@@ -132,6 +136,65 @@ def test_effective_entry_pattern_sql_allowlist_matches_storage_contract() -> Non
     assert _extract_in_list_values_after(
         effective_sql, "holdings_entry_pattern_value_check"
     ) == set(HOLDINGS_ENTRY_PATTERN_VALUES)
+
+
+def test_runtime_enablement_migration_opens_entry_pattern_writes() -> None:
+    sql = _ENABLEMENT_MIGRATION_PATH.read_text(encoding="utf-8")
+    normalized_sql = _normalize_sql(_strip_sql_comments(sql))
+
+    required_snippets = [
+        "drop constraint if exists holdings_entry_pattern_write_closed_check",
+        "create or replace function public.replace_holdings_v1(",
+        "lock table public.holdings in share row exclusive mode",
+        "incoming holdings entry_pattern must be a string",
+        "incoming holdings entry_pattern must be <= 120 chars",
+        "incoming holdings entry_pattern must be one of",
+        "inactive holdings entry_pattern must be null",
+        "incoming holdings entry_pattern must be explicit when entry identity or strategy changes",
+        "when incoming.quantity = 0 then null",
+        "when incoming.has_entry_pattern then incoming.entry_pattern",
+        "else existing.entry_pattern",
+    ]
+    for snippet in required_snippets:
+        assert _normalize_sql(snippet) in normalized_sql
+
+    forbidden_snippets = [
+        "incoming holdings entry_pattern writes are disabled until runtime export paths own entry_pattern",
+        "add constraint holdings_entry_pattern_write_closed_check",
+        "create or replace function public.holdings_add_buy_v1(",
+        "grant execute on function public.replace_holdings_v1(jsonb) to",
+        "revoke all on function public.replace_holdings_v1(jsonb)",
+        "disable row level security",
+    ]
+    for snippet in forbidden_snippets:
+        assert _normalize_sql(snippet) not in normalized_sql
+
+    assert (
+        _extract_in_list_values_after(
+            sql, "nullif(trim(incoming.item->>'entry_pattern'), '') not in"
+        )
+        == _INITIAL_ENTRY_PATTERN_IDS
+    )
+
+
+def test_entry_pattern_smoke_matches_runtime_enablement_contract() -> None:
+    sql = _SMOKE_PATH.read_text(encoding="utf-8")
+    normalized_sql = _normalize_sql(_strip_sql_comments(sql))
+
+    required_snippets = [
+        "replace non-null marker stores entry_pattern",
+        "replace omit keeps active entry_pattern through update",
+        "replace explicit null clears entry_pattern",
+        "expected inactive entry_pattern to fail",
+        "inactive holdings entry_pattern must be null",
+    ]
+    for snippet in required_snippets:
+        assert _normalize_sql(snippet) in normalized_sql
+
+    assert (
+        "incoming holdings entry_pattern writes are disabled until runtime export paths own entry_pattern"
+        not in sql
+    )
 
 
 def test_current_buy_patterns_are_covered_by_storage_contract() -> None:

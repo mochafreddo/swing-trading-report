@@ -81,7 +81,7 @@ insert into public.holdings (
   date '2026-06-09',
   'sma_ema_hybrid',
   null,
-  'phase-a smoke',
+  'runtime smoke',
   array['smoke']::text[],
   null,
   null
@@ -142,26 +142,24 @@ as $$
   ) rows;
 $$;
 
-do $$
-begin
-  perform *
-  from public.replace_holdings_v1(
-    pg_temp.holdings_payload(
-      to_jsonb('swing_high_breakout'::text),
-      true
-    )
-  );
+select *
+from public.replace_holdings_v1(
+  pg_temp.holdings_payload(
+    to_jsonb('swing_high_breakout'::text),
+    true
+  )
+);
 
-  raise exception 'expected non-null entry_pattern write to fail';
-exception
-  when others then
-    if sqlerrm not like
-      '%incoming holdings entry_pattern writes are disabled until runtime export paths own entry_pattern%'
-    then
-      raise;
-    end if;
-end;
-$$;
+select *
+from pg_temp.assert_true(
+  'replace non-null marker stores entry_pattern',
+  exists (
+    select 1
+    from public.holdings
+    where ticker = 'SABSMOKE.NAS'
+      and entry_pattern = 'swing_high_breakout'
+  )
+);
 
 select *
 from public.replace_holdings_v1(pg_temp.holdings_payload());
@@ -172,19 +170,19 @@ from public.replace_holdings_v1(
     null,
     false,
     null,
-    'phase-a smoke notes-only update'
+    'runtime smoke notes-only update'
   )
 );
 
 select *
 from pg_temp.assert_true(
-  'replace omit keeps entry_pattern null through update',
+  'replace omit keeps active entry_pattern through update',
   exists (
     select 1
     from public.holdings
     where ticker = 'SABSMOKE.NAS'
-      and notes = 'phase-a smoke notes-only update'
-      and entry_pattern is null
+      and notes = 'runtime smoke notes-only update'
+      and entry_pattern = 'swing_high_breakout'
   )
 );
 
@@ -195,7 +193,7 @@ from public.replace_holdings_v1(
 
 select *
 from pg_temp.assert_true(
-  'replace explicit null keeps entry_pattern null',
+  'replace explicit null clears entry_pattern',
   exists (
     select 1
     from public.holdings
@@ -210,7 +208,7 @@ from public.replace_holdings_v1(
     null,
     false,
     0,
-    'phase-a smoke inactive omitted marker'
+    'runtime smoke inactive omitted marker'
   )
 );
 
@@ -225,6 +223,22 @@ from pg_temp.assert_true(
       and entry_pattern is null
   )
 );
+
+do $$
+begin
+  perform *
+  from public.replace_holdings_v1(
+    pg_temp.holdings_payload(to_jsonb('swing_high_breakout'::text), true)
+  );
+
+  raise exception 'expected inactive entry_pattern to fail';
+exception
+  when others then
+    if sqlerrm not like '%inactive holdings entry_pattern must be null%' then
+      raise;
+    end if;
+end;
+$$;
 
 do $$
 begin
@@ -265,7 +279,7 @@ set
   entry_currency = 'USD',
   entry_date = date '2026-06-09',
   entry_pattern = null,
-  notes = 'phase-a smoke add-buy active'
+  notes = 'runtime smoke add-buy active'
 where ticker = 'SABSMOKE.NAS';
 
 create temporary table smoke_add_buy_active as
@@ -295,7 +309,7 @@ set
   quantity = 0,
   entry_price = 0,
   entry_pattern = null,
-  notes = 'phase-a smoke add-buy inactive'
+  notes = 'runtime smoke add-buy inactive'
 where ticker = 'SABSMOKE.NAS';
 
 create temporary table smoke_add_buy_reactivate as
