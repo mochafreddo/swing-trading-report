@@ -103,9 +103,10 @@ Docker Compose production mode:
 ```bash
 docker compose up -d --build web
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/favicon.ico
 ```
 
-기대값: `200`
+기대값: 두 요청 모두 `200`
 
 Docker Compose development mode:
 
@@ -171,6 +172,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 - `/reports`, `/holdings`, `/run` 같은 보호 페이지가 `/login?next=...`로 redirect되는지 확인합니다.
 - 로그인 폼의 빈 제출(required validation)과 잘못된 자격 증명(`Unauthorized`) 상태를 확인합니다.
 - desktop과 mobile viewport에서 텍스트/폼/alert가 겹치지 않는지 확인합니다.
+- `/favicon.ico`가 `200`을 반환해 기본 browser console이 clean한지 확인합니다.
 - browser console error가 없는지 확인합니다.
 
 로컬 QA 리포트, baseline, 스크린샷은 `.gstack/qa-reports/`에 저장합니다. 이 디렉터리는 검증 증거용 로컬 산출물이므로 git에 커밋하지 않습니다.

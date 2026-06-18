@@ -6,11 +6,11 @@
 
 ## Deferred
 
-- 2026-06-16: Add a favicon asset or route for the local web UI. Browser QA on `http://127.0.0.1:55300/login` reports `GET /favicon.ico` as a 404 console error. Severity is low because login, auth redirects, and build/test gates still pass, but the missing asset keeps the console from being clean.
 - 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed
 
+- 2026-06-18: Added a `/favicon.ico` route for the local web UI, returning a cacheable SVG favicon so browser QA on `/login` no longer reports the missing favicon 404.
 - 2026-06-18: Applied the remaining `sma_ema_hybrid` swing-trader review follow-ups: `sab entry` now requires `quality_state=A` for automatic hybrid `ENTER`, and hybrid sell supports pattern-specific time-stop overrides with a shorter default for `swing_high_breakout`.
 - 2026-06-18: Added `SELL_PARTIAL` for `sma_ema_hybrid` low/high profit target tiers, including sell report ordering, Telegram notification inclusion/display, and strategy documentation, so profit tiers can now suggest partial exits instead of only tightening stops.
 - 2026-06-18: Preserved buy `pattern` as holdings `entry_pattern` across Python YAML loading, Supabase holdings storage, scheduled export, web holdings create/edit/import/export, and recent buy candidate selection, so `sma_ema_hybrid` failed-breakout sell rules no longer depend on manual `strategy`/`tags` markers.

@@ -86,9 +86,10 @@ Check:
 ```bash
 docker compose ps
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/favicon.ico
 ```
 
-Expected liveness result is `200`. `/login` proves the Next.js server is responding; it does not prove authenticated Supabase-backed pages are healthy.
+Expected liveness result is `200` for both requests. `/login` proves the Next.js server is responding; `/favicon.ico` keeps the default unauthenticated browser load from reporting a missing asset. Neither check proves authenticated Supabase-backed pages are healthy.
 
 Development profile:
 
@@ -202,6 +203,7 @@ NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 �
 ```bash
 docker compose ps
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/favicon.ico
 gh run list --limit 10
 ```
 
