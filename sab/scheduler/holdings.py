@@ -50,6 +50,7 @@ _HOLDINGS_FIELDS = (
     "entry_currency",
     "entry_date",
     "strategy",
+    "entry_pattern",
     "notes",
     "tags",
     "stop_override",
@@ -89,6 +90,13 @@ def _normalize_rows(payload: object) -> list[dict[str, object]]:
             continue
         item: dict[str, object] = {"ticker": ticker}
         for field_name in _OPTIONAL_FIELDS:
+            if field_name == "entry_pattern":
+                if field_name not in raw:
+                    raise SupabaseHoldingsExportError(
+                        "Supabase holdings response omitted entry_pattern"
+                    )
+                item[field_name] = raw.get(field_name)
+                continue
             value = raw.get(field_name)
             if value is not None:
                 item[field_name] = value

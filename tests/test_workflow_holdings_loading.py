@@ -122,6 +122,14 @@ def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
     run_script = str(holdings_step.get("run") or "")
     assert "holdings.generated.yaml" in run_script
+    assert "entry_pattern" in run_script
+    assert (
+        "select=ticker,quantity,entry_price,entry_currency,entry_date,"
+        "strategy,entry_pattern,notes,tags,stop_override,target_override" in run_script
+    )
+    assert '"entry_pattern",' in run_script
+    assert 'key == "entry_pattern"' in run_script
+    assert "Supabase holdings response omitted entry_pattern" in run_script
     assert (
         'echo "holdings_file=holdings.generated.yaml" >> "${GITHUB_OUTPUT}"'
         in run_script
@@ -130,3 +138,20 @@ def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     run_sell_step = _find_step_by_name(steps, "Run sell")
     run_script = str(run_sell_step.get("run") or "")
     assert '--holdings "${{ steps.holdings.outputs.holdings_file }}"' in run_script
+
+
+def test_ai_brief_workflow_manual_holdings_export_includes_entry_pattern() -> None:
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = workflow["jobs"]["ai_brief"]["steps"]
+
+    holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
+    run_script = str(holdings_step.get("run") or "")
+
+    assert "entry_pattern" in run_script
+    assert (
+        "select=ticker,quantity,entry_price,entry_currency,entry_date,"
+        "strategy,entry_pattern,notes,tags,stop_override,target_override" in run_script
+    )
+    assert '"entry_pattern",' in run_script
+    assert 'key == "entry_pattern"' in run_script
+    assert "Supabase holdings response omitted entry_pattern" in run_script

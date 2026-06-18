@@ -99,7 +99,7 @@ jobs:
           fi
 
           base_url="${SUPABASE_URL%/}"
-          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override&quantity=gt.0&order=ticker.asc"
+          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override&quantity=gt.0&order=ticker.asc"
 
           curl -fsS "${base_url}/rest/v1/holdings?${query}" \
             -H "apikey: ${supabase_key}" \
@@ -122,6 +122,7 @@ jobs:
               "entry_currency",
               "entry_date",
               "strategy",
+              "entry_pattern",
               "notes",
               "tags",
               "stop_override",
@@ -136,6 +137,11 @@ jobs:
                   continue
               item: dict[str, object] = {"ticker": ticker}
               for key in keys:
+                  if key == "entry_pattern":
+                      if key not in row:
+                          raise SystemExit("Supabase holdings response omitted entry_pattern")
+                      item[key] = row.get(key)
+                      continue
                   value = row.get(key)
                   if value is None:
                       continue

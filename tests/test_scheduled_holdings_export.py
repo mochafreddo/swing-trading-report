@@ -46,6 +46,7 @@ def test_export_active_holdings_snapshot_writes_entry_holdings_yaml(
                     "entry_currency": "USD",
                     "entry_date": "2026-05-01",
                     "strategy": "sma_ema_hybrid",
+                    "entry_pattern": "swing_high_breakout",
                     "notes": None,
                     "tags": ["core"],
                     "stop_override": None,
@@ -74,6 +75,7 @@ def test_export_active_holdings_snapshot_writes_entry_holdings_yaml(
     assert count == 1
     assert "quantity=gt.0" in str(session.get_calls[0]["url"])
     assert "select=ticker%2Cquantity%2Centry_price" in str(session.get_calls[0]["url"])
+    assert "entry_pattern" in str(session.get_calls[0]["url"])
     payload = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert payload == {
         "holdings": [
@@ -84,8 +86,74 @@ def test_export_active_holdings_snapshot_writes_entry_holdings_yaml(
                 "entry_currency": "USD",
                 "entry_date": "2026-05-01",
                 "strategy": "sma_ema_hybrid",
+                "entry_pattern": "swing_high_breakout",
                 "tags": ["core"],
                 "target_override": 130,
             }
         ]
     }
+
+
+def test_export_active_holdings_snapshot_preserves_null_entry_pattern(
+    tmp_path: Path,
+) -> None:
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            [
+                {
+                    "ticker": "MSFT.NAS",
+                    "quantity": 1,
+                    "entry_price": 300,
+                    "entry_currency": "USD",
+                    "entry_pattern": None,
+                },
+            ],
+        )
+    )
+    output = tmp_path / "holdings.generated.yaml"
+
+    count = export_active_holdings_snapshot(
+        output_path=output,
+        config=SupabaseHoldingsExportConfig(
+            url="https://example.supabase.co",
+            service_role_key="sb_secret",
+        ),
+        session=session,
+    )
+
+    assert count == 1
+    payload = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert payload["holdings"][0]["entry_pattern"] is None
+
+
+def test_export_active_holdings_snapshot_fails_when_entry_pattern_omitted(
+    tmp_path: Path,
+) -> None:
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            [
+                {
+                    "ticker": "MSFT.NAS",
+                    "quantity": 1,
+                    "entry_price": 300,
+                    "entry_currency": "USD",
+                },
+            ],
+        )
+    )
+
+    try:
+        export_active_holdings_snapshot(
+            output_path=tmp_path / "holdings.generated.yaml",
+            config=SupabaseHoldingsExportConfig(
+                url="https://example.supabase.co",
+                service_role_key="sb_secret",
+            ),
+            session=session,
+        )
+    except Exception as exc:
+        assert "omitted entry_pattern" in str(exc)
+    else:
+        raise AssertionError("expected omitted entry_pattern to fail")
