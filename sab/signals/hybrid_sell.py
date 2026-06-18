@@ -44,7 +44,7 @@ class HybridSellSettings:
 
 @dataclass
 class HybridSellEvaluation:
-    action: str  # HOLD, REVIEW, SELL
+    action: str  # HOLD, SELL_PARTIAL, REVIEW, SELL
     reasons: list[str]
     stop_price: float | None = None
     target_price: float | None = None
@@ -606,6 +606,8 @@ def _apply_profit_protection(
                 "Profit protection tightened above entry "
                 f"({profit_label} ≥ {settings.profit_target_low * 100:.1f}%)"
             )
+            if action_out == "HOLD":
+                action_out = "SELL_PARTIAL"
         if profit_basis_pnl >= settings.profit_target_high:
             profit_protection_high_armed = True
             extended_stop = entry_price * (1.0 + settings.profit_target_low)

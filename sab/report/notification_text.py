@@ -321,6 +321,8 @@ def _format_sell_action(action: str) -> str:
     normalized = _safe_str(action).upper()
     if normalized == "SELL":
         return "매도"
+    if normalized == "SELL_PARTIAL":
+        return "부분매도"
     if normalized == "REVIEW":
         return "점검"
     if normalized == "HOLD":
@@ -569,7 +571,7 @@ def build_sell_telegram_report_text(
     report: dict[str, Any],
     run_url: str,
     provider: str,
-    include_actions: Collection[str] = ("SELL", "REVIEW"),
+    include_actions: Collection[str] = ("SELL", "SELL_PARTIAL", "REVIEW"),
     storage_key: str | None = None,
     max_items: int = 5,
 ) -> str:
@@ -582,6 +584,7 @@ def build_sell_telegram_report_text(
     total = len(filtered)
     shown = min(total, max(max_items, 0))
     sell_count = action_counts.get("SELL", 0)
+    partial_sell_count = action_counts.get("SELL_PARTIAL", 0)
     review_count = action_counts.get("REVIEW", 0)
     hold_count = action_counts.get("HOLD", 0)
 
@@ -591,7 +594,8 @@ def build_sell_telegram_report_text(
         f"시각: {_generated_at(report)}",
         (
             f"대상: {total}건 "
-            f"(매도 {sell_count}, 점검 {review_count}, 보유 {hold_count} 제외)"
+            f"(매도 {sell_count}, 부분매도 {partial_sell_count}, "
+            f"점검 {review_count}, 보유 {hold_count} 제외)"
         ),
     ]
 

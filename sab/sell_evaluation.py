@@ -276,7 +276,7 @@ def _evaluate_holdings(
             )
         )
 
-    order = {"SELL": 0, "REVIEW": 1, "HOLD": 2}
+    order = {"SELL": 0, "SELL_PARTIAL": 1, "REVIEW": 2, "HOLD": 3}
     results.sort(key=lambda row: (order.get(row.action, 99), row.ticker))
     return results
 

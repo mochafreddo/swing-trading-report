@@ -3,7 +3,6 @@
 ## Active
 
 - 2026-06-09: Swing-trader review follow-ups for the current `sma_ema_hybrid` strategy:
-  - Consider partial-exit actions such as `TRIM`/`SELL_PARTIAL`; current hybrid sell logic tightens protective stops at 5%/10% profit tiers but does not realize partial gains.
   - Use `quality_state` as an entry policy input, e.g. default `A -> ENTER`, `B -> REVIEW`, `C -> REVIEW/WATCH`, instead of letting READY rows pass without quality-state policy after gap/trigger/risk checks.
   - Revisit pattern-specific time stops; the current 30-session stop plus 15-session grace may hold weak swing setups too long, especially failed breakouts.
 
@@ -14,6 +13,7 @@
 
 ## Completed
 
+- 2026-06-18: Added `SELL_PARTIAL` for `sma_ema_hybrid` low/high profit target tiers, including sell report ordering, Telegram notification inclusion/display, and strategy documentation, so profit tiers can now suggest partial exits instead of only tightening stops.
 - 2026-06-18: Preserved buy `pattern` as holdings `entry_pattern` across Python YAML loading, Supabase holdings storage, scheduled export, web holdings create/edit/import/export, and recent buy candidate selection, so `sma_ema_hybrid` failed-breakout sell rules no longer depend on manual `strategy`/`tags` markers.
 - 2026-06-09: Downgraded `sma_ema_hybrid` entry candidates with explicit non-`aligned` `risk_alignment` to `REVIEW`, so volatility/unknown-risk buy warnings cannot become automatic `ENTER` rows just because price, gap, and trigger checks pass.
 - 2026-06-05: Added optional live integration smoke coverage via `scripts/live_integration_smoke.py` and `just live-integration-smoke`, so local refactors can intentionally verify real RSS/source API/KIS market-data service boundaries when credentials and network access are available.

@@ -755,7 +755,9 @@ def test_hybrid_sell_failed_breakout_state_preserves_contract(
     assert result.reasons == expected_reasons
 
 
-def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatch):
+def test_hybrid_sell_profit_high_requests_partial_exit_without_forcing_sell(
+    monkeypatch,
+):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -765,7 +767,7 @@ def test_hybrid_sell_profit_high_arms_protection_without_forcing_sell(monkeypatc
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(110.0), holding, settings
     )
-    assert result.action == "HOLD"
+    assert result.action == "SELL_PARTIAL"
     assert result.stop_price == 105.0
     assert any("High-target profit protection activated" in r for r in result.reasons)
 
@@ -905,7 +907,7 @@ def test_hybrid_sell_future_entry_ignores_corporate_action_current_pnl(
     assert not any("Profit protection" in reason for reason in result.reasons)
 
 
-def test_hybrid_sell_profit_target_zone_tightens_stop_without_review(monkeypatch):
+def test_hybrid_sell_profit_target_zone_requests_partial_exit(monkeypatch):
     _patch_indicators(monkeypatch)
     settings = HybridSellSettings(
         min_bars=2, ema_short_period=2, ema_mid_period=2, sma_trend_period=2
@@ -915,7 +917,7 @@ def test_hybrid_sell_profit_target_zone_tightens_stop_without_review(monkeypatch
     result = evaluate_sell_signals_hybrid(
         "FAKE.US", _simple_candles(105.0), holding, settings
     )
-    assert result.action == "HOLD"
+    assert result.action == "SELL_PARTIAL"
     assert result.stop_price == 103.0
     assert any("Profit protection tightened above entry" in r for r in result.reasons)
 

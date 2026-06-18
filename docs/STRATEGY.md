@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-17
+최종 확인: 2026-06-18
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -41,7 +41,7 @@
 - **system 이슈**: 데이터 부족/비정상 캔들/예외 등 “시그널 이전”의 시스템/데이터 문제.
 - **signal 탈락**: 규칙(필터/조건) 불충족으로 후보에서 제외되는 경우.
 - **candidate**: buy 리포트에 들어가는 종목 단위 결과(dict).
-- **sell action**: `HOLD|REVIEW|SELL`.
+- **sell action**: `HOLD|SELL_PARTIAL|REVIEW|SELL`.
 - **entry_state**(hybrid buy 전용): `WATCH|READY`(대기 vs 종가 기반 확인 신호).
 
 ## 3. 입력 데이터 계약
@@ -366,7 +366,7 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
 
 ## 6. Sell 로직 설계
 
-Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
+Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
 
 - 평가 대상은 `quantity > 0`인 활성 보유분으로 한정합니다(`quantity <= 0`은 평가에서 제외).
 - `entry_date`가 평가 캔들 날짜보다 미래이면 time stop 계산을 건너뛰고 `REVIEW`로 올립니다.
@@ -406,8 +406,8 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - `entry_date`가 없거나 유효하지 않으면 기존 호환성을 위해 평가일 현재 P&L만 사용합니다.
   - `entry_date`가 유효하지만 평가 구간에 진입일 이후 완료봉이 없으면, pre-entry 가격으로 profit protection을 활성화하지 않습니다.
   - partial profit zone 도달 시 break-even 보호 stop을 제안하고 기본 action은 `HOLD`
-  - low target 도달 시 보호 stop을 추가로 강화하고 기본 action은 `HOLD`
-  - high target 도달 시 더 강한 보호 stop을 제안하되, stop 이탈 전에는 즉시 `SELL`하지 않습니다.
+  - low target 도달 시 보호 stop을 추가로 강화하고 기본 action은 `SELL_PARTIAL`입니다. 이 action은 부분 이익실현 검토/실행 제안이며 자동 주문은 아닙니다.
+  - high target 도달 시 더 강한 보호 stop을 제안하고 기본 action은 `SELL_PARTIAL`입니다. stop 이탈 전에는 전체 `SELL`로 승격하지 않습니다.
   - high target 보호 stop이 활성화된 뒤 종가가 해당 stop 아래로 내려오면 `SELL`, 그보다 낮은 티어의 보호 stop 이탈은 `REVIEW`입니다.
   - corporate action 의심 구간에서는 분할/병합 전 가격 피크가 왜곡될 수 있으므로 과거 피크 기반 profit protection을 쓰지 않고 수동 확인 경로를 우선합니다.
   - corporate action 의심 여부는 최근 봉뿐 아니라 `entry_date` 이후 평가 구간 전체의 split-like 변동도 확인합니다.
@@ -518,7 +518,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
 
 ### 7.2 Sell report (row)
 
-- `action`은 `HOLD|REVIEW|SELL` 중 하나입니다.
+- `action`은 `HOLD|SELL_PARTIAL|REVIEW|SELL` 중 하나입니다.
 - `stop_price`, `target_price`는 “가이드”이며, override가 있으면 override가 우선합니다.
 
 ## 8. 운영/재현성 권장 사항

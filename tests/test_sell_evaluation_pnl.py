@@ -133,6 +133,62 @@ def test_evaluate_holdings_keeps_pnl_none_when_entry_price_is_zero() -> None:
     assert rows[0].pnl_pct is None
 
 
+def test_evaluate_holdings_orders_partial_sell_before_review() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.holdings = [
+        SimpleNamespace(
+            ticker=ticker,
+            quantity=1.0,
+            entry_price=100.0,
+            entry_date="2025-01-01",
+            stop_override=None,
+            target_override=None,
+            strategy=None,
+            entry_currency="USD",
+            notes=None,
+        )
+        for ticker in ("HOLD.NASD", "PART.NASD", "SELL.NASD", "REVW.NASD")
+    ]
+    runtime.market_data = {
+        holding.ticker: runtime.market_data["AAPL.NASD"] for holding in runtime.holdings
+    }
+    runtime.ticker_currency = {holding.ticker: "USD" for holding in runtime.holdings}
+    action_by_ticker = {
+        "HOLD.NASD": "HOLD",
+        "PART.NASD": "SELL_PARTIAL",
+        "SELL.NASD": "SELL",
+        "REVW.NASD": "REVIEW",
+    }
+
+    def _evaluate(ticker: str, *_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            action=action_by_ticker[ticker],
+            reasons=["ok"],
+            stop_price=None,
+            target_price=None,
+            eval_price=100.0,
+            eval_date="20250102",
+        )
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert [row.action for row in rows] == [
+        "SELL",
+        "SELL_PARTIAL",
+        "REVIEW",
+        "HOLD",
+    ]
+
+
 def test_evaluate_holdings_passes_tags_to_hybrid_sell() -> None:
     runtime = _make_runtime(entry_price=100.0)
     runtime.cfg.sell_mode = "sma_ema_hybrid"
