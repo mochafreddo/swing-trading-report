@@ -690,6 +690,7 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
     if not isinstance(value, list):
         raise AiBriefProviderContractError(f"OpenAI output {field_name} must be a list")
     source_refs: list[str] = []
+    seen_source_refs: set[str] = set()
     for idx, raw_ref in enumerate(value):
         if not isinstance(raw_ref, str):
             raise AiBriefProviderContractError(
@@ -700,6 +701,11 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
             raise AiBriefProviderContractError(
                 f"OpenAI output {field_name}[{idx}] must be a non-empty string"
             )
+        if source_ref in seen_source_refs:
+            raise AiBriefProviderContractError(
+                f"OpenAI output {field_name} must not contain duplicate source_refs"
+            )
+        seen_source_refs.add(source_ref)
         source_refs.append(source_ref)
     if len(source_refs) > _MAX_SOURCES_PER_TICKER:
         raise AiBriefProviderContractError(

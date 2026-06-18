@@ -824,6 +824,36 @@ def test_openai_resolves_watch_source_refs_to_canonical_sources() -> None:
     assert sources[0]["url"] == "https://news.example/MSFT.NAS"
 
 
+def test_openai_rejects_duplicate_watch_source_refs() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "source_refs": ["MSFT.NAS:1", "MSFT.NAS:1"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="duplicate source_refs"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+        )
+
+
 def test_openai_resolves_recommendation_source_refs_to_canonical_sources() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
@@ -941,6 +971,37 @@ def test_openai_rejects_non_string_source_ref_items() -> None:
     )
 
     with pytest.raises(AiBriefProviderContractError, match="must be a string"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+
+def test_openai_rejects_duplicate_recommendation_source_refs() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["duplicate source refs"],
+                        "checklist": ["manually confirm price and risk before order"],
+                        "source_refs": ["AAPL.NAS:1", "AAPL.NAS:1"],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="duplicate source_refs"):
         provider.build_recommendations(
             recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
             watch_candidates=[],
