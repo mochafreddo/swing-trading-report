@@ -287,6 +287,7 @@ describe("POST /api/holdings/[ticker]/add-buy route", () => {
       entry_currency: "USD",
       entry_date: "2026-03-03",
       strategy: null,
+      entry_pattern: null,
       notes: null,
       tags: [],
       stop_override: null,

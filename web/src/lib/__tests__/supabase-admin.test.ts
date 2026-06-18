@@ -424,6 +424,7 @@ function holdingRow(
     ticker: string;
     quantity: number;
     entry_price: number;
+    entry_pattern: string | null;
   }> = {},
 ) {
   return {
@@ -433,6 +434,7 @@ function holdingRow(
     entry_currency: null,
     entry_date: null,
     strategy: null,
+    entry_pattern: overrides.entry_pattern ?? null,
     notes: null,
     tags: [],
     stop_override: null,
@@ -469,6 +471,7 @@ describe("fetchAllHoldings", () => {
     expect(rows).toHaveLength(501);
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(firstUrl.searchParams.get("select")).toContain("entry_pattern");
     expect(firstUrl.searchParams.get("offset")).toBe("0");
     expect(secondUrl.searchParams.get("offset")).toBe("500");
   });
@@ -525,6 +528,30 @@ describe("holding mutations alias handling", () => {
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
     expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
     expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+  });
+
+  it("updateHolding clears entry pattern when quantity is zero", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([holdingRow({ ticker: "AAPL.NAS", quantity: 0 })]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await updateHolding("AAPL.NAS", {
+      quantity: 0,
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(requestInit?.body).toBe(
+      JSON.stringify({
+        quantity: 0,
+        entry_pattern: null,
+      }),
+    );
   });
 
   it("deleteHolding falls back to slash alias when canonical dot ticker row is absent", async () => {
@@ -604,6 +631,7 @@ describe("replaceAllHoldings", () => {
         entry_currency: "USD",
         entry_date: "2026-03-28",
         strategy: "swing",
+        entry_pattern: "swing_high_breakout",
         notes: "leader",
         tags: ["us"],
         stop_override: 220,
@@ -632,6 +660,7 @@ describe("replaceAllHoldings", () => {
             entry_currency: "USD",
             entry_date: "2026-03-28",
             strategy: "swing",
+            entry_pattern: "swing_high_breakout",
             notes: "leader",
             tags: ["us"],
             stop_override: 220,
@@ -640,6 +669,64 @@ describe("replaceAllHoldings", () => {
         ],
       }),
     );
+  });
+
+  it("replaceAllHoldings omits undefined entry pattern but keeps explicit null", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            inserted_count: 0,
+            updated_count: 1,
+            deleted_count: 0,
+            unchanged_count: 0,
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await replaceAllHoldings([
+      {
+        ticker: "AAPL.NAS",
+        quantity: 1,
+        entry_price: 100,
+        entry_currency: "USD",
+        entry_date: null,
+        strategy: null,
+        entry_pattern: undefined,
+        notes: null,
+        tags: [],
+        stop_override: null,
+        target_override: null,
+      },
+      {
+        ticker: "MSFT.NAS",
+        quantity: 1,
+        entry_price: 300,
+        entry_currency: "USD",
+        entry_date: null,
+        strategy: null,
+        entry_pattern: null,
+        notes: null,
+        tags: [],
+        stop_override: null,
+        target_override: null,
+      },
+    ]);
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const body =
+      typeof requestInit?.body === "string"
+        ? (JSON.parse(requestInit.body) as {
+            p_holdings: Array<Record<string, unknown>>;
+          })
+        : null;
+    expect(body?.p_holdings[0]).not.toHaveProperty("entry_pattern");
+    expect(body?.p_holdings[1]).toHaveProperty("entry_pattern", null);
   });
 });
 

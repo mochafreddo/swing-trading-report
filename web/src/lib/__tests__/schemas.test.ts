@@ -231,8 +231,86 @@ describe("holding schemas", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("accepts active create payload with entry pattern", () => {
+    const parsed = holdingCreateSchema.parse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 172.5,
+      entry_pattern: " swing_high_breakout ",
+    });
+
+    expect(parsed.entry_pattern).toBe("swing_high_breakout");
+  });
+
+  it("rejects unknown create entry pattern values", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 172.5,
+      entry_pattern: "not_a_breakout",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects inactive create payload with non-null entry pattern", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.NAS",
+      quantity: 0,
+      entry_price: 0,
+      entry_pattern: "swing_high_breakout",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts inactive create payload with explicit null entry pattern", () => {
+    const parsed = holdingCreateSchema.parse({
+      ticker: "AAPL.NAS",
+      quantity: 0,
+      entry_price: 0,
+      entry_pattern: null,
+    });
+
+    expect(parsed.entry_pattern).toBeNull();
+  });
+
   it("requires at least one patch field", () => {
     const parsed = holdingPatchSchema.safeParse({});
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts active patch payload with entry pattern", () => {
+    const parsed = holdingPatchSchema.parse({
+      quantity: 1,
+      entry_pattern: " swing_high_breakout ",
+    });
+
+    expect(parsed.entry_pattern).toBe("swing_high_breakout");
+  });
+
+  it("rejects marker-only non-null entry pattern patch", () => {
+    const parsed = holdingPatchSchema.safeParse({
+      entry_pattern: "swing_high_breakout",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts explicit entry pattern clear without quantity", () => {
+    const parsed = holdingPatchSchema.parse({
+      entry_pattern: null,
+    });
+
+    expect(parsed.entry_pattern).toBeNull();
+  });
+
+  it("rejects inactive patch payload with non-null entry pattern", () => {
+    const parsed = holdingPatchSchema.safeParse({
+      quantity: 0,
+      entry_pattern: "swing_high_breakout",
+    });
+
     expect(parsed.success).toBe(false);
   });
 

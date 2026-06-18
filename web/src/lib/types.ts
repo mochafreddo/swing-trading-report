@@ -49,6 +49,7 @@ export interface HoldingRecord {
   entry_currency: string | null;
   entry_date: string | null;
   strategy: string | null;
+  entry_pattern: string | null;
   notes: string | null;
   tags: string[];
   stop_override: number | null;
@@ -58,6 +59,10 @@ export interface HoldingRecord {
 }
 
 export type HoldingSnapshot = Omit<HoldingRecord, "created_at" | "updated_at">;
+
+export type HoldingReplaceSnapshot = Omit<HoldingSnapshot, "entry_pattern"> & {
+  entry_pattern?: string | null;
+};
 
 export interface HoldingCursor {
   updated_at: string;
@@ -77,6 +82,7 @@ export interface HoldingMutationInput {
   entry_currency?: string | null;
   entry_date?: string | null;
   strategy?: string | null;
+  entry_pattern?: string | null;
   notes?: string | null;
   tags?: string[];
   stop_override?: number | null;

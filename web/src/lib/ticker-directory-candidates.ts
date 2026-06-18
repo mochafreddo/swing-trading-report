@@ -1,10 +1,15 @@
 import "server-only";
 
+import { isHoldingEntryPattern } from "@/lib/holding-entry-pattern";
 import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 
 export interface TickerDirectoryCandidate {
   ticker: string;
   name: string | null;
+}
+
+export interface RecentBuyCandidate extends TickerDirectoryCandidate {
+  pattern: string | null;
 }
 
 function toCleanString(value: unknown): string {
@@ -25,6 +30,11 @@ export function normalizeCandidateTicker(value: unknown): string {
 export function normalizeCandidateName(value: unknown): string | null {
   const text = toCleanString(value);
   return text ? text : null;
+}
+
+export function normalizeCandidatePattern(value: unknown): string | null {
+  const text = toCleanString(value);
+  return isHoldingEntryPattern(text) ? text : null;
 }
 
 export function collectTickerAliases(
@@ -84,6 +94,48 @@ export function extractBuyCandidatesFromRows(
       continue;
     }
     seen.add(candidate.ticker);
+    results.push(candidate);
+  }
+  return results;
+}
+
+export function extractRecentBuyCandidateFromRow(
+  row: unknown,
+): RecentBuyCandidate | null {
+  const candidate = extractBuyCandidateFromRow(row);
+  if (!candidate || !row || typeof row !== "object" || Array.isArray(row)) {
+    return null;
+  }
+  const raw = row as { pattern?: unknown };
+  return {
+    ...candidate,
+    pattern: normalizeCandidatePattern(raw.pattern),
+  };
+}
+
+export function extractRecentBuyCandidatesFromRows(
+  rows: unknown[],
+): RecentBuyCandidate[] {
+  const seen = new Map<string, RecentBuyCandidate>();
+  const results: RecentBuyCandidate[] = [];
+  for (const row of rows) {
+    const candidate = extractRecentBuyCandidateFromRow(row);
+    if (!candidate) {
+      continue;
+    }
+
+    const existing = seen.get(candidate.ticker);
+    if (existing) {
+      if (!existing.name && candidate.name) {
+        existing.name = candidate.name;
+      }
+      if (!existing.pattern && candidate.pattern) {
+        existing.pattern = candidate.pattern;
+      }
+      continue;
+    }
+
+    seen.set(candidate.ticker, candidate);
     results.push(candidate);
   }
   return results;

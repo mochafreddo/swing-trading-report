@@ -6,7 +6,11 @@ import {
   HoldingsYamlError,
   parseHoldingsYamlDocument,
 } from "@/lib/holdings-yaml";
-import type { HoldingRecord, HoldingSnapshot } from "@/lib/types";
+import type {
+  HoldingRecord,
+  HoldingReplaceSnapshot,
+  HoldingSnapshot,
+} from "@/lib/types";
 
 function snapshot(
   overrides: Partial<HoldingSnapshot> & Pick<HoldingSnapshot, "ticker">,
@@ -18,6 +22,7 @@ function snapshot(
     entry_currency: overrides.entry_currency ?? null,
     entry_date: overrides.entry_date ?? null,
     strategy: overrides.strategy ?? null,
+    entry_pattern: overrides.entry_pattern ?? null,
     notes: overrides.notes ?? null,
     tags: overrides.tags ?? [],
     stop_override: overrides.stop_override ?? null,
@@ -43,6 +48,7 @@ describe("holdings-yaml", () => {
         quantity: 3,
         entry_price: 250.5,
         entry_currency: "USD",
+        entry_pattern: "swing_high_breakout",
         tags: ["leader"],
       }),
       snapshot({
@@ -66,9 +72,27 @@ describe("holdings-yaml", () => {
         quantity: 3,
         entry_price: 250.5,
         entry_currency: "USD",
+        entry_pattern: "swing_high_breakout",
         tags: ["leader"],
       }),
     ]);
+  });
+
+  it("exports explicit null entry pattern ownership", () => {
+    const document = buildHoldingsYamlDocument([
+      snapshot({
+        ticker: "AAPL.NAS",
+        entry_currency: "USD",
+        entry_pattern: null,
+      }),
+    ]);
+
+    expect(document).toContain("entry_pattern: null");
+    const parsed = parseHoldingsYamlDocument(document);
+    expect(
+      Object.prototype.hasOwnProperty.call(parsed[0], "entry_pattern"),
+    ).toBe(true);
+    expect(parsed[0]?.entry_pattern).toBeNull();
   });
 
   it("applies settings defaults and ticker normalization on import", () => {
@@ -86,14 +110,18 @@ holdings:
 `);
 
     expect(parsed).toEqual([
-      snapshot({
+      {
         ticker: "BRK.B.NYS",
         quantity: 2,
         entry_price: 510,
         entry_currency: "USD",
+        entry_date: null,
         strategy: "swing",
+        notes: null,
         tags: ["leader"],
-      }),
+        stop_override: null,
+        target_override: null,
+      },
     ]);
   });
 
@@ -164,12 +192,45 @@ holdings:
     entry_price: 0
 `),
     ).toEqual([
-      snapshot({
+      {
         ticker: "005930",
         quantity: 0,
         entry_price: 0,
-      }),
+        entry_currency: null,
+        entry_date: null,
+        strategy: null,
+        notes: null,
+        tags: [],
+        stop_override: null,
+        target_override: null,
+      },
     ]);
+  });
+
+  it("rejects unknown entry pattern values", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+    entry_pattern: not_a_breakout
+`),
+    ).toThrow(/entry_pattern.*one of/);
+  });
+
+  it("rejects inactive holdings with non-null entry pattern", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 0
+    entry_price: 0
+    entry_currency: USD
+    entry_pattern: swing_high_breakout
+`),
+    ).toThrow(/entry_pattern.*inactive/);
   });
 
   it("builds a replace-all diff summary", () => {
@@ -212,5 +273,88 @@ holdings:
       updateTickers: [],
       deleteTickers: ["MSFT.NAS"],
     });
+  });
+
+  it("treats omitted entry pattern as preserve-existing for active row diff", () => {
+    const incoming = parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+`);
+    expect(
+      Object.prototype.hasOwnProperty.call(incoming[0], "entry_pattern"),
+    ).toBe(false);
+
+    const summary = buildHoldingsYamlImportSummary(
+      [
+        record({
+          ticker: "AAPL.NAS",
+          quantity: 1,
+          entry_price: 100,
+          entry_currency: "USD",
+          entry_pattern: "swing_high_breakout",
+        }),
+      ],
+      incoming,
+    );
+
+    expect(summary.updateCount).toBe(0);
+    expect(summary.unchangedCount).toBe(1);
+  });
+
+  it("requires explicit entry pattern when entry identity changes", () => {
+    const incoming = parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 101
+    entry_currency: USD
+`) satisfies HoldingReplaceSnapshot[];
+
+    expect(() =>
+      buildHoldingsYamlImportSummary(
+        [
+          record({
+            ticker: "AAPL.NAS",
+            quantity: 1,
+            entry_price: 100,
+            entry_currency: "USD",
+            entry_pattern: "swing_high_breakout",
+          }),
+        ],
+        incoming,
+      ),
+    ).toThrow(/entry_pattern.*entry identity/);
+  });
+
+  it("treats explicit null entry pattern as a clear during diff", () => {
+    const incoming = parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+    entry_pattern: null
+`);
+    expect(
+      Object.prototype.hasOwnProperty.call(incoming[0], "entry_pattern"),
+    ).toBe(true);
+
+    const summary = buildHoldingsYamlImportSummary(
+      [
+        record({
+          ticker: "AAPL.NAS",
+          quantity: 1,
+          entry_price: 100,
+          entry_currency: "USD",
+          entry_pattern: "swing_high_breakout",
+        }),
+      ],
+      incoming,
+    );
+
+    expect(summary.updateCount).toBe(1);
   });
 });

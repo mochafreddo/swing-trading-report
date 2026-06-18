@@ -3,11 +3,14 @@ import Link from "next/link";
 
 import styles from "../holdings-client.module.css";
 
+import { HOLDING_ENTRY_PATTERN_VALUES } from "@/lib/holding-entry-pattern";
+
 import type { HoldingFormState } from "./form-state";
 
 interface TickerLookupItem {
   ticker: string;
   name: string | null;
+  pattern?: string | null;
 }
 
 interface HoldingsFormPanelProps {
@@ -29,7 +32,7 @@ interface HoldingsFormPanelProps {
   onCancelEdit: () => void;
   onFieldChange: (field: keyof HoldingFormState, value: string) => void;
   onTickerLookupQueryChange: (value: string) => void;
-  onSelectTicker: (ticker: string) => void;
+  onSelectTicker: (ticker: string, entryPattern?: string | null) => void;
 }
 
 export function HoldingsFormPanel({
@@ -153,11 +156,18 @@ export function HoldingsFormPanel({
                   <button
                     type="button"
                     className={styles.lookupItemButton}
-                    onClick={() => onSelectTicker(item.ticker)}
+                    onClick={() => onSelectTicker(item.ticker, item.pattern)}
                   >
                     <span className={styles.lookupTicker}>{item.ticker}</span>
-                    <span className={styles.lookupName}>
-                      {item.name ?? "이름 없음"}
+                    <span>
+                      <span className={styles.lookupName}>
+                        {item.name ?? "이름 없음"}
+                      </span>
+                      {item.pattern && (
+                        <span className={styles.lookupMeta}>
+                          Pattern: {item.pattern}
+                        </span>
+                      )}
                     </span>
                   </button>
                 </li>
@@ -237,6 +247,24 @@ export function HoldingsFormPanel({
             onChange={(event) => onFieldChange("strategy", event.target.value)}
             placeholder="optional"
           />
+        </label>
+
+        <label>
+          Entry Pattern
+          <select
+            name="entryPattern"
+            value={form.entry_pattern}
+            onChange={(event) =>
+              onFieldChange("entry_pattern", event.target.value)
+            }
+          >
+            <option value="">None</option>
+            {HOLDING_ENTRY_PATTERN_VALUES.map((pattern) => (
+              <option key={pattern} value={pattern}>
+                {pattern}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label>

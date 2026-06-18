@@ -138,7 +138,14 @@ export function HoldingsTable({
                     <td data-label="Notes" className={styles.notesCell}>
                       {row.notes ?? "-"}
                     </td>
-                    <td data-label="Tags">{row.tags.join(", ") || "-"}</td>
+                    <td data-label="Tags">
+                      {row.tags.join(", ") || "-"}
+                      {row.entry_pattern && (
+                        <span className={styles.entryPatternMeta}>
+                          Entry Pattern: {row.entry_pattern}
+                        </span>
+                      )}
+                    </td>
                     <td data-label="Updated">{row.updated_at}</td>
                     <td data-label="Action">
                       <div className={styles.inlineActions}>

@@ -14,6 +14,7 @@ function makeHolding(ticker: string, quantity: number): HoldingRecord {
     entry_currency: "USD",
     entry_date: "2026-02-14",
     strategy: null,
+    entry_pattern: null,
     notes: null,
     tags: [],
     stop_override: null,

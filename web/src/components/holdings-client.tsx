@@ -49,10 +49,24 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     beginEdit,
     cancelEdit,
   } = useHoldingsForm({ refresh, saveHolding: saveHoldingAction, setError });
+  const updateTickerField = useCallback(
+    (ticker: string) => updateField("ticker", ticker),
+    [updateField],
+  );
   const tickerLookup = useTickerLookup({
-    onSelectTicker: (ticker) => updateField("ticker", ticker),
+    onSelectTicker: updateTickerField,
   });
+  const { selectTicker: selectLookupTicker } = tickerLookup;
   const recentCandidates = useRecentCandidates();
+  const selectTicker = useCallback(
+    (ticker: string, entryPattern?: string | null) => {
+      selectLookupTicker(ticker);
+      if (entryPattern !== undefined) {
+        updateField("entry_pattern", entryPattern ?? "");
+      }
+    },
+    [selectLookupTicker, updateField],
+  );
   const addBuy = useAddBuyFlow({
     items,
     refresh,
@@ -122,7 +136,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           onCancelEdit={cancelEdit}
           onFieldChange={updateField}
           onTickerLookupQueryChange={tickerLookup.setQuery}
-          onSelectTicker={tickerLookup.selectTicker}
+          onSelectTicker={selectTicker}
         />
         <HoldingsAddBuyPanel
           target={addBuy.target}

@@ -5,6 +5,7 @@ import {
   ADD_BUY_IDEMPOTENCY_MISMATCH_DETAIL,
 } from "@/lib/add-buy-idempotency";
 import { getSupabaseEnv } from "@/lib/env.server";
+import { normalizeHoldingMutationForPersistence } from "@/lib/holding-mutation";
 import { buildHoldingTickerAliases } from "@/lib/holding-ticker";
 import {
   buildHoldingsKeysetFilter,
@@ -21,11 +22,14 @@ import type {
   HoldingCursor,
   HoldingMutationInput,
   HoldingRecord,
-  HoldingSnapshot,
+  HoldingReplaceSnapshot,
 } from "@/lib/types";
 
 const HOLDINGS_SELECT =
-  "ticker,quantity,entry_price,entry_currency,entry_date,strategy,notes,tags,stop_override,target_override,created_at,updated_at";
+  "ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,created_at,updated_at";
+
+const hasOwn = (value: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
 
 export interface FetchHoldingsPageOptions {
   limit?: number;
@@ -194,7 +198,7 @@ function parseReplaceAllHoldingsResult(
 }
 
 export async function replaceAllHoldings(
-  input: HoldingSnapshot[],
+  input: HoldingReplaceSnapshot[],
 ): Promise<ReplaceAllHoldingsResult> {
   const env = getSupabaseEnv();
   const url = `${env.SUPABASE_URL}/rest/v1/rpc/replace_holdings_v1`;
@@ -205,18 +209,29 @@ export async function replaceAllHoldings(
       Accept: "application/json",
     }),
     body: JSON.stringify({
-      p_holdings: input.map((row) => ({
-        ticker: row.ticker,
-        quantity: row.quantity,
-        entry_price: row.entry_price,
-        entry_currency: row.entry_currency,
-        entry_date: row.entry_date,
-        strategy: row.strategy,
-        notes: row.notes,
-        tags: row.tags,
-        stop_override: row.stop_override,
-        target_override: row.target_override,
-      })),
+      p_holdings: input.map((row) => {
+        const payload = {
+          ticker: row.ticker,
+          quantity: row.quantity,
+          entry_price: row.entry_price,
+          entry_currency: row.entry_currency,
+          entry_date: row.entry_date,
+          strategy: row.strategy,
+          ...(hasOwn(row, "entry_pattern") && row.entry_pattern !== undefined
+            ? { entry_pattern: row.entry_pattern }
+            : {}),
+          notes: row.notes,
+          tags: row.tags,
+          stop_override: row.stop_override,
+          target_override: row.target_override,
+        } satisfies HoldingMutationInput & {
+          ticker: string;
+          quantity: number;
+          entry_price: number;
+          tags: string[];
+        };
+        return normalizeHoldingMutationForPersistence(payload);
+      }),
     }),
     cache: "no-store",
   });
@@ -289,7 +304,7 @@ async function patchHoldingByExactTicker(
       Accept: "application/json",
       Prefer: "return=representation",
     }),
-    body: JSON.stringify(patch),
+    body: JSON.stringify(normalizeHoldingMutationForPersistence(patch)),
     cache: "no-store",
   });
 
@@ -363,7 +378,7 @@ export async function createHolding(
       Accept: "application/json",
       Prefer: "return=representation",
     }),
-    body: JSON.stringify(input),
+    body: JSON.stringify(normalizeHoldingMutationForPersistence(input)),
     cache: "no-store",
   });
 

@@ -138,10 +138,12 @@ describe("GET /api/tickers/recent-candidates", () => {
         {
           ticker: "COST.NAS",
           name: "코스트코 홀세일",
+          pattern: null,
         },
         {
           ticker: "ETN.NYS",
           name: "이튼",
+          pattern: null,
         },
       ],
     });
@@ -151,7 +153,11 @@ describe("GET /api/tickers/recent-candidates", () => {
     );
     const payload = (await response.json()) as {
       report: { key: string; reportDate: string | null } | null;
-      candidates: Array<{ ticker: string; name: string | null }>;
+      candidates: Array<{
+        ticker: string;
+        name: string | null;
+        pattern: string | null;
+      }>;
     };
 
     expect(response.status).toBe(200);

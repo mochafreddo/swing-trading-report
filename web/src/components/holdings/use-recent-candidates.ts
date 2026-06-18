@@ -50,7 +50,11 @@ export function useRecentCandidates({
             readApiError(payload) || "Failed to load recent buy candidates",
           );
         }
-        setCandidates(parseTickerLookupResults(payload.candidates));
+        setCandidates(
+          parseTickerLookupResults(payload.candidates, {
+            includePattern: true,
+          }),
+        );
         setReportKey(
           payload.report && typeof payload.report.key === "string"
             ? payload.report.key

@@ -5,6 +5,7 @@ export interface HoldingFormState {
   entry_currency: string;
   entry_date: string;
   strategy: string;
+  entry_pattern: string;
   notes: string;
   tags: string;
   stop_override: string;
@@ -25,6 +26,7 @@ export function createEmptyHoldingForm(): HoldingFormState {
     entry_currency: "USD",
     entry_date: formatTodayLocalDate(),
     strategy: "swing",
+    entry_pattern: "",
     notes: "",
     tags: "",
     stop_override: "",

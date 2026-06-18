@@ -4,8 +4,10 @@ import { getSupabaseEnv } from "@/lib/env.server";
 import {
   collectTickerAliases,
   extractBuyCandidatesFromRows,
+  extractRecentBuyCandidatesFromRows,
   normalizeCandidateName,
   normalizeCandidateTicker,
+  type RecentBuyCandidate,
   type TickerDirectoryCandidate,
 } from "@/lib/ticker-directory-candidates";
 import {
@@ -24,7 +26,10 @@ const DIRECTORY_BUILD_REPORT_LIMIT = 60;
 const REPORT_PAGE_SIZE = 20;
 const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
 
-export type { TickerDirectoryCandidate } from "@/lib/ticker-directory-candidates";
+export type {
+  RecentBuyCandidate,
+  TickerDirectoryCandidate,
+} from "@/lib/ticker-directory-candidates";
 
 interface TickerDirectoryEntryV1 {
   ticker: string;
@@ -64,7 +69,7 @@ export interface RecentBuyCandidatesResponse {
     key: string;
     reportDate: string | null;
   } | null;
-  candidates: TickerDirectoryCandidate[];
+  candidates: RecentBuyCandidate[];
 }
 
 type ReportIndexRow = Awaited<
@@ -301,6 +306,19 @@ async function tryLoadBuyReportCandidates(
   return extractBuyCandidatesFromReport(report);
 }
 
+async function tryLoadBuyReportRecentCandidates(
+  bucket: string,
+  reportKey: string,
+): Promise<RecentBuyCandidate[] | null> {
+  let report: Record<string, unknown>;
+  try {
+    report = await downloadStorageJson(bucket, reportKey);
+  } catch {
+    return null;
+  }
+  return extractRecentBuyCandidatesFromReport(report);
+}
+
 async function collectRecentBuyRows(
   limitReports: number,
 ): Promise<ReportIndexRow[]> {
@@ -490,6 +508,13 @@ export function extractBuyCandidatesFromReport(
   return extractBuyCandidatesFromRows(rows);
 }
 
+export function extractRecentBuyCandidatesFromReport(
+  report: Record<string, unknown>,
+): RecentBuyCandidate[] {
+  const rows = Array.isArray(report.candidates) ? report.candidates : [];
+  return extractRecentBuyCandidatesFromRows(rows);
+}
+
 export async function searchTickerDirectory(
   options: SearchOptions,
 ): Promise<TickerDirectorySearchResponse> {
@@ -542,7 +567,7 @@ export async function listRecentBuyCandidates(
   const rows = await collectRecentBuyRows(limitReports);
 
   for (const row of rows) {
-    const allCandidates = await tryLoadBuyReportCandidates(
+    const allCandidates = await tryLoadBuyReportRecentCandidates(
       env.SUPABASE_REPORTS_BUCKET,
       row.report_key,
     );

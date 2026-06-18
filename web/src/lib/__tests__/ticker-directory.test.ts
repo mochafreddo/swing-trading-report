@@ -109,6 +109,7 @@ describe("extractBuyCandidatesFromReport", () => {
         {
           ticker: "brk/b.nys",
           name: "버크셔 해서웨이",
+          pattern: "swing_high_breakout",
         },
         {
           ticker: "  ",
@@ -131,6 +132,7 @@ describe("extractBuyCandidatesFromReport", () => {
         name: "코스트코",
       },
     ]);
+    expect(candidates[0]).not.toHaveProperty("pattern");
   });
 
   it("deduplicates ticker while keeping the first seen order", () => {
@@ -338,8 +340,99 @@ describe("listRecentBuyCandidates", () => {
 
     expect(result.report?.key).toBe("2026/02/2026-02-27.buy.json");
     expect(result.candidates).toEqual([
-      { ticker: "ABBV.NYS", name: "애브비" },
-      { ticker: "ETN.NYS", name: "이튼" },
+      { ticker: "ABBV.NYS", name: "애브비", pattern: null },
+      { ticker: "ETN.NYS", name: "이튼", pattern: null },
+    ]);
+  });
+
+  it("returns pattern metadata for recent buy candidates", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValueOnce(
+      reportIndexPage([
+        buyReportRow("2026/02/2026-02-27.buy.json", "2026-02-27"),
+      ]),
+    );
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [
+        {
+          ticker: "AAPL.NAS",
+          name: "Apple",
+          pattern: "swing_high_breakout",
+        },
+      ],
+    });
+
+    const result = await listRecentBuyCandidates({
+      limitReports: 1,
+      limitCandidates: 5,
+    });
+
+    expect(result.candidates).toEqual([
+      {
+        ticker: "AAPL.NAS",
+        name: "Apple",
+        pattern: "swing_high_breakout",
+      },
+    ]);
+  });
+
+  it("normalizes invalid recent buy candidate patterns to null", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValueOnce(
+      reportIndexPage([
+        buyReportRow("2026/02/2026-02-27.buy.json", "2026-02-27"),
+      ]),
+    );
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [
+        {
+          ticker: "AAPL.NAS",
+          name: "Apple",
+          pattern: "not_a_breakout",
+        },
+      ],
+    });
+
+    const result = await listRecentBuyCandidates({
+      limitReports: 1,
+      limitCandidates: 5,
+    });
+
+    expect(result.candidates).toEqual([
+      {
+        ticker: "AAPL.NAS",
+        name: "Apple",
+        pattern: null,
+      },
+    ]);
+  });
+
+  it("promotes first valid pattern from duplicate recent candidates", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValueOnce(
+      reportIndexPage([
+        buyReportRow("2026/02/2026-02-27.buy.json", "2026-02-27"),
+      ]),
+    );
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [
+        { ticker: "AAPL.NAS", name: "Apple", pattern: null },
+        {
+          ticker: "aapl.nas",
+          name: "Apple Inc.",
+          pattern: "swing_high_breakout",
+        },
+      ],
+    });
+
+    const result = await listRecentBuyCandidates({
+      limitReports: 1,
+      limitCandidates: 5,
+    });
+
+    expect(result.candidates).toEqual([
+      {
+        ticker: "AAPL.NAS",
+        name: "Apple",
+        pattern: "swing_high_breakout",
+      },
     ]);
   });
 });

@@ -6,6 +6,10 @@ import {
 } from "@/lib/run-dispatch-policy";
 import { REPORT_TYPES } from "@/lib/types";
 import {
+  HOLDING_ENTRY_PATTERN_VALUES,
+  isHoldingEntryPattern,
+} from "@/lib/holding-entry-pattern";
+import {
   KR_TICKER_PATTERN,
   normalizeHoldingTickerForMutation,
   US_TICKER_PATTERN,
@@ -58,6 +62,26 @@ const toNullableTrimmedString = (maxLength: number) =>
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
   }, z.string().max(maxLength).nullable());
+
+const toNullableEntryPattern = z.preprocess(
+  (value) => {
+    if (value == null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      return value;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  },
+  z
+    .string()
+    .max(120)
+    .refine(isHoldingEntryPattern, {
+      message: `entry_pattern must be one of ${HOLDING_ENTRY_PATTERN_VALUES.join(", ")}`,
+    })
+    .nullable(),
+);
 
 const toOptionalNonNegativeNumber = z.preprocess((value) => {
   if (value === "" || value == null) {
@@ -199,6 +223,7 @@ export const holdingCreateSchema = z
     entry_currency: toNullableTrimmedString(12).optional(),
     entry_date: entryDateSchema.optional(),
     strategy: toNullableTrimmedString(80).optional(),
+    entry_pattern: toNullableEntryPattern.optional(),
     notes: toNullableTrimmedString(2000).optional(),
     tags: toTags.default([]),
     stop_override: toNullableNonNegativeNumber.optional(),
@@ -208,6 +233,15 @@ export const holdingCreateSchema = z
   .refine((payload) => payload.quantity === 0 || payload.entry_price > 0, {
     message: "entry_price must be > 0 when quantity > 0",
     path: ["entry_price"],
+  })
+  .superRefine((payload, ctx) => {
+    if (payload.entry_pattern != null && payload.quantity <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["entry_pattern"],
+        message: "entry_pattern requires quantity > 0",
+      });
+    }
   });
 
 export const holdingPatchSchema = z
@@ -218,6 +252,7 @@ export const holdingPatchSchema = z
     entry_currency: toNullableTrimmedString(12).optional(),
     entry_date: entryDateSchema.optional(),
     strategy: toNullableTrimmedString(80).optional(),
+    entry_pattern: toNullableEntryPattern.optional(),
     notes: toNullableTrimmedString(2000).optional(),
     tags: toTags.optional(),
     stop_override: toNullableNonNegativeNumber.optional(),
@@ -236,6 +271,18 @@ export const holdingPatchSchema = z
       path: ["entry_price"],
     },
   )
+  .superRefine((payload, ctx) => {
+    if (
+      payload.entry_pattern != null &&
+      (payload.quantity == null || payload.quantity <= 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["entry_pattern"],
+        message: "entry_pattern requires quantity > 0",
+      });
+    }
+  })
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one field must be provided",
   });

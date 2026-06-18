@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { readApiError } from "@/components/holdings/helpers";
+import { isHoldingEntryPattern } from "@/lib/holding-entry-pattern";
 
 export interface TickerLookupResult {
   ticker: string;
   name: string | null;
+  pattern?: string | null;
 }
 
 interface TickerLookupState {
@@ -24,6 +26,10 @@ interface UseTickerLookupOptions {
   debounceMs?: number;
 }
 
+interface ParseTickerLookupResultsOptions {
+  includePattern?: boolean;
+}
+
 const EMPTY_TICKER_LOOKUP_STATE: TickerLookupState = {
   query: "",
   results: [],
@@ -33,6 +39,7 @@ const EMPTY_TICKER_LOOKUP_STATE: TickerLookupState = {
 
 export function parseTickerLookupResults(
   payload: unknown,
+  options: ParseTickerLookupResultsOptions = {},
 ): TickerLookupResult[] {
   if (!Array.isArray(payload)) {
     return [];
@@ -42,17 +49,29 @@ export function parseTickerLookupResults(
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       continue;
     }
-    const raw = item as { ticker?: unknown; name?: unknown };
+    const raw = item as {
+      ticker?: unknown;
+      name?: unknown;
+      pattern?: unknown;
+    };
     const ticker =
       typeof raw.ticker === "string" ? raw.ticker.trim().toUpperCase() : "";
     if (!ticker) {
       continue;
     }
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
-    results.push({
+    const result: TickerLookupResult = {
       ticker,
       name: name || null,
-    });
+    };
+    if (options.includePattern) {
+      const pattern =
+        typeof raw.pattern === "string" && isHoldingEntryPattern(raw.pattern)
+          ? raw.pattern
+          : null;
+      result.pattern = pattern;
+    }
+    results.push(result);
   }
   return results;
 }

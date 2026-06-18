@@ -18,6 +18,7 @@ function makeHolding(overrides: Partial<HoldingRecord> = {}): HoldingRecord {
     created_at: "2026-03-03T00:00:00Z",
     updated_at: "2026-03-03T00:00:00Z",
     ...overrides,
+    entry_pattern: overrides.entry_pattern ?? null,
   };
 }
 

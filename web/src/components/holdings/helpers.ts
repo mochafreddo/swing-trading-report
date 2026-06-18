@@ -45,6 +45,7 @@ export function recordToForm(record: HoldingRecord): HoldingFormState {
     entry_currency: record.entry_currency ?? "",
     entry_date: record.entry_date ?? "",
     strategy: record.strategy ?? "",
+    entry_pattern: record.entry_pattern ?? "",
     notes: record.notes ?? "",
     tags: record.tags.join(", "),
     stop_override:
@@ -55,13 +56,15 @@ export function recordToForm(record: HoldingRecord): HoldingFormState {
 }
 
 function buildHoldingMutationPayload(form: HoldingFormState) {
+  const quantity = requiredNumber(form.quantity, "Quantity");
   return {
     ticker: form.ticker,
-    quantity: requiredNumber(form.quantity, "Quantity"),
+    quantity,
     entry_price: requiredNumber(form.entry_price, "Entry Price"),
     entry_currency: stringOrNull(form.entry_currency),
     entry_date: stringOrNull(form.entry_date),
     strategy: stringOrNull(form.strategy),
+    entry_pattern: quantity === 0 ? null : stringOrNull(form.entry_pattern),
     notes: stringOrNull(form.notes),
     tags: form.tags,
     stop_override: numberOrNull(form.stop_override),

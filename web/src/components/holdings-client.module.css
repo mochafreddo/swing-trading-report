@@ -31,6 +31,7 @@
 }
 
 .form input,
+.form select,
 .form textarea,
 .form button,
 .wrapper section button {
@@ -49,6 +50,7 @@
 }
 
 .form input:focus-visible,
+.form select:focus-visible,
 .form textarea:focus-visible,
 .form button:focus-visible,
 .wrapper section button:focus-visible {
@@ -168,6 +170,15 @@
 
 .lookupName {
   font-size: 0.875rem;
+}
+
+.lookupMeta,
+.entryPatternMeta {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  white-space: normal;
 }
 
 .formActions {

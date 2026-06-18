@@ -37,6 +37,7 @@ const HOLDING: HoldingRecord = {
   entry_currency: "USD",
   entry_date: "2026-03-01",
   strategy: null,
+  entry_pattern: null,
   notes: null,
   tags: [],
   stop_override: null,
@@ -105,6 +106,22 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement {
     throw new Error(`button containing "${text}" not found`);
   }
   return button;
+}
+
+function setControlValue(
+  control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+  value: string,
+  eventName: "input" | "change" = "input",
+) {
+  const prototype =
+    control instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : control instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+  const valueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  valueSetter?.call(control, value);
+  control.dispatchEvent(new Event(eventName, { bubbles: true }));
 }
 
 describe("holdings client hooks", () => {
@@ -179,7 +196,13 @@ describe("holdings client hooks", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
         report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
-        candidates: [{ ticker: "aapl.nas", name: "Apple" }],
+        candidates: [
+          {
+            ticker: "aapl.nas",
+            name: "Apple",
+            pattern: "swing_high_breakout",
+          },
+        ],
       }),
     );
     const hook = renderHook(() => useRecentCandidates({ fetcher }));
@@ -194,11 +217,36 @@ describe("holdings client hooks", () => {
       expect.objectContaining({ cache: "no-store" }),
     );
     expect(hook.current.candidates).toEqual([
-      { ticker: "AAPL.NAS", name: "Apple" },
+      { ticker: "AAPL.NAS", name: "Apple", pattern: "swing_high_breakout" },
     ]);
     expect(hook.current.reportKey).toBe("2026/03/report.buy.json");
     expect(hook.current.reportDate).toBe("2026-03-02");
     expect(hook.current.error).toBeNull();
+
+    hook.unmount();
+  });
+
+  it("normalizes omitted and invalid recent candidate patterns", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
+        candidates: [
+          { ticker: "aapl.nas", name: "Apple" },
+          { ticker: "msft.nas", name: "Microsoft", pattern: "not_a_breakout" },
+        ],
+      }),
+    );
+    const hook = renderHook(() => useRecentCandidates({ fetcher }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hook.current.candidates).toEqual([
+      { ticker: "AAPL.NAS", name: "Apple", pattern: null },
+      { ticker: "MSFT.NAS", name: "Microsoft", pattern: null },
+    ]);
 
     hook.unmount();
   });
@@ -384,5 +432,117 @@ describe("HoldingsClient composition", () => {
     expect(
       container.querySelector<HTMLInputElement>('input[name="buy_quantity"]'),
     ).not.toBeNull();
+  });
+
+  it("populates entry pattern when selecting a patterned recent candidate", async () => {
+    vi.mocked(globalThis.fetch as typeof fetch).mockResolvedValueOnce(
+      jsonResponse({
+        report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
+        candidates: [
+          {
+            ticker: "msft.nas",
+            name: "Microsoft",
+            pattern: "swing_high_breakout",
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: { items: [], hasMore: false, nextCursor: null },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Pattern: swing_high_breakout");
+
+    act(() => {
+      findButton(container, "MSFT.NAS").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="ticker"]')?.value,
+    ).toBe("MSFT.NAS");
+    expect(
+      container.querySelector<HTMLSelectElement>('select[name="entryPattern"]')
+        ?.value,
+    ).toBe("swing_high_breakout");
+  });
+
+  it("submits entry pattern from the holdings form", async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: { items: [], hasMore: false, nextCursor: null },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    const ticker = container.querySelector<HTMLInputElement>(
+      'input[name="ticker"]',
+    );
+    const quantity = container.querySelector<HTMLInputElement>(
+      'input[name="quantity"]',
+    );
+    const entryPrice = container.querySelector<HTMLInputElement>(
+      'input[name="entryPrice"]',
+    );
+    const entryPattern = container.querySelector<HTMLSelectElement>(
+      'select[name="entryPattern"]',
+    );
+    expect(ticker).not.toBeNull();
+    expect(quantity).not.toBeNull();
+    expect(entryPrice).not.toBeNull();
+    expect(entryPattern).not.toBeNull();
+
+    act(() => {
+      setControlValue(ticker!, "AAPL.NAS");
+      setControlValue(quantity!, "1");
+      setControlValue(entryPrice!, "100");
+      setControlValue(entryPattern!, "swing_high_breakout", "change");
+    });
+
+    await act(async () => {
+      container
+        .querySelector("form")
+        ?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      await Promise.resolve();
+    });
+
+    expect(saveHoldingAction).toHaveBeenCalledWith({
+      editingTicker: null,
+      payload: expect.objectContaining({
+        ticker: "AAPL.NAS",
+        entry_pattern: "swing_high_breakout",
+      }),
+    });
+  });
+
+  it("renders entry pattern metadata in the holdings table", async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: {
+            items: [{ ...HOLDING, entry_pattern: "swing_high_breakout" }],
+            hasMore: false,
+            nextCursor: null,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(
+      "Entry Pattern: swing_high_breakout",
+    );
   });
 });
