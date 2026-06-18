@@ -419,7 +419,7 @@ Sell은 보유 종목을 `HOLD|REVIEW|SELL`로 분류하고, stop/target 가이�
   - holdings의 `strategy` 또는 `tags` 중 하나에 `breakout`이 포함된 경우 손실 임계로 `SELL`
   - 로컬 `holdings.yaml`은 buy/entry report의 `pattern`을 `entry_pattern`으로 보존할 수 있습니다. 하위 hybrid sell evaluator는 구조화 필드(`pattern`, `entry_pattern`, `signal_pattern`)를 exact pattern ID로 해석하며, `swing_high_breakout`만 failed-breakout marker로 사용합니다.
   - 기존 holdings와의 호환을 위해 free-form `strategy`/`tags`의 `breakout` substring marker는 계속 인식합니다.
-  - Supabase/web/scheduled export 경로의 `entry_pattern` 보존은 별도 runtime 배포 경계에서 연결합니다.
+  - Supabase/web/scheduled export 경로는 active holdings의 `entry_pattern`을 보존합니다. 런타임이 `entry_pattern` 컬럼을 선택하므로 DB migration과 PostgREST schema cache가 먼저 적용되어야 합니다.
 - 하드 스탑 밴드(기본 3–5%):
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:

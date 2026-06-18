@@ -138,8 +138,9 @@ where schemaname = 'public'
 order by tablename;
 ```
 
-For the 2026-06 holdings `entry_pattern` migration, the rollback-only DB smoke
-checks the new column, write-closed RPC behavior, and Add Buy replay shape:
+For the 2026-06 holdings `entry_pattern` runtime migration, the DB smoke checks
+the column, enabled non-null replace-all writes, omitted-key preserve behavior,
+inactive-row null enforcement, and Add Buy replay shape:
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/smoke_holdings_entry_pattern.sql

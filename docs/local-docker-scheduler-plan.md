@@ -276,7 +276,7 @@ NOTIFICATION_SENT
 11. `scan -> holdings export -> entry -> ai-brief -> AI Brief upload -> notification reconciliation`을 실행합니다.
 12. `entry` 실행 전 Supabase `holdings`에서 active holdings snapshot을 export합니다.
    - `quantity > 0` row만 사용합니다.
-   - 필드는 current GitHub workflow와 같은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `notes`, `tags`, `stop_override`, `target_override`를 사용합니다.
+   - 필드는 current GitHub workflow와 같은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`를 사용합니다.
    - export 결과는 scheduler 임시 `holdings.yaml`에 쓰고 `HOLDINGS_FILE` 또는 config override로 `entry`에 주입합니다.
 13. scheduled AI Brief `report_date`는 container local timezone이 아니라 계산된 `sessionDate`로 고정합니다.
    - `sab ai-brief --report-date <sessionDate>` CLI 옵션을 추가합니다.

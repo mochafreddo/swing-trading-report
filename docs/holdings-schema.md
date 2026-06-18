@@ -14,7 +14,7 @@
 - 보유 목록의 단일 운영 소스는 Supabase `holdings`이며, `holdings.yaml`은 백업/import-export 입력으로 지원합니다.
 - YAML import는 dry-run + replace-all semantics, export는 전체 snapshot(`quantity=0` 포함) 기준으로 동작합니다.
 - 통화/티커 fail-closed 계약은 앱과 CLI 로더 양쪽에서 강제됩니다.
-- 로컬 Python 로더는 선택적 `entry_pattern`을 받아 sell 평가에 전달합니다. Supabase는 Phase A에서 nullable 컬럼/RPC 계약만 준비했고, 웹과 scheduled export가 필드를 소유하기 전까지 non-null DB write는 닫아둡니다.
+- 로컬 Python 로더, Supabase holdings, 웹 CRUD/YAML import/export, scheduled export는 선택적 `entry_pattern`을 보존해 sell 평가에 전달합니다.
 
 ### 실험
 
@@ -59,7 +59,7 @@ holdings:
 | `entry_price` | number | 평균 매입가 (기본 통화). DB는 `numeric(20,4)`(`>=0`)이며, `quantity>0` row는 `entry_price>0`을 요구합니다. |
 | `entry_currency` | string (선택) | 통화 표시 (예: `KRW`, `USD`). 수동 작성 파일에서는 US-only + `settings.default_currency: USD`일 때만 row 생략 허용. 웹 export는 모든 row에 명시적으로 기록 |
 | `entry_date` | string (YYYY-MM-DD) | 최초(또는 평균) 매입일 |
-| `entry_pattern` | string (선택) | buy/entry report의 `pattern`을 보존하는 진입 패턴 marker. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`입니다. 현재 로컬 CLI 로더/sell 평가 입력용이며, 웹 import/export와 scheduled holdings export는 Phase A에서 non-null 값을 보존하지 않습니다. |
+| `entry_pattern` | string/null (선택) | buy/entry report의 `pattern`을 보존하는 active-position marker. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`입니다. 웹 export는 `null`도 명시하고, import/create/patch는 non-null marker를 active row(`quantity > 0`)에만 허용합니다. |
 | `strategy` | string (선택) | 전략 구분 (예: `swing`, `core`). 미지정 시 `settings.default_strategy` 적용 |
 | `notes` | string (선택) | 메모 |
 | `tags` | list[string] (선택) | 태그 목록 |
@@ -97,7 +97,7 @@ settings:
 - 빈 문자열, 공백 문자열, 명시적 `null`, 미지정은 모두 marker 없음으로 처리합니다.
 - 비활성 row(`quantity=0`)는 `entry_pattern`을 가질 수 없습니다. 미지정 또는 null/empty로 남겨야 합니다.
 - `sab sell`은 로드된 `entry_pattern`을 hybrid sell evaluator에 전달합니다. 현재 failed-breakout 손실 marker로 쓰이는 구조화 값은 `swing_high_breakout`뿐이며, 기존 `strategy`/`tags`의 `breakout` substring marker는 호환용으로 계속 동작합니다.
-- Phase A Supabase migration은 nullable `holdings.entry_pattern` 컬럼과 RPC 검증 계약을 추가하지만, `holdings_entry_pattern_write_closed_check`로 non-null DB write를 막습니다. 웹 CRUD, 웹 YAML import/export, scheduled holdings export가 필드를 선택/쓰기 전까지 DB는 null-only입니다.
+- Supabase `holdings.entry_pattern`은 nullable이며 length/allowlist/active-only constraint를 갖습니다. `replace_holdings_v1`은 active row에서 key가 생략되면 기존 marker를 보존하지만, entry identity(`entry_price`, `entry_date`) 또는 `strategy`가 바뀌는 active row는 명시적 valid marker나 명시적 clear(`null`/blank)를 요구합니다.
 
 ## 웹 import/export 계약
 
@@ -105,7 +105,8 @@ settings:
 - export는 현재 DB의 전체 snapshot을 내보내며, `quantity=0` 비활성 row도 포함합니다.
 - export는 복구 충실도를 위해 `settings`를 생략하고 row별 필드를 명시합니다.
 - export 정렬 순서는 `ticker asc`입니다.
-- Phase A에서는 웹 export/import payload가 `entry_pattern`을 소유하지 않습니다. 로컬 CLI 입력에는 사용할 수 있지만, 웹 import/export 백업 경로로 non-null marker를 왕복시키는 것은 아직 지원하지 않습니다.
+- export는 `entry_pattern`을 항상 명시합니다. DB 값이 `null`이어도 `entry_pattern: null`을 기록해, 나중에 import할 때 cleared marker가 old-style omitted key로 바뀌지 않게 합니다.
+- import 입력에서 `entry_pattern` key 생략은 old YAML 호환을 위한 active-row preserve-existing 의미입니다. 명시적 `null` 또는 blank는 clear이고, non-empty string은 set입니다. `quantity=0` row는 import/apply 시 `entry_pattern=null`로 정규화됩니다.
 - Holdings 화면 import는 항상 **Replace All** semantics로 동작합니다.
 - import는 apply 전에 dry-run diff(create/update/delete/unchanged)를 보여줍니다.
 - import apply 시 파일에 없는 ticker는 삭제됩니다.

@@ -53,8 +53,8 @@
 | --- | --- | --- |
 | `KIS_APP_KEY`, `KIS_APP_SECRET` | CLI/GitHub Actions/scheduler KIS 호출 | YAML 저장 금지 |
 | `SUPABASE_URL` | web, CLI upload, scheduler, GitHub Actions | Supabase 프로젝트 URL |
-| `SUPABASE_SECRET_KEY` | server-side Supabase 접근 | 권장 server-side key |
-| `SUPABASE_SERVICE_ROLE_KEY` | server-side Supabase 접근 | legacy fallback |
+| `SUPABASE_SECRET_KEY` | server-side Supabase 접근 | 권장 server-side key. holdings select/export, `replace_holdings_v1`, `holdings_add_buy_v1`, report upload/index write를 실행할 수 있어야 하며 배포 smoke는 실제 configured key로 검증합니다. |
+| `SUPABASE_SERVICE_ROLE_KEY` | server-side Supabase 접근 | legacy fallback. 사용 시 `SUPABASE_SECRET_KEY`와 같은 holdings projection/RPC/write capability가 필요합니다. |
 | `SUPABASE_REPORTS_BUCKET` | report upload/web 조회 | 기본 `reports` |
 | `SAB_UPLOAD_REPORTS` | 로컬 CLI upload | true면 로컬 scan/sell/entry/ai-brief 업로드 |
 | `SAB_SUPPRESS_REPORT_UPLOADS` | CLI/workflow report upload helper | true면 현재 process의 report upload를 강제로 비활성화. 별도 품질 게이트 이후 upload step이 있는 생성 단계에서만 사용 |

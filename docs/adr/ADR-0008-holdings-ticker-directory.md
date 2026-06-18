@@ -20,6 +20,10 @@ Holdings 입력 UX를 다음 3가지로 개선합니다.
   - buy 리포트의 `candidates[].{ticker,name}`를 누적해 “티커 ↔ 이름/별칭” 디렉토리를 유지합니다.
   - 저장소는 Supabase `runtime_state`(단일 row)로 하며, stale 조건에서 incremental로 갱신합니다.
 
+4. **2026-06 addendum: recent candidate `pattern`**
+  - 디렉토리 캐시와 `/api/tickers/search` 계약은 계속 ticker/name/alias 중심으로 유지합니다.
+  - `/api/tickers/recent-candidates`는 최신 buy report를 직접 읽어 `candidates[].{ticker,name,pattern}`을 반환할 수 있습니다. 이 `pattern`은 holdings form의 `entry_pattern` prefill에만 사용하고, 디렉토리 캐시/search entry에는 저장하지 않습니다.
+
 ### 결과/영향
 
 - 장점
@@ -39,4 +43,3 @@ Holdings 입력 UX를 다음 3가지로 개선합니다.
   - 단점: 라이선스/비용/레이트리밋/정확도 문제 + 운영 복잡도 증가
 - ticker 규칙 완화(예: `AAPL`만 입력 허용):
   - 단점: `.NAS/.NYS` 모호성(동일 심볼 상장/클래스 표기) 및 fail-closed 정책 약화
-

@@ -63,8 +63,8 @@
 - 폼 사이드바에 “최근 buy 후보” 섹션을 추가한다.
 - 기본 동작:
   - 최근 `buy` 리포트 중 **candidate가 존재하는 가장 최신 리포트** 1건을 선택
-  - 후보를 `(Ticker) (Name)` 형태로 최대 N개 표시
-  - 항목 클릭 시 `form.ticker` 채움
+  - 후보를 `(Ticker) (Name)` 형태로 최대 N개 표시하고, buy report `pattern`이 유효하면 함께 표시
+  - 항목 클릭 시 `form.ticker`를 채우고, candidate `pattern`을 holdings `entry_pattern`으로 전달
   - “리포트 보기” 링크로 해당 리포트 상세 페이지 이동 가능
 
 후보가 없으면:
@@ -167,7 +167,10 @@ export interface TickerDirectoryPayloadV1 {
   - `limitCandidates`: default 50
 - 동작:
   - 최근 buy 리포트들을 확인하고 candidates가 비어있지 않은 첫 리포트를 선택
-  - 해당 report의 candidates에서 `{ticker, name}`만 추출해 반환
+  - 해당 report의 candidates에서 `{ticker, name, pattern}`을 추출해 반환
+  - `pattern`은 holdings storage allowlist(`trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`)와 일치할 때만 문자열로 반환하고, 누락/invalid 값은 `null`로 정규화합니다.
+
+주의: ticker directory cache/search 계약은 계속 `{ticker, name}` 중심입니다. `pattern`은 최근 후보 선택 UX에서 최신 buy report를 직접 읽을 때만 전달하며, 검색 캐시에 저장하지 않습니다.
 
 ### 5.3 `POST /api/tickers/directory/refresh` (선택)
 

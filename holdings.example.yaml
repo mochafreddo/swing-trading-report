@@ -17,7 +17,8 @@ holdings:
     entry_price: 255.4   # USD
     entry_currency: USD
     entry_date: 2024-08-28
-    strategy: swing
+    strategy: sma_ema_hybrid
+    entry_pattern: swing_high_breakout
     notes: "RS 강한 리더"
     tags:
       - us

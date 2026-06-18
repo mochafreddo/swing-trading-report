@@ -98,7 +98,15 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `GET` | `/api/holdings/yaml` | holdings YAML export | no body required | YAML snapshot payload |
 | `POST` | `/api/holdings/yaml` | holdings YAML import dry-run/apply | JSON `{ "document": string, "apply": boolean }` | `{ mode, summary }` |
 | `GET` | `/api/tickers/search` | ticker directory 검색 | query `q=1..120 chars`, `limit=1..50` | ticker search payload |
-| `GET` | `/api/tickers/recent-candidates` | 최근 buy 후보 | query `limitReports=1..50`, `limitCandidates=1..100` | recent candidate payload |
+| `GET` | `/api/tickers/recent-candidates` | 최근 buy 후보 | query `limitReports=1..50`, `limitCandidates=1..100` | recent candidate payload with `pattern: string \| null` per candidate |
+
+### Holdings Contract Notes
+
+- `HoldingRecord`/current snapshots include nullable `entry_pattern: string | null`.
+- `HoldingMutationInput` accepts optional `entry_pattern?: string | null`. A non-null `entry_pattern` create/patch payload must include `quantity > 0` in the same payload. Explicit `entry_pattern: null` clears without requiring quantity. If a mutation owns `quantity: 0`, persistence normalizes `entry_pattern` to `null`.
+- YAML import/replace-all inputs are the only path where an omitted active `entry_pattern` key can mean preserve-existing. YAML export always owns the key, including `entry_pattern: null`.
+- Add Buy remains quantity-only. `/api/holdings/[ticker]/add-buy` does not accept marker fields such as `entry_pattern`; the RPC preserves existing active markers and clears stale markers when reactivating `quantity=0` rows.
+- `/api/tickers/search` remains ticker/name-only. `/api/tickers/recent-candidates` reads the latest buy report candidates and returns `{ ticker, name, pattern }`, where invalid or missing buy-report patterns are normalized to `null`.
 
 ## Ticker Contract
 
