@@ -64,6 +64,21 @@ def _build_sell_settings(cfg: Any, *, SellSettingsCls: Any) -> Any:
     )
 
 
+def _hybrid_pattern_time_stops_snapshot(
+    hybrid_sell_cfg: Any,
+) -> dict[str, dict[str, Any]]:
+    return {
+        pattern: {
+            "time_stop_days": override.time_stop_days,
+            "time_stop_grace_days": override.time_stop_grace_days,
+            "time_stop_profit_floor": override.time_stop_profit_floor,
+        }
+        for pattern, override in getattr(
+            hybrid_sell_cfg, "pattern_time_stops", {}
+        ).items()
+    }
+
+
 def _build_hybrid_sell_settings(cfg: Any, *, HybridSellSettingsCls: Any) -> Any:
     return HybridSellSettingsCls(
         profit_target_low=cfg.hybrid_sell.profit_target_low,
@@ -80,6 +95,7 @@ def _build_hybrid_sell_settings(cfg: Any, *, HybridSellSettingsCls: Any) -> Any:
         time_stop_days=cfg.hybrid_sell.time_stop_days,
         time_stop_grace_days=cfg.hybrid_sell.time_stop_grace_days,
         time_stop_profit_floor=cfg.hybrid_sell.time_stop_profit_floor,
+        pattern_time_stops=_hybrid_pattern_time_stops_snapshot(cfg.hybrid_sell),
     )
 
 
@@ -345,6 +361,9 @@ def _write_sell_report(
             "time_stop_days": runtime.cfg.hybrid_sell.time_stop_days,
             "time_stop_grace_days": runtime.cfg.hybrid_sell.time_stop_grace_days,
             "time_stop_profit_floor": runtime.cfg.hybrid_sell.time_stop_profit_floor,
+            "pattern_time_stops": _hybrid_pattern_time_stops_snapshot(
+                runtime.cfg.hybrid_sell
+            ),
         }
     run_meta = build_run_meta(
         market=eval_market,

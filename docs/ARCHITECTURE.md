@@ -103,6 +103,7 @@ flowchart LR
 1. 보유 종목을 로드해 런타임을 구성합니다(로컬 기본: `holdings.yaml`).
    - `quantity > 0`인 활성 보유분만 sell 평가 대상으로 사용합니다.
    - 로컬 `holdings.yaml`의 선택적 `entry_pattern`은 hybrid sell evaluator에 전달됩니다. 구조화 marker는 exact ID로만 해석하며, failed-breakout marker로 쓰이는 값은 `swing_high_breakout`뿐입니다.
+   - hybrid sell evaluator는 `entry_pattern`별 time-stop override를 전역 hybrid time-stop 위에 적용합니다. 기본 설정은 `swing_high_breakout`을 전역 30+15 세션보다 짧은 15+5 세션으로 평가합니다.
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다.
 4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
@@ -112,6 +113,7 @@ flowchart LR
 
 1. 입력 buy 리포트를 읽고 후보(`candidates[]`)를 시장별로 정규화합니다.
 2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. US KIS 해외 `price-detail`은 `PRE_OPEN|INTRADAY`에서 날짜/시각 marker 없이 `last` 계열 가격을 줄 수 있어 `curr`가 있으면 `USD`일 때만 양수 가격 필드를 스냅샷으로 사용하고, KR KIS domestic `price-detail`은 `PRE_OPEN`에서 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
+   - `sma_ema_hybrid` 후보는 gap/trigger/risk checks를 통과한 뒤에도 `quality_state=A`일 때만 자동 `ENTER`가 됩니다. `B|C|missing`은 `REVIEW`로 fail closed 처리합니다.
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)를 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다. 전체 보유 상한은 기존 활성 보유를 포함하고, 시장별 신규 진입 상한은 이번 run에서 승인된 신규 진입만 셉니다.
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
    - `entry.summary`는 `missing_entry_price_by_reason`과 `entry_price_sources`로 가격 조회 실패 원인과 사용된 가격 소스를 집계합니다.

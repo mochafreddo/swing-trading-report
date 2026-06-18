@@ -416,6 +416,21 @@ def _normalize_risk_alignment_reasons(candidate: dict[str, Any]) -> list[str]:
     return [reason] if reason else []
 
 
+def _normalize_quality_state(candidate: dict[str, Any]) -> str | None:
+    normalized = str(candidate.get("quality_state") or "").strip().upper()
+    if normalized in {"A", "B", "C"}:
+        return normalized
+    return None
+
+
+def _normalize_quality_reasons(candidate: dict[str, Any]) -> list[str]:
+    raw_reasons = candidate.get("quality_reasons")
+    if isinstance(raw_reasons, list):
+        return [str(reason).strip() for reason in raw_reasons if str(reason).strip()]
+    reason = str(raw_reasons or "").strip()
+    return [reason] if reason else []
+
+
 def _hybrid_risk_alignment_review_reason(
     risk_alignment: str, risk_alignment_reasons: list[str]
 ) -> str:
@@ -423,6 +438,19 @@ def _hybrid_risk_alignment_review_reason(
     if risk_alignment_reasons:
         detail = f"{detail}: {', '.join(risk_alignment_reasons)}"
     return f"hybrid risk_alignment requires manual review ({detail})"
+
+
+def _hybrid_quality_state_review_reason(
+    quality_state: str | None, quality_reasons: list[str]
+) -> str:
+    if quality_state is None:
+        return "hybrid quality_state unavailable; manual review required"
+    if quality_reasons:
+        return (
+            f"hybrid quality_state {quality_state} requires manual review "
+            f"({', '.join(quality_reasons)})"
+        )
+    return f"hybrid quality_state {quality_state} requires manual review"
 
 
 def _resolve_report_strategy_mode(report: dict[str, Any]) -> str | None:
@@ -457,6 +485,8 @@ def _resolve_entry_candidate_action(
     entry_state: str | None,
     risk_alignment: str | None,
     risk_alignment_reasons: list[str],
+    quality_state: str | None,
+    quality_reasons: list[str],
     gap_breach_action: str,
     allow_missing_gap_guard: bool,
     reasons: list[str],
@@ -499,6 +529,11 @@ def _resolve_entry_candidate_action(
             _hybrid_risk_alignment_review_reason(risk_alignment, risk_alignment_reasons)
         )
         return "REVIEW"
+    if quality_state != "A":
+        reasons.append(
+            _hybrid_quality_state_review_reason(quality_state, quality_reasons)
+        )
+        return "REVIEW"
     return "ENTER"
 
 
@@ -528,6 +563,8 @@ def _evaluate_entry_candidate(
     entry_state = str(candidate.get("entry_state") or "").strip().upper() or None
     risk_alignment = _normalize_risk_alignment(candidate)
     risk_alignment_reasons = _normalize_risk_alignment_reasons(candidate)
+    quality_state = _normalize_quality_state(candidate)
+    quality_reasons = _normalize_quality_reasons(candidate)
     pattern = str(candidate.get("pattern") or "").strip() or None
     trigger_price, trigger_operator, trigger_label, trigger_issue = (
         _extract_entry_trigger_guard(candidate, signal_close=signal_close)
@@ -573,6 +610,8 @@ def _evaluate_entry_candidate(
         entry_state=entry_state,
         risk_alignment=risk_alignment,
         risk_alignment_reasons=risk_alignment_reasons,
+        quality_state=quality_state,
+        quality_reasons=quality_reasons,
         gap_breach_action=gap_breach_action,
         allow_missing_gap_guard=allow_missing_gap_guard,
         reasons=reasons,

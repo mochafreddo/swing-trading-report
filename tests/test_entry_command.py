@@ -64,6 +64,9 @@ def _entry_candidate(
         "gap_guard_pct_value": gap_guard_value,
         "strategy_mode": strategy_mode,
     }
+    if strategy_mode == "sma_ema_hybrid" and "quality_state" not in extra:
+        candidate["quality_state"] = "A"
+        candidate["quality_reasons"] = ["entry_state_ready"]
     candidate.update(extra)
     return candidate
 

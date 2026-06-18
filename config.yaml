@@ -91,6 +91,11 @@ sell:
     time_stop_days: 30
     time_stop_grace_days: 15
     time_stop_profit_floor: 0.03
+    pattern_time_stops:
+      swing_high_breakout:
+        time_stop_days: 15
+        time_stop_grace_days: 5
+        time_stop_profit_floor: 0.01
 
 entry_check:
   fatal_missing_price_ratio: 0.0

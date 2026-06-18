@@ -193,5 +193,15 @@ These settings are currently YAML-only in `config.yaml`:
 - `screener.us_defaults`
 - `portfolio.max_new_entries_per_market.KR`
 - `portfolio.max_new_entries_per_market.US`
+- `sell.hybrid.pattern_time_stops.<pattern>.time_stop_days`
+- `sell.hybrid.pattern_time_stops.<pattern>.time_stop_grace_days`
+- `sell.hybrid.pattern_time_stops.<pattern>.time_stop_profit_floor`
 
 If these need environment overrides later, update `sab/config.py`, `.env.example`, this document, and the relevant config tests in the same change.
+
+`sell.hybrid.pattern_time_stops` keys must be one of the structured hybrid entry
+patterns: `trend_pullback_bounce`, `swing_high_breakout`, or
+`rsi_oversold_reversal`. Omitted fields inherit the global
+`sell.hybrid.time_stop_*` value. The repository default shortens
+`swing_high_breakout` to `15` sessions plus `5` grace sessions with a `1%`
+profit floor, while other patterns use the global hybrid time-stop settings.

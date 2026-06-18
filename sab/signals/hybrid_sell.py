@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..data.trading_sessions import count_trading_sessions
+from ..entry_pattern_contract import HOLDINGS_ENTRY_PATTERNS
 from ..utils.numeric import to_finite_float as _to_finite_float
 from ._candle_dates import parse_eval_date as _parse_eval_date
 from ._holding_market import resolve_holding_market as _resolve_holding_market
@@ -13,6 +14,13 @@ from .eval_index import choose_eval_index
 from .indicators import ema, rsi, sma
 
 _FAILED_BREAKOUT_PATTERN = "swing_high_breakout"
+
+
+@dataclass(frozen=True)
+class HybridSellPatternTimeStopSettings:
+    time_stop_days: int | None = None
+    time_stop_grace_days: int | None = None
+    time_stop_profit_floor: float | None = None
 
 
 @dataclass
@@ -40,6 +48,9 @@ class HybridSellSettings:
     time_stop_days: int = 0  # optional; 0 to disable
     time_stop_grace_days: int = 0  # extra days after time_stop_days before a hard exit
     time_stop_profit_floor: float = 0.0  # minimum P&L to avoid forced exit after grace
+    pattern_time_stops: dict[
+        str, HybridSellPatternTimeStopSettings | dict[str, Any]
+    ] = field(default_factory=dict)
 
 
 @dataclass
@@ -257,6 +268,63 @@ def _is_breakout_holding(holding: dict[str, Any]) -> bool:
     return any("breakout" in marker.strip().lower() for marker in markers)
 
 
+def _resolve_structured_holding_pattern(holding: dict[str, Any]) -> str | None:
+    for key in ("pattern", "entry_pattern", "signal_pattern"):
+        value = holding.get(key)
+        if not isinstance(value, str):
+            continue
+        pattern = value.strip()
+        if pattern in HOLDINGS_ENTRY_PATTERNS:
+            return pattern
+    if _is_breakout_holding(holding):
+        return _FAILED_BREAKOUT_PATTERN
+    return None
+
+
+def _override_time_stop_value(
+    override: HybridSellPatternTimeStopSettings | dict[str, Any],
+    field_name: str,
+) -> Any:
+    if isinstance(override, HybridSellPatternTimeStopSettings):
+        return getattr(override, field_name)
+    return override.get(field_name)
+
+
+def _resolve_time_stop_settings_for_holding(
+    *,
+    holding: dict[str, Any],
+    settings: HybridSellSettings,
+) -> HybridSellSettings:
+    pattern = _resolve_structured_holding_pattern(holding)
+    if pattern is None:
+        return settings
+    override = settings.pattern_time_stops.get(pattern)
+    if override is None:
+        return settings
+
+    time_stop_days = _override_time_stop_value(override, "time_stop_days")
+    time_stop_grace_days = _override_time_stop_value(override, "time_stop_grace_days")
+    time_stop_profit_floor = _override_time_stop_value(
+        override, "time_stop_profit_floor"
+    )
+    return replace(
+        settings,
+        time_stop_days=(
+            settings.time_stop_days if time_stop_days is None else int(time_stop_days)
+        ),
+        time_stop_grace_days=(
+            settings.time_stop_grace_days
+            if time_stop_grace_days is None
+            else int(time_stop_grace_days)
+        ),
+        time_stop_profit_floor=(
+            settings.time_stop_profit_floor
+            if time_stop_profit_floor is None
+            else float(time_stop_profit_floor)
+        ),
+    )
+
+
 def _extract_sell_ohlc_series(
     candles_eval: list[dict[str, float]],
 ) -> _SellOhlcSeries | None:
@@ -457,7 +525,11 @@ def _apply_time_stop_rules(
     days_in_trade_sessions: int | None = None
     time_stop_triggered = False
     entry_date_str = holding.get("entry_date")
-    time_stop_days = settings.time_stop_days
+    time_stop_settings = _resolve_time_stop_settings_for_holding(
+        holding=holding,
+        settings=settings,
+    )
+    time_stop_days = time_stop_settings.time_stop_days
     if entry_date_str and time_stop_days > 0:
         if entry_date_state.invalid:
             reasons.append("Entry date missing/invalid; time stop skipped")
@@ -498,7 +570,7 @@ def _apply_time_stop_rules(
 
     extended_time_stop = _apply_extended_time_stop(
         days_in_trade_sessions=days_in_trade_sessions,
-        settings=settings,
+        settings=time_stop_settings,
         action=action_out,
         pnl_pct=pnl_pct,
         last_close=last_close,
@@ -1070,6 +1142,7 @@ def evaluate_sell_signals_hybrid(
 
 __all__ = [
     "HybridSellEvaluation",
+    "HybridSellPatternTimeStopSettings",
     "HybridSellSettings",
     "evaluate_sell_signals_hybrid",
 ]

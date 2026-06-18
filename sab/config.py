@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config_loader import ConfigLoadError, load_yaml_config
+from .entry_pattern_contract import HOLDINGS_ENTRY_PATTERNS
 from .env_loader import env_flag, getenv, load_dotenv_if_available
 from .holdings_loader import HoldingsData, load_holdings
 from .tickers import (
@@ -181,6 +182,13 @@ class HybridStrategyConfig:
 
 
 @dataclass(frozen=True)
+class HybridSellPatternTimeStopConfig:
+    time_stop_days: int | None = None
+    time_stop_grace_days: int | None = None
+    time_stop_profit_floor: float | None = None
+
+
+@dataclass(frozen=True)
 class HybridSellConfig:
     profit_target_low: float = 0.05
     profit_target_high: float = 0.10
@@ -196,6 +204,9 @@ class HybridSellConfig:
     time_stop_days: int = 0
     time_stop_grace_days: int = 0
     time_stop_profit_floor: float = 0.0
+    pattern_time_stops: dict[str, HybridSellPatternTimeStopConfig] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -973,6 +984,91 @@ def _parse_strategy_section(parser: _ConfigParser) -> _StrategySection:
     )
 
 
+def _parse_optional_int_mapping_value(
+    mapping: dict[Any, Any], *, key: str, path: str
+) -> int | None:
+    raw = mapping.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be an integer or null, got {raw!r}."
+        )
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as err:
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be an integer or null, got {raw!r}."
+        ) from err
+
+
+def _parse_optional_float_mapping_value(
+    mapping: dict[Any, Any], *, key: str, path: str
+) -> float | None:
+    raw = mapping.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a float or null, got {raw!r}."
+        )
+    try:
+        return float(raw)
+    except (TypeError, ValueError) as err:
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a float or null, got {raw!r}."
+        ) from err
+
+
+def _parse_hybrid_sell_pattern_time_stops(
+    parser: _ConfigParser,
+) -> dict[str, HybridSellPatternTimeStopConfig]:
+    path = "sell.hybrid.pattern_time_stops"
+    raw = parser.from_yaml(path, {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a mapping/object, "
+            f"got {_yaml_value_type_name(raw)}."
+        )
+
+    pattern_time_stops: dict[str, HybridSellPatternTimeStopConfig] = {}
+    for raw_pattern, raw_settings in raw.items():
+        pattern = str(raw_pattern).strip()
+        pattern_path = f"{path}.{pattern}"
+        if pattern not in HOLDINGS_ENTRY_PATTERNS:
+            raise ConfigLoadError(
+                f"Invalid config value '{pattern_path}': unsupported pattern "
+                f"{raw_pattern!r}; expected one of {sorted(HOLDINGS_ENTRY_PATTERNS)!r}."
+            )
+        if raw_settings is None:
+            raw_settings = {}
+        if not isinstance(raw_settings, dict):
+            raise ConfigLoadError(
+                f"Invalid config value '{pattern_path}': must be a mapping/object, "
+                f"got {_yaml_value_type_name(raw_settings)}."
+            )
+        pattern_time_stops[pattern] = HybridSellPatternTimeStopConfig(
+            time_stop_days=_parse_optional_int_mapping_value(
+                raw_settings,
+                key="time_stop_days",
+                path=f"{pattern_path}.time_stop_days",
+            ),
+            time_stop_grace_days=_parse_optional_int_mapping_value(
+                raw_settings,
+                key="time_stop_grace_days",
+                path=f"{pattern_path}.time_stop_grace_days",
+            ),
+            time_stop_profit_floor=_parse_optional_float_mapping_value(
+                raw_settings,
+                key="time_stop_profit_floor",
+                path=f"{pattern_path}.time_stop_profit_floor",
+            ),
+        )
+    return pattern_time_stops
+
+
 def _build_hybrid_sell_config(parser: _ConfigParser) -> HybridSellConfig:
     return HybridSellConfig(
         profit_target_low=parser.env_float(
@@ -1019,6 +1115,7 @@ def _build_hybrid_sell_config(parser: _ConfigParser) -> HybridSellConfig:
             "sell.hybrid.time_stop_profit_floor",
             0.0,
         ),
+        pattern_time_stops=_parse_hybrid_sell_pattern_time_stops(parser),
     )
 
 
@@ -1418,6 +1515,22 @@ def _validate_risk_ranges(*, strategy: _StrategySection, sell: _SellSection) -> 
     _validate_non_negative(
         "sell.hybrid.time_stop_profit_floor", hybrid_sell.time_stop_profit_floor
     )
+    for pattern, time_stop in hybrid_sell.pattern_time_stops.items():
+        base_path = f"sell.hybrid.pattern_time_stops.{pattern}"
+        if time_stop.time_stop_days is not None:
+            _validate_non_negative(
+                f"{base_path}.time_stop_days", float(time_stop.time_stop_days)
+            )
+        if time_stop.time_stop_grace_days is not None:
+            _validate_non_negative(
+                f"{base_path}.time_stop_grace_days",
+                float(time_stop.time_stop_grace_days),
+            )
+        if time_stop.time_stop_profit_floor is not None:
+            _validate_non_negative(
+                f"{base_path}.time_stop_profit_floor",
+                time_stop.time_stop_profit_floor,
+            )
 
 
 def _validate_portfolio_ranges(portfolio: _PortfolioSection) -> None:

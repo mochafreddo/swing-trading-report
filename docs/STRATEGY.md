@@ -335,6 +335,9 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
   - `B`: READY지만 RS 약세 또는 손절폭 대비 변동성 warning이 있음
   - `C`: WATCH, RS 기준 미확보, 또는 변동성 기준 미확보
   - `quality_reasons`는 `entry_state_ready`, `relative_strength_negative`, `risk_alignment_tight_stop` 같은 reason code 목록입니다.
+- `sab entry`는 `sma_ema_hybrid` candidate의 gap/trigger/risk checks 이후 `quality_state`를 마지막 자동 진입 정책으로 적용합니다.
+  - `quality_state=A`만 자동 `ENTER` 후보가 될 수 있습니다.
+  - `quality_state=B|C` 또는 누락/unknown 값은 수동검토 reason과 함께 `REVIEW`입니다.
 - `strategy_mode=sma_ema_hybrid` 정렬은 `quality_state`를 먼저 적용한 뒤 기존 점수/RS/유동성/등락률/ticker tie-breaker를 사용합니다. `ema_cross` 정렬은 기존 score 우선 계약을 유지합니다.
 
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
@@ -423,6 +426,10 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - 하드 스탑 밴드(기본 3–5%):
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
 - (옵션) extended time stop:
+  - 기본 time stop은 `sell.hybrid.time_stop_days`, `sell.hybrid.time_stop_grace_days`, `sell.hybrid.time_stop_profit_floor`를 사용합니다.
+  - `sell.hybrid.pattern_time_stops.<pattern>`이 있으면 해당 holding pattern에 한해 지정된 time stop 필드만 override하고, 누락된 필드는 전역 hybrid 값을 상속합니다.
+  - pattern key는 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`만 허용합니다.
+  - 운영 기본값은 `swing_high_breakout`을 15 trading sessions + 5 grace sessions + 1% profit floor로 짧게 적용해, 약한 breakout 셋업을 전역 30+15 세션보다 빨리 수동검토/청산 후보로 올립니다.
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
   - 수익 조건은 충족했지만 추세 지표가 부족한 경우, 지표 부족만으로 `SELL`하지 않고 `REVIEW`를 유지합니다.
 - corporate action 의심 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다. 기존 action이 `SELL`이면 보존하고, `SELL`이 아닌 action만 `REVIEW`로 조정합니다.
