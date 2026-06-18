@@ -140,23 +140,13 @@ class FakeAiBriefProvider:
             source_issues=source_issues,
             watch_candidates=watch_rows,
         )
-        recommendable_source_rows_by_ticker = _source_rows_by_ticker(
-            recommendable_candidates
-        )
-        watch_source_rows_by_ticker = _source_rows_by_ticker(watch_candidates)
         _validate_provider_result_contract(
             result,
             eligible_tickers=eligible_tickers,
             watch_tickers=watch_tickers,
             expected_watch_tickers=expected_watch_tickers,
-            source_urls_by_ticker={
-                ticker: set(rows_by_url)
-                for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
-            },
-            watch_source_urls_by_ticker={
-                ticker: set(rows_by_url)
-                for ticker, rows_by_url in watch_source_rows_by_ticker.items()
-            },
+            source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
+            watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
         )
         return result
 
@@ -231,16 +221,10 @@ class OpenAiBriefProvider:
             ) from exc
 
         parsed = _parse_openai_structured_output(response_payload)
-        recommendable_source_rows_by_ticker = _source_rows_by_ticker(
-            recommendable_candidates
-        )
-        watch_source_rows_by_ticker = _source_rows_by_ticker(watch_candidates)
         result = _normalize_openai_provider_result(
             parsed,
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
-            recommendable_source_rows_by_ticker=recommendable_source_rows_by_ticker,
-            watch_source_rows_by_ticker=watch_source_rows_by_ticker,
             recommendable_source_catalog=recommendable_source_catalog,
             watch_source_catalog=watch_source_catalog,
         )
@@ -249,14 +233,8 @@ class OpenAiBriefProvider:
             eligible_tickers=eligible_tickers,
             watch_tickers=watch_tickers,
             expected_watch_tickers=expected_watch_tickers,
-            source_urls_by_ticker={
-                ticker: set(rows_by_url)
-                for ticker, rows_by_url in recommendable_source_rows_by_ticker.items()
-            },
-            watch_source_urls_by_ticker={
-                ticker: set(rows_by_url)
-                for ticker, rows_by_url in watch_source_rows_by_ticker.items()
-            },
+            source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
+            watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
         )
         return result
 
@@ -475,8 +453,6 @@ def _normalize_openai_provider_result(
     *,
     recommendable_candidates: list[dict[str, object]],
     watch_candidates: list[dict[str, object]],
-    recommendable_source_rows_by_ticker: Mapping[str, Mapping[str, dict[str, object]]],
-    watch_source_rows_by_ticker: Mapping[str, Mapping[str, dict[str, object]]],
     recommendable_source_catalog: _SourceReferenceCatalog,
     watch_source_catalog: _SourceReferenceCatalog,
 ) -> AiBriefProviderResult:
@@ -509,9 +485,7 @@ def _normalize_openai_provider_result(
             ticker=ticker,
             source_refs=source_refs,
         )
-        candidate_has_sources = bool(
-            recommendable_source_catalog.source_ids_for(ticker)
-        )
+        candidate_has_sources = recommendable_source_catalog.has_sources_for(ticker)
         if invalid_refs or (candidate_has_sources and not sources):
             source_issues.append(
                 _model_source_issue(
@@ -581,7 +555,7 @@ def _normalize_openai_provider_result(
             ticker=ticker,
             source_refs=source_refs,
         )
-        watch_has_sources = bool(watch_source_catalog.source_ids_for(ticker))
+        watch_has_sources = watch_source_catalog.has_sources_for(ticker)
         if invalid_refs or (watch_has_sources and not sources):
             source_issues.append(
                 _model_source_issue(
@@ -673,8 +647,8 @@ class _SourceReferenceCatalog:
             resolved.append(dict(source))
         return resolved, invalid_refs
 
-    def source_ids_for(self, ticker: str) -> list[str]:
-        return list(self._sources_by_ticker.get(ticker, {}))
+    def has_sources_for(self, ticker: str) -> bool:
+        return bool(self._sources_by_ticker.get(ticker))
 
 
 def _provider_source_issue_tickers(source_issues: list[dict[str, object]]) -> set[str]:
@@ -768,21 +742,20 @@ def _validate_raw_recommendation_ranks(
             )
 
 
-def _source_rows_by_ticker(
+def _source_urls_by_ticker(
     candidates: list[dict[str, object]],
-) -> dict[str, dict[str, dict[str, object]]]:
-    rows_by_ticker: dict[str, dict[str, dict[str, object]]] = {}
+) -> dict[str, set[str]]:
+    urls_by_ticker: dict[str, set[str]] = {}
     for candidate in candidates:
         ticker = str(candidate.get("ticker") or "").strip()
         if not ticker:
             continue
-        rows_by_url: dict[str, dict[str, object]] = {}
-        for source in _candidate_sources(candidate):
-            source_url = str(source.get("url") or "").strip()
-            if source_url and source_url not in rows_by_url:
-                rows_by_url[source_url] = source
-        rows_by_ticker[ticker] = rows_by_url
-    return rows_by_ticker
+        urls_by_ticker[ticker] = {
+            source_url
+            for source in _candidate_sources(candidate)
+            if (source_url := str(source.get("url") or "").strip())
+        }
+    return urls_by_ticker
 
 
 def _candidate_role_ticker_sets(
