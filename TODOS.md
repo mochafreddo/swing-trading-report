@@ -2,11 +2,19 @@
 
 ## Active
 
-- None.
+- 2026-06-18: Add an investment-readiness layer separate from technical `quality_state`. `quality_state=A` should remain a technical setup label unless the report also has NAV/risk-budget, liquidity exit capacity, portfolio exposure, and source/fundamental context; consider a separate `investment_readiness` or `implementation_ready` field.
+- 2026-06-18: Add liquidity and exit-capacity checks tied to intended position size, such as position value as percent of ADV, estimated exit days at normal/stressed participation, and warnings for small-cap, event-driven, or crowded names. Current liquidity use is mainly minimum average traded value and ranking.
+- 2026-06-18: Add portfolio exposure controls beyond count-based caps. Current `max_active_holdings` and `max_new_entries_per_market` do not account for sector/theme/currency/beta/correlation concentration, so eight holdings can still represent one crowded risk bucket.
+- 2026-06-18: Make stop/target reporting explicit that `risk_guide`, `stop_price`, and `target_price` are decision guides, not guaranteed execution or account-loss limits. Add gap/slippage caveats and, if position sizing is added, show downside loss in amount and portfolio percent/bps.
+- 2026-06-18: Separate AI Brief candidate roles so executable `ENTER` rows are not mixed with portfolio-blocked `SKIP` rows or tight-stop `REVIEW` rows under the same `recommendable` label. Consider explicit roles such as `executable`, `blocked_but_valid`, and `watch_only`, and update notification/web copy to preserve the distinction.
+- 2026-06-18: Expand replay/backtest coverage for active swing thresholds across KR/US, rising/sideways/falling regimes, high-volatility names, and weak/strong relative-strength cases. Current replay coverage is too small to justify the RSI, consolidation, gap, stop, and profit target thresholds as trading parameters.
+- 2026-06-18: Validate whether `sma_ema_hybrid` quality `A` should require an additional individual-stock medium/long trend filter, such as SMA60 or SMA200, before changing the default. Current defaults rely on market regime, SMA20/EMA10/21, RSI, RS, and risk alignment.
+- 2026-06-18: Review pullback/reversal volume confirmation semantics. Breakout volume uses the pre-breakout average, while pullback/reversal paths include the signal candle in the average; either normalize to pre-signal averages or document and test the intentional difference.
+- 2026-06-18: Consider environment overrides for `portfolio.max_new_entries_per_market.KR/US`, or document a local-config workflow for temporarily tightening market entry caps during risk-off regimes. `PORTFOLIO_MAX_ACTIVE_HOLDINGS` is env-bound, but per-market new-entry caps are currently YAML-only.
 
 ## Deferred
 
-- 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
+- 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. The 2026-06-18 swing-trader and investment reviews revalidated this as the top decision-readiness gap. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed
 
