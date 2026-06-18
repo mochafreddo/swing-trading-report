@@ -68,6 +68,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - `watch_candidates[]` records watch-only candidates with `action=WATCH`, manual reason, retrigger conditions, and optional source rows. It is displayed separately from `recommendations[]`.
 - `vetoed_candidates[]` records preselected recommendable candidates that the model did not recommend. It is displayed separately from `recommendations[]` in notifications and the web report detail view.
 - `source_provider_summary` records the configured source chain, provider-level `status|covered|total`, and final recommendable/watch coverage. A chain of `none` has no provider rows and zero final coverage.
+- OpenAI model output uses request-local `source_refs` internally, but final artifacts keep canonical `sources[]` objects. `model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, and `model_watch_source_ref_invalid` may appear in `source_issues[]` when local normalization isolates a candidate-level source-ref problem.
 - `brief_state` is one of `NO_SIGNAL`, `NEEDS_REVIEW_WATCH_ONLY`, `FINAL_JUDGMENT`, or `NEEDS_REVIEW_WEAK_NEWS`. `NO_SIGNAL` means no recommendable or watch candidates; `NEEDS_REVIEW_WATCH_ONLY` means only trigger-pending watch candidates remain.
 - `scripts/eval_ai_brief_recommendations.py` is the offline recommendation quality gate. The manual GitHub AI Brief workflow and scheduled runner treat `FAIL` as a stop before normal notification/success handling.
 

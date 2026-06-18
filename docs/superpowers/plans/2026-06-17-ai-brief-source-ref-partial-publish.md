@@ -1,6 +1,6 @@
 # AI Brief Source Ref Partial Publish Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking; this artifact now marks completed steps with `- [x]`.
 
 **Goal:** Make AI Brief model outputs choose source references instead of re-creating source objects, and allow scheduled partial publish when candidate-level source-ref errors can be isolated.
 
@@ -9,6 +9,23 @@
 **Tech Stack:** Python 3.14, pytest, `uv`, existing `sab` package modules, local JSON report artifacts, scheduled runner quality gate.
 
 ---
+
+## Implementation Status
+
+Status: Implemented and verified on 2026-06-18.
+
+Final branch commits include the source-ref model contract, recommendation/watch candidate isolation, regression coverage, documentation updates, contract hardening for ref item/rank/duplicate cases, and the final source URL allowlist simplification.
+
+Verification:
+
+- `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_providers.py -q` -> 28 passed.
+- `just quality` -> ruff, format check, mypy, and 1843 pytest tests passed.
+
+Implemented hardening beyond the initial plan:
+
+- `source_refs[]` must be a list of non-empty strings, may contain at most 3 refs, and must not contain duplicates after trimming.
+- Raw recommendation `rank` must be an integer, not bool or float, before local re-ranking after candidate drops.
+- Source URL allowlists are now derived directly as `ticker -> set[url]` for provider result validation.
 
 ## Scope Check
 
@@ -42,7 +59,7 @@ This is one implementation slice. It touches one subsystem, AI Brief generation,
 - Modify: `tests/test_ai_brief_providers.py`
 - Modify: `sab/ai_brief_providers.py`
 
-- [ ] **Step 1: Write failing provider payload/schema test**
+- [x] **Step 1: Write failing provider payload/schema test**
 
 Add this test near `test_openai_payload_separates_recommendable_and_watch_candidates` in `tests/test_ai_brief_providers.py`:
 
@@ -93,7 +110,7 @@ def test_openai_payload_adds_source_ids_and_schema_uses_source_refs() -> None:
     assert "sources" not in watch_props
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -103,7 +120,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_providers.py:
 
 Expected: FAIL because model input lacks `source_id` and the schema still exposes `sources`.
 
-- [ ] **Step 3: Add source catalog and model-facing candidates**
+- [x] **Step 3: Add source catalog and model-facing candidates**
 
 In `sab/ai_brief_providers.py`, add these helpers after `_as_provider_mapping_rows`:
 
@@ -140,8 +157,8 @@ class _SourceReferenceCatalog:
             model_rows.append({**candidate, "sources": sources})
         return model_rows
 
-    def source_ids_for(self, ticker: str) -> set[str]:
-        return set(self._sources_by_ticker.get(ticker, {}))
+    def has_sources_for(self, ticker: str) -> bool:
+        return bool(self._sources_by_ticker.get(ticker))
 
     def sources_for_refs(
         self,
@@ -152,11 +169,7 @@ class _SourceReferenceCatalog:
         rows_by_id = self._sources_by_ticker.get(ticker, {})
         resolved: list[dict[str, object]] = []
         invalid_refs: list[str] = []
-        seen_refs: set[str] = set()
         for source_ref in source_refs:
-            if source_ref in seen_refs:
-                continue
-            seen_refs.add(source_ref)
             source = rows_by_id.get(source_ref)
             if source is None:
                 invalid_refs.append(source_ref)
@@ -201,7 +214,7 @@ def _normalize_openai_provider_result(
 ) -> AiBriefProviderResult:
 ```
 
-- [ ] **Step 4: Change OpenAI schema from `sources` to `source_refs`**
+- [x] **Step 4: Change OpenAI schema from `sources` to `source_refs`**
 
 In `_build_openai_request_payload`, extend the system prompt sentence:
 
@@ -257,7 +270,7 @@ The watch `properties` source field must become:
                         },
 ```
 
-- [ ] **Step 5: Run provider payload/schema test**
+- [x] **Step 5: Run provider payload/schema test**
 
 Run:
 
@@ -267,7 +280,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_providers.py:
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add sab/ai_brief_providers.py tests/test_ai_brief_providers.py
@@ -280,7 +293,7 @@ git commit -m "feat(ai-brief): source ref 모델 계약 추가" -m "OpenAI 입�
 - Modify: `tests/test_ai_brief_providers.py`
 - Modify: `sab/ai_brief_providers.py`
 
-- [ ] **Step 1: Write failing tests for valid refs and bad recommendation refs**
+- [x] **Step 1: Write failing tests for valid refs and bad recommendation refs**
 
 Add these tests before the `_Response` helper in `tests/test_ai_brief_providers.py`:
 
@@ -377,7 +390,7 @@ def test_openai_drops_recommendation_with_invalid_source_ref_and_reranks() -> No
     ]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -390,7 +403,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: FAIL because `_normalize_openai_provider_result` still reads `sources`.
 
-- [ ] **Step 3: Add source-ref parsing and issue helpers**
+- [x] **Step 3: Add source-ref parsing and issue helpers**
 
 In `sab/ai_brief_providers.py`, add these helpers after `_provider_source_issue_tickers`:
 
@@ -399,12 +412,22 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
     if not isinstance(value, list):
         raise AiBriefProviderContractError(f"OpenAI output {field_name} must be a list")
     source_refs: list[str] = []
+    seen_source_refs: set[str] = set()
     for idx, raw_ref in enumerate(value):
-        source_ref = str(raw_ref or "").strip()
+        if not isinstance(raw_ref, str):
+            raise AiBriefProviderContractError(
+                f"OpenAI output {field_name}[{idx}] must be a string"
+            )
+        source_ref = raw_ref.strip()
         if not source_ref:
             raise AiBriefProviderContractError(
                 f"OpenAI output {field_name}[{idx}] must be a non-empty string"
             )
+        if source_ref in seen_source_refs:
+            raise AiBriefProviderContractError(
+                f"OpenAI output {field_name} must not contain duplicate source_refs"
+            )
+        seen_source_refs.add(source_ref)
         source_refs.append(source_ref)
     if len(source_refs) > _MAX_SOURCES_PER_TICKER:
         raise AiBriefProviderContractError(
@@ -443,7 +466,7 @@ def _validate_raw_recommendation_ranks(
         )
 ```
 
-- [ ] **Step 4: Resolve recommendation refs in normalization**
+- [x] **Step 4: Resolve recommendation refs in normalization**
 
 In `_normalize_openai_provider_result`, parse `source_issues` before the recommendations loop:
 
@@ -476,7 +499,7 @@ Replace the current recommendations loop with:
             ticker=ticker,
             source_refs=source_refs,
         )
-        candidate_has_sources = bool(recommendable_source_catalog.source_ids_for(ticker))
+        candidate_has_sources = recommendable_source_catalog.has_sources_for(ticker)
         if invalid_refs or (candidate_has_sources and not sources):
             source_issues.append(
                 _model_source_issue(
@@ -529,7 +552,7 @@ After the loop and before returning `AiBriefProviderResult`, re-rank kept recomm
 Remove the duplicate `source_issues = _as_provider_mapping_rows(...)` assignment that
 currently appears after the recommendations loop so the augmented list is returned.
 
-- [ ] **Step 5: Run targeted provider tests**
+- [x] **Step 5: Run targeted provider tests**
 
 Run:
 
@@ -542,7 +565,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add sab/ai_brief_providers.py tests/test_ai_brief_providers.py
@@ -555,7 +578,7 @@ git commit -m "fix(ai-brief): 추천 source ref 오류를 후보 단위로 격�
 - Modify: `tests/test_ai_brief_providers.py`
 - Modify: `sab/ai_brief_providers.py`
 
-- [ ] **Step 1: Write failing watch source-ref fallback tests**
+- [x] **Step 1: Write failing watch source-ref fallback tests**
 
 Replace `test_openai_rejects_watch_candidate_unprovided_source_url` in `tests/test_ai_brief_providers.py` with:
 
@@ -654,7 +677,7 @@ def test_openai_resolves_watch_source_refs_to_canonical_sources() -> None:
     assert sources[0]["url"] == "https://news.example/MSFT.NAS"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -667,7 +690,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: FAIL because watch normalization still expects returned `sources`.
 
-- [ ] **Step 3: Add provider-local watch fallback helper**
+- [x] **Step 3: Add provider-local watch fallback helper**
 
 In `sab/ai_brief_providers.py`, add after `_model_source_issue`:
 
@@ -695,7 +718,7 @@ def _provider_fallback_watch_candidate(
     return row
 ```
 
-- [ ] **Step 4: Resolve watch refs in normalization**
+- [x] **Step 4: Resolve watch refs in normalization**
 
 In `_normalize_openai_provider_result`, replace the watch normalization loop with:
 
@@ -717,7 +740,7 @@ In `_normalize_openai_provider_result`, replace the watch normalization loop wit
             ticker=ticker,
             source_refs=source_refs,
         )
-        watch_has_sources = bool(watch_source_catalog.source_ids_for(ticker))
+        watch_has_sources = watch_source_catalog.has_sources_for(ticker)
         if invalid_refs or (watch_has_sources and not sources):
             source_issues.append(
                 _model_source_issue(
@@ -743,7 +766,7 @@ In `_normalize_openai_provider_result`, replace the watch normalization loop wit
         )
 ```
 
-- [ ] **Step 5: Run full provider test file and update remaining fake responses**
+- [x] **Step 5: Run full provider test file and update remaining fake responses**
 
 Run:
 
@@ -789,7 +812,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_ai_brief_providers.py 
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add sab/ai_brief_providers.py tests/test_ai_brief_providers.py
@@ -802,7 +825,7 @@ git commit -m "fix(ai-brief): watch source ref 오류를 fallback 처리" -m "Op
 - Modify: `tests/test_ai_brief.py`
 - Modify: `tests/test_scheduled_ai_brief_runner.py`
 
-- [ ] **Step 1: Update OpenAI integration fake outputs to `source_refs`**
+- [x] **Step 1: Update OpenAI integration fake outputs to `source_refs`**
 
 In `tests/test_ai_brief.py`, update fake `_OpenAiSession` output payloads so model
 responses use `source_refs` instead of returned source objects. Apply these exact
@@ -839,7 +862,7 @@ becomes:
 For tests that intentionally assert provider-wide failures unrelated to source refs,
 keep the same expected `system_issues` behavior after replacing the source field.
 
-- [ ] **Step 2: Write 2026-06-17 partial watch regression test**
+- [x] **Step 2: Write 2026-06-17 partial watch regression test**
 
 Add this test after `test_run_ai_brief_openai_provider_writes_structured_recommendation`
 in `tests/test_ai_brief.py`:
@@ -937,7 +960,7 @@ def test_run_ai_brief_openai_invalid_watch_source_ref_uses_partial_publish_artif
     assert payload["brief_reason"] == "weak_news_coverage"
 ```
 
-- [ ] **Step 3: Run integration regression to verify it fails, then passes**
+- [x] **Step 3: Run integration regression to verify it fails, then passes**
 
 Run:
 
@@ -949,7 +972,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected before provider implementation is complete: FAIL. After Tasks 1-3 are complete and fake outputs are updated: PASS.
 
-- [ ] **Step 4: Add scheduled pipeline WARN-pass regression**
+- [x] **Step 4: Add scheduled pipeline WARN-pass regression**
 
 Add this test after the existing quality-gate failure test in
 `tests/test_scheduled_ai_brief_runner.py`:
@@ -1021,7 +1044,7 @@ def test_default_pipeline_returns_result_when_ai_brief_quality_warns(
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 ```
 
-- [ ] **Step 5: Run integration and scheduled tests**
+- [x] **Step 5: Run integration and scheduled tests**
 
 Run:
 
@@ -1036,7 +1059,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add tests/test_ai_brief.py tests/test_scheduled_ai_brief_runner.py
@@ -1050,7 +1073,7 @@ git commit -m "test(ai-brief): source ref partial publish 회귀 보강" -m "Ope
 - Modify: `docs/ARCHITECTURE.md`
 - Modify: `docs/operations.md`
 
-- [ ] **Step 1: Update strategy contract**
+- [x] **Step 1: Update strategy contract**
 
 In `docs/STRATEGY.md`, near the AI Brief state/source contract section around
 `brief_state`, add this text:
@@ -1060,7 +1083,7 @@ In `docs/STRATEGY.md`, near the AI Brief state/source contract section around
 - 모델이 특정 후보에 대해 잘못된 `source_refs`를 반환하면 해당 추천은 제외하거나 watch 후보는 deterministic fallback으로 복원하고, `source_issues[]`에 `model_source_ref_*` 진단을 남깁니다. 추천 품질 게이트는 복원된 최종 artifact를 기준으로 판단합니다.
 ```
 
-- [ ] **Step 2: Update architecture flow**
+- [x] **Step 2: Update architecture flow**
 
 In `docs/ARCHITECTURE.md`, update the scheduled/manual AI Brief flow section around the
 source provider and model provider steps with this text:
@@ -1069,7 +1092,7 @@ source provider and model provider steps with this text:
 Source provider 단계는 ticker별 canonical source row를 만든 뒤 모델 요청 직전에 request-local source catalog를 구성합니다. Catalog는 각 후보의 source row에 `source_id`를 붙이고, OpenAI provider는 source 객체가 아니라 `source_refs[]`를 structured output으로 받습니다. Provider normalization은 refs를 catalog의 canonical source row로 복원하고, candidate-local source ref 오류는 `source_issues[]`로 격리한 뒤 최종 `recommendations[].sources[]`/`watch_candidates[].sources[]` artifact 형태를 유지합니다.
 ```
 
-- [ ] **Step 3: Update operations runbook**
+- [x] **Step 3: Update operations runbook**
 
 In `docs/operations.md`, extend the `scheduled ai-brief quality gate failed` paragraph
 with this text:
@@ -1078,7 +1101,7 @@ with this text:
 `model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, `model_watch_source_ref_invalid`은 모델이 canonical source catalog의 ref를 제대로 선택하지 못했다는 뜻입니다. 이 진단이 `WARN`이고 최종 추천이 source-backed이면 scheduled run은 partial publish로 정상 업로드될 수 있습니다. 같은 진단 뒤 추천이 모두 제거되거나 source-backed ratio가 부족하면 기존처럼 quality `FAIL`로 처리됩니다.
 ```
 
-- [ ] **Step 4: Run docs grep check**
+- [x] **Step 4: Run docs grep check**
 
 Run:
 
@@ -1089,7 +1112,7 @@ rg -n "source_refs|model_source_ref|model_watch_source_ref|source catalog" \
 
 Expected: each of the three docs has at least one relevant match.
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run:
 
@@ -1105,7 +1128,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Run Python quality gate**
+- [x] **Step 6: Run Python quality gate**
 
 Run:
 
@@ -1121,7 +1144,7 @@ mise exec -- just quality
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add docs/STRATEGY.md docs/ARCHITECTURE.md docs/operations.md
@@ -1139,7 +1162,7 @@ git commit -m "docs(ai-brief): source ref partial publish 운영 계약 기록" 
 - Review: `docs/ARCHITECTURE.md`
 - Review: `docs/operations.md`
 
-- [ ] **Step 1: Check final diff scope**
+- [x] **Step 1: Check final diff scope**
 
 Run:
 
@@ -1150,7 +1173,7 @@ git diff --stat HEAD~5..HEAD
 
 Expected: only the files listed in this plan changed after the plan commit.
 
-- [ ] **Step 2: Search for stale returned source object schema in OpenAI outputs**
+- [x] **Step 2: Search for stale returned source object schema in OpenAI outputs**
 
 Run:
 
@@ -1164,7 +1187,7 @@ Expected:
 - No match should remain inside fake OpenAI response payloads that represent model output.
 - `_openai_result_schema()` should expose `source_refs`, not output `sources`.
 
-- [ ] **Step 3: Search for new diagnostics**
+- [x] **Step 3: Search for new diagnostics**
 
 Run:
 
@@ -1174,7 +1197,7 @@ rg -n "model_source_ref_invalid|model_source_ref_missing|model_unbacked_recommen
 
 Expected: matches in provider implementation, provider/workflow tests, and docs.
 
-- [ ] **Step 4: Run final targeted verification**
+- [x] **Step 4: Run final targeted verification**
 
 Run:
 
@@ -1188,7 +1211,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Record final status**
+- [x] **Step 5: Record final status**
 
 Do not commit if any verification command fails. If all checks pass, report:
 
