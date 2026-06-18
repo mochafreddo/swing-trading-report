@@ -339,6 +339,40 @@ def test_openai_rejects_watch_candidate_returned_as_recommendation() -> None:
         )
 
 
+@pytest.mark.parametrize("bad_rank", [True, 1.0])
+def test_openai_rejects_non_integer_raw_recommendation_rank(
+    bad_rank: object,
+) -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": bad_rank,
+                        "confidence": "LOW",
+                        "rationale": ["bad rank type"],
+                        "checklist": ["manual check"],
+                        "source_refs": [],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="rank must be an integer"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+
 def test_openai_rejects_missing_watch_candidate_output() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",

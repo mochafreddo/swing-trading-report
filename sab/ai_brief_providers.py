@@ -749,13 +749,17 @@ def _provider_fallback_watch_candidate(
 def _validate_raw_recommendation_ranks(
     rows: list[dict[str, object]],
 ) -> None:
-    ranks = [row.get("rank") for row in rows]
-    expected = list(range(1, len(rows) + 1))
-    if ranks != expected:
-        raise AiBriefProviderContractError(
-            "OpenAI output recommendations[].rank must be contiguous from 1 to N "
-            "in recommendation order"
-        )
+    for expected_rank, row in enumerate(rows, start=1):
+        rank = row.get("rank")
+        if isinstance(rank, bool) or not isinstance(rank, int):
+            raise AiBriefProviderContractError(
+                "OpenAI output recommendations[].rank must be an integer"
+            )
+        if rank != expected_rank:
+            raise AiBriefProviderContractError(
+                "OpenAI output recommendations[].rank must be contiguous from 1 to N "
+                "in recommendation order"
+            )
 
 
 def _source_rows_by_ticker(
