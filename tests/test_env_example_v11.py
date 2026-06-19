@@ -51,6 +51,19 @@ def test_env_example_has_no_duplicate_keys() -> None:
     assert not duplicates, f"Duplicate keys in .env.example: {duplicates}"
 
 
+def test_docker_compose_forwards_toss_invest_env_to_web() -> None:
+    compose_path = Path(__file__).resolve().parents[1] / "docker-compose.yml"
+    compose_text = compose_path.read_text(encoding="utf-8")
+
+    for key in (
+        "TOSS_INVEST_CLIENT_ID",
+        "TOSS_INVEST_CLIENT_SECRET",
+        "TOSS_INVEST_ACCOUNT",
+        "TOSS_INVEST_BASE_URL",
+    ):
+        assert f"{key}:" in compose_text
+
+
 def test_env_example_retention_default_is_30_days() -> None:
     env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
     values: dict[str, str] = {}
