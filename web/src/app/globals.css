@@ -334,8 +334,8 @@ a {
   margin: 0 auto;
   padding: clamp(1.5rem, 4vw, 3rem);
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(340px, 460px);
-  gap: clamp(1.5rem, 4vw, 4.5rem);
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 460px);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
   align-items: center;
 }
 
@@ -357,18 +357,18 @@ a {
 .auth-copy {
   position: relative;
   display: grid;
-  gap: var(--space-4);
-  max-width: 38rem;
+  gap: var(--space-3);
+  max-width: 34rem;
   animation: rise-in 0.58s ease-out both;
 }
 
 .auth-title {
   margin: 0;
-  max-width: 10ch;
+  max-width: 13ch;
   font-family: var(--font-display);
-  font-size: clamp(2.9rem, 7vw, 5.4rem);
-  line-height: 0.92;
-  letter-spacing: -0.08em;
+  font-size: clamp(2.35rem, 5.4vw, 4.35rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
   color: var(--ink);
   text-wrap: balance;
 }
@@ -478,10 +478,15 @@ a {
     min-height: auto;
     padding-top: 2.5rem;
     padding-bottom: 2.5rem;
+    align-items: start;
   }
 
   .auth-title {
-    max-width: 12ch;
+    max-width: 14ch;
+  }
+
+  .auth-panel {
+    order: -1;
   }
 }
 
@@ -495,7 +500,7 @@ a {
   }
 
   .auth-title {
-    font-size: clamp(2.4rem, 14vw, 4rem);
+    font-size: clamp(2.05rem, 10vw, 3rem);
   }
 }
 

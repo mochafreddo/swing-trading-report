@@ -7,12 +7,9 @@ export default function LoginPage() {
     <section className="auth-shell">
       <div className="auth-copy">
         <p className="eyebrow">Swing Trading Report</p>
-        <h1 className="auth-title">
-          Admin control surface for local trading ops.
-        </h1>
+        <h1 className="auth-title">Local trading operations console.</h1>
         <p className="auth-lede">
-          리포트 검토, 보유 종목 정리, 워크플로 실행을 같은 운영 콘솔에서
-          처리합니다.
+          리포트 검토, 보유 종목 정리, scan·sell 실행을 한 곳에서 처리합니다.
         </p>
         <ul className="auth-list">
           <li>
