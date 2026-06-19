@@ -75,6 +75,9 @@
 | `SAB_RUN_DISPATCH_LOCK_TTL_SECONDS` | web `/api/run` duplicate lock | 기본 30 |
 | `REPORT_RETENTION_DAYS` | web display / cleanup workflow | 기본 30 |
 | `REPORT_SEARCH_WINDOW` | web report ticker search | 기본 100, 코드에서 min/max 적용 |
+| `TOSS_INVEST_CLIENT_ID`, `TOSS_INVEST_CLIENT_SECRET` | web `/api/holdings/toss-sync` | Toss Open API OAuth client credentials. 서버 전용이며 커밋 금지 |
+| `TOSS_INVEST_ACCOUNT` | web `/api/holdings/toss-sync` | `X-Tossinvest-Account`에 쓰는 accountSeq. 실제 계좌 식별자는 커밋 금지 |
+| `TOSS_INVEST_BASE_URL` | web `/api/holdings/toss-sync` | 기본 `https://openapi.tossinvest.com` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | scheduled/Actions notification | 알림 사용 시 필요 |
 | `SLACK_WEBHOOK_URL` | scheduled/Actions notification | 선택 |
 | `SAB_SCHEDULER_ENV_FILE` | Docker scheduler env_file | 기본 `.env.scheduler.local` |

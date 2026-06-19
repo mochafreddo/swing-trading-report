@@ -17,8 +17,10 @@ import {
   useHoldingsQuery,
 } from "@/components/holdings/use-holdings-query";
 import { HoldingsImportPanel } from "@/components/holdings/holdings-import-panel";
+import { TossSyncPanel } from "@/components/holdings/toss-sync-panel";
 import { useAddBuyFlow } from "@/components/holdings/use-add-buy-flow";
 import { useHoldingsImport } from "@/components/holdings/use-holdings-import";
+import { useTossHoldingsSync } from "@/components/holdings/use-toss-holdings-sync";
 import { useRecentCandidates } from "@/components/holdings/use-recent-candidates";
 import { useTickerLookup } from "@/components/holdings/use-ticker-lookup";
 
@@ -72,10 +74,19 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     refresh,
     setError,
   });
+  const cancelAddBuy = addBuy.cancel;
+  const refreshAfterTossApply = useCallback(async () => {
+    cancelEdit();
+    cancelAddBuy();
+    await refresh();
+  }, [cancelAddBuy, cancelEdit, refresh]);
   const holdingsImport = useHoldingsImport({
     refresh,
     cancelEdit,
-    cancelAddBuy: addBuy.cancel,
+    cancelAddBuy,
+  });
+  const tossSync = useTossHoldingsSync({
+    onApplied: refreshAfterTossApply,
   });
   const partitioned = useMemo(
     () => partitionHoldingsByActivity(items),
@@ -148,6 +159,22 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           onFieldChange={addBuy.updateField}
           onSubmit={addBuy.submit}
           onCancel={addBuy.cancel}
+        />
+        <TossSyncPanel
+          status={tossSync.status}
+          statusMessage={tossSync.statusMessage}
+          loading={tossSync.loading}
+          applying={tossSync.applying}
+          error={tossSync.error}
+          success={tossSync.success}
+          summary={tossSync.summary}
+          changes={tossSync.changes}
+          blockedRows={tossSync.blockedRows}
+          diffHash={tossSync.diffHash}
+          canRunDryRun={tossSync.canRunDryRun}
+          canApply={tossSync.canApply}
+          onRunDryRun={tossSync.runDryRun}
+          onApply={tossSync.apply}
         />
         <HoldingsImportPanel
           fileName={holdingsImport.fileName}

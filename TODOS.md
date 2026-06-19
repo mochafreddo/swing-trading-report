@@ -14,6 +14,21 @@
 
 ## Deferred
 
+- 2026-06-19: Create a repo-wide `DESIGN.md` with `/design-consultation` after
+  Toss holdings sync is implemented or as a separate design-system cleanup.
+  The Toss Sync plan now documents the existing Holdings UI vocabulary locally,
+  but future UI work should not need to rediscover panel, spacing, responsive,
+  and state rules from code each time.
+- 2026-06-19: Add redacted Toss holdings snapshot upload only after the first
+  local-only Toss sync lands and real Toss fixture redaction tests prove that
+  account identifiers, bearer tokens, and sensitive raw response fields cannot
+  leak into Supabase Storage. First implementation keeps raw snapshots local and
+  stores only redacted summary/hash metadata in runtime state.
+- 2026-06-19: Add a Toss-powered account readiness layer after broker-backed
+  holdings sync is stable, covering NAV, buying power, sellable quantity,
+  stop-distance position sizing, exposure, and downside amount/portfolio-percent
+  context. Keep this out of the first holdings sync PR to avoid mixing state sync
+  with risk-budget decisions.
 - 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. The 2026-06-18 swing-trader and investment reviews revalidated this as the top decision-readiness gap. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed

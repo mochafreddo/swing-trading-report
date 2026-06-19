@@ -9,6 +9,11 @@ import {
   normalizeHoldingTickerForMutation,
   US_TICKER_PATTERN,
 } from "@/lib/holding-ticker";
+import {
+  buildHoldingsReconciliationSummary,
+  HoldingsReconciliationError,
+  toHoldingSnapshot,
+} from "@/lib/holdings-reconciliation";
 import type {
   HoldingRecord,
   HoldingReplaceSnapshot,
@@ -302,24 +307,6 @@ function normalizeSettings(root: RootRecord): HoldingsYamlSettings {
   };
 }
 
-function toHoldingSnapshot(
-  record: HoldingRecord | HoldingSnapshot,
-): HoldingSnapshot {
-  return {
-    ticker: record.ticker,
-    quantity: record.quantity,
-    entry_price: record.entry_price,
-    entry_currency: record.entry_currency ?? null,
-    entry_date: record.entry_date ?? null,
-    strategy: record.strategy ?? null,
-    entry_pattern: record.entry_pattern ?? null,
-    notes: record.notes ?? null,
-    tags: [...record.tags],
-    stop_override: record.stop_override ?? null,
-    target_override: record.target_override ?? null,
-  };
-}
-
 function buildYamlRow(snapshot: HoldingSnapshot): RootRecord {
   const row: RootRecord = {
     ticker: snapshot.ticker,
@@ -348,56 +335,6 @@ function buildYamlRow(snapshot: HoldingSnapshot): RootRecord {
   }
 
   return row;
-}
-
-function areSnapshotsEqual(
-  left: HoldingSnapshot,
-  right: HoldingReplaceSnapshot,
-): boolean {
-  const rightEntryPattern =
-    right.quantity === 0
-      ? null
-      : hasOwn(right, "entry_pattern")
-        ? (right.entry_pattern ?? null)
-        : left.entry_pattern;
-  return (
-    left.ticker === right.ticker &&
-    left.quantity === right.quantity &&
-    left.entry_price === right.entry_price &&
-    left.entry_currency === right.entry_currency &&
-    left.entry_date === right.entry_date &&
-    left.strategy === right.strategy &&
-    left.entry_pattern === rightEntryPattern &&
-    left.notes === right.notes &&
-    left.stop_override === right.stop_override &&
-    left.target_override === right.target_override &&
-    left.tags.length === right.tags.length &&
-    left.tags.every((value, index) => value === right.tags[index])
-  );
-}
-
-function assertEntryPatternOwnedForEntryChange(
-  current: HoldingSnapshot,
-  incoming: HoldingReplaceSnapshot,
-): void {
-  if (
-    current.entry_pattern == null ||
-    current.quantity <= 0 ||
-    incoming.quantity <= 0 ||
-    hasOwn(incoming, "entry_pattern")
-  ) {
-    return;
-  }
-
-  if (
-    current.entry_price !== incoming.entry_price ||
-    current.entry_date !== incoming.entry_date ||
-    current.strategy !== incoming.strategy
-  ) {
-    throw new HoldingsYamlError(
-      `${incoming.ticker}: entry_pattern must be explicit when entry identity or strategy changes.`,
-    );
-  }
 }
 
 export function buildHoldingsYamlDocument(
@@ -584,46 +521,15 @@ export function buildHoldingsYamlImportSummary(
   currentHoldings: readonly HoldingRecord[],
   incomingHoldings: readonly HoldingReplaceSnapshot[],
 ): HoldingsYamlImportSummary {
-  const currentByTicker = new Map(
-    currentHoldings.map((row) => [row.ticker, toHoldingSnapshot(row)]),
-  );
-  const incomingByTicker = new Map(
-    incomingHoldings.map((row) => [row.ticker, row]),
-  );
-
-  const createTickers: string[] = [];
-  const updateTickers: string[] = [];
-  const deleteTickers: string[] = [];
-  let unchangedCount = 0;
-
-  for (const incoming of sortHoldingsByTicker(incomingHoldings)) {
-    const current = currentByTicker.get(incoming.ticker);
-    if (!current) {
-      createTickers.push(incoming.ticker);
-      continue;
+  try {
+    return buildHoldingsReconciliationSummary(
+      currentHoldings,
+      incomingHoldings,
+    );
+  } catch (error) {
+    if (error instanceof HoldingsReconciliationError) {
+      throw new HoldingsYamlError(error.message);
     }
-    assertEntryPatternOwnedForEntryChange(current, incoming);
-    if (areSnapshotsEqual(current, incoming)) {
-      unchangedCount += 1;
-      continue;
-    }
-    updateTickers.push(incoming.ticker);
+    throw error;
   }
-
-  for (const current of sortHoldingsByTicker(currentHoldings)) {
-    if (!incomingByTicker.has(current.ticker)) {
-      deleteTickers.push(current.ticker);
-    }
-  }
-
-  return {
-    incomingCount: incomingHoldings.length,
-    createCount: createTickers.length,
-    updateCount: updateTickers.length,
-    deleteCount: deleteTickers.length,
-    unchangedCount,
-    createTickers,
-    updateTickers,
-    deleteTickers,
-  };
 }

@@ -77,6 +77,10 @@
 | `GITHUB_PAT` | required when dispatch enabled | none | `replace-with-github-token` | web `/api/run` | GitHub token for workflow dispatch | Secret. Server-only. |
 | `REPORT_RETENTION_DAYS` | no | `30` | `30` | web, cleanup workflow | Retention days display/cleanup input | Cleanup workflow validates positive integer. |
 | `REPORT_SEARCH_WINDOW` | no | `100` | `100` | web reports | Ticker search scan window | Code clamps min/max. |
+| `TOSS_INVEST_CLIENT_ID` | required for Toss holdings sync | none | `replace-with-toss-client-id` | web `/api/holdings/toss-sync` | Toss Securities Open API OAuth client id | Secret-like credential. Do not commit. Used only server-side. |
+| `TOSS_INVEST_CLIENT_SECRET` | required for Toss holdings sync | none | `replace-with-toss-client-secret` | web `/api/holdings/toss-sync` | Toss Securities Open API OAuth client secret | Secret. Do not commit. Used only server-side. |
+| `TOSS_INVEST_ACCOUNT` | required for Toss holdings sync | none | `replace-with-account-seq` | web `/api/holdings/toss-sync` | Toss accountSeq for `X-Tossinvest-Account` | Treat as sensitive account metadata. Do not commit real values. |
+| `TOSS_INVEST_BASE_URL` | no | `https://openapi.tossinvest.com` | `https://openapi.tossinvest.com` | web `/api/holdings/toss-sync` | Toss Open API base URL override | Keep default unless testing against an approved endpoint. |
 | `MARKET_REGIME_UNAVAILABLE_POLICY` | no | `config.yaml` `strategy.market_regime_unavailable_policy` | `block_market` | `sab scan` | Market regime unavailable policy | Env/YAML conflict binding. |
 | `TELEGRAM_BOT_TOKEN` | no | none | `replace-with-token` | workflows, scheduler | Telegram notification token | Secret. |
 | `TELEGRAM_CHAT_ID` | no | none | `replace-with-chat-id` | workflows, scheduler | Telegram chat id | Treat as sensitive. |

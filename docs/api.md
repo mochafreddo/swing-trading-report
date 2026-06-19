@@ -97,6 +97,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `POST` | `/api/holdings/add-buy/[...ticker]` | class ticker add-buy alias route | same as `[ticker]/add-buy` | same as `[ticker]/add-buy` |
 | `GET` | `/api/holdings/yaml` | holdings YAML export | no body required | YAML snapshot payload |
 | `POST` | `/api/holdings/yaml` | holdings YAML import dry-run/apply | JSON `{ "document": string, "apply": boolean }` | `{ mode, summary }` |
+| `POST` | `/api/holdings/toss-sync` | Toss Securities holdings dry-run/apply | dry-run: `{ "mode": "dry-run" }`; apply: `{ "mode": "apply", "diffHash": "sha256:...", "confirmationText": "APPLY TOSS HOLDINGS" }` | `{ mode, diffHash, applyBlocked, summary, changes, blockedRows, targetRows }`; apply may return `409` for blocked/stale diffs |
 | `GET` | `/api/tickers/search` | ticker directory 검색 | query `q=1..120 chars`, `limit=1..50` | ticker search payload |
 | `GET` | `/api/tickers/recent-candidates` | 최근 buy 후보 | query `limitReports=1..50`, `limitCandidates=1..100` | recent candidate payload with `pattern: string \| null` per candidate |
 
@@ -107,6 +108,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - YAML import/replace-all inputs are the only path where an omitted active `entry_pattern` key can mean preserve-existing. YAML export always owns the key, including `entry_pattern: null`.
 - Add Buy remains quantity-only. `/api/holdings/[ticker]/add-buy` does not accept marker fields such as `entry_pattern`; the RPC preserves existing active markers and clears stale markers when reactivating `quantity=0` rows.
 - `/api/tickers/search` remains ticker/name-only. `/api/tickers/recent-candidates` reads the latest buy report candidates and returns `{ ticker, name, pattern }`, where invalid or missing buy-report patterns are normalized to `null`.
+- `/api/holdings/toss-sync` fetches Toss holdings with server-side credentials, normalizes safe rows into the holdings snapshot contract, preserves app-owned metadata for matched rows, and returns a grouped reconciliation with a deterministic `diffHash`. Blocked rows such as unknown enum values, invalid decimals, or unresolved US exchange suffixes set `applyBlocked=true`. Apply refetches Toss and Supabase, recomputes the diff/hash, requires `confirmationText: "APPLY TOSS HOLDINGS"`, rejects blocked or stale diffs with `409`, and only then calls the Supabase replace-all RPC. The browser displays these rows in the Holdings Toss Sync panel and does not receive Toss access tokens or full account identifiers.
 
 ## Ticker Contract
 

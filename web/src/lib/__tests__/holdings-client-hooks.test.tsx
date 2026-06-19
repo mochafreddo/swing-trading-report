@@ -16,6 +16,7 @@ import { HoldingsClient } from "@/components/holdings-client";
 import { useAddBuyFlow } from "@/components/holdings/use-add-buy-flow";
 import { useHoldingsImport } from "@/components/holdings/use-holdings-import";
 import { useRecentCandidates } from "@/components/holdings/use-recent-candidates";
+import { useTossHoldingsSync } from "@/components/holdings/use-toss-holdings-sync";
 import { useTickerLookup } from "@/components/holdings/use-ticker-lookup";
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import type {
@@ -55,6 +56,17 @@ const IMPORT_SUMMARY: HoldingsYamlImportSummary = {
   createTickers: ["AAPL.NAS"],
   updateTickers: [],
   deleteTickers: [],
+};
+
+const TOSS_SUMMARY: HoldingsYamlImportSummary = {
+  incomingCount: 2,
+  createCount: 0,
+  updateCount: 1,
+  deleteCount: 1,
+  unchangedCount: 0,
+  createTickers: [],
+  updateTickers: ["AAPL.NAS"],
+  deleteTickers: ["TSLA.NAS"],
 };
 
 function renderHook<T>(useHook: () => T) {
@@ -316,6 +328,143 @@ describe("holdings client hooks", () => {
     hook.unmount();
   });
 
+  it("runs Toss dry-run and exposes blocked normalization state", async () => {
+    const requestDryRun = vi.fn().mockResolvedValue({
+      mode: "dry-run",
+      diffHash:
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      applyBlocked: true,
+      summary: TOSS_SUMMARY,
+      blockedRows: [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          reason: "ticker_exchange_unresolved",
+          message:
+            "Toss returned a US symbol without a safe existing exchange suffix mapping.",
+        },
+      ],
+      changes: {
+        create: [],
+        update: [
+          {
+            ticker: "AAPL.NAS",
+            before: {
+              ticker: "AAPL.NAS",
+              quantity: 10,
+              entry_price: 100,
+              entry_currency: "USD",
+              entry_date: "2026-03-01",
+              strategy: null,
+              entry_pattern: null,
+              notes: null,
+              tags: [],
+              stop_override: null,
+              target_override: null,
+            },
+            after: {
+              ticker: "AAPL.NAS",
+              quantity: 11,
+              entry_price: 99,
+              entry_currency: "USD",
+              entry_date: "2026-03-01",
+              strategy: null,
+              entry_pattern: null,
+              notes: null,
+              tags: [],
+              stop_override: null,
+              target_override: null,
+            },
+            changedFields: ["quantity", "entry_price"],
+          },
+        ],
+        delete: [],
+        unchanged: [],
+      },
+      targetRows: [],
+    });
+    const hook = renderHook(() =>
+      useTossHoldingsSync({
+        requestDryRun,
+      }),
+    );
+
+    expect(hook.current.status).toBe("idle");
+
+    await act(async () => {
+      await hook.current.runDryRun();
+    });
+
+    expect(requestDryRun).toHaveBeenCalledTimes(1);
+    expect(hook.current.status).toBe("blocked");
+    expect(hook.current.summary).toEqual(TOSS_SUMMARY);
+    expect(hook.current.blockedRows).toHaveLength(1);
+    expect(hook.current.statusMessage).toBe("Apply blocked");
+
+    hook.unmount();
+  });
+
+  it("applies a reviewed Toss dry-run and runs the applied callback", async () => {
+    const onApplied = vi.fn().mockResolvedValue(undefined);
+    const requestApply = vi.fn().mockResolvedValue({
+      mode: "apply",
+      diffHash:
+        "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      applyBlocked: false,
+      summary: TOSS_SUMMARY,
+      blockedRows: [],
+      changes: {
+        create: [],
+        update: [],
+        delete: [],
+        unchanged: [],
+      },
+      targetRows: [],
+    });
+    const hook = renderHook(() =>
+      useTossHoldingsSync({
+        requestDryRun: vi.fn().mockResolvedValue({
+          mode: "dry-run",
+          diffHash:
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          applyBlocked: false,
+          summary: TOSS_SUMMARY,
+          blockedRows: [],
+          changes: {
+            create: [],
+            update: [],
+            delete: [],
+            unchanged: [],
+          },
+          targetRows: [],
+        }),
+        requestApply,
+        onApplied,
+      }),
+    );
+
+    await act(async () => {
+      await hook.current.runDryRun();
+    });
+    expect(hook.current.status).toBe("ready");
+    expect(hook.current.canApply).toBe(true);
+
+    await act(async () => {
+      await hook.current.apply("APPLY TOSS HOLDINGS");
+    });
+
+    expect(requestApply).toHaveBeenCalledWith(
+      "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "APPLY TOSS HOLDINGS",
+    );
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(hook.current.status).toBe("applied");
+    expect(hook.current.success).toBe("Applied Toss holdings sync");
+
+    hook.unmount();
+  });
+
   it("rotates add-buy idempotency key after payload mismatch", async () => {
     const randomUUID = vi
       .spyOn(crypto, "randomUUID")
@@ -432,6 +581,255 @@ describe("HoldingsClient composition", () => {
     expect(
       container.querySelector<HTMLInputElement>('input[name="buy_quantity"]'),
     ).not.toBeNull();
+  });
+
+  it("places Toss Sync between Add Buy and Holdings YAML in the sidebar", async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: {
+            items: [HOLDING],
+            hasMore: false,
+            nextCursor: null,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    const sidebarTitles = Array.from(
+      container.querySelectorAll(".panel .panelTitle"),
+    ).map((title) => title.textContent);
+
+    expect(sidebarTitles.slice(0, 4)).toEqual([
+      "Create Holding",
+      "Add Buy",
+      "Toss Sync",
+      "Holdings YAML",
+    ]);
+  });
+
+  it("fetches Toss dry-run from the panel and renders blocked and delete groups", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch as typeof fetch);
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/tickers/recent-candidates")) {
+        return jsonResponse({
+          report: null,
+          candidates: [],
+        });
+      }
+      if (url === "/api/holdings/toss-sync") {
+        return jsonResponse({
+          mode: "dry-run",
+          diffHash:
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          applyBlocked: true,
+          summary: TOSS_SUMMARY,
+          blockedRows: [
+            {
+              symbol: "MSFT",
+              marketCountry: "US",
+              currency: "USD",
+              reason: "ticker_exchange_unresolved",
+              message:
+                "Toss returned a US symbol without a safe existing exchange suffix mapping.",
+            },
+          ],
+          changes: {
+            create: [],
+            update: [],
+            delete: [
+              {
+                ticker: "TSLA.NAS",
+                before: {
+                  ticker: "TSLA.NAS",
+                  quantity: 1,
+                  entry_price: 200,
+                  entry_currency: "USD",
+                  entry_date: null,
+                  strategy: null,
+                  entry_pattern: null,
+                  notes: null,
+                  tags: [],
+                  stop_override: null,
+                  target_override: null,
+                },
+              },
+            ],
+            unchanged: [],
+          },
+          targetRows: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: {
+            items: [HOLDING],
+            hasMore: false,
+            nextCursor: null,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findButton(container, "Fetch Toss Snapshot").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holdings/toss-sync",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(container.textContent).toContain("Apply blocked");
+    expect(container.textContent).toContain("MSFT");
+    expect(container.textContent).toContain("ticker_exchange_unresolved");
+    expect(container.textContent).toContain("TSLA.NAS");
+    expect(findButton(container, "Blocked").getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(findButton(container, "Delete").getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+  });
+
+  it("requires confirmation before applying a Toss dry-run from the panel", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch as typeof fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/tickers/recent-candidates")) {
+        return jsonResponse({
+          report: null,
+          candidates: [],
+        });
+      }
+      if (url.startsWith("/api/holdings?")) {
+        return jsonResponse({
+          items: [HOLDING],
+          hasMore: false,
+          nextCursor: null,
+        });
+      }
+      if (url === "/api/holdings/toss-sync") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          mode?: string;
+          diffHash?: string;
+        };
+        if (body.mode === "apply") {
+          return jsonResponse({
+            mode: "apply",
+            diffHash: body.diffHash,
+            applyBlocked: false,
+            summary: TOSS_SUMMARY,
+            blockedRows: [],
+            changes: {
+              create: [],
+              update: [],
+              delete: [],
+              unchanged: [],
+            },
+            targetRows: [],
+          });
+        }
+        return jsonResponse({
+          mode: "dry-run",
+          diffHash:
+            "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          applyBlocked: false,
+          summary: TOSS_SUMMARY,
+          blockedRows: [],
+          changes: {
+            create: [],
+            update: [],
+            delete: [
+              {
+                ticker: "TSLA.NAS",
+                before: {
+                  ticker: "TSLA.NAS",
+                  quantity: 1,
+                  entry_price: 200,
+                  entry_currency: "USD",
+                  entry_date: null,
+                  strategy: null,
+                  entry_pattern: null,
+                  notes: null,
+                  tags: [],
+                  stop_override: null,
+                  target_override: null,
+                },
+              },
+            ],
+            unchanged: [],
+          },
+          targetRows: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: {
+            items: [HOLDING],
+            hasMore: false,
+            nextCursor: null,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findButton(container, "Fetch Toss Snapshot").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const applyButton = findButton(container, "Apply Toss Snapshot");
+    expect(applyButton.disabled).toBe(true);
+
+    const confirmationInput = container.querySelector<HTMLInputElement>(
+      'input[name="tossConfirmation"]',
+    );
+    expect(confirmationInput).not.toBeNull();
+
+    act(() => {
+      setControlValue(confirmationInput!, "APPLY TOSS HOLDINGS");
+    });
+    expect(applyButton.disabled).toBe(false);
+
+    await act(async () => {
+      applyButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holdings/toss-sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "apply",
+          diffHash:
+            "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          confirmationText: "APPLY TOSS HOLDINGS",
+        }),
+      }),
+    );
+    expect(container.textContent).toContain("Applied Toss holdings sync");
   });
 
   it("populates entry pattern when selecting a patterned recent candidate", async () => {

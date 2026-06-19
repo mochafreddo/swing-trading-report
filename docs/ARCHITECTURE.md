@@ -44,6 +44,7 @@
 flowchart LR
   U["User (Local Browser)"] --> W["Next.js Web (web)"]
   W -->|CRUD / 조회| SDB["Supabase Postgres"]
+  W -->|Toss holdings sync| TOSS["Toss Securities Open API"]
   W -->|리포트 목록/상세| SST["Supabase Storage (reports)"]
   W -->|workflow_dispatch| GHA["GitHub Actions (scan/sell/cleanup/ai-brief)"]
   U -->|manual workflow_dispatch| GHA
@@ -79,6 +80,7 @@ flowchart LR
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링, AI Brief 판단 상태(`NO_SIGNAL`/`NEEDS_REVIEW_WATCH_ONLY`/`FINAL_JUDGMENT`/`NEEDS_REVIEW_WEAK_NEWS`)와 scheduled skip 상태 결정 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/ai_brief_skip_report.py`, `sab/report/ai_brief_state.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py`, `sab/report/storage_key.py` |
 | 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
+| Toss holdings sync | 서버 전용 OAuth client credentials로 Toss 보유 종목을 조회하고 Supabase holdings와 비교한 뒤, 서버 재조회/hash guard/확인 문구를 통과한 apply만 replace-all로 반영하는 브로커-backed review 경로 | `web/src/lib/toss/client.ts`, `web/src/lib/toss/holdings-sync.ts`, `web/src/app/api/holdings/toss-sync/route.ts`, `web/src/components/holdings/toss-sync-panel.tsx` |
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
@@ -190,7 +192,13 @@ flowchart LR
    - import apply는 Supabase RPC(`replace_holdings_v1`)로 원자적 replace-all을 수행합니다.
    - export는 `quantity=0` row를 포함한 전체 snapshot을 내보내고, import는 파일에 없는 ticker를 삭제합니다.
    - export는 `entry_pattern`을 명시적으로 기록합니다. import에서 key를 생략한 old YAML active row는 기존 marker를 보존하지만, entry identity(`entry_price`, `entry_date`) 또는 `strategy`가 바뀌면 명시적 valid marker나 명시적 clear(`null`/blank)를 요구합니다. `quantity=0` row는 항상 `entry_pattern=null`로 저장됩니다.
-5. (구현, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
+5. `/api/holdings/toss-sync` `POST`는 Toss Securities Open API에서 보유 종목을 조회해 Supabase holdings와 reconciliation을 반환하고, guarded apply를 수행합니다.
+   - route는 기존 admin/same-origin/local guard 뒤에서만 동작하고, Toss access token과 account metadata는 서버 밖으로 내보내지 않습니다.
+   - KR `symbol`은 6자리 ticker로 직접 매핑하고, US `symbol`은 기존 Supabase holdings에 정확히 하나의 명시 suffix(`.NAS/.NYS/.AMS`)가 있을 때만 안전하게 매핑합니다. 안전한 suffix를 알 수 없거나 Toss enum/decimal 값이 해석되지 않으면 row를 `blockedRows[]`에 넣고 `applyBlocked=true`로 반환합니다.
+   - matched row는 `quantity`, `entry_price`, `entry_currency`를 Toss 값으로 정규화하되 `entry_date`, `strategy`, `entry_pattern`, notes, tags, stop/target overrides 같은 app-owned metadata를 보존합니다.
+   - dry-run 응답은 `diffHash`를 포함합니다. apply 요청은 서버가 Toss/Supabase를 다시 조회해 같은 hash인지 확인하고, blocked row가 없고 `confirmationText: "APPLY TOSS HOLDINGS"`가 맞을 때만 Supabase RPC(`replace_holdings_v1`)를 호출합니다. stale 또는 blocked apply는 `409`로 차단합니다.
+   - `/holdings` 사이드바의 Toss Sync panel은 `Fetch Toss Snapshot`/`Run New Dry-run`, summary grid, `Blocked`/`Delete`/`Update`/`Create` 그룹, apply confirmation input을 표시합니다. `Blocked`와 destructive `Delete` 그룹은 기본 확장 상태로 보여 주며, blocked/stale 상태에서는 Supabase를 쓰지 않습니다.
+6. (구현, ADR-0008) Holdings 입력 UX는 “회사명/별칭 검색”과 “최근 buy 후보”로 ticker 입력을 보조합니다.
    - 티커 검색 데이터는 buy 리포트(`candidates[].{ticker,name}`)에서 파생한 “티커 디렉토리(캐시)”를 사용하며, 캐시/검색 entry shape는 ticker/name 중심으로 유지합니다.
    - 최근 buy 후보 API와 후보 선택 경로는 최신 buy 리포트의 `candidates[].{ticker,name,pattern}`을 읽고, 후보 `pattern`을 holdings 입력의 `entry_pattern`으로 전달해 breakout 매수의 sell marker를 보존합니다.
    - 캐시는 Supabase `runtime_state`에 저장되며 stale 시 증분 갱신합니다.
