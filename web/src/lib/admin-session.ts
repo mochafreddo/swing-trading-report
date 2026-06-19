@@ -266,9 +266,17 @@ export async function verifyAdminSessionToken(
 export function getAdminSessionCookieOptions(
   maxAge = ADMIN_SESSION_TTL_SECONDS,
 ) {
+  const secureOverride = process.env.SAB_SESSION_COOKIE_SECURE?.trim();
+  const secure =
+    secureOverride === "true"
+      ? true
+      : secureOverride === "false"
+        ? false
+        : process.env.NODE_ENV === "production";
+
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     sameSite: "lax" as const,
     path: "/",
     maxAge,

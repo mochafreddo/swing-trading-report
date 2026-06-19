@@ -90,4 +90,13 @@ describe("admin-session", () => {
       maxAge: ADMIN_SESSION_TTL_SECONDS,
     });
   });
+
+  it("allows local production deployments to disable secure session cookies", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_SESSION_COOKIE_SECURE", "false");
+
+    expect(getAdminSessionCookieOptions()).toMatchObject({
+      secure: false,
+    });
+  });
 });

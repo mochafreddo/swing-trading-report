@@ -60,6 +60,7 @@
 | `SAB_BASIC_AUTH_USER` | yes for web | none | `admin` | web | Admin login username | Required by `web/scripts/validate-env.mjs`. |
 | `SAB_BASIC_AUTH_PASS` | yes for web | none | `replace-with-password` | web | Admin login password | Secret. |
 | `SAB_SESSION_SECRET` | yes for web | none | `replace-with-32-plus-char-secret` | web | HMAC session cookie secret | Must be at least 32 chars. |
+| `SAB_SESSION_COOKIE_SECURE` | no | `true` when `NODE_ENV=production`, else `false`; Docker Compose default `false` | `false` | web | Adds the `Secure` attribute to admin session cookies | Keep `false` for HTTP localhost Docker. Set `true` only behind HTTPS. |
 | `SAB_LOGIN_MAX_ATTEMPTS` | no | `5` | `5` | web | Login throttle attempts | See `web/src/lib/login-throttle.ts`. |
 | `SAB_LOGIN_WINDOW_SECONDS` | no | `900` | `900` | web | Login throttle window | Seconds. |
 | `SAB_LOGIN_BLOCK_SECONDS` | no | `900` | `900` | web | Login block duration | Seconds. |
