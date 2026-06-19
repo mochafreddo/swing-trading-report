@@ -20,12 +20,42 @@ function sanitizeNextPath(rawNext: string | null): string {
   return rawNext;
 }
 
+function getRedirectLabel(path: string): string {
+  if (path.startsWith("/holdings")) {
+    return "Holdings upkeep";
+  }
+  if (path.startsWith("/run")) {
+    return "Workflow dispatch";
+  }
+  if (path.startsWith("/metrics")) {
+    return "Metrics dashboard";
+  }
+  if (path.startsWith("/reports")) {
+    return "Reports review";
+  }
+  return "Requested console page";
+}
+
+function getLoginErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Login failed";
+
+  if (message === "Unauthorized") {
+    return "Username or password did not match. Check the local web credentials and try again.";
+  }
+
+  return message;
+}
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectPath = useMemo(
     () => sanitizeNextPath(searchParams.get("next")),
     [searchParams],
+  );
+  const redirectLabel = useMemo(
+    () => getRedirectLabel(redirectPath),
+    [redirectPath],
   );
 
   const [username, setUsername] = useState("");
@@ -50,9 +80,7 @@ export function LoginForm() {
       router.replace(redirectPath);
       router.refresh();
     } catch (requestError) {
-      setError(
-        requestError instanceof Error ? requestError.message : "Login failed",
-      );
+      setError(getLoginErrorMessage(requestError));
     } finally {
       setSubmitting(false);
     }
@@ -61,6 +89,11 @@ export function LoginForm() {
   return (
     <section className={styles.wrapper}>
       <form className={styles.form} onSubmit={(event) => void onSubmit(event)}>
+        <div className={styles.destination}>
+          <span>After sign-in</span>
+          <strong>{redirectLabel}</strong>
+        </div>
+
         <label className={styles.field}>
           <span className={styles.label}>Username</span>
           <input
@@ -92,9 +125,10 @@ export function LoginForm() {
         </p>
 
         {error ? (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
+          <div className={styles.error} role="alert">
+            <strong>Sign-in failed</strong>
+            <span>{error}</span>
+          </div>
         ) : null}
 
         <button className={styles.button} type="submit" disabled={submitting}>

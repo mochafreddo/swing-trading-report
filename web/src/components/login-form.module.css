@@ -8,6 +8,30 @@
   gap: var(--space-5);
 }
 
+.destination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  background: color-mix(in srgb, var(--accent-bg) 62%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.destination span {
+  color: var(--ink-muted);
+}
+
+.destination strong {
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+
 .field {
   display: grid;
   gap: 0.65rem;
@@ -92,4 +116,28 @@
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+  display: grid;
+  gap: 0.25rem;
+}
+
+.error strong {
+  color: color-mix(in srgb, var(--danger) 72%, #fff 28%);
+  font-size: 0.82rem;
+}
+
+.error span {
+  color: color-mix(in srgb, var(--danger) 88%, #fff 12%);
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .destination {
+    display: grid;
+    justify-content: stretch;
+    gap: 0.2rem;
+  }
+
+  .destination strong {
+    text-align: left;
+  }
 }
