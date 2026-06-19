@@ -171,4 +171,40 @@ describe("toss holdings sync dry-run", () => {
       buildTossHoldingsDiffHash(first),
     );
   });
+
+  it("rounds Toss numeric fields to replace_holdings_v1 precision before comparing", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [
+        holding({
+          ticker: "AAPL.NAS",
+          quantity: 1.123457,
+          entry_price: 188.5556,
+          entry_currency: "USD",
+        }),
+      ],
+      items: [
+        {
+          symbol: "AAPL",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1.1234567",
+          averagePurchasePrice: "188.55555",
+        },
+      ],
+    });
+
+    expect(dryRun.reconciliation.summary).toEqual(
+      expect.objectContaining({
+        updateCount: 0,
+        unchangedCount: 1,
+      }),
+    );
+    expect(dryRun.targetRows).toEqual([
+      expect.objectContaining({
+        ticker: "AAPL.NAS",
+        quantity: 1.123457,
+        entry_price: 188.5556,
+      }),
+    ]);
+  });
 });

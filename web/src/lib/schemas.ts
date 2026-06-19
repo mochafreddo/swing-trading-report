@@ -9,7 +9,6 @@ import {
   HOLDING_ENTRY_PATTERN_VALUES,
   isHoldingEntryPattern,
 } from "@/lib/holding-entry-pattern";
-import { TOSS_HOLDINGS_APPLY_CONFIRMATION_TEXT } from "@/lib/toss/holdings-sync-contract";
 import {
   KR_TICKER_PATTERN,
   normalizeHoldingTickerForMutation,
@@ -319,7 +318,6 @@ export const tossHoldingsSyncRequestSchema = z.union([
     .object({
       mode: z.literal("apply"),
       diffHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-      confirmationText: z.literal(TOSS_HOLDINGS_APPLY_CONFIRMATION_TEXT),
     })
     .strict(),
   z

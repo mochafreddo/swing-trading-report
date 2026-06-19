@@ -45,6 +45,13 @@ export interface TossHoldingsDryRunResult {
 
 const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
 const DECIMAL_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+const QUANTITY_DECIMAL_DIGITS = 6;
+const ENTRY_PRICE_DECIMAL_DIGITS = 4;
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
 
 function sortByTicker<T extends { ticker: string }>(rows: readonly T[]): T[] {
   return [...rows].sort((left, right) =>
@@ -216,8 +223,8 @@ export function buildTossHoldingsDryRun(
       preserveAppOwnedMetadata(
         {
           ticker,
-          quantity,
-          entry_price: entryPrice,
+          quantity: roundTo(quantity, QUANTITY_DECIMAL_DIGITS),
+          entry_price: roundTo(entryPrice, ENTRY_PRICE_DECIMAL_DIGITS),
           entry_currency:
             marketCountry === "KR" && currency === "KRW" ? null : currency,
           entry_date: null,

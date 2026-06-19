@@ -9,6 +9,7 @@ import {
   reportDetailQuerySchema,
   reportListQuerySchema,
   runDispatchSchema,
+  tossHoldingsSyncRequestSchema,
 } from "@/lib/schemas";
 
 describe("runDispatchSchema", () => {
@@ -398,6 +399,22 @@ describe("holding schemas", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("tossHoldingsSyncRequestSchema", () => {
+  it("accepts apply payload with a reviewed diff hash and no confirmation text", () => {
+    const parsed = tossHoldingsSyncRequestSchema.parse({
+      mode: "apply",
+      diffHash:
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    });
+
+    expect(parsed).toEqual({
+      mode: "apply",
+      diffHash:
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    });
   });
 });
 

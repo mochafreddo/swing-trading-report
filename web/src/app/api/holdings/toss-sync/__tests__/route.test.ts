@@ -223,7 +223,6 @@ describe("/api/holdings/toss-sync route", () => {
       makePostRequest({
         mode: "apply",
         diffHash: dryRunPayload.diffHash,
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const applyPayload = (await applyResponse.json()) as {
@@ -265,7 +264,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
@@ -296,7 +294,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {

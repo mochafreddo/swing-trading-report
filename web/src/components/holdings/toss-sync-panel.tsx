@@ -11,7 +11,6 @@ import type {
 } from "@/components/holdings/use-toss-holdings-sync";
 import type { HoldingReplaceSnapshot, HoldingSnapshot } from "@/lib/types";
 import type { TossHoldingsBlockedRow } from "@/lib/toss/holdings-sync";
-import { TOSS_HOLDINGS_APPLY_CONFIRMATION_TEXT } from "@/lib/toss/holdings-sync-contract";
 
 interface TossSyncPanelProps {
   status: TossSyncStatus;
@@ -23,11 +22,10 @@ interface TossSyncPanelProps {
   summary: TossHoldingsDryRunResponse["summary"] | null;
   changes: TossHoldingsDryRunResponse["changes"] | null;
   blockedRows: TossHoldingsBlockedRow[];
-  diffHash: string | null;
   canRunDryRun: boolean;
   canApply: boolean;
   onRunDryRun: () => void | Promise<void>;
-  onApply: (confirmationText: string) => void | Promise<void>;
+  onApply: () => void | Promise<void>;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -199,26 +197,17 @@ export function TossSyncPanel({
   summary,
   changes,
   blockedRows,
-  diffHash,
   canRunDryRun,
   canApply,
   onRunDryRun,
   onApply,
 }: TossSyncPanelProps) {
-  const [confirmationState, setConfirmationState] = useState<{
-    diffHash: string | null;
-    text: string;
-  }>({ diffHash: null, text: "" });
-  const confirmationText =
-    confirmationState.diffHash === diffHash ? confirmationState.text : "";
   const actionLabel =
     status === "idle" || status === "error" || status === "rate-limited"
       ? "Fetch Toss Snapshot"
       : "Run New Dry-run";
   const hasBlockingError =
     status === "error" || status === "rate-limited" || status === "blocked";
-  const confirmationMatches =
-    confirmationText === TOSS_HOLDINGS_APPLY_CONFIRMATION_TEXT;
 
   return (
     <aside className="panel" aria-busy={loading || applying}>
@@ -317,27 +306,11 @@ export function TossSyncPanel({
 
           {canApply && (
             <div className={styles.applyGuard}>
-              <label className={styles.confirmationLabel}>
-                <span>Confirmation</span>
-                <input
-                  name="tossConfirmation"
-                  value={confirmationText}
-                  onChange={(event) =>
-                    setConfirmationState({
-                      diffHash,
-                      text: event.target.value,
-                    })
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={TOSS_HOLDINGS_APPLY_CONFIRMATION_TEXT}
-                />
-              </label>
               <button
                 type="button"
                 className={styles.dangerButton}
-                onClick={() => void onApply(confirmationText)}
-                disabled={!confirmationMatches || applying || loading}
+                onClick={() => void onApply()}
+                disabled={applying || loading}
               >
                 {applying ? "Applying..." : "Apply Toss Snapshot"}
               </button>
