@@ -23,7 +23,7 @@
   --panel-strong: rgba(22, 28, 44, 0.85);
   --line: rgba(161, 180, 204, 0.15);
   --line-strong: rgba(161, 180, 204, 0.28);
-  --line-focus: rgba(139, 92, 246, 0.62);
+  --line-focus: rgba(107, 163, 255, 0.62);
 
   --ink: #f2f7ff;
   --ink-soft: #d7e4f7;
@@ -71,17 +71,8 @@ body {
   line-height: 1.6;
   color: var(--ink);
   background:
-    radial-gradient(
-      circle at 15% 0%,
-      rgba(139, 92, 246, 0.18),
-      transparent 35%
-    ),
-    radial-gradient(
-      circle at 85% 5%,
-      rgba(107, 163, 255, 0.15),
-      transparent 30%
-    ),
-    linear-gradient(180deg, #0b121a 0%, #070b14 48%, #05070d 100%);
+    linear-gradient(135deg, rgba(20, 184, 166, 0.07), transparent 34%),
+    linear-gradient(180deg, #0b1117 0%, #070a0d 52%, #050607 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -109,19 +100,17 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(
-      circle at 72% 16%,
-      rgba(107, 163, 255, 0.12),
-      transparent 24%
-    ),
-    radial-gradient(
-      circle at 32% 72%,
-      rgba(217, 70, 239, 0.08),
-      transparent 26%
-    );
+  background: linear-gradient(
+    112deg,
+    transparent 0%,
+    transparent 48%,
+    rgba(20, 184, 166, 0.05) 49%,
+    rgba(107, 163, 255, 0.035) 58%,
+    transparent 66%,
+    transparent 100%
+  );
+  opacity: 0.72;
   z-index: 0;
-  animation: slow-drift 18s ease-in-out infinite alternate;
 }
 
 a {
@@ -175,16 +164,6 @@ a {
   }
 }
 
-@keyframes slow-drift {
-  from {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-
-  to {
-    transform: translate3d(0, -2%, 0) scale(1.04);
-  }
-}
-
 .app-shell {
   position: relative;
   z-index: 1;
@@ -233,7 +212,7 @@ a {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: clamp(2.6rem, 6vw, 4.8rem);
-  letter-spacing: -0.07em;
+  letter-spacing: 0;
   line-height: 0.94;
   color: var(--ink);
   text-wrap: balance;
@@ -316,7 +295,7 @@ a {
   font-family: var(--font-display);
   font-size: clamp(1.05rem, 1.4vw, 1.25rem);
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   color: var(--ink);
 }
 
@@ -342,15 +321,16 @@ a {
 .auth-shell::before {
   content: "";
   position: absolute;
-  inset: 12% 4% 16% 36%;
-  border-radius: 40px;
-  background: radial-gradient(
-    circle,
-    rgba(139, 92, 246, 0.15),
-    rgba(107, 163, 255, 0.08) 40%,
-    transparent 70%
+  inset: 14% 50% 14% auto;
+  width: 1px;
+  border-radius: 0;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(20, 184, 166, 0.24),
+    transparent
   );
-  filter: blur(36px);
+  opacity: 0.58;
   pointer-events: none;
 }
 
@@ -368,19 +348,9 @@ a {
   font-family: var(--font-display);
   font-size: clamp(2.35rem, 5.4vw, 4.35rem);
   line-height: 0.98;
-  letter-spacing: -0.06em;
+  letter-spacing: 0;
   color: var(--ink);
   text-wrap: balance;
-}
-
-@supports ((-webkit-background-clip: text) or (background-clip: text)) {
-  .title,
-  .auth-title {
-    color: transparent;
-    background: linear-gradient(135deg, var(--ink), var(--ink-muted) 80%);
-    background-clip: text;
-    -webkit-background-clip: text;
-  }
 }
 
 @media (forced-colors: active) {
