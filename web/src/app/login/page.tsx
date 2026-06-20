@@ -33,7 +33,13 @@ export default function LoginPage() {
       </div>
 
       <div className="auth-panel">
-        <p className="auth-panel-label">관리자 인증</p>
+        <div
+          className="auth-panel-heading"
+          aria-label="Swing Trading Report 관리자 인증"
+        >
+          <p className="auth-panel-label">Swing Trading Report</p>
+          <span className="auth-panel-badge">관리자 인증</span>
+        </div>
         <h2 className="panelTitle">Sign in</h2>
         <p className="subtle">
           운영 콘솔 접근을 위해 관리자 자격 증명을 입력하세요.

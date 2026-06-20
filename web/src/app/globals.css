@@ -443,6 +443,13 @@ a {
   animation: rise-in 0.7s ease-out both;
 }
 
+.auth-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 .auth-panel-label {
   margin: 0;
   text-transform: uppercase;
@@ -450,6 +457,17 @@ a {
   font-size: 0.74rem;
   font-weight: 600;
   color: var(--accent-soft);
+}
+
+.auth-panel-badge {
+  flex: none;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .auth-panel .panelTitle {
