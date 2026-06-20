@@ -467,14 +467,25 @@ a {
     padding-top: 2.5rem;
     padding-bottom: 2.5rem;
     align-items: start;
+    justify-items: center;
   }
 
   .auth-title {
     max-width: 14ch;
   }
 
+  .auth-copy,
+  .auth-panel {
+    width: min(100%, 42rem);
+  }
+
+  .auth-shell::before {
+    display: none;
+  }
+
   .auth-panel {
     order: -1;
+    max-width: 36rem;
   }
 }
 
