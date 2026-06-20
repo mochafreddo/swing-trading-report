@@ -1,3 +1,7 @@
+import { loadRootEnv } from "./root-env-loader.mjs";
+
+loadRootEnv();
+
 function requireNonEmpty(name) {
   const raw = process.env[name];
   const value = typeof raw === "string" ? raw.trim() : "";

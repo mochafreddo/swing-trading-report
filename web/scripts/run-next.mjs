@@ -6,7 +6,10 @@ import {
   normalizeEnvValue,
   resolveEffectiveBindHost,
 } from "./next-args.mjs";
+import { loadRootEnv } from "./root-env-loader.mjs";
 import { enforceStartupBindGuard } from "./startup-bind-guard.mjs";
+
+loadRootEnv();
 
 const require = createRequire(import.meta.url);
 

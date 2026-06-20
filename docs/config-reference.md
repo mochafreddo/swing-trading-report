@@ -34,6 +34,8 @@
 - `SAB_CONFIG`는 YAML 파일 경로를 바꿉니다. 기본값은 `config.yaml`입니다.
 - `SAB_CONFIG_STRICT=true`는 로컬에서도 CI/GitHub Actions와 같은 strict parsing을 강제합니다.
 - `.env`는 `sab`가 로드합니다. `direnv`는 `.env`를 자동 로드하지 않고 `.envrc.local`만 source합니다.
+- Direct web scripts preload the repository root `.env` before validation.
+- `web/.env` is not a supported env file for this project.
 
 ## 파일별 역할
 
@@ -41,6 +43,7 @@
 | --- | --- | --- |
 | `.env.example` | 필요한 시크릿/주요 env 템플릿 | 커밋 |
 | `.env` | 로컬 시크릿과 환경별 값 | 커밋 금지 |
+| `web/.env` | unsupported local duplicate; do not create | 커밋 금지 |
 | `.env.scheduler.local` | 로컬 Docker scheduled AI Brief wrapper용 시크릿 | 커밋 금지 |
 | `.envrc.local` | direnv 개인 override | 커밋 금지 |
 | `config.yaml` | 저장소 기본 비시크릿 config | 커밋 |

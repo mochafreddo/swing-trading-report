@@ -98,6 +98,10 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY
 
 ## 5. Web UI 실행
 
+Direct web scripts preload the repository root `.env` before validation.
+`web/.env` is not a supported env file for this project. Keep local web secrets in
+the root `.env` or export them through `.envrc.local` when direnv is active.
+
 Docker Compose production mode:
 
 ```bash
