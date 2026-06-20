@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
@@ -11,6 +11,12 @@ from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
 
 _ARTIFACT_SCHEMA = "sab.report.v1"
+_DEFAULT_INVESTMENT_READINESS_REASONS = (
+    "nav_risk_budget_unavailable",
+    "liquidity_exit_capacity_unavailable",
+    "portfolio_exposure_context_unavailable",
+    "source_fundamental_context_unavailable",
+)
 
 
 @dataclass
@@ -31,6 +37,11 @@ class EntryReportRow:
     entry_price_source: str | None = None
     entry_price_issue_code: str | None = None
     entry_price_issues: list[str] | None = None
+    implementation_ready: bool = False
+    investment_readiness: str = "CONTEXT_REQUIRED"
+    investment_readiness_reasons: list[str] = field(
+        default_factory=lambda: list(_DEFAULT_INVESTMENT_READINESS_REASONS)
+    )
 
 
 def write_entry_report(

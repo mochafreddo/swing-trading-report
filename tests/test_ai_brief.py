@@ -1153,6 +1153,95 @@ def test_run_ai_brief_rejects_unsupported_action_before_providers(
     assert list(report_dir.glob("*.ai-brief.json")) == []
 
 
+def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry_row("AAPL.NAS")
+    entry.update(
+        {
+            "implementation_ready": False,
+            "investment_readiness": "CONTEXT_REQUIRED",
+            "investment_readiness_reasons": [
+                "nav_risk_budget_unavailable",
+                "liquidity_exit_capacity_unavailable",
+            ],
+        }
+    )
+    entry_report = _write_entry_report(tmp_path, entries=[entry])
+    report_dir = tmp_path / "reports"
+    seen: dict[str, object] = {}
+    original_build = FakeAiBriefProvider.build_recommendations
+
+    def spy_build(
+        self: FakeAiBriefProvider,
+        *,
+        recommendable_candidates: list[dict[str, object]],
+        watch_candidates: list[dict[str, object]],
+    ) -> object:
+        seen["candidate"] = recommendable_candidates[0]
+        return original_build(
+            self,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
+
+    monkeypatch.setattr(FakeAiBriefProvider, "build_recommendations", spy_build)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    assert seen["candidate"] == {
+        "ticker": "AAPL.NAS",
+        "name": None,
+        "action": "ENTER",
+        "ai_role": "recommendable",
+        "ai_role_reason": "entry report action was ENTER",
+        "entry_reasons": ["entry conditions satisfied"],
+        "buy_reason_labels": [],
+        "entry_price": 101.0,
+        "gap_pct": 0.01,
+        "gap_guard_pct": 0.03,
+        "strategy_mode": "ema_cross",
+        "pattern": None,
+        "entry_state": "READY",
+        "implementation_ready": False,
+        "investment_readiness": "CONTEXT_REQUIRED",
+        "investment_readiness_reasons": [
+            "nav_risk_budget_unavailable",
+            "liquidity_exit_capacity_unavailable",
+        ],
+        "sources": [],
+    }
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    recommendation = payload["recommendations"][0]
+    assert recommendation["implementation_ready"] is False
+    assert recommendation["investment_readiness"] == "CONTEXT_REQUIRED"
+    assert recommendation["investment_readiness_reasons"] == [
+        "nav_risk_budget_unavailable",
+        "liquidity_exit_capacity_unavailable",
+    ]
+    assert (
+        "investment readiness requires context: CONTEXT_REQUIRED"
+        in recommendation["rationale"]
+    )
+    assert (
+        "confirm NAV/risk budget, exit liquidity, portfolio exposure, and source context before acting"
+        in recommendation["checklist"]
+    )
+
+
 def test_run_ai_brief_applies_provider_boundary_before_output_cap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

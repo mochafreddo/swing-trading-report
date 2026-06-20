@@ -31,6 +31,15 @@ PRESELECTION_LIMIT = 5
 RECOMMENDATION_LIMIT = 3
 
 _MAX_SOURCES_PER_TICKER = 3
+_INVESTMENT_READINESS_FIELDS = (
+    "implementation_ready",
+    "investment_readiness",
+    "investment_readiness_reasons",
+)
+_INVESTMENT_READINESS_CHECKLIST_ITEM = (
+    "confirm NAV/risk budget, exit liquidity, portfolio exposure, "
+    "and source context before acting"
+)
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
@@ -90,23 +99,23 @@ class FakeAiBriefProvider:
         ):
             ticker = str(candidate["ticker"])
             sources = _candidate_sources(candidate)
-            recommendations.append(
-                {
-                    "ticker": ticker,
-                    "name": candidate.get("name"),
-                    "rank": rank,
-                    "action": "ENTER",
-                    "confidence": "LOW",
-                    "rationale": _build_fake_rationale(candidate),
-                    "checklist": [
-                        "entry price is still close to the entry report snapshot",
-                        "gap guard, position size, and cash availability are acceptable",
-                        "manually check for blocking headlines or market-wide shocks",
-                    ],
-                    "sources": sources,
-                    "as_of": as_of,
-                }
-            )
+            recommendation = {
+                "ticker": ticker,
+                "name": candidate.get("name"),
+                "rank": rank,
+                "action": "ENTER",
+                "confidence": "LOW",
+                "rationale": _build_fake_rationale(candidate),
+                "checklist": [
+                    "entry price is still close to the entry report snapshot",
+                    "gap guard, position size, and cash availability are acceptable",
+                    "manually check for blocking headlines or market-wide shocks",
+                ],
+                "sources": sources,
+                "as_of": as_of,
+            }
+            _apply_investment_readiness_context(recommendation, candidate)
+            recommendations.append(recommendation)
             if not sources:
                 source_issues.append(
                     {
@@ -119,22 +128,22 @@ class FakeAiBriefProvider:
         watch_rows: list[dict[str, object]] = []
         for candidate in watch_candidates:
             ticker = str(candidate["ticker"])
-            watch_rows.append(
-                {
-                    "ticker": ticker,
-                    "action": "WATCH",
-                    "reason": str(
-                        candidate.get("ai_role_reason")
-                        or "entry trigger requires re-confirmation"
-                    ),
-                    "retrigger_conditions": [
-                        "price must satisfy the original entry trigger again",
-                        "manual review must confirm source and market context",
-                    ],
-                    "sources": _candidate_sources(candidate),
-                    "as_of": as_of,
-                }
-            )
+            watch_row: dict[str, object] = {
+                "ticker": ticker,
+                "action": "WATCH",
+                "reason": str(
+                    candidate.get("ai_role_reason")
+                    or "entry trigger requires re-confirmation"
+                ),
+                "retrigger_conditions": [
+                    "price must satisfy the original entry trigger again",
+                    "manual review must confirm source and market context",
+                ],
+                "sources": _candidate_sources(candidate),
+                "as_of": as_of,
+            }
+            _copy_investment_readiness_fields(watch_row, candidate)
+            watch_rows.append(watch_row)
         result = AiBriefProviderResult(
             recommendations=recommendations,
             source_issues=source_issues,
@@ -258,6 +267,9 @@ def _build_openai_request_payload(
                     "ENTER, REVIEW, or SKIP; use ai_role_reason as the inclusion "
                     "decision. Do not use automated-order "
                     f"language such as {AUTOMATED_ORDER_PROMPT_EXAMPLES}. "
+                    "When implementation_ready is false or investment_readiness "
+                    "requires context, keep the recommendation manual-review-only "
+                    "and include the readiness caveat in rationale/checklist. "
                     "Only cite source_refs supplied in each candidate's "
                     "sources[].source_id list; do not return source title, url, "
                     "or published_at fields. "
@@ -513,21 +525,19 @@ def _normalize_openai_provider_result(
             )
             continue
         candidate = candidate_by_ticker[ticker]
-        recommendations.append(
-            {
-                "ticker": ticker,
-                "name": candidate.get("name"),
-                "rank": raw_recommendation.get("rank"),
-                "action": "ENTER",
-                "confidence": str(
-                    raw_recommendation.get("confidence") or "LOW"
-                ).upper(),
-                "rationale": string_list(raw_recommendation.get("rationale")),
-                "checklist": string_list(raw_recommendation.get("checklist")),
-                "sources": sources,
-                "as_of": _offset_now_iso(),
-            }
-        )
+        recommendation = {
+            "ticker": ticker,
+            "name": candidate.get("name"),
+            "rank": raw_recommendation.get("rank"),
+            "action": "ENTER",
+            "confidence": str(raw_recommendation.get("confidence") or "LOW").upper(),
+            "rationale": string_list(raw_recommendation.get("rationale")),
+            "checklist": string_list(raw_recommendation.get("checklist")),
+            "sources": sources,
+            "as_of": _offset_now_iso(),
+        }
+        _apply_investment_readiness_context(recommendation, candidate)
+        recommendations.append(recommendation)
     for rank, recommendation in enumerate(recommendations, start=1):
         recommendation["rank"] = rank
     vetoed_candidates = _as_provider_mapping_rows(
@@ -568,15 +578,17 @@ def _normalize_openai_provider_result(
                 _provider_fallback_watch_candidate(watch_candidate_by_ticker[ticker])
             )
             continue
-        normalized_watch_candidates.append(
-            {
-                "ticker": ticker,
-                "action": action,
-                "reason": reason,
-                "retrigger_conditions": retrigger_conditions,
-                "sources": sources,
-            }
+        watch_candidate: dict[str, object] = {
+            "ticker": ticker,
+            "action": action,
+            "reason": reason,
+            "retrigger_conditions": retrigger_conditions,
+            "sources": sources,
+        }
+        _copy_investment_readiness_fields(
+            watch_candidate, watch_candidate_by_ticker[ticker]
         )
+        normalized_watch_candidates.append(watch_candidate)
     return AiBriefProviderResult(
         recommendations=recommendations,
         source_issues=source_issues,
@@ -703,6 +715,51 @@ def _model_source_issue(
     }
 
 
+def _copy_investment_readiness_fields(
+    row: dict[str, object], candidate: Mapping[str, object]
+) -> None:
+    for field_name in _INVESTMENT_READINESS_FIELDS:
+        if field_name in candidate:
+            row[field_name] = candidate.get(field_name)
+
+
+def _investment_readiness_status(candidate: Mapping[str, object]) -> str:
+    return str(candidate.get("investment_readiness") or "").strip().upper()
+
+
+def _needs_investment_readiness_caveat(candidate: Mapping[str, object]) -> bool:
+    if candidate.get("implementation_ready") is False:
+        return True
+    status = _investment_readiness_status(candidate)
+    return bool(status and status not in {"READY", "IMPLEMENTATION_READY"})
+
+
+def _append_unique_text(row: dict[str, object], field_name: str, text: str) -> None:
+    normalized_items = string_list(row.get(field_name))
+    if text not in normalized_items:
+        normalized_items.append(text)
+    row[field_name] = normalized_items
+
+
+def _apply_investment_readiness_context(
+    row: dict[str, object], candidate: Mapping[str, object]
+) -> None:
+    _copy_investment_readiness_fields(row, candidate)
+    if not _needs_investment_readiness_caveat(candidate):
+        return
+    status = _investment_readiness_status(candidate) or "CONTEXT_REQUIRED"
+    _append_unique_text(
+        row,
+        "rationale",
+        f"investment readiness requires context: {status}",
+    )
+    _append_unique_text(
+        row,
+        "checklist",
+        _INVESTMENT_READINESS_CHECKLIST_ITEM,
+    )
+
+
 def _provider_fallback_watch_candidate(
     candidate: Mapping[str, object],
 ) -> dict[str, object]:
@@ -723,6 +780,7 @@ def _provider_fallback_watch_candidate(
     name = str(candidate.get("name") or "").strip()
     if name:
         row["name"] = name
+    _copy_investment_readiness_fields(row, candidate)
     return row
 
 

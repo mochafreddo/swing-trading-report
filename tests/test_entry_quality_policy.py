@@ -34,6 +34,14 @@ def test_hybrid_quality_state_a_allows_entry_when_other_guards_pass() -> None:
     assert issues == []
     assert rows[0].action == "ENTER"
     assert rows[0].reasons == ["entry conditions satisfied"]
+    assert rows[0].implementation_ready is False
+    assert rows[0].investment_readiness == "CONTEXT_REQUIRED"
+    assert rows[0].investment_readiness_reasons == [
+        "nav_risk_budget_unavailable",
+        "liquidity_exit_capacity_unavailable",
+        "portfolio_exposure_context_unavailable",
+        "source_fundamental_context_unavailable",
+    ]
 
 
 @pytest.mark.parametrize(

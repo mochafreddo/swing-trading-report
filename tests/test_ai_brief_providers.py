@@ -197,6 +197,65 @@ def test_openai_payload_adds_source_ids_and_schema_uses_source_refs() -> None:
     assert "sources" not in watch_props
 
 
+def test_openai_normalized_output_preserves_candidate_investment_readiness() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid"],
+                    "checklist": ["confirm price"],
+                    "source_refs": ["AAPL.NAS:1"],
+                }
+            ],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+    candidate = _candidate("AAPL.NAS", role="recommendable")
+    candidate.update(
+        {
+            "implementation_ready": False,
+            "investment_readiness": "CONTEXT_REQUIRED",
+            "investment_readiness_reasons": [
+                "nav_risk_budget_unavailable",
+                "liquidity_exit_capacity_unavailable",
+            ],
+        }
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[candidate],
+        watch_candidates=[],
+    )
+
+    recommendation = result.recommendations[0]
+    assert recommendation["implementation_ready"] is False
+    assert recommendation["investment_readiness"] == "CONTEXT_REQUIRED"
+    assert recommendation["investment_readiness_reasons"] == [
+        "nav_risk_budget_unavailable",
+        "liquidity_exit_capacity_unavailable",
+    ]
+    rationale = recommendation["rationale"]
+    checklist = recommendation["checklist"]
+    assert isinstance(rationale, list)
+    assert isinstance(checklist, list)
+    assert "investment readiness requires context: CONTEXT_REQUIRED" in rationale
+    assert (
+        "confirm NAV/risk budget, exit liquidity, portfolio exposure, and source context before acting"
+        in checklist
+    )
+
+
 def test_openai_rejects_legacy_output_sources_after_source_ref_schema_switch() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",

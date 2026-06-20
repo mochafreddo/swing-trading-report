@@ -117,7 +117,7 @@ flowchart LR
 2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. US KIS 해외 `price-detail`은 `PRE_OPEN|INTRADAY`에서 날짜/시각 marker 없이 `last` 계열 가격을 줄 수 있어 `curr`가 있으면 `USD`일 때만 양수 가격 필드를 스냅샷으로 사용하고, KR KIS domestic `price-detail`은 `PRE_OPEN`에서 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
    - `sma_ema_hybrid` 후보는 gap/trigger/risk checks를 통과한 뒤에도 `quality_state=A`일 때만 자동 `ENTER`가 됩니다. `B|C|missing`은 `REVIEW`로 fail closed 처리합니다.
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)를 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다. 전체 보유 상한은 기존 활성 보유를 포함하고, 시장별 신규 진입 상한은 이번 run에서 승인된 신규 진입만 셉니다.
-4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다.
+4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다. 새 entry row는 기술 액션과 별개로 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`를 남깁니다. NAV/리스크 예산, 의도 포지션 규모 기준 유동성/청산 가능성, 포트폴리오 노출, source/fundamental context가 아직 별도 확인되지 않았다는 뜻입니다.
    - `entry.summary`는 `missing_entry_price_by_reason`과 `entry_price_sources`로 가격 조회 실패 원인과 사용된 가격 소스를 집계합니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 정상/비fatal entry 리포트를 Supabase Storage에 업로드하고 `report_index`를 upsert합니다. fatal missing-price 정책으로 non-zero 종료한 entry 리포트는 이미 로컬에 작성된 진단 artifact로 남으며, 수동 AI Brief workflow가 별도 GitHub artifact로 노출합니다.
 
@@ -125,7 +125,7 @@ flowchart LR
 
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `sab/ai_brief_candidates.py`가 각 row를 `recommendable`, `watch_only`, `excluded`로 분류합니다. Base gate(`entry_state=READY`, `entry_price_status=available`)를 통과한 `ENTER`, 포트폴리오 상한 `SKIP`, tight-stop risk-alignment `REVIEW`는 recommendable입니다. `entry_price_status`가 없는 legacy row는 유효한 `entry_price`가 있을 때만 available로 취급합니다. Hybrid trigger guard `SKIP`은 watch-only이며, 나머지는 excluded입니다.
-3. 모델 ranking 입력은 recommendable 후보 중 entry report 순서를 보존해 최대 5개로 제한하며, 초과 recommendable 행은 `cap_excluded_candidates[]`로 기록합니다. Watch-only 후보는 ranking 대상이 아니지만 `watch_candidates[]`/`watch_tickers[]`로 모델 provider와 artifact에 분리 전달합니다.
+3. 모델 ranking 입력은 recommendable 후보 중 entry report 순서를 보존해 최대 5개로 제한하며, 초과 recommendable 행은 `cap_excluded_candidates[]`로 기록합니다. Watch-only 후보는 ranking 대상이 아니지만 `watch_candidates[]`/`watch_tickers[]`로 모델 provider와 artifact에 분리 전달합니다. Entry row의 `implementation_ready`, `investment_readiness`, `investment_readiness_reasons`도 provider 입력에 함께 복사합니다.
 4. source provider는 `none`, `local-json`, `http-json`, `finnhub`, `polygon-news`, `alpha-vantage-news`, `marketaux-news`, `benzinga-news`, `naver-news`를 지원하며, scheduled/환경 경로에서는 comma-separated source provider chain을 사용할 수 있습니다.
    - Chain은 순서대로 provider를 실행하고, 이미 ticker별 source row cap을 채운 ticker를 제외한 남은 ticker만 다음 provider에 요청합니다. Provider별 status/coverage와 final recommendable/watch coverage는 `source_provider_summary`에 남습니다. 중간 provider의 0건/실패는 fallback 뒤에도 source가 없는 ticker에 대해서만 top-level issue로 승격합니다.
    - `local-json`은 로컬 source report의 `sources[]`를 후보 source universe에 붙입니다.
@@ -146,6 +146,7 @@ flowchart LR
    - `fake`는 외부 뉴스/API를 호출하지 않는 deterministic contract exerciser입니다.
    - `openai`는 Responses API structured output을 사용하며 timeout/요청 실패/모델 출력 계약 실패 시 추천 없이 `system_issues[]`를 남긴 artifact를 생성합니다.
    - OpenAI 출력 `source_refs[]`는 request-local source catalog의 `source_id`만 선택할 수 있고, 복원 후 소스 없는 추천은 ticker별 `source_issues[]`를 요구합니다. `recommendations[].rank`는 배열 순서대로 `1..N` 연속값이어야 하며, 한국어/영어 자동 주문·체결 문구는 계약 오류로 처리합니다. Watch-only 후보는 추천으로 승격할 수 없고 `action=WATCH` row로만 반환됩니다.
+   - Provider normalization은 최종 `recommendations[]`와 `watch_candidates[]`에도 entry readiness 필드를 보존합니다. `implementation_ready=false` 또는 context-required readiness가 있는 recommendation은 rationale/checklist에 수동 확인 caveat를 포함합니다.
 6. 최종 추천은 최대 3개이며, 모델이 preselected recommendable 후보를 추천하지 않기로 판단한 경우 `vetoed_candidates[]`에 추천과 별도로 보존합니다. `reports/YYYY-MM-DD(.n).ai-brief.json`은 로컬 파일 락 + 원자적 쓰기로 생성합니다.
 7. writer는 새 artifact에 top-level `brief_state`/`brief_reason`을 주입합니다. 상태는 `NO_SIGNAL`, `NEEDS_REVIEW_WATCH_ONLY`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 중 하나이며, preselected recommendable count, watch count, recommendation source coverage, source/system issue count만으로 결정합니다.
 8. AI Brief recommendation 품질 게이트는 생성 artifact와 source entry report를 함께 평가합니다. 수동 GitHub workflow는 진단용 GitHub artifact upload 뒤, Supabase Storage 업로드와 Telegram/Slack 알림 전 단계에서 실행하고, scheduled runner는 로컬 `ai-brief` path 확정 직후 Storage upload/성공 marker/notification reconciliation 전에 실행합니다. Preselected recommendable 후보가 있는데 추천과 veto가 모두 비어 있으면 source/system issue가 있어도 `FAIL`입니다. `FAIL`이면 해당 성공 경로를 중단합니다.
@@ -167,7 +168,7 @@ flowchart LR
 5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
 7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다.
-8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다.
+8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열을 표시해 기술적 `ENTER`와 계좌 실행 준비도를 분리해 보여줍니다.
 9. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우

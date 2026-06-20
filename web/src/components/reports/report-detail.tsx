@@ -119,6 +119,21 @@ function formatScoreValue(row: ReportJson): string {
   return "-";
 }
 
+function formatEntryReadiness(row: ReportJson): string {
+  const explicitReady = row.implementation_ready;
+  const readiness = readString(row.investment_readiness);
+  const reasons = asStringArray(row.investment_readiness_reasons);
+  const status =
+    readiness ?? (explicitReady === false ? "CONTEXT_REQUIRED" : null);
+  if (!status) {
+    return "-";
+  }
+  if (reasons.length === 0) {
+    return status;
+  }
+  return `${status}: ${reasons.join(" · ")}`;
+}
+
 function chipToneClass(tone: ChipTone): string {
   if (tone === "warning") {
     return styles.chipWarning;
@@ -588,6 +603,7 @@ export function ReportDetail({
                     <th>Signal Close</th>
                     <th>Entry Price</th>
                     <th>Gap%</th>
+                    <th>Readiness</th>
                     <th>Reasons</th>
                   </tr>
                 </thead>
@@ -604,6 +620,9 @@ export function ReportDetail({
                       </td>
                       <td data-label="Gap%">
                         {formatRatioPercent(row.gap_pct)}
+                      </td>
+                      <td data-label="Readiness">
+                        {formatEntryReadiness(row)}
                       </td>
                       <td data-label="Reasons">
                         {asStringArray(row.reasons).join(" · ") || "-"}

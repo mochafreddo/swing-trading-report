@@ -60,6 +60,11 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
 | `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
 
+### Entry Artifact Notes
+
+- New `entry.entries[]` rows include `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, and `investment_readiness_reasons[]`. `action=ENTER` and hybrid `quality_state=A` remain technical setup labels until NAV/risk budget, intended-size liquidity/exit capacity, portfolio exposure, and source/fundamental context are checked by a separate layer.
+- AI Brief model input and final recommendation/watch rows preserve those readiness fields when they are present in the source entry report. Recommendations with context-required readiness also carry an explicit rationale/checklist caveat.
+
 ### AI Brief Artifact Notes
 
 - `ai-brief.summary` includes `entry_count`, `recommendable_count`, `watch_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, and `system_issue_count`.

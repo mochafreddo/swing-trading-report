@@ -115,6 +115,12 @@ describe("ReportDetail component", () => {
         entry_price: 101.5,
         gap_pct: 0.015,
         reasons: ["entry conditions satisfied"],
+        implementation_ready: false,
+        investment_readiness: "CONTEXT_REQUIRED",
+        investment_readiness_reasons: [
+          "nav_risk_budget_unavailable",
+          "liquidity_exit_capacity_unavailable",
+        ],
       },
     ];
 
@@ -140,6 +146,11 @@ describe("ReportDetail component", () => {
     expect(html).toContain("AAPL.NASD");
     expect(html).toContain("ENTER");
     expect(html).toContain("+1.5%");
+    expect(html).toContain("Readiness");
+    expect(html).toContain("CONTEXT_REQUIRED");
+    expect(html).toContain(
+      "nav_risk_budget_unavailable · liquidity_exit_capacity_unavailable",
+    );
     expect(html).toContain("2026-02-25.buy.json");
   });
 

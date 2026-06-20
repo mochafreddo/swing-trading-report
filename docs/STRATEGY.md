@@ -40,6 +40,8 @@
 - **Eval index**: 평가 캔들의 배열 인덱스(`choose_eval_index()` 결과).
 - **system 이슈**: 데이터 부족/비정상 캔들/예외 등 “시그널 이전”의 시스템/데이터 문제.
 - **signal 탈락**: 규칙(필터/조건) 불충족으로 후보에서 제외되는 경우.
+- **quality_state**: `sma_ema_hybrid` 기술 셋업 품질입니다. 주문 실행 준비도나 계좌 리스크 승인을 뜻하지 않습니다.
+- **investment_readiness / implementation_ready**: 계좌 NAV/리스크 예산, 의도 포지션 규모 기준 유동성/청산 가능성, 포트폴리오 노출, source/fundamental context까지 확인됐는지 나타내는 실행 준비도 레이어입니다.
 - **candidate**: buy 리포트에 들어가는 종목 단위 결과(dict).
 - **sell action**: `HOLD|SELL_PARTIAL|REVIEW|SELL`.
 - **entry_state**(hybrid buy 전용): `WATCH|READY`(대기 vs 종가 기반 확인 신호).
@@ -338,6 +340,7 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 - `sab entry`는 `sma_ema_hybrid` candidate의 gap/trigger/risk checks 이후 `quality_state`를 마지막 자동 진입 정책으로 적용합니다.
   - `quality_state=A`만 자동 `ENTER` 후보가 될 수 있습니다.
   - `quality_state=B|C` 또는 누락/unknown 값은 수동검토 reason과 함께 `REVIEW`입니다.
+- `quality_state=A`는 기술 셋업 라벨일 뿐이며, entry row의 주문 실행 준비도와 분리됩니다.
 - `strategy_mode=sma_ema_hybrid` 정렬은 `quality_state`를 먼저 적용한 뒤 기존 점수/RS/유동성/등락률/ticker tie-breaker를 사용합니다. `ema_cross` 정렬은 기존 score 우선 계약을 유지합니다.
 
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
@@ -480,6 +483,9 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - `max_new_entries_per_market`은 이번 run에서 승인된 신규 진입만 세며, 기존 활성 보유 수는 시장별 신규 진입 한도에 포함하지 않습니다.
   - 포트폴리오 차단은 system issue가 아니라 정책 결과로 취급하며, `entries[].reasons`와 `summary.portfolio_blocked_*`에만 반영합니다.
   - `REVIEW`/`SKIP` 후보는 포트폴리오 규율로 승격하지 않습니다.
+- 새 entry row는 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, `investment_readiness_reasons[]`를 포함합니다.
+  - 현재 기본 누락 reason은 `nav_risk_budget_unavailable`, `liquidity_exit_capacity_unavailable`, `portfolio_exposure_context_unavailable`, `source_fundamental_context_unavailable`입니다.
+  - 따라서 `action=ENTER` 또는 `quality_state=A`는 기술적 진입 조건 통과를 뜻하며, 계좌 크기/리스크 예산/유동성 청산 능력/포트폴리오 집중/source-fundamental 확인까지 끝난 주문 가능 상태를 뜻하지 않습니다.
 - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
 - 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.
 - 같은 시장 안에서 candidate들의 `eval_date`가 혼재하면, `sab entry` 리포트의 `system_issues`에 혼재 경고를 기록합니다.
@@ -496,6 +502,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - 모델 ranking 입력은 `recommendable` 후보 중 entry report 순서 기준 최대 5개(`eligible_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 최종 `recommendations[]`는 최대 3개입니다.
 - source provider universe는 preselection cap을 통과한 후보만이 아니라 전체 `recommendable` 후보와 `watch_only` 후보를 포함합니다. 따라서 `source_provider_summary.final.recommendable_total`은 `summary.recommendable_count`, `watch_total`은 `summary.watch_count`와 맞아야 합니다.
 - `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
+- AI Brief provider 입력과 최종 recommendation/watch row는 entry row의 `implementation_ready` / `investment_readiness` 필드를 보존합니다. `implementation_ready=false` 또는 context-required readiness가 있는 recommendation은 rationale/checklist에 수동 확인 caveat를 포함해야 합니다.
 - `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `watch_only` 후보의 추천 승격, 한국어/영어 자동 주문·체결 언어를 허용하지 않습니다. `watch_candidates[]`는 `action=WATCH`, 수동 확인 이유, 재트리거 조건만 담을 수 있습니다.
 - `local-json` source provider는 로컬 source report를 후보 context로 붙일 수 있지만, entry report의 후보 universe를 확장하지 않습니다.
 - `http-json` source provider는 HTTPS 외부 source API에 source universe ticker 목록을 POST하고, 응답 `sources[]`를 같은 source row 계약으로 정규화합니다. Source API fetch는 HTTPS/local-private/redirect/body-size 제한을 적용하고, 반환 row URL은 syntax/local-private/DNS 검증을 통과해야 합니다. 반환 ticker가 후보 universe 밖이거나 stale/future-time/invalid URL/cap 초과이면 모델 입력에서 제외하고 `source_issues[]`로 남깁니다.

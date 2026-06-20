@@ -1548,6 +1548,14 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
             "entry_price_source": "kis_live_snapshot",
             "entry_price_issue_code": None,
             "entry_price_issues": [],
+            "implementation_ready": False,
+            "investment_readiness": "CONTEXT_REQUIRED",
+            "investment_readiness_reasons": [
+                "nav_risk_budget_unavailable",
+                "liquidity_exit_capacity_unavailable",
+                "portfolio_exposure_context_unavailable",
+                "source_fundamental_context_unavailable",
+            ],
         }
     ]
 

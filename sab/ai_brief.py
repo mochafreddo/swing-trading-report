@@ -364,7 +364,7 @@ def _build_model_candidate(
         raw_name = buy_candidate.get("name")
         if raw_name is not None and str(raw_name).strip():
             name = str(raw_name).strip()
-    return {
+    row = {
         "ticker": ticker,
         "name": name,
         "action": classified.action,
@@ -384,6 +384,14 @@ def _build_model_candidate(
         "entry_state": entry.get("entry_state"),
         "sources": [],
     }
+    for field_name in (
+        "implementation_ready",
+        "investment_readiness",
+        "investment_readiness_reasons",
+    ):
+        if field_name in entry:
+            row[field_name] = entry.get(field_name)
+    return row
 
 
 def _build_excluded_candidate(
