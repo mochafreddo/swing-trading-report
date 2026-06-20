@@ -186,6 +186,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 
 - Recipe list: `just --list`
 - Dependencies/locks: `just sync`, `just lock-upgrade`
+- Dependency audit: `just audit` (`just audit-python-osv` and `just audit-web-prod` for source-specific checks)
 - Trading workflows: `just scan`, `just sell`, `just entry`
 - AI Brief workflows: `just ai-brief-source-collect`, `just ai-brief-source-eval`, `just ai-brief-source-live-compare`, `just ai-brief-eval`
 - Quality gates: for Python-only changes, run `just quality` (`just check` is the same alias); for web changes, run `just ci-web`; for Python+web changes, run both.
@@ -206,7 +207,18 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`
 - `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`
 - `UV_CACHE_DIR=.uv-cache uv run python scripts/run_vulture.py`
+- `UV_CACHE_DIR=.uv-cache uv export --quiet --locked --all-extras --all-groups --no-emit-project --output-file /tmp/swing-trading-report-pip-audit-requirements.txt`
+- `pip-audit --disable-pip -r /tmp/swing-trading-report-pip-audit-requirements.txt`
+- `pnpm --dir web audit --audit-level low`
 - `pnpm --dir web run deadcode`
+
+### Dependency Audit Gotchas
+
+- Prefer `just audit` for combined Python + web dependency audits.
+- `pip-audit --locked .` does not currently read this project's `uv.lock`; export from `uv.lock` first and audit the generated requirements file.
+- Use hash-including `uv export` with `pip-audit --disable-pip`; plain `pip-audit -r ...` may create a temporary venv and fail in sandboxed `ensurepip`.
+- Keep pnpm security overrides in `web/pnpm-workspace.yaml`, not `web/package.json`; `web/scripts/dependency-overrides.test.mjs` enforces this.
+- If `pnpm why` fails with a pnpm store SQLite permission error, inspect `web/pnpm-lock.yaml` directly for dependency paths.
 
 ## Health Stack
 

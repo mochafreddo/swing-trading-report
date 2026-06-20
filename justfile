@@ -14,6 +14,7 @@ ci_github_repo := "ci-repo"
 ci_github_pat := "ghp_ci_token"
 web_tool_path := 'PATH="$(mise where node)/bin:$(mise where pnpm):$PATH"'
 actionlint_image := "rhysd/actionlint:1.7.12"
+python_audit_requirements := "/tmp/swing-trading-report-pip-audit-requirements.txt"
 
 alias qa := quality
 alias pc := precommit
@@ -32,6 +33,22 @@ lock:
 
 lock-upgrade:
   uv lock --upgrade
+
+audit: audit-python audit-web
+
+audit-python:
+  uv export --quiet --locked --all-extras --all-groups --no-emit-project --output-file {{python_audit_requirements}}
+  pip-audit --disable-pip -r {{python_audit_requirements}}
+
+audit-python-osv:
+  uv export --quiet --locked --all-extras --all-groups --no-emit-project --output-file {{python_audit_requirements}}
+  pip-audit --disable-pip -s osv -r {{python_audit_requirements}}
+
+audit-web:
+  {{web_tool_path}} pnpm --dir web audit --audit-level low
+
+audit-web-prod:
+  {{web_tool_path}} pnpm --dir web audit --prod --audit-level low
 
 # Trading workflows
 scan *args:
