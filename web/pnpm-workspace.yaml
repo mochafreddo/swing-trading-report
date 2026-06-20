@@ -1,6 +1,7 @@
 strictDepBuilds: true
 overrides:
   "postcss@<8.5.10": ">=8.5.10"
+  vite: "8.0.16"
 allowBuilds:
   sharp: true
   unrs-resolver: true
