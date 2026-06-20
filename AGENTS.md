@@ -20,29 +20,41 @@ config.yaml, holdings.yaml   # 런타임 설정(config.yaml은 저장소에 기�
 
 이 파일은 `AGENTS.md`이며 `CLAUDE.md`는 이를 가리키는 심링크(다른 에이전트와 공유). `AGENTS.md`를 제자리에서 편집할 것 — 새 파일로 교체하면 심링크가 깨짐.
 
+Shared-agent note: tool-specific rules are marked when they depend on Codex
+or a particular sandbox. Other agents should preserve the intent and use the
+closest safe equivalent instead of assuming the exact tool or permission model
+exists.
+
+Instruction budget: keep this file focused and comfortably below Codex's
+default project instruction budget. Move directory-specific rules to nested
+`AGENTS.md` files when they only matter inside that subtree.
+
 ## Rule Priority
 
-When rules conflict, follow this priority:
+Follow higher-priority system, developer, and user instructions first. Within
+this file, when rules conflict, follow this priority:
 
-1. **Correctness**
-2. **Security**
+1. **Safety, security, privacy, and permissions**
+2. **Correctness**
 3. **Repository conventions**
 4. **Clarity**
 5. **Simplicity**
 
-Prefer the repository's existing architecture, naming, error handling, and test patterns over generic style rules. The exception is when doing so would weaken correctness, security, or maintainability.
+Safety, honesty, privacy, and permission constraints do not yield. Prefer the
+repository's existing architecture, naming, error handling, and test patterns
+over generic style rules unless doing so would weaken safety, correctness,
+security, or maintainability.
 
 ## MUST
 
 ### Understand Before Changing
 
-- Before non-trivial, multi-file, or risky changes, leave a short problem brief.
-- The problem brief must include at least **Context**, **Problem**, **Goal**, **Non-Goals**, and **Constraints**.
-- Expand the brief into a more detailed one-pager for multi-file, high-risk, or architectural changes.
-- Before non-trivial changes, leave a 1-3 line impact note.
-- The impact note must include what changes, what might break, and which tests/docs need to change with it.
-- Read all affected files from start to finish before editing them.
-- Trace related definitions, references, call paths, tests, configuration, feature flags, and docs.
+- For small, low-risk changes, proceed after reading enough local context to act safely.
+- For non-trivial, multi-file, or risky changes, leave a short problem brief covering **Context**, **Problem**, **Goal**, **Constraints**, and relevant **Non-Goals** when useful.
+- For architectural or high-risk changes, expand the brief into a one-page plan and compare viable options when practical.
+- Before editing non-trivial work, state the intended scope, likely impact, and planned validation in 1-3 lines.
+- Read files you will edit end to end when practical. For generated, very large, or repetitive files, inspect the full relevant structure and all sections touched by the change.
+- Trace related definitions, references, call paths, tests, configuration, feature flags, and docs when they could affect behavior or reviewability.
 - Do not edit a symbol until you understand its inputs, outputs, invariants, and side effects.
 
 ### Scope Control
@@ -74,21 +86,20 @@ Prefer the repository's existing architecture, naming, error handling, and test 
 
 ### Testing
 
+- Match tests and validation to behavioral risk and blast radius.
 - New code that changes runtime behavior, public contracts, risk judgment, or data processing results must include tests.
-- Bug fixes require regression tests. When possible, write the failing test first.
+- Bug fixes require regression tests unless reproducing the bug is impractical; record why when skipping one.
+- Prefer a Red/Green/Refactor cycle for feature additions and bug fixes when practical. Do not force it for documentation-only, metadata-only, or purely static changes.
 - Tests must be deterministic and independent. Replace external systems with fakes, mocks, or contract tests.
 - When behavior changes, include related tests and docs in the same change.
-- Feature additions and bug fixes should default to a Red/Green/Refactor cycle.
-- Red: write the failing test first and confirm it fails before implementing.
-- Green: write only the minimum code needed to pass the test.
-- Refactor: remove duplication and improve structure only while tests are passing.
-- Do not fix a bug before adding a reproduction test. If that is unavoidable, record why.
-- Documentation, configuration descriptions, skill/plugin metadata, and static manifests are non-runtime changes and do not always require execution tests. Prefer static validation appropriate to the change, such as link, structure, or schema validation.
-- Even for non-runtime changes, first consider adding minimal structure validation if the file is used as a real load path, contract file, or automation input.
-- Apply quality gates in proportion to the change. For strategy logic, APIs, schemas, risk boundaries, or build/deploy paths, pass all relevant gates before finishing the cycle.
-- Docs/metadata-only changes may be covered by related static validation or targeted tests. If you skip the full gate, record why.
-- Recommended: for Python-only changes, run `just quality`; for web changes, run `just ci-web`; for Python+web changes, run both.
-- Fallback: for Python, run `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q`, `UV_CACHE_DIR=.uv-cache uv run ruff check .`, and `UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml`; for web, run `just web-lint`, `just web-format-check`, `just web-typecheck`, `just web-test`, and `just web-build` separately.
+- Documentation, configuration descriptions, skill/plugin metadata, and static manifests usually need structure, schema, link, or diff validation rather than runtime tests.
+- For strategy logic, APIs, schemas, risk boundaries, or build/deploy paths, pass the relevant full gate before finishing.
+- Validation matrix:
+  - Python-only changes: prefer `just quality`; fallback to targeted pytest plus `ruff` and `mypy`.
+  - Web-only changes: prefer `just ci-web`; fallback to the affected `just web-*` checks.
+  - Python + web changes: run both relevant gates or explain the narrower validation.
+  - Docs/static-only changes: run the cheapest check that catches formatting, syntax, links, schema, or whitespace issues.
+- If validation cannot be run or a full gate is skipped, state why and describe the next best check.
 
 ## SHOULD
 
@@ -162,7 +173,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 
 - The problem is clearly defined.
 - The change is the smallest safe solution.
-- All affected files were read from start to finish.
+- Relevant context was read, and edited files were reviewed carefully.
 - Related references and call paths were checked.
 - Assumptions were recorded.
 - Tests cover the change.
@@ -174,7 +185,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 
 ### Execution Priority
 
-- Toolchain sync: `mise install`
+- Toolchain sync: run `mise install` only when pinned tools are missing or stale, after `mise.toml` changes, or when a command fails because the pinned tool is unavailable.
 - If `just ...` fails because `pnpm` is not on `PATH`, rerun through mise:
   `mise exec -- just ...` (for example, `mise exec -- just ci-web`).
 - When tool versions change, refresh the lockfile: `mise lock --platform linux-x64,macos-arm64 && mise install`
@@ -272,11 +283,12 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - Local `python` execution can be unstable, so repository work scripts should prefer `uv run python ...`.
 - Reproduce workflow syntax and shell lint locally with: `docker run --rm -v "$PWD":/work -w /work rhysd/actionlint:latest`
 
-### Context7 MCP
+### Current Documentation
 
-- Prefer checking Context7 MCP when external library/API docs, code generation, or setup/configuration steps are needed.
-- If official docs or another primary source is more appropriate, or if a higher-priority instruction has a separate source rule, follow that rule first.
-- When using Context7, first resolve the library ID with `resolve-library-id`, then fetch current docs with `query-docs`.
+- When current or version-specific external behavior matters, use authoritative current docs instead of memory.
+- Prefer official docs or repository-local docs when they are more appropriate than third-party summaries.
+- Codex: Prefer checking Context7 MCP for non-OpenAI library/API docs, code generation, or setup/configuration steps when it is available and a good fit.
+- Codex: When using Context7, first resolve the library ID with `resolve-library-id`, then fetch current docs with `query-docs`.
 
 ### Commits
 
@@ -288,7 +300,7 @@ If exceeding these targets is clearer or better aligned with repository conventi
 - If the body needs line breaks, do not put `"\n"` inside double quotes. Use zsh `$'...'` quoting or an editor. Example: `git commit -m "chore(ci): ..." -m $'- item 1\n- item 2'`
 - Correcting pushed commit messages or rewriting pushed history is human-led work. Check branch policy and collaboration context first. Automation agents should prefer non-interactive git methods and use force-push commands only when the user requests them.
 - Run git commands such as `git status`, `git add`, and `git commit` directly, without a shell wrapper like `/bin/zsh -lc`.
-- Run `git push` with elevated permissions (`sandbox_permissions="require_escalated"`).
+- Codex: run `git push` with elevated permissions (`sandbox_permissions="require_escalated"`).
 
 ## Deploy Configuration (configured by /setup-deploy)
 
