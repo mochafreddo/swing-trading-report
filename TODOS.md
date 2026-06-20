@@ -14,6 +14,16 @@
 
 ## Deferred
 
+- 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
+  console pages after admin credentials or browser cookies are available. The
+  2026-06-20 pass fixed the unauthenticated login surface, but reports,
+  holdings, metrics, and run pages were behind admin auth and were not visually
+  audited.
+- 2026-06-20: Plan a focused typography pass for the web UI. `Inter` remains
+  the primary body font because `web/src/lib/__tests__/font-build-contract.test.ts`
+  currently locks the existing local font variables; a future pass should pick a
+  more distinctive operations-console type pairing and update that contract
+  deliberately.
 - 2026-06-19: Create a repo-wide `DESIGN.md` with `/design-consultation` after
   Toss holdings sync is implemented or as a separate design-system cleanup.
   The Toss Sync plan now documents the existing Holdings UI vocabulary locally,
