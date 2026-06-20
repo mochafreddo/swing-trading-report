@@ -29,6 +29,7 @@
 | --- | --- | --- |
 | `.env.example` | 주요 env template | yes |
 | `.env` | 로컬 시크릿/환경별 값 | no |
+| `web/.env` | unsupported local duplicate; do not create | no |
 | `.env.scheduler.local` | 로컬 scheduled AI Brief Docker env file | no |
 | `.envrc.local` | direnv 개인 override | no |
 | `config.yaml` | 저장소 기본 비시크릿 config | yes |
@@ -42,6 +43,8 @@
 - 같은 논리 키를 `.env`와 `config.yaml`에 동시에 정의하면 fail-closed로 실패합니다.
 - CLI option은 단일 실행에만 적용하는 가장 좁은 override입니다.
 - `.env`는 `sab`가 로드합니다. `direnv`는 `.env`를 자동 로드하지 않습니다.
+- Direct web scripts preload the repository root `.env` before validation.
+- `web/.env` is not a supported env file for this project.
 
 ## 환경변수 표
 

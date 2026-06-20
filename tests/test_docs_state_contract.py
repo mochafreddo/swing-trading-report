@@ -225,3 +225,18 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     )
     assert "code-level compatibility default `warn_continue`" not in safety_design_text
     assert "code-level compatibility default `1.0`" not in safety_design_text
+
+
+def test_web_env_docs_use_root_env_and_reject_web_env_file() -> None:
+    configuration_text = _read(Path("docs/configuration.md"))
+    config_reference_text = _read(Path("docs/config-reference.md"))
+    local_development_text = _read(Path("docs/local-development.md"))
+
+    required_phrases = (
+        "Direct web scripts preload the repository root `.env` before validation.",
+        "`web/.env` is not a supported env file for this project.",
+    )
+    for phrase in required_phrases:
+        assert phrase in configuration_text
+        assert phrase in config_reference_text
+        assert phrase in local_development_text
