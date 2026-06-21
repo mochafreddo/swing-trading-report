@@ -485,6 +485,9 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - `REVIEW`/`SKIP` 후보는 포트폴리오 규율로 승격하지 않습니다.
 - 새 entry row는 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, `investment_readiness_reasons[]`를 포함합니다.
   - 현재 기본 누락 reason은 `nav_risk_budget_unavailable`, `liquidity_exit_capacity_unavailable`, `portfolio_exposure_context_unavailable`, `source_fundamental_context_unavailable`입니다.
+  - candidate가 `intended_position_value`(또는 호환 position-value 필드)와 `avg_dollar_volume_value`(또는 호환 평균 거래대금 필드)를 제공하면 `sab entry`는 `liquidity_exit_capacity`에 포지션 금액, 평균 거래대금, ADV 대비 비율, 정상 참여율 10%/스트레스 참여율 3% 기준 예상 청산 일수를 기록합니다. 이 경우 `liquidity_exit_capacity_unavailable`은 readiness reason에서 제거됩니다.
+  - 의도 포지션 크기나 평균 거래대금이 없으면 `liquidity_exit_capacity.status`를 `position_size_unavailable`, `avg_traded_value_unavailable`, 또는 `position_size_and_liquidity_unavailable`로 남기고 `liquidity_warnings[]`에 누락 warning을 기록합니다.
+  - candidate의 `liquidity_flags`/`liquidity_risk_flags` 또는 boolean flag가 `small_cap`, `event_driven`, `crowded` 계열을 표시하면 `liquidity_warnings[]`에 `small_cap_liquidity_risk`, `event_driven_liquidity_risk`, `crowded_name_exit_risk`를 보존합니다.
   - 따라서 `action=ENTER` 또는 `quality_state=A`는 기술적 진입 조건 통과를 뜻하며, 계좌 크기/리스크 예산/유동성 청산 능력/포트폴리오 집중/source-fundamental 확인까지 끝난 주문 가능 상태를 뜻하지 않습니다.
 - mixed entry report는 `market="MIXED"`와 `markets=["KR","US"]`를 기록하고, `signal_eval_date_by_market` / `entry_session_date_by_market`을 함께 남깁니다.
 - 단일 시장 entry report의 `signal_eval_date`는 buy report의 top-level 값이 없을 때 candidate들의 `eval_date`를 우선 사용해 결정합니다.

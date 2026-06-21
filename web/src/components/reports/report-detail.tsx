@@ -134,6 +134,37 @@ function formatEntryReadiness(row: ReportJson): string {
   return `${status}: ${reasons.join(" · ")}`;
 }
 
+function formatOneDecimal(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatEntryExitCapacity(row: ReportJson): string {
+  const capacity = asRecord(row.liquidity_exit_capacity);
+  const warnings = asStringArray(row.liquidity_warnings);
+  if (!capacity) {
+    return warnings.length > 0 ? warnings.join(" · ") : "-";
+  }
+
+  const status = readString(capacity.status);
+  let summary = status ?? "-";
+  if (status === "available") {
+    const advPercent = readNumberLike(capacity.position_adv_percent);
+    const normalDays = readNumberLike(capacity.exit_days_normal);
+    const stressedDays = readNumberLike(capacity.exit_days_stressed);
+    if (advPercent !== null && normalDays !== null && stressedDays !== null) {
+      summary = [
+        `ADV ${formatOneDecimal(advPercent)}%`,
+        `normal ${formatOneDecimal(normalDays)}d`,
+        `stressed ${formatOneDecimal(stressedDays)}d`,
+      ].join(" · ");
+    }
+  }
+  if (warnings.length === 0) {
+    return summary;
+  }
+  return `${summary}: ${warnings.join(" · ")}`;
+}
+
 function chipToneClass(tone: ChipTone): string {
   if (tone === "warning") {
     return styles.chipWarning;
@@ -604,6 +635,7 @@ export function ReportDetail({
                     <th>Entry Price</th>
                     <th>Gap%</th>
                     <th>Readiness</th>
+                    <th>Exit Capacity</th>
                     <th>Reasons</th>
                   </tr>
                 </thead>
@@ -623,6 +655,9 @@ export function ReportDetail({
                       </td>
                       <td data-label="Readiness">
                         {formatEntryReadiness(row)}
+                      </td>
+                      <td data-label="Exit Capacity">
+                        {formatEntryExitCapacity(row)}
                       </td>
                       <td data-label="Reasons">
                         {asStringArray(row.reasons).join(" · ") || "-"}

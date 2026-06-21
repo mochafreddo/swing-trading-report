@@ -388,6 +388,8 @@ def _build_model_candidate(
         "implementation_ready",
         "investment_readiness",
         "investment_readiness_reasons",
+        "liquidity_exit_capacity",
+        "liquidity_warnings",
     ):
         if field_name in entry:
             row[field_name] = entry.get(field_name)

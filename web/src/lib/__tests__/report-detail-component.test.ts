@@ -121,6 +121,16 @@ describe("ReportDetail component", () => {
           "nav_risk_budget_unavailable",
           "liquidity_exit_capacity_unavailable",
         ],
+        liquidity_exit_capacity: {
+          status: "available",
+          currency: "USD",
+          position_value: 100000,
+          avg_traded_value: 2000000,
+          position_adv_percent: 5,
+          exit_days_normal: 0.5,
+          exit_days_stressed: 1.6667,
+        },
+        liquidity_warnings: ["small_cap_liquidity_risk"],
       },
     ];
 
@@ -151,6 +161,9 @@ describe("ReportDetail component", () => {
     expect(html).toContain(
       "nav_risk_budget_unavailable · liquidity_exit_capacity_unavailable",
     );
+    expect(html).toContain("Exit Capacity");
+    expect(html).toContain("ADV 5% · normal 0.5d · stressed 1.7d");
+    expect(html).toContain("small_cap_liquidity_risk");
     expect(html).toContain("2026-02-25.buy.json");
   });
 
