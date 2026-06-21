@@ -29,12 +29,17 @@ _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
 class _AiBriefCounts:
     preselected_count: int
     recommendable_count: int
+    executable_count: int
+    blocked_but_valid_count: int
+    role_present: bool
     watch_count: int
     watch_present: bool
     recommendation_count: int
     vetoed_count: int
     source_issue_count: int
     system_issue_count: int
+    executable_tickers: list[str]
+    blocked_but_valid_tickers: list[str]
     watch_tickers: list[str]
     recommendations: list[dict[str, Any]]
     vetoed_candidates: list[dict[str, Any]]
@@ -215,6 +220,16 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     eligible_count = len(
         [item for item in _as_list(report.get("eligible_tickers")) if _safe_str(item)]
     )
+    executable_tickers = [
+        _safe_str(item) for item in _as_list(report.get("executable_tickers"))
+    ]
+    executable_tickers = [ticker for ticker in executable_tickers if ticker]
+    blocked_but_valid_tickers = [
+        _safe_str(item) for item in _as_list(report.get("blocked_but_valid_tickers"))
+    ]
+    blocked_but_valid_tickers = [
+        ticker for ticker in blocked_but_valid_tickers if ticker
+    ]
     watch_tickers = [_safe_str(item) for item in _as_list(report.get("watch_tickers"))]
     watch_tickers = [ticker for ticker in watch_tickers if ticker]
     if not watch_tickers:
@@ -227,6 +242,12 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
         "watch_tickers" in report
         or "watch_candidates" in report
         or "watch_count" in summary
+    )
+    role_present = (
+        "executable_tickers" in report
+        or "blocked_but_valid_tickers" in report
+        or "executable_count" in summary
+        or "blocked_but_valid_count" in summary
     )
 
     recommendation_count = max(
@@ -258,6 +279,14 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
         _safe_int(report.get("recommendable_count"), default=0),
         preselected_count,
     )
+    executable_count = max(
+        _safe_int(summary.get("executable_count"), default=0),
+        len(executable_tickers),
+    )
+    blocked_but_valid_count = max(
+        _safe_int(summary.get("blocked_but_valid_count"), default=0),
+        len(blocked_but_valid_tickers),
+    )
     source_issue_count = max(
         _safe_int(summary.get("source_issue_count"), default=0),
         _safe_int(report.get("source_issue_count"), default=0),
@@ -271,12 +300,17 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
     return _AiBriefCounts(
         preselected_count=preselected_count,
         recommendable_count=recommendable_count,
+        executable_count=executable_count,
+        blocked_but_valid_count=blocked_but_valid_count,
+        role_present=role_present,
         watch_count=watch_count,
         watch_present=watch_present,
         recommendation_count=recommendation_count,
         vetoed_count=vetoed_count,
         source_issue_count=source_issue_count,
         system_issue_count=system_issue_count,
+        executable_tickers=executable_tickers,
+        blocked_but_valid_tickers=blocked_but_valid_tickers,
         watch_tickers=watch_tickers,
         recommendations=recommendations,
         vetoed_candidates=vetoed_candidates,
@@ -490,6 +524,19 @@ def build_ai_brief_slack_summary_text(
         watch_tickers = ", ".join(counts.watch_tickers) if counts.watch_tickers else "-"
         lines.append(f"watch_count={counts.watch_count}")
         lines.append(f"watch_tickers={watch_tickers}")
+    if counts.role_present:
+        executable_tickers = (
+            ", ".join(counts.executable_tickers) if counts.executable_tickers else "-"
+        )
+        blocked_but_valid_tickers = (
+            ", ".join(counts.blocked_but_valid_tickers)
+            if counts.blocked_but_valid_tickers
+            else "-"
+        )
+        lines.append(f"executable_count={counts.executable_count}")
+        lines.append(f"blocked_but_valid_count={counts.blocked_but_valid_count}")
+        lines.append(f"executable_tickers={executable_tickers}")
+        lines.append(f"blocked_but_valid_tickers={blocked_but_valid_tickers}")
     source_chain_summary = _format_source_chain_summary(report)
     if source_chain_summary:
         source_chain, _, source_final = source_chain_summary.partition(" final ")
@@ -755,6 +802,32 @@ def build_ai_brief_telegram_report_text(
         ),
     ]
 
+    if counts.role_present:
+        lines.append(
+            f"역할 실행가능 {_html_code(counts.executable_count)}건 · "
+            f"차단/검토 {_html_code(counts.blocked_but_valid_count)}건"
+        )
+        executable_preview, executable_extra = _ticker_preview(
+            counts.executable_tickers
+        )
+        if executable_preview:
+            suffix = f", 외 {executable_extra}건" if executable_extra > 0 else ""
+            lines.append(
+                "실행가능 후보 "
+                f"{_html_code(counts.executable_count)}건: "
+                f"{_html_escape(executable_preview)}{_html_escape(suffix)}"
+            )
+        blocked_preview, blocked_extra = _ticker_preview(
+            counts.blocked_but_valid_tickers
+        )
+        if blocked_preview:
+            suffix = f", 외 {blocked_extra}건" if blocked_extra > 0 else ""
+            lines.append(
+                "차단/검토 후보 "
+                f"{_html_code(counts.blocked_but_valid_count)}건: "
+                f"{_html_escape(blocked_preview)}{_html_escape(suffix)}"
+            )
+
     if counts.watch_present:
         ticker_preview, extra = _ticker_preview(counts.watch_tickers)
         suffix = f", 외 {extra}건" if extra > 0 else ""
@@ -785,7 +858,7 @@ def build_ai_brief_telegram_report_text(
                     f"{candidate_count_text}(모델 입력 {counts.preselected_count}건)"
                 )
             lines.append(
-                "추천 생성 실패/보류: recommendable 후보 "
+                "추천 생성 실패/보류: 모델 후보 "
                 f"{_html_escape(candidate_count_text)}이 있었지만 추천 결과가 비었습니다."
             )
             ticker_preview, extra = _ticker_preview(report.get("eligible_tickers"))

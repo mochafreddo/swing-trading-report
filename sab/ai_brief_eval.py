@@ -150,7 +150,7 @@ def evaluate_ai_brief_recommendation_report(
                 severity="FAIL",
                 message=(
                     "AI brief eligible_tickers must match the entry report's "
-                    f"first {PRESELECTION_LIMIT} preselected recommendable tickers"
+                    f"first {PRESELECTION_LIMIT} preselected model tickers"
                 ),
             )
         )
@@ -227,7 +227,7 @@ def evaluate_ai_brief_recommendation_report(
                 severity="FAIL",
                 message=(
                     "AI brief must not silently omit recommendations and vetoes "
-                    "when preselected recommendable candidates exist"
+                    "when preselected model candidates exist"
                 ),
             )
         )

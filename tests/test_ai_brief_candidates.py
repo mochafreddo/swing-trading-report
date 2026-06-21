@@ -82,8 +82,9 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
         ]
     )
 
-    assert [row.ticker for row in result.recommendable] == [
-        "ELV.NYS",
+    assert [row.ticker for row in result.executable] == ["ELV.NYS"]
+    assert [row.role for row in result.executable] == ["executable"]
+    assert [row.ticker for row in result.blocked_but_valid] == [
         "CAT.NYS",
         "TSM.NYS",
         "TOTAL.NAS",
@@ -92,6 +93,16 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
         "IREN.NAS",
         "COHR.NYS",
         "ANET.NYS",
+    ]
+    assert [row.role for row in result.blocked_but_valid] == [
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
+        "blocked_but_valid",
     ]
     assert [row.ticker for row in result.watch_only] == ["MO.NYS"]
     assert result.excluded == []
@@ -116,7 +127,8 @@ def test_classifier_excludes_rows_that_fail_base_ready_gates() -> None:
         ]
     )
 
-    assert result.recommendable == []
+    assert result.executable == []
+    assert result.blocked_but_valid == []
     assert result.watch_only == []
     assert [(row.ticker, row.action) for row in result.excluded] == [
         ("MISSING.NAS", "ENTER"),
@@ -140,7 +152,8 @@ def test_classifier_accepts_legacy_ready_enter_with_entry_price() -> None:
         ]
     )
 
-    assert [row.ticker for row in result.recommendable] == ["LEGACY.NAS"]
+    assert [row.ticker for row in result.executable] == ["LEGACY.NAS"]
+    assert result.blocked_but_valid == []
     assert result.watch_only == []
     assert result.excluded == []
 
@@ -157,7 +170,8 @@ def test_classifier_excludes_legacy_ready_enter_without_entry_price() -> None:
         ]
     )
 
-    assert result.recommendable == []
+    assert result.executable == []
+    assert result.blocked_but_valid == []
     assert result.watch_only == []
     assert [(row.ticker, row.action) for row in result.excluded] == [
         ("LEGACY.NAS", "ENTER")
@@ -177,7 +191,8 @@ def test_classifier_explains_supported_actions_that_do_not_match_rules() -> None
         ]
     )
 
-    assert result.recommendable == []
+    assert result.executable == []
+    assert result.blocked_but_valid == []
     assert result.watch_only == []
     assert [(row.ticker, row.action) for row in result.excluded] == [
         ("SKIP.NAS", "SKIP"),
@@ -198,7 +213,8 @@ def test_classifier_explains_supported_actions_that_do_not_match_rules() -> None
 def test_classifier_excludes_missing_ticker() -> None:
     result = classify_ai_brief_entry_rows([_row("", action="ENTER")])
 
-    assert result.recommendable == []
+    assert result.executable == []
+    assert result.blocked_but_valid == []
     assert result.watch_only == []
     assert [(row.ticker, row.action, row.reason) for row in result.excluded] == [
         ("", "ENTER", "entry row ticker is required")

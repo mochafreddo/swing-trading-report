@@ -35,8 +35,21 @@ _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_SOURCE_PROVIDER_STATUSES = frozenset({"success", "failed", "skipped"})
 _EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
+_CANDIDATE_ROLE_SUMMARY_COUNT_FIELDS = (
+    "executable_count",
+    "blocked_but_valid_count",
+)
+_CANDIDATE_ROLE_ARTIFACT_FIELDS = (
+    "executable_tickers",
+    "blocked_but_valid_tickers",
+)
 _NEW_FORMAT_ARTIFACT_FIELDS = frozenset(
-    {"watch_tickers", "watch_candidates", "source_provider_summary"}
+    {
+        "watch_tickers",
+        "watch_candidates",
+        "source_provider_summary",
+        *_CANDIDATE_ROLE_ARTIFACT_FIELDS,
+    }
 )
 
 
@@ -294,6 +307,27 @@ def _watch_tickers(payload: Mapping[str, Any]) -> list[str] | None:
     return tickers
 
 
+def _optional_ticker_list(
+    payload: Mapping[str, Any], field_name: str
+) -> list[str] | None:
+    raw_tickers = _optional_list(payload, field_name)
+    if raw_tickers is None:
+        return None
+    tickers: list[str] = []
+    seen_tickers: set[str] = set()
+    for idx, raw_ticker in enumerate(raw_tickers):
+        if not isinstance(raw_ticker, str):
+            raise AiBriefValidationError(f"{field_name}[{idx}] must be a string")
+        ticker = raw_ticker.strip()
+        if not ticker:
+            raise AiBriefValidationError(f"{field_name}[{idx}] is required")
+        if ticker in seen_tickers:
+            raise AiBriefValidationError(f"{field_name} must be unique")
+        seen_tickers.add(ticker)
+        tickers.append(ticker)
+    return tickers
+
+
 def _validate_candidate_list(
     payload: Mapping[str, Any],
     field_name: str,
@@ -397,6 +431,75 @@ def _recommendable_count(payload: Mapping[str, Any]) -> int:
     return _array_count(payload, "eligible_tickers") + _array_count(
         payload, "cap_excluded_candidates"
     )
+
+
+def _candidate_list_tickers(payload: Mapping[str, Any], field_name: str) -> set[str]:
+    tickers: set[str] = set()
+    for raw_row in _require_list(payload.get(field_name), field_name=field_name):
+        if isinstance(raw_row, Mapping):
+            ticker = str(raw_row.get("ticker") or "").strip()
+            if ticker:
+                tickers.add(ticker)
+    return tickers
+
+
+def _validate_candidate_role_counts(
+    payload: Mapping[str, Any],
+    *,
+    summary: Mapping[str, Any],
+) -> None:
+    role_fields_present = any(
+        field_name in payload for field_name in _CANDIDATE_ROLE_ARTIFACT_FIELDS
+    ) or any(
+        field_name in summary for field_name in _CANDIDATE_ROLE_SUMMARY_COUNT_FIELDS
+    )
+    if not role_fields_present:
+        return
+
+    executable_tickers = _optional_ticker_list(payload, "executable_tickers")
+    blocked_tickers = _optional_ticker_list(payload, "blocked_but_valid_tickers")
+    if executable_tickers is None:
+        raise AiBriefValidationError("executable_tickers is required")
+    if blocked_tickers is None:
+        raise AiBriefValidationError("blocked_but_valid_tickers is required")
+
+    executable_set = set(executable_tickers)
+    blocked_set = set(blocked_tickers)
+    if executable_set & blocked_set:
+        raise AiBriefValidationError("candidate role tickers must be disjoint")
+
+    role_universe = _eligible_tickers(payload) | _candidate_list_tickers(
+        payload, "cap_excluded_candidates"
+    )
+    unknown_tickers = (executable_set | blocked_set) - role_universe
+    if unknown_tickers:
+        raise AiBriefValidationError(
+            "candidate role tickers must be in eligible_tickers or "
+            "cap_excluded_candidates"
+        )
+
+    expected_counts = {
+        "executable_count": len(executable_tickers),
+        "blocked_but_valid_count": len(blocked_tickers),
+    }
+    for field_name, expected_count in expected_counts.items():
+        if field_name not in summary:
+            raise AiBriefValidationError(f"summary.{field_name} is required")
+        actual_count = _summary_int(summary, field_name)
+        if actual_count != expected_count:
+            raise AiBriefValidationError(
+                f"summary.{field_name} must be {expected_count}, got {actual_count!r}"
+            )
+
+    recommendable_count = _summary_int(summary, "recommendable_count")
+    if (
+        recommendable_count is not None
+        and sum(expected_counts.values()) != recommendable_count
+    ):
+        raise AiBriefValidationError(
+            "summary.executable_count + summary.blocked_but_valid_count "
+            "must match summary.recommendable_count"
+        )
 
 
 def _watch_count(
@@ -668,6 +771,7 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         allowed_actions={"ENTER", "REVIEW", "SKIP"},
     )
     _validate_watch_candidates(payload, watch_tickers=watch_tickers, now=now)
+    _validate_candidate_role_counts(payload, summary=summary)
     _validate_issue_list(payload, "source_issues")
     _validate_issue_list(payload, "system_issues")
     _validate_source_provider_summary(

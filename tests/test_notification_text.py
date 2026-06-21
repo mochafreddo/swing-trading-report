@@ -883,11 +883,15 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
         "model_name": "gpt-5.4-mini",
         "summary": {
             "entry_count": 3,
+            "executable_count": 1,
+            "blocked_but_valid_count": 2,
             "preselected_count": 3,
             "recommendation_count": 0,
             "source_issue_count": 0,
             "system_issue_count": 1,
         },
+        "executable_tickers": ["AXTI.NAS"],
+        "blocked_but_valid_tickers": ["WELL.NYS", "BABA.NYS"],
         "eligible_tickers": ["AXTI.NAS", "WELL.NYS", "BABA.NYS"],
         "recommendations": [],
         "source_issues": [],
@@ -908,12 +912,15 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
 
     assert "추천 <code>0</code>건 · 표시 <code>0</code>건" in text
     assert "모델 입력 <code>3</code>건" in text
+    assert "역할 실행가능 <code>1</code>건 · 차단/검토 <code>2</code>건" in text
+    assert "실행가능 후보 <code>1</code>건: AXTI.NAS" in text
+    assert "차단/검토 후보 <code>2</code>건: WELL.NYS, BABA.NYS" in text
     assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert (
-        "추천 생성 실패/보류: recommendable 후보 3건이 있었지만 추천 결과가 비었습니다."
-        in text
+        "추천 생성 실패/보류: 모델 후보 3건이 있었지만 추천 결과가 비었습니다." in text
     )
+    assert "recommendable 후보" not in text
     assert "ENTER 후보" not in text
     assert "대상: AXTI.NAS, WELL.NYS, BABA.NYS" in text
     assert (
@@ -930,12 +937,23 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
         "model_name": "gpt-5.4-mini",
         "summary": {
             "recommendable_count": 7,
+            "executable_count": 1,
+            "blocked_but_valid_count": 6,
             "watch_count": 2,
             "preselected_count": 5,
             "recommendation_count": 0,
             "source_issue_count": 0,
             "system_issue_count": 1,
         },
+        "executable_tickers": ["AXTI.NAS"],
+        "blocked_but_valid_tickers": [
+            "WELL.NYS",
+            "BABA.NYS",
+            "CAT.NYS",
+            "TSM.NYS",
+            "CIFR.NAS",
+            "IREN.NAS",
+        ],
         "eligible_tickers": ["AXTI.NAS", "WELL.NYS", "BABA.NYS"],
         "watch_tickers": ["AAPL.NAS", "MSFT.NAS"],
         "recommendations": [],
@@ -973,6 +991,12 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
         run_url="https://github.com/example/repo/actions/runs/790",
     )
 
+    assert "역할 실행가능 <code>1</code>건 · 차단/검토 <code>6</code>건" in text
+    assert "실행가능 후보 <code>1</code>건: AXTI.NAS" in text
+    assert (
+        "차단/검토 후보 <code>6</code>건: WELL.NYS, BABA.NYS, CAT.NYS, TSM.NYS, CIFR.NAS, 외 1건"
+        in text
+    )
     assert "watch 후보 <code>2</code>건: AAPL.NAS, MSFT.NAS" in text
     assert (
         "<code>source_chain=finnhub,benzinga-news final recommendable=3/7 "
@@ -983,9 +1007,10 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
         "benzinga-news success 0/4</code>" in text
     )
     assert (
-        "추천 생성 실패/보류: recommendable 후보 7건(모델 입력 5건)이 있었지만 "
+        "추천 생성 실패/보류: 모델 후보 7건(모델 입력 5건)이 있었지만 "
         "추천 결과가 비었습니다." in text
     )
+    assert "recommendable 후보" not in text
     assert "ENTER 후보" not in text
 
 
@@ -1285,6 +1310,8 @@ def test_build_ai_brief_slack_summary_text_includes_watch_and_source_chain() -> 
         "model_name": "gpt-test",
         "summary": {
             "recommendable_count": 7,
+            "executable_count": 1,
+            "blocked_but_valid_count": 6,
             "watch_count": 2,
             "preselected_count": 5,
             "recommendation_count": 3,
@@ -1292,6 +1319,15 @@ def test_build_ai_brief_slack_summary_text_includes_watch_and_source_chain() -> 
             "source_issue_count": 1,
             "system_issue_count": 0,
         },
+        "executable_tickers": ["AXTI.NAS"],
+        "blocked_but_valid_tickers": [
+            "WELL.NYS",
+            "BABA.NYS",
+            "CAT.NYS",
+            "TSM.NYS",
+            "CIFR.NAS",
+            "IREN.NAS",
+        ],
         "watch_tickers": ["AAPL.NAS", "MSFT.NAS"],
         "recommendations": [{}, {}, {}],
         "source_provider_summary": {
@@ -1323,6 +1359,13 @@ def test_build_ai_brief_slack_summary_text_includes_watch_and_source_chain() -> 
     )
 
     assert "watch_count=2" in text
+    assert "executable_count=1" in text
+    assert "blocked_but_valid_count=6" in text
+    assert "executable_tickers=AXTI.NAS" in text
+    assert (
+        "blocked_but_valid_tickers=WELL.NYS, BABA.NYS, CAT.NYS, TSM.NYS, "
+        "CIFR.NAS, IREN.NAS"
+    ) in text
     assert "watch_tickers=AAPL.NAS, MSFT.NAS" in text
     assert "source_chain=finnhub,benzinga-news" in text
     assert "source_final_recommendable=3/7" in text

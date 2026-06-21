@@ -264,6 +264,9 @@ describe("ReportDetail component", () => {
       {
         ticker: "AAPL.NAS",
         rank: 1,
+        candidate_role: "executable",
+        entry_action: "ENTER",
+        candidate_role_reason: "entry report action was ENTER",
         confidence: "LOW",
         rationale: ["entry setup remains valid"],
         checklist: ["manually confirm price and risk"],
@@ -300,6 +303,11 @@ describe("ReportDetail component", () => {
     expect(html).toContain("source_entry_report");
     expect(html).toContain("Recommendations (1)");
     expect(html).toContain("AAPL.NAS");
+    expect(html).toContain("Role");
+    expect(html).toContain("executable");
+    expect(html).toContain("Entry Action");
+    expect(html).toContain("ENTER");
+    expect(html).toContain("entry report action was ENTER");
     expect(html).toContain("entry setup remains valid");
     expect(html).toContain("Apple supply chain update");
     expect(html).toContain("Source issues (1)");
@@ -353,10 +361,14 @@ describe("ReportDetail component", () => {
       source_entry_report: "2026-05-05.entry.json",
       summary: {
         recommendable_count: 7,
+        executable_count: 1,
+        blocked_but_valid_count: 6,
         watch_count: 2,
         preselected_count: 5,
         recommendation_count: 0,
       },
+      executable_tickers: ["AAPL.NAS"],
+      blocked_but_valid_tickers: ["MSFT.NAS", "NVDA.NAS"],
       eligible_tickers: ["AAPL.NAS"],
       watch_tickers: ["MSFT.NAS", "NVDA.NAS"],
       watch_candidates: [
@@ -407,6 +419,9 @@ describe("ReportDetail component", () => {
 
     expect(html).toContain("watch_tickers");
     expect(html).toContain("MSFT.NAS, NVDA.NAS");
+    expect(html).toContain("executable_tickers");
+    expect(html).toContain("AAPL.NAS");
+    expect(html).toContain("blocked_but_valid_tickers");
     expect(html).toContain("source_chain");
     expect(html).toContain("finnhub,benzinga-news");
     expect(html).toContain("source_final_coverage");

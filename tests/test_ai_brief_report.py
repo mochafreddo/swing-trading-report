@@ -115,6 +115,20 @@ def _artifact_with_watch() -> dict[str, object]:
     return artifact
 
 
+def _artifact_with_candidate_roles() -> dict[str, object]:
+    artifact = _artifact_with_watch()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "executable_count": 1,
+        "blocked_but_valid_count": 0,
+    }
+    artifact["executable_tickers"] = ["AAPL.NAS"]
+    artifact["blocked_but_valid_tickers"] = []
+    return artifact
+
+
 def test_write_ai_brief_report_writes_schema_and_offset_generated_at(
     tmp_path: Path,
 ) -> None:
@@ -947,6 +961,18 @@ def test_write_ai_brief_report_rejects_new_format_missing_expanded_summary_count
         }
 
     with pytest.raises(AiBriefValidationError, match="recommendable_count"):
+        write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
+
+
+def test_write_ai_brief_report_validates_candidate_role_summary_counts(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact_with_candidate_roles()
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    summary["blocked_but_valid_count"] = 1
+
+    with pytest.raises(AiBriefValidationError, match="blocked_but_valid_count"):
         write_ai_brief_report(report_dir=tmp_path.as_posix(), artifact=artifact)
 
 

@@ -117,6 +117,7 @@ class FakeAiBriefProvider:
                 "sources": sources,
                 "as_of": as_of,
             }
+            _copy_candidate_role_context(recommendation, candidate)
             _apply_investment_readiness_context(recommendation, candidate)
             recommendations.append(recommendation)
             if not sources:
@@ -266,9 +267,13 @@ def _build_openai_request_payload(
                     "You summarize swing-trading entry candidates for manual "
                     "review. Return JSON only. Do not create new tickers. Do not "
                     "rank candidates outside recommendable_candidates. "
-                    "Recommendable candidates may have original entry action "
-                    "ENTER, REVIEW, or SKIP; use ai_role_reason as the inclusion "
-                    "decision. Do not use automated-order "
+                    "Candidate ai_role values are explicit: executable means the "
+                    "entry report action was ENTER; blocked_but_valid means the "
+                    "setup is technically valid but automatic entry was blocked "
+                    "by portfolio policy or manual risk review; watch_only must "
+                    "stay out of recommendations. Use ai_role_reason and the "
+                    "original action when explaining manual review context. "
+                    "Do not use automated-order "
                     f"language such as {AUTOMATED_ORDER_PROMPT_EXAMPLES}. "
                     "When implementation_ready is false or investment_readiness "
                     "requires context, keep the recommendation manual-review-only "
@@ -539,6 +544,7 @@ def _normalize_openai_provider_result(
             "sources": sources,
             "as_of": _offset_now_iso(),
         }
+        _copy_candidate_role_context(recommendation, candidate)
         _apply_investment_readiness_context(recommendation, candidate)
         recommendations.append(recommendation)
     for rank, recommendation in enumerate(recommendations, start=1):
@@ -724,6 +730,20 @@ def _copy_investment_readiness_fields(
     for field_name in _INVESTMENT_READINESS_FIELDS:
         if field_name in candidate:
             row[field_name] = candidate.get(field_name)
+
+
+def _copy_candidate_role_context(
+    row: dict[str, object], candidate: Mapping[str, object]
+) -> None:
+    role = str(candidate.get("ai_role") or "").strip()
+    if role:
+        row["candidate_role"] = role
+    entry_action = str(candidate.get("action") or "").strip().upper()
+    if entry_action:
+        row["entry_action"] = entry_action
+    role_reason = str(candidate.get("ai_role_reason") or "").strip()
+    if role_reason:
+        row["candidate_role_reason"] = role_reason
 
 
 def _investment_readiness_status(candidate: Mapping[str, object]) -> str:
