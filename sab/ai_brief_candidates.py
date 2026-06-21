@@ -5,7 +5,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-AiBriefCandidateRole = Literal["recommendable", "watch_only", "excluded"]
+AiBriefCandidateRole = Literal[
+    "executable", "blocked_but_valid", "watch_only", "excluded"
+]
 
 _PORTFOLIO_BLOCK_REASON_PREFIXES = (
     "portfolio exposure cap reached",
@@ -28,9 +30,14 @@ class AiBriefEntryCandidate:
 
 @dataclass(frozen=True)
 class AiBriefEntryClassification:
-    recommendable: list[AiBriefEntryCandidate]
+    executable: list[AiBriefEntryCandidate]
+    blocked_but_valid: list[AiBriefEntryCandidate]
     watch_only: list[AiBriefEntryCandidate]
     excluded: list[AiBriefEntryCandidate]
+
+    @property
+    def recommendable(self) -> list[AiBriefEntryCandidate]:
+        return [*self.executable, *self.blocked_but_valid]
 
 
 def entry_reasons(entry: Mapping[str, object]) -> list[str]:
@@ -108,7 +115,7 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
         return AiBriefEntryCandidate(
             ticker=ticker,
             action=action,
-            role="recommendable",
+            role="executable",
             reason="entry report action was ENTER",
             entry=entry,
         )
@@ -118,7 +125,7 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
         return AiBriefEntryCandidate(
             ticker=ticker,
             action=action,
-            role="recommendable",
+            role="blocked_but_valid",
             reason="portfolio policy blocked automatic entry",
             entry=entry,
         )
@@ -126,7 +133,7 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
         return AiBriefEntryCandidate(
             ticker=ticker,
             action=action,
-            role="recommendable",
+            role="blocked_but_valid",
             reason="risk alignment requires manual review",
             entry=entry,
         )
@@ -159,19 +166,23 @@ def classify_ai_brief_entry_row(entry: Mapping[str, object]) -> AiBriefEntryCand
 def classify_ai_brief_entry_rows(
     rows: Iterable[Mapping[str, object]],
 ) -> AiBriefEntryClassification:
-    recommendable: list[AiBriefEntryCandidate] = []
+    executable: list[AiBriefEntryCandidate] = []
+    blocked_but_valid: list[AiBriefEntryCandidate] = []
     watch_only: list[AiBriefEntryCandidate] = []
     excluded: list[AiBriefEntryCandidate] = []
     for row in rows:
         classified = classify_ai_brief_entry_row(row)
-        if classified.role == "recommendable":
-            recommendable.append(classified)
+        if classified.role == "executable":
+            executable.append(classified)
+        elif classified.role == "blocked_but_valid":
+            blocked_but_valid.append(classified)
         elif classified.role == "watch_only":
             watch_only.append(classified)
         else:
             excluded.append(classified)
     return AiBriefEntryClassification(
-        recommendable=recommendable,
+        executable=executable,
+        blocked_but_valid=blocked_but_valid,
         watch_only=watch_only,
         excluded=excluded,
     )

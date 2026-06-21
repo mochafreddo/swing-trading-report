@@ -516,7 +516,18 @@ def test_run_ai_brief_expands_ready_candidates_by_ai_role(
     assert exit_code == 0
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["summary"]["recommendable_count"] == 7
+    assert payload["summary"]["executable_count"] == 1
+    assert payload["summary"]["blocked_but_valid_count"] == 6
     assert payload["summary"]["watch_count"] == 1
+    assert payload["executable_tickers"] == ["ELV.NYS"]
+    assert payload["blocked_but_valid_tickers"] == [
+        "CAT.NYS",
+        "TSM.NYS",
+        "CIFR.NAS",
+        "IREN.NAS",
+        "COHR.NYS",
+        "ANET.NYS",
+    ]
     assert payload["eligible_tickers"] == [
         "ELV.NYS",
         "CAT.NYS",
@@ -534,6 +545,8 @@ def test_run_ai_brief_expands_ready_candidates_by_ai_role(
         "REVIEW",
     ]
     assert payload["excluded_candidates"] == []
+    assert payload["recommendations"][0]["candidate_role"] == "executable"
+    assert payload["recommendations"][0]["entry_action"] == "ENTER"
     assert payload["watch_candidates"][0]["ticker"] == "MO.NYS"
     assert payload["source_provider_summary"]["chain"] == ["none"]
 
@@ -1213,7 +1226,7 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
         "ticker": "AAPL.NAS",
         "name": None,
         "action": "ENTER",
-        "ai_role": "recommendable",
+        "ai_role": "executable",
         "ai_role_reason": "entry report action was ENTER",
         "entry_reasons": ["entry conditions satisfied"],
         "buy_reason_labels": [],

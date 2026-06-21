@@ -501,13 +501,15 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 ### 7.1.1 AI Brief report (entry 후속 요약)
 
 - `sab ai-brief`는 전략 신호 생성기가 아니라 `sab entry` 결과의 후속 요약/판단 레이어입니다.
-- 입력은 `*.entry.json`이며, AI Brief는 entry row를 `recommendable`, `watch_only`, `excluded` 역할로 먼저 분류합니다.
+- 입력은 `*.entry.json`이며, AI Brief는 entry row를 `executable`, `blocked_but_valid`, `watch_only`, `excluded` 역할로 먼저 분류합니다.
   - 공통 base gate는 `entry_state=READY`와 `entry_price_status=available`입니다. `entry_price_status`가 없는 legacy entry row는 `entry_price`가 유효한 양수일 때만 available로 해석합니다. 이 gate를 통과하지 못하면 추천/관찰 후보가 아니라 `excluded_candidates[]`에 남깁니다.
-  - `recommendable`: `action=ENTER`, 포트폴리오 상한 때문에 `SKIP`된 후보, 또는 손절폭 대비 변동성 warning 때문에 `REVIEW`된 후보입니다. 포트폴리오/리스크로 자동 진입은 막혔지만 스윙 트레이딩 관점의 기술 셋업은 살아 있는 후보로 취급합니다.
+  - `executable`: `action=ENTER` 후보입니다. 모델 추천의 최종 `action`은 계속 `ENTER`로 기록되지만, 원본 entry action은 `entry_action`으로 따로 보존합니다.
+  - `blocked_but_valid`: 포트폴리오 상한 때문에 `SKIP`된 후보 또는 손절폭 대비 변동성 warning 때문에 `REVIEW`된 후보입니다. 포트폴리오/리스크로 자동 진입은 막혔지만 스윙 트레이딩 관점의 기술 셋업은 살아 있는 후보로 취급합니다.
   - `watch_only`: hybrid trigger guard 실패로 `SKIP`된 후보입니다. 추천 ranking에는 들어가지 않고 `watch_candidates[]`/`watch_tickers[]`로 분리해 재트리거 조건 확인용으로만 표시합니다.
   - 그 외 `REVIEW`/`SKIP`/unsupported action은 `excluded_candidates[]`에 남기며 추천으로 승격하지 않습니다.
-- 모델 ranking 입력은 `recommendable` 후보 중 entry report 순서 기준 최대 5개(`eligible_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 최종 `recommendations[]`는 최대 3개입니다.
-- source provider universe는 preselection cap을 통과한 후보만이 아니라 전체 `recommendable` 후보와 `watch_only` 후보를 포함합니다. 따라서 `source_provider_summary.final.recommendable_total`은 `summary.recommendable_count`, `watch_total`은 `summary.watch_count`와 맞아야 합니다.
+- 모델 ranking 입력은 `executable` + `blocked_but_valid` 후보 중 entry report 순서 기준 최대 5개(`eligible_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 최종 `recommendations[]`는 최대 3개입니다.
+- `summary.recommendable_count`는 호환성을 위해 `executable_count + blocked_but_valid_count` aggregate로 유지합니다. `executable_tickers[]`와 `blocked_but_valid_tickers[]`는 알림/web에서 실행 가능 후보와 차단/검토 후보를 따로 표시하기 위한 역할별 원본 ticker 배열입니다.
+- source provider universe는 preselection cap을 통과한 후보만이 아니라 전체 `executable`/`blocked_but_valid` 후보와 `watch_only` 후보를 포함합니다. 따라서 `source_provider_summary.final.recommendable_total`은 `summary.recommendable_count`, `watch_total`은 `summary.watch_count`와 맞아야 합니다.
 - `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
 - AI Brief provider 입력과 최종 recommendation/watch row는 entry row의 `implementation_ready` / `investment_readiness` / `liquidity_exit_capacity` / `liquidity_warnings` / `downside_risk` / `portfolio_exposure_buckets` 필드를 보존합니다. `implementation_ready=false` 또는 context-required readiness가 있는 recommendation은 rationale/checklist에 수동 확인 caveat를 포함해야 합니다.
 - `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `watch_only` 후보의 추천 승격, 한국어/영어 자동 주문·체결 언어를 허용하지 않습니다. `watch_candidates[]`는 `action=WATCH`, 수동 확인 이유, 재트리거 조건만 담을 수 있습니다.
@@ -528,12 +530,12 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - AI Brief 모델 provider는 source 객체(`title`/`url`/`published_at`)를 신뢰 경계 밖에서 재작성하지 않습니다. Source provider가 만든 canonical source row는 실행 중 request-local `source_id`를 받고, 모델은 `source_refs`만 선택합니다. 최종 artifact에는 로컬 코드가 `source_refs`를 canonical `sources[]` 객체로 복원한 결과만 저장합니다.
 - 모델이 특정 후보에 대해 잘못된 `source_refs`를 반환하면 해당 추천은 제외하거나 watch 후보는 deterministic fallback으로 복원하고, `source_issues[]`에 `model_source_ref_*` 진단을 남깁니다. 추천 품질 게이트는 복원된 최종 artifact를 기준으로 판단합니다.
 - OpenAI가 추천하지 않기로 판단한 후보는 `vetoed_candidates[]`에 남기며, 알림과 웹 상세 화면에서 추천과 별도로 표시합니다.
-- `summary`는 `entry_count`, `recommendable_count`, `watch_count`, `preselected_count`, `recommendation_count`, `vetoed_count`, `excluded_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`를 기록해 추천/관찰/제외/모델 입력 cap을 분리해 검증할 수 있어야 합니다.
+- `summary`는 `entry_count`, `recommendable_count`, `executable_count`, `blocked_but_valid_count`, `watch_count`, `preselected_count`, `recommendation_count`, `vetoed_count`, `excluded_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`를 기록해 추천/관찰/제외/모델 입력 cap을 분리해 검증할 수 있어야 합니다.
 - OpenAI provider timeout/요청 실패/출력 계약 실패는 추천을 비우고 `system_issues[]`로 남깁니다. `watch_only` 후보가 있으면 모델 출력 없이도 입력 후보에서 결정론적 `WATCH` row를 만들어 `watch_candidates[]`/`watch_tickers[]` 계약과 진단 artifact를 보존합니다.
 - source provider timeout/HTTP/JSON 실패는 추천 생성을 중단하지 않습니다. 단일 provider 또는 chain 최종 결과에서도 미커버 ticker가 남으면 `system_issues[]`/ticker별 `source_issues[]`로 disclose하고, fallback provider가 source를 채우면 provider summary에만 남깁니다.
-- 새로 작성되는 `sab.ai_brief.v1` artifact는 top-level `brief_state`와 `brief_reason`을 항상 포함합니다. `NO_SIGNAL/no_enter_candidates`의 reason 문자열은 legacy 이름을 유지하지만 현재 의미는 preselected recommendable 후보와 watch 후보가 모두 없는 상태입니다. `NEEDS_REVIEW_WATCH_ONLY/watch_only_trigger_pending`은 모델 ranking 후보는 없고 재트리거 확인용 watch 후보만 있는 상태입니다. `FINAL_JUDGMENT/source_backed_final`은 표시 추천이 모두 source-backed이고 source/system issue가 없는 최종 판단입니다.
+- 새로 작성되는 `sab.ai_brief.v1` artifact는 top-level `brief_state`와 `brief_reason`을 항상 포함합니다. `NO_SIGNAL/no_enter_candidates`의 reason 문자열은 legacy 이름을 유지하지만 현재 의미는 preselected model 후보와 watch 후보가 모두 없는 상태입니다. `NEEDS_REVIEW_WATCH_ONLY/watch_only_trigger_pending`은 모델 ranking 후보는 없고 재트리거 확인용 watch 후보만 있는 상태입니다. `FINAL_JUDGMENT/source_backed_final`은 표시 추천이 모두 source-backed이고 source/system issue가 없는 최종 판단입니다.
 - 그 외 후보가 있었지만 뉴스 근거가 약하거나 모델/source/system 문제가 있으면 `NEEDS_REVIEW_WEAK_NEWS`로 낮춰 표시합니다. reason은 `model_or_system_issue`, `weak_news_coverage`, `model_deferred` 중 하나이며 런타임 AI가 아니라 artifact count, watch count, recommendation source, issue 배열로만 결정합니다.
-- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. recommendable/watch/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, watch 후보 계약, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다. Preselected recommendable 후보가 있는데 `recommendations[]`와 `vetoed_candidates[]`가 모두 비면 source/system issue 존재 여부와 관계없이 `FAIL`입니다. 수동 GitHub workflow와 scheduled runner는 이 평가가 `FAIL`이면 Supabase 업로드, 알림 전송, 성공 처리를 중단합니다.
+- `scripts/eval_ai_brief_recommendations.py`는 생성된 AI Brief artifact의 source-backed/manual-review 품질 게이트입니다. executable/blocked/watch/excluded/cap-excluded entry 후보 정합성, summary count 일관성, rank 연속성, watch 후보 계약, source-backed recommendation 비율, source 없는 추천의 confidence 안전성을 오프라인으로 평가하며, 새 매매 신호를 생성하지 않습니다. Preselected model 후보가 있는데 `recommendations[]`와 `vetoed_candidates[]`가 모두 비면 source/system issue 존재 여부와 관계없이 `FAIL`입니다. 수동 GitHub workflow와 scheduled runner는 이 평가가 `FAIL`이면 Supabase 업로드, 알림 전송, 성공 처리를 중단합니다.
 - `--buy-report`는 회사명/기존 buy 근거 보강용이며, entry report에 없는 ticker를 추가하지 않습니다.
 - mixed KR/US entry report는 `--market KR|US`를 요구하고, AI Brief artifact는 단일 시장만 다룹니다.
 

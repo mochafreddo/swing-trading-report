@@ -409,11 +409,18 @@ def _build_excluded_candidate(
 
 
 def _build_cap_excluded_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
-    return {
+    row: dict[str, object] = {
         "ticker": str(candidate["ticker"]),
         "action": str(candidate.get("action") or ""),
         "reason": f"preselection cap {_PRESELECTION_LIMIT} exceeded",
     }
+    ai_role = str(candidate.get("ai_role") or "").strip()
+    if ai_role:
+        row["candidate_role"] = ai_role
+    ai_role_reason = str(candidate.get("ai_role_reason") or "").strip()
+    if ai_role_reason:
+        row["candidate_role_reason"] = ai_role_reason
+    return row
 
 
 def _entry_system_issues(source_report: Mapping[str, Any]) -> list[dict[str, object]]:
@@ -440,6 +447,8 @@ def _build_summary(
     *,
     entry_count: int,
     recommendable_count: int,
+    executable_count: int,
+    blocked_but_valid_count: int,
     watch_count: int,
     preselected_count: int,
     recommendation_count: int,
@@ -452,6 +461,8 @@ def _build_summary(
     return {
         "entry_count": entry_count,
         "recommendable_count": recommendable_count,
+        "executable_count": executable_count,
+        "blocked_but_valid_count": blocked_but_valid_count,
         "watch_count": watch_count,
         "preselected_count": preselected_count,
         "recommendation_count": recommendation_count,
@@ -703,10 +714,15 @@ def run_ai_brief(
     )
 
     classified_rows = classify_ai_brief_entry_rows(target_rows)
-    eligible_candidates = [
+    executable_candidates = [
         _build_model_candidate(classified, buy_enrichment.get(classified.ticker))
-        for classified in classified_rows.recommendable
+        for classified in classified_rows.executable
     ]
+    blocked_but_valid_candidates = [
+        _build_model_candidate(classified, buy_enrichment.get(classified.ticker))
+        for classified in classified_rows.blocked_but_valid
+    ]
+    eligible_candidates = [*executable_candidates, *blocked_but_valid_candidates]
     watch_candidates = [
         _build_model_candidate(classified, buy_enrichment.get(classified.ticker))
         for classified in classified_rows.watch_only
@@ -958,6 +974,8 @@ def run_ai_brief(
         "summary": _build_summary(
             entry_count=len(target_rows),
             recommendable_count=len(eligible_candidates),
+            executable_count=len(executable_candidates),
+            blocked_but_valid_count=len(blocked_but_valid_candidates),
             watch_count=len(watch_candidates),
             preselected_count=len(preselected_candidates),
             recommendation_count=len(recommendations),
@@ -976,6 +994,12 @@ def run_ai_brief(
         "system_issues": system_issues,
         "eligible_tickers": [
             str(candidate["ticker"]) for candidate in preselected_candidates
+        ],
+        "executable_tickers": [
+            str(candidate["ticker"]) for candidate in executable_candidates
+        ],
+        "blocked_but_valid_tickers": [
+            str(candidate["ticker"]) for candidate in blocked_but_valid_candidates
         ],
         "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
         "source_provider_summary": source_provider_summary,

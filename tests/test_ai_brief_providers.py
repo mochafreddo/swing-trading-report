@@ -73,13 +73,13 @@ def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -
         recommendable_candidates=[
             _candidate(
                 "CAT.NYS",
-                role="recommendable",
+                role="blocked_but_valid",
                 action="SKIP",
                 ai_role_reason="portfolio policy blocked automatic entry",
             ),
             _candidate(
                 "CIFR.NAS",
-                role="recommendable",
+                role="blocked_but_valid",
                 action="REVIEW",
                 ai_role_reason="risk alignment requires manual review",
             ),
@@ -96,6 +96,13 @@ def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -
     assert "portfolio policy blocked automatic entry" in rationale_text
     assert "risk alignment requires manual review" in rationale_text
     assert "entry report marked this candidate ENTER" not in rationale_text
+    assert result.recommendations[0]["candidate_role"] == "blocked_but_valid"
+    assert result.recommendations[0]["entry_action"] == "SKIP"
+    assert result.recommendations[0]["candidate_role_reason"] == (
+        "portfolio policy blocked automatic entry"
+    )
+    assert result.recommendations[1]["candidate_role"] == "blocked_but_valid"
+    assert result.recommendations[1]["entry_action"] == "REVIEW"
 
 
 def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
@@ -300,7 +307,9 @@ def test_openai_rejects_legacy_output_sources_after_source_ref_schema_switch() -
         )
 
 
-def test_openai_prompt_allows_promoted_recommendable_review_skip_candidates() -> None:
+def test_openai_prompt_separates_executable_from_blocked_review_skip_candidates() -> (
+    None
+):
     session = _CapturingSession(
         {
             "recommendations": [],
@@ -320,13 +329,13 @@ def test_openai_prompt_allows_promoted_recommendable_review_skip_candidates() ->
         recommendable_candidates=[
             _candidate(
                 "CAT.NYS",
-                role="recommendable",
+                role="blocked_but_valid",
                 action="SKIP",
                 ai_role_reason="portfolio policy blocked automatic entry",
             ),
             _candidate(
                 "CIFR.NAS",
-                role="recommendable",
+                role="blocked_but_valid",
                 action="REVIEW",
                 ai_role_reason="risk alignment requires manual review",
             ),
@@ -342,13 +351,18 @@ def test_openai_prompt_allows_promoted_recommendable_review_skip_candidates() ->
     assert isinstance(system_message, dict)
     system_content = str(system_message["content"])
     assert "Do not recommend REVIEW or SKIP rows" not in system_content
-    assert "recommendable" in system_content
+    assert "executable" in system_content
+    assert "blocked_but_valid" in system_content
     user_message = request_input[1]
     assert isinstance(user_message, dict)
     user_payload = json.loads(str(user_message["content"]))
     assert [row["action"] for row in user_payload["recommendable_candidates"]] == [
         "SKIP",
         "REVIEW",
+    ]
+    assert [row["ai_role"] for row in user_payload["recommendable_candidates"]] == [
+        "blocked_but_valid",
+        "blocked_but_valid",
     ]
     assert [
         row["ai_role_reason"] for row in user_payload["recommendable_candidates"]

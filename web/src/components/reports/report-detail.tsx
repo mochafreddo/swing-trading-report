@@ -277,6 +277,12 @@ export function ReportDetail({
   const aiBriefWatchTickers = isAiBriefReport
     ? asStringArray(detail?.watch_tickers)
     : [];
+  const aiBriefExecutableTickers = isAiBriefReport
+    ? asStringArray(detail?.executable_tickers)
+    : [];
+  const aiBriefBlockedTickers = isAiBriefReport
+    ? asStringArray(detail?.blocked_but_valid_tickers)
+    : [];
   const aiBriefWatchRows = isAiBriefReport
     ? asRecordArray(detail?.watch_candidates)
     : [];
@@ -289,6 +295,22 @@ export function ReportDetail({
   const showAiBriefWatchTickers =
     isAiBriefReport &&
     (hasOwnField(detail, "watch_tickers") || aiBriefWatchTickers.length > 0);
+  const showAiBriefExecutableTickers =
+    isAiBriefReport &&
+    (hasOwnField(detail, "executable_tickers") ||
+      aiBriefExecutableTickers.length > 0);
+  const showAiBriefBlockedTickers =
+    isAiBriefReport &&
+    (hasOwnField(detail, "blocked_but_valid_tickers") ||
+      aiBriefBlockedTickers.length > 0);
+  const showAiBriefRecommendationRoles =
+    isAiBriefReport &&
+    aiBriefRows.some(
+      (row) =>
+        hasOwnField(row, "candidate_role") ||
+        hasOwnField(row, "entry_action") ||
+        hasOwnField(row, "candidate_role_reason"),
+    );
   const showSourceProviderChain =
     isAiBriefReport && sourceProviderChain.length > 0;
   const showSourceProviderFinal =
@@ -416,6 +438,18 @@ export function ReportDetail({
                 <dd>{formatStringList(aiBriefWatchTickers)}</dd>
               </div>
             )}
+            {showAiBriefExecutableTickers && (
+              <div>
+                <dt>executable_tickers</dt>
+                <dd>{formatStringList(aiBriefExecutableTickers)}</dd>
+              </div>
+            )}
+            {showAiBriefBlockedTickers && (
+              <div>
+                <dt>blocked_but_valid_tickers</dt>
+                <dd>{formatStringList(aiBriefBlockedTickers)}</dd>
+              </div>
+            )}
             {showSourceProviderChain && (
               <div>
                 <dt>source_chain</dt>
@@ -530,8 +564,8 @@ export function ReportDetail({
           )}
           {isAiBriefReport && (
             <p className={styles.infoNote}>
-              AI Brief는 entry 리포트의 recommendable 후보를 모델 provider로
-              요약한 수동 검토용 결과입니다.
+              AI Brief는 entry 리포트의 실행가능, 차단/검토, watch 후보를
+              역할별로 분리해 모델 provider로 요약한 수동 검토용 결과입니다.
             </p>
           )}
           {isAiBriefSkipReport && (
@@ -745,6 +779,13 @@ export function ReportDetail({
                   <tr>
                     <th>Ticker</th>
                     <th>Rank</th>
+                    {showAiBriefRecommendationRoles && (
+                      <>
+                        <th>Role</th>
+                        <th>Entry Action</th>
+                        <th>Role Reason</th>
+                      </>
+                    )}
                     <th>Confidence</th>
                     <th>Rationale</th>
                     <th>Checklist</th>
@@ -756,6 +797,19 @@ export function ReportDetail({
                     <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
                       <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
                       <td data-label="Rank">{String(row.rank ?? "-")}</td>
+                      {showAiBriefRecommendationRoles && (
+                        <>
+                          <td data-label="Role">
+                            {String(row.candidate_role ?? "-")}
+                          </td>
+                          <td data-label="Entry Action">
+                            {String(row.entry_action ?? "-")}
+                          </td>
+                          <td data-label="Role Reason">
+                            {String(row.candidate_role_reason ?? "-")}
+                          </td>
+                        </>
+                      )}
                       <td data-label="Confidence">
                         {String(row.confidence ?? "-")}
                       </td>
