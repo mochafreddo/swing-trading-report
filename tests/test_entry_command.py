@@ -351,6 +351,68 @@ def test_evaluate_entry_candidates_handles_legacy_guard_strings() -> None:
     assert issues == []
 
 
+def test_evaluate_entry_candidates_calculates_liquidity_exit_capacity() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate(
+                "AAPL.NASD",
+                avg_dollar_volume_value=2_000_000.0,
+                currency="USD",
+                intended_position_value=100_000.0,
+                liquidity_flags=["small_cap", "event_driven", "crowded"],
+            )
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+
+    assert issues == []
+    row = rows[0]
+    assert row.liquidity_exit_capacity == {
+        "status": "available",
+        "currency": "USD",
+        "position_value": 100_000.0,
+        "avg_traded_value": 2_000_000.0,
+        "position_adv_percent": 5.0,
+        "normal_participation_rate": 0.1,
+        "stressed_participation_rate": 0.03,
+        "exit_days_normal": 0.5,
+        "exit_days_stressed": 1.6667,
+    }
+    assert row.liquidity_warnings == [
+        "small_cap_liquidity_risk",
+        "event_driven_liquidity_risk",
+        "crowded_name_exit_risk",
+    ]
+    assert "liquidity_exit_capacity_unavailable" not in row.investment_readiness_reasons
+
+
+def test_evaluate_entry_candidates_keeps_liquidity_unavailable_without_position_size() -> (
+    None
+):
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate(
+                "AAPL.NASD",
+                avg_dollar_volume_value=2_000_000.0,
+                currency="USD",
+            )
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+
+    assert issues == []
+    row = rows[0]
+    assert row.liquidity_exit_capacity == {
+        "status": "position_size_unavailable",
+        "currency": "USD",
+        "avg_traded_value": 2_000_000.0,
+    }
+    assert row.liquidity_warnings == ["intended_position_size_unavailable"]
+    assert "liquidity_exit_capacity_unavailable" in row.investment_readiness_reasons
+
+
 def test_evaluate_entry_candidates_marks_legacy_basis_as_review() -> None:
     rows, issues = evaluate_entry_candidates(
         candidates=[
@@ -1555,6 +1617,13 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
                 "liquidity_exit_capacity_unavailable",
                 "portfolio_exposure_context_unavailable",
                 "source_fundamental_context_unavailable",
+            ],
+            "liquidity_exit_capacity": {
+                "status": "position_size_and_liquidity_unavailable",
+            },
+            "liquidity_warnings": [
+                "intended_position_size_unavailable",
+                "avg_traded_value_unavailable",
             ],
         }
     ]

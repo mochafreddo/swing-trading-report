@@ -2,7 +2,6 @@
 
 ## Active
 
-- 2026-06-18: Add liquidity and exit-capacity checks tied to intended position size, such as position value as percent of ADV, estimated exit days at normal/stressed participation, and warnings for small-cap, event-driven, or crowded names. Current liquidity use is mainly minimum average traded value and ranking.
 - 2026-06-18: Add portfolio exposure controls beyond count-based caps. Current `max_active_holdings` and `max_new_entries_per_market` do not account for sector/theme/currency/beta/correlation concentration, so eight holdings can still represent one crowded risk bucket.
 - 2026-06-18: Make stop/target reporting explicit that `risk_guide`, `stop_price`, and `target_price` are decision guides, not guaranteed execution or account-loss limits. Add gap/slippage caveats and, if position sizing is added, show downside loss in amount and portfolio percent/bps.
 - 2026-06-18: Separate AI Brief candidate roles so executable `ENTER` rows are not mixed with portfolio-blocked `SKIP` rows or tight-stop `REVIEW` rows under the same `recommendable` label. Consider explicit roles such as `executable`, `blocked_but_valid`, and `watch_only`, and update notification/web copy to preserve the distinction.
@@ -42,6 +41,7 @@
 
 ## Completed
 
+- 2026-06-21: Added entry liquidity exit-capacity reporting tied to intended position size. Entry rows now emit `liquidity_exit_capacity` with ADV percent and normal/stressed exit-day estimates when position value and average traded value are available, preserve missing-size/liquidity plus small-cap/event-driven/crowded warnings in `liquidity_warnings`, remove the liquidity-unavailable readiness reason only when capacity is calculable, carry the fields through AI Brief provider input/final rows, and show them in the web report detail `Exit Capacity` column.
 - 2026-06-21: Added entry report investment-readiness fields separate from technical `quality_state`. New entry rows now emit `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, and missing-context reasons for NAV/risk budget, liquidity exit capacity, portfolio exposure, and source/fundamental context; AI Brief provider input plus final recommendation/watch rows preserve those fields with manual-review caveats, web report detail shows readiness, and strategy/API/architecture docs clarify that `ENTER` and `quality_state=A` are technical setup labels rather than execution-ready account decisions.
 - 2026-06-18: Added a `/favicon.ico` route for the local web UI, returning a cacheable SVG favicon so browser QA on `/login` no longer reports the missing favicon 404.
 - 2026-06-18: Applied the remaining `sma_ema_hybrid` swing-trader review follow-ups: `sab entry` now requires `quality_state=A` for automatic hybrid `ENTER`, and hybrid sell supports pattern-specific time-stop overrides with a shorter default for `swing_high_breakout`.

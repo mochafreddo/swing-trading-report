@@ -1165,6 +1165,13 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
                 "nav_risk_budget_unavailable",
                 "liquidity_exit_capacity_unavailable",
             ],
+            "liquidity_exit_capacity": {
+                "status": "available",
+                "position_adv_percent": 5.0,
+                "exit_days_normal": 0.5,
+                "exit_days_stressed": 1.6667,
+            },
+            "liquidity_warnings": ["small_cap_liquidity_risk"],
         }
     )
     entry_report = _write_entry_report(tmp_path, entries=[entry])
@@ -1222,6 +1229,13 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
             "nav_risk_budget_unavailable",
             "liquidity_exit_capacity_unavailable",
         ],
+        "liquidity_exit_capacity": {
+            "status": "available",
+            "position_adv_percent": 5.0,
+            "exit_days_normal": 0.5,
+            "exit_days_stressed": 1.6667,
+        },
+        "liquidity_warnings": ["small_cap_liquidity_risk"],
         "sources": [],
     }
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
@@ -1232,6 +1246,13 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
         "nav_risk_budget_unavailable",
         "liquidity_exit_capacity_unavailable",
     ]
+    assert recommendation["liquidity_exit_capacity"] == {
+        "status": "available",
+        "position_adv_percent": 5.0,
+        "exit_days_normal": 0.5,
+        "exit_days_stressed": 1.6667,
+    }
+    assert recommendation["liquidity_warnings"] == ["small_cap_liquidity_risk"]
     assert (
         "investment readiness requires context: CONTEXT_REQUIRED"
         in recommendation["rationale"]

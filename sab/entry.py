@@ -25,7 +25,11 @@ from .holdings_loader import (
 )
 from .market_data_common import infer_env_from_base_url
 from .observability import current_run_id
-from .report.entry_report import EntryReportRow, write_entry_report
+from .report.entry_report import (
+    DEFAULT_INVESTMENT_READINESS_REASONS,
+    EntryReportRow,
+    write_entry_report,
+)
 from .report.run_meta import build_run_meta
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .tickers import (
@@ -77,6 +81,37 @@ _KIS_OVERSEAS_ENTRY_PRICE_KEYS = (
     "ovrs_prpr",
 )
 _KIS_DOMESTIC_ENTRY_PRICE_KEYS = ("stck_prpr",)
+_LIQUIDITY_EXIT_CAPACITY_UNAVAILABLE_REASON = "liquidity_exit_capacity_unavailable"
+_NORMAL_EXIT_PARTICIPATION_RATE = 0.10
+_STRESSED_EXIT_PARTICIPATION_RATE = 0.03
+_POSITION_VALUE_KEYS = (
+    "intended_position_value",
+    "intended_position_value_value",
+    "planned_position_value",
+    "planned_position_value_value",
+    "target_position_value",
+    "target_position_value_value",
+    "position_value",
+    "position_value_value",
+)
+_AVG_TRADED_VALUE_KEYS = (
+    "avg_dollar_volume_value",
+    "avg_traded_value_value",
+    "avg_traded_value",
+    "avg_dollar_volume",
+)
+_LIQUIDITY_FLAG_WARNING_MAP = {
+    "small_cap": "small_cap_liquidity_risk",
+    "small-cap": "small_cap_liquidity_risk",
+    "small cap": "small_cap_liquidity_risk",
+    "event_driven": "event_driven_liquidity_risk",
+    "event-driven": "event_driven_liquidity_risk",
+    "event driven": "event_driven_liquidity_risk",
+    "crowded": "crowded_name_exit_risk",
+    "crowded_name": "crowded_name_exit_risk",
+    "crowded-name": "crowded_name_exit_risk",
+    "crowded name": "crowded_name_exit_risk",
+}
 
 
 @dataclass(frozen=True)
@@ -256,6 +291,116 @@ def _parse_guard_percent_text(value: Any) -> float | None:
     if parsed is None:
         return None
     return parsed / 100.0
+
+
+def _first_positive_candidate_value(
+    candidate: Mapping[str, Any], keys: tuple[str, ...]
+) -> float | None:
+    for key in keys:
+        parsed = _to_positive_price(candidate.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _candidate_currency(candidate: Mapping[str, Any]) -> str | None:
+    currency = str(candidate.get("currency") or "").strip().upper()
+    return currency or None
+
+
+def _rounded_capacity_value(value: float) -> float:
+    return round(value, 4)
+
+
+def _liquidity_flag_tokens(candidate: Mapping[str, Any]) -> list[str]:
+    tokens: list[str] = []
+    for key in ("liquidity_flags", "liquidity_risk_flags"):
+        raw_flags = candidate.get(key)
+        if isinstance(raw_flags, list):
+            tokens.extend(str(flag).strip().lower() for flag in raw_flags)
+        elif isinstance(raw_flags, str):
+            tokens.extend(
+                flag.strip().lower()
+                for flag in re.split(r"[,|]", raw_flags)
+                if flag.strip()
+            )
+    for key in ("small_cap", "event_driven", "crowded", "crowded_name"):
+        if candidate.get(key) is True:
+            tokens.append(key)
+    return [token for token in tokens if token]
+
+
+def _liquidity_warnings_from_flags(candidate: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for token in _liquidity_flag_tokens(candidate):
+        warning = _LIQUIDITY_FLAG_WARNING_MAP.get(token)
+        if warning is not None and warning not in seen:
+            warnings.append(warning)
+            seen.add(warning)
+    return warnings
+
+
+def _resolve_liquidity_exit_capacity(
+    candidate: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str], bool]:
+    currency = _candidate_currency(candidate)
+    position_value = _first_positive_candidate_value(candidate, _POSITION_VALUE_KEYS)
+    avg_traded_value = _first_positive_candidate_value(
+        candidate, _AVG_TRADED_VALUE_KEYS
+    )
+
+    base_capacity: dict[str, Any] = {"status": "available"}
+    if currency is not None:
+        base_capacity["currency"] = currency
+
+    warnings = _liquidity_warnings_from_flags(candidate)
+    if position_value is None or avg_traded_value is None:
+        if position_value is None and avg_traded_value is None:
+            status = "position_size_and_liquidity_unavailable"
+            warnings.insert(0, "intended_position_size_unavailable")
+            warnings.insert(1, "avg_traded_value_unavailable")
+        elif position_value is None:
+            status = "position_size_unavailable"
+            warnings.insert(0, "intended_position_size_unavailable")
+            base_capacity["avg_traded_value"] = avg_traded_value
+        else:
+            status = "avg_traded_value_unavailable"
+            warnings.insert(0, "avg_traded_value_unavailable")
+            base_capacity["position_value"] = position_value
+        base_capacity["status"] = status
+        return base_capacity, warnings, False
+
+    position_adv_percent = position_value / avg_traded_value * 100.0
+    normal_exit_days = position_value / (
+        avg_traded_value * _NORMAL_EXIT_PARTICIPATION_RATE
+    )
+    stressed_exit_days = position_value / (
+        avg_traded_value * _STRESSED_EXIT_PARTICIPATION_RATE
+    )
+    base_capacity.update(
+        {
+            "position_value": position_value,
+            "avg_traded_value": avg_traded_value,
+            "position_adv_percent": _rounded_capacity_value(position_adv_percent),
+            "normal_participation_rate": _NORMAL_EXIT_PARTICIPATION_RATE,
+            "stressed_participation_rate": _STRESSED_EXIT_PARTICIPATION_RATE,
+            "exit_days_normal": _rounded_capacity_value(normal_exit_days),
+            "exit_days_stressed": _rounded_capacity_value(stressed_exit_days),
+        }
+    )
+    return base_capacity, warnings, True
+
+
+def _entry_investment_readiness_reasons(*, liquidity_available: bool) -> list[str]:
+    reasons = list(DEFAULT_INVESTMENT_READINESS_REASONS)
+    if liquidity_available:
+        reasons = [
+            reason
+            for reason in reasons
+            if reason != _LIQUIDITY_EXIT_CAPACITY_UNAVAILABLE_REASON
+        ]
+    return reasons
 
 
 def _normalize_signal_basis(candidate: dict[str, Any]) -> str:
@@ -621,6 +766,10 @@ def _evaluate_entry_candidate(
     if not reasons:
         reasons.append("entry conditions satisfied")
 
+    liquidity_exit_capacity, liquidity_warnings, liquidity_available = (
+        _resolve_liquidity_exit_capacity(candidate)
+    )
+
     row = EntryReportRow(
         ticker=ticker,
         action=action,
@@ -640,6 +789,11 @@ def _evaluate_entry_candidate(
             lookup_result.issue_codes[0] if lookup_result.issue_codes else None
         ),
         entry_price_issues=list(lookup_result.issue_codes),
+        investment_readiness_reasons=_entry_investment_readiness_reasons(
+            liquidity_available=liquidity_available
+        ),
+        liquidity_exit_capacity=liquidity_exit_capacity,
+        liquidity_warnings=liquidity_warnings,
     )
     logger.debug(
         "Entry candidate evaluated: ticker=%s action=%s reason_count=%s",

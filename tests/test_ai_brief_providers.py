@@ -230,6 +230,13 @@ def test_openai_normalized_output_preserves_candidate_investment_readiness() -> 
                 "nav_risk_budget_unavailable",
                 "liquidity_exit_capacity_unavailable",
             ],
+            "liquidity_exit_capacity": {
+                "status": "available",
+                "position_adv_percent": 5.0,
+                "exit_days_normal": 0.5,
+                "exit_days_stressed": 1.6667,
+            },
+            "liquidity_warnings": ["small_cap_liquidity_risk"],
         }
     )
 
@@ -245,6 +252,13 @@ def test_openai_normalized_output_preserves_candidate_investment_readiness() -> 
         "nav_risk_budget_unavailable",
         "liquidity_exit_capacity_unavailable",
     ]
+    assert recommendation["liquidity_exit_capacity"] == {
+        "status": "available",
+        "position_adv_percent": 5.0,
+        "exit_days_normal": 0.5,
+        "exit_days_stressed": 1.6667,
+    }
+    assert recommendation["liquidity_warnings"] == ["small_cap_liquidity_risk"]
     rationale = recommendation["rationale"]
     checklist = recommendation["checklist"]
     assert isinstance(rationale, list)

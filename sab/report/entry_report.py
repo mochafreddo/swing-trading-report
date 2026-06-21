@@ -17,6 +17,7 @@ _DEFAULT_INVESTMENT_READINESS_REASONS = (
     "portfolio_exposure_context_unavailable",
     "source_fundamental_context_unavailable",
 )
+DEFAULT_INVESTMENT_READINESS_REASONS = _DEFAULT_INVESTMENT_READINESS_REASONS
 
 
 @dataclass
@@ -42,6 +43,8 @@ class EntryReportRow:
     investment_readiness_reasons: list[str] = field(
         default_factory=lambda: list(_DEFAULT_INVESTMENT_READINESS_REASONS)
     )
+    liquidity_exit_capacity: dict[str, Any] | None = None
+    liquidity_warnings: list[str] = field(default_factory=list)
 
 
 def write_entry_report(
@@ -88,4 +91,8 @@ def write_entry_report(
     return out_path
 
 
-__all__ = ["EntryReportRow", "write_entry_report"]
+__all__ = [
+    "DEFAULT_INVESTMENT_READINESS_REASONS",
+    "EntryReportRow",
+    "write_entry_report",
+]
