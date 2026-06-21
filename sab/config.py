@@ -210,10 +210,18 @@ class HybridSellConfig:
 
 
 @dataclass(frozen=True)
+class PortfolioExposureLimit:
+    dimension: str
+    value: str
+    max_active: int
+
+
+@dataclass(frozen=True)
 class PortfolioConfig:
     max_active_holdings: int | None = None
     max_new_entries_kr: int | None = None
     max_new_entries_us: int | None = None
+    exposure_limits: tuple[PortfolioExposureLimit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -624,6 +632,7 @@ class _PortfolioSection:
     max_active_holdings: int | None
     max_new_entries_kr: int | None
     max_new_entries_us: int | None
+    exposure_limits: tuple[PortfolioExposureLimit, ...]
 
 
 @dataclass(frozen=True)
@@ -1185,6 +1194,89 @@ def _parse_optional_int(
         ) from err
 
 
+_PORTFOLIO_EXPOSURE_DIMENSIONS = frozenset(
+    {
+        "currency",
+        "sector",
+        "theme",
+        "beta_bucket",
+        "correlation_bucket",
+        "tag",
+    }
+)
+
+
+def _normalize_portfolio_exposure_value(dimension: str, value: Any, path: str) -> str:
+    if value is None or isinstance(value, bool):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a non-empty string."
+        )
+    normalized = str(value).strip()
+    if not normalized:
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a non-empty string."
+        )
+    if dimension == "currency":
+        return normalized.upper()
+    return normalized.lower()
+
+
+def _parse_portfolio_exposure_limits(
+    parser: _ConfigParser,
+) -> tuple[PortfolioExposureLimit, ...]:
+    path = "portfolio.exposure_limits"
+    raw_limits = parser.from_yaml(path)
+    if raw_limits is None:
+        return ()
+    if not isinstance(raw_limits, list):
+        raise ConfigLoadError(
+            f"Invalid config value '{path}': must be a list of exposure limit objects."
+        )
+
+    limits: list[PortfolioExposureLimit] = []
+    for index, raw_limit in enumerate(raw_limits):
+        item_path = f"{path}.{index}"
+        if not isinstance(raw_limit, dict):
+            raise ConfigLoadError(
+                f"Invalid config value '{item_path}': must be a mapping/object."
+            )
+
+        dimension_raw = raw_limit.get("dimension")
+        dimension = str(dimension_raw or "").strip().lower()
+        if dimension not in _PORTFOLIO_EXPOSURE_DIMENSIONS:
+            raise ConfigLoadError(
+                f"Invalid config value '{item_path}.dimension': "
+                f"expected one of {sorted(_PORTFOLIO_EXPOSURE_DIMENSIONS)!r}, "
+                f"got {dimension_raw!r}."
+            )
+
+        value = _normalize_portfolio_exposure_value(
+            dimension, raw_limit.get("value"), f"{item_path}.value"
+        )
+        max_active_raw = raw_limit.get("max_active")
+        if max_active_raw is None or isinstance(max_active_raw, bool):
+            raise ConfigLoadError(
+                f"Invalid config value '{item_path}.max_active': "
+                f"must be an integer, got {max_active_raw!r}."
+            )
+        try:
+            max_active = int(max_active_raw)
+        except (TypeError, ValueError) as err:
+            raise ConfigLoadError(
+                f"Invalid config value '{item_path}.max_active': "
+                f"must be an integer, got {max_active_raw!r}."
+            ) from err
+
+        limits.append(
+            PortfolioExposureLimit(
+                dimension=dimension,
+                value=value,
+                max_active=max_active,
+            )
+        )
+    return tuple(limits)
+
+
 def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
     max_new_entries_per_market = parser.from_yaml(
         "portfolio.max_new_entries_per_market"
@@ -1237,6 +1329,7 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
         ),
         max_new_entries_kr=_market_cap_value("KR"),
         max_new_entries_us=_market_cap_value("US"),
+        exposure_limits=_parse_portfolio_exposure_limits(parser),
     )
 
 
@@ -1548,6 +1641,11 @@ def _validate_portfolio_ranges(portfolio: _PortfolioSection) -> None:
             "portfolio.max_new_entries_per_market.US",
             float(portfolio.max_new_entries_us),
         )
+    for index, limit in enumerate(portfolio.exposure_limits):
+        _validate_non_negative(
+            f"portfolio.exposure_limits.{index}.max_active",
+            float(limit.max_active),
+        )
 
 
 def _validate_sections(
@@ -1694,6 +1792,7 @@ def _compose_config(
             max_active_holdings=portfolio.max_active_holdings,
             max_new_entries_kr=portfolio.max_new_entries_kr,
             max_new_entries_us=portfolio.max_new_entries_us,
+            exposure_limits=portfolio.exposure_limits,
         ),
     )
 

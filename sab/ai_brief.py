@@ -390,6 +390,7 @@ def _build_model_candidate(
         "investment_readiness_reasons",
         "liquidity_exit_capacity",
         "liquidity_warnings",
+        "portfolio_exposure_buckets",
     ):
         if field_name in entry:
             row[field_name] = entry.get(field_name)

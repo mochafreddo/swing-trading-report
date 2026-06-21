@@ -165,6 +165,11 @@ function formatEntryExitCapacity(row: ReportJson): string {
   return `${summary}: ${warnings.join(" · ")}`;
 }
 
+function formatEntryExposure(row: ReportJson): string {
+  const buckets = asStringArray(row.portfolio_exposure_buckets);
+  return buckets.length > 0 ? buckets.join(" · ") : "-";
+}
+
 function chipToneClass(tone: ChipTone): string {
   if (tone === "warning") {
     return styles.chipWarning;
@@ -636,6 +641,7 @@ export function ReportDetail({
                     <th>Gap%</th>
                     <th>Readiness</th>
                     <th>Exit Capacity</th>
+                    <th>Exposure</th>
                     <th>Reasons</th>
                   </tr>
                 </thead>
@@ -659,6 +665,7 @@ export function ReportDetail({
                       <td data-label="Exit Capacity">
                         {formatEntryExitCapacity(row)}
                       </td>
+                      <td data-label="Exposure">{formatEntryExposure(row)}</td>
                       <td data-label="Reasons">
                         {asStringArray(row.reasons).join(" · ") || "-"}
                       </td>

@@ -33,12 +33,13 @@ from .report.entry_report import (
 from .report.run_meta import build_run_meta
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .tickers import (
-    infer_market_from_ticker as infer_market_from_ticker_strict,
-)
-from .tickers import (
+    infer_currency_from_ticker,
     parse_ticker,
     validate_strict_holdings_ticker,
     validate_strict_us_ticker,
+)
+from .tickers import (
+    infer_market_from_ticker as infer_market_from_ticker_strict,
 )
 from .utils.numeric import (
     to_finite_float as _to_finite_float,
@@ -59,6 +60,7 @@ _SUPPORTED_PROVIDERS = {"kis", "pykrx"}
 _SUPPORTED_STRATEGY_MODES = {"ema_cross", "sma_ema_hybrid"}
 _DEFAULT_US_EXCHANGE = "NAS"
 _PORTFOLIO_BLOCK_REASON_TOTAL = "portfolio max active holdings reached"
+_PORTFOLIO_EXPOSURE_BLOCK_REASON_PREFIX = "portfolio exposure cap reached"
 _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
     "stck_cntg_hour",
     "xymd",
@@ -111,6 +113,14 @@ _LIQUIDITY_FLAG_WARNING_MAP = {
     "crowded_name": "crowded_name_exit_risk",
     "crowded-name": "crowded_name_exit_risk",
     "crowded name": "crowded_name_exit_risk",
+}
+_EXPOSURE_TAG_PREFIX_DIMENSIONS = {
+    "sector": "sector",
+    "theme": "theme",
+    "beta": "beta_bucket",
+    "beta_bucket": "beta_bucket",
+    "correlation": "correlation_bucket",
+    "correlation_bucket": "correlation_bucket",
 }
 
 
@@ -306,6 +316,139 @@ def _first_positive_candidate_value(
 def _candidate_currency(candidate: Mapping[str, Any]) -> str | None:
     currency = str(candidate.get("currency") or "").strip().upper()
     return currency or None
+
+
+def _portfolio_exposure_value(dimension: str, value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if dimension == "currency":
+        return text.upper()
+    return text.lower()
+
+
+def _portfolio_exposure_bucket(dimension: str, value: Any) -> str | None:
+    normalized = _portfolio_exposure_value(dimension, value)
+    if normalized is None:
+        return None
+    return f"{dimension}={normalized}"
+
+
+def _append_portfolio_exposure_bucket(
+    buckets: list[str],
+    seen: set[str],
+    dimension: str,
+    value: Any,
+) -> None:
+    bucket = _portfolio_exposure_bucket(dimension, value)
+    if bucket is not None and bucket not in seen:
+        buckets.append(bucket)
+        seen.add(bucket)
+
+
+def _iter_exposure_values(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, set):
+        return sorted(value, key=str)
+    if isinstance(value, list | tuple):
+        return list(value)
+    if isinstance(value, str):
+        return [part.strip() for part in re.split(r"[,|]", value) if part.strip()]
+    return [value]
+
+
+def _append_prefixed_tag_exposure_buckets(
+    buckets: list[str],
+    seen: set[str],
+    tag_value: Any,
+) -> None:
+    text = str(tag_value or "").strip()
+    if ":" not in text:
+        return
+    prefix, raw_value = text.split(":", 1)
+    dimension = _EXPOSURE_TAG_PREFIX_DIMENSIONS.get(prefix.strip().lower())
+    if dimension is None:
+        return
+    _append_portfolio_exposure_bucket(buckets, seen, dimension, raw_value)
+
+
+def _beta_bucket(value: Any) -> str | None:
+    beta = _to_finite_float(value)
+    if beta is None:
+        return _portfolio_exposure_value("beta_bucket", value)
+    if beta >= 1.2:
+        return "high_beta"
+    if beta <= 0.8:
+        return "low_beta"
+    return "market_beta"
+
+
+def _append_exposure_field_values(
+    buckets: list[str],
+    seen: set[str],
+    *,
+    dimension: str,
+    values: list[Any],
+) -> None:
+    for value in values:
+        _append_portfolio_exposure_bucket(buckets, seen, dimension, value)
+
+
+def _portfolio_exposure_buckets_from_candidate(
+    ticker: str,
+    candidate: Mapping[str, Any],
+) -> list[str]:
+    buckets: list[str] = []
+    seen: set[str] = set()
+
+    _append_portfolio_exposure_bucket(
+        buckets,
+        seen,
+        "currency",
+        _candidate_currency(candidate) or infer_currency_from_ticker(ticker),
+    )
+    _append_exposure_field_values(
+        buckets,
+        seen,
+        dimension="sector",
+        values=[
+            *(_iter_exposure_values(candidate.get("sector"))),
+            *(_iter_exposure_values(candidate.get("sectors"))),
+        ],
+    )
+    _append_exposure_field_values(
+        buckets,
+        seen,
+        dimension="theme",
+        values=[
+            *(_iter_exposure_values(candidate.get("theme"))),
+            *(_iter_exposure_values(candidate.get("themes"))),
+        ],
+    )
+    beta_value = candidate.get("beta_bucket")
+    if beta_value is None:
+        beta_value = _beta_bucket(candidate.get("beta"))
+    _append_portfolio_exposure_bucket(buckets, seen, "beta_bucket", beta_value)
+    _append_exposure_field_values(
+        buckets,
+        seen,
+        dimension="correlation_bucket",
+        values=[
+            *(_iter_exposure_values(candidate.get("correlation_bucket"))),
+            *(_iter_exposure_values(candidate.get("correlation_group"))),
+            *(_iter_exposure_values(candidate.get("correlation_cluster"))),
+        ],
+    )
+    for tag in [
+        *(_iter_exposure_values(candidate.get("exposure_tags"))),
+        *(_iter_exposure_values(candidate.get("tags"))),
+    ]:
+        _append_prefixed_tag_exposure_buckets(buckets, seen, tag)
+        _append_portfolio_exposure_bucket(buckets, seen, "tag", tag)
+    return buckets
 
 
 def _rounded_capacity_value(value: float) -> float:
@@ -794,6 +937,10 @@ def _evaluate_entry_candidate(
         ),
         liquidity_exit_capacity=liquidity_exit_capacity,
         liquidity_warnings=liquidity_warnings,
+        portfolio_exposure_buckets=_portfolio_exposure_buckets_from_candidate(
+            ticker,
+            candidate,
+        ),
     )
     logger.debug(
         "Entry candidate evaluated: ticker=%s action=%s reason_count=%s",
@@ -1395,6 +1542,18 @@ def _build_entry_summary(
         for market, count in sorted((portfolio_blocked_by_market or {}).items())
         if count > 0
     }
+    exposure_block_counts = Counter(
+        match.group("bucket")
+        for row in rows
+        for reason in row.reasons
+        if (
+            match := re.match(
+                rf"^{re.escape(_PORTFOLIO_EXPOSURE_BLOCK_REASON_PREFIX)} "
+                r"\((?P<bucket>[^,]+), max=\d+\)$",
+                reason,
+            )
+        )
+    )
     return {
         "entry_count": len(rows),
         "action_counts": dict(sorted(counts.items())),
@@ -1405,6 +1564,7 @@ def _build_entry_summary(
         "entry_price_sources": dict(sorted(source_counts.items())),
         "portfolio_blocked_count": sum(portfolio_counts.values()),
         "portfolio_blocked_by_market": portfolio_counts,
+        "portfolio_blocked_by_exposure": dict(sorted(exposure_block_counts.items())),
     }
 
 
@@ -1442,6 +1602,14 @@ def _build_config_snapshot(
                 "KR": getattr(portfolio, "max_new_entries_kr", None),
                 "US": getattr(portfolio, "max_new_entries_us", None),
             },
+            "exposure_limits": [
+                {
+                    "dimension": getattr(limit, "dimension", None),
+                    "value": getattr(limit, "value", None),
+                    "max_active": getattr(limit, "max_active", None),
+                }
+                for limit in getattr(portfolio, "exposure_limits", ()) or ()
+            ],
         },
     }
 
@@ -1484,17 +1652,81 @@ def _canonical_ticker(ticker: Any) -> str:
     return parse_ticker(normalized).ticker
 
 
+def _portfolio_exposure_buckets_from_holding(holding: Holding | Any) -> list[str]:
+    ticker = getattr(holding, "ticker", None)
+    buckets: list[str] = []
+    seen: set[str] = set()
+
+    currency = getattr(holding, "entry_currency", None) or getattr(
+        holding, "currency", None
+    )
+    if currency is None and ticker:
+        currency = infer_currency_from_ticker(str(ticker))
+    _append_portfolio_exposure_bucket(buckets, seen, "currency", currency)
+
+    for dimension in ("sector", "theme"):
+        values = _iter_exposure_values(getattr(holding, dimension, None))
+        _append_exposure_field_values(
+            buckets,
+            seen,
+            dimension=dimension,
+            values=values,
+        )
+
+    beta_value = getattr(holding, "beta_bucket", None)
+    if beta_value is None:
+        beta_value = _beta_bucket(getattr(holding, "beta", None))
+    _append_portfolio_exposure_bucket(buckets, seen, "beta_bucket", beta_value)
+
+    _append_exposure_field_values(
+        buckets,
+        seen,
+        dimension="correlation_bucket",
+        values=[
+            *(_iter_exposure_values(getattr(holding, "correlation_bucket", None))),
+            *(_iter_exposure_values(getattr(holding, "correlation_group", None))),
+            *(_iter_exposure_values(getattr(holding, "correlation_cluster", None))),
+        ],
+    )
+
+    for tag in _iter_exposure_values(getattr(holding, "tags", None)):
+        _append_prefixed_tag_exposure_buckets(buckets, seen, tag)
+        _append_portfolio_exposure_bucket(buckets, seen, "tag", tag)
+    return buckets
+
+
 def _build_active_holding_state(
     holdings_data: HoldingsData | Any,
-) -> tuple[int, set[str]]:
+) -> tuple[int, set[str], Counter[str]]:
     active_total = 0
     active_tickers: set[str] = set()
+    active_exposure_counts: Counter[str] = Counter()
     for holding in getattr(holdings_data, "holdings", []):
         if not _is_active_holding(holding):
             continue
         active_total += 1
         active_tickers.add(_canonical_ticker(getattr(holding, "ticker", None)))
-    return active_total, active_tickers
+        active_exposure_counts.update(_portfolio_exposure_buckets_from_holding(holding))
+    return active_total, active_tickers, active_exposure_counts
+
+
+def _portfolio_exposure_limits_by_bucket(
+    exposure_limits: Any,
+) -> dict[str, int]:
+    limits_by_bucket: dict[str, int] = {}
+    for limit in exposure_limits or ():
+        dimension = str(getattr(limit, "dimension", "") or "").strip().lower()
+        value = _portfolio_exposure_value(dimension, getattr(limit, "value", None))
+        max_active = getattr(limit, "max_active", None)
+        if not dimension or value is None or max_active is None:
+            continue
+        bucket = f"{dimension}={value}"
+        limits_by_bucket[bucket] = int(max_active)
+    return limits_by_bucket
+
+
+def _portfolio_exposure_block_reason(bucket: str, max_active: int) -> str:
+    return f"{_PORTFOLIO_EXPOSURE_BLOCK_REASON_PREFIX} ({bucket}, max={max_active})"
 
 
 def _apply_portfolio_guards(
@@ -1502,12 +1734,16 @@ def _apply_portfolio_guards(
     *,
     active_total: int,
     active_tickers: set[str],
+    active_exposure_counts: Counter[str] | None = None,
     max_active_holdings: int | None,
     max_new_entries_per_market: dict[str, int | None],
+    exposure_limits: Any = (),
 ) -> dict[str, int]:
     accepted_new_entries_by_market = {"KR": 0, "US": 0}
     blocked_by_market = {"KR": 0, "US": 0}
     current_active_total = active_total
+    exposure_counts = Counter(active_exposure_counts or {})
+    exposure_limits_by_bucket = _portfolio_exposure_limits_by_bucket(exposure_limits)
 
     for row in rows:
         if row.action != "ENTER":
@@ -1534,10 +1770,24 @@ def _apply_portfolio_guards(
             blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
             continue
 
+        exposure_block: tuple[str, int] | None = None
+        for bucket in row.portfolio_exposure_buckets:
+            max_active = exposure_limits_by_bucket.get(bucket)
+            if max_active is not None and exposure_counts.get(bucket, 0) >= max_active:
+                exposure_block = (bucket, max_active)
+                break
+        if exposure_block is not None:
+            bucket, max_active = exposure_block
+            row.action = "SKIP"
+            row.reasons.append(_portfolio_exposure_block_reason(bucket, max_active))
+            blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
+            continue
+
         accepted_new_entries_by_market[market] = (
             accepted_new_entries_by_market.get(market, 0) + 1
         )
         current_active_total += 1
+        exposure_counts.update(row.portfolio_exposure_buckets)
 
     return blocked_by_market
 
@@ -1548,17 +1798,21 @@ def _apply_entry_portfolio_guards(
     holdings_data: HoldingsData | Any,
     rows: list[EntryReportRow],
 ) -> dict[str, int]:
-    active_total, active_tickers = _build_active_holding_state(holdings_data)
+    active_total, active_tickers, active_exposure_counts = _build_active_holding_state(
+        holdings_data
+    )
     portfolio_settings = getattr(cfg, "portfolio", None)
     return _apply_portfolio_guards(
         rows,
         active_total=active_total,
         active_tickers=active_tickers,
+        active_exposure_counts=active_exposure_counts,
         max_active_holdings=getattr(portfolio_settings, "max_active_holdings", None),
         max_new_entries_per_market={
             "KR": getattr(portfolio_settings, "max_new_entries_kr", None),
             "US": getattr(portfolio_settings, "max_new_entries_us", None),
         },
+        exposure_limits=getattr(portfolio_settings, "exposure_limits", ()),
     )
 
 

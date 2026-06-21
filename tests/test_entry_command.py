@@ -29,11 +29,13 @@ def _portfolio_config(
     max_active_holdings: int | None = None,
     max_new_entries_kr: int | None = None,
     max_new_entries_us: int | None = None,
+    exposure_limits: list[SimpleNamespace] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         max_active_holdings=max_active_holdings,
         max_new_entries_kr=max_new_entries_kr,
         max_new_entries_us=max_new_entries_us,
+        exposure_limits=tuple(exposure_limits or []),
     )
 
 
@@ -534,6 +536,91 @@ def test_apply_entry_portfolio_guards_uses_config_and_existing_holdings() -> Non
     assert blocked_by_market == {"KR": 0, "US": 1}
 
 
+def test_apply_entry_portfolio_guards_blocks_configured_exposure_bucket() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate("005930", sector="semiconductor"),
+            _entry_candidate("000660", sector="semiconductor"),
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+    assert issues == []
+
+    blocked_by_market = entry._apply_entry_portfolio_guards(
+        cfg=cast(
+            Config,
+            SimpleNamespace(
+                portfolio=_portfolio_config(
+                    exposure_limits=[
+                        SimpleNamespace(
+                            dimension="sector",
+                            value="semiconductor",
+                            max_active=1,
+                        )
+                    ]
+                ),
+            ),
+        ),
+        holdings_data=_holdings_data([]),
+        rows=rows,
+    )
+
+    by_ticker = {row.ticker: row for row in rows}
+    assert by_ticker["005930"].action == "ENTER"
+    assert by_ticker["005930"].portfolio_exposure_buckets == [
+        "currency=KRW",
+        "sector=semiconductor",
+    ]
+    assert by_ticker["000660"].action == "SKIP"
+    assert by_ticker["000660"].portfolio_exposure_buckets == [
+        "currency=KRW",
+        "sector=semiconductor",
+    ]
+    assert (
+        "portfolio exposure cap reached (sector=semiconductor, max=1)"
+        in by_ticker["000660"].reasons
+    )
+    assert blocked_by_market == {"KR": 1, "US": 0}
+
+
+def test_apply_entry_portfolio_guards_counts_active_holding_exposure_tags() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[_entry_candidate("005930", sector="semiconductor")],
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+    assert issues == []
+
+    blocked_by_market = entry._apply_entry_portfolio_guards(
+        cfg=cast(
+            Config,
+            SimpleNamespace(
+                portfolio=_portfolio_config(
+                    exposure_limits=[
+                        SimpleNamespace(
+                            dimension="sector",
+                            value="semiconductor",
+                            max_active=1,
+                        )
+                    ]
+                ),
+            ),
+        ),
+        holdings_data=_holdings_data(
+            [Holding(ticker="000660", quantity=1, tags=["sector:semiconductor"])]
+        ),
+        rows=rows,
+    )
+
+    assert rows[0].action == "SKIP"
+    assert (
+        "portfolio exposure cap reached (sector=semiconductor, max=1)"
+        in rows[0].reasons
+    )
+    assert blocked_by_market == {"KR": 1, "US": 0}
+
+
 def test_resolve_entry_evaluation_policy_prefers_source_report_snapshot() -> None:
     cfg = cast(
         Config,
@@ -1029,6 +1116,7 @@ def test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty(
         "entry_price_sources": {},
         "portfolio_blocked_count": 0,
         "portfolio_blocked_by_market": {},
+        "portfolio_blocked_by_exposure": {},
     }
     assert payload["source_buy_report"] == "source.buy.json"
 
@@ -1625,6 +1713,7 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
                 "intended_position_size_unavailable",
                 "avg_traded_value_unavailable",
             ],
+            "portfolio_exposure_buckets": ["currency=USD"],
         }
     ]
 
@@ -2749,6 +2838,101 @@ def test_run_entry_e2e_blocks_second_us_entry_when_market_cap_reached(
     assert "portfolio market cap reached (US)" in payload["entries"][1]["reasons"]
     assert payload["summary"]["portfolio_blocked_count"] == 1
     assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}
+
+
+def test_run_entry_e2e_reports_exposure_portfolio_guard(
+    monkeypatch, tmp_path: Path
+) -> None:
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    buy_report_path = tmp_path / "source.buy.json"
+    buy_report_path.write_text(
+        json.dumps(
+            {
+                "run_ts_utc": "2026-02-26T01:30:00Z",
+                "eval_context": {"market": "US"},
+                "candidates": [
+                    _entry_candidate(
+                        "AAPL.NASD",
+                        gap_guard_value=0.05,
+                        theme="ai-megacap",
+                    ),
+                    _entry_candidate(
+                        "MSFT.NASD",
+                        gap_guard_value=0.05,
+                        theme="ai-megacap",
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cfg = SimpleNamespace(
+        report_dir=report_dir.as_posix(),
+        strategy_mode="ema_cross",
+        gap_atr_multiplier=1.0,
+        min_history_bars=50,
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+        entry_fatal_missing_price_ratio=1.0,
+        holdings=_holdings_data([]),
+        portfolio=_portfolio_config(
+            exposure_limits=[
+                SimpleNamespace(
+                    dimension="theme",
+                    value="ai-megacap",
+                    max_active=1,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "sab.entry.load_config", lambda provider_override=None: fake_cfg
+    )
+
+    class _FakeKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert exchange == "NAS"
+            return {"last": "101.0", "xymd": "20260226"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _FakeKISClient)
+
+    exit_code = run_entry(
+        buy_report_path=buy_report_path.as_posix(),
+        provider="kis",
+        mode="PRE_OPEN",
+        market="US",
+    )
+
+    assert exit_code == 0
+    payload = json.loads(
+        next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
+    )
+    by_ticker = {row["ticker"]: row for row in payload["entries"]}
+    assert by_ticker["AAPL.NASD"]["action"] == "ENTER"
+    assert by_ticker["AAPL.NASD"]["portfolio_exposure_buckets"] == [
+        "currency=USD",
+        "theme=ai-megacap",
+    ]
+    assert by_ticker["MSFT.NASD"]["action"] == "SKIP"
+    assert (
+        "portfolio exposure cap reached (theme=ai-megacap, max=1)"
+        in by_ticker["MSFT.NASD"]["reasons"]
+    )
+    assert payload["summary"]["portfolio_blocked_count"] == 1
+    assert payload["summary"]["portfolio_blocked_by_market"] == {"US": 1}
+    assert payload["summary"]["portfolio_blocked_by_exposure"] == {
+        "theme=ai-megacap": 1
+    }
 
 
 def test_run_entry_e2e_market_new_entry_cap_excludes_existing_holdings(

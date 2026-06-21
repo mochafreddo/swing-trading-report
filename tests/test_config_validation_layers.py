@@ -1258,6 +1258,41 @@ portfolio:
     assert cfg.portfolio.max_new_entries_us == 1
 
 
+def test_load_config_parses_portfolio_exposure_limits(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+portfolio:
+  exposure_limits:
+    - dimension: currency
+      value: USD
+      max_active: 4
+    - dimension: sector
+      value: Semiconductor
+      max_active: 2
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    cfg = load_config()
+    assert [
+        (limit.dimension, limit.value, limit.max_active)
+        for limit in cfg.portfolio.exposure_limits
+    ] == [
+        ("currency", "USD", 4),
+        ("sector", "semiconductor", 2),
+    ]
+
+
 @pytest.mark.parametrize(
     ("yaml_text", "error_path"),
     [
@@ -1281,6 +1316,22 @@ portfolio:
         (
             "portfolio:\n  max_new_entries_per_market: 3\n",
             "portfolio.max_new_entries_per_market",
+        ),
+        (
+            "portfolio:\n  exposure_limits: 3\n",
+            "portfolio.exposure_limits",
+        ),
+        (
+            "portfolio:\n  exposure_limits:\n    - dimension: country\n      value: US\n      max_active: 1\n",
+            "portfolio.exposure_limits.0.dimension",
+        ),
+        (
+            "portfolio:\n  exposure_limits:\n    - dimension: sector\n      value: semiconductor\n      max_active: true\n",
+            "portfolio.exposure_limits.0.max_active",
+        ),
+        (
+            "portfolio:\n  exposure_limits:\n    - dimension: sector\n      value: ''\n      max_active: 1\n",
+            "portfolio.exposure_limits.0.value",
         ),
     ],
 )

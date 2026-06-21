@@ -199,6 +199,7 @@ These settings are currently YAML-only in `config.yaml`:
 - `screener.us_defaults`
 - `portfolio.max_new_entries_per_market.KR`
 - `portfolio.max_new_entries_per_market.US`
+- `portfolio.exposure_limits[]` (`dimension`, `value`, `max_active`; dimensions: `currency`, `sector`, `theme`, `beta_bucket`, `correlation_bucket`, `tag`)
 - `sell.hybrid.pattern_time_stops.<pattern>.time_stop_days`
 - `sell.hybrid.pattern_time_stops.<pattern>.time_stop_grace_days`
 - `sell.hybrid.pattern_time_stops.<pattern>.time_stop_profit_floor`

@@ -131,6 +131,7 @@ describe("ReportDetail component", () => {
           exit_days_stressed: 1.6667,
         },
         liquidity_warnings: ["small_cap_liquidity_risk"],
+        portfolio_exposure_buckets: ["currency=USD", "theme=ai-megacap"],
       },
     ];
 
@@ -164,6 +165,8 @@ describe("ReportDetail component", () => {
     expect(html).toContain("Exit Capacity");
     expect(html).toContain("ADV 5% · normal 0.5d · stressed 1.7d");
     expect(html).toContain("small_cap_liquidity_risk");
+    expect(html).toContain("Exposure");
+    expect(html).toContain("currency=USD · theme=ai-megacap");
     expect(html).toContain("2026-02-25.buy.json");
   });
 

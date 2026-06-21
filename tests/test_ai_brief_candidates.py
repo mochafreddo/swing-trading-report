@@ -55,6 +55,11 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
                 reasons=["portfolio max active holdings reached"],
             ),
             _row(
+                "NVDA.NAS",
+                action="SKIP",
+                reasons=["portfolio exposure cap reached (theme=ai-megacap, max=1)"],
+            ),
+            _row(
                 "CIFR.NAS",
                 action="REVIEW",
                 reasons=[_RISK_ALIGNMENT_REVIEW_REASON],
@@ -82,6 +87,7 @@ def test_classifier_maps_2026_06_15_ready_rows_to_ai_roles() -> None:
         "CAT.NYS",
         "TSM.NYS",
         "TOTAL.NAS",
+        "NVDA.NAS",
         "CIFR.NAS",
         "IREN.NAS",
         "COHR.NYS",

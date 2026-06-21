@@ -62,7 +62,7 @@ holdings:
 | `entry_pattern` | string/null (선택) | buy/entry report의 `pattern`을 보존하는 active-position marker. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`입니다. 웹 export는 `null`도 명시하고, import/create/patch는 non-null marker를 active row(`quantity > 0`)에만 허용합니다. |
 | `strategy` | string (선택) | 전략 구분 (예: `swing`, `core`). 미지정 시 `settings.default_strategy` 적용 |
 | `notes` | string (선택) | 메모 |
-| `tags` | list[string] (선택) | 태그 목록 |
+| `tags` | list[string] (선택) | 태그 목록. `portfolio.exposure_limits`가 활성화된 경우 `sector:semiconductor`, `theme:ai`, `beta:high_beta`, `correlation:ai-megacap` 같은 prefix 태그는 활성 보유의 노출 bucket으로도 해석됩니다. |
 | `stop_override` | float (선택) | 사용자 정의 손절가 (`0` 이상만 허용) |
 | `target_override` | float (선택) | 사용자 정의 목표가 (`0` 이상만 허용) |
 
@@ -80,6 +80,12 @@ settings:
 - `default_strategy`: `strategy` 미지정 시 사용
 - `default_tags`: 태그 미지정 시 초기값으로 사용
 - 웹 UI export는 `settings`를 쓰지 않고 row별 명시 값만 기록합니다. `settings` 블록은 수동 작성/import와 로컬 CLI 입력에서 계속 지원됩니다.
+
+### 포트폴리오 노출 태그
+
+- `sab entry`는 활성 holdings의 `tags`에서 `sector:`, `theme:`, `beta:`/`beta_bucket:`, `correlation:`/`correlation_bucket:` prefix를 읽어 포트폴리오 노출 bucket으로 계산합니다.
+- 예를 들어 holdings row에 `tags: [sector:semiconductor, theme:ai]`가 있고 `portfolio.exposure_limits`에 `dimension: sector`, `value: semiconductor`, `max_active: 2`가 있으면, 같은 sector bucket의 신규 `ENTER` 후보는 기존 활성 보유 2개 이후 `SKIP`됩니다.
+- prefix가 없는 일반 tag도 `dimension: tag` limit의 bucket 값으로 사용할 수 있습니다.
 
 ### Fail-closed 통화 규칙
 

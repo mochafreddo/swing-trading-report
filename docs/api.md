@@ -65,8 +65,9 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - New `entry.entries[]` rows include `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, and `investment_readiness_reasons[]`. `action=ENTER` and hybrid `quality_state=A` remain technical setup labels until NAV/risk budget, intended-size liquidity/exit capacity, portfolio exposure, and source/fundamental context are checked by a separate layer.
 - `entry.entries[].liquidity_exit_capacity` records intended-size exit capacity when source candidate data is available. With `status="available"`, it includes position value, average traded value, ADV percent, normal/stressed participation rates, and normal/stressed estimated exit days. Missing intended size or liquidity data leaves an explicit unavailable status and keeps `liquidity_exit_capacity_unavailable` in readiness reasons.
 - `entry.entries[].liquidity_warnings[]` preserves missing-size/liquidity warnings plus small-cap, event-driven, and crowded-name exit-risk flags when source candidates provide those flags. The reports UI shows these fields in the entry table's `Exit Capacity` column.
+- `entry.entries[].portfolio_exposure_buckets[]` records normalized exposure buckets such as `currency=USD`, `sector=semiconductor`, or `theme=ai-megacap`. Configured `portfolio.exposure_limits[]` can turn an otherwise technical `ENTER` row into `SKIP` with a `portfolio exposure cap reached (...)` reason; `entry.summary.portfolio_blocked_by_exposure` counts those blocks.
 - AI Brief model input and final recommendation/watch rows preserve those readiness fields when they are present in the source entry report. Recommendations with context-required readiness also carry an explicit rationale/checklist caveat.
-- AI Brief also preserves `liquidity_exit_capacity` and `liquidity_warnings` from entry rows into provider input and final recommendation/watch rows.
+- AI Brief also preserves `liquidity_exit_capacity`, `liquidity_warnings`, and `portfolio_exposure_buckets` from entry rows into provider input and final recommendation/watch rows.
 
 ### AI Brief Artifact Notes
 

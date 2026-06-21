@@ -8,6 +8,7 @@ from typing import Literal
 AiBriefCandidateRole = Literal["recommendable", "watch_only", "excluded"]
 
 _PORTFOLIO_BLOCK_REASON_PREFIXES = (
+    "portfolio exposure cap reached",
     "portfolio market cap reached",
     "portfolio max active holdings reached",
 )
