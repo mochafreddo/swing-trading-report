@@ -45,6 +45,7 @@ class EntryReportRow:
     )
     liquidity_exit_capacity: dict[str, Any] | None = None
     liquidity_warnings: list[str] = field(default_factory=list)
+    downside_risk: dict[str, Any] | None = None
     portfolio_exposure_buckets: list[str] = field(default_factory=list)
 
 

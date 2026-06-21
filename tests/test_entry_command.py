@@ -361,10 +361,13 @@ def test_evaluate_entry_candidates_calculates_liquidity_exit_capacity() -> None:
                 avg_dollar_volume_value=2_000_000.0,
                 currency="USD",
                 intended_position_value=100_000.0,
+                portfolio_value=1_000_000.0,
+                risk_stop_price_value=95.0,
+                risk_target_price_value=120.0,
                 liquidity_flags=["small_cap", "event_driven", "crowded"],
             )
         ],
-        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        price_lookup_fn=lambda _ticker: _entry_price_result(100.0),
         gap_breach_action="SKIP",
     )
 
@@ -381,12 +384,93 @@ def test_evaluate_entry_candidates_calculates_liquidity_exit_capacity() -> None:
         "exit_days_normal": 0.5,
         "exit_days_stressed": 1.6667,
     }
+    assert row.downside_risk == {
+        "status": "available",
+        "currency": "USD",
+        "position_value": 100_000.0,
+        "entry_price": 100.0,
+        "stop_price": 95.0,
+        "target_price": 120.0,
+        "position_loss_amount": 5_000.0,
+        "position_loss_pct": 5.0,
+        "portfolio_value": 1_000_000.0,
+        "portfolio_loss_pct": 0.5,
+        "portfolio_loss_bps": 50.0,
+        "caveat": "stop_target_decision_guide_only_gap_slippage_may_exceed",
+    }
     assert row.liquidity_warnings == [
         "small_cap_liquidity_risk",
         "event_driven_liquidity_risk",
         "crowded_name_exit_risk",
     ]
     assert "liquidity_exit_capacity_unavailable" not in row.investment_readiness_reasons
+
+
+def test_evaluate_entry_candidates_converts_adjusted_downside_to_raw_basis() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate(
+                "AAPL.NASD",
+                raw_close=200.0,
+                gap_guard_value=0.10,
+                currency="USD",
+                intended_position_value=100_000.0,
+                portfolio_value=1_000_000.0,
+                risk_stop_price_value=95.0,
+                risk_target_price_value=120.0,
+            )
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(210.0),
+        gap_breach_action="SKIP",
+    )
+
+    assert issues == []
+    row = rows[0]
+    assert row.action == "ENTER"
+    assert row.downside_risk == {
+        "status": "available",
+        "currency": "USD",
+        "position_value": 100_000.0,
+        "entry_price": 210.0,
+        "stop_price": 190.0,
+        "target_price": 240.0,
+        "position_loss_amount": 9523.8095,
+        "position_loss_pct": 9.5238,
+        "portfolio_value": 1_000_000.0,
+        "portfolio_loss_pct": 0.9524,
+        "portfolio_loss_bps": 95.2381,
+        "caveat": "stop_target_decision_guide_only_gap_slippage_may_exceed",
+    }
+
+
+def test_evaluate_entry_candidates_keeps_zero_stop_for_downside_risk() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate(
+                "AAPL.NASD",
+                currency="USD",
+                intended_position_value=100_000.0,
+                risk_stop_price_value=0.0,
+                risk_target_price_value=120.0,
+            )
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(100.0),
+        gap_breach_action="SKIP",
+    )
+
+    assert issues == []
+    row = rows[0]
+    assert row.downside_risk == {
+        "status": "available",
+        "currency": "USD",
+        "position_value": 100_000.0,
+        "entry_price": 100.0,
+        "stop_price": 0.0,
+        "target_price": 120.0,
+        "position_loss_amount": 100_000.0,
+        "position_loss_pct": 100.0,
+        "caveat": "stop_target_decision_guide_only_gap_slippage_may_exceed",
+    }
 
 
 def test_evaluate_entry_candidates_keeps_liquidity_unavailable_without_position_size() -> (
@@ -1713,6 +1797,7 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
                 "intended_position_size_unavailable",
                 "avg_traded_value_unavailable",
             ],
+            "downside_risk": None,
             "portfolio_exposure_buckets": ["currency=USD"],
         }
     ]

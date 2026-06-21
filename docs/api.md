@@ -60,14 +60,21 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
 | `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
 
+### Buy/Sell Risk Disclosure Notes
+
+- New `buy` and `sell` artifacts include top-level `risk_disclosure`. The payload marks stop/target-related fields as `meaning="decision_guide_only"`, with `execution_caveat="gap_slippage_may_exceed_guide"` and `account_loss_caveat="not_account_loss_limit"`.
+- Buy candidates expose structured stop/target guide values as `risk_stop_price_value`, `risk_target_price_value`, `risk_price_basis="adjusted"`, and `risk_guide_meaning="decision_guide_only"`. These fields are calculation aids and do not change the legacy display string `risk_guide`.
+- Sell reports keep row-level `stop_price` and `target_price` as guide values. Overrides still determine those guide prices when present.
+
 ### Entry Artifact Notes
 
 - New `entry.entries[]` rows include `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, and `investment_readiness_reasons[]`. `action=ENTER` and hybrid `quality_state=A` remain technical setup labels until NAV/risk budget, intended-size liquidity/exit capacity, portfolio exposure, and source/fundamental context are checked by a separate layer.
 - `entry.entries[].liquidity_exit_capacity` records intended-size exit capacity when source candidate data is available. With `status="available"`, it includes position value, average traded value, ADV percent, normal/stressed participation rates, and normal/stressed estimated exit days. Missing intended size or liquidity data leaves an explicit unavailable status and keeps `liquidity_exit_capacity_unavailable` in readiness reasons.
 - `entry.entries[].liquidity_warnings[]` preserves missing-size/liquidity warnings plus small-cap, event-driven, and crowded-name exit-risk flags when source candidates provide those flags. The reports UI shows these fields in the entry table's `Exit Capacity` column.
+- `entry.entries[].downside_risk` records guide-based downside when source candidate stop guidance and intended position value are available. With `status="available"`, it includes entry price, stop price, optional target price, position loss amount/percent, optional portfolio value/loss percent/bps, and caveat `stop_target_decision_guide_only_gap_slippage_may_exceed`. When the source guide basis is `adjusted`, entry converts stop/target values to raw entry-price basis before calculating this payload.
 - `entry.entries[].portfolio_exposure_buckets[]` records normalized exposure buckets such as `currency=USD`, `sector=semiconductor`, or `theme=ai-megacap`. Configured `portfolio.exposure_limits[]` can turn an otherwise technical `ENTER` row into `SKIP` with a `portfolio exposure cap reached (...)` reason; `entry.summary.portfolio_blocked_by_exposure` counts those blocks.
 - AI Brief model input and final recommendation/watch rows preserve those readiness fields when they are present in the source entry report. Recommendations with context-required readiness also carry an explicit rationale/checklist caveat.
-- AI Brief also preserves `liquidity_exit_capacity`, `liquidity_warnings`, and `portfolio_exposure_buckets` from entry rows into provider input and final recommendation/watch rows.
+- AI Brief also preserves `liquidity_exit_capacity`, `liquidity_warnings`, `downside_risk`, and `portfolio_exposure_buckets` from entry rows into provider input and final recommendation/watch rows.
 
 ### AI Brief Artifact Notes
 
@@ -86,7 +93,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first and uses only `<b>`, `<code>`, and `<a>` tags.
 - Report-derived values are HTML-escaped, normalized to single-line text where needed, and length-bounded before rendering. Unsafe, malformed, too-long, or whitespace/control-character HTTP(S) `run_url` values are not emitted as Telegram links.
 - GitHub Actions and the scheduled notifier split the AI Brief Telegram report body with `split_telegram_message_text()` and send each part through `sendMessage` with `parse_mode=HTML` and web previews disabled.
-- AI Brief skipped notifications, scan/sell Telegram notifications, host late alerts, and Slack summaries remain plain text. Slack keeps the key-value summary format.
+- AI Brief skipped notifications, scan/sell Telegram notifications, host late alerts, and Slack summaries remain plain text. Scan/sell Telegram notifications append the same stop/target decision-guide caveat used in report artifacts when rows are shown. Slack keeps the key-value summary format.
 
 ## Web API Routes
 

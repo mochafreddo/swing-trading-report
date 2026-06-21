@@ -17,6 +17,7 @@ from .ai_brief_state import (
     BRIEF_STATE_NO_SIGNAL,
     read_ai_brief_state,
 )
+from .risk_disclosure import RISK_GUIDE_NOTICE_KO
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
 _HTML_LINK_MAX_CHARS = 1024
@@ -558,6 +559,7 @@ def build_scan_telegram_report_text(
                 ),
             )
             lines.append(f"{idx}. {ticker_name} | {price} | 점수 {score} | {reason}")
+        lines.append(RISK_GUIDE_NOTICE_KO)
 
     key = _safe_str(storage_key)
     if key:
@@ -611,6 +613,7 @@ def build_sell_telegram_report_text(
         extra = total - shown
         if extra > 0:
             lines.append(f"외 {extra}건")
+        lines.append(RISK_GUIDE_NOTICE_KO)
 
     key = _safe_str(storage_key)
     if key:

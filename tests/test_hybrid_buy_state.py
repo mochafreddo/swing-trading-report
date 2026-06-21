@@ -200,6 +200,14 @@ def test_pullback_bounce_watch(monkeypatch):
     assert result.candidate["gap_guard_down_price_value"] is not None
     # Risk guide should be populated
     assert "Target" in result.candidate["risk_guide"]
+    assert result.candidate["risk_stop_price_value"] == pytest.approx(
+        result.candidate["close_value"] - result.candidate["atr14_value"]
+    )
+    assert result.candidate["risk_target_price_value"] == pytest.approx(
+        result.candidate["close_value"] + result.candidate["atr14_value"] * 2
+    )
+    assert result.candidate["risk_price_basis"] == "adjusted"
+    assert result.candidate["risk_guide_meaning"] == "decision_guide_only"
 
 
 def test_pullback_bounce_hammer_without_ema_reclaim_stays_watch(monkeypatch):

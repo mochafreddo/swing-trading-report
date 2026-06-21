@@ -7,6 +7,7 @@ from typing import Any
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
 from .metadata import collect_row_tickers, infer_market_from_currency
 from .paths import ensure_dir, next_report_path
+from .risk_disclosure import build_buy_risk_disclosure, build_sell_risk_disclosure
 from .run_meta import build_run_meta
 from .time_label import resolve_report_timestamp
 
@@ -84,6 +85,10 @@ def write_report(
         "system_issues": system_issues_list,
         "screen_outs": screen_outs_list,
     }
+    if normalized_report_type == "buy":
+        artifact["risk_disclosure"] = build_buy_risk_disclosure()
+    else:
+        artifact["risk_disclosure"] = build_sell_risk_disclosure()
     if cache_hint:
         artifact["cache_hint"] = cache_hint
     if strategy_mode and normalized_report_type == "buy":

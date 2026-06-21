@@ -77,7 +77,7 @@ flowchart LR
 | AI Brief recommendation 품질 평가 | 생성된 `*.ai-brief.json`을 네트워크/secret 없이 entry 후보 기준으로 검증하고, rank 연속성/source-backed ratio/confidence 안전성/summary count를 수동·scheduled 성공 경로의 fail-closed 품질 게이트로 평가 | `sab/ai_brief_eval.py`, `scripts/eval_ai_brief_recommendations.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py`(facade), `sab/data/kis/{auth,calendar,common,quote,ranking}.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
-| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링, AI Brief 판단 상태(`NO_SIGNAL`/`NEEDS_REVIEW_WATCH_ONLY`/`FINAL_JUDGMENT`/`NEEDS_REVIEW_WEAK_NEWS`)와 scheduled skip 상태 결정 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/ai_brief_report.py`, `sab/report/ai_brief_skip_report.py`, `sab/report/ai_brief_state.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py`, `sab/report/storage_key.py` |
+| 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링, buy/sell stop-target risk disclosure, AI Brief 판단 상태(`NO_SIGNAL`/`NEEDS_REVIEW_WATCH_ONLY`/`FINAL_JUDGMENT`/`NEEDS_REVIEW_WEAK_NEWS`)와 scheduled skip 상태 결정 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/risk_disclosure.py`, `sab/report/ai_brief_report.py`, `sab/report/ai_brief_skip_report.py`, `sab/report/ai_brief_state.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py`, `sab/report/storage_key.py` |
 | 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | Toss holdings sync | 서버 전용 OAuth client credentials로 Toss 보유 종목을 조회하고 Supabase holdings와 비교한 뒤, 서버 재조회/hash guard/확인 문구를 통과한 apply만 replace-all로 반영하는 브로커-backed review 경로 | `web/src/lib/toss/client.ts`, `web/src/lib/toss/holdings-sync.ts`, `web/src/app/api/holdings/toss-sync/route.ts`, `web/src/components/holdings/toss-sync-panel.tsx` |
@@ -96,7 +96,7 @@ flowchart LR
 4. `kis` 경로에서는 호출 실패 시 캐시 유지 또는 KR 종목에 한해 PyKRX 폴백을 적용합니다.
 5. 선택적으로(`strategy.use_market_regime_filter=true`) 시장별 benchmark 종가가 SMA200 위인지 먼저 확인하고, 레짐이 약세인 시장의 ticker는 평가 전에 제외합니다. benchmark를 못 구하면 `strategy.market_regime_unavailable_policy`에 따라 경고 후 계속 진행하거나(`warn_continue`) 해당 시장을 제외합니다(`block_market`).
 6. 시그널 평가 후 후보 티커에 대해서만 raw 캔들을 배치 warmup하고, cache hit 기반으로 `entry_reference_close_raw_value`를 보강한 뒤 후보를 정렬하고 통화/시장 상태 표시를 덧붙입니다. `ema_cross`는 기존 점수/RS/유동성 순서를 유지하고, `sma_ema_hybrid`는 `quality_state`를 먼저 적용한 뒤 같은 tie-breaker를 사용합니다.
-7. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다.
+7. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다. Buy artifact는 top-level `risk_disclosure`를 포함하고, 후보별 `risk_guide`의 계산용 stop/target 값(`risk_stop_price_value`, `risk_target_price_value`, `risk_price_basis`)을 함께 저장합니다.
 8. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다.
 9. `scan`은 holdings 파일을 읽지 않습니다. `entry`는 포트폴리오 가드가 설정된 경우 holdings 파일 입력을 읽을 수 있지만, 신호 계산은 buy report 기준을 유지합니다.
 
@@ -107,7 +107,7 @@ flowchart LR
    - 로컬 `holdings.yaml`의 선택적 `entry_pattern`은 hybrid sell evaluator에 전달됩니다. 구조화 marker는 exact ID로만 해석하며, failed-breakout marker로 쓰이는 값은 `swing_high_breakout`뿐입니다.
    - hybrid sell evaluator는 `entry_pattern`별 time-stop override를 전역 hybrid time-stop 위에 적용합니다. 기본 설정은 `swing_high_breakout`을 전역 30+15 세션보다 짧은 15+5 세션으로 평가합니다.
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
-3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다.
+3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다. Sell artifact는 `stop_price`/`target_price`가 체결 보장이나 계좌 손실 한도가 아닌 의사결정 가이드임을 top-level `risk_disclosure`에 기록합니다.
 4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
    - scheduled export field set은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`입니다. `entry_pattern` 컬럼이 PostgREST schema cache에 노출되지 않으면 export는 lossy snapshot을 만들지 않고 실패합니다.
 
@@ -119,13 +119,14 @@ flowchart LR
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)와 노출 bucket을 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다. 전체 보유 상한은 기존 활성 보유를 포함하고, 시장별 신규 진입 상한은 이번 run에서 승인된 신규 진입만 셉니다. `portfolio.exposure_limits[]`는 currency, sector, theme, beta bucket, correlation bucket, tag bucket 기준으로 기존 활성 보유와 이번 run 승인 후보를 함께 세어 crowded bucket의 추가 진입을 막습니다.
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다. 새 entry row는 기술 액션과 별개로 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`를 남깁니다. NAV/리스크 예산, 의도 포지션 규모 기준 유동성/청산 가능성, 포트폴리오 노출, source/fundamental context가 아직 별도 확인되지 않았다는 뜻입니다.
    - `entry.summary`는 `missing_entry_price_by_reason`과 `entry_price_sources`로 가격 조회 실패 원인과 사용된 가격 소스를 집계하고, 포트폴리오 차단은 `portfolio_blocked_by_market` / `portfolio_blocked_by_exposure`에 분리 기록합니다.
+   - entry row는 source candidate가 제공한 의도 포지션/유동성/stop 가이드에 따라 `liquidity_exit_capacity`, `liquidity_warnings`, `downside_risk`, `portfolio_exposure_buckets`를 기록합니다. `downside_risk`는 adjusted basis stop/target 가이드를 raw entry-price 기준으로 환산한 뒤 계산하며, gap/slippage 전 참고 손실입니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 정상/비fatal entry 리포트를 Supabase Storage에 업로드하고 `report_index`를 upsert합니다. fatal missing-price 정책으로 non-zero 종료한 entry 리포트는 이미 로컬에 작성된 진단 artifact로 남으며, 수동 AI Brief workflow가 별도 GitHub artifact로 노출합니다.
 
 ### 4.3.1 `ai-brief` 로컬/수동/scheduled workflow 플로우
 
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `sab/ai_brief_candidates.py`가 각 row를 `recommendable`, `watch_only`, `excluded`로 분류합니다. Base gate(`entry_state=READY`, `entry_price_status=available`)를 통과한 `ENTER`, 포트폴리오 상한 `SKIP`, tight-stop risk-alignment `REVIEW`는 recommendable입니다. `entry_price_status`가 없는 legacy row는 유효한 `entry_price`가 있을 때만 available로 취급합니다. Hybrid trigger guard `SKIP`은 watch-only이며, 나머지는 excluded입니다.
-3. 모델 ranking 입력은 recommendable 후보 중 entry report 순서를 보존해 최대 5개로 제한하며, 초과 recommendable 행은 `cap_excluded_candidates[]`로 기록합니다. Watch-only 후보는 ranking 대상이 아니지만 `watch_candidates[]`/`watch_tickers[]`로 모델 provider와 artifact에 분리 전달합니다. Entry row의 `implementation_ready`, `investment_readiness`, `investment_readiness_reasons`, `portfolio_exposure_buckets`도 provider 입력에 함께 복사합니다.
+3. 모델 ranking 입력은 recommendable 후보 중 entry report 순서를 보존해 최대 5개로 제한하며, 초과 recommendable 행은 `cap_excluded_candidates[]`로 기록합니다. Watch-only 후보는 ranking 대상이 아니지만 `watch_candidates[]`/`watch_tickers[]`로 모델 provider와 artifact에 분리 전달합니다. Entry row의 `implementation_ready`, `investment_readiness`, `investment_readiness_reasons`, `liquidity_exit_capacity`, `liquidity_warnings`, `downside_risk`, `portfolio_exposure_buckets`도 provider 입력에 함께 복사합니다.
 4. source provider는 `none`, `local-json`, `http-json`, `finnhub`, `polygon-news`, `alpha-vantage-news`, `marketaux-news`, `benzinga-news`, `naver-news`를 지원하며, scheduled/환경 경로에서는 comma-separated source provider chain을 사용할 수 있습니다.
    - Chain은 순서대로 provider를 실행하고, 이미 ticker별 source row cap을 채운 ticker를 제외한 남은 ticker만 다음 provider에 요청합니다. Provider별 status/coverage와 final recommendable/watch coverage는 `source_provider_summary`에 남습니다. 중간 provider의 0건/실패는 fallback 뒤에도 source가 없는 ticker에 대해서만 top-level issue로 승격합니다.
    - `local-json`은 로컬 source report의 `sources[]`를 후보 source universe에 붙입니다.
@@ -150,7 +151,7 @@ flowchart LR
 6. 최종 추천은 최대 3개이며, 모델이 preselected recommendable 후보를 추천하지 않기로 판단한 경우 `vetoed_candidates[]`에 추천과 별도로 보존합니다. `reports/YYYY-MM-DD(.n).ai-brief.json`은 로컬 파일 락 + 원자적 쓰기로 생성합니다.
 7. writer는 새 artifact에 top-level `brief_state`/`brief_reason`을 주입합니다. 상태는 `NO_SIGNAL`, `NEEDS_REVIEW_WATCH_ONLY`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS` 중 하나이며, preselected recommendable count, watch count, recommendation source coverage, source/system issue count만으로 결정합니다.
 8. AI Brief recommendation 품질 게이트는 생성 artifact와 source entry report를 함께 평가합니다. 수동 GitHub workflow는 진단용 GitHub artifact upload 뒤, Supabase Storage 업로드와 Telegram/Slack 알림 전 단계에서 실행하고, scheduled runner는 로컬 `ai-brief` path 확정 직후 Storage upload/성공 marker/notification reconciliation 전에 실행합니다. Preselected recommendable 후보가 있는데 추천과 veto가 모두 비어 있으면 source/system issue가 있어도 `FAIL`입니다. `FAIL`이면 해당 성공 경로를 중단합니다.
-9. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다. AI Brief Telegram 리포트 본문은 Telegram HTML rich text(`parse_mode=HTML`)로 decision-first 형식을 사용하며, `NO_SIGNAL`이면 휴식 문구, `NEEDS_REVIEW_WATCH_ONLY`이면 watch-only 재트리거 확인 문구, `FINAL_JUDGMENT`이면 source-backed 후보, `NEEDS_REVIEW_WEAK_NEWS`이면 downgraded copy와 issue 요약을 보여줍니다. `watch_candidates[]`, `source_provider_summary`, `vetoed_candidates[]`가 있으면 추천과 별도로 표시합니다. Slack 요약은 watch/source chain/veto count를 key-value로 포함하고, scan/sell Telegram 메시지는 기존 plain text 형식을 유지합니다.
+9. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다. AI Brief Telegram 리포트 본문은 Telegram HTML rich text(`parse_mode=HTML`)로 decision-first 형식을 사용하며, `NO_SIGNAL`이면 휴식 문구, `NEEDS_REVIEW_WATCH_ONLY`이면 watch-only 재트리거 확인 문구, `FINAL_JUDGMENT`이면 source-backed 후보, `NEEDS_REVIEW_WEAK_NEWS`이면 downgraded copy와 issue 요약을 보여줍니다. `watch_candidates[]`, `source_provider_summary`, `vetoed_candidates[]`가 있으면 추천과 별도로 표시합니다. Slack 요약은 watch/source chain/veto count를 key-value로 포함합니다. Scan/sell Telegram 메시지는 plain text 형식을 유지하되, stop/target이 의사결정 가이드이고 gap/slippage로 실제 체결·손실이 달라질 수 있다는 caveat를 함께 표시합니다.
 10. mixed KR/US entry 리포트는 `--market KR|US`를 요구하고, 출력 artifact는 단일 시장만 다룹니다.
 11. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab ai-brief --upload`일 때 Supabase Storage 업로드 + `report_index` upsert를 수행합니다. Scheduled runner는 `sab ai-brief --report-date <sessionDate>`로 artifact date를 session date에 고정한 뒤 직접 AI Brief upload와 marker 기록을 수행합니다.
 12. `.github/workflows/ai-brief.yml`의 수동 `workflow_dispatch`는 단일 시장 `scan` → Supabase holdings snapshot → `entry --upload` → upload suppressed `ai-brief` 생성 → recommendation 품질 평가 → 별도 Supabase AI Brief upload 흐름을 사용합니다. 생성 단계는 `SAB_SUPPRESS_REPORT_UPLOADS=true`로 GitHub Actions의 암묵적 필수 업로드를 끄고, 품질 평가를 통과한 뒤 `maybe_upload_report_artifact(..., force=True)` 단계에서만 AI Brief를 Supabase Storage와 `report_index`에 반영합니다. `sab entry`가 fatal missing-price 정책으로 non-zero 종료해도 이미 작성된 entry report는 workflow output과 별도 artifact upload step으로 노출해 진단 가능성을 유지합니다. AI Brief 품질 게이트가 실패하면 생성 artifact는 GitHub artifact로 남지만 Supabase 업로드와 알림 전송은 진행하지 않습니다.
@@ -167,9 +168,10 @@ flowchart LR
 4. 클라이언트(`ReportsClient`)는 목록/상세 요청에 in-flight dedupe + 세션 메모리 캐시를 적용합니다.
 5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
-7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다.
-8. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열과 `portfolio_exposure_buckets` 기반 Exposure 열을 표시해 기술적 `ENTER`, 계좌 실행 준비도, 포트폴리오 집중 bucket을 분리해 보여줍니다.
-9. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
+7. Report Detail의 buy 후보 근거 표시는 `candidates[].reasons[]`(구조화 근거)를 우선 사용하고, 누락 시 `score_notes`/`pattern_reasons`/`entry_state_reason` 문자열 필드로 폴백합니다. Buy risk summary는 `risk_guide`와 gap guard를 의사결정 가이드로 표시하고 gap/slippage caveat를 함께 보여줍니다.
+8. sell 상세는 `stop_price`/`target_price`를 `Stop Guide`/`Target Guide` 열로 표시해 자동 체결/계좌 손실 한도가 아니라는 의미를 유지합니다.
+9. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열, `liquidity_exit_capacity`/`liquidity_warnings` 기반 Exit Capacity 열, `downside_risk` 기반 Downside 열, `portfolio_exposure_buckets` 기반 Exposure 열을 표시해 기술적 `ENTER`, 계좌 실행 준비도, 유동성, 가이드 기준 하방 손실, 포트폴리오 집중 bucket을 분리해 보여줍니다.
+10. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
@@ -240,7 +242,7 @@ flowchart LR
   - `summary`는 Reports 목록 요약과 `/metrics` 운영 대시보드의 단일 집계 소스입니다.
   - `buy.summary`: `candidate_count`, `system_issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`, `rs_benchmark_requested/unavailable_count`, `rs_benchmark_unavailable_ratio`, `market_regime_unavailable_count`, `market_regime_blocked_count`, `market_regime_blocked_by_market`, `market_regime_unavailable_by_market`
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
-  - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`, `missing_entry_price_by_reason`, `entry_price_sources`
+  - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`, `missing_entry_price_by_reason`, `entry_price_sources`, `portfolio_blocked_by_market`, `portfolio_blocked_by_exposure`
   - `ai-brief.summary`: `entry_count`, `recommendable_count`, `watch_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`; artifact top-level에는 `brief_state`, `brief_reason`, `eligible_tickers`, `watch_tickers`, `source_provider_summary`가 함께 저장됩니다.
   - `ai-brief-skip.summary`: `skip_state`, `skip_reason`, `session_state`, `expected_state`, `trading_session`; artifact top-level에는 `skip_state`, `skip_reason`, `session_date`, `local_time`, `run_url`이 함께 저장됩니다.
 - `runtime_state`: 로그인 시도 제한 상태와 scheduled AI Brief idempotency/lock/notification marker 등 단기 런타임 상태(기본 저장소)

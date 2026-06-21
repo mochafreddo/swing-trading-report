@@ -33,8 +33,10 @@ describe("buildBuyCandidateViewModel", () => {
     expect(model.reasonSummary).toContain("EMA20/50 크로스 + RSI 반등");
     expect(model.reasonSummary).toContain("갭 0.4% / 한도 3.0%");
     expect(model.reasonSummary).toContain("유동성 2,000,000");
+    expect(model.riskSummary).toContain("의사결정 가이드");
     expect(model.riskSummary).toContain("Stop 100 / Target 120 (~1:2)");
     expect(model.riskSummary).toContain("gap guard ±3.0%");
+    expect(model.riskSummary).toContain("갭/슬리피지");
     expect(model.detailSections.map((section) => section.title)).toEqual([
       "근거 상세",
       "지표 스냅샷",
@@ -71,8 +73,10 @@ describe("buildBuyCandidateViewModel", () => {
     expect(model.reasonSummary).toContain("눌림 반등 / READY(확인)");
     expect(model.reasonSummary).toContain("양봉+거래량");
     expect(model.reasonSummary).toContain("EMA 부근 반전");
+    expect(model.riskSummary).toContain("의사결정 가이드");
     expect(model.riskSummary).toContain("Stop 352.33 / Target 378.52 (~1:2)");
     expect(model.riskSummary).toContain("gap guard ±2.4%");
+    expect(model.riskSummary).toContain("갭/슬리피지");
 
     const reasonSection = model.detailSections.find(
       (section) => section.title === "근거 상세",

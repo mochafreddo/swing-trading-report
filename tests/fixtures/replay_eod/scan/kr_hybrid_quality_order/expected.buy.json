@@ -125,6 +125,10 @@
         "relative_strength_positive"
       ],
       "risk_guide": "Stop 159 / Target 182 (~1:2)",
+      "risk_stop_price_value": 158.58411303363584,
+      "risk_target_price_value": 182.1283739327283,
+      "risk_price_basis": "adjusted",
+      "risk_guide_meaning": "decision_guide_only",
       "score_value": 2.4,
       "score": "2.40",
       "score_notes": "entry_state=2.0, pattern=0.30, volume_bonus=0.10, extended_penalty=0.00",
@@ -261,6 +265,10 @@
         "risk_alignment_tight_stop"
       ],
       "risk_guide": "Stop 157 / Target 186 (~1:2)",
+      "risk_stop_price_value": 156.85262955151504,
+      "risk_target_price_value": 185.5913408969699,
+      "risk_price_basis": "adjusted",
+      "risk_guide_meaning": "decision_guide_only",
       "score_value": 2.4,
       "score": "2.40",
       "score_notes": "entry_state=2.0, pattern=0.30, volume_bonus=0.10, extended_penalty=0.00",

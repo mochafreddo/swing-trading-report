@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from ..report.risk_disclosure import RISK_GUIDE_MEANING
 from ..utils.numeric import to_finite_float as _to_finite_float
 from .etf_filters import is_etf_or_leveraged
 from .eval_index import choose_eval_index
@@ -309,12 +310,14 @@ def _build_ema_cross_candidate(
         pct_change = (latest_close - previous_close) / previous_close
 
     risk_guide = "-"
+    risk_stop_price: float | None = None
+    risk_target_price: float | None = None
     if not math.isnan(atr_value):
-        stop = max(latest_close - atr_value, 0)
-        target = latest_close + atr_value * 2
+        risk_stop_price = max(latest_close - atr_value, 0)
+        risk_target_price = latest_close + atr_value * 2
         risk_guide = (
-            f"Stop {_format_metric(stop, 0)} / "
-            f"Target {_format_metric(target, 0)} (~1:2)"
+            f"Stop {_format_metric(risk_stop_price, 0)} / "
+            f"Target {_format_metric(risk_target_price, 0)} (~1:2)"
         )
 
     score = 0.0
@@ -443,6 +446,10 @@ def _build_ema_cross_candidate(
         "high": _format_metric(latest_high, 0),
         "low": _format_metric(latest_low, 0),
         "risk_guide": risk_guide,
+        "risk_stop_price_value": risk_stop_price,
+        "risk_target_price_value": risk_target_price,
+        "risk_price_basis": "adjusted",
+        "risk_guide_meaning": RISK_GUIDE_MEANING,
         "sma200": _format_metric(sma200_value, 0),
         "avg_dollar_volume": _format_metric(volume.avg_dollar_volume, 0),
         "avg_dollar_volume_value": volume.avg_dollar_volume,

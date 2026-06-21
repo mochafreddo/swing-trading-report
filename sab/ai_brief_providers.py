@@ -37,6 +37,7 @@ _INVESTMENT_READINESS_FIELDS = (
     "investment_readiness_reasons",
     "liquidity_exit_capacity",
     "liquidity_warnings",
+    "downside_risk",
 )
 _INVESTMENT_READINESS_CHECKLIST_ITEM = (
     "confirm NAV/risk budget, exit liquidity, portfolio exposure, "

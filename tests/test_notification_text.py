@@ -173,6 +173,8 @@ def test_build_scan_telegram_report_text_keeps_legacy_candidates_without_entry_s
 
     assert "진입 가능: 1건" in text
     assert "LEGACY.NYS Legacy Candidate" in text
+    assert "Stop/Target은 의사결정 가이드" in text
+    assert "갭/슬리피지" in text
 
 
 def test_split_telegram_message_text_keeps_parts_within_limit() -> None:
@@ -245,6 +247,8 @@ def test_build_sell_telegram_report_text_excludes_hold_rows() -> None:
     assert "COP.NYS | 점검 | +8.8% | Reached profit target zone" in text
     assert "MSI.NYS | 점검 | -3.4% | Close below EMA short" in text
     assert "CI.NYS" not in text
+    assert "Stop/Target은 의사결정 가이드" in text
+    assert "갭/슬리피지" in text
     assert "보관: 2026/02/2026-02-11.sell.json" in text
     assert text.endswith("실행: https://github.com/example/repo/actions/runs/456")
 

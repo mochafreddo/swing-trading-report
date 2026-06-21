@@ -2,7 +2,7 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-18
+최종 확인: 2026-06-21
 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
@@ -488,6 +488,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - 새 entry row는 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`, `investment_readiness_reasons[]`를 포함합니다.
   - 현재 기본 누락 reason은 `nav_risk_budget_unavailable`, `liquidity_exit_capacity_unavailable`, `portfolio_exposure_context_unavailable`, `source_fundamental_context_unavailable`입니다.
   - candidate가 `intended_position_value`(또는 호환 position-value 필드)와 `avg_dollar_volume_value`(또는 호환 평균 거래대금 필드)를 제공하면 `sab entry`는 `liquidity_exit_capacity`에 포지션 금액, 평균 거래대금, ADV 대비 비율, 정상 참여율 10%/스트레스 참여율 3% 기준 예상 청산 일수를 기록합니다. 이 경우 `liquidity_exit_capacity_unavailable`은 readiness reason에서 제거됩니다.
+  - candidate가 `risk_stop_price_value`와 의도 포지션 금액을 제공하면 `sab entry`는 `downside_risk`에 stop 가이드 기준 하방 손실액과 포지션 손실률을 기록합니다. buy candidate가 생성한 stop/target 가이드는 `risk_price_basis="adjusted"`를 함께 기록하며, entry 단계는 `signal_close_adjusted_value`와 `entry_reference_close_raw_value`의 비율로 raw 진입가 기준 stop/target으로 환산한 뒤 하방 리스크를 계산합니다. `portfolio_value`/`account_value`/`nav` 계열 값도 있으면 포트폴리오 손실률과 bps를 함께 기록합니다. 이 값은 stop 체결 보장이나 계좌 손실 한도가 아니라 gap/slippage 전 하방 참고값입니다.
   - 의도 포지션 크기나 평균 거래대금이 없으면 `liquidity_exit_capacity.status`를 `position_size_unavailable`, `avg_traded_value_unavailable`, 또는 `position_size_and_liquidity_unavailable`로 남기고 `liquidity_warnings[]`에 누락 warning을 기록합니다.
   - candidate의 `liquidity_flags`/`liquidity_risk_flags` 또는 boolean flag가 `small_cap`, `event_driven`, `crowded` 계열을 표시하면 `liquidity_warnings[]`에 `small_cap_liquidity_risk`, `event_driven_liquidity_risk`, `crowded_name_exit_risk`를 보존합니다.
   - `portfolio_exposure_buckets[]`는 entry 후보가 속한 노출 bucket을 기록하며, web entry 상세의 Exposure 열과 AI Brief provider 입력에 전달됩니다.
@@ -508,7 +509,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - 모델 ranking 입력은 `recommendable` 후보 중 entry report 순서 기준 최대 5개(`eligible_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 최종 `recommendations[]`는 최대 3개입니다.
 - source provider universe는 preselection cap을 통과한 후보만이 아니라 전체 `recommendable` 후보와 `watch_only` 후보를 포함합니다. 따라서 `source_provider_summary.final.recommendable_total`은 `summary.recommendable_count`, `watch_total`은 `summary.watch_count`와 맞아야 합니다.
 - `fake` provider는 외부 GPT/news/API를 호출하지 않고, 낮은 confidence와 source issue를 남깁니다.
-- AI Brief provider 입력과 최종 recommendation/watch row는 entry row의 `implementation_ready` / `investment_readiness` / `portfolio_exposure_buckets` 필드를 보존합니다. `implementation_ready=false` 또는 context-required readiness가 있는 recommendation은 rationale/checklist에 수동 확인 caveat를 포함해야 합니다.
+- AI Brief provider 입력과 최종 recommendation/watch row는 entry row의 `implementation_ready` / `investment_readiness` / `liquidity_exit_capacity` / `liquidity_warnings` / `downside_risk` / `portfolio_exposure_buckets` 필드를 보존합니다. `implementation_ready=false` 또는 context-required readiness가 있는 recommendation은 rationale/checklist에 수동 확인 caveat를 포함해야 합니다.
 - `openai` provider는 OpenAI Responses API structured output으로 후보를 요약하지만, ticker 추가, `watch_only` 후보의 추천 승격, 한국어/영어 자동 주문·체결 언어를 허용하지 않습니다. `watch_candidates[]`는 `action=WATCH`, 수동 확인 이유, 재트리거 조건만 담을 수 있습니다.
 - `local-json` source provider는 로컬 source report를 후보 context로 붙일 수 있지만, entry report의 후보 universe를 확장하지 않습니다.
 - `http-json` source provider는 HTTPS 외부 source API에 source universe ticker 목록을 POST하고, 응답 `sources[]`를 같은 source row 계약으로 정규화합니다. Source API fetch는 HTTPS/local-private/redirect/body-size 제한을 적용하고, 반환 row URL은 syntax/local-private/DNS 검증을 통과해야 합니다. 반환 ticker가 후보 universe 밖이거나 stale/future-time/invalid URL/cap 초과이면 모델 입력에서 제외하고 `source_issues[]`로 남깁니다.
@@ -539,7 +540,8 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 ### 7.2 Sell report (row)
 
 - `action`은 `HOLD|SELL_PARTIAL|REVIEW|SELL` 중 하나입니다.
-- `stop_price`, `target_price`는 “가이드”이며, override가 있으면 override가 우선합니다.
+- buy report의 `risk_guide`와 sell report의 `stop_price`, `target_price`는 모두 “의사결정 가이드”입니다. 리포트 top-level `risk_disclosure`는 해당 필드가 체결 보장이나 계좌 손실 한도가 아니며, gap/slippage로 실제 체결·손실이 가이드를 벗어날 수 있음을 명시합니다.
+- sell `stop_price`, `target_price`는 override가 있으면 override가 우선합니다.
 
 ## 8. 운영/재현성 권장 사항
 

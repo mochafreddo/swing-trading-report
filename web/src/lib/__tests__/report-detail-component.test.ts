@@ -131,6 +131,20 @@ describe("ReportDetail component", () => {
           exit_days_stressed: 1.6667,
         },
         liquidity_warnings: ["small_cap_liquidity_risk"],
+        downside_risk: {
+          status: "available",
+          currency: "USD",
+          position_value: 100000,
+          entry_price: 101.5,
+          stop_price: 96.5,
+          target_price: 112,
+          position_loss_amount: 4926.1084,
+          position_loss_pct: 4.9261,
+          portfolio_value: 1000000,
+          portfolio_loss_pct: 0.4926,
+          portfolio_loss_bps: 49.2611,
+          caveat: "stop_target_decision_guide_only_gap_slippage_may_exceed",
+        },
         portfolio_exposure_buckets: ["currency=USD", "theme=ai-megacap"],
       },
     ];
@@ -165,9 +179,59 @@ describe("ReportDetail component", () => {
     expect(html).toContain("Exit Capacity");
     expect(html).toContain("ADV 5% · normal 0.5d · stressed 1.7d");
     expect(html).toContain("small_cap_liquidity_risk");
+    expect(html).toContain("Downside");
+    expect(html).toContain("USD 4,926.11");
+    expect(html).toContain("49.3bps");
+    expect(html).toContain("가이드");
+    expect(html).toContain("갭/슬리피지");
     expect(html).toContain("Exposure");
     expect(html).toContain("currency=USD · theme=ai-megacap");
     expect(html).toContain("2026-02-25.buy.json");
+  });
+
+  it("renders sell stop and target values as decision guides", () => {
+    const detail: ReportJson = {
+      schema: "sab.report.v1",
+      type: "sell",
+      generated_at: "2026-02-11 21:03 KST",
+      provider: "kis",
+      summary: {
+        evaluated_count: 1,
+      },
+    };
+    const sellRows: ReportJson[] = [
+      {
+        ticker: "AAPL.NASD",
+        action: "REVIEW",
+        last_price: 190,
+        pnl_pct: 0.2,
+        stop_price: 170,
+        target_price: 210,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(ReportDetail, {
+        detail,
+        loadingDetail: false,
+        error: null,
+        showRaw: false,
+        summary: detail.summary as ReportJson,
+        buyRows: [],
+        sellRows,
+        entryRows: [],
+        aiBriefRows: [],
+        rawDetailJson: "",
+        onToggleRaw: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Stop Guide");
+    expect(html).toContain("Target Guide");
+    expect(html).toContain("의사결정 가이드");
+    expect(html).toContain("170");
+    expect(html).toContain("210");
+    expect(html).toContain("갭/슬리피지");
   });
 
   it("renders AI brief recommendations and structured issues", () => {

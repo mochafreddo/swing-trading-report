@@ -1,4 +1,5 @@
 import { readNumberLike, readString } from "./helpers";
+import { RISK_GUIDE_NOTICE } from "./risk-guidance";
 import type { ReportJson } from "./types";
 
 const MAX_REASON_CHIPS = 5;
@@ -313,14 +314,16 @@ function buildRiskSummary(
 ): string {
   const riskGuide = readNonDashString(row.risk_guide);
   const gapGuardPct = formatGapGuardPct(row);
-  if (riskGuide && gapGuardPct) {
-    return `${riskGuide} · gap guard ${gapGuardPct}`;
-  }
+  const riskGuideParts: string[] = [];
   if (riskGuide) {
-    return riskGuide;
+    riskGuideParts.push(`의사결정 가이드: ${riskGuide}`);
   }
   if (gapGuardPct) {
-    return `gap guard ${gapGuardPct}`;
+    riskGuideParts.push(`gap guard ${gapGuardPct}`);
+  }
+  if (riskGuideParts.length > 0) {
+    riskGuideParts.push(RISK_GUIDE_NOTICE);
+    return riskGuideParts.join(" · ");
   }
   const riskLabels = structuredReasons
     .filter((reason) => reason.kind === "risk")

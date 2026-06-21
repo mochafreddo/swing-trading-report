@@ -210,6 +210,9 @@ Entry 및 운영 안정성을 위해, buy report의 후보(candidate)는 최소�
 - `atr14_value` (float)
 - `gap_guard_pct_value` (float|null)
 - `gap_guard_up_price_value` / `gap_guard_down_price_value` (float|null)
+- `risk_stop_price_value` / `risk_target_price_value` (float|null): 표시용 `risk_guide`의 계산용 stop/target 값
+- `risk_price_basis` (`adjusted|raw`): stop/target 값의 가격 basis. 현재 buy candidate 생성기는 adjusted 값을 기록하고, `sab entry`는 raw entry 가격 기준으로 환산해 `downside_risk`를 계산합니다.
+- `risk_guide_meaning="decision_guide_only"`: stop/target 값이 체결 보장이나 계좌 손실 한도가 아니라는 안정적인 의미 태그
 
 > v1.3에서는 “표시용 문자열”과 “계산용 numeric”를 분리해 계약을 고정합니다.
 

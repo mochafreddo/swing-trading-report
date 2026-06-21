@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ..report.risk_disclosure import RISK_GUIDE_MEANING
 from ..utils.numeric import to_finite_float as _to_finite_float
 from .etf_filters import is_etf_or_leveraged
 from .eval_index import choose_eval_index
@@ -1250,12 +1251,14 @@ def evaluate_ticker_hybrid(
     rsi_key = f"rsi{settings.rsi_period}"
 
     risk_guide = "-"
+    risk_stop_price: float | None = None
+    risk_target_price: float | None = None
     if not math.isnan(indicators.atr_value):
-        stop = max(last_close - indicators.atr_value, 0)
-        target = last_close + indicators.atr_value * 2
+        risk_stop_price = max(last_close - indicators.atr_value, 0)
+        risk_target_price = last_close + indicators.atr_value * 2
         risk_guide = (
-            f"Stop {_format_hybrid_value(stop, price_digits)} / "
-            f"Target {_format_hybrid_value(target, price_digits)} (~1:2)"
+            f"Stop {_format_hybrid_value(risk_stop_price, price_digits)} / "
+            f"Target {_format_hybrid_value(risk_target_price, price_digits)} (~1:2)"
         )
 
     gap_guard = _build_hybrid_gap_guard(
@@ -1368,6 +1371,10 @@ def evaluate_ticker_hybrid(
         "quality_state": quality_state.state,
         "quality_reasons": list(quality_state.reasons),
         "risk_guide": risk_guide,
+        "risk_stop_price_value": risk_stop_price,
+        "risk_target_price_value": risk_target_price,
+        "risk_price_basis": "adjusted",
+        "risk_guide_meaning": RISK_GUIDE_MEANING,
         "score_value": score.value,
         "score": f"{score.value:.2f}",
         "score_notes": score.notes,

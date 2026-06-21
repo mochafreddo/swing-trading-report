@@ -204,6 +204,10 @@ def test_ema_cross_candidate_contract_fields_are_stable(
     assert candidate["gap"] == "0.0%"
     assert candidate["gap_threshold"] == "9.5%"
     assert candidate["risk_guide"] == "Stop 10 / Target 13 (~1:2)"
+    assert candidate["risk_stop_price_value"] == pytest.approx(10.0)
+    assert candidate["risk_target_price_value"] == pytest.approx(13.0)
+    assert candidate["risk_price_basis"] == "adjusted"
+    assert candidate["risk_guide_meaning"] == "decision_guide_only"
     assert candidate["signal_price_basis"] == "adjusted"
     assert [reason["id"] for reason in candidate["reasons"]] == [
         "ema_cross",

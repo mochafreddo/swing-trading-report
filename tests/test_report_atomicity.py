@@ -113,6 +113,31 @@ def test_write_report_uses_unique_paths_under_concurrency(tmp_path: Path) -> Non
         assert payload["summary"]["candidate_count"] == 1
 
 
+def test_write_buy_report_emits_stop_target_risk_disclosure(tmp_path: Path) -> None:
+    out_path = write_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        universe_count=1,
+        candidates=[
+            {
+                "ticker": "AAPL.NASD",
+                "name": "Apple",
+                "price": "100",
+                "risk_guide": "Stop 95 / Target 110 (~1:2)",
+            }
+        ],
+        report_type="buy",
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+
+    disclosure = payload["risk_disclosure"]
+    assert disclosure["meaning"] == "decision_guide_only"
+    assert "risk_guide" in disclosure["fields"]
+    assert disclosure["execution_caveat"] == "gap_slippage_may_exceed_guide"
+    assert disclosure["account_loss_caveat"] == "not_account_loss_limit"
+
+
 def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -> None:
     report_dir = tmp_path.as_posix()
     jobs = 12
@@ -133,6 +158,35 @@ def test_write_sell_report_uses_unique_paths_under_concurrency(tmp_path: Path) -
         assert payload["schema"] == "sab.report.v1"
         assert payload["type"] == "sell"
         assert payload["summary"]["evaluated_count"] == 1
+
+
+def test_write_sell_report_emits_stop_target_risk_disclosure(tmp_path: Path) -> None:
+    row = SellReportRow(
+        ticker="AAPL.NASD",
+        name="Apple",
+        quantity=1.0,
+        entry_price=150.0,
+        entry_date="2026-01-02",
+        last_price=190.0,
+        pnl_pct=0.2,
+        action="HOLD",
+        reasons=["test"],
+        stop_price=170.0,
+        target_price=210.0,
+    )
+    out_path = write_sell_report(
+        report_dir=tmp_path.as_posix(),
+        provider="test",
+        evaluated=[row],
+    )
+
+    payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
+
+    disclosure = payload["risk_disclosure"]
+    assert disclosure["meaning"] == "decision_guide_only"
+    assert {"stop_price", "target_price"}.issubset(disclosure["fields"])
+    assert disclosure["execution_caveat"] == "gap_slippage_may_exceed_guide"
+    assert disclosure["account_loss_caveat"] == "not_account_loss_limit"
 
 
 def test_write_ai_brief_report_uses_unique_paths_under_concurrency(

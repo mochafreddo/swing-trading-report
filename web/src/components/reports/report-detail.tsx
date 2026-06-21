@@ -10,6 +10,7 @@ import {
   type ChipTone,
 } from "./buy-candidate-view-model";
 import { asIssueArray, formatSources } from "./report-detail-formatters";
+import { DOWNSIDE_RISK_SUFFIX, SELL_GUIDE_SUFFIX } from "./risk-guidance";
 import {
   asRecord,
   asRecordArray,
@@ -34,6 +35,11 @@ interface ReportDetailProps {
   rawDetailJson: string;
   onToggleRaw: () => void;
 }
+
+const MONEY_FORMATTER = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 function formatSummaryValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -138,6 +144,14 @@ function formatOneDecimal(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
+function formatGuideValue(value: unknown): string {
+  const formatted = formatNullableNumber(value);
+  if (formatted === "-") {
+    return "-";
+  }
+  return `${formatted} · ${SELL_GUIDE_SUFFIX}`;
+}
+
 function formatEntryExitCapacity(row: ReportJson): string {
   const capacity = asRecord(row.liquidity_exit_capacity);
   const warnings = asStringArray(row.liquidity_warnings);
@@ -163,6 +177,39 @@ function formatEntryExitCapacity(row: ReportJson): string {
     return summary;
   }
   return `${summary}: ${warnings.join(" · ")}`;
+}
+
+function formatMoneyAmount(currency: string | null, value: number): string {
+  const amount = MONEY_FORMATTER.format(value);
+  return currency ? `${currency} ${amount}` : amount;
+}
+
+function formatEntryDownsideRisk(row: ReportJson): string {
+  const downside = asRecord(row.downside_risk);
+  if (!downside || readString(downside.status) !== "available") {
+    return "-";
+  }
+  const amount = readNumberLike(downside.position_loss_amount);
+  if (amount === null) {
+    return "-";
+  }
+  const currency = readString(downside.currency);
+  const positionLossPct = readNumberLike(downside.position_loss_pct);
+  const portfolioLossPct = readNumberLike(downside.portfolio_loss_pct);
+  const portfolioLossBps = readNumberLike(downside.portfolio_loss_bps);
+  const fragments = [formatMoneyAmount(currency, amount)];
+  if (positionLossPct !== null) {
+    fragments.push(`${formatOneDecimal(positionLossPct)}% position`);
+  }
+  if (portfolioLossPct !== null && portfolioLossBps !== null) {
+    fragments.push(
+      `${formatOneDecimal(portfolioLossPct)}% portfolio / ${formatOneDecimal(
+        portfolioLossBps,
+      )}bps`,
+    );
+  }
+  fragments.push(DOWNSIDE_RISK_SUFFIX);
+  return fragments.join(" · ");
 }
 
 function formatEntryExposure(row: ReportJson): string {
@@ -608,6 +655,8 @@ export function ReportDetail({
                     <th>Action</th>
                     <th>Last</th>
                     <th>PnL%</th>
+                    <th>Stop Guide</th>
+                    <th>Target Guide</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -619,6 +668,12 @@ export function ReportDetail({
                         {readNumber(row.last_price) ?? "-"}
                       </td>
                       <td data-label="PnL%">{formatPnlPercent(row.pnl_pct)}</td>
+                      <td data-label="Stop Guide">
+                        {formatGuideValue(row.stop_price)}
+                      </td>
+                      <td data-label="Target Guide">
+                        {formatGuideValue(row.target_price)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -641,6 +696,7 @@ export function ReportDetail({
                     <th>Gap%</th>
                     <th>Readiness</th>
                     <th>Exit Capacity</th>
+                    <th>Downside</th>
                     <th>Exposure</th>
                     <th>Reasons</th>
                   </tr>
@@ -664,6 +720,9 @@ export function ReportDetail({
                       </td>
                       <td data-label="Exit Capacity">
                         {formatEntryExitCapacity(row)}
+                      </td>
+                      <td data-label="Downside">
+                        {formatEntryDownsideRisk(row)}
                       </td>
                       <td data-label="Exposure">{formatEntryExposure(row)}</td>
                       <td data-label="Reasons">

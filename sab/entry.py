@@ -30,6 +30,7 @@ from .report.entry_report import (
     EntryReportRow,
     write_entry_report,
 )
+from .report.risk_disclosure import RISK_DOWNSIDE_CAVEAT
 from .report.run_meta import build_run_meta
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .tickers import (
@@ -95,6 +96,30 @@ _POSITION_VALUE_KEYS = (
     "target_position_value_value",
     "position_value",
     "position_value_value",
+)
+_PORTFOLIO_VALUE_KEYS = (
+    "portfolio_value",
+    "portfolio_value_value",
+    "account_value",
+    "account_value_value",
+    "account_equity",
+    "account_equity_value",
+    "nav",
+    "nav_value",
+    "net_asset_value",
+    "net_asset_value_value",
+)
+_RISK_STOP_PRICE_KEYS = (
+    "risk_stop_price_value",
+    "risk_stop_price",
+    "stop_price_value",
+    "stop_price",
+)
+_RISK_TARGET_PRICE_KEYS = (
+    "risk_target_price_value",
+    "risk_target_price",
+    "target_price_value",
+    "target_price",
 )
 _AVG_TRADED_VALUE_KEYS = (
     "avg_dollar_volume_value",
@@ -303,14 +328,37 @@ def _parse_guard_percent_text(value: Any) -> float | None:
     return parsed / 100.0
 
 
-def _first_positive_candidate_value(
-    candidate: Mapping[str, Any], keys: tuple[str, ...]
+def _first_candidate_value(
+    candidate: Mapping[str, Any],
+    keys: tuple[str, ...],
+    parser: Callable[[Any], float | None],
 ) -> float | None:
     for key in keys:
-        parsed = _to_positive_price(candidate.get(key))
+        parsed = parser(candidate.get(key))
         if parsed is not None:
             return parsed
     return None
+
+
+def _first_positive_candidate_value(
+    candidate: Mapping[str, Any], keys: tuple[str, ...]
+) -> float | None:
+    return _first_candidate_value(candidate, keys, _to_positive_price)
+
+
+def _to_non_negative_price(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    parsed = _to_finite_float(value)
+    if parsed is None or parsed < 0:
+        return None
+    return parsed
+
+
+def _first_non_negative_candidate_value(
+    candidate: Mapping[str, Any], keys: tuple[str, ...]
+) -> float | None:
+    return _first_candidate_value(candidate, keys, _to_non_negative_price)
 
 
 def _candidate_currency(candidate: Mapping[str, Any]) -> str | None:
@@ -535,6 +583,62 @@ def _resolve_liquidity_exit_capacity(
     return base_capacity, warnings, True
 
 
+def _resolve_downside_risk(
+    candidate: Mapping[str, Any],
+    *,
+    entry_price: float | None,
+    signal_close: float | None,
+) -> dict[str, Any] | None:
+    parsed_entry_price = _to_positive_price(entry_price)
+    position_value = _first_positive_candidate_value(candidate, _POSITION_VALUE_KEYS)
+    stop_price = _first_non_negative_candidate_value(candidate, _RISK_STOP_PRICE_KEYS)
+    target_price = _first_positive_candidate_value(candidate, _RISK_TARGET_PRICE_KEYS)
+    if parsed_entry_price is None or position_value is None or stop_price is None:
+        return None
+
+    risk_basis = _normalize_risk_price_basis(candidate)
+    if risk_basis == "adjusted":
+        adjusted_signal_close = _extract_adjusted_signal_close(candidate)
+        if signal_close is None or adjusted_signal_close is None:
+            return None
+        basis_ratio = signal_close / adjusted_signal_close
+        stop_price = stop_price * basis_ratio
+        if target_price is not None:
+            target_price = target_price * basis_ratio
+    elif risk_basis not in {"", "raw"}:
+        return None
+
+    loss_fraction = max(parsed_entry_price - stop_price, 0.0) / parsed_entry_price
+    payload: dict[str, Any] = {
+        "status": "available",
+        "position_value": position_value,
+        "entry_price": parsed_entry_price,
+        "stop_price": stop_price,
+        "position_loss_amount": _rounded_capacity_value(position_value * loss_fraction),
+        "position_loss_pct": _rounded_capacity_value(loss_fraction * 100.0),
+        "caveat": RISK_DOWNSIDE_CAVEAT,
+    }
+    currency = _candidate_currency(candidate)
+    if currency is not None:
+        payload["currency"] = currency
+    if target_price is not None:
+        payload["target_price"] = target_price
+
+    portfolio_value = _first_positive_candidate_value(candidate, _PORTFOLIO_VALUE_KEYS)
+    if portfolio_value is not None:
+        portfolio_loss_pct = (
+            payload["position_loss_amount"] / portfolio_value * 100.0
+            if portfolio_value > 0
+            else 0.0
+        )
+        payload["portfolio_value"] = portfolio_value
+        payload["portfolio_loss_pct"] = _rounded_capacity_value(portfolio_loss_pct)
+        payload["portfolio_loss_bps"] = _rounded_capacity_value(
+            portfolio_loss_pct * 100.0
+        )
+    return payload
+
+
 def _entry_investment_readiness_reasons(*, liquidity_available: bool) -> list[str]:
     reasons = list(DEFAULT_INVESTMENT_READINESS_REASONS)
     if liquidity_available:
@@ -546,7 +650,7 @@ def _entry_investment_readiness_reasons(*, liquidity_available: bool) -> list[st
     return reasons
 
 
-def _normalize_signal_basis(candidate: dict[str, Any]) -> str:
+def _normalize_signal_basis(candidate: Mapping[str, Any]) -> str:
     return str(candidate.get("signal_price_basis") or "").strip().lower()
 
 
@@ -555,6 +659,13 @@ def _normalize_trigger_basis(candidate: dict[str, Any]) -> str:
     if primary:
         return primary
     return _normalize_signal_basis(candidate)
+
+
+def _normalize_risk_price_basis(candidate: Mapping[str, Any]) -> str:
+    primary = str(candidate.get("risk_price_basis") or "").strip().lower()
+    if primary:
+        return primary
+    return str(candidate.get("signal_price_basis") or "").strip().lower()
 
 
 def _resolve_signal_close(
@@ -617,7 +728,7 @@ def _extract_gap_guard(
     return pct, up, down
 
 
-def _extract_adjusted_signal_close(candidate: dict[str, Any]) -> float | None:
+def _extract_adjusted_signal_close(candidate: Mapping[str, Any]) -> float | None:
     close_value = _to_positive_price(candidate.get("signal_close_adjusted_value"))
     if close_value is not None:
         return close_value
@@ -912,6 +1023,11 @@ def _evaluate_entry_candidate(
     liquidity_exit_capacity, liquidity_warnings, liquidity_available = (
         _resolve_liquidity_exit_capacity(candidate)
     )
+    downside_risk = _resolve_downside_risk(
+        candidate,
+        entry_price=entry_price,
+        signal_close=signal_close,
+    )
 
     row = EntryReportRow(
         ticker=ticker,
@@ -937,6 +1053,7 @@ def _evaluate_entry_candidate(
         ),
         liquidity_exit_capacity=liquidity_exit_capacity,
         liquidity_warnings=liquidity_warnings,
+        downside_risk=downside_risk,
         portfolio_exposure_buckets=_portfolio_exposure_buckets_from_candidate(
             ticker,
             candidate,
