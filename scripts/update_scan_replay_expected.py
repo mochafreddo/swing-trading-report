@@ -20,7 +20,14 @@ from tests.helpers.replay_eod import (
     run_scan_replay_case,
 )
 
-_DEFAULT_REPLAY_ROOT = Path("tests/fixtures/replay_eod/scan")
+_DEFAULT_REPLAY_ROOT = ROOT / "tests/fixtures/replay_eod/scan"
+_REQUIRED_REPLAY_INPUT_FILES = (
+    "case.yaml",
+    "config.yaml",
+    "watchlist.txt",
+    "adjusted_market_data.json",
+    "raw_market_data.json",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -36,10 +43,36 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _validate_case_dir(path: Path) -> Path:
+    resolved = path.resolve()
+    replay_root = _DEFAULT_REPLAY_ROOT.resolve()
+    try:
+        resolved.relative_to(replay_root)
+    except ValueError as exc:
+        raise ReplayScanCaseError(
+            f"replay case path must be under '{replay_root}': {path}"
+        ) from exc
+    if not resolved.is_dir():
+        raise ReplayScanCaseError(f"replay case path is not a directory: {path}")
+
+    missing_inputs = [
+        name for name in _REQUIRED_REPLAY_INPUT_FILES if not (resolved / name).is_file()
+    ]
+    if missing_inputs:
+        raise ReplayScanCaseError(
+            "replay case path is missing required input files before refresh: "
+            f"{', '.join(missing_inputs)} ({resolved})"
+        )
+    return resolved
+
+
 def _resolve_case_dirs(paths: list[Path]) -> list[Path]:
     if paths:
-        return [path for path in paths if path.is_dir()]
-    return iter_scan_replay_case_dirs(_DEFAULT_REPLAY_ROOT)
+        return [_validate_case_dir(path) for path in paths]
+    return [
+        _validate_case_dir(path)
+        for path in iter_scan_replay_case_dirs(_DEFAULT_REPLAY_ROOT)
+    ]
 
 
 def _ensure_expected_placeholder(case_dir: Path) -> None:
