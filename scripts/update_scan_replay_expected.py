@@ -106,11 +106,15 @@ def _refresh_case(case_dir: Path) -> None:
 
 
 def main() -> int:
-    case_dirs = _resolve_case_dirs(_parse_args().paths)
-    if not case_dirs:
-        raise ReplayScanCaseError("no replay case directories found")
-    for case_dir in case_dirs:
-        _refresh_case(case_dir)
+    try:
+        case_dirs = _resolve_case_dirs(_parse_args().paths)
+        if not case_dirs:
+            raise ReplayScanCaseError("no replay case directories found")
+        for case_dir in case_dirs:
+            _refresh_case(case_dir)
+    except ReplayScanCaseError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
