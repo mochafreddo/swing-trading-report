@@ -1,0 +1,11 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR ema_cross baseline preserves legacy scan artifact contract"
+market: KR
+strategy_mode: ema_cross
+regime: not_applicable
+pattern: ema_cross
+relative_strength: unavailable
+volatility: not_applicable
+expected_outcome: candidate_present
+threshold_axes:
+  - relative_strength

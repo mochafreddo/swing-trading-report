@@ -1,0 +1,14 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR hybrid quality ordering keeps aligned A before tight-stop B"
+market: KR
+strategy_mode: sma_ema_hybrid
+regime: rising
+pattern: swing_high_breakout
+relative_strength: strong
+volatility: high
+expected_outcome: candidate_quality_b
+threshold_axes:
+  - consolidation
+  - volume_confirmation
+  - relative_strength
+  - stop_alignment

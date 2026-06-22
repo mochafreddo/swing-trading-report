@@ -9,9 +9,11 @@ from typing import Any, cast
 import pytest
 import sab.config as sab_config
 import sab.scan as scan
+import yaml  # type: ignore[import-untyped]
 from sab.tickers import infer_currency_from_ticker
 
 SCAN_REPLAY_REQUIRED_FILES = (
+    "case.yaml",
     "config.yaml",
     "watchlist.txt",
     "adjusted_market_data.json",
@@ -43,6 +45,64 @@ class ReplayScanCaseError(ValueError):
     """Raised when a replay fixture case violates the local contract."""
 
 
+_REPLAY_CASE_SCHEMA = "sab.replay.scan-case.v1"
+_REPLAY_CASE_MARKETS = frozenset({"KR", "US", "MIXED"})
+_REPLAY_CASE_STRATEGY_MODES = frozenset({"ema_cross", "sma_ema_hybrid"})
+_REPLAY_CASE_REGIMES = frozenset({"rising", "sideways", "falling", "not_applicable"})
+_REPLAY_CASE_PATTERNS = frozenset(
+    {
+        "trend_pullback_bounce",
+        "swing_high_breakout",
+        "rsi_oversold_reversal",
+        "ema_cross",
+        "none",
+    }
+)
+_REPLAY_CASE_RELATIVE_STRENGTH = frozenset(
+    {"strong", "weak", "unavailable", "not_applicable"}
+)
+_REPLAY_CASE_VOLATILITY = frozenset({"normal", "high", "unknown", "not_applicable"})
+_REPLAY_CASE_EXPECTED_OUTCOMES = frozenset(
+    {
+        "candidate_quality_a",
+        "candidate_quality_b",
+        "candidate_quality_c",
+        "candidate_present",
+        "rejected_by_gap",
+        "blocked_by_market_regime",
+        "no_candidate",
+    }
+)
+_REPLAY_CASE_THRESHOLD_AXES = frozenset(
+    {
+        "rsi",
+        "consolidation",
+        "gap",
+        "stop_alignment",
+        "profit_target",
+        "volume_confirmation",
+        "relative_strength",
+        "market_regime",
+        "entry_state",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ReplayScanCaseMetadata:
+    case_dir: Path
+    name: str
+    purpose: str
+    market: str
+    strategy_mode: str
+    regime: str
+    pattern: str
+    relative_strength: str
+    volatility: str
+    expected_outcome: str
+    threshold_axes: frozenset[str]
+
+
 @dataclass(frozen=True)
 class ReplayScanResult:
     case_dir: Path
@@ -55,6 +115,78 @@ class ReplayScanResult:
 
 def iter_scan_replay_case_dirs(root: Path) -> list[Path]:
     return sorted(path for path in root.iterdir() if path.is_dir())
+
+
+def _load_case_yaml(path: Path) -> dict[str, Any]:
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ReplayScanCaseError(
+            f"failed to load replay case metadata '{path}': {exc}"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise ReplayScanCaseError(f"replay case metadata '{path}' must be a mapping")
+    return cast(dict[str, Any], loaded)
+
+
+def _metadata_error(case_dir: Path, field: str, message: str) -> ReplayScanCaseError:
+    return ReplayScanCaseError(
+        f"invalid replay case metadata {field}: {message} ({case_dir})"
+    )
+
+
+def _require_str(
+    payload: dict[str, Any],
+    *,
+    case_dir: Path,
+    field: str,
+) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise _metadata_error(case_dir, field, "must be a non-empty string")
+    return value.strip()
+
+
+def _require_choice(
+    payload: dict[str, Any],
+    *,
+    case_dir: Path,
+    field: str,
+    allowed: frozenset[str],
+) -> str:
+    value = _require_str(payload, case_dir=case_dir, field=field)
+    if value not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        raise _metadata_error(case_dir, field, f"must be one of: {allowed_text}")
+    return value
+
+
+def _require_threshold_axes(
+    payload: dict[str, Any],
+    *,
+    case_dir: Path,
+) -> frozenset[str]:
+    value = payload.get("threshold_axes")
+    if not isinstance(value, list) or not value:
+        raise _metadata_error(case_dir, "threshold_axes", "must be a non-empty list")
+    axes: set[str] = set()
+    for index, raw_axis in enumerate(value):
+        if not isinstance(raw_axis, str) or not raw_axis.strip():
+            raise _metadata_error(
+                case_dir,
+                "threshold_axes",
+                f"item {index} must be a non-empty string",
+            )
+        axis = raw_axis.strip()
+        if axis not in _REPLAY_CASE_THRESHOLD_AXES:
+            allowed_text = ", ".join(sorted(_REPLAY_CASE_THRESHOLD_AXES))
+            raise _metadata_error(
+                case_dir,
+                "threshold_axes",
+                f"item {index} must be one of: {allowed_text}",
+            )
+        axes.add(axis)
+    return frozenset(sorted(axes))
 
 
 def validate_scan_replay_case_dir(case_dir: Path) -> None:
@@ -133,6 +265,68 @@ def normalize_scan_artifact(payload: dict[str, Any]) -> dict[str, Any]:
         dict[str, Any],
         json.loads(json.dumps(normalized, ensure_ascii=False)),
     )
+
+
+def load_scan_replay_case_metadata(case_dir: Path) -> ReplayScanCaseMetadata:
+    payload = _load_case_yaml(case_dir / "case.yaml")
+    schema = _require_str(payload, case_dir=case_dir, field="schema")
+    if schema != _REPLAY_CASE_SCHEMA:
+        raise _metadata_error(case_dir, "schema", f"must be {_REPLAY_CASE_SCHEMA}")
+    return ReplayScanCaseMetadata(
+        case_dir=case_dir,
+        name=case_dir.name,
+        purpose=_require_str(payload, case_dir=case_dir, field="purpose"),
+        market=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="market",
+            allowed=_REPLAY_CASE_MARKETS,
+        ),
+        strategy_mode=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="strategy_mode",
+            allowed=_REPLAY_CASE_STRATEGY_MODES,
+        ),
+        regime=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="regime",
+            allowed=_REPLAY_CASE_REGIMES,
+        ),
+        pattern=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="pattern",
+            allowed=_REPLAY_CASE_PATTERNS,
+        ),
+        relative_strength=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="relative_strength",
+            allowed=_REPLAY_CASE_RELATIVE_STRENGTH,
+        ),
+        volatility=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="volatility",
+            allowed=_REPLAY_CASE_VOLATILITY,
+        ),
+        expected_outcome=_require_choice(
+            payload,
+            case_dir=case_dir,
+            field="expected_outcome",
+            allowed=_REPLAY_CASE_EXPECTED_OUTCOMES,
+        ),
+        threshold_axes=_require_threshold_axes(payload, case_dir=case_dir),
+    )
+
+
+def load_scan_replay_case_metadatas(root: Path) -> list[ReplayScanCaseMetadata]:
+    return [
+        load_scan_replay_case_metadata(case_dir)
+        for case_dir in iter_scan_replay_case_dirs(root)
+    ]
 
 
 def _normalize_date_key(value: object | None) -> str | None:

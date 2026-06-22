@@ -7,6 +7,7 @@ import pytest
 from tests.helpers.replay_eod import (
     ReplayScanCaseError,
     iter_scan_replay_case_dirs,
+    load_scan_replay_case_metadata,
     normalize_scan_artifact,
     run_scan_replay_case,
     validate_scan_replay_case_dir,
@@ -156,6 +157,130 @@ def test_scan_replay_hybrid_report_preserves_quality_fields_and_order(
         candidates[0]["avg_dollar_volume_value"]
         < candidates[1]["avg_dollar_volume_value"]
     )
+
+
+def test_load_scan_replay_case_metadata_parses_valid_case(tmp_path: Path) -> None:
+    case_dir = tmp_path / "valid"
+    case_dir.mkdir()
+    (case_dir / "case.yaml").write_text(
+        "\n".join(
+            [
+                "schema: sab.replay.scan-case.v1",
+                'purpose: "strong US breakout candidate with quality A"',
+                "market: US",
+                "strategy_mode: sma_ema_hybrid",
+                "regime: rising",
+                "pattern: swing_high_breakout",
+                "relative_strength: strong",
+                "volatility: normal",
+                "expected_outcome: candidate_quality_a",
+                "threshold_axes:",
+                "  - consolidation",
+                "  - volume_confirmation",
+                "  - relative_strength",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    metadata = load_scan_replay_case_metadata(case_dir)
+
+    assert metadata.case_dir == case_dir
+    assert metadata.name == "valid"
+    assert metadata.market == "US"
+    assert metadata.strategy_mode == "sma_ema_hybrid"
+    assert metadata.regime == "rising"
+    assert metadata.pattern == "swing_high_breakout"
+    assert metadata.relative_strength == "strong"
+    assert metadata.volatility == "normal"
+    assert metadata.expected_outcome == "candidate_quality_a"
+    assert metadata.threshold_axes == frozenset(
+        {"consolidation", "volume_confirmation", "relative_strength"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema", "wrong.schema"),
+        ("market", "JP"),
+        ("strategy_mode", "hybrid"),
+        ("regime", "bull"),
+        ("pattern", "cup_handle"),
+        ("relative_strength", "medium"),
+        ("volatility", "medium"),
+        ("expected_outcome", "maybe_candidate"),
+    ],
+)
+def test_load_scan_replay_case_metadata_rejects_invalid_choices(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    payload = {
+        "schema": "sab.replay.scan-case.v1",
+        "purpose": "invalid field check",
+        "market": "KR",
+        "strategy_mode": "sma_ema_hybrid",
+        "regime": "rising",
+        "pattern": "trend_pullback_bounce",
+        "relative_strength": "strong",
+        "volatility": "normal",
+        "expected_outcome": "candidate_quality_a",
+        "threshold_axes": ["rsi"],
+    }
+    payload[field] = value
+    case_dir = tmp_path / "invalid"
+    case_dir.mkdir()
+    yaml_text = "\n".join(
+        [
+            f"schema: {payload['schema']}",
+            f"purpose: {payload['purpose']!r}",
+            f"market: {payload['market']}",
+            f"strategy_mode: {payload['strategy_mode']}",
+            f"regime: {payload['regime']}",
+            f"pattern: {payload['pattern']}",
+            f"relative_strength: {payload['relative_strength']}",
+            f"volatility: {payload['volatility']}",
+            f"expected_outcome: {payload['expected_outcome']}",
+            "threshold_axes:",
+            *[f"  - {axis}" for axis in payload["threshold_axes"]],
+            "",
+        ]
+    )
+    (case_dir / "case.yaml").write_text(yaml_text, encoding="utf-8")
+
+    with pytest.raises(ReplayScanCaseError, match=field):
+        load_scan_replay_case_metadata(case_dir)
+
+
+def test_load_scan_replay_case_metadata_rejects_empty_threshold_axes(
+    tmp_path: Path,
+) -> None:
+    case_dir = tmp_path / "empty_axes"
+    case_dir.mkdir()
+    (case_dir / "case.yaml").write_text(
+        "\n".join(
+            [
+                "schema: sab.replay.scan-case.v1",
+                'purpose: "empty axes check"',
+                "market: KR",
+                "strategy_mode: sma_ema_hybrid",
+                "regime: rising",
+                "pattern: trend_pullback_bounce",
+                "relative_strength: strong",
+                "volatility: normal",
+                "expected_outcome: candidate_quality_a",
+                "threshold_axes: []",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReplayScanCaseError, match="threshold_axes"):
+        load_scan_replay_case_metadata(case_dir)
 
 
 def test_normalize_scan_artifact_drops_volatile_meta_and_preserves_candidate_order() -> (
