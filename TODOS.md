@@ -8,6 +8,12 @@
 
 ## Deferred
 
+- 2026-06-22: Design and implement a historical swing backtest runner for
+  profitability and parameter-sensitivity research, covering data source,
+  sample period, universe, benchmark/regime alignment, survivorship assumptions,
+  EOD entry timing, stop/target approximation, transaction costs, slippage, and
+  output metrics. The 2026-06-22 replay matrix intentionally covers
+  deterministic rule semantics only.
 - 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
   console pages after admin credentials or browser cookies are available. The
   2026-06-20 pass fixed the unauthenticated login surface, but reports,
