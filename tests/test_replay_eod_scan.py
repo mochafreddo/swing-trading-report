@@ -8,6 +8,7 @@ from tests.helpers.replay_eod import (
     ReplayScanCaseError,
     iter_scan_replay_case_dirs,
     load_scan_replay_case_metadata,
+    load_scan_replay_case_metadatas,
     normalize_scan_artifact,
     run_scan_replay_case,
     validate_scan_replay_case_dir,
@@ -15,6 +16,27 @@ from tests.helpers.replay_eod import (
 
 _SCAN_REPLAY_ROOT = Path(__file__).parent / "fixtures" / "replay_eod" / "scan"
 _SCAN_REPLAY_CASES = iter_scan_replay_case_dirs(_SCAN_REPLAY_ROOT)
+_REQUIRED_REPLAY_MARKETS = {"KR", "US"}
+_REQUIRED_REPLAY_REGIMES = {"rising", "sideways", "falling"}
+_REQUIRED_REPLAY_PATTERNS = {
+    "trend_pullback_bounce",
+    "swing_high_breakout",
+    "rsi_oversold_reversal",
+}
+_REQUIRED_REPLAY_OUTCOMES = {
+    "candidate_quality_a",
+    "candidate_quality_b",
+    "rejected_by_gap",
+    "blocked_by_market_regime",
+}
+_REQUIRED_REPLAY_THRESHOLD_AXES = {
+    "rsi",
+    "consolidation",
+    "gap",
+    "stop_alignment",
+    "profit_target",
+    "volume_confirmation",
+}
 
 
 def _build_hybrid_replay_config(
@@ -157,6 +179,26 @@ def test_scan_replay_hybrid_report_preserves_quality_fields_and_order(
         candidates[0]["avg_dollar_volume_value"]
         < candidates[1]["avg_dollar_volume_value"]
     )
+
+
+def test_scan_replay_metadata_covers_active_swing_threshold_matrix() -> None:
+    metadata = load_scan_replay_case_metadatas(_SCAN_REPLAY_ROOT)
+
+    markets = {case.market for case in metadata}
+    regimes = {case.regime for case in metadata}
+    patterns = {case.pattern for case in metadata}
+    relative_strengths = {case.relative_strength for case in metadata}
+    volatility_states = {case.volatility for case in metadata}
+    outcomes = {case.expected_outcome for case in metadata}
+    threshold_axes = set().union(*(case.threshold_axes for case in metadata))
+
+    assert markets >= _REQUIRED_REPLAY_MARKETS
+    assert regimes >= _REQUIRED_REPLAY_REGIMES
+    assert patterns >= _REQUIRED_REPLAY_PATTERNS
+    assert {"strong", "weak"} <= relative_strengths
+    assert {"normal", "high"} <= volatility_states
+    assert outcomes >= _REQUIRED_REPLAY_OUTCOMES
+    assert threshold_axes >= _REQUIRED_REPLAY_THRESHOLD_AXES
 
 
 def test_load_scan_replay_case_metadata_parses_valid_case(tmp_path: Path) -> None:
