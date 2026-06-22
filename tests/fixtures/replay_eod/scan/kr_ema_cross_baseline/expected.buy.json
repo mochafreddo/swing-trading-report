@@ -10,7 +10,6 @@
     "use_sma200_filter": false,
     "use_market_regime_filter": false,
     "market_regime_unavailable_policy": "block_market",
-    "require_slope_up": false,
     "gap_atr_multiplier": 1.0,
     "min_history_bars": 30,
     "rs_lookback_days": 5,
@@ -23,7 +22,8 @@
     "exclude_etf_etn": false,
     "universe_markets": [
       "KR"
-    ]
+    ],
+    "require_slope_up": false
   },
   "summary": {
     "universe_count": 3,
