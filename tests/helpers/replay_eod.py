@@ -436,10 +436,24 @@ def run_scan_replay_case(
     fixture_service = FixtureBackedScanMarketData(raw_market_data)
 
     def _collect_scan_runtime(runtime: Any, **_: Any) -> FixtureBackedScanMarketData:
-        runtime.market_data = _deep_copy_json_compatible(adjusted_market_data)
+        runtime_tickers = {
+            str(ticker or "").strip().upper()
+            for ticker in runtime.tickers
+            if str(ticker or "").strip()
+        }
+        runtime_adjusted_market_data = {
+            ticker: _deep_copy_json_compatible(rows)
+            for ticker, rows in adjusted_market_data.items()
+            if ticker in runtime_tickers
+        }
+        runtime.market_data = runtime_adjusted_market_data
         runtime.raw_market_data = {}
-        runtime.ticker_data_source = dict.fromkeys(adjusted_market_data, "fixture")
-        runtime.latest_dates = _latest_dates_from_market_data(adjusted_market_data)
+        runtime.ticker_data_source = dict.fromkeys(
+            runtime_adjusted_market_data, "fixture"
+        )
+        runtime.latest_dates = _latest_dates_from_market_data(
+            runtime_adjusted_market_data
+        )
         runtime.ticker_currency = {
             ticker: infer_currency_from_ticker(ticker) for ticker in runtime.tickers
         }

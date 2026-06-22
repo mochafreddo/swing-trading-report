@@ -95,6 +95,10 @@ def _refresh_case(case_dir: Path) -> None:
         monkeypatch.undo()
 
     expected_path = case_dir / "expected.buy.json"
+    if result.exit_code != 0:
+        raise ReplayScanCaseError(
+            f"replay case failed with exit code {result.exit_code}: {case_dir}"
+        )
     expected_path.write_text(
         json.dumps(result.normalized_actual, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

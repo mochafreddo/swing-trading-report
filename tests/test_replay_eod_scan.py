@@ -9,6 +9,7 @@ import pytest
 from tests.helpers.replay_eod import (
     ReplayScanCaseError,
     iter_scan_replay_case_dirs,
+    load_expected_scan_artifact,
     load_scan_replay_case_metadata,
     load_scan_replay_case_metadatas,
     normalize_scan_artifact,
@@ -240,6 +241,61 @@ def test_scan_replay_metadata_covers_active_swing_threshold_matrix() -> None:
     assert {"normal", "high"} <= volatility_states
     assert outcomes >= _REQUIRED_REPLAY_OUTCOMES
     assert threshold_axes >= _REQUIRED_REPLAY_THRESHOLD_AXES
+
+
+@pytest.mark.parametrize("case_dir", _SCAN_REPLAY_CASES, ids=lambda path: path.name)
+def test_scan_replay_metadata_matches_expected_artifact(case_dir: Path) -> None:
+    metadata = load_scan_replay_case_metadata(case_dir)
+    expected = load_expected_scan_artifact(case_dir / "expected.buy.json")
+    candidates = expected.get("candidates") or []
+
+    assert expected["config_snapshot"]["strategy_mode"] == metadata.strategy_mode
+
+    if candidates and metadata.pattern != "none":
+        candidate_patterns = {
+            candidate.get("pattern")
+            for candidate in candidates
+            if candidate.get("pattern")
+        }
+        if candidate_patterns:
+            assert metadata.pattern in candidate_patterns
+
+    if metadata.expected_outcome.startswith("candidate_quality_"):
+        expected_quality = metadata.expected_outcome.removeprefix(
+            "candidate_quality_"
+        ).upper()
+        candidate_qualities = {
+            candidate.get("quality_state") for candidate in candidates
+        }
+        assert expected_quality in candidate_qualities
+
+    if metadata.expected_outcome == "rejected_by_gap":
+        assert not candidates
+        assert any("Gap " in message for message in expected["screen_outs"])
+
+    if metadata.expected_outcome == "blocked_by_market_regime":
+        assert not candidates
+        assert any(
+            "Market regime filter blocked" in message
+            for message in expected["screen_outs"]
+        )
+
+
+def test_scan_replay_report_coverage_excludes_fixture_only_benchmark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = run_scan_replay_case(
+        _SCAN_REPLAY_ROOT / "kr_hybrid_falling_regime_blocked",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    summary = result.normalized_actual["summary"]
+    assert result.exit_code == 0
+    assert summary["data_requested_count"] == 1
+    assert summary["data_covered_count"] == 1
+    assert summary["data_coverage_ratio"] == 1.0
 
 
 def test_load_scan_replay_case_metadata_parses_valid_case(tmp_path: Path) -> None:
