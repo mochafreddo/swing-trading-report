@@ -2,7 +2,6 @@
 
 ## Active
 
-- 2026-06-18: Validate whether `sma_ema_hybrid` quality `A` should require an additional individual-stock medium/long trend filter, such as SMA60 or SMA200, before changing the default. Current defaults rely on market regime, SMA20/EMA10/21, RSI, RS, and risk alignment.
 - 2026-06-18: Review pullback/reversal volume confirmation semantics. Breakout volume uses the pre-breakout average, while pullback/reversal paths include the signal candle in the average; either normalize to pre-signal averages or document and test the intentional difference.
 - 2026-06-18: Consider environment overrides for `portfolio.max_new_entries_per_market.KR/US`, or document a local-config workflow for temporarily tightening market entry caps during risk-off regimes. `PORTFOLIO_MAX_ACTIVE_HOLDINGS` is env-bound, but per-market new-entry caps are currently YAML-only.
 
@@ -43,6 +42,7 @@
 
 ## Completed
 
+- 2026-06-22: Validated the `sma_ema_hybrid` quality `A` medium/long trend-filter question and kept the default unchanged. `quality_state=A` remains READY + positive relative strength + aligned risk rather than requiring SMA60/SMA200 by default; operators who want a stricter local stance should enable the existing `HYBRID_USE_SMA60_FILTER=true` hard filter, while SMA60/SMA200 default quality changes remain dependent on historical backtest/parameter-sensitivity evidence.
 - 2026-06-22: Expanded deterministic scan replay coverage with case metadata and a KR/US swing-threshold matrix covering rising/sideways/falling regimes, high-volatility tight-stop warnings, strong/weak relative strength, gap rejection, market-regime blocking, and major hybrid patterns. This validates rule semantics and report regression behavior, not parameter profitability.
 - 2026-06-22: Restored the Next.js 16 page auth gate through `web/src/proxy.ts`, keeping protected pages behind `/login?next=...` before render and adding regression coverage for unauthenticated `/reports` redirects.
 - 2026-06-22: Cleaned up replay expected-artifact updater failures so invalid case paths exit with a concise stderr error instead of a full traceback, with subprocess regression coverage.
