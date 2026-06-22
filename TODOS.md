@@ -2,7 +2,6 @@
 
 ## Active
 
-- 2026-06-18: Expand replay/backtest coverage for active swing thresholds across KR/US, rising/sideways/falling regimes, high-volatility names, and weak/strong relative-strength cases. Current replay coverage is too small to justify the RSI, consolidation, gap, stop, and profit target thresholds as trading parameters.
 - 2026-06-18: Validate whether `sma_ema_hybrid` quality `A` should require an additional individual-stock medium/long trend filter, such as SMA60 or SMA200, before changing the default. Current defaults rely on market regime, SMA20/EMA10/21, RSI, RS, and risk alignment.
 - 2026-06-18: Review pullback/reversal volume confirmation semantics. Breakout volume uses the pre-breakout average, while pullback/reversal paths include the signal candle in the average; either normalize to pre-signal averages or document and test the intentional difference.
 - 2026-06-18: Consider environment overrides for `portfolio.max_new_entries_per_market.KR/US`, or document a local-config workflow for temporarily tightening market entry caps during risk-off regimes. `PORTFOLIO_MAX_ACTIVE_HOLDINGS` is env-bound, but per-market new-entry caps are currently YAML-only.
@@ -38,6 +37,7 @@
 
 ## Completed
 
+- 2026-06-22: Expanded deterministic scan replay coverage with case metadata and a KR/US swing-threshold matrix covering rising/sideways/falling regimes, high-volatility tight-stop warnings, strong/weak relative strength, gap rejection, market-regime blocking, and major hybrid patterns. This validates rule semantics and report regression behavior, not parameter profitability.
 - 2026-06-21: Separated AI Brief candidate roles into `executable`, `blocked_but_valid`, `watch_only`, and `excluded`. Artifacts now keep legacy `recommendable_count` as the executable+blocked aggregate while adding role-specific counts/ticker arrays, provider recommendations preserve `candidate_role`/`entry_action`/`candidate_role_reason`, and Telegram/Slack/web copy shows execution-ready and blocked/manual-review candidates separately.
 - 2026-06-21: Made stop/target reporting explicit as decision guidance rather than execution guarantees or account-loss limits. Buy/sell reports now emit `risk_disclosure`, scan/sell Telegram text and web report views show gap/slippage caveats, buy candidates emit structured `risk_stop_price_value`/`risk_target_price_value`, and entry rows emit `downside_risk` with amount plus portfolio percent/bps when position size and portfolio value are available.
 - 2026-06-21: Added portfolio exposure controls beyond count-based entry caps. `portfolio.exposure_limits[]` now supports currency, sector, theme, beta bucket, correlation bucket, and tag bucket caps across existing active holdings plus newly accepted entry rows; entry reports emit `portfolio_exposure_buckets`, exposure cap blocks are counted in `summary.portfolio_blocked_by_exposure`, AI Brief preserves the buckets, web report detail shows an `Exposure` column, and docs describe the holdings tag-prefix convention.

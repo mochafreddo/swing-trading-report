@@ -17,6 +17,20 @@
 
 - 별도 experimental 전략 계약은 두지 않습니다. 파라미터 튜닝은 설정과 replay fixture에서 검증합니다.
 
+### Replay coverage vs historical backtesting
+
+`tests/fixtures/replay_eod/scan/*` contains deterministic scan replay fixtures
+for active threshold behavior. These fixtures protect implementation semantics:
+market/regime gating, RSI zones, consolidation windows, gap rejection,
+volume confirmation, relative-strength quality, volatility-vs-stop alignment,
+and report artifact shape.
+
+Replay fixtures are not profitability evidence. They do not estimate win rate,
+expected value, MFE/MAE, stop/target hit-rate, slippage, transaction cost, or
+survivorship effects. Those claims require a separate historical backtest runner
+with explicit data-source, universe, entry-timing, benchmark, and execution
+assumptions.
+
 ### 백로그
 
 - 현재 없음.
