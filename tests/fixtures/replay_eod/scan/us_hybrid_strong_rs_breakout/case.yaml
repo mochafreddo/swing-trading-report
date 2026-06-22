@@ -1,0 +1,14 @@
+schema: sab.replay.scan-case.v1
+purpose: "US strong relative-strength breakout produces quality A"
+market: US
+strategy_mode: sma_ema_hybrid
+regime: rising
+pattern: swing_high_breakout
+relative_strength: strong
+volatility: normal
+expected_outcome: candidate_quality_a
+threshold_axes:
+  - consolidation
+  - volume_confirmation
+  - relative_strength
+  - profit_target

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
+import sab.scan as scan
 
 from tests.helpers.replay_eod import (
     ReplayScanCaseError,
@@ -37,6 +39,40 @@ _REQUIRED_REPLAY_THRESHOLD_AXES = {
     "profit_target",
     "volume_confirmation",
 }
+
+
+@pytest.fixture(autouse=True)
+def _prefer_fixture_backed_benchmark_candles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = scan.scan_evaluation._resolve_adjusted_benchmark_candles
+
+    def _resolve_from_replay_fixture(
+        runtime: Any,
+        *,
+        ticker: str,
+        market: str,
+        count: int,
+        unavailable_label: str = "RS benchmark",
+        market_date_key: str | None = None,
+    ) -> tuple[list[dict[str, object]] | None, str | None]:
+        rows = getattr(runtime, "market_data", {}).get(ticker)
+        if isinstance(rows, list) and rows:
+            return rows[-count:], None
+        return original(
+            runtime,
+            ticker=ticker,
+            market=market,
+            count=count,
+            unavailable_label=unavailable_label,
+            market_date_key=market_date_key,
+        )
+
+    monkeypatch.setattr(
+        scan.scan_evaluation,
+        "_resolve_adjusted_benchmark_candles",
+        _resolve_from_replay_fixture,
+    )
 
 
 def _build_hybrid_replay_config(

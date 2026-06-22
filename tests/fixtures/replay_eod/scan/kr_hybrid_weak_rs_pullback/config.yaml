@@ -1,0 +1,43 @@
+data:
+  provider: pykrx
+  report_dir: reports
+  data_dir: data
+files:
+  watchlist: watchlist.txt
+universe:
+  markets:
+    - KR
+strategy:
+  mode: sma_ema_hybrid
+  min_history_bars: 30
+  gap_atr_multiplier: 1.0
+  use_sma200_filter: false
+  use_market_regime_filter: false
+  require_slope_up: false
+  rs_lookback_days: 5
+  rs_benchmark_return: 0.20
+  hybrid:
+    sma_trend_period: 20
+    ema_short_period: 10
+    ema_mid_period: 21
+    rsi_period: 14
+    rsi_zone_low: 40
+    rsi_zone_high: 70
+    rsi_oversold_low: 25
+    rsi_oversold_high: 40
+    pullback_max_bars: 7
+    breakout_consolidation_min_bars: 4
+    breakout_consolidation_max_bars: 12
+    breakout_consolidation_max_range_pct: 0.10
+    volume_lookback_days: 3
+    max_gap_pct: 0.08
+    use_sma60_filter: false
+    sma60_period: 55
+    kr_breakout_requires_confirmation: false
+screener:
+  enabled: false
+  min_price: 0
+  min_dollar_volume: 0
+sell:
+  hybrid:
+    stop_loss_pct_max: 0.05

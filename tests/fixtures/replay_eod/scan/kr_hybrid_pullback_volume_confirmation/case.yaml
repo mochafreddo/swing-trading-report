@@ -1,0 +1,13 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR pullback bounce uses volume confirmation"
+market: KR
+strategy_mode: sma_ema_hybrid
+regime: rising
+pattern: trend_pullback_bounce
+relative_strength: strong
+volatility: normal
+expected_outcome: candidate_quality_a
+threshold_axes:
+  - rsi
+  - volume_confirmation
+  - profit_target

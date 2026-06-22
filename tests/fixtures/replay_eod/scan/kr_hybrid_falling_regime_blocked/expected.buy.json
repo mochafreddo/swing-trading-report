@@ -1,0 +1,76 @@
+{
+  "report_date": "2024-01-30",
+  "eval_context": {
+    "market": "KR",
+    "session_state": "AFTER_CLOSE",
+    "eval_index_policy": "choose_eval_index:v1"
+  },
+  "config_snapshot": {
+    "strategy_mode": "sma_ema_hybrid",
+    "use_sma200_filter": false,
+    "use_market_regime_filter": true,
+    "market_regime_unavailable_policy": "block_market",
+    "gap_atr_multiplier": 1.0,
+    "min_history_bars": 30,
+    "rs_lookback_days": 5,
+    "rs_benchmark_ticker_kr": "069500",
+    "rs_benchmark_ticker_us": null,
+    "min_price": 0.0,
+    "us_min_price": null,
+    "min_dollar_volume": 0.0,
+    "us_min_dollar_volume": null,
+    "exclude_etf_etn": false,
+    "universe_markets": [
+      "KR"
+    ],
+    "rs_benchmark_return": 0.02,
+    "hybrid": {
+      "sma_trend_period": 20,
+      "ema_short_period": 10,
+      "ema_mid_period": 21,
+      "rsi_period": 14,
+      "rsi_zone_low": 40.0,
+      "rsi_zone_high": 70.0,
+      "rsi_oversold_low": 25.0,
+      "rsi_oversold_high": 40.0,
+      "pullback_max_bars": 7,
+      "breakout_consolidation_min_bars": 4,
+      "breakout_consolidation_max_bars": 12,
+      "breakout_consolidation_max_range_pct": 0.1,
+      "volume_lookback_days": 3,
+      "max_gap_pct": 0.08,
+      "use_sma60_filter": false,
+      "sma60_period": 55,
+      "kr_breakout_requires_confirmation": false
+    }
+  },
+  "summary": {
+    "universe_count": 1,
+    "candidate_count": 0,
+    "issue_count": 1,
+    "system_issue_count": 0,
+    "screen_out_count": 1,
+    "data_requested_count": 1,
+    "data_covered_count": 2,
+    "data_missing_count": 0,
+    "data_coverage_ratio": 2.0,
+    "provider_fallback_count": 1,
+    "provider_fallback_ratio": 1.0,
+    "rs_benchmark_requested_count": 1,
+    "rs_benchmark_unavailable_count": 0,
+    "rs_benchmark_unavailable_ratio": 0.0,
+    "market_regime_unavailable_count": 0,
+    "market_regime_blocked_count": 0,
+    "market_regime_blocked_by_market": {},
+    "market_regime_unavailable_by_market": {}
+  },
+  "tickers": [],
+  "candidates": [],
+  "issues": [
+    "000660: Market regime filter blocked (benchmark 069500 close 200.00 <= SMA200 249.75)"
+  ],
+  "system_issues": [],
+  "screen_outs": [
+    "000660: Market regime filter blocked (benchmark 069500 close 200.00 <= SMA200 249.75)"
+  ]
+}

@@ -1,0 +1,11 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR falling benchmark blocks candidate through market regime filter"
+market: KR
+strategy_mode: sma_ema_hybrid
+regime: falling
+pattern: none
+relative_strength: not_applicable
+volatility: normal
+expected_outcome: blocked_by_market_regime
+threshold_axes:
+  - market_regime

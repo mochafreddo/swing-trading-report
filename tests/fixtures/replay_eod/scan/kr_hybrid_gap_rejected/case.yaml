@@ -1,0 +1,11 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR oversized signal-day gap is rejected"
+market: KR
+strategy_mode: sma_ema_hybrid
+regime: rising
+pattern: none
+relative_strength: strong
+volatility: high
+expected_outcome: rejected_by_gap
+threshold_axes:
+  - gap

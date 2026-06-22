@@ -1,0 +1,13 @@
+schema: sab.replay.scan-case.v1
+purpose: "KR ready pullback with weak relative strength is quality B"
+market: KR
+strategy_mode: sma_ema_hybrid
+regime: rising
+pattern: trend_pullback_bounce
+relative_strength: weak
+volatility: normal
+expected_outcome: candidate_quality_b
+threshold_axes:
+  - rsi
+  - relative_strength
+  - volume_confirmation
