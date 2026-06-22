@@ -8,7 +8,9 @@ relative_strength: strong
 volatility: high
 expected_outcome: candidate_quality_b
 threshold_axes:
-  - consolidation
+  - entry_state
+  - gap
+  - profit_target
   - volume_confirmation
   - relative_strength
   - stop_alignment

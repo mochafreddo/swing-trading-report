@@ -8,4 +8,6 @@ relative_strength: unavailable
 volatility: not_applicable
 expected_outcome: candidate_present
 threshold_axes:
-  - relative_strength
+  - gap
+  - profit_target
+  - rsi

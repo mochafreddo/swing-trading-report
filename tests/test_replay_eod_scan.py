@@ -42,6 +42,20 @@ _REQUIRED_REPLAY_THRESHOLD_AXES = {
 }
 
 
+def _copy_scan_replay_case(case_name: str, tmp_path: Path) -> Path:
+    source_case_dir = _SCAN_REPLAY_ROOT / case_name
+    case_dir = tmp_path / "source" / source_case_dir.name
+    shutil.copytree(source_case_dir, case_dir)
+    return case_dir
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _build_hybrid_replay_config(
     base_config: str,
     *,
@@ -188,20 +202,15 @@ def test_scan_replay_case_reports_missing_benchmark_from_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source_case_dir = _SCAN_REPLAY_ROOT / "kr_hybrid_falling_regime_blocked"
-    case_dir = tmp_path / "source" / source_case_dir.name
+    case_dir = _copy_scan_replay_case("kr_hybrid_falling_regime_blocked", tmp_path)
     workspace_root = tmp_path / "workspace"
-    shutil.copytree(source_case_dir, case_dir)
 
     adjusted_market_data_path = case_dir / "adjusted_market_data.json"
     adjusted_market_data = json.loads(
         adjusted_market_data_path.read_text(encoding="utf-8")
     )
     adjusted_market_data.pop("069500")
-    adjusted_market_data_path.write_text(
-        json.dumps(adjusted_market_data, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_json(adjusted_market_data_path, adjusted_market_data)
 
     result = run_scan_replay_case(
         case_dir,
@@ -223,6 +232,72 @@ def test_scan_replay_case_reports_missing_benchmark_from_fixture(
     assert result.normalized_actual["summary"]["market_regime_unavailable_count"] == 1
 
 
+def test_scan_replay_case_ignores_future_benchmark_fixture_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_dir = _copy_scan_replay_case("kr_hybrid_falling_regime_blocked", tmp_path)
+    adjusted_market_data_path = case_dir / "adjusted_market_data.json"
+    adjusted_market_data = json.loads(
+        adjusted_market_data_path.read_text(encoding="utf-8")
+    )
+    future_row = dict(adjusted_market_data["069500"][-1])
+    future_row.update(
+        {
+            "date": "20990101",
+            "open": 1000.0,
+            "high": 1000.0,
+            "low": 1000.0,
+            "close": 1000.0,
+        }
+    )
+    adjusted_market_data["069500"].append(future_row)
+    _write_json(adjusted_market_data_path, adjusted_market_data)
+
+    result = run_scan_replay_case(
+        case_dir,
+        tmp_path=tmp_path / "workspace",
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 0
+    assert result.normalized_actual["candidates"] == []
+    assert any(
+        "Market regime filter blocked" in message
+        for message in result.normalized_actual["screen_outs"]
+    )
+
+
+def test_scan_replay_case_reports_stale_benchmark_fixture_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_dir = _copy_scan_replay_case("kr_hybrid_falling_regime_blocked", tmp_path)
+    adjusted_market_data_path = case_dir / "adjusted_market_data.json"
+    adjusted_market_data = json.loads(
+        adjusted_market_data_path.read_text(encoding="utf-8")
+    )
+    for index, row in enumerate(adjusted_market_data["069500"], start=1):
+        row["date"] = f"2022{index:04d}"
+    _write_json(adjusted_market_data_path, adjusted_market_data)
+
+    result = run_scan_replay_case(
+        case_dir,
+        tmp_path=tmp_path / "workspace",
+        monkeypatch=monkeypatch,
+    )
+
+    messages = (
+        result.normalized_actual["issues"]
+        + result.normalized_actual["system_issues"]
+        + result.normalized_actual["screen_outs"]
+    )
+    assert result.exit_code == 0
+    assert result.normalized_actual["candidates"] == []
+    assert result.normalized_actual["summary"]["market_regime_unavailable_count"] == 1
+    assert any("stale benchmark candles" in message for message in messages)
+
+
 def test_scan_replay_metadata_covers_active_swing_threshold_matrix() -> None:
     metadata = load_scan_replay_case_metadatas(_SCAN_REPLAY_ROOT)
 
@@ -241,6 +316,78 @@ def test_scan_replay_metadata_covers_active_swing_threshold_matrix() -> None:
     assert {"normal", "high"} <= volatility_states
     assert outcomes >= _REQUIRED_REPLAY_OUTCOMES
     assert threshold_axes >= _REQUIRED_REPLAY_THRESHOLD_AXES
+
+
+def _artifact_threshold_axes(expected: dict[str, object]) -> set[str]:
+    axes: set[str] = set()
+    candidates = expected.get("candidates") or []
+    raw_screen_outs = expected.get("screen_outs") or []
+    raw_issues = expected.get("issues") or []
+    summary = expected.get("summary") or {}
+    if not isinstance(candidates, list):
+        return axes
+    screen_outs = raw_screen_outs if isinstance(raw_screen_outs, list) else []
+    issues = raw_issues if isinstance(raw_issues, list) else []
+
+    candidate_reasons = [
+        reason
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        for reason in (candidate.get("reasons") or [])
+        if isinstance(reason, dict)
+    ]
+    reason_ids = {
+        str(reason.get("id") or "")
+        for reason in candidate_reasons
+        if str(reason.get("id") or "")
+    }
+    candidate_patterns = {
+        str(candidate.get("pattern") or "")
+        for candidate in candidates
+        if isinstance(candidate, dict) and str(candidate.get("pattern") or "")
+    }
+    quality_reasons = {
+        str(reason)
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        for reason in (candidate.get("quality_reasons") or [])
+    }
+
+    if any("rsi" in reason_id for reason_id in reason_ids):
+        axes.add("rsi")
+    if "swing_high_breakout" in candidate_patterns:
+        axes.add("consolidation")
+    if any("Gap " in str(message) for message in screen_outs) or any(
+        reason_id in {"gap_guard_atr", "gap_within_limit"} for reason_id in reason_ids
+    ):
+        axes.add("gap")
+    if any(reason == "risk_alignment_tight_stop" for reason in quality_reasons) or any(
+        reason_id == "risk_alignment_tight_stop" for reason_id in reason_ids
+    ):
+        axes.add("stop_alignment")
+    if any(
+        isinstance(candidate, dict) and candidate.get("risk_target_price_value")
+        for candidate in candidates
+    ):
+        axes.add("profit_target")
+    if "volume_confirmation" in reason_ids:
+        axes.add("volume_confirmation")
+    if any(
+        reason.startswith("relative_strength_") for reason in quality_reasons
+    ) or any(reason_id == "rs_above_benchmark" for reason_id in reason_ids):
+        axes.add("relative_strength")
+    if any("Market regime" in str(message) for message in [*screen_outs, *issues]) or (
+        isinstance(summary, dict)
+        and (
+            summary.get("market_regime_blocked_count", 0) > 0
+            or summary.get("market_regime_unavailable_count", 0) > 0
+        )
+    ):
+        axes.add("market_regime")
+    if any(reason_id == "entry_state_ready" for reason_id in reason_ids):
+        axes.add("entry_state")
+
+    return axes
 
 
 @pytest.mark.parametrize("case_dir", _SCAN_REPLAY_CASES, ids=lambda path: path.name)
@@ -279,6 +426,8 @@ def test_scan_replay_metadata_matches_expected_artifact(case_dir: Path) -> None:
             "Market regime filter blocked" in message
             for message in expected["screen_outs"]
         )
+
+    assert metadata.threshold_axes <= _artifact_threshold_axes(expected)
 
 
 def test_scan_replay_report_coverage_excludes_fixture_only_benchmark(

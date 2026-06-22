@@ -370,7 +370,6 @@ def _resolve_fixture_backed_benchmark_candles(
         unavailable_label: str = "RS benchmark",
         market_date_key: str | None = None,
     ) -> tuple[list[dict[str, Any]] | None, str | None]:
-        del runtime, market, market_date_key
         normalized_ticker = str(ticker or "").strip().upper()
         rows = adjusted_market_data.get(normalized_ticker)
         if not rows:
@@ -378,7 +377,17 @@ def _resolve_fixture_backed_benchmark_candles(
                 None,
                 f"{normalized_ticker}: {unavailable_label} unavailable from replay fixture",
             )
-        return _deep_copy_json_compatible(rows[-count:]), None
+        normalized_rows, issue = scan.scan_evaluation._normalize_benchmark_rows(
+            runtime,
+            ticker=normalized_ticker,
+            market=market,
+            rows=_deep_copy_json_compatible(rows),
+            unavailable_label=unavailable_label,
+            market_date_key=market_date_key,
+        )
+        if normalized_rows is None:
+            return None, issue
+        return normalized_rows[-count:], None
 
     return _resolve_from_replay_fixture
 

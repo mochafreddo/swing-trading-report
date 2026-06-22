@@ -75,14 +75,13 @@ def _resolve_case_dirs(paths: list[Path]) -> list[Path]:
     ]
 
 
-def _ensure_expected_placeholder(case_dir: Path) -> None:
+def _write_expected_placeholder(case_dir: Path) -> None:
     expected_path = case_dir / "expected.buy.json"
-    if not expected_path.exists():
-        expected_path.write_text("{}\n", encoding="utf-8")
+    expected_path.write_text("{}\n", encoding="utf-8")
 
 
 def _refresh_case(case_dir: Path) -> None:
-    _ensure_expected_placeholder(case_dir)
+    _write_expected_placeholder(case_dir)
     monkeypatch = pytest.MonkeyPatch()
     try:
         with tempfile.TemporaryDirectory(prefix=f"{case_dir.name}-replay-") as tmp_dir:
