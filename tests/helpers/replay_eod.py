@@ -422,6 +422,9 @@ def run_scan_replay_case(
             if str(market).strip()
         }
 
+    def _fixed_us_market_status(**_: Any) -> str:
+        return "closed"
+
     class FixtureBackedScanMarketData:
         def __init__(self, raw_by_ticker: dict[str, list[dict[str, Any]]]) -> None:
             self._raw_by_ticker = raw_by_ticker
@@ -475,6 +478,7 @@ def run_scan_replay_case(
     monkeypatch.setattr(scan, "ScanMarketData", FixtureBackedScanMarketData)
     monkeypatch.setattr(scan, "_collect_scan_runtime", _collect_scan_runtime)
     monkeypatch.setattr(scan, "maybe_upload_report_artifact", _skip_upload)
+    monkeypatch.setattr(scan, "us_market_status", _fixed_us_market_status)
     monkeypatch.setattr(
         scan.scan_evaluation,
         "resolve_run_session_state_map",

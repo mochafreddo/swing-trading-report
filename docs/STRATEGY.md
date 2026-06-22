@@ -93,6 +93,10 @@ assumptions.
   - volume이 `null`/빈 문자열이면 **system 이슈**로 처리하고 평가에서 제외합니다.
   - volume이 non-finite(파싱 불가/NaN/inf)이면 **system 이슈**로 처리하고 평가에서 제외합니다.
   - finite `0` volume은 데이터 값으로는 허용하지만, 평가 구간의 평균 거래대금이 `0`이면 `min_dollar_volume=0`이어도 후보에서 제외합니다.
+  - volume confirmation 기준은 패턴별로 다릅니다.
+    `swing_high_breakout`은 신호봉을 제외한 직전 N일 평균 거래량을 baseline으로 쓰고,
+    `trend_pullback_bounce`와 `rsi_oversold_reversal`은 신호봉을 포함한 최근 N일
+    rolling 평균 거래량을 confirmation 기준으로 씁니다.
 - Sell(`sell_mode=generic|sma_ema_hybrid`)
   - 현재 sell 평가 로직은 volume을 직접 사용하지 않습니다.
 
@@ -296,6 +300,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
   - 허용 박스권 폭은 `strategy.hybrid.breakout_consolidation_max_range_pct`로 설정하며 기본값은 `0.10`(10%)입니다.
 - Swing high breakout의 볼륨 확인은 **돌파 신호봉을 제외한 직전 N일 평균 거래량** 대비로 평가합니다.
   - 의도: `volume > Nd avg` 해석을 신호봉 포함 평균과 분리해 룰 의미를 고정합니다.
+- Trend pullback bounce와 RSI oversold reversal의 볼륨 확인은 **신호봉을 포함한 최근 N일 평균 거래량** 대비로 평가합니다.
+  - 의도: pullback/reversal의 거래량은 돌파 전 baseline 대비 이벤트가 아니라 반등/반전 신호봉까지 포함한 최근 rolling confirmation으로 봅니다.
+  - 따라서 신호봉 거래량이 신호봉 제외 평균보다 크더라도, 신호봉 포함 평균을 넘지 못하면 pullback의 `Bullish candle with rising volume` trigger나 reversal의 거래량 확인이 성립하지 않을 수 있습니다.
 - KR breakout confirmation이 켜진 경우 첫 돌파 종가는 `WATCH`가 될 수 있습니다.
   - 다음 완성 일봉이 **원래 박스권 swing high** 위에서 한 번 더 마감하면 `READY`로 승격할 수 있습니다.
   - 이때 직전 돌파봉의 고점을 새 swing high로 잘못 재계산하지 않고, 돌파 전 박스권의 swing high를 유지합니다.

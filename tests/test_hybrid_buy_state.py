@@ -33,6 +33,50 @@ def _simple_candles(n: int, base: float = 100.0) -> list[dict]:
     return candles
 
 
+_PRE_SIGNAL_VOLUME_AVG = (10.0 + 300.0 + 100.0) / 3.0
+_SIGNAL_INCLUSIVE_VOLUME_AVG = (300.0 + 100.0 + 150.0) / 3.0
+
+
+def _signal_inclusive_volume_contrast_candles() -> list[dict]:
+    return [
+        {
+            "open": 100.5,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000.0,
+        },
+        {
+            "open": 99.5,
+            "high": 100.0,
+            "low": 98.0,
+            "close": 99.0,
+            "volume": 10.0,
+        },
+        {
+            "open": 97.5,
+            "high": 99.0,
+            "low": 97.0,
+            "close": 98.0,
+            "volume": 300.0,
+        },
+        {
+            "open": 99.2,
+            "high": 100.0,
+            "low": 98.5,
+            "close": 99.0,
+            "volume": 100.0,
+        },
+        {
+            "open": 99.0,
+            "high": 102.0,
+            "low": 96.0,
+            "close": 101.0,
+            "volume": 150.0,
+        },
+    ]
+
+
 def _settings(min_history: int = 5) -> HybridEvaluationSettings:
     return HybridEvaluationSettings(
         sma_trend_period=2,
@@ -846,6 +890,35 @@ def test_pullback_bounce_accepts_reclaim_after_prior_pullback() -> None:
     assert "Close reclaimed EMA short" in reasons
 
 
+def test_pullback_volume_confirmation_uses_signal_inclusive_average() -> None:
+    settings = _settings()
+    settings.volume_lookback_days = 3
+    candles = _signal_inclusive_volume_contrast_candles()
+    closes = [candle["close"] for candle in candles]
+    sma_trend = [95.0] * len(closes)
+    ema_short = [99.5, 100.0, 99.5, 99.2, 100.0]
+    ema_mid = [99.0] * len(closes)
+    rsi_vals = [46.0, 47.0, 48.0, 49.0, 52.0]
+
+    ok, reasons, pattern, context = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is True
+    assert pattern == HybridPattern.TREND_PULLBACK_BOUNCE
+    assert candles[-1]["volume"] > _PRE_SIGNAL_VOLUME_AVG
+    assert candles[-1]["volume"] > candles[-2]["volume"]
+    assert context["avg_vol"] == pytest.approx(_SIGNAL_INCLUSIVE_VOLUME_AVG)
+    assert candles[-1]["volume"] < context["avg_vol"]
+    assert "Bullish candle with rising volume" not in reasons
+
+
 def test_hybrid_respects_max_gap_pct(monkeypatch):
     candles = _simple_candles(10)
     candles[-2]["close"] = 100.0
@@ -1450,6 +1523,33 @@ def test_rsi_oversold_reversal_handles_zero_close_without_crash() -> None:
     assert isinstance(ok, bool)
     assert isinstance(reasons, list)
     assert pattern in {None, HybridPattern.RSI_OVERSOLD_REVERSAL}
+
+
+def test_rsi_reversal_volume_confirmation_uses_signal_inclusive_average() -> None:
+    settings = _settings()
+    settings.volume_lookback_days = 3
+    candles = _signal_inclusive_volume_contrast_candles()
+    closes = [candle["close"] for candle in candles]
+    sma_trend = [95.0] * len(closes)
+    ema_short = [98.0, 97.5, 97.0, 96.8, 96.5]
+    ema_mid = [97.0, 96.8, 96.6, 96.4, 96.2]
+    rsi_vals = [55.0, 45.0, 35.0, 35.0, 45.0]
+
+    ok, reasons, pattern, _ = _detect_rsi_oversold_reversal(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert candles[-1]["volume"] > _PRE_SIGNAL_VOLUME_AVG
+    assert candles[-1]["volume"] < _SIGNAL_INCLUSIVE_VOLUME_AVG
+    assert ok is False
+    assert pattern is None
+    assert reasons == ["No strong bullish candle with rising volume"]
 
 
 def test_hybrid_candidate_exposes_configured_indicator_period_keys(monkeypatch):
