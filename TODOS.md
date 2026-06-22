@@ -16,9 +16,9 @@
   deterministic rule semantics only.
 - 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
   console pages after admin credentials or browser cookies are available. The
-  2026-06-20 pass fixed the unauthenticated login surface, but reports,
-  holdings, metrics, and run pages were behind admin auth and were not visually
-  audited.
+  2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
+  holdings, metrics, and run, but authenticated Supabase-backed page states
+  still need visual audit with real credentials or browser auth state.
 - 2026-06-20: Plan a focused typography pass for the web UI. `Inter` remains
   the primary body font because `web/src/lib/__tests__/font-build-contract.test.ts`
   currently locks the existing local font variables; a future pass should pick a
@@ -44,6 +44,8 @@
 ## Completed
 
 - 2026-06-22: Expanded deterministic scan replay coverage with case metadata and a KR/US swing-threshold matrix covering rising/sideways/falling regimes, high-volatility tight-stop warnings, strong/weak relative strength, gap rejection, market-regime blocking, and major hybrid patterns. This validates rule semantics and report regression behavior, not parameter profitability.
+- 2026-06-22: Restored the Next.js 16 page auth gate through `web/src/proxy.ts`, keeping protected pages behind `/login?next=...` before render and adding regression coverage for unauthenticated `/reports` redirects.
+- 2026-06-22: Cleaned up replay expected-artifact updater failures so invalid case paths exit with a concise stderr error instead of a full traceback, with subprocess regression coverage.
 - 2026-06-21: Separated AI Brief candidate roles into `executable`, `blocked_but_valid`, `watch_only`, and `excluded`. Artifacts now keep legacy `recommendable_count` as the executable+blocked aggregate while adding role-specific counts/ticker arrays, provider recommendations preserve `candidate_role`/`entry_action`/`candidate_role_reason`, and Telegram/Slack/web copy shows execution-ready and blocked/manual-review candidates separately.
 - 2026-06-21: Made stop/target reporting explicit as decision guidance rather than execution guarantees or account-loss limits. Buy/sell reports now emit `risk_disclosure`, scan/sell Telegram text and web report views show gap/slippage caveats, buy candidates emit structured `risk_stop_price_value`/`risk_target_price_value`, and entry rows emit `downside_risk` with amount plus portfolio percent/bps when position size and portfolio value are available.
 - 2026-06-21: Added portfolio exposure controls beyond count-based entry caps. `portfolio.exposure_limits[]` now supports currency, sector, theme, beta bucket, correlation bucket, and tag bucket caps across existing active holdings plus newly accepted entry rows; entry reports emit `portfolio_exposure_buckets`, exposure cap blocks are counted in `summary.portfolio_blocked_by_exposure`, AI Brief preserves the buckets, web report detail shows an `Exposure` column, and docs describe the holdings tag-prefix convention.

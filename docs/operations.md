@@ -39,6 +39,7 @@
 | Check | Command/Place | Expected |
 | --- | --- | --- |
 | Web liveness | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` | `200` |
+| Web page auth gate | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` | `307` to `/login?next=%2Freports` |
 | Web container | `docker compose ps` | `sab-web` running |
 | Latest workflows | `gh run list --limit 10` | scheduled jobs not repeatedly failing |
 | Reports visible | Web `Reports` | latest `buy`/`sell`/`entry`/`ai-brief` as expected |
@@ -62,6 +63,7 @@
 | Web prod container | process/logs | `docker compose ps` and `docker compose logs -f web` |
 | Web dev container | process/logs | `docker compose --profile dev logs -f web-dev` |
 | Web liveness | unauthenticated page | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` |
+| Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
 | Supabase reports | SQL/dashboard | `report_index`, Storage `reports` bucket |

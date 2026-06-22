@@ -87,9 +87,15 @@ Check:
 docker compose ps
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/favicon.ico
+curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports
 ```
 
-Expected liveness result is `200` for both requests. `/login` proves the Next.js server is responding; `/favicon.ico` keeps the default unauthenticated browser load from reporting a missing asset. Neither check proves authenticated Supabase-backed pages are healthy.
+Expected liveness result is `200` for `/login` and `/favicon.ico`. `/reports`
+must return a redirect to `/login?next=%2Freports` for an unauthenticated
+request. `/login` proves the Next.js server is responding; `/favicon.ico` keeps
+the default unauthenticated browser load from reporting a missing asset. The
+protected-page redirect proves the Next proxy auth gate is active. None of these
+checks prove authenticated Supabase-backed pages are healthy.
 
 Development profile:
 
@@ -204,11 +210,13 @@ NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 �
 docker compose ps
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/favicon.ico
+curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports
 gh run list --limit 10
 ```
 
 Authenticated browser checks:
 
+- Unauthenticated `/reports`, `/holdings`, `/metrics`, and `/run` redirect to `/login?next=...` before page content renders.
 - Login succeeds.
 - `Reports` list loads from `report_index`.
 - Report detail loads a Storage JSON object.
@@ -221,6 +229,7 @@ Authenticated browser checks:
 | --- | --- |
 | Web container exits | `docker compose logs web` |
 | `/login` not `200` | host port, `WEB_HOST_PORT`, container state |
+| Protected pages return `200` while unauthenticated | `web/src/proxy.ts` presence/config, Next build output includes `ƒ Proxy (Middleware)`, browser/curl redirect smoke |
 | Build fails env validation | `web/scripts/validate-env.mjs` required vars |
 | Reports page errors | Supabase URL/key, bucket, `report_index` rows |
 | Workflow dispatch fails | `RUN_DISPATCH_ENABLED`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_PAT` |

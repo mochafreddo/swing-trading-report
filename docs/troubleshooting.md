@@ -122,6 +122,36 @@ where id = 'reports';
 
 NEEDS_CONFIRMATION: target Supabase project, migration approval, and data recovery owner.
 
+## Symptom: Protected pages render while unauthenticated
+
+### Possible Causes
+
+- Next.js did not pick up the page-level auth proxy.
+- `web/src/proxy.ts` is missing, misplaced, or its `config.matcher` is not statically analyzable.
+- The server was not restarted after changing proxy files.
+
+### Checks
+
+```bash
+curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports
+pnpm --dir web run build
+```
+
+Expected: unauthenticated `/reports` returns `307` to `/login?next=%2Freports`,
+and the Next build output includes `ƒ Proxy (Middleware)`.
+
+### Resolution
+
+- Keep the proxy entrypoint at `web/src/proxy.ts`, the same level as `web/src/app`.
+- Keep the matcher literal in `web/src/proxy.ts`; do not rely on a re-exported `config`.
+- Restart the web server after proxy file changes.
+
+### Escalation
+
+NEEDS_CONFIRMATION: if build output includes Proxy and redirect smoke still
+fails, inspect the effective container image and runtime source tree before
+changing auth policy.
+
 ## Symptom: `sab scan` or `sab sell` fails on KIS authentication or rate limits
 
 ### Possible Causes

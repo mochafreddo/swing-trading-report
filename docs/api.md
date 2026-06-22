@@ -30,11 +30,11 @@
 | Surface | Auth | Notes |
 | --- | --- | --- |
 | CLI `sab` | local environment credentials | `.env`/GitHub Secrets/Docker env에서 KIS, Supabase, provider secret을 읽습니다. |
-| Web pages | admin session cookie | `/login`에서 `SAB_BASIC_AUTH_USER/PASS`로 로그인합니다. |
+| Web pages | admin session cookie + Next proxy redirect | `/login`에서 `SAB_BASIC_AUTH_USER/PASS`로 로그인합니다. 보호 page는 `web/src/proxy.ts`에서 렌더링 전에 `/login?next=...`로 리다이렉트합니다. |
 | Web APIs | admin session + same-origin/local request guard | `/api/auth/login`과 `/api/auth/logout`를 제외한 API route는 `enforceAdminApiGuard`를 사용합니다. |
 | GitHub workflow dispatch | server-side `GITHUB_PAT` | `RUN_DISPATCH_ENABLED=1`일 때만 `/api/run`이 dispatch합니다. |
 
-`/login` page는 liveness 확인용으로 비인증 접근이 가능하지만, 보호 API의 정상 여부를 의미하지 않습니다.
+`/login` page는 liveness 확인용으로 비인증 접근이 가능하지만, 보호 API의 정상 여부를 의미하지 않습니다. 보호 page auth gate는 `/reports`, `/holdings`, `/metrics`, `/run`이 비인증 상태에서 `307` redirect를 반환하는지로 smoke합니다.
 
 ## CLI Interface
 
@@ -160,7 +160,7 @@ The examples above require a valid authenticated session cookie in normal browse
 
 | Condition | Typical Status | Notes |
 | --- | ---: | --- |
-| Missing/invalid admin session | `401` or redirect from page middleware | Protected API route guard. |
+| Missing/invalid admin session | `401` or redirect from page proxy | Protected API route guard. |
 | Same-origin/local guard failure | `403` | Local-console hardening. |
 | Schema validation failure | `400` | Zod schema errors are returned as request errors. |
 | GitHub dispatch disabled | `503`/feature disabled response | Depends on `/api/run` branch. |
@@ -171,6 +171,7 @@ The examples above require a valid authenticated session cookie in normal browse
 
 - CLI options: `sab/__main__.py`
 - Web request schemas: `web/src/lib/schemas.ts`
+- Web page auth proxy: `web/src/proxy.ts`
 - Web route implementations: `web/src/app/api/**/route.ts`
 - Shared response types: `web/src/lib/types.ts`
 - Supabase schema/RPC: `supabase/migrations/`

@@ -173,7 +173,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 기본 unauthenticated smoke 범위:
 
 - `/`가 `/login?next=%2F`로 redirect되는지 확인합니다.
-- `/reports`, `/holdings`, `/run` 같은 보호 페이지가 `/login?next=...`로 redirect되는지 확인합니다.
+- `/reports`, `/holdings`, `/metrics`, `/run` 같은 보호 페이지가 `/login?next=...`로 redirect되는지 확인합니다. Next.js 16에서는 이 page-level gate가 `web/src/proxy.ts`에서 실행되며, `just ci-web` build 출력에 `ƒ Proxy (Middleware)`가 보여야 합니다.
 - 로그인 폼의 빈 제출(required validation)과 잘못된 자격 증명(`Unauthorized`) 상태를 확인합니다.
 - desktop과 mobile viewport에서 텍스트/폼/alert가 겹치지 않는지 확인합니다.
 - `/favicon.ico`가 `200`을 반환해 기본 browser console이 clean한지 확인합니다.

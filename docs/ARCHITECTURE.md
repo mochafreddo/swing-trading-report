@@ -78,7 +78,7 @@ flowchart LR
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py`(facade), `sab/data/kis/{auth,calendar,common,quote,ranking}.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
 | 리포트 계층 | 로컬 JSON 원자적 저장 + Supabase 업로드/인덱싱 + 알림 텍스트 렌더링, buy/sell stop-target risk disclosure, AI Brief 판단 상태(`NO_SIGNAL`/`NEEDS_REVIEW_WATCH_ONLY`/`FINAL_JUDGMENT`/`NEEDS_REVIEW_WEAK_NEWS`)와 scheduled skip 상태 결정 | `sab/report/markdown.py`, `sab/report/sell_report.py`, `sab/report/entry_report.py`, `sab/report/risk_disclosure.py`, `sab/report/ai_brief_report.py`, `sab/report/ai_brief_skip_report.py`, `sab/report/ai_brief_state.py`, `sab/report/notification_text.py`, `sab/report/supabase_storage.py`, `sab/report/storage_key.py` |
-| 웹 API 경계 | 페이지 접근 제어(미들웨어) + API 가드 단일 진입점(route helper) | `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
+| 웹 API 경계 | 페이지 접근 제어(Next proxy) + API 가드 단일 진입점(route helper) | `web/src/proxy.ts`, `web/middleware.ts`, `web/src/lib/admin-api-guard.ts`, `web/src/app/api/**/route.ts` |
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | Toss holdings sync | 서버 전용 OAuth client credentials로 Toss 보유 종목을 조회하고 Supabase holdings와 비교한 뒤, 서버 재조회/hash guard/확인 문구를 통과한 apply만 replace-all로 반영하는 브로커-backed review 경로 | `web/src/lib/toss/client.ts`, `web/src/lib/toss/holdings-sync.ts`, `web/src/app/api/holdings/toss-sync/route.ts`, `web/src/components/holdings/toss-sync-panel.tsx` |
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
@@ -257,7 +257,8 @@ flowchart LR
 - 요청 무결성
   - 보호 API 라우트는 `enforceAdminApiGuard()` 단일 진입점에서 인증 + `same-origin` + 로컬 요청 검증(`host`, `x-forwarded-host`, unsafe의 `origin/referer` 또는 `sec-fetch-site=same-origin`)을 수행
   - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
-  - `middleware.ts`는 페이지 라우트 접근 제어/리다이렉트 전용으로 유지
+  - `web/src/proxy.ts`는 Next.js 16 page proxy entrypoint이며 `/`, `/reports`, `/metrics`, `/holdings`, `/run`을 렌더링 전에 로그인으로 리다이렉트합니다. `web/middleware.ts`는 이 proxy가 재사용하는 구현 모듈로 유지합니다.
+  - Proxy matcher는 Next build가 정적으로 분석할 수 있도록 `web/src/proxy.ts`에 literal `config.matcher`로 둡니다. `just ci-web` build 출력의 `ƒ Proxy (Middleware)`와 보호 페이지 307 smoke가 page-level auth gate 회귀 검증입니다.
   - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
   - 시작 가드는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없는 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다.
 - 비밀키 보호
