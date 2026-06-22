@@ -351,6 +351,10 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
   - `B`: READY지만 RS 약세 또는 손절폭 대비 변동성 warning이 있음
   - `C`: WATCH, RS 기준 미확보, 또는 변동성 기준 미확보
   - `quality_reasons`는 `entry_state_ready`, `relative_strength_negative`, `risk_alignment_tight_stop` 같은 reason code 목록입니다.
+- 2026-06-22 검토 결과, `quality_state=A`는 기본값에서 SMA60이나 SMA200 같은 개별 종목 중장기 추세 필터를 추가로 요구하지 않습니다.
+  - 근거: 현행 `A` 판정은 READY, benchmark 대비 RS 양호, 변동성/손절폭 정합성 양호를 요구하고, 시장 방향성은 market regime benchmark SMA200 필터가 담당합니다.
+  - SMA20/EMA10/21 패턴 조건보다 긴 개별 종목 추세를 기본 hard/quality gate로 승격하는 것은 replay matrix만으로는 수익성이나 민감도를 검증할 수 없습니다.
+  - 더 보수적인 로컬 운용이 필요하면 `HYBRID_USE_SMA60_FILTER=true`로 기존 optional SMA60 hard filter를 명시적으로 켭니다. SMA60/SMA200 기반 기본 품질 기준 변경은 별도 historical backtest/parameter-sensitivity 검증 후 다룹니다.
 - `sab entry`는 `sma_ema_hybrid` candidate의 gap/trigger/risk checks 이후 `quality_state`를 마지막 자동 진입 정책으로 적용합니다.
   - `quality_state=A`만 자동 `ENTER` 후보가 될 수 있습니다.
   - `quality_state=B|C` 또는 누락/unknown 값은 수동검토 reason과 함께 `REVIEW`입니다.

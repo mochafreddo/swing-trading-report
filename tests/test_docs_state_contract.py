@@ -197,6 +197,11 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     assert "market_regime_unavailable_policy" in strategy_text
     assert "quality_state" in strategy_text
     assert "risk_alignment" in strategy_text
+    assert (
+        "`quality_state=A`는 기본값에서 SMA60이나 SMA200 같은 개별 종목 중장기 추세 필터를 추가로 요구하지 않습니다."
+        in strategy_text
+    )
+    assert "HYBRID_USE_SMA60_FILTER=true" in strategy_text
     assert "MARKET_REGIME_UNAVAILABLE_POLICY" in config_reference_text
     assert "entry_check.fatal_missing_price_ratio" in strategy_text
     assert "ENTRY_FATAL_MISSING_PRICE_RATIO" in config_reference_text
