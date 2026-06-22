@@ -58,3 +58,20 @@
 ## Concerns
 
 - `tests/test_replay_eod_scan.py` now owns a replay-only benchmark-resolution patch because benchmark candles otherwise bypass fixture data and go straight to provider clients. This keeps the replay matrix honest, but the benchmark-fixture behavior still lives in the test layer rather than the shared helper/updater path.
+
+## Review fix follow-up
+
+- Moved replay benchmark resolution into `tests/helpers/replay_eod.py` so `run_scan_replay_case()` now patches `scan.scan_evaluation._resolve_adjusted_benchmark_candles` for every replay execution path, including `tests/test_replay_eod_scan.py` and `scripts/update_scan_replay_expected.py`.
+- Changed replay benchmark lookup to fail closed against `adjusted_market_data.json` only. Missing benchmark fixture rows now return deterministic `"... unavailable from replay fixture"` issues and never fall through to provider-backed resolution.
+- Removed the redundant autouse benchmark monkeypatch from `tests/test_replay_eod_scan.py`.
+- Added a regression test that drops `069500` from the falling-regime fixture copy and verifies replay emits the fixture-unavailable message instead of provider/client errors.
+- Re-ran `scripts/update_scan_replay_expected.py` for `tests/fixtures/replay_eod/scan/kr_hybrid_falling_regime_blocked`; the artifact content remained unchanged after the shared-helper move.
+
+## Follow-up verification
+
+1. `UV_CACHE_DIR=.uv-cache uv run python scripts/update_scan_replay_expected.py tests/fixtures/replay_eod/scan/kr_hybrid_falling_regime_blocked`
+   - passed; no artifact diff after regeneration
+2. `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_replay_eod_scan.py -q`
+   - passed (`26 passed`)
+3. `UV_CACHE_DIR=.uv-cache uv run ruff check tests/helpers/replay_eod.py tests/test_replay_eod_scan.py scripts/update_scan_replay_expected.py`
+   - passed

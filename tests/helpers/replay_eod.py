@@ -358,6 +358,31 @@ def _deep_copy_json_compatible(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
+def _resolve_fixture_backed_benchmark_candles(
+    adjusted_market_data: dict[str, list[dict[str, Any]]],
+) -> Any:
+    def _resolve_from_replay_fixture(
+        runtime: Any,
+        *,
+        ticker: str,
+        market: str,
+        count: int,
+        unavailable_label: str = "RS benchmark",
+        market_date_key: str | None = None,
+    ) -> tuple[list[dict[str, Any]] | None, str | None]:
+        del runtime, market, market_date_key
+        normalized_ticker = str(ticker or "").strip().upper()
+        rows = adjusted_market_data.get(normalized_ticker)
+        if not rows:
+            return (
+                None,
+                f"{normalized_ticker}: {unavailable_label} unavailable from replay fixture",
+            )
+        return _deep_copy_json_compatible(rows[-count:]), None
+
+    return _resolve_from_replay_fixture
+
+
 def run_scan_replay_case(
     case_dir: Path,
     *,
@@ -431,6 +456,11 @@ def run_scan_replay_case(
         scan.scan_evaluation,
         "resolve_run_session_state_map",
         _fixed_session_state_map,
+    )
+    monkeypatch.setattr(
+        scan.scan_evaluation,
+        "_resolve_adjusted_benchmark_candles",
+        _resolve_fixture_backed_benchmark_candles(adjusted_market_data),
     )
     monkeypatch.setattr(
         scan.scan_evaluation,

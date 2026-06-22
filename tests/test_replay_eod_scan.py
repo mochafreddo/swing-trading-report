@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
-from typing import Any
 
 import pytest
-import sab.scan as scan
 
 from tests.helpers.replay_eod import (
     ReplayScanCaseError,
@@ -39,40 +39,6 @@ _REQUIRED_REPLAY_THRESHOLD_AXES = {
     "profit_target",
     "volume_confirmation",
 }
-
-
-@pytest.fixture(autouse=True)
-def _prefer_fixture_backed_benchmark_candles(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original = scan.scan_evaluation._resolve_adjusted_benchmark_candles
-
-    def _resolve_from_replay_fixture(
-        runtime: Any,
-        *,
-        ticker: str,
-        market: str,
-        count: int,
-        unavailable_label: str = "RS benchmark",
-        market_date_key: str | None = None,
-    ) -> tuple[list[dict[str, object]] | None, str | None]:
-        rows = getattr(runtime, "market_data", {}).get(ticker)
-        if isinstance(rows, list) and rows:
-            return rows[-count:], None
-        return original(
-            runtime,
-            ticker=ticker,
-            market=market,
-            count=count,
-            unavailable_label=unavailable_label,
-            market_date_key=market_date_key,
-        )
-
-    monkeypatch.setattr(
-        scan.scan_evaluation,
-        "_resolve_adjusted_benchmark_candles",
-        _resolve_from_replay_fixture,
-    )
 
 
 def _build_hybrid_replay_config(
@@ -215,6 +181,45 @@ def test_scan_replay_hybrid_report_preserves_quality_fields_and_order(
         candidates[0]["avg_dollar_volume_value"]
         < candidates[1]["avg_dollar_volume_value"]
     )
+
+
+def test_scan_replay_case_reports_missing_benchmark_from_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_case_dir = _SCAN_REPLAY_ROOT / "kr_hybrid_falling_regime_blocked"
+    case_dir = tmp_path / "source" / source_case_dir.name
+    workspace_root = tmp_path / "workspace"
+    shutil.copytree(source_case_dir, case_dir)
+
+    adjusted_market_data_path = case_dir / "adjusted_market_data.json"
+    adjusted_market_data = json.loads(
+        adjusted_market_data_path.read_text(encoding="utf-8")
+    )
+    adjusted_market_data.pop("069500")
+    adjusted_market_data_path.write_text(
+        json.dumps(adjusted_market_data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_scan_replay_case(
+        case_dir,
+        tmp_path=workspace_root,
+        monkeypatch=monkeypatch,
+    )
+
+    messages = (
+        result.normalized_actual["issues"]
+        + result.normalized_actual["system_issues"]
+        + result.normalized_actual["screen_outs"]
+    )
+    assert result.exit_code == 0
+    assert any(
+        "069500: Market regime benchmark unavailable from replay fixture" in message
+        for message in messages
+    )
+    assert not any("client not initialized" in message for message in messages)
+    assert result.normalized_actual["summary"]["market_regime_unavailable_count"] == 1
 
 
 def test_scan_replay_metadata_covers_active_swing_threshold_matrix() -> None:
