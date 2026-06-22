@@ -47,6 +47,7 @@ mise.local.lock
 /BOILERPLATE.md
 
 # Local project data
+/.superpowers/
 /.gstack/
 /.worktrees/
 /data/
