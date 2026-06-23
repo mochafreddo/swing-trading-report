@@ -33,6 +33,21 @@ def _simple_candles(n: int, base: float = 100.0) -> list[dict]:
     return candles
 
 
+def _ohlcv_candles(
+    *rows: tuple[float, float, float, float, float],
+) -> list[dict[str, float]]:
+    return [
+        {
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+        for open_, high, low, close, volume in rows
+    ]
+
+
 def _settings(min_history: int = 5) -> HybridEvaluationSettings:
     return HybridEvaluationSettings(
         sma_trend_period=2,
@@ -1433,43 +1448,13 @@ def test_pullback_volume_thrust_uses_pre_signal_average() -> None:
     ema_short = [104.0, 101.0, 99.0, 100.0, 102.0]
     ema_mid = [90.0] * 5
     rsi_vals = [55.0] * 5
-    candles = [
-        {
-            "open": 105.0,
-            "high": 106.0,
-            "low": 104.0,
-            "close": 105.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 100.0,
-            "high": 101.0,
-            "low": 99.0,
-            "close": 100.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 98.0,
-            "high": 99.0,
-            "low": 97.0,
-            "close": 98.0,
-            "volume": 300.0,
-        },
-        {
-            "open": 99.0,
-            "high": 100.0,
-            "low": 98.0,
-            "close": 99.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 100.0,
-            "high": 102.0,
-            "low": 99.0,
-            "close": 101.0,
-            "volume": 180.0,
-        },
-    ]
+    candles = _ohlcv_candles(
+        (105.0, 106.0, 104.0, 105.0, 100.0),
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 300.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (100.0, 102.0, 99.0, 101.0, 180.0),
+    )
 
     ok, reasons, pattern, context = _detect_trend_pullback_bounce(
         closes,
@@ -1496,43 +1481,13 @@ def test_pullback_heavy_selling_uses_pre_signal_average() -> None:
     ema_short = [104.0, 101.0, 99.0, 100.0, 102.0]
     ema_mid = [90.0] * 5
     rsi_vals = [55.0] * 5
-    candles = [
-        {
-            "open": 105.0,
-            "high": 106.0,
-            "low": 104.0,
-            "close": 105.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 100.0,
-            "high": 101.0,
-            "low": 99.0,
-            "close": 100.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 98.0,
-            "high": 99.0,
-            "low": 97.0,
-            "close": 98.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 101.0,
-            "high": 102.0,
-            "low": 98.0,
-            "close": 99.0,
-            "volume": 400.0,
-        },
-        {
-            "open": 100.0,
-            "high": 102.0,
-            "low": 99.0,
-            "close": 101.0,
-            "volume": 1000.0,
-        },
-    ]
+    candles = _ohlcv_candles(
+        (105.0, 106.0, 104.0, 105.0, 100.0),
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 100.0),
+        (101.0, 102.0, 98.0, 99.0, 400.0),
+        (100.0, 102.0, 99.0, 101.0, 1000.0),
+    )
 
     ok, reasons, pattern, context = _detect_trend_pullback_bounce(
         closes,
@@ -1558,43 +1513,13 @@ def test_rsi_reversal_volume_confirmation_uses_pre_signal_average() -> None:
     ema_short = [96.0, 96.0, 96.0, 96.0, 95.0]
     ema_mid = [94.0] * 5
     rsi_vals = [50.0, 35.0, 32.0, 38.0, 45.0]
-    candles = [
-        {
-            "open": 100.0,
-            "high": 101.0,
-            "low": 99.0,
-            "close": 100.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 99.0,
-            "high": 100.0,
-            "low": 98.0,
-            "close": 99.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 98.0,
-            "high": 99.0,
-            "low": 97.0,
-            "close": 98.0,
-            "volume": 300.0,
-        },
-        {
-            "open": 99.0,
-            "high": 100.0,
-            "low": 98.0,
-            "close": 99.0,
-            "volume": 100.0,
-        },
-        {
-            "open": 99.0,
-            "high": 103.0,
-            "low": 94.0,
-            "close": 102.0,
-            "volume": 180.0,
-        },
-    ]
+    candles = _ohlcv_candles(
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 300.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (99.0, 103.0, 94.0, 102.0, 180.0),
+    )
 
     ok, reasons, pattern, context = _detect_rsi_oversold_reversal(
         closes,
