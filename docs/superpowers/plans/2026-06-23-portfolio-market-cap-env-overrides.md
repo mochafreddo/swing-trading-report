@@ -20,7 +20,9 @@
 
 ---
 
-상태: Backlog
+상태: Archive (completed)
+
+이 계획은 2026-06-23 기준으로 구현, 문서화, 검증, 정리까지 완료되었다. 아래 체크박스는 완료 기록으로 유지한다.
 
 ## Design Decision
 
@@ -67,7 +69,7 @@ This is one config-loading contract. It should stay in one implementation task b
 - Consumes: existing `_ConfigParser`, `_ENV_YAML_CONFLICT_BINDINGS`, `_parse_optional_int`, and `_validate_portfolio_ranges`.
 - Produces: `Config.portfolio.max_new_entries_kr` and `Config.portfolio.max_new_entries_us` resolved from env when the matching YAML key is absent.
 
-- [ ] **Step 1: Add failing env parsing tests**
+- [x] **Step 1: Add failing env parsing tests**
 
 In `tests/test_config_validation_layers.py`, add the two env keys to `_reset_config_env()`:
 
@@ -142,7 +144,7 @@ def test_load_config_rejects_invalid_portfolio_market_cap_env(
         load_config()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -155,7 +157,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: the env parsing test fails because the new env keys are not read yet.
 
-- [ ] **Step 3: Add failing conflict-policy tests**
+- [x] **Step 3: Add failing conflict-policy tests**
 
 In `tests/test_config_conflict_policy.py`, add the two env keys to `_reset_conflict_env()`:
 
@@ -207,7 +209,7 @@ portfolio:
     ) in msg
 ```
 
-- [ ] **Step 4: Run conflict test to verify it fails**
+- [x] **Step 4: Run conflict test to verify it fails**
 
 Run:
 
@@ -219,7 +221,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: the test fails because the new env keys are not conflict-bound yet.
 
-- [ ] **Step 5: Add bindings and scoped conflict path detection**
+- [x] **Step 5: Add bindings and scoped conflict path detection**
 
 In `sab/config.py`, add these rows immediately after `("PORTFOLIO_MAX_ACTIVE_HOLDINGS", "portfolio.max_active_holdings")`:
 
@@ -277,7 +279,7 @@ def _collect_env_yaml_conflicts(parser: _ConfigParser) -> list[str]:
     return sorted(conflicts)
 ```
 
-- [ ] **Step 6: Refactor optional integer parsing for env-backed market caps**
+- [x] **Step 6: Refactor optional integer parsing for env-backed market caps**
 
 In `sab/config.py`, replace `_parse_optional_int()` with this raw-value helper plus wrapper:
 
@@ -372,7 +374,7 @@ In `_parse_portfolio_section()`, replace the nested `_market_cap_value()` functi
     )
 ```
 
-- [ ] **Step 7: Run config tests**
+- [x] **Step 7: Run config tests**
 
 Run:
 
@@ -390,7 +392,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 Run:
 
@@ -412,7 +414,7 @@ git commit -m "feat(config): 시장별 신규 진입 cap env 추가" -m "PORTFOL
 - Consumes: `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` from Task 1.
 - Produces: operator docs that explain how to tighten caps without creating env/YAML conflicts.
 
-- [ ] **Step 1: Add failing `.env.example` contract test**
+- [x] **Step 1: Add failing `.env.example` contract test**
 
 In `tests/test_env_example_v11.py`, add:
 
@@ -430,7 +432,7 @@ def test_env_example_documents_portfolio_market_caps_without_active_override() -
     assert "PORTFOLIO_MAX_NEW_ENTRIES_US" not in active_keys
 ```
 
-- [ ] **Step 2: Add failing docs contract test**
+- [x] **Step 2: Add failing docs contract test**
 
 In `tests/test_docs_state_contract.py`, add:
 
@@ -461,7 +463,7 @@ def test_config_docs_document_portfolio_market_cap_env_overrides() -> None:
     )
 ```
 
-- [ ] **Step 3: Run docs tests to verify they fail**
+- [x] **Step 3: Run docs tests to verify they fail**
 
 Run:
 
@@ -474,7 +476,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: both tests fail because docs do not mention the new env keys yet.
 
-- [ ] **Step 4: Update `.env.example`**
+- [x] **Step 4: Update `.env.example`**
 
 In `.env.example`, directly after `# PORTFOLIO_MAX_ACTIVE_HOLDINGS=8`, add:
 
@@ -486,7 +488,7 @@ In `.env.example`, directly after `# PORTFOLIO_MAX_ACTIVE_HOLDINGS=8`, add:
 # PORTFOLIO_MAX_NEW_ENTRIES_US=1
 ```
 
-- [ ] **Step 5: Update `docs/configuration.md`**
+- [x] **Step 5: Update `docs/configuration.md`**
 
 In the environment-variable table, add these rows after `ENTRY_FATAL_MISSING_PRICE_RATIO`:
 
@@ -501,7 +503,7 @@ In the `## Config YAML` section, append this paragraph after the paragraph that 
 For risk-off entry throttling, prefer a local uncommitted YAML file when the repository `config.yaml` already owns `portfolio.max_new_entries_per_market.KR/US`: copy `config.yaml` to `config.local.yaml`, lower only the desired market cap values, and run with `SAB_CONFIG=config.local.yaml`. The env overrides `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` are available for environments whose selected YAML config omits the matching market cap; defining both sides for the same market fails closed.
 ```
 
-- [ ] **Step 6: Update `docs/config-reference.md`**
+- [x] **Step 6: Update `docs/config-reference.md`**
 
 In `## Runtime Secrets And App Env`, add this row after `ENTRY_FATAL_MISSING_PRICE_RATIO`:
 
@@ -529,7 +531,7 @@ Leave this bullet in place:
 - `portfolio.exposure_limits[]` (`dimension`, `value`, `max_active`; dimensions: `currency`, `sector`, `theme`, `beta_bucket`, `correlation_bucket`, `tag`)
 ```
 
-- [ ] **Step 7: Run docs tests**
+- [x] **Step 7: Run docs tests**
 
 Run:
 
@@ -544,7 +546,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 Run:
 
@@ -562,7 +564,7 @@ git commit -m "docs(config): 시장별 entry cap override 문서화" -m "risk-of
 - Consumes: passing Task 1 and Task 2 tests.
 - Produces: the active backlog item moved to Completed with the implementation summary.
 
-- [ ] **Step 1: Move backlog item to Completed**
+- [x] **Step 1: Move backlog item to Completed**
 
 In `TODOS.md`, remove the active item:
 
@@ -576,7 +578,7 @@ Add this item at the top of `## Completed`:
 - 2026-06-23: Added env/YAML-conflict-bound `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` overrides for `portfolio.max_new_entries_per_market.KR/US`, while documenting the safer `config.local.yaml` workflow when committed YAML already owns the caps. `portfolio.exposure_limits[]` remains YAML-only.
 ```
 
-- [ ] **Step 2: Run focused full validation**
+- [x] **Step 2: Run focused full validation**
 
 Run:
 
@@ -593,7 +595,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 3: Run repository quality gate if time allows**
+- [x] **Step 3: Run repository quality gate if time allows**
 
 Run:
 
@@ -603,7 +605,7 @@ just quality
 
 Expected: Python quality gate passes. If this is too broad for the current run, record the focused pytest command from Step 2 as the completed validation and state why `just quality` was not run.
 
-- [ ] **Step 4: Commit closeout**
+- [x] **Step 4: Commit closeout**
 
 Run:
 

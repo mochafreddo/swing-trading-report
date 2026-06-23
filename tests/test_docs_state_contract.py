@@ -253,10 +253,9 @@ def test_config_docs_document_portfolio_market_cap_env_overrides() -> None:
 
     assert "risk-off" in configuration_text
     assert "`portfolio.exposure_limits[]`" in config_reference_text
-    assert (
-        "`portfolio.max_new_entries_per_market.KR`"
-        not in (config_reference_text.split("## YAML-Only Config Notes", 1)[1])
-    )
+    yaml_only_section = config_reference_text.split("## YAML-Only Config Notes", 1)[1]
+    assert "`portfolio.max_new_entries_per_market.KR`" not in yaml_only_section
+    assert "`portfolio.max_new_entries_per_market.US`" not in yaml_only_section
 
 
 def test_web_env_docs_use_root_env_and_reject_web_env_file() -> None:
