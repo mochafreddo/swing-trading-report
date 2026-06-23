@@ -2,8 +2,6 @@
 
 ## Active
 
-- 2026-06-18: Review pullback/reversal volume confirmation semantics. Breakout volume uses the pre-breakout average, while pullback/reversal paths include the signal candle in the average; either normalize to pre-signal averages or document and test the intentional difference.
-
 ## Deferred
 
 - 2026-06-22: Design and implement a historical swing backtest runner for
@@ -41,6 +39,7 @@
 
 ## Completed
 
+- 2026-06-23: Normalized `sma_ema_hybrid` volume confirmation semantics so breakout, pullback, and reversal compare the signal candle to the preceding N-day average; added focused detector regressions and strategy documentation.
 - 2026-06-23: Added env/YAML-conflict-bound `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` overrides for `portfolio.max_new_entries_per_market.KR/US`, while documenting the safer `config.local.yaml` workflow when committed YAML already owns the caps. `portfolio.exposure_limits[]` remains YAML-only.
 - 2026-06-22: Validated the `sma_ema_hybrid` quality `A` medium/long trend-filter question and kept the default unchanged. `quality_state=A` remains READY + positive relative strength + aligned risk rather than requiring SMA60/SMA200 by default; operators who want a stricter local stance should enable the existing `HYBRID_USE_SMA60_FILTER=true` hard filter, while SMA60/SMA200 default quality changes remain dependent on historical backtest/parameter-sensitivity evidence.
 - 2026-06-22: Expanded deterministic scan replay coverage with case metadata and a KR/US swing-threshold matrix covering rising/sideways/falling regimes, high-volatility tight-stop warnings, strong/weak relative strength, gap rejection, market-regime blocking, and major hybrid patterns. This validates rule semantics and report regression behavior, not parameter profitability.
