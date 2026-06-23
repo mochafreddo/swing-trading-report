@@ -116,6 +116,8 @@
 | `LOG_DATEFMT` | no | ISO-like default | `%Y-%m-%dT%H:%M:%S%z` | CLI | Logging date format | Optional. |
 | `LOG_TZ` | no | `local` | `utc` | CLI/scheduler | Log timezone | `local` or `utc`. |
 | `ENTRY_FATAL_MISSING_PRICE_RATIO` | no | active default `0.0` | `0.0` | `sab entry` | Missing entry price fatal threshold | Operational safety key. When YAML config is loaded, configure this in YAML; env override is accepted only when no YAML config is loaded. 0.0 means any missing price fails. |
+| `PORTFOLIO_MAX_NEW_ENTRIES_KR` | no | `config.yaml` `portfolio.max_new_entries_per_market.KR` | `1` | `sab entry` | KR new-entry cap | Env/YAML conflict binding. Use for temporary risk-off tightening only when the selected YAML config omits the KR cap. |
+| `PORTFOLIO_MAX_NEW_ENTRIES_US` | no | `config.yaml` `portfolio.max_new_entries_per_market.US` | `1` | `sab entry` | US new-entry cap | Env/YAML conflict binding. Use for temporary risk-off tightening only when the selected YAML config omits the US cap. |
 | `SAB_CONFIG` | no | `config.yaml` | `config.local.yaml` | `sab` | Config file path override | Do not commit local config. |
 | `SAB_CONFIG_STRICT` | no | true in CI/GHA | `true` | `sab` | Strict config parsing | Recommended for reproducing CI locally. |
 
@@ -126,6 +128,8 @@
 YAML mapping keys must be unique at every level; duplicate keys fail closed instead of letting a later key mask an earlier safety setting. Empty top-level `strategy:` and `entry_check:` sections are rejected instead of falling back to code defaults. Valid nested safety values are accepted, but `null` or invalid values are rejected, for example `fatal_missing_price_ratio: null` under `entry_check:`.
 
 Use `config.local.yaml` plus `SAB_CONFIG=config.local.yaml` for local experiments that should not be committed. When any YAML config is loaded, omitted operational safety keys inherit the active safety defaults: `strategy.use_market_regime_filter=true`, `strategy.market_regime_unavailable_policy=block_market`, and `entry_check.fatal_missing_price_ratio=0.0`. Environment overrides for those operational safety keys are rejected while YAML config is loaded, even if the YAML omits the key; set them explicitly in YAML when the local experiment intentionally changes the safety posture. With no YAML config loaded, the same active safety defaults still apply unless an explicit env override is set.
+
+For risk-off entry throttling, prefer a local uncommitted YAML file when the repository `config.yaml` already owns `portfolio.max_new_entries_per_market.KR/US`: copy `config.yaml` to `config.local.yaml`, lower only the desired market cap values, and run with `SAB_CONFIG=config.local.yaml`. The env overrides `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` are available for environments whose selected YAML config omits the matching market cap; defining both sides for the same market fails closed.
 
 ## Secret handling
 

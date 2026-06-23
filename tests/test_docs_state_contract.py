@@ -232,6 +232,33 @@ def test_strategy_docs_include_swing_logic_improvement_contracts() -> None:
     assert "code-level compatibility default `1.0`" not in safety_design_text
 
 
+def test_config_docs_document_portfolio_market_cap_env_overrides() -> None:
+    configuration_text = _read(Path("docs/configuration.md"))
+    config_reference_text = _read(Path("docs/config-reference.md"))
+
+    for env_key, yaml_path in (
+        (
+            "PORTFOLIO_MAX_NEW_ENTRIES_KR",
+            "portfolio.max_new_entries_per_market.KR",
+        ),
+        (
+            "PORTFOLIO_MAX_NEW_ENTRIES_US",
+            "portfolio.max_new_entries_per_market.US",
+        ),
+    ):
+        assert env_key in configuration_text
+        assert yaml_path in configuration_text
+        assert env_key in config_reference_text
+        assert yaml_path in config_reference_text
+
+    assert "risk-off" in configuration_text
+    assert "`portfolio.exposure_limits[]`" in config_reference_text
+    assert (
+        "`portfolio.max_new_entries_per_market.KR`"
+        not in (config_reference_text.split("## YAML-Only Config Notes", 1)[1])
+    )
+
+
 def test_web_env_docs_use_root_env_and_reject_web_env_file() -> None:
     configuration_text = _read(Path("docs/configuration.md"))
     config_reference_text = _read(Path("docs/config-reference.md"))

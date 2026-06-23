@@ -101,6 +101,7 @@
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | `naver-news` source provider | KR-only |
 | `LOG_LEVEL`, `LOG_FORMAT`, `LOG_DATEFMT`, `LOG_TZ` | CLI logging | `LOG_FORMAT=json`, `LOG_TZ=utc` 지원 |
 | `ENTRY_FATAL_MISSING_PRICE_RATIO` | `sab entry` | `entry_check.fatal_missing_price_ratio`, 0.0-1.0, active default 0.0; env override only when no YAML config is loaded |
+| `PORTFOLIO_MAX_NEW_ENTRIES_KR`, `PORTFOLIO_MAX_NEW_ENTRIES_US` | `sab entry` | `portfolio.max_new_entries_per_market.KR/US`; env override only when the selected YAML config omits the matching market cap |
 | `SAB_DATA_DIR` | calendar/eval helper lower-level override | 일반 config는 `DATA_DIR`/`data.data_dir` 우선 |
 | `SAB_USE_PMC_CALENDAR` | trading calendar optional path | 기본 enabled, calendar extra 필요 가능 |
 
@@ -187,6 +188,8 @@
 | `FX_CACHE_TTL` | `fx.cache_ttl_minutes` | FX cache TTL |
 | `FX_KIS_SYMBOL` | `fx.kis_symbol` | representative US ticker for KIS FX |
 | `PORTFOLIO_MAX_ACTIVE_HOLDINGS` | `portfolio.max_active_holdings` | entry portfolio active holdings cap |
+| `PORTFOLIO_MAX_NEW_ENTRIES_KR` | `portfolio.max_new_entries_per_market.KR` | KR 신규 entry cap |
+| `PORTFOLIO_MAX_NEW_ENTRIES_US` | `portfolio.max_new_entries_per_market.US` | US 신규 entry cap |
 
 ## YAML-Only Config Notes
 
@@ -197,8 +200,6 @@ These settings are currently YAML-only in `config.yaml`:
 - `screener.us_mode`
 - `screener.us_metric`
 - `screener.us_defaults`
-- `portfolio.max_new_entries_per_market.KR`
-- `portfolio.max_new_entries_per_market.US`
 - `portfolio.exposure_limits[]` (`dimension`, `value`, `max_active`; dimensions: `currency`, `sector`, `theme`, `beta_bucket`, `correlation_bucket`, `tag`)
 - `sell.hybrid.pattern_time_stops.<pattern>.time_stop_days`
 - `sell.hybrid.pattern_time_stops.<pattern>.time_stop_grace_days`

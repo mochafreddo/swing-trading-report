@@ -98,6 +98,19 @@ def test_env_example_documents_entry_fatal_override_without_active_override() ->
     assert "ENTRY_FATAL_MISSING_PRICE_RATIO" not in active_keys
 
 
+def test_env_example_documents_portfolio_market_caps_without_active_override() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+    active_keys = set(_extract_env_keys(env_example_path))
+
+    assert "PORTFOLIO_MAX_NEW_ENTRIES_KR" in text
+    assert "PORTFOLIO_MAX_NEW_ENTRIES_US" in text
+    assert "portfolio.max_new_entries_per_market.KR" in text
+    assert "portfolio.max_new_entries_per_market.US" in text
+    assert "PORTFOLIO_MAX_NEW_ENTRIES_KR" not in active_keys
+    assert "PORTFOLIO_MAX_NEW_ENTRIES_US" not in active_keys
+
+
 def test_env_example_uses_active_kis_interval_in_commented_override() -> None:
     env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
     text = env_example_path.read_text(encoding="utf-8")
