@@ -257,6 +257,7 @@ def _basic_filters(
 def _volume_stats(
     candles: list[dict[str, Any]], lookback_days: int
 ) -> tuple[float, float]:
+    """Return previous-bar volume and average volume before the signal bar."""
     if not candles:
         return 0.0, 0.0
     vols: list[float] = []
@@ -264,14 +265,14 @@ def _volume_stats(
         volume, _ = _to_volume_and_invalid(candle.get("volume"))
         vols.append(volume)
     prev_vol = vols[-2] if len(vols) >= 2 else vols[-1]
-    window = vols[-lookback_days:] if len(vols) >= lookback_days else vols
-    avg_vol = sum(window) / len(window) if window else 0.0
+    avg_vol = _avg_volume_excluding_latest(candles, lookback_days)
     return prev_vol, avg_vol
 
 
 def _avg_volume_excluding_latest(
     candles: list[dict[str, Any]], lookback_days: int
 ) -> float:
+    """Average volume over bars before the latest signal candle."""
     if len(candles) <= 1 or lookback_days <= 0:
         return 0.0
     historical = candles[:-1]
