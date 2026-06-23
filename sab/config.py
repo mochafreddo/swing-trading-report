@@ -135,6 +135,14 @@ _ENV_YAML_CONFLICT_BINDINGS: tuple[tuple[str, str], ...] = (
     ("FX_CACHE_TTL", "fx.cache_ttl_minutes"),
     ("FX_KIS_SYMBOL", "fx.kis_symbol"),
     ("PORTFOLIO_MAX_ACTIVE_HOLDINGS", "portfolio.max_active_holdings"),
+    (
+        "PORTFOLIO_MAX_NEW_ENTRIES_KR",
+        "portfolio.max_new_entries_per_market.KR",
+    ),
+    (
+        "PORTFOLIO_MAX_NEW_ENTRIES_US",
+        "portfolio.max_new_entries_per_market.US",
+    ),
     ("ENTRY_FATAL_MISSING_PRICE_RATIO", "entry_check.fatal_missing_price_ratio"),
 )
 
@@ -147,6 +155,7 @@ def _yaml_path_exists(yaml_cfg: dict[str, Any], path: str) -> bool:
 _DOTTED_ENV_YAML_BINDING_KEYS = frozenset(
     yaml_path for _env_key, yaml_path in _ENV_YAML_CONFLICT_BINDINGS
 )
+_PORTFOLIO_MARKET_CAP_PATH_PREFIX = "portfolio.max_new_entries_per_market."
 _ACTIVE_USE_MARKET_REGIME_FILTER_DEFAULT = True
 _ACTIVE_MARKET_REGIME_UNAVAILABLE_POLICY_DEFAULT = "block_market"
 _ACTIVE_ENTRY_FATAL_MISSING_PRICE_RATIO_DEFAULT = 0.0
@@ -505,12 +514,33 @@ class _ConfigParser:
         return str(value)
 
 
+def _portfolio_market_cap_yaml_path_exists(
+    parser: _ConfigParser, yaml_path: str
+) -> bool:
+    if not yaml_path.startswith(_PORTFOLIO_MARKET_CAP_PATH_PREFIX):
+        return parser.has_yaml_path(yaml_path)
+
+    market = yaml_path.removeprefix(_PORTFOLIO_MARKET_CAP_PATH_PREFIX).strip().upper()
+    raw_caps = parser.from_yaml("portfolio.max_new_entries_per_market")
+    if raw_caps is None:
+        return False
+    if not isinstance(raw_caps, dict):
+        return parser.has_yaml_path("portfolio.max_new_entries_per_market")
+    return any(str(key).strip().upper() == market for key in raw_caps)
+
+
+def _binding_yaml_path_exists(parser: _ConfigParser, yaml_path: str) -> bool:
+    if yaml_path.startswith(_PORTFOLIO_MARKET_CAP_PATH_PREFIX):
+        return _portfolio_market_cap_yaml_path_exists(parser, yaml_path)
+    return parser.has_yaml_path(yaml_path)
+
+
 def _collect_env_yaml_conflicts(parser: _ConfigParser) -> list[str]:
     conflicts: set[str] = set()
     for env_key, yaml_path in _ENV_YAML_CONFLICT_BINDINGS:
         if getenv(env_key) is None:
             continue
-        if parser.has_yaml_path(yaml_path):
+        if _binding_yaml_path_exists(parser, yaml_path):
             conflicts.add(f"{env_key} ({yaml_path})")
     return sorted(conflicts)
 
@@ -1166,18 +1196,7 @@ def _parse_fx_section(parser: _ConfigParser) -> _FxSection:
     )
 
 
-def _parse_optional_int(
-    parser: _ConfigParser, *, path: str, env_key: str | None = None
-) -> int | None:
-    raw: Any
-    source = f"config.yaml '{path}'"
-    env_value = getenv(env_key) if env_key is not None else None
-    if env_value is not None:
-        raw = env_value
-        source = f"environment variable '{env_key}'"
-    else:
-        raw = parser.from_yaml(path)
-
+def _parse_optional_int_raw(raw: Any, *, path: str, source: str) -> int | None:
     if raw is None:
         return None
 
@@ -1192,6 +1211,24 @@ def _parse_optional_int(
         raise ConfigLoadError(
             f"Invalid config value '{path}': {source} must be an integer or null, got {raw!r}."
         ) from err
+
+
+def _parse_optional_int(
+    parser: _ConfigParser, *, path: str, env_key: str | None = None
+) -> int | None:
+    source = f"config.yaml '{path}'"
+    env_value = getenv(env_key) if env_key is not None else None
+    if env_value is not None:
+        return _parse_optional_int_raw(
+            env_value,
+            path=path,
+            source=f"environment variable '{env_key}'",
+        )
+    return _parse_optional_int_raw(
+        parser.from_yaml(path),
+        path=path,
+        source=source,
+    )
 
 
 _PORTFOLIO_EXPOSURE_DIMENSIONS = frozenset(
@@ -1277,6 +1314,31 @@ def _parse_portfolio_exposure_limits(
     return tuple(limits)
 
 
+def _parse_portfolio_market_cap(
+    market_caps: dict[str, Any],
+    *,
+    market: str,
+    env_value: str | None,
+    env_key: str,
+) -> int | None:
+    path = f"portfolio.max_new_entries_per_market.{market}"
+    if env_value is not None:
+        return _parse_optional_int_raw(
+            env_value,
+            path=path,
+            source=f"environment variable '{env_key}'",
+        )
+
+    for key, value in market_caps.items():
+        if str(key).strip().upper() == market:
+            return _parse_optional_int_raw(
+                value,
+                path=path,
+                source=f"config.yaml '{path}'",
+            )
+    return None
+
+
 def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
     max_new_entries_per_market = parser.from_yaml(
         "portfolio.max_new_entries_per_market"
@@ -1300,26 +1362,18 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
             f"unsupported market keys {unknown_market_keys!r}; expected only 'KR' and/or 'US'."
         )
 
-    def _market_cap_value(market: str) -> int | None:
-        for key, value in market_caps.items():
-            if str(key).strip().upper() == market:
-                if value is None:
-                    return None
-                if isinstance(value, bool):
-                    raise ConfigLoadError(
-                        "Invalid config value "
-                        f"'portfolio.max_new_entries_per_market.{market}': "
-                        f"must be an integer or null, got {value!r}."
-                    )
-                try:
-                    return int(value)
-                except (TypeError, ValueError) as err:
-                    raise ConfigLoadError(
-                        "Invalid config value "
-                        f"'portfolio.max_new_entries_per_market.{market}': "
-                        f"must be an integer or null, got {value!r}."
-                    ) from err
-        return None
+    max_new_entries_kr = _parse_portfolio_market_cap(
+        market_caps,
+        market="KR",
+        env_value=getenv("PORTFOLIO_MAX_NEW_ENTRIES_KR"),
+        env_key="PORTFOLIO_MAX_NEW_ENTRIES_KR",
+    )
+    max_new_entries_us = _parse_portfolio_market_cap(
+        market_caps,
+        market="US",
+        env_value=getenv("PORTFOLIO_MAX_NEW_ENTRIES_US"),
+        env_key="PORTFOLIO_MAX_NEW_ENTRIES_US",
+    )
 
     return _PortfolioSection(
         max_active_holdings=_parse_optional_int(
@@ -1327,8 +1381,8 @@ def _parse_portfolio_section(parser: _ConfigParser) -> _PortfolioSection:
             path="portfolio.max_active_holdings",
             env_key="PORTFOLIO_MAX_ACTIVE_HOLDINGS",
         ),
-        max_new_entries_kr=_market_cap_value("KR"),
-        max_new_entries_us=_market_cap_value("US"),
+        max_new_entries_kr=max_new_entries_kr,
+        max_new_entries_us=max_new_entries_us,
         exposure_limits=_parse_portfolio_exposure_limits(parser),
     )
 

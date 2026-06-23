@@ -26,6 +26,8 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ENTRY_FATAL_MISSING_PRICE_RATIO",
         "SELL_MODE",
         "FX_MODE",
+        "PORTFOLIO_MAX_NEW_ENTRIES_KR",
+        "PORTFOLIO_MAX_NEW_ENTRIES_US",
         "GITHUB_ACTIONS",
         "CI",
         "MIN_DOLLAR_VOLUME",
@@ -1256,6 +1258,66 @@ portfolio:
     assert cfg.portfolio.max_active_holdings == 5
     assert cfg.portfolio.max_new_entries_kr == 2
     assert cfg.portfolio.max_new_entries_us == 1
+
+
+def test_load_config_parses_portfolio_market_caps_from_env_when_yaml_omits_caps(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "portfolio:\n  max_active_holdings: 8\n",
+        encoding="utf-8",
+    )
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("PORTFOLIO_MAX_NEW_ENTRIES_KR", "0")
+    monkeypatch.setenv("PORTFOLIO_MAX_NEW_ENTRIES_US", "2")
+
+    cfg = load_config()
+
+    assert cfg.portfolio.max_active_holdings == 8
+    assert cfg.portfolio.max_new_entries_kr == 0
+    assert cfg.portfolio.max_new_entries_us == 2
+
+
+@pytest.mark.parametrize(
+    ("env_key", "env_value", "error_path"),
+    [
+        (
+            "PORTFOLIO_MAX_NEW_ENTRIES_KR",
+            "true",
+            "portfolio.max_new_entries_per_market.KR",
+        ),
+        (
+            "PORTFOLIO_MAX_NEW_ENTRIES_US",
+            "-1",
+            "portfolio.max_new_entries_per_market.US",
+        ),
+    ],
+)
+def test_load_config_rejects_invalid_portfolio_market_cap_env(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    env_key: str,
+    env_value: str,
+    error_path: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("portfolio: {}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv(env_key, env_value)
+
+    with pytest.raises(ConfigLoadError, match=error_path):
+        load_config()
 
 
 def test_load_config_parses_portfolio_exposure_limits(

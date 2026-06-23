@@ -16,6 +16,8 @@ def _reset_conflict_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "USE_MARKET_REGIME_FILTER",
         "MARKET_REGIME_UNAVAILABLE_POLICY",
         "ENTRY_FATAL_MISSING_PRICE_RATIO",
+        "PORTFOLIO_MAX_NEW_ENTRIES_KR",
+        "PORTFOLIO_MAX_NEW_ENTRIES_US",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -187,3 +189,41 @@ def test_load_config_rejects_entry_fatal_missing_price_ratio_env_yaml_conflict(
         match=r"ENTRY_FATAL_MISSING_PRICE_RATIO \(entry_check\.fatal_missing_price_ratio\)",
     ):
         load_config()
+
+
+def test_load_config_rejects_portfolio_market_cap_env_yaml_conflict_case_insensitive(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+portfolio:
+  max_new_entries_per_market:
+    kr: 1
+    US: 1
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _reset_conflict_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    monkeypatch.setenv("PORTFOLIO_MAX_NEW_ENTRIES_KR", "0")
+    monkeypatch.setenv("PORTFOLIO_MAX_NEW_ENTRIES_US", "0")
+
+    with pytest.raises(
+        ConfigLoadError,
+        match="Config conflict policy violation",
+    ) as exc:
+        load_config()
+
+    msg = str(exc.value)
+    assert (
+        "PORTFOLIO_MAX_NEW_ENTRIES_KR (portfolio.max_new_entries_per_market.KR)"
+    ) in msg
+    assert (
+        "PORTFOLIO_MAX_NEW_ENTRIES_US (portfolio.max_new_entries_per_market.US)"
+    ) in msg
