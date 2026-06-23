@@ -1,5 +1,5 @@
 {
-  "report_date": "2026-06-22",
+  "report_date": "2024-01-30",
   "eval_context": {
     "market": "US",
     "session_state": "AFTER_CLOSE",
@@ -77,7 +77,7 @@
       "signal_price_basis": "adjusted",
       "signal_close_adjusted_value": 102.4383,
       "currency": "USD",
-      "eval_date": "20240030",
+      "eval_date": "20240130",
       "pct_change": "3.3%",
       "pct_change_value": 0.03315031356087764,
       "rs_return": "2.2%",
@@ -195,7 +195,7 @@
       "rsi14": "57.9",
       "strategy_mode": "sma_ema_hybrid",
       "entry_reference_close_raw_value": 102.4383,
-      "entry_reference_eval_date": "20240030",
+      "entry_reference_eval_date": "20240130",
       "market_status": "US market closed"
     }
   ],
