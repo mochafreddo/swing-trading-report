@@ -264,6 +264,10 @@ def test_run_ai_brief_enriches_sources_with_article_reader(
     article_read = payload["recommendations"][0]["sources"][0]["article_read"]
     assert article_read["status"] == "verified"
     assert article_read["tier"] == "article_verified"
+    assert payload["summary"]["article_read_attempted_count"] == 1
+    assert payload["summary"]["article_accessed_count"] == 0
+    assert payload["summary"]["article_verified_count"] == 1
+    assert payload["summary"]["article_read_issue_count"] == 0
 
 
 def test_run_ai_brief_writes_recommendations_from_entry_report_only(

@@ -1,6 +1,6 @@
 # AI Brief Article Reader Source-Backed Design
 
-Status: Accepted
+상태: Accepted
 Date: 2026-06-24
 Scope: AI Brief source enrichment, source-backed evaluation tiers, article URL reader policy
 

@@ -91,6 +91,10 @@
 | `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` | scheduled provider URL | GitHub Actions variable 용도 |
 | `AI_BRIEF_SOURCE_API_TOKEN` | `http-json` source provider | 실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `_KR`, `_US` 중 하나와 일치할 때만 Bearer 전송 |
 | `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` | source provider timeout | 선택 |
+| `AI_BRIEF_ARTICLE_READER` | AI Brief article reader | 선택. `none` 기본, `lightpanda`는 source discovery 뒤 선택된 기사 URL을 public fetch로 읽어 `article_read` 메타데이터를 붙임 |
+| `AI_BRIEF_ARTICLE_READER_MAX_URLS` | AI Brief article reader cap | 선택. 기본 8, 0이면 reader 비활성 |
+| `AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS` | AI Brief article reader timeout | 선택. 양의 finite 숫자만 허용 |
+| `AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS` | AI Brief article excerpt cap | 선택. 기본 1200, 전체 본문은 저장하지 않음 |
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | scheduled/source provider chain | market chain > global chain > single-provider fallback. 일반 `sab ai-brief`는 명시 `--source-provider`/source path/API URL이 없을 때만 env chain 사용 |
 | `AI_BRIEF_SOURCE_PROVIDER_KR`, `AI_BRIEF_SOURCE_PROVIDER_US`, `AI_BRIEF_SOURCE_PROVIDER` | scheduled source provider | market-specific 값 우선 |
 | `FINNHUB_API_KEY` | `finnhub` source provider | US-only |

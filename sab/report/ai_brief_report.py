@@ -42,6 +42,12 @@ _ALLOWED_SOURCE_BACKING_TIERS = frozenset(
 )
 _ALLOWED_ARTICLE_READERS = frozenset({"none", "lightpanda"})
 _EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
+_ARTICLE_READ_SUMMARY_COUNT_FIELDS = (
+    "article_read_attempted_count",
+    "article_accessed_count",
+    "article_verified_count",
+    "article_read_issue_count",
+)
 _CANDIDATE_ROLE_SUMMARY_COUNT_FIELDS = (
     "executable_count",
     "blocked_but_valid_count",
@@ -560,6 +566,43 @@ def _watch_count(
     return len(_optional_list(payload, "watch_candidates") or [])
 
 
+def _artifact_source_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    source_rows: list[Mapping[str, Any]] = []
+    for candidate_field in ("recommendations", "watch_candidates"):
+        candidates = _optional_list(payload, candidate_field)
+        if candidates is None:
+            continue
+        for raw_candidate in candidates:
+            if not isinstance(raw_candidate, Mapping):
+                continue
+            sources = raw_candidate.get("sources")
+            if not isinstance(sources, list):
+                continue
+            for raw_source in sources:
+                if isinstance(raw_source, Mapping):
+                    source_rows.append(raw_source)
+    return source_rows
+
+
+def _article_read_summary_counts(payload: Mapping[str, Any]) -> dict[str, int]:
+    counts = dict.fromkeys(_ARTICLE_READ_SUMMARY_COUNT_FIELDS, 0)
+    for source in _artifact_source_rows(payload):
+        raw_read = source.get("article_read")
+        if not isinstance(raw_read, Mapping):
+            continue
+        counts["article_read_attempted_count"] += 1
+        status = str(raw_read.get("status") or "").strip()
+        tier = str(raw_read.get("tier") or "").strip()
+        issue_code = str(raw_read.get("issue_code") or "").strip()
+        if status == "accessed" or tier == "article_accessed":
+            counts["article_accessed_count"] += 1
+        if status == "verified" or tier == "article_verified":
+            counts["article_verified_count"] += 1
+        if issue_code:
+            counts["article_read_issue_count"] += 1
+    return counts
+
+
 def _summary_int(summary: Mapping[str, Any], field_name: str) -> int | None:
     if field_name not in summary:
         return None
@@ -615,6 +658,14 @@ def _validate_summary_counts(
             raise AiBriefValidationError(
                 f"summary.{field_name} must be {expected_count}, got {actual_count!r}"
             )
+    if any(field_name in summary for field_name in _ARTICLE_READ_SUMMARY_COUNT_FIELDS):
+        for field_name, expected_count in _article_read_summary_counts(payload).items():
+            actual_count = _summary_int(summary, field_name)
+            if actual_count != expected_count:
+                raise AiBriefValidationError(
+                    f"summary.{field_name} must be "
+                    f"{expected_count}, got {actual_count!r}"
+                )
 
 
 def _non_negative_int(value: object, *, field_name: str) -> int:
