@@ -269,6 +269,7 @@ Common failure mapping:
 - Robots or policy denial: `blocked`, `issue_code=article_robots_blocked`
 - HTTP 403 or 429: `blocked`, `issue_code=article_access_blocked`
 - Timeout: `failed`, `issue_code=article_timeout`
+- Response size limit exceeded: `failed`, `issue_code=article_response_too_large`
 - Empty or boilerplate-only extraction: `failed`, `issue_code=article_empty_content`
 - Parser/process error: `failed`, `issue_code=article_reader_failed`
 

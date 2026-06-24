@@ -27,6 +27,7 @@ SourceBackingTier = Literal[
 DEFAULT_ARTICLE_READER_MAX_URLS = 8
 DEFAULT_ARTICLE_READER_TIMEOUT_SECONDS = 8.0
 DEFAULT_ARTICLE_READER_MAX_EXCERPT_CHARS = 1200
+DEFAULT_ARTICLE_READER_MAX_RESPONSE_BYTES = 1_000_000
 
 type LightpandaRunner = Callable[[str, float], tuple[int, str, str]]
 
@@ -151,8 +152,11 @@ def _default_lightpanda_runner(
             "--dump",
             "markdown",
             "--block-private-networks",
+            "--obey-robots",
             "--disable-subframes",
             "--disable-workers",
+            "--http-max-response-size",
+            str(DEFAULT_ARTICLE_READER_MAX_RESPONSE_BYTES),
             "--http-timeout",
             str(int(timeout_seconds * 1000)),
             "--terminate-ms",
@@ -176,6 +180,8 @@ def _issue_code_for_failure(stderr: str) -> tuple[ArticleReadStatus, str]:
         return "blocked", "article_robots_blocked"
     if "403" in text or "429" in text or "forbidden" in text or "rate" in text:
         return "blocked", "article_access_blocked"
+    if "response size" in text or "max response" in text or "too large" in text:
+        return "failed", "article_response_too_large"
     return "failed", "article_reader_failed"
 
 

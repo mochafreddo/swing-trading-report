@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import subprocess
 
+import pytest
+from sab import article_reader
 from sab.article_reader import (
     ArticleReaderSettings,
     ArticleReadResult,
@@ -118,6 +121,42 @@ def test_article_reader_settings_disabled_by_default() -> None:
     assert settings.enabled is False
 
 
+def test_default_lightpanda_runner_uses_conservative_fetch_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="Apple mentions AAPL.",
+            stderr="",
+        )
+
+    monkeypatch.setattr(article_reader.subprocess, "run", fake_run)
+
+    returncode, stdout, stderr = article_reader._default_lightpanda_runner(
+        "https://news.example/aapl",
+        4.5,
+    )
+
+    assert (returncode, stdout, stderr) == (0, "Apple mentions AAPL.", "")
+    args = captured["args"]
+    assert isinstance(args, list)
+    assert "--obey-robots" in args
+    assert "--http-max-response-size" in args
+    response_size_index = args.index("--http-max-response-size")
+    assert args[response_size_index + 1] == str(
+        article_reader.DEFAULT_ARTICLE_READER_MAX_RESPONSE_BYTES
+    )
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["timeout"] == 5.5
+
+
 class _FakeLightpandaRunner:
     def __init__(self, responses: dict[str, tuple[int, str, str]]) -> None:
         self.responses = responses
@@ -189,6 +228,42 @@ def test_enrich_sources_preserves_rows_and_records_blocked_issue() -> None:
         {
             "ticker": "MSFT.NAS",
             "code": "article_access_blocked",
+            "severity": "WARN",
+            "message": "article reader could not access source URL",
+        }
+    ]
+
+
+def test_enrich_sources_records_response_size_issue() -> None:
+    sources: dict[str, list[dict[str, object]]] = {
+        "AAPL.NAS": [
+            {
+                "title": "AAPL source",
+                "url": "https://news.example/aapl",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            }
+        ]
+    }
+    runner = _FakeLightpandaRunner(
+        {"https://news.example/aapl": (1, "", "HTTP max response size exceeded")}
+    )
+
+    enriched, issues = enrich_sources_with_article_reads(
+        sources,
+        ticker_names={"AAPL.NAS": "Apple"},
+        settings=ArticleReaderSettings(reader="lightpanda", max_urls=8),
+        now=NOW,
+        lightpanda_runner=runner,
+    )
+
+    article_read = enriched["AAPL.NAS"][0]["article_read"]
+    assert isinstance(article_read, dict)
+    assert article_read["status"] == "failed"
+    assert article_read["issue_code"] == "article_response_too_large"
+    assert issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "article_response_too_large",
             "severity": "WARN",
             "message": "article reader could not access source URL",
         }
