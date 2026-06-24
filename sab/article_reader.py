@@ -186,6 +186,20 @@ def _issue_code_for_failure(stderr: str) -> tuple[ArticleReadStatus, str]:
     return "failed", "article_reader_failed"
 
 
+def _issue_code_for_lightpanda_markdown_failure(
+    stdout: str,
+) -> tuple[ArticleReadStatus, str] | None:
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading = line.lstrip("#").strip().lower()
+        if heading.startswith("navigation failed"):
+            return _issue_code_for_failure(stdout)
+        return None
+    return None
+
+
 def _metadata_only_result(
     *,
     status: ArticleReadStatus,
@@ -249,6 +263,20 @@ def _read_one_source(
         )
     if returncode != 0:
         status, issue_code = _issue_code_for_failure(stderr)
+        result = _metadata_only_result(
+            status=status,
+            checked_at=now,
+            reader=settings.reader,
+            issue_code=issue_code,
+        )
+        return result, _article_source_issue(
+            ticker=ticker,
+            code=issue_code,
+            message="article reader could not access source URL",
+        )
+    markdown_failure = _issue_code_for_lightpanda_markdown_failure(stdout)
+    if markdown_failure is not None:
+        status, issue_code = markdown_failure
         result = _metadata_only_result(
             status=status,
             checked_at=now,

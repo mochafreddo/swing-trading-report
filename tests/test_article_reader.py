@@ -270,6 +270,48 @@ def test_enrich_sources_records_response_size_issue() -> None:
     ]
 
 
+def test_enrich_sources_records_navigation_failure_from_lightpanda_markdown() -> None:
+    sources: dict[str, list[dict[str, object]]] = {
+        "AAPL.NAS": [
+            {
+                "title": "AAPL source",
+                "url": "https://example.test/aapl",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            }
+        ]
+    }
+    runner = _FakeLightpandaRunner(
+        {
+            "https://example.test/aapl": (
+                0,
+                "# Navigation failed\nReason: CouldntResolveHost",
+                "",
+            )
+        }
+    )
+
+    enriched, issues = enrich_sources_with_article_reads(
+        sources,
+        ticker_names={"AAPL.NAS": "Apple"},
+        settings=ArticleReaderSettings(reader="lightpanda", max_urls=8),
+        now=NOW,
+        lightpanda_runner=runner,
+    )
+
+    article_read = enriched["AAPL.NAS"][0]["article_read"]
+    assert isinstance(article_read, dict)
+    assert article_read["status"] == "failed"
+    assert article_read["issue_code"] == "article_reader_failed"
+    assert issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "article_reader_failed",
+            "severity": "WARN",
+            "message": "article reader could not access source URL",
+        }
+    ]
+
+
 def test_enrich_sources_marks_remaining_rows_not_attempted_after_cap() -> None:
     sources: dict[str, list[dict[str, object]]] = {
         "AAPL.NAS": [
