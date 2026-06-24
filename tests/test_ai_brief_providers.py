@@ -654,7 +654,7 @@ def test_openai_rejects_overlapping_candidate_roles() -> None:
         )
 
 
-def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
+def test_openai_drops_watch_candidate_returned_as_veto() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
         api_key="test-key",
@@ -669,16 +669,96 @@ def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
                         "reason": "bad role",
                     }
                 ],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "source_refs": ["MSFT.NAS:1"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues[-1]["ticker"] == "MSFT.NAS"
+    assert result.source_issues[-1]["code"] == "model_watch_veto_dropped"
+    assert result.source_issues[-1]["severity"] == "WARN"
+
+
+def test_openai_drops_unknown_veto_candidate_as_warn_source_issue() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "SKIP",
+                        "reason": "not in the request candidate set",
+                    }
+                ],
                 "watch_candidates": [],
                 "source_issues": [],
             }
         ),
     )
 
-    with pytest.raises(AiBriefProviderContractError, match="watch ticker"):
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_ineligible_veto_dropped",
+            "severity": "WARN",
+            "message": (
+                "model returned vetoed candidate outside eligible_tickers "
+                "and the row was dropped"
+            ),
+        }
+    ]
+
+
+def test_openai_rejects_invalid_veto_action_for_known_ticker() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "action": "WATCH",
+                        "reason": "bad action",
+                    }
+                ],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="PASS or SKIP"):
         provider.build_recommendations(
             recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
-            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+            watch_candidates=[],
         )
 
 

@@ -593,9 +593,15 @@ def _normalize_openai_provider_result(
         recommendations.append(recommendation)
     for rank, recommendation in enumerate(recommendations, start=1):
         recommendation["rank"] = rank
-    vetoed_candidates = _as_provider_mapping_rows(
+    raw_vetoed_candidates = _as_provider_mapping_rows(
         parsed.get("vetoed_candidates"), field_name="vetoed_candidates"
     )
+    vetoed_candidates, veto_source_issues = _sanitize_provider_vetoed_candidates(
+        raw_vetoed_candidates,
+        eligible_tickers=set(candidate_by_ticker),
+        watch_tickers=set(watch_candidate_by_ticker),
+    )
+    source_issues.extend(veto_source_issues)
     normalized_watch_candidates: list[dict[str, object]] = []
     for watch_index, raw_watch in enumerate(
         _as_provider_mapping_rows(
@@ -752,6 +758,60 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
             f"{_MAX_SOURCES_PER_TICKER} refs"
         )
     return source_refs
+
+
+def _sanitize_provider_vetoed_candidates(
+    vetoed_candidates: list[dict[str, object]],
+    *,
+    eligible_tickers: set[str],
+    watch_tickers: set[str],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    valid_rows: list[dict[str, object]] = []
+    issues: list[dict[str, object]] = []
+    for idx, candidate in enumerate(vetoed_candidates):
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].ticker is required"
+            )
+        action = str(candidate.get("action") or "").strip().upper()
+        if action not in {"PASS", "SKIP"}:
+            raise AiBriefProviderContractError(
+                "OpenAI output vetoed_candidates[].action must be PASS or SKIP"
+            )
+        reason = str(candidate.get("reason") or "").strip()
+        if not reason:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].reason is required"
+            )
+        if ticker in watch_tickers:
+            issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_watch_veto_dropped",
+                    message=(
+                        "model returned watch ticker in vetoed_candidates "
+                        "and the row was dropped"
+                    ),
+                )
+            )
+            continue
+        if ticker not in eligible_tickers:
+            issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_ineligible_veto_dropped",
+                    message=(
+                        "model returned vetoed candidate outside eligible_tickers "
+                        "and the row was dropped"
+                    ),
+                )
+            )
+            continue
+        valid_rows.append(
+            {**candidate, "ticker": ticker, "action": action, "reason": reason}
+        )
+    return valid_rows, issues
 
 
 def _model_source_issue(

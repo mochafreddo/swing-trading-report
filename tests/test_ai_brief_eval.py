@@ -920,6 +920,65 @@ def test_ai_brief_eval_fails_silent_empty_recommendation_artifact(
     assert "recommendation_report_empty" in _issue_codes(result)
 
 
+def test_ai_brief_eval_fails_when_invalid_veto_drop_leaves_no_model_judgment(
+    tmp_path: Path,
+) -> None:
+    entry_path = _write_payload(
+        tmp_path,
+        "entry.invalid-veto-drop.json",
+        {
+            "schema": "sab.report.v1",
+            "type": "entry",
+            "market": "US",
+            "entries": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "action": "ENTER",
+                    "entry_state": "READY",
+                    "entry_price": 101.0,
+                    "entry_price_status": "available",
+                    "gap_pct": 0.01,
+                    "gap_guard_pct": 0.03,
+                    "strategy_mode": "ema_cross",
+                    "pattern": None,
+                    "reasons": ["entry conditions satisfied"],
+                }
+            ],
+            "summary": {"entry_count": 1},
+            "system_issues": [],
+        },
+    )
+    payload = _ai_brief_payload(
+        entry_count=1,
+        eligible_tickers=["AAPL.NAS"],
+        recommendations=[],
+        excluded_candidates=[],
+    )
+    payload["source_issues"] = [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_ineligible_veto_dropped",
+            "severity": "WARN",
+            "message": (
+                "model returned vetoed candidate outside eligible_tickers "
+                "and the row was dropped"
+            ),
+        }
+    ]
+    payload["summary"]["source_issue_count"] = 1
+    report_path = _write_payload(tmp_path, "invalid-veto-drop.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=entry_path,
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert "ai_brief_source_issue_reported" in _issue_codes(result)
+    assert "recommendation_report_empty" in _issue_codes(result)
+
+
 def test_ai_brief_eval_fails_when_report_market_does_not_match_entry_market(
     tmp_path: Path,
 ) -> None:
