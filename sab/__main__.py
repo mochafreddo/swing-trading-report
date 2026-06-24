@@ -266,6 +266,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="External source provider timeout in seconds",
     )
     ai_brief.add_argument(
+        "--article-reader",
+        type=str,
+        default=None,
+        choices=["none", "lightpanda"],
+        help="Optional article reader for AI brief source URL verification",
+    )
+    ai_brief.add_argument(
+        "--article-reader-max-urls",
+        type=int,
+        default=None,
+        help="Maximum source URLs to read for article verification",
+    )
+    ai_brief.add_argument(
+        "--article-reader-timeout-seconds",
+        type=float,
+        default=None,
+        help="Article reader timeout per URL in seconds",
+    )
+    ai_brief.add_argument(
+        "--article-reader-max-excerpt-chars",
+        type=int,
+        default=None,
+        help="Maximum extracted article excerpt characters per source",
+    )
+    ai_brief.add_argument(
         "--upload",
         action="store_true",
         help="Upload AI brief report to Supabase Storage/report_index",
@@ -333,6 +358,10 @@ def _run_ai_brief_command(ns: argparse.Namespace) -> int:
         source_report_path=ns.source_report,
         source_api_url=ns.source_api_url,
         source_timeout_seconds=ns.source_timeout_seconds,
+        article_reader=ns.article_reader,
+        article_reader_max_urls=ns.article_reader_max_urls,
+        article_reader_timeout_seconds=ns.article_reader_timeout_seconds,
+        article_reader_max_excerpt_chars=ns.article_reader_max_excerpt_chars,
         report_date=ns.report_date,
         upload=ns.upload,
     )

@@ -130,6 +130,8 @@ class AiBriefStateInputs:
     recommendation_count: int
     source_issue_count: int
     system_issue_count: int
+    article_read_recommendation_count: int
+    article_verified_recommendation_count: int
     recommendations: list[Mapping[str, Any]]
 
 
@@ -154,6 +156,30 @@ def _count_with_row_floor(
         _safe_int(top_level_value, default=row_count),
         row_count,
     )
+
+
+def _article_read_recommendation_counts(
+    recommendations: list[Mapping[str, Any]],
+) -> tuple[int, int]:
+    article_read_count = 0
+    article_verified_count = 0
+    for recommendation in recommendations:
+        has_article_read = False
+        has_article_verified = False
+        for source in _mapping_rows(recommendation.get("sources")):
+            raw_read = source.get("article_read")
+            if not isinstance(raw_read, Mapping):
+                continue
+            has_article_read = True
+            status = str(raw_read.get("status") or "").strip()
+            tier = str(raw_read.get("tier") or "").strip()
+            if status == "verified" or tier == "article_verified":
+                has_article_verified = True
+        if has_article_read:
+            article_read_count += 1
+        if has_article_verified:
+            article_verified_count += 1
+    return article_read_count, article_verified_count
 
 
 def _brief_state_inputs(payload: Mapping[str, Any]) -> AiBriefStateInputs:
@@ -192,12 +218,17 @@ def _brief_state_inputs(payload: Mapping[str, Any]) -> AiBriefStateInputs:
         payload.get("system_issue_count"),
         row_count=len(system_issues),
     )
+    article_read_count, article_verified_count = _article_read_recommendation_counts(
+        recommendations
+    )
     return AiBriefStateInputs(
         preselected_count=preselected_count,
         watch_count=watch_count,
         recommendation_count=recommendation_count,
         source_issue_count=source_issue_count,
         system_issue_count=system_issue_count,
+        article_read_recommendation_count=article_read_count,
+        article_verified_recommendation_count=article_verified_count,
         recommendations=recommendations,
     )
 
@@ -216,6 +247,10 @@ def infer_ai_brief_state(payload: Mapping[str, Any]) -> AiBriefState:
         not _recommendation_has_sources(recommendation)
         for recommendation in inputs.recommendations
     )
+    weak_article_verification = (
+        inputs.article_read_recommendation_count > 0
+        and inputs.article_verified_recommendation_count < inputs.recommendation_count
+    )
 
     if inputs.preselected_count == 0 and inputs.watch_count == 0:
         return _state_for_rule(BRIEF_RULE_NO_SIGNAL)
@@ -225,11 +260,16 @@ def infer_ai_brief_state(payload: Mapping[str, Any]) -> AiBriefState:
         and not missing_recommendation_sources
         and inputs.source_issue_count == 0
         and inputs.system_issue_count == 0
+        and not weak_article_verification
     ):
         return _state_for_rule(BRIEF_RULE_SOURCE_BACKED_FINAL)
     if inputs.system_issue_count > 0:
         return _state_for_rule(BRIEF_RULE_SYSTEM_ISSUE)
-    elif inputs.source_issue_count > 0 or missing_recommendation_sources:
+    elif (
+        inputs.source_issue_count > 0
+        or missing_recommendation_sources
+        or weak_article_verification
+    ):
         return _state_for_rule(BRIEF_RULE_WEAK_NEWS_COVERAGE)
     if inputs.preselected_count == 0 and inputs.watch_count > 0:
         return _state_for_rule(BRIEF_RULE_WATCH_ONLY)

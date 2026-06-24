@@ -5,7 +5,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .ai_brief_candidates import classify_ai_brief_entry_rows
 from .ai_brief_eval_common import (
@@ -21,6 +21,7 @@ from .ai_brief_eval_common import (
     string_list,
 )
 from .ai_brief_providers import PRESELECTION_LIMIT
+from .article_reader import SourceBackingTier
 from .report.ai_brief_report import AiBriefValidationError, validate_ai_brief_artifact
 from .tickers import infer_market_from_ticker
 
@@ -32,6 +33,14 @@ _EXPANDED_SUMMARY_COUNT_FIELDS = frozenset({"recommendable_count", "watch_count"
 _NEW_FORMAT_ARTIFACT_FIELDS = frozenset(
     {"watch_tickers", "watch_candidates", "source_provider_summary"}
 )
+_SOURCE_BACKING_TIERS: tuple[SourceBackingTier, ...] = (
+    "metadata_backed",
+    "article_accessed",
+    "article_verified",
+)
+_SOURCE_BACKING_TIER_RANK = {
+    tier: rank for rank, tier in enumerate(_SOURCE_BACKING_TIERS)
+}
 
 
 @dataclass(frozen=True)
@@ -234,11 +243,19 @@ def evaluate_ai_brief_recommendation_report(
 
     source_issue_tickers = _issue_tickers(source_issues)
     source_backed_count = 0
+    source_backing_tier_counts: dict[str, int] = dict.fromkeys(_SOURCE_BACKING_TIERS, 0)
+    article_read_recommendation_count = 0
+    article_verified_count = 0
     for recommendation in recommendations:
         ticker = str(recommendation.get("ticker") or "").strip()
-        sources = recommendation.get("sources")
-        if isinstance(sources, list) and sources:
+        source_backing_tier = _source_backing_tier(recommendation)
+        if source_backing_tier is not None:
             source_backed_count += 1
+            source_backing_tier_counts[source_backing_tier] += 1
+            if _has_article_read_metadata(recommendation):
+                article_read_recommendation_count += 1
+            if source_backing_tier == "article_verified":
+                article_verified_count += 1
             continue
         confidence = str(recommendation.get("confidence") or "").strip().upper()
         if confidence in {"MEDIUM", "HIGH"}:
@@ -283,6 +300,25 @@ def evaluate_ai_brief_recommendation_report(
             )
         )
 
+    article_verified_ratio = _source_backed_ratio(
+        recommendation_count=len(recommendations),
+        source_backed_count=article_verified_count,
+    )
+    if article_read_recommendation_count and article_verified_count < len(
+        recommendations
+    ):
+        issues.append(
+            AiBriefRecommendationEvalIssue(
+                code="article_verified_ratio_below_recommendation_count",
+                severity="WARN",
+                message=(
+                    "article-verified recommendation ratio "
+                    f"{article_verified_ratio:.3f} is below full recommendation "
+                    "coverage"
+                ),
+            )
+        )
+
     status = _status_from_issues(issues)
     return AiBriefRecommendationEvalResult(
         status=status,
@@ -297,6 +333,10 @@ def evaluate_ai_brief_recommendation_report(
             "source_backed_recommendation_count": source_backed_count,
             "source_backed_ratio": source_backed_ratio,
             "minimum_source_backed_ratio": minimum_source_backed_ratio,
+            "source_backing_tiers": source_backing_tier_counts,
+            "article_read_recommendation_count": article_read_recommendation_count,
+            "article_verified_recommendation_count": article_verified_count,
+            "article_verified_ratio": article_verified_ratio,
             "source_issue_count": len(source_issues),
             "system_issue_count": len(system_issues),
             "issue_count": len(issues),
@@ -675,6 +715,39 @@ def _source_backed_ratio(
     if recommendation_count == 0:
         return 1.0
     return source_backed_count / recommendation_count
+
+
+def _source_backing_tier(
+    recommendation: Mapping[str, Any],
+) -> SourceBackingTier | None:
+    sources = recommendation.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return None
+
+    strongest: SourceBackingTier = "metadata_backed"
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        raw_article_read = source.get("article_read")
+        if not isinstance(raw_article_read, Mapping):
+            continue
+        raw_tier = str(raw_article_read.get("tier") or "").strip()
+        if raw_tier not in _SOURCE_BACKING_TIER_RANK:
+            continue
+        tier = cast(SourceBackingTier, raw_tier)
+        if _SOURCE_BACKING_TIER_RANK[tier] > _SOURCE_BACKING_TIER_RANK[strongest]:
+            strongest = tier
+    return strongest
+
+
+def _has_article_read_metadata(recommendation: Mapping[str, Any]) -> bool:
+    sources = recommendation.get("sources")
+    if not isinstance(sources, list):
+        return False
+    return any(
+        isinstance(source, Mapping) and isinstance(source.get("article_read"), Mapping)
+        for source in sources
+    )
 
 
 def _issue_only_result(

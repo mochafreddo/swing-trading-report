@@ -46,6 +46,11 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY
 docker compose up -d --build web
 ```
 
+AI Brief가 source URL 본문 확인까지 수행해야 하면 `lightpanda`가 실행 환경의
+`PATH`에 있는 상태에서 `--article-reader lightpanda`를 추가합니다. 이 reader는
+공개 URL을 보수적으로 읽어 `article_read` 메타데이터만 붙이며, paywall/CAPTCHA/
+로그인/robots/bot block/접근 제어를 우회하지 않습니다.
+
 웹 UI 기본 주소는 `http://localhost:${WEB_HOST_PORT}`이며 기본 포트는 `55300`입니다.
 
 ## 품질 검증

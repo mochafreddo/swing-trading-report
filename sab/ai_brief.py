@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import math
 import os
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from .ai_brief_candidates import (
     AiBriefEntryCandidate,
@@ -39,6 +40,15 @@ from .ai_brief_sources import (
     SOURCE_PROVIDER_NONE,
     SOURCE_PROVIDER_POLYGON_NEWS,
     AiBriefSourceProviderError,
+)
+from .article_reader import (
+    DEFAULT_ARTICLE_READER_MAX_EXCERPT_CHARS,
+    DEFAULT_ARTICLE_READER_MAX_URLS,
+    DEFAULT_ARTICLE_READER_TIMEOUT_SECONDS,
+    ArticleReaderName,
+    ArticleReaderSettings,
+    article_read_summary,
+    enrich_sources_with_article_reads,
 )
 from .config import ConfigLoadError, load_config
 from .observability import current_run_id
@@ -133,6 +143,16 @@ def _read_env_float(name: str, *, error_message: str) -> float | None:
         raise ValueError(error_message) from exc
 
 
+def _read_env_int(name: str, *, error_message: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(error_message) from exc
+
+
 def _normalize_model_timeout_seconds(value: float | None) -> float:
     if value is None:
         value = _read_env_float(
@@ -144,6 +164,73 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
+
+
+def _normalize_article_reader(value: str | None) -> ArticleReaderName:
+    reader = (
+        str(value or os.getenv("AI_BRIEF_ARTICLE_READER") or "none").strip().lower()
+    )
+    if reader not in {"none", "lightpanda"}:
+        raise ValueError("article_reader must be one of ['lightpanda', 'none']")
+    return cast(ArticleReaderName, reader)
+
+
+def _normalize_article_reader_max_urls(value: int | None) -> int:
+    if value is None:
+        value = _read_env_int(
+            "AI_BRIEF_ARTICLE_READER_MAX_URLS",
+            error_message="AI_BRIEF_ARTICLE_READER_MAX_URLS must be an integer",
+        )
+        if value is None:
+            return DEFAULT_ARTICLE_READER_MAX_URLS
+    if value < 0:
+        raise ValueError("article_reader_max_urls must be non-negative")
+    return value
+
+
+def _normalize_article_reader_timeout_seconds(value: float | None) -> float:
+    if value is None:
+        value = _read_env_float(
+            "AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS must be a number",
+        )
+        if value is None:
+            return DEFAULT_ARTICLE_READER_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("article_reader_timeout_seconds must be positive")
+    return float(value)
+
+
+def _normalize_article_reader_max_excerpt_chars(value: int | None) -> int:
+    if value is None:
+        value = _read_env_int(
+            "AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS",
+            error_message="AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS must be an integer",
+        )
+        if value is None:
+            return DEFAULT_ARTICLE_READER_MAX_EXCERPT_CHARS
+    if value < 1:
+        raise ValueError("article_reader_max_excerpt_chars must be positive")
+    return value
+
+
+def _normalize_article_reader_settings(
+    *,
+    article_reader: str | None,
+    article_reader_max_urls: int | None,
+    article_reader_timeout_seconds: float | None,
+    article_reader_max_excerpt_chars: int | None,
+) -> ArticleReaderSettings:
+    return ArticleReaderSettings(
+        reader=_normalize_article_reader(article_reader),
+        max_urls=_normalize_article_reader_max_urls(article_reader_max_urls),
+        timeout_seconds=_normalize_article_reader_timeout_seconds(
+            article_reader_timeout_seconds
+        ),
+        max_excerpt_chars=_normalize_article_reader_max_excerpt_chars(
+            article_reader_max_excerpt_chars
+        ),
+    )
 
 
 def _normalize_source_provider(
@@ -457,8 +544,9 @@ def _build_summary(
     cap_excluded_count: int,
     source_issue_count: int,
     system_issue_count: int,
+    article_summary: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
-    return {
+    summary: dict[str, object] = {
         "entry_count": entry_count,
         "recommendable_count": recommendable_count,
         "executable_count": executable_count,
@@ -472,6 +560,9 @@ def _build_summary(
         "source_issue_count": source_issue_count,
         "system_issue_count": system_issue_count,
     }
+    if article_summary:
+        summary.update(article_summary)
+    return summary
 
 
 def _build_provider(
@@ -577,6 +668,10 @@ def run_ai_brief(
     source_provider_chain: str | None = None,
     source_api_url: str | None = None,
     source_timeout_seconds: float | None = None,
+    article_reader: str | None = None,
+    article_reader_max_urls: int | None = None,
+    article_reader_timeout_seconds: float | None = None,
+    article_reader_max_excerpt_chars: int | None = None,
     report_date: str | None = None,
     upload: bool = False,
     report_path_callback: Callable[[str], None] | None = None,
@@ -598,6 +693,12 @@ def run_ai_brief(
             value=source_provider,
             source_report_path=source_report_path,
             source_api_url=source_api_url_input,
+        )
+        article_reader_settings = _normalize_article_reader_settings(
+            article_reader=article_reader,
+            article_reader_max_urls=article_reader_max_urls,
+            article_reader_timeout_seconds=article_reader_timeout_seconds,
+            article_reader_max_excerpt_chars=article_reader_max_excerpt_chars,
         )
     except ValueError as exc:
         logger.error(
@@ -629,6 +730,7 @@ def run_ai_brief(
             "model_name": normalized_model_name,
             "source_provider": normalized_source_provider,
             "source_provider_chain": source_provider_chain,
+            "article_reader": article_reader_settings.reader,
             "upload": upload,
         },
     )
@@ -740,6 +842,7 @@ def run_ai_brief(
     system_issues = [*_entry_system_issues(source_report), *enrichment_issues]
     source_provider_issues: list[dict[str, object]] = []
     source_provider_summary: dict[str, object] = {}
+    article_summary: dict[str, int] = {}
     source_universe_candidates = [*eligible_candidates, *watch_candidates]
     source_universe_tickers = {
         str(candidate["ticker"]) for candidate in source_universe_candidates
@@ -764,15 +867,25 @@ def run_ai_brief(
             watch_tickers=watch_ticker_set,
             ticker_names=ticker_names,
         )
+        sources_by_ticker = source_chain_result.sources_by_ticker
+        article_issues: list[dict[str, object]] = []
+        if article_reader_settings.enabled:
+            sources_by_ticker, article_issues = enrich_sources_with_article_reads(
+                sources_by_ticker,
+                ticker_names=ticker_names,
+                settings=article_reader_settings,
+                now=dt.datetime.now().astimezone(),
+            )
+            article_summary = article_read_summary(sources_by_ticker)
         preselected_candidates = _attach_candidate_sources(
             preselected_candidates,
-            source_chain_result.sources_by_ticker,
+            sources_by_ticker,
         )
         watch_candidates = _attach_candidate_sources(
             watch_candidates,
-            source_chain_result.sources_by_ticker,
+            sources_by_ticker,
         )
-        source_provider_issues = source_chain_result.source_issues
+        source_provider_issues = [*source_chain_result.source_issues, *article_issues]
         system_issues.extend(source_chain_result.system_issues)
         source_provider_summary = source_chain_result.summary
         provider_summaries = source_provider_summary.get("providers")
@@ -818,8 +931,7 @@ def run_ai_brief(
                 "market": target_market,
                 "ticker_count": len(source_universe_candidates),
                 "source_count": sum(
-                    len(sources)
-                    for sources in source_chain_result.sources_by_ticker.values()
+                    len(sources) for sources in sources_by_ticker.values()
                 ),
                 "source_issue_count": len(source_provider_issues),
             },
@@ -984,6 +1096,7 @@ def run_ai_brief(
             cap_excluded_count=len(cap_excluded_candidates),
             source_issue_count=len(source_issues),
             system_issue_count=len(system_issues),
+            article_summary=article_summary,
         ),
         "recommendations": recommendations,
         "excluded_candidates": excluded_candidates,

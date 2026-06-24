@@ -1194,6 +1194,9 @@ def _candidate_sources(candidate: Mapping[str, object]) -> list[dict[str, object
             "url": url,
             "published_at": str(raw_source.get("published_at") or "").strip(),
         }
+        article_read = raw_source.get("article_read")
+        if isinstance(article_read, Mapping):
+            source["article_read"] = dict(article_read)
         if source["title"] and source["url"] and source["published_at"]:
             candidate_sources.append(source)
     return candidate_sources

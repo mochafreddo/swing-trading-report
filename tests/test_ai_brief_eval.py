@@ -54,6 +54,29 @@ def _copy_mapping_rows(value: object) -> list[dict[str, Any]]:
     return rows
 
 
+def _with_article_read(
+    recommendation: Mapping[str, Any],
+    *,
+    status: str,
+    tier: str,
+) -> dict[str, Any]:
+    updated = dict(recommendation)
+    sources = _copy_mapping_rows(updated["sources"])
+    first_source = dict(sources[0])
+    first_source["article_read"] = {
+        "status": status,
+        "tier": tier,
+        "checked_at": "2026-05-06T11:30:00+00:00",
+        "reader": "lightpanda",
+        "excerpt": "Article text mentions the recommendation context.",
+        "matched_terms": ["AAPL"] if tier == "article_verified" else [],
+        "issue_code": None,
+    }
+    sources[0] = first_source
+    updated["sources"] = sources
+    return updated
+
+
 def _unbacked_payload(*, confidence: str = "LOW") -> dict[str, Any]:
     payload = _load_good_ai_brief()
     recommendations = _copy_mapping_rows(payload["recommendations"])
@@ -192,6 +215,80 @@ def test_ai_brief_eval_passes_source_backed_artifact() -> None:
     assert result.summary["source_backed_recommendation_count"] == 3
     assert result.summary["source_backed_ratio"] == 1.0
     assert result.issues == []
+
+
+def test_ai_brief_eval_reports_article_source_backing_tiers(
+    tmp_path: Path,
+) -> None:
+    payload = _load_good_ai_brief()
+    recommendations = _copy_mapping_rows(payload["recommendations"])
+    recommendations[0] = _with_article_read(
+        recommendations[0],
+        status="verified",
+        tier="article_verified",
+    )
+    recommendations[1] = _with_article_read(
+        recommendations[1],
+        status="accessed",
+        tier="article_accessed",
+    )
+    recommendations[2] = _with_article_read(
+        recommendations[2],
+        status="not_attempted",
+        tier="metadata_backed",
+    )
+    payload["recommendations"] = recommendations
+    report_path = _write_payload(tmp_path, "article-tiers.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "WARN"
+    assert result.summary["source_backing_tiers"] == {
+        "metadata_backed": 1,
+        "article_accessed": 1,
+        "article_verified": 1,
+    }
+    assert result.summary["article_verified_recommendation_count"] == 1
+    assert result.summary["article_verified_ratio"] == 1 / 3
+    assert "article_verified_ratio_below_recommendation_count" in _issue_codes(result)
+
+
+def test_ai_brief_eval_passes_when_all_recommendations_are_article_verified(
+    tmp_path: Path,
+) -> None:
+    payload = _load_good_ai_brief()
+    recommendations = [
+        _with_article_read(
+            recommendation,
+            status="verified",
+            tier="article_verified",
+        )
+        for recommendation in _copy_mapping_rows(payload["recommendations"])
+    ]
+    payload["recommendations"] = recommendations
+    report_path = _write_payload(tmp_path, "article-verified.ai-brief.json", payload)
+
+    result = evaluate_ai_brief_recommendation_report(
+        entry_report_path=_fixture("entry.us.json"),
+        ai_brief_report_path=report_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "PASS"
+    assert result.summary["source_backing_tiers"] == {
+        "metadata_backed": 0,
+        "article_accessed": 0,
+        "article_verified": 3,
+    }
+    assert result.summary["article_verified_recommendation_count"] == 3
+    assert result.summary["article_verified_ratio"] == 1.0
+    assert "article_verified_ratio_below_recommendation_count" not in _issue_codes(
+        result
+    )
 
 
 def test_ai_brief_eval_accepts_legacy_artifact_without_expanded_summary_counts(

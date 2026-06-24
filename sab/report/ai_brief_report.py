@@ -34,7 +34,20 @@ _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_SOURCE_PROVIDER_STATUSES = frozenset({"success", "failed", "skipped"})
+_ALLOWED_ARTICLE_READ_STATUSES = frozenset(
+    {"not_attempted", "metadata_only", "accessed", "verified", "blocked", "failed"}
+)
+_ALLOWED_SOURCE_BACKING_TIERS = frozenset(
+    {"metadata_backed", "article_accessed", "article_verified"}
+)
+_ALLOWED_ARTICLE_READERS = frozenset({"none", "lightpanda"})
 _EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
+_ARTICLE_READ_SUMMARY_COUNT_FIELDS = (
+    "article_read_attempted_count",
+    "article_accessed_count",
+    "article_verified_count",
+    "article_read_issue_count",
+)
 _CANDIDATE_ROLE_SUMMARY_COUNT_FIELDS = (
     "executable_count",
     "blocked_but_valid_count",
@@ -148,7 +161,48 @@ def _validate_source_rows(
                 "source.published_at must not be more than "
                 f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
             )
+        if "article_read" in source:
+            _validate_article_read(
+                source.get("article_read"),
+                field_name=f"{field_name}[{source_index}].article_read",
+            )
     return len(source_rows)
+
+
+def _validate_article_read(value: object, *, field_name: str) -> None:
+    row = _require_mapping(value, field_name=field_name)
+    status = str(row.get("status") or "").strip()
+    if status not in _ALLOWED_ARTICLE_READ_STATUSES:
+        raise AiBriefValidationError(
+            f"{field_name}.status must be one of "
+            f"{sorted(_ALLOWED_ARTICLE_READ_STATUSES)}"
+        )
+    tier = str(row.get("tier") or "").strip()
+    if tier not in _ALLOWED_SOURCE_BACKING_TIERS:
+        raise AiBriefValidationError(
+            f"{field_name}.tier must be one of {sorted(_ALLOWED_SOURCE_BACKING_TIERS)}"
+        )
+    _parse_offset_datetime(row.get("checked_at"), field_name=f"{field_name}.checked_at")
+    reader = str(row.get("reader") or "").strip()
+    if reader not in _ALLOWED_ARTICLE_READERS:
+        raise AiBriefValidationError(
+            f"{field_name}.reader must be one of {sorted(_ALLOWED_ARTICLE_READERS)}"
+        )
+    excerpt = row.get("excerpt")
+    if excerpt is not None and not isinstance(excerpt, str):
+        raise AiBriefValidationError(f"{field_name}.excerpt must be a string")
+    matched_terms = _require_list(
+        row.get("matched_terms"),
+        field_name=f"{field_name}.matched_terms",
+    )
+    for idx, raw_term in enumerate(matched_terms):
+        if not isinstance(raw_term, str):
+            raise AiBriefValidationError(
+                f"{field_name}.matched_terms[{idx}] must be a string"
+            )
+    issue_code = row.get("issue_code")
+    if issue_code is not None and not str(issue_code).strip():
+        raise AiBriefValidationError(f"{field_name}.issue_code must not be blank")
 
 
 def _validate_sources(
@@ -512,6 +566,44 @@ def _watch_count(
     return len(_optional_list(payload, "watch_candidates") or [])
 
 
+def _artifact_source_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    source_rows: list[Mapping[str, Any]] = []
+    for candidate_field in ("recommendations", "watch_candidates"):
+        candidates = _optional_list(payload, candidate_field)
+        if candidates is None:
+            continue
+        for raw_candidate in candidates:
+            if not isinstance(raw_candidate, Mapping):
+                continue
+            sources = raw_candidate.get("sources")
+            if not isinstance(sources, list):
+                continue
+            for raw_source in sources:
+                if isinstance(raw_source, Mapping):
+                    source_rows.append(raw_source)
+    return source_rows
+
+
+def _article_read_summary_counts(payload: Mapping[str, Any]) -> dict[str, int]:
+    counts = dict.fromkeys(_ARTICLE_READ_SUMMARY_COUNT_FIELDS, 0)
+    for source in _artifact_source_rows(payload):
+        raw_read = source.get("article_read")
+        if not isinstance(raw_read, Mapping):
+            continue
+        status = str(raw_read.get("status") or "").strip()
+        tier = str(raw_read.get("tier") or "").strip()
+        issue_code = str(raw_read.get("issue_code") or "").strip()
+        if status != "not_attempted":
+            counts["article_read_attempted_count"] += 1
+        if status == "accessed" or tier == "article_accessed":
+            counts["article_accessed_count"] += 1
+        if status == "verified" or tier == "article_verified":
+            counts["article_verified_count"] += 1
+        if issue_code:
+            counts["article_read_issue_count"] += 1
+    return counts
+
+
 def _summary_int(summary: Mapping[str, Any], field_name: str) -> int | None:
     if field_name not in summary:
         return None
@@ -567,6 +659,14 @@ def _validate_summary_counts(
             raise AiBriefValidationError(
                 f"summary.{field_name} must be {expected_count}, got {actual_count!r}"
             )
+    if any(field_name in summary for field_name in _ARTICLE_READ_SUMMARY_COUNT_FIELDS):
+        for field_name, expected_count in _article_read_summary_counts(payload).items():
+            actual_count = _summary_int(summary, field_name)
+            if actual_count != expected_count:
+                raise AiBriefValidationError(
+                    f"summary.{field_name} must be "
+                    f"{expected_count}, got {actual_count!r}"
+                )
 
 
 def _non_negative_int(value: object, *, field_name: str) -> int:

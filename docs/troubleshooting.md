@@ -269,6 +269,10 @@ NEEDS_CONFIRMATION: report_index backfill ownership and accepted recovery path.
   non-HTTPS, includes userinfo, targets a local/private literal host, has an
   invalid port, or contains whitespace/control chars. Scheduler returns
   `source_config_invalid` before scan/entry.
+- Article reader is enabled but `lightpanda` is missing from the runner `PATH`,
+  timed out, hit publisher blocking, or returned navigation-failure markdown.
+  These are recorded as `article_read.issue_code` and `source_issues[]`; they
+  should not be interpreted as successful article access.
 - Notification token/webhook is missing.
 - Telegram accepted skipped/plain text paths but rejected the AI Brief report
   HTML body. The report body is sent with `parse_mode=HTML`, while skipped
@@ -299,11 +303,31 @@ For a manual GitHub run, inspect the uploaded `ai-brief.telegram.txt` artifact
 when the `Send Telegram notification` step fails. The workflow sends that file
 in chunks with `split_telegram_message_text()` and `parse_mode=HTML`.
 
+For article reader diagnostics, inspect the AI Brief artifact:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("reports/YYYY-MM-DD.ai-brief.json")
+payload = json.loads(path.read_text())
+print(payload.get("summary", {}))
+for issue in payload.get("source_issues", []):
+    if str(issue.get("code", "")).startswith("article_"):
+        print(issue)
+PY
+```
+
 ### Resolution
 
 - Treat `ai-brief-skip` as an artifact, not a silent failure.
 - Do not delete `success`, `artifact`, `skip-artifact`, or `notification:sent` markers unless intentionally rerunning.
 - Confirm `OPENAI_API_KEY` and market source provider env exist in the scheduler/GitHub environment.
+- If article body checks are not required for a run, set
+  `AI_BRIEF_ARTICLE_READER=none` or `AI_BRIEF_ARTICLE_READER_MAX_URLS=0`.
+  Do not add browser flags, cookies, login state, proxying, or challenge bypass
+  behavior to make publisher pages readable.
 - For `source_config_invalid`, inspect scheduler logs for
   `scheduled_ai_brief_source_config_invalid`; it includes provider/API URL
   origin metadata but does not log the source API URL value.

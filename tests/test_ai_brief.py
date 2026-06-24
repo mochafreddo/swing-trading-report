@@ -6,6 +6,7 @@ import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sab import ai_brief_sources
@@ -17,6 +18,7 @@ from sab.ai_brief_sources import (
     AiBriefSourceProviderTimeoutError,
     load_ai_brief_sources,
 )
+from sab.article_reader import ArticleReaderSettings
 
 
 def _fresh_published_at() -> str:
@@ -186,6 +188,86 @@ def _write_source_report(
         encoding="utf-8",
     )
     return path
+
+
+def test_run_ai_brief_enriches_sources_with_article_reader(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    buy_report = _write_buy_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    def fake_enrich(
+        sources_by_ticker: object,
+        *,
+        ticker_names: object,
+        settings: object,
+        now: dt.datetime,
+    ) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
+        captured["settings"] = settings
+        captured["ticker_names"] = dict(cast(dict[str, str], ticker_names))
+        sources = cast(dict[str, list[dict[str, object]]], sources_by_ticker)
+        enriched = {
+            ticker: [
+                {
+                    **source,
+                    "article_read": {
+                        "status": "verified",
+                        "tier": "article_verified",
+                        "checked_at": now.isoformat(),
+                        "reader": "lightpanda",
+                        "excerpt": "Apple mentions AAPL.",
+                        "matched_terms": ["AAPL", "Apple"],
+                        "issue_code": None,
+                    },
+                }
+                for source in source_rows
+            ]
+            for ticker, source_rows in sources.items()
+        }
+        return enriched, []
+
+    monkeypatch.setattr(
+        "sab.ai_brief.enrich_sources_with_article_reads",
+        fake_enrich,
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=buy_report.as_posix(),
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider="local-json",
+        source_report_path=source_report.as_posix(),
+        article_reader="lightpanda",
+        article_reader_max_urls=3,
+        article_reader_timeout_seconds=4.5,
+        article_reader_max_excerpt_chars=900,
+    )
+
+    assert exit_code == 0
+    settings = cast(ArticleReaderSettings, captured["settings"])
+    assert settings.reader == "lightpanda"
+    assert settings.max_urls == 3
+    assert settings.timeout_seconds == 4.5
+    assert settings.max_excerpt_chars == 900
+    assert captured["ticker_names"] == {"AAPL.NAS": "Apple"}
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    article_read = payload["recommendations"][0]["sources"][0]["article_read"]
+    assert article_read["status"] == "verified"
+    assert article_read["tier"] == "article_verified"
+    assert payload["summary"]["article_read_attempted_count"] == 1
+    assert payload["summary"]["article_accessed_count"] == 0
+    assert payload["summary"]["article_verified_count"] == 1
+    assert payload["summary"]["article_read_issue_count"] == 0
 
 
 def test_run_ai_brief_writes_recommendations_from_entry_report_only(
@@ -7553,6 +7635,10 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "source_report_path": None,
         "source_api_url": None,
         "source_timeout_seconds": None,
+        "article_reader": None,
+        "article_reader_max_urls": None,
+        "article_reader_timeout_seconds": None,
+        "article_reader_max_excerpt_chars": None,
         "report_date": None,
         "upload": False,
     }
@@ -7600,6 +7686,10 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "source_report_path": None,
         "source_api_url": "https://source.example/api",
         "source_timeout_seconds": 2.5,
+        "article_reader": None,
+        "article_reader_max_urls": None,
+        "article_reader_timeout_seconds": None,
+        "article_reader_max_excerpt_chars": None,
         "report_date": None,
         "upload": False,
     }
