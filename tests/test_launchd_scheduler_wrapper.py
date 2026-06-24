@@ -21,6 +21,8 @@ def _run_wrapper_with_stubs(
     *,
     docker_script: str,
     tee_script: str | None = None,
+    mktemp_script: str | None = None,
+    mkfifo_script: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -39,6 +41,10 @@ def _run_wrapper_with_stubs(
     _write_executable(bin_dir / "docker", docker_script)
     if tee_script is not None:
         _write_executable(bin_dir / "tee", tee_script)
+    if mktemp_script is not None:
+        _write_executable(bin_dir / "mktemp", mktemp_script)
+    if mkfifo_script is not None:
+        _write_executable(bin_dir / "mkfifo", mkfifo_script)
     _write_executable(
         bin_dir / "curl",
         "#!/usr/bin/env bash\n"
@@ -170,6 +176,29 @@ def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
 
     assert result.returncode == 1
     assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
+
+
+def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            "printf '%s\\n' 'scheduler should not start'\n"
+            "exit 0\n"
+        ),
+        mkfifo_script=(
+            "#!/usr/bin/env bash\nprintf '%s\\n' 'mkfifo failed' >&2\nexit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert "mkfifo failed" in result.stderr
+    assert "scheduler should not start" not in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
 

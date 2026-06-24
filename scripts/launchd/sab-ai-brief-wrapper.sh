@@ -195,10 +195,22 @@ printf '\n' >> "logs/launchd/${market}-${schedule_role}.cmd.log"
 
 container_status=0
 tee_status=0
-container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"
-capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.capture.XXXXXX")"
+container_stdout=""
+capture_dir=""
+container_pipe=""
+if ! container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"; then
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit 1
+fi
+if ! capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.capture.XXXXXX")"; then
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit 1
+fi
 container_pipe="${capture_dir}/stdout.pipe"
-mkfifo "${container_pipe}"
+if ! mkfifo "${container_pipe}"; then
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit 1
+fi
 trap 'rm -f "${container_stdout:-}"; rm -rf "${capture_dir:-}"' EXIT
 tee "${container_stdout}" < "${container_pipe}" &
 tee_pid=$!

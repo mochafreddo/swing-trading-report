@@ -78,3 +78,30 @@
 ### Any concerns
 
 - None beyond the existing FIFO-based capture tradeoff already documented above.
+
+## Remaining reviewer finding fix
+
+### What I changed for this remaining finding
+
+- Wrapped `mktemp`, `mktemp -d`, and `mkfifo` in explicit guarded checks so `set -e` no longer exits the wrapper before it can classify stdout capture setup as a host-side failure.
+- Sent `send_host_failure_alert "scheduler_stdout_capture_failed"` before each non-zero exit when stdout capture setup cannot create the temp file, temp directory, or FIFO.
+- Initialized capture cleanup variables to empty strings before setup so the existing `EXIT` trap remains safe when setup fails partway through.
+- Extended the wrapper test helper so PATH-stubbed `mktemp` and `mkfifo` commands can be injected for capture setup failure scenarios.
+- Added a focused regression test that forces `mkfifo` failure and verifies the wrapper alerts with `scheduler_stdout_capture_failed` without reaching the scheduler run path.
+
+### Test commands and results
+
+- `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_launchd_scheduler_wrapper.py -q`
+  - Result: `12 passed in 3.66s`
+- `bash -n scripts/launchd/sab-ai-brief-wrapper.sh`
+  - Result: exit 0
+
+### Files changed
+
+- `/Users/mochafreddo/GitHub/swing-trading-report/scripts/launchd/sab-ai-brief-wrapper.sh`
+- `/Users/mochafreddo/GitHub/swing-trading-report/tests/test_launchd_scheduler_wrapper.py`
+- `/Users/mochafreddo/GitHub/swing-trading-report/.superpowers/sdd/task-3-report.md`
+
+### Any concerns
+
+- None.
