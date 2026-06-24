@@ -304,4 +304,10 @@ def test_enrich_sources_marks_remaining_rows_not_attempted_after_cap() -> None:
     assert issues == []
     assert first_read["status"] == "verified"
     assert second_read["status"] == "not_attempted"
+    assert article_read_summary(enriched) == {
+        "article_read_attempted_count": 1,
+        "article_accessed_count": 0,
+        "article_verified_count": 1,
+        "article_read_issue_count": 0,
+    }
     assert runner.calls == [("https://news.example/aapl-1", 8.0)]

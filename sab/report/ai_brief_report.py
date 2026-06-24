@@ -590,10 +590,11 @@ def _article_read_summary_counts(payload: Mapping[str, Any]) -> dict[str, int]:
         raw_read = source.get("article_read")
         if not isinstance(raw_read, Mapping):
             continue
-        counts["article_read_attempted_count"] += 1
         status = str(raw_read.get("status") or "").strip()
         tier = str(raw_read.get("tier") or "").strip()
         issue_code = str(raw_read.get("issue_code") or "").strip()
+        if status != "not_attempted":
+            counts["article_read_attempted_count"] += 1
         if status == "accessed" or tier == "article_accessed":
             counts["article_accessed_count"] += 1
         if status == "verified" or tier == "article_verified":

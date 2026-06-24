@@ -424,6 +424,64 @@ def test_validate_ai_brief_artifact_rejects_stale_article_read_summary_counts() 
         )
 
 
+def test_validate_ai_brief_artifact_does_not_count_not_attempted_as_attempted() -> None:
+    artifact = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+    }
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "Apple supply chain update",
+            "url": "https://example.test/aapl",
+            "published_at": "2026-05-05T08:00:00+00:00",
+            "article_read": {
+                "status": "verified",
+                "tier": "article_verified",
+                "checked_at": "2026-05-05T08:35:00+00:00",
+                "reader": "lightpanda",
+                "excerpt": "Apple mentions AAPL.",
+                "matched_terms": ["AAPL"],
+                "issue_code": None,
+            },
+        },
+        {
+            "title": "Apple capped source",
+            "url": "https://example.test/aapl-capped",
+            "published_at": "2026-05-05T08:00:00+00:00",
+            "article_read": {
+                "status": "not_attempted",
+                "tier": "metadata_backed",
+                "checked_at": "2026-05-05T08:35:00+00:00",
+                "reader": "lightpanda",
+                "excerpt": "",
+                "matched_terms": [],
+                "issue_code": None,
+            },
+        },
+    ]
+    artifact["recommendations"] = [recommendation]
+    artifact["source_issues"] = []
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {
+        **summary,
+        "source_issue_count": 0,
+        "article_read_attempted_count": 1,
+        "article_accessed_count": 0,
+        "article_verified_count": 1,
+        "article_read_issue_count": 0,
+    }
+
+    validate_ai_brief_artifact(
+        artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+
 def test_write_ai_brief_report_rejects_stale_issue_summary_counts(
     tmp_path: Path,
 ) -> None:

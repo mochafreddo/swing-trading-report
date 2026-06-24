@@ -123,10 +123,11 @@ def article_read_summary(
             raw_read = source.get("article_read")
             if not isinstance(raw_read, Mapping):
                 continue
-            attempted += 1
-            status = str(raw_read.get("status") or "")
-            tier = str(raw_read.get("tier") or "")
+            status = str(raw_read.get("status") or "").strip()
+            tier = str(raw_read.get("tier") or "").strip()
             issue_code = str(raw_read.get("issue_code") or "").strip()
+            if status != "not_attempted":
+                attempted += 1
             if status == "accessed" or tier == "article_accessed":
                 accessed += 1
             if status == "verified" or tier == "article_verified":
