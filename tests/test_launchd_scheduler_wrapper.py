@@ -23,6 +23,7 @@ def _run_wrapper_with_stubs(
     tee_script: str | None = None,
     mktemp_script: str | None = None,
     mkfifo_script: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -61,9 +62,7 @@ def _run_wrapper_with_stubs(
         encoding="utf-8",
     )
     wrapper_copy.chmod(0o755)
-    env = {
-        **os.environ,
-    }
+    env = {**os.environ, **(extra_env or {})}
     result = subprocess.run(
         [
             str(wrapper_copy),
@@ -199,6 +198,46 @@ def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
     assert result.returncode == 1
     assert "mkfifo failed" in result.stderr
     assert "scheduler should not start" not in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
+
+
+def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
+    tmp_path: Path,
+) -> None:
+    tmp_runtime_dir = tmp_path / "runtime-tmp"
+    tmp_runtime_dir.mkdir()
+    count_file = tmp_path / "mktemp-count"
+    stdout_file = tmp_runtime_dir / "captured.stdout"
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            "printf '%s\\n' 'scheduler should not start'\n"
+            "exit 0\n"
+        ),
+        mktemp_script=(
+            "#!/usr/bin/env bash\n"
+            f"count_file={shlex.quote(count_file.as_posix())}\n"
+            f"stdout_file={shlex.quote(stdout_file.as_posix())}\n"
+            'count="$(cat "${count_file}" 2>/dev/null || printf \'0\')"\n'
+            'if [[ "${count}" == "0" ]]; then\n'
+            "  printf '1' > \"${count_file}\"\n"
+            '  : > "${stdout_file}"\n'
+            "  printf '%s\\n' \"${stdout_file}\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\\n' 'mktemp -d failed' >&2\n"
+            "exit 1\n"
+        ),
+        extra_env={"TMPDIR": str(tmp_runtime_dir)},
+    )
+
+    assert result.returncode == 1
+    assert "mktemp -d failed" in result.stderr
+    assert "scheduler should not start" not in result.stdout
+    assert not stdout_file.exists()
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
 

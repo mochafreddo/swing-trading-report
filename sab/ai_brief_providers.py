@@ -774,16 +774,6 @@ def _sanitize_provider_vetoed_candidates(
             raise AiBriefProviderContractError(
                 f"OpenAI output vetoed_candidates[{idx}].ticker is required"
             )
-        action = str(candidate.get("action") or "").strip().upper()
-        if action not in {"PASS", "SKIP"}:
-            raise AiBriefProviderContractError(
-                "OpenAI output vetoed_candidates[].action must be PASS or SKIP"
-            )
-        reason = str(candidate.get("reason") or "").strip()
-        if not reason:
-            raise AiBriefProviderContractError(
-                f"OpenAI output vetoed_candidates[{idx}].reason is required"
-            )
         if ticker in watch_tickers:
             issues.append(
                 _model_source_issue(
@@ -808,6 +798,16 @@ def _sanitize_provider_vetoed_candidates(
                 )
             )
             continue
+        action = str(candidate.get("action") or "").strip().upper()
+        if action not in {"PASS", "SKIP"}:
+            raise AiBriefProviderContractError(
+                "OpenAI output vetoed_candidates[].action must be PASS or SKIP"
+            )
+        reason = str(candidate.get("reason") or "").strip()
+        if not reason:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].reason is required"
+            )
         valid_rows.append(
             {**candidate, "ticker": ticker, "action": action, "reason": reason}
         )

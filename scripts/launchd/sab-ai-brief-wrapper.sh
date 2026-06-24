@@ -94,6 +94,11 @@ extract_scheduler_status() {
   printf '%s' "${status}"
 }
 
+cleanup_capture_artifacts() {
+  rm -f "${container_stdout:-}"
+  rm -rf "${capture_dir:-}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-root)
@@ -198,6 +203,7 @@ tee_status=0
 container_stdout=""
 capture_dir=""
 container_pipe=""
+trap cleanup_capture_artifacts EXIT
 if ! container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"; then
   send_host_failure_alert "scheduler_stdout_capture_failed"
   exit 1
@@ -211,7 +217,6 @@ if ! mkfifo "${container_pipe}"; then
   send_host_failure_alert "scheduler_stdout_capture_failed"
   exit 1
 fi
-trap 'rm -f "${container_stdout:-}"; rm -rf "${capture_dir:-}"' EXIT
 tee "${container_stdout}" < "${container_pipe}" &
 tee_pid=$!
 SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" "${cmd[@]}" > "${container_pipe}" || container_status=$?
