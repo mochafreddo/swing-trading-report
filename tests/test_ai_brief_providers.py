@@ -204,6 +204,105 @@ def test_openai_payload_adds_source_ids_and_schema_uses_source_refs() -> None:
     assert "sources" not in watch_props
 
 
+def test_openai_schema_constrains_tickers_by_candidate_role() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "action": "SKIP",
+                    "reason": "source risk",
+                }
+            ],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    user_payload = json.loads(str(request["input"][1]["content"]))
+    assert user_payload["eligible_tickers"] == ["AAPL.NAS"]
+    assert user_payload["watch_tickers"] == ["MSFT.NAS"]
+
+    schema = request["text"]["format"]["schema"]
+    recommendation_ticker = schema["properties"]["recommendations"]["items"][
+        "properties"
+    ]["ticker"]
+    veto_ticker = schema["properties"]["vetoed_candidates"]["items"]["properties"][
+        "ticker"
+    ]
+    watch_ticker = schema["properties"]["watch_candidates"]["items"]["properties"][
+        "ticker"
+    ]
+    assert recommendation_ticker == {"type": "string", "enum": ["AAPL.NAS"]}
+    assert veto_ticker == {"type": "string", "enum": ["AAPL.NAS"]}
+    assert watch_ticker == {"type": "string", "enum": ["MSFT.NAS"]}
+
+
+def test_openai_schema_disallows_empty_role_arrays() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    schema = request["text"]["format"]["schema"]
+    assert schema["properties"]["recommendations"]["maxItems"] == 0
+    assert schema["properties"]["vetoed_candidates"]["maxItems"] == 0
+    assert (
+        "enum"
+        not in schema["properties"]["recommendations"]["items"]["properties"]["ticker"]
+    )
+    assert schema["properties"]["watch_candidates"]["items"]["properties"][
+        "ticker"
+    ] == {"type": "string", "enum": ["MSFT.NAS"]}
+
+
 def test_openai_normalized_output_preserves_candidate_investment_readiness() -> None:
     session = _CapturingSession(
         {
