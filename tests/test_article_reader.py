@@ -6,6 +6,7 @@ from sab.article_reader import (
     ArticleReaderSettings,
     ArticleReadResult,
     article_read_summary,
+    enrich_sources_with_article_reads,
     extract_bounded_excerpt,
     verify_article_text,
 )
@@ -115,3 +116,117 @@ def test_article_reader_settings_disabled_by_default() -> None:
 
     assert settings.reader == "none"
     assert settings.enabled is False
+
+
+class _FakeLightpandaRunner:
+    def __init__(self, responses: dict[str, tuple[int, str, str]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, float]] = []
+
+    def __call__(self, url: str, timeout_seconds: float) -> tuple[int, str, str]:
+        self.calls.append((url, timeout_seconds))
+        return self.responses[url]
+
+
+def test_enrich_sources_marks_verified_from_lightpanda_markdown() -> None:
+    sources: dict[str, list[dict[str, object]]] = {
+        "AAPL.NAS": [
+            {
+                "title": "Apple source",
+                "url": "https://news.example/aapl",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            }
+        ]
+    }
+    runner = _FakeLightpandaRunner(
+        {"https://news.example/aapl": (0, "# Apple\nAAPL expanded AI capacity.", "")}
+    )
+
+    enriched, issues = enrich_sources_with_article_reads(
+        sources,
+        ticker_names={"AAPL.NAS": "Apple"},
+        settings=ArticleReaderSettings(reader="lightpanda", max_urls=8),
+        now=NOW,
+        lightpanda_runner=runner,
+    )
+
+    article_read = enriched["AAPL.NAS"][0]["article_read"]
+    assert isinstance(article_read, dict)
+    assert issues == []
+    assert article_read["status"] == "verified"
+    assert article_read["tier"] == "article_verified"
+    assert runner.calls == [("https://news.example/aapl", 8.0)]
+
+
+def test_enrich_sources_preserves_rows_and_records_blocked_issue() -> None:
+    sources: dict[str, list[dict[str, object]]] = {
+        "MSFT.NAS": [
+            {
+                "title": "MSFT source",
+                "url": "https://news.example/msft",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            }
+        ]
+    }
+    runner = _FakeLightpandaRunner(
+        {"https://news.example/msft": (1, "", "HTTP 403 forbidden")}
+    )
+
+    enriched, issues = enrich_sources_with_article_reads(
+        sources,
+        ticker_names={"MSFT.NAS": "Microsoft"},
+        settings=ArticleReaderSettings(reader="lightpanda", max_urls=8),
+        now=NOW,
+        lightpanda_runner=runner,
+    )
+
+    article_read = enriched["MSFT.NAS"][0]["article_read"]
+    assert isinstance(article_read, dict)
+    assert enriched["MSFT.NAS"][0]["url"] == "https://news.example/msft"
+    assert article_read["status"] == "blocked"
+    assert article_read["issue_code"] == "article_access_blocked"
+    assert issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "article_access_blocked",
+            "severity": "WARN",
+            "message": "article reader could not access source URL",
+        }
+    ]
+
+
+def test_enrich_sources_marks_remaining_rows_not_attempted_after_cap() -> None:
+    sources: dict[str, list[dict[str, object]]] = {
+        "AAPL.NAS": [
+            {
+                "title": "AAPL source 1",
+                "url": "https://news.example/aapl-1",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            },
+            {
+                "title": "AAPL source 2",
+                "url": "https://news.example/aapl-2",
+                "published_at": "2026-06-24T09:00:00+00:00",
+            },
+        ]
+    }
+    runner = _FakeLightpandaRunner(
+        {"https://news.example/aapl-1": (0, "Apple mentions AAPL.", "")}
+    )
+
+    enriched, issues = enrich_sources_with_article_reads(
+        sources,
+        ticker_names={"AAPL.NAS": "Apple"},
+        settings=ArticleReaderSettings(reader="lightpanda", max_urls=1),
+        now=NOW,
+        lightpanda_runner=runner,
+    )
+
+    first_read = enriched["AAPL.NAS"][0]["article_read"]
+    second_read = enriched["AAPL.NAS"][1]["article_read"]
+    assert isinstance(first_read, dict)
+    assert isinstance(second_read, dict)
+    assert issues == []
+    assert first_read["status"] == "verified"
+    assert second_read["status"] == "not_attempted"
+    assert runner.calls == [("https://news.example/aapl-1", 8.0)]
