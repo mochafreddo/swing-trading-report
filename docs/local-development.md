@@ -94,6 +94,22 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab entry
 UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json
 ```
 
+AI Brief source URL 본문 확인을 로컬에서 켜려면 `lightpanda` 바이너리가 `PATH`에
+있어야 합니다.
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief \
+  --entry-report reports/YYYY-MM-DD.entry.json \
+  --source-provider local-json \
+  --source-report reports/YYYY-MM-DD.sources.json \
+  --article-reader lightpanda \
+  --article-reader-max-urls 8
+```
+
+Reader는 source discovery 이후 선택된 공개 URL만 읽고 bounded excerpt와
+`article_read` 상태를 리포트에 저장합니다. paywall, CAPTCHA, 로그인, robots/bot
+block, 접근 제어는 우회하지 않습니다.
+
 `scan`/`sell`/`entry`는 KIS/Supabase/시장 데이터 상태에 따라 실패할 수 있습니다. 실패 시 [Troubleshooting](troubleshooting.md)을 먼저 확인합니다.
 
 ## 5. Web UI 실행

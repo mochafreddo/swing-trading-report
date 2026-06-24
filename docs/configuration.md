@@ -98,7 +98,7 @@
 | `AI_BRIEF_SOURCE_API_URL_US` | no | none | `https://source.example/us` | scheduled workflow | US scheduled source API URL | GitHub variable. |
 | `AI_BRIEF_SOURCE_API_TOKEN` | no | none | `replace-with-source-token` | source provider | Bearer token for matching configured source API URL | Secret. Only sent when the request URL matches `AI_BRIEF_SOURCE_API_URL`, `_KR`, or `_US`. |
 | `AI_BRIEF_SOURCE_TIMEOUT_SECONDS` | no | provider default | `10` | source providers | Source provider timeout | Positive number. |
-| `AI_BRIEF_ARTICLE_READER` | no | `none` | `none` | `sab ai-brief` | Optional article reader after source discovery | `lightpanda` reads selected public source URLs and records bounded `article_read` metadata. Does not bypass paywalls, CAPTCHA, login, bot blocks, or access controls. |
+| `AI_BRIEF_ARTICLE_READER` | no | `none` | `none` | `sab ai-brief` | Optional article reader after source discovery | `lightpanda` must be on runner `PATH`; it reads selected public source URLs and records bounded `article_read` metadata. Does not bypass paywalls, CAPTCHA, login, robots/bot blocks, or access controls. |
 | `AI_BRIEF_ARTICLE_READER_MAX_URLS` | no | `8` | `8` | `sab ai-brief` | Article reader per-run URL cap | Non-negative integer; `0` disables reader attempts. |
 | `AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS` | no | `8` | `8` | `sab ai-brief` | Article reader timeout | Positive finite number. |
 | `AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS` | no | `1200` | `1200` | `sab ai-brief` | Stored article excerpt cap | Positive integer; full article bodies are not stored. |
