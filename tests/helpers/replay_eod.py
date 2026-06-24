@@ -32,6 +32,7 @@ _NORMALIZED_SCAN_ARTIFACT_KEYS = (
     "screen_outs",
 )
 _FIXED_SESSION_STATE = "AFTER_CLOSE"
+_FIXED_US_MARKET_STATUS = "closed"
 _CONFIG_ENV_KEYS = {name for name, _ in sab_config._ENV_YAML_CONFLICT_BINDINGS}
 _CLEAR_ENV_KEYS = _CONFIG_ENV_KEYS | {
     "KIS_APP_KEY",
@@ -422,6 +423,9 @@ def run_scan_replay_case(
             if str(market).strip()
         }
 
+    def _fixed_us_market_status(**_: Any) -> str:
+        return _FIXED_US_MARKET_STATUS
+
     class FixtureBackedScanMarketData:
         def __init__(self, raw_by_ticker: dict[str, list[dict[str, Any]]]) -> None:
             self._raw_by_ticker = raw_by_ticker
@@ -474,6 +478,7 @@ def run_scan_replay_case(
 
     monkeypatch.setattr(scan, "ScanMarketData", FixtureBackedScanMarketData)
     monkeypatch.setattr(scan, "_collect_scan_runtime", _collect_scan_runtime)
+    monkeypatch.setattr(scan, "us_market_status", _fixed_us_market_status)
     monkeypatch.setattr(scan, "maybe_upload_report_artifact", _skip_upload)
     monkeypatch.setattr(
         scan.scan_evaluation,

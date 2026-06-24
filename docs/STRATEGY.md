@@ -294,8 +294,9 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - Swing high breakout의 박스권(consolidation) 폭 계산은 **돌파 신호봉을 제외한 직전 구간**으로 평가합니다.
   - 의도: 돌파 당일 변동폭이 큰 정상 breakout이 “박스권 과대”로 오탐지되어 탈락하는 것을 방지합니다.
   - 허용 박스권 폭은 `strategy.hybrid.breakout_consolidation_max_range_pct`로 설정하며 기본값은 `0.10`(10%)입니다.
-- Swing high breakout의 볼륨 확인은 **돌파 신호봉을 제외한 직전 N일 평균 거래량** 대비로 평가합니다.
-  - 의도: `volume > Nd avg` 해석을 신호봉 포함 평균과 분리해 룰 의미를 고정합니다.
+- Hybrid buy의 볼륨 확인은 패턴별 신호봉을 제외한 직전 `strategy.hybrid.volume_lookback_days`일 평균 거래량 대비로 평가합니다.
+  - 적용 대상: Trend pullback bounce, Swing high breakout, RSI oversold reversal.
+  - 의도: 신호봉 당일 거래량이 자기 자신의 비교 기준선을 움직이지 않게 해 `volume > Nd avg` 해석을 고정합니다.
 - KR breakout confirmation이 켜진 경우 첫 돌파 종가는 `WATCH`가 될 수 있습니다.
   - 다음 완성 일봉이 **원래 박스권 swing high** 위에서 한 번 더 마감하면 `READY`로 승격할 수 있습니다.
   - 이때 직전 돌파봉의 고점을 새 swing high로 잘못 재계산하지 않고, 돌파 전 박스권의 swing high를 유지합니다.

@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import sab.scan as scan
 
 from tests.helpers.replay_eod import (
     ReplayScanCaseError,
@@ -107,6 +108,28 @@ def test_scan_replay_cases_match_expected_artifact(
 
     assert result.exit_code == 0
     assert result.normalized_actual == result.expected
+
+
+def test_scan_replay_cases_fix_us_market_status_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _live_open_us_market_status(**_: object) -> str:
+        return "open"
+
+    monkeypatch.setattr(scan, "us_market_status", _live_open_us_market_status)
+
+    result = run_scan_replay_case(
+        _SCAN_REPLAY_ROOT / "us_hybrid_strong_rs_breakout",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 0
+    assert result.normalized_actual == result.expected
+    assert result.normalized_actual["candidates"][0]["market_status"] == (
+        "US market closed"
+    )
 
 
 def test_scan_replay_hybrid_report_preserves_hybrid_config_snapshot(

@@ -1,4 +1,4 @@
-Status: Accepted
+상태: Accepted
 Date: 2026-06-23
 
 # Hybrid Volume Semantics Design

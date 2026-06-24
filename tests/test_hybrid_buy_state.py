@@ -33,6 +33,21 @@ def _simple_candles(n: int, base: float = 100.0) -> list[dict]:
     return candles
 
 
+def _ohlcv_candles(
+    *rows: tuple[float, float, float, float, float],
+) -> list[dict[str, float]]:
+    return [
+        {
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+        for open_, high, low, close, volume in rows
+    ]
+
+
 def _settings(min_history: int = 5) -> HybridEvaluationSettings:
     return HybridEvaluationSettings(
         sma_trend_period=2,
@@ -1423,6 +1438,103 @@ def test_pullback_bounce_handles_zero_close_without_crash() -> None:
     assert isinstance(ok, bool)
     assert isinstance(reasons, list)
     assert pattern in {None, HybridPattern.TREND_PULLBACK_BOUNCE}
+
+
+def test_pullback_volume_thrust_uses_pre_signal_average() -> None:
+    settings = _settings()
+    settings.volume_lookback_days = 3
+    closes = [105.0, 100.0, 98.0, 99.0, 101.0]
+    sma_trend = [95.0] * 5
+    ema_short = [104.0, 101.0, 99.0, 100.0, 102.0]
+    ema_mid = [90.0] * 5
+    rsi_vals = [55.0] * 5
+    candles = _ohlcv_candles(
+        (105.0, 106.0, 104.0, 105.0, 100.0),
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 300.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (100.0, 102.0, 99.0, 101.0, 180.0),
+    )
+
+    ok, reasons, pattern, context = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is True
+    assert pattern == HybridPattern.TREND_PULLBACK_BOUNCE
+    assert reasons == ["Bullish candle with rising volume"]
+    assert context["avg_vol"] == pytest.approx((100.0 + 300.0 + 100.0) / 3)
+    assert context["trigger_bullish_vol"] is True
+
+
+def test_pullback_heavy_selling_uses_pre_signal_average() -> None:
+    settings = _settings()
+    settings.volume_lookback_days = 3
+    closes = [105.0, 100.0, 98.0, 99.0, 101.0]
+    sma_trend = [95.0] * 5
+    ema_short = [104.0, 101.0, 99.0, 100.0, 102.0]
+    ema_mid = [90.0] * 5
+    rsi_vals = [55.0] * 5
+    candles = _ohlcv_candles(
+        (105.0, 106.0, 104.0, 105.0, 100.0),
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 100.0),
+        (101.0, 102.0, 98.0, 99.0, 400.0),
+        (100.0, 102.0, 99.0, 101.0, 1000.0),
+    )
+
+    ok, reasons, pattern, context = _detect_trend_pullback_bounce(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is False
+    assert reasons == ["Heavy selling volume during pullback"]
+    assert pattern is None
+    assert context == {}
+
+
+def test_rsi_reversal_volume_confirmation_uses_pre_signal_average() -> None:
+    settings = _settings()
+    settings.volume_lookback_days = 3
+    closes = [100.0, 99.0, 98.0, 99.0, 102.0]
+    sma_trend = [90.0] * 5
+    ema_short = [96.0, 96.0, 96.0, 96.0, 95.0]
+    ema_mid = [94.0] * 5
+    rsi_vals = [50.0, 35.0, 32.0, 38.0, 45.0]
+    candles = _ohlcv_candles(
+        (100.0, 101.0, 99.0, 100.0, 100.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (98.0, 99.0, 97.0, 98.0, 300.0),
+        (99.0, 100.0, 98.0, 99.0, 100.0),
+        (99.0, 103.0, 94.0, 102.0, 180.0),
+    )
+
+    ok, reasons, pattern, context = _detect_rsi_oversold_reversal(
+        closes,
+        sma_trend,
+        ema_short,
+        ema_mid,
+        rsi_vals,
+        candles,
+        settings,
+    )
+
+    assert ok is True
+    assert pattern == HybridPattern.RSI_OVERSOLD_REVERSAL
+    assert reasons == ["Reversal off EMA short/mid with volume"]
+    assert context["avg_vol"] == pytest.approx((100.0 + 300.0 + 100.0) / 3)
 
 
 def test_rsi_oversold_reversal_handles_zero_close_without_crash() -> None:

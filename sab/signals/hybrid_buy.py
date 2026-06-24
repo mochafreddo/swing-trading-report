@@ -254,24 +254,10 @@ def _basic_filters(
     return True, None, None, close, avg_dv
 
 
-def _volume_stats(
-    candles: list[dict[str, Any]], lookback_days: int
-) -> tuple[float, float]:
-    if not candles:
-        return 0.0, 0.0
-    vols: list[float] = []
-    for candle in candles:
-        volume, _ = _to_volume_and_invalid(candle.get("volume"))
-        vols.append(volume)
-    prev_vol = vols[-2] if len(vols) >= 2 else vols[-1]
-    window = vols[-lookback_days:] if len(vols) >= lookback_days else vols
-    avg_vol = sum(window) / len(window) if window else 0.0
-    return prev_vol, avg_vol
-
-
 def _avg_volume_excluding_latest(
     candles: list[dict[str, Any]], lookback_days: int
 ) -> float:
+    """Average volume over bars before the latest signal candle."""
     if len(candles) <= 1 or lookback_days <= 0:
         return 0.0
     historical = candles[:-1]
@@ -364,7 +350,7 @@ def _detect_trend_pullback_bounce(
     if not (settings.rsi_zone_low <= rsi_val <= settings.rsi_zone_high):
         return False, ["RSI not in swing zone"], None, {}
 
-    _, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
+    avg_vol = _avg_volume_excluding_latest(candles, settings.volume_lookback_days)
 
     # Pullback region: bars immediately before today's signal bar where
     # close stayed at/below EMA short.
@@ -542,7 +528,7 @@ def _detect_rsi_oversold_reversal(
         return False, ["RSI did not rebound from oversold band"], None, {}
 
     today = candles[-1]
-    _, avg_vol = _volume_stats(candles, settings.volume_lookback_days)
+    avg_vol = _avg_volume_excluding_latest(candles, settings.volume_lookback_days)
     o = _to_finite_or_default(today.get("open"))
     c = _to_finite_or_default(today.get("close"))
     v, _ = _to_volume_and_invalid(today.get("volume"))
