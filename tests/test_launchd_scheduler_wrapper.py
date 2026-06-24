@@ -20,6 +20,7 @@ def _run_wrapper_with_stubs(
     tmp_path: Path,
     *,
     docker_script: str,
+    tee_script: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -36,6 +37,8 @@ def _run_wrapper_with_stubs(
         "exit 1\n",
     )
     _write_executable(bin_dir / "docker", docker_script)
+    if tee_script is not None:
+        _write_executable(bin_dir / "tee", tee_script)
     _write_executable(
         bin_dir / "curl",
         "#!/usr/bin/env bash\n"
@@ -149,6 +152,26 @@ def test_launchd_wrapper_sends_host_failure_without_structured_status(
     assert "container crashed before app status" in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_container_failed" in alert_text
+
+
+def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'printf \'%s\\n\' \'{"status": "pipeline_failed", "storage_key": null}\'\n'
+            "exit 1\n"
+        ),
+        tee_script=("#!/usr/bin/env bash\ncat\nexit 1\n"),
+    )
+
+    assert result.returncode == 1
+    assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
 
 
 def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:

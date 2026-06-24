@@ -194,14 +194,24 @@ printf ' %q' "${cmd[@]}" >> "logs/launchd/${market}-${schedule_role}.cmd.log"
 printf '\n' >> "logs/launchd/${market}-${schedule_role}.cmd.log"
 
 container_status=0
+tee_status=0
 container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"
-container_pipe="$(mktemp -u "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.pipe.XXXXXX")"
+capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.capture.XXXXXX")"
+container_pipe="${capture_dir}/stdout.pipe"
 mkfifo "${container_pipe}"
-trap 'rm -f "${container_stdout:-}" "${container_pipe:-}"' EXIT
+trap 'rm -f "${container_stdout:-}"; rm -rf "${capture_dir:-}"' EXIT
 tee "${container_stdout}" < "${container_pipe}" &
 tee_pid=$!
 SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" "${cmd[@]}" > "${container_pipe}" || container_status=$?
-wait "${tee_pid}" || true
+if wait "${tee_pid}"; then
+  tee_status=0
+else
+  tee_status=$?
+fi
+if [[ "${tee_status}" -ne 0 ]]; then
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit "${tee_status}"
+fi
 if [[ "${container_status}" -ne 0 ]]; then
   scheduler_status="$(extract_scheduler_status "${container_stdout}" || true)"
   if [[ -n "${scheduler_status}" ]] && is_structured_scheduler_failure_status "${scheduler_status}"; then

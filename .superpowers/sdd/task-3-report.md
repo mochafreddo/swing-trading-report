@@ -51,3 +51,30 @@
 
 - I deviated from the brief's process-substitution example because this sandbox rejects `> >(tee ...)` with `/dev/fd/...: Operation not permitted`.
 - The replacement uses a FIFO plus background `tee`, which is behaviorally equivalent for this task: stdout still streams live to the parent process, stderr still flows directly, and the wrapper retains a stdout capture file for final structured status inspection.
+
+## Review fix follow-up
+
+### What I changed for the review findings
+
+- Replaced the race-prone `mktemp -u` FIFO name generation with `mktemp -d` and created the FIFO inside that private capture directory.
+- Stopped ignoring the background `tee` exit status: the wrapper now records `wait "${tee_pid}"` explicitly and treats any non-zero result as a wrapper-side failure.
+- Added a distinct host-failure reason, `scheduler_stdout_capture_failed`, so stdout capture failures do not get mixed into `scheduler_container_failed`.
+- Made structured scheduler status suppression depend on a successful stdout capture path; recognized structured failures are only honored when `tee` completed successfully.
+- Added a focused wrapper execution test that forces `tee` to fail and verifies the wrapper emits the new host-failure reason.
+
+### Test commands and results
+
+- `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_launchd_scheduler_wrapper.py -q`
+  - Result: `11 passed in 3.50s`
+- `bash -n scripts/launchd/sab-ai-brief-wrapper.sh`
+  - Result: exit 0
+
+### Files changed
+
+- `/Users/mochafreddo/GitHub/swing-trading-report/scripts/launchd/sab-ai-brief-wrapper.sh`
+- `/Users/mochafreddo/GitHub/swing-trading-report/tests/test_launchd_scheduler_wrapper.py`
+- `/Users/mochafreddo/GitHub/swing-trading-report/.superpowers/sdd/task-3-report.md`
+
+### Any concerns
+
+- None beyond the existing FIFO-based capture tradeoff already documented above.
