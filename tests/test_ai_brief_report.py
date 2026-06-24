@@ -247,6 +247,81 @@ def test_write_ai_brief_report_marks_source_backed_final_judgment(
     assert payload["brief_reason"] == "source_backed_final"
 
 
+def test_validate_ai_brief_artifact_accepts_source_article_read_metadata() -> None:
+    artifact = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+    }
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "Apple supply chain update",
+            "url": "https://example.test/aapl",
+            "published_at": "2026-05-05T08:00:00+00:00",
+            "article_read": {
+                "status": "verified",
+                "tier": "article_verified",
+                "checked_at": "2026-05-05T08:35:00+00:00",
+                "reader": "lightpanda",
+                "excerpt": "Apple mentions AAPL.",
+                "matched_terms": ["AAPL", "Apple"],
+                "issue_code": None,
+            },
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+    artifact["source_issues"] = []
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {**summary, "source_issue_count": 0}
+
+    validate_ai_brief_artifact(
+        artifact,
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+
+def test_validate_ai_brief_artifact_rejects_invalid_article_read_tier() -> None:
+    artifact = {
+        "schema": "sab.ai_brief.v1",
+        "type": "ai_brief",
+        "generated_at": "2026-05-05T08:40:00+00:00",
+        "report_date": "2026-05-05",
+        **_artifact(),
+    }
+    recommendation = dict(artifact["recommendations"][0])  # type: ignore[index]
+    recommendation["sources"] = [
+        {
+            "title": "Apple supply chain update",
+            "url": "https://example.test/aapl",
+            "published_at": "2026-05-05T08:00:00+00:00",
+            "article_read": {
+                "status": "verified",
+                "tier": "unknown",
+                "checked_at": "2026-05-05T08:35:00+00:00",
+                "reader": "lightpanda",
+                "excerpt": "Apple mentions AAPL.",
+                "matched_terms": ["AAPL"],
+                "issue_code": None,
+            },
+        }
+    ]
+    artifact["recommendations"] = [recommendation]
+    artifact["source_issues"] = []
+    summary = artifact["summary"]
+    assert isinstance(summary, dict)
+    artifact["summary"] = {**summary, "source_issue_count": 0}
+
+    with pytest.raises(AiBriefValidationError, match=r"article_read\.tier"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
 def test_write_ai_brief_report_rejects_stale_issue_summary_counts(
     tmp_path: Path,
 ) -> None:

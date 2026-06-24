@@ -34,6 +34,13 @@ _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
 _ALLOWED_MODEL_PROVIDERS = frozenset({"fake", "openai"})
 _ALLOWED_SOURCE_PROVIDER_STATUSES = frozenset({"success", "failed", "skipped"})
+_ALLOWED_ARTICLE_READ_STATUSES = frozenset(
+    {"not_attempted", "metadata_only", "accessed", "verified", "blocked", "failed"}
+)
+_ALLOWED_SOURCE_BACKING_TIERS = frozenset(
+    {"metadata_backed", "article_accessed", "article_verified"}
+)
+_ALLOWED_ARTICLE_READERS = frozenset({"none", "lightpanda"})
 _EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
 _CANDIDATE_ROLE_SUMMARY_COUNT_FIELDS = (
     "executable_count",
@@ -148,7 +155,48 @@ def _validate_source_rows(
                 "source.published_at must not be more than "
                 f"{SOURCE_FUTURE_SKEW_MINUTES}m in the future"
             )
+        if "article_read" in source:
+            _validate_article_read(
+                source.get("article_read"),
+                field_name=f"{field_name}[{source_index}].article_read",
+            )
     return len(source_rows)
+
+
+def _validate_article_read(value: object, *, field_name: str) -> None:
+    row = _require_mapping(value, field_name=field_name)
+    status = str(row.get("status") or "").strip()
+    if status not in _ALLOWED_ARTICLE_READ_STATUSES:
+        raise AiBriefValidationError(
+            f"{field_name}.status must be one of "
+            f"{sorted(_ALLOWED_ARTICLE_READ_STATUSES)}"
+        )
+    tier = str(row.get("tier") or "").strip()
+    if tier not in _ALLOWED_SOURCE_BACKING_TIERS:
+        raise AiBriefValidationError(
+            f"{field_name}.tier must be one of {sorted(_ALLOWED_SOURCE_BACKING_TIERS)}"
+        )
+    _parse_offset_datetime(row.get("checked_at"), field_name=f"{field_name}.checked_at")
+    reader = str(row.get("reader") or "").strip()
+    if reader not in _ALLOWED_ARTICLE_READERS:
+        raise AiBriefValidationError(
+            f"{field_name}.reader must be one of {sorted(_ALLOWED_ARTICLE_READERS)}"
+        )
+    excerpt = row.get("excerpt")
+    if excerpt is not None and not isinstance(excerpt, str):
+        raise AiBriefValidationError(f"{field_name}.excerpt must be a string")
+    matched_terms = _require_list(
+        row.get("matched_terms"),
+        field_name=f"{field_name}.matched_terms",
+    )
+    for idx, raw_term in enumerate(matched_terms):
+        if not isinstance(raw_term, str):
+            raise AiBriefValidationError(
+                f"{field_name}.matched_terms[{idx}] must be a string"
+            )
+    issue_code = row.get("issue_code")
+    if issue_code is not None and not str(issue_code).strip():
+        raise AiBriefValidationError(f"{field_name}.issue_code must not be blank")
 
 
 def _validate_sources(
