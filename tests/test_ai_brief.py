@@ -7635,6 +7635,10 @@ def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "source_report_path": None,
         "source_api_url": None,
         "source_timeout_seconds": None,
+        "article_reader": None,
+        "article_reader_max_urls": None,
+        "article_reader_timeout_seconds": None,
+        "article_reader_max_excerpt_chars": None,
         "report_date": None,
         "upload": False,
     }
@@ -7682,6 +7686,10 @@ def test_main_routes_openai_ai_brief_options(monkeypatch: pytest.MonkeyPatch) ->
         "source_report_path": None,
         "source_api_url": "https://source.example/api",
         "source_timeout_seconds": 2.5,
+        "article_reader": None,
+        "article_reader_max_urls": None,
+        "article_reader_timeout_seconds": None,
+        "article_reader_max_excerpt_chars": None,
         "report_date": None,
         "upload": False,
     }
