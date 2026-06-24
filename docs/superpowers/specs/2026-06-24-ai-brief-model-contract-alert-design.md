@@ -1,5 +1,6 @@
 # AI Brief Model Contract And Host Alert Design
 
+상태: Accepted
 Status: Accepted for implementation planning
 Date: 2026-06-24
 Scope: AI Brief OpenAI output contract, provider result normalization, scheduled quality gate behavior, launchd host-failure alert classification
