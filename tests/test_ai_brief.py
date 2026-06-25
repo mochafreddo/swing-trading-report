@@ -7246,7 +7246,11 @@ def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
     assert payload["watch_tickers"] == ["MSFT.NAS"]
     assert payload["watch_candidates"][0]["ticker"] == "MSFT.NAS"
     assert payload["watch_candidates"][0]["action"] == "WATCH"
-    assert payload["watch_candidates"][0]["retrigger_conditions"]
+    assert payload["watch_candidates"][0]["reason"] == "진입 트리거 재확인이 필요함"
+    assert payload["watch_candidates"][0]["retrigger_conditions"] == [
+        "가격이 원래 진입 트리거를 다시 충족해야 함",
+        "소스와 시장 맥락을 수동 확인해야 함",
+    ]
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
 
 

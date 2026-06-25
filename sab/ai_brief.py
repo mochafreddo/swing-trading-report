@@ -624,9 +624,12 @@ def _attach_candidate_sources(
 
 def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
     ticker = str(candidate["ticker"])
-    reason = str(
-        candidate.get("ai_role_reason") or "entry trigger is pending re-confirmation"
-    ).strip()
+    raw_reason = str(candidate.get("ai_role_reason") or "").strip()
+    reason = (
+        "진입 트리거 재확인이 필요함"
+        if raw_reason in {"", "entry trigger is pending re-confirmation"}
+        else raw_reason
+    )
     sources = candidate.get("sources")
     source_rows = (
         [dict(source) for source in sources if isinstance(source, Mapping)]
@@ -638,8 +641,8 @@ def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, obje
         "action": "WATCH",
         "reason": reason,
         "retrigger_conditions": [
-            "price must satisfy the original entry trigger again",
-            "manual review must confirm source and market context",
+            "가격이 원래 진입 트리거를 다시 충족해야 함",
+            "소스와 시장 맥락을 수동 확인해야 함",
         ],
         "sources": source_rows,
     }
