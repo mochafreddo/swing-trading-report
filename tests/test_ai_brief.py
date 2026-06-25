@@ -7532,7 +7532,7 @@ def test_run_ai_brief_openai_invalid_source_issue_writes_contract_error_artifact
     assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
 
 
-def test_run_ai_brief_openai_rejects_unknown_vetoed_candidate(
+def test_run_ai_brief_openai_drops_unknown_vetoed_candidate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
@@ -7571,7 +7571,20 @@ def test_run_ai_brief_openai_rejects_unknown_vetoed_candidate(
     assert exit_code == 0
     payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
     assert payload["vetoed_candidates"] == []
-    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert payload["system_issues"] == []
+    assert payload["source_issues"] == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_ineligible_veto_dropped",
+            "severity": "WARN",
+            "message": (
+                "model returned vetoed candidate outside eligible_tickers "
+                "and the row was dropped"
+            ),
+        }
+    ]
+    assert payload["summary"]["source_issue_count"] == 1
+    assert payload["summary"]["system_issue_count"] == 0
 
 
 def test_run_ai_brief_openai_requires_real_model_name(

@@ -113,6 +113,8 @@ If a run creates `ai-brief-skip`, inspect `skip_state`, `skip_reason`, `session_
 
 If a run fails with `scheduled ai-brief quality gate failed`, treat it as a generated-report contract failure rather than a delivery outage. Inspect the paired entry report and AI Brief report for `system_issues[]`, `source_issues[]`, `source_provider_summary`, `watch_candidates[]`, `recommendations[].rank`, `vetoed_candidates[]`, article reader summary counts, and summary count drift before rerunning. A report with preselected model candidates but no recommendation and no veto is invalid even when source/system issues are present. The scheduled runner performs this quality gate before Storage upload, success marker creation, and notification reconciliation; the manual GitHub workflow uploads diagnostic GitHub artifacts first, then blocks Supabase upload and Telegram/Slack delivery on a quality `FAIL`.
 
+`model_ineligible_veto_dropped` and `model_watch_veto_dropped` mean the model tried to place a ticker outside the eligible veto universe into `vetoed_candidates[]`; the provider dropped that row and kept it as a WARN source issue. These warnings do not by themselves fail scheduled publish, but if the model leaves no valid recommendation and no valid veto for preselected candidates, the recommendation quality gate still fails with `recommendation_report_empty`.
+
 `model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, `model_watch_source_ref_invalid`은 모델이 canonical source catalog의 ref를 제대로 선택하지 못했다는 뜻입니다. 이 진단이 `WARN`이고 최종 추천이 source-backed이면 scheduled run은 partial publish로 정상 업로드될 수 있습니다. 같은 진단 뒤 추천이 모두 제거되거나 source-backed ratio가 부족하면 기존처럼 quality `FAIL`로 처리됩니다.
 
 Notification checks:
@@ -121,6 +123,7 @@ Notification checks:
 - Scheduled AI Brief report notifications use the same HTML body and parse mode through `DefaultScheduledNotifier`; late alerts stay plain text.
 - Skipped schedule Telegram messages use `ai-brief.skipped.telegram.txt` and remain plain text. Do not troubleshoot skipped notifications as HTML parse-mode failures.
 - If a successful run uploaded an AI Brief artifact but no report notification arrived, check `notification:claim` and `notification:sent` runtime markers first, then the Telegram/Slack delivery step logs. Missing `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, or `SLACK_WEBHOOK_URL` is a delivery configuration issue, not an AI Brief generation issue.
+- The launchd host wrapper sends `scheduler_container_failed` only when the Docker scheduler command exits without a recognized structured scheduler status. If the scheduler prints a JSON status such as `pipeline_failed`, treat the app-level late-alert and local scheduler logs as the source of truth rather than diagnosing Docker first. Stdout capture setup or tee failures are tagged `scheduler_stdout_capture_failed`, which keeps wrapper-level diagnostics distinct from scheduler execution status.
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 

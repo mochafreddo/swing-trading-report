@@ -198,12 +198,16 @@ class OpenAiBriefProvider:
 
         recommendable_source_catalog = _SourceReferenceCatalog(recommendable_candidates)
         watch_source_catalog = _SourceReferenceCatalog(watch_candidates)
+        eligible_ticker_order = _candidate_ticker_order(recommendable_candidates)
+        watch_ticker_order = _candidate_ticker_order(watch_candidates)
         request_payload = _build_openai_request_payload(
             model_name=self.model_name,
             recommendable_candidates=recommendable_source_catalog.model_candidates(
                 recommendable_candidates
             ),
             watch_candidates=watch_source_catalog.model_candidates(watch_candidates),
+            eligible_tickers=eligible_ticker_order,
+            watch_tickers=watch_ticker_order,
         )
         try:
             response = self._session.post(
@@ -257,6 +261,8 @@ def _build_openai_request_payload(
     model_name: str,
     recommendable_candidates: list[dict[str, object]],
     watch_candidates: list[dict[str, object]],
+    eligible_tickers: list[str],
+    watch_tickers: list[str],
 ) -> dict[str, _JsonValue]:
     return {
         "model": model_name,
@@ -296,6 +302,8 @@ def _build_openai_request_payload(
                             "Summarize watch candidates separately; never place watch "
                             "candidates in recommendations or vetoed_candidates."
                         ),
+                        "eligible_tickers": eligible_tickers,
+                        "watch_tickers": watch_tickers,
                         "recommendable_candidates": recommendable_candidates,
                         "watch_candidates": watch_candidates,
                     },
@@ -309,13 +317,40 @@ def _build_openai_request_payload(
                 "type": "json_schema",
                 "name": "sab_ai_brief_provider_result",
                 "strict": True,
-                "schema": _openai_result_schema(),
+                "schema": _openai_result_schema(
+                    eligible_tickers=eligible_tickers,
+                    watch_tickers=watch_tickers,
+                ),
             }
         },
     }
 
 
-def _openai_result_schema() -> dict[str, _JsonValue]:
+def _ticker_schema(tickers: list[str]) -> dict[str, _JsonValue]:
+    if tickers:
+        return {"type": "string", "enum": list(tickers)}
+    return {"type": "string"}
+
+
+def _role_array_schema(
+    *,
+    items: dict[str, _JsonValue],
+    allowed_tickers: list[str],
+    max_items: int | None = None,
+) -> dict[str, _JsonValue]:
+    schema: dict[str, _JsonValue] = {"type": "array", "items": items}
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    if not allowed_tickers:
+        schema["maxItems"] = 0
+    return schema
+
+
+def _openai_result_schema(
+    *,
+    eligible_tickers: list[str],
+    watch_tickers: list[str],
+) -> dict[str, _JsonValue]:
     return {
         "type": "object",
         "additionalProperties": False,
@@ -327,82 +362,91 @@ def _openai_result_schema() -> dict[str, _JsonValue]:
         ],
         "properties": {
             "recommendations": {
-                "type": "array",
-                "maxItems": RECOMMENDATION_LIMIT,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "ticker",
-                        "rank",
-                        "confidence",
-                        "rationale",
-                        "checklist",
-                        "source_refs",
-                    ],
-                    "properties": {
-                        "ticker": {"type": "string"},
-                        "rank": {"type": "integer"},
-                        "confidence": {
-                            "type": "string",
-                            "enum": ["LOW", "MEDIUM", "HIGH"],
-                        },
-                        "rationale": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "checklist": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "source_refs": {
-                            "type": "array",
-                            "maxItems": 3,
-                            "items": {"type": "string"},
+                **_role_array_schema(
+                    allowed_tickers=eligible_tickers,
+                    max_items=RECOMMENDATION_LIMIT,
+                    items={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "ticker",
+                            "rank",
+                            "confidence",
+                            "rationale",
+                            "checklist",
+                            "source_refs",
+                        ],
+                        "properties": {
+                            "ticker": _ticker_schema(eligible_tickers),
+                            "rank": {"type": "integer"},
+                            "confidence": {
+                                "type": "string",
+                                "enum": ["LOW", "MEDIUM", "HIGH"],
+                            },
+                            "rationale": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "checklist": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "source_refs": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "items": {"type": "string"},
+                            },
                         },
                     },
-                },
+                ),
             },
             "vetoed_candidates": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["ticker", "action", "reason"],
-                    "properties": {
-                        "ticker": {"type": "string"},
-                        "action": {"type": "string", "enum": ["PASS", "SKIP"]},
-                        "reason": {"type": "string"},
+                **_role_array_schema(
+                    allowed_tickers=eligible_tickers,
+                    items={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["ticker", "action", "reason"],
+                        "properties": {
+                            "ticker": _ticker_schema(eligible_tickers),
+                            "action": {
+                                "type": "string",
+                                "enum": ["PASS", "SKIP"],
+                            },
+                            "reason": {"type": "string"},
+                        },
                     },
-                },
+                ),
             },
             "watch_candidates": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "ticker",
-                        "action",
-                        "reason",
-                        "retrigger_conditions",
-                        "source_refs",
-                    ],
-                    "properties": {
-                        "ticker": {"type": "string"},
-                        "action": {"type": "string", "enum": ["WATCH"]},
-                        "reason": {"type": "string"},
-                        "retrigger_conditions": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "source_refs": {
-                            "type": "array",
-                            "maxItems": 3,
-                            "items": {"type": "string"},
+                **_role_array_schema(
+                    allowed_tickers=watch_tickers,
+                    items={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "ticker",
+                            "action",
+                            "reason",
+                            "retrigger_conditions",
+                            "source_refs",
+                        ],
+                        "properties": {
+                            "ticker": _ticker_schema(watch_tickers),
+                            "action": {"type": "string", "enum": ["WATCH"]},
+                            "reason": {"type": "string"},
+                            "retrigger_conditions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "source_refs": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "items": {"type": "string"},
+                            },
                         },
                     },
-                },
+                ),
             },
             "source_issues": {
                 "type": "array",
@@ -549,9 +593,15 @@ def _normalize_openai_provider_result(
         recommendations.append(recommendation)
     for rank, recommendation in enumerate(recommendations, start=1):
         recommendation["rank"] = rank
-    vetoed_candidates = _as_provider_mapping_rows(
+    raw_vetoed_candidates = _as_provider_mapping_rows(
         parsed.get("vetoed_candidates"), field_name="vetoed_candidates"
     )
+    vetoed_candidates, veto_source_issues = _sanitize_provider_vetoed_candidates(
+        raw_vetoed_candidates,
+        eligible_tickers=set(candidate_by_ticker),
+        watch_tickers=set(watch_candidate_by_ticker),
+    )
+    source_issues.extend(veto_source_issues)
     normalized_watch_candidates: list[dict[str, object]] = []
     for watch_index, raw_watch in enumerate(
         _as_provider_mapping_rows(
@@ -708,6 +758,60 @@ def _provider_source_refs(value: object, *, field_name: str) -> list[str]:
             f"{_MAX_SOURCES_PER_TICKER} refs"
         )
     return source_refs
+
+
+def _sanitize_provider_vetoed_candidates(
+    vetoed_candidates: list[dict[str, object]],
+    *,
+    eligible_tickers: set[str],
+    watch_tickers: set[str],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    valid_rows: list[dict[str, object]] = []
+    issues: list[dict[str, object]] = []
+    for idx, candidate in enumerate(vetoed_candidates):
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].ticker is required"
+            )
+        if ticker in watch_tickers:
+            issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_watch_veto_dropped",
+                    message=(
+                        "model returned watch ticker in vetoed_candidates "
+                        "and the row was dropped"
+                    ),
+                )
+            )
+            continue
+        if ticker not in eligible_tickers:
+            issues.append(
+                _model_source_issue(
+                    ticker=ticker,
+                    code="model_ineligible_veto_dropped",
+                    message=(
+                        "model returned vetoed candidate outside eligible_tickers "
+                        "and the row was dropped"
+                    ),
+                )
+            )
+            continue
+        action = str(candidate.get("action") or "").strip().upper()
+        if action not in {"PASS", "SKIP"}:
+            raise AiBriefProviderContractError(
+                "OpenAI output vetoed_candidates[].action must be PASS or SKIP"
+            )
+        reason = str(candidate.get("reason") or "").strip()
+        if not reason:
+            raise AiBriefProviderContractError(
+                f"OpenAI output vetoed_candidates[{idx}].reason is required"
+            )
+        valid_rows.append(
+            {**candidate, "ticker": ticker, "action": action, "reason": reason}
+        )
+    return valid_rows, issues
 
 
 def _model_source_issue(

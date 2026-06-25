@@ -68,6 +68,43 @@ reason=${reason}"
     -d disable_web_page_preview=true >/dev/null || true
 }
 
+is_structured_scheduler_failure_status() {
+  local status="$1"
+  case "${status}" in
+    attempt_marker_failed|guard_failed|guard_failed_before_upload|guard_failed_before_notification|pipeline_failed|upload_failed|artifact_marker_failed|artifact_marker_invalid|entry_failure_artifact_claim_held|late_alert_send_failed|late_alert_sent_marker_failed|lock_lost_before_upload|skip_artifact_upload_failed|source_config_invalid|unsupported_runner_role)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+extract_scheduler_status() {
+  local stdout_file="$1"
+  local line last_line status
+  [[ -r "${stdout_file}" ]] || return 1
+  last_line=""
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -n "${line}" ]] && last_line="${line}"
+  done < "${stdout_file}"
+  [[ "${last_line}" == \{*\"status\"* ]] || return 1
+  status="$(printf '%s' "${last_line}" | sed -nE 's/.*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p')"
+  [[ -n "${status}" ]] || return 1
+  printf '%s' "${status}"
+}
+
+cleanup_capture_artifacts() {
+  rm -f "${container_stdout:-}"
+  rm -rf "${capture_dir:-}"
+}
+
+fail_stdout_capture() {
+  local status="${1:-1}"
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit "${status}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-root)
@@ -167,7 +204,38 @@ printf 'running command:' > "logs/launchd/${market}-${schedule_role}.cmd.log"
 printf ' %q' "${cmd[@]}" >> "logs/launchd/${market}-${schedule_role}.cmd.log"
 printf '\n' >> "logs/launchd/${market}-${schedule_role}.cmd.log"
 
-if ! SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" "${cmd[@]}"; then
+container_status=0
+tee_status=0
+container_stdout=""
+capture_dir=""
+container_pipe=""
+trap cleanup_capture_artifacts EXIT
+if ! container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"; then
+  fail_stdout_capture
+fi
+if ! capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.capture.XXXXXX")"; then
+  fail_stdout_capture
+fi
+container_pipe="${capture_dir}/stdout.pipe"
+if ! mkfifo "${container_pipe}"; then
+  fail_stdout_capture
+fi
+tee "${container_stdout}" < "${container_pipe}" &
+tee_pid=$!
+SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" "${cmd[@]}" > "${container_pipe}" || container_status=$?
+if wait "${tee_pid}"; then
+  tee_status=0
+else
+  tee_status=$?
+fi
+if [[ "${tee_status}" -ne 0 ]]; then
+  fail_stdout_capture "${tee_status}"
+fi
+if [[ "${container_status}" -ne 0 ]]; then
+  scheduler_status="$(extract_scheduler_status "${container_stdout}" || true)"
+  if [[ -n "${scheduler_status}" ]] && is_structured_scheduler_failure_status "${scheduler_status}"; then
+    exit "${container_status}"
+  fi
   send_host_failure_alert "scheduler_container_failed"
-  exit 1
+  exit "${container_status}"
 fi

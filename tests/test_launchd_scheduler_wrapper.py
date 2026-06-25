@@ -1,12 +1,91 @@
 from __future__ import annotations
 
+import os
 import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_executable(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _run_wrapper_with_stubs(
+    tmp_path: Path,
+    *,
+    docker_script: str,
+    tee_script: str | None = None,
+    mktemp_script: str | None = None,
+    mkfifo_script: str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    alerts_path = tmp_path / "alerts.log"
+    env_file = tmp_path / ".env.scheduler.local"
+    env_file.write_text(
+        "TELEGRAM_BOT_TOKEN=test-token\nTELEGRAM_CHAT_ID=test-chat\n",
+        encoding="utf-8",
+    )
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == *"--guard-only"* ]]; then exit 0; fi\n'
+        "exit 1\n",
+    )
+    _write_executable(bin_dir / "docker", docker_script)
+    if tee_script is not None:
+        _write_executable(bin_dir / "tee", tee_script)
+    if mktemp_script is not None:
+        _write_executable(bin_dir / "mktemp", mktemp_script)
+    if mkfifo_script is not None:
+        _write_executable(bin_dir / "mkfifo", mkfifo_script)
+    _write_executable(
+        bin_dir / "curl",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(alerts_path.as_posix())}\n"
+        "exit 0\n",
+    )
+    wrapper_src = REPO_ROOT / "scripts/launchd/sab-ai-brief-wrapper.sh"
+    wrapper_copy = tmp_path / "sab-ai-brief-wrapper.sh"
+    wrapper_copy.write_text(
+        wrapper_src.read_text(encoding="utf-8").replace(
+            'export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/share/mise/shims:${HOME}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
+            f'export PATH="{bin_dir}:/opt/homebrew/bin:/usr/local/bin:${{HOME}}/.local/share/mise/shims:${{HOME}}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
+        ),
+        encoding="utf-8",
+    )
+    wrapper_copy.chmod(0o755)
+    env = {**os.environ, **(extra_env or {})}
+    result = subprocess.run(
+        [
+            str(wrapper_copy),
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(env_file),
+            "--market",
+            "US",
+            "--schedule-role",
+            "local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "0810",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, alerts_path
 
 
 def _run_plist_timing_check(repo_root: Path) -> subprocess.CompletedProcess[str]:
@@ -41,6 +120,126 @@ def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     assert "send_host_failure_alert" in text
     assert "TELEGRAM_BOT_TOKEN" in text
     assert "TELEGRAM_CHAT_ID" in text
+
+
+def test_launchd_wrapper_suppresses_host_failure_for_structured_pipeline_failed(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'printf \'%s\\n\' \'{"status": "pipeline_failed", "storage_key": null}\'\n'
+            "exit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_sends_host_failure_without_structured_status(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            "printf '%s\\n' 'container crashed before app status'\n"
+            "exit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert "container crashed before app status" in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_container_failed" in alert_text
+
+
+def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'printf \'%s\\n\' \'{"status": "pipeline_failed", "storage_key": null}\'\n'
+            "exit 1\n"
+        ),
+        tee_script=("#!/usr/bin/env bash\ncat\nexit 1\n"),
+    )
+
+    assert result.returncode == 1
+    assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
+
+
+def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            "printf '%s\\n' 'scheduler should not start'\n"
+            "exit 0\n"
+        ),
+        mkfifo_script=(
+            "#!/usr/bin/env bash\nprintf '%s\\n' 'mkfifo failed' >&2\nexit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert "mkfifo failed" in result.stderr
+    assert "scheduler should not start" not in result.stdout
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
+
+
+def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
+    tmp_path: Path,
+) -> None:
+    tmp_runtime_dir = tmp_path / "runtime-tmp"
+    tmp_runtime_dir.mkdir()
+    count_file = tmp_path / "mktemp-count"
+    stdout_file = tmp_runtime_dir / "captured.stdout"
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            "printf '%s\\n' 'scheduler should not start'\n"
+            "exit 0\n"
+        ),
+        mktemp_script=(
+            "#!/usr/bin/env bash\n"
+            f"count_file={shlex.quote(count_file.as_posix())}\n"
+            f"stdout_file={shlex.quote(stdout_file.as_posix())}\n"
+            'count="$(cat "${count_file}" 2>/dev/null || printf \'0\')"\n'
+            'if [[ "${count}" == "0" ]]; then\n'
+            "  printf '1' > \"${count_file}\"\n"
+            '  : > "${stdout_file}"\n'
+            "  printf '%s\\n' \"${stdout_file}\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\\n' 'mktemp -d failed' >&2\n"
+            "exit 1\n"
+        ),
+        extra_env={"TMPDIR": str(tmp_runtime_dir)},
+    )
+
+    assert result.returncode == 1
+    assert "mktemp -d failed" in result.stderr
+    assert "scheduler should not start" not in result.stdout
+    assert not stdout_file.exists()
+    alert_text = alerts_path.read_text(encoding="utf-8")
+    assert "reason=scheduler_stdout_capture_failed" in alert_text
 
 
 def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:

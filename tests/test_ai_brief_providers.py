@@ -204,6 +204,105 @@ def test_openai_payload_adds_source_ids_and_schema_uses_source_refs() -> None:
     assert "sources" not in watch_props
 
 
+def test_openai_schema_constrains_tickers_by_candidate_role() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "action": "SKIP",
+                    "reason": "source risk",
+                }
+            ],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    user_payload = json.loads(str(request["input"][1]["content"]))
+    assert user_payload["eligible_tickers"] == ["AAPL.NAS"]
+    assert user_payload["watch_tickers"] == ["MSFT.NAS"]
+
+    schema = request["text"]["format"]["schema"]
+    recommendation_ticker = schema["properties"]["recommendations"]["items"][
+        "properties"
+    ]["ticker"]
+    veto_ticker = schema["properties"]["vetoed_candidates"]["items"]["properties"][
+        "ticker"
+    ]
+    watch_ticker = schema["properties"]["watch_candidates"]["items"]["properties"][
+        "ticker"
+    ]
+    assert recommendation_ticker == {"type": "string", "enum": ["AAPL.NAS"]}
+    assert veto_ticker == {"type": "string", "enum": ["AAPL.NAS"]}
+    assert watch_ticker == {"type": "string", "enum": ["MSFT.NAS"]}
+
+
+def test_openai_schema_disallows_empty_role_arrays() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    schema = request["text"]["format"]["schema"]
+    assert schema["properties"]["recommendations"]["maxItems"] == 0
+    assert schema["properties"]["vetoed_candidates"]["maxItems"] == 0
+    assert (
+        "enum"
+        not in schema["properties"]["recommendations"]["items"]["properties"]["ticker"]
+    )
+    assert schema["properties"]["watch_candidates"]["items"]["properties"][
+        "ticker"
+    ] == {"type": "string", "enum": ["MSFT.NAS"]}
+
+
 def test_openai_normalized_output_preserves_candidate_investment_readiness() -> None:
     session = _CapturingSession(
         {
@@ -555,7 +654,7 @@ def test_openai_rejects_overlapping_candidate_roles() -> None:
         )
 
 
-def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
+def test_openai_drops_watch_candidate_returned_as_veto() -> None:
     provider = OpenAiBriefProvider(
         model_name="gpt-test",
         api_key="test-key",
@@ -570,16 +669,186 @@ def test_openai_rejects_watch_candidate_returned_as_veto() -> None:
                         "reason": "bad role",
                     }
                 ],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "source_refs": ["MSFT.NAS:1"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues[-1]["ticker"] == "MSFT.NAS"
+    assert result.source_issues[-1]["code"] == "model_watch_veto_dropped"
+    assert result.source_issues[-1]["severity"] == "WARN"
+
+
+def test_openai_drops_watch_veto_before_action_and_reason_validation() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [{"ticker": "MSFT.NAS", "action": "WATCH"}],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "trigger pending",
+                        "retrigger_conditions": ["price back above trigger"],
+                        "source_refs": ["MSFT.NAS:1"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues[-1]["ticker"] == "MSFT.NAS"
+    assert result.source_issues[-1]["code"] == "model_watch_veto_dropped"
+    assert result.source_issues[-1]["severity"] == "WARN"
+
+
+def test_openai_drops_unknown_veto_candidate_as_warn_source_issue() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "SKIP",
+                        "reason": "not in the request candidate set",
+                    }
+                ],
                 "watch_candidates": [],
                 "source_issues": [],
             }
         ),
     )
 
-    with pytest.raises(AiBriefProviderContractError, match="watch ticker"):
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_ineligible_veto_dropped",
+            "severity": "WARN",
+            "message": (
+                "model returned vetoed candidate outside eligible_tickers "
+                "and the row was dropped"
+            ),
+        }
+    ]
+
+
+def test_openai_drops_unknown_veto_before_action_and_reason_validation() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [{"ticker": "MSFT.NAS", "action": "WATCH"}],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    assert result.vetoed_candidates == []
+    assert result.source_issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_ineligible_veto_dropped",
+            "severity": "WARN",
+            "message": (
+                "model returned vetoed candidate outside eligible_tickers "
+                "and the row was dropped"
+            ),
+        }
+    ]
+
+
+def test_openai_rejects_invalid_veto_action_for_known_ticker() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "action": "WATCH",
+                        "reason": "bad action",
+                    }
+                ],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="PASS or SKIP"):
         provider.build_recommendations(
             recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
-            watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+            watch_candidates=[],
+        )
+
+
+def test_openai_rejects_missing_veto_reason_for_known_ticker() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [{"ticker": "AAPL.NAS", "action": "SKIP"}],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="reason is required"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
         )
 
 
