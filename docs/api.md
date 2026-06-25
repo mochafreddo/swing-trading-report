@@ -94,7 +94,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 
 ### Notification Text Contracts
 
-- AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first and uses only `<b>`, `<code>`, and `<a>` tags.
+- AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first, Korean-first for operator-facing explanation text, and uses only `<b>`, `<code>`, and `<a>` tags. Source article titles, tickers, enum values, issue codes, URLs, and storage keys remain original/untranslated.
 - Report-derived values are HTML-escaped, normalized to single-line text where needed, and length-bounded before rendering. Unsafe, malformed, too-long, or whitespace/control-character HTTP(S) `run_url` values are not emitted as Telegram links.
 - GitHub Actions and the scheduled notifier split the AI Brief Telegram report body with `split_telegram_message_text()` and send each part through `sendMessage` with `parse_mode=HTML` and web previews disabled.
 - AI Brief skipped notifications, scan/sell Telegram notifications, host late alerts, and Slack summaries remain plain text. Scan/sell Telegram notifications append the same stop/target decision-guide caveat used in report artifacts when rows are shown. Slack keeps the key-value summary format.

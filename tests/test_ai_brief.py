@@ -1349,11 +1349,11 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
     }
     assert recommendation["liquidity_warnings"] == ["small_cap_liquidity_risk"]
     assert (
-        "investment readiness requires context: CONTEXT_REQUIRED"
+        "투자 준비 상태에 추가 확인 필요: CONTEXT_REQUIRED"
         in recommendation["rationale"]
     )
     assert (
-        "confirm NAV/risk budget, exit liquidity, portfolio exposure, and source context before acting"
+        "NAV/위험 예산, 청산 유동성, 포트폴리오 노출, 소스 맥락을 행동 전 확인"
         in recommendation["checklist"]
     )
 
