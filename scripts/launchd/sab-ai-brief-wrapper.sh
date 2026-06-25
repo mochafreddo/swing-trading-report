@@ -99,6 +99,12 @@ cleanup_capture_artifacts() {
   rm -rf "${capture_dir:-}"
 }
 
+fail_stdout_capture() {
+  local status="${1:-1}"
+  send_host_failure_alert "scheduler_stdout_capture_failed"
+  exit "${status}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo-root)
@@ -205,17 +211,14 @@ capture_dir=""
 container_pipe=""
 trap cleanup_capture_artifacts EXIT
 if ! container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"; then
-  send_host_failure_alert "scheduler_stdout_capture_failed"
-  exit 1
+  fail_stdout_capture
 fi
 if ! capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.capture.XXXXXX")"; then
-  send_host_failure_alert "scheduler_stdout_capture_failed"
-  exit 1
+  fail_stdout_capture
 fi
 container_pipe="${capture_dir}/stdout.pipe"
 if ! mkfifo "${container_pipe}"; then
-  send_host_failure_alert "scheduler_stdout_capture_failed"
-  exit 1
+  fail_stdout_capture
 fi
 tee "${container_stdout}" < "${container_pipe}" &
 tee_pid=$!
@@ -226,8 +229,7 @@ else
   tee_status=$?
 fi
 if [[ "${tee_status}" -ne 0 ]]; then
-  send_host_failure_alert "scheduler_stdout_capture_failed"
-  exit "${tee_status}"
+  fail_stdout_capture "${tee_status}"
 fi
 if [[ "${container_status}" -ne 0 ]]; then
   scheduler_status="$(extract_scheduler_status "${container_stdout}" || true)"
