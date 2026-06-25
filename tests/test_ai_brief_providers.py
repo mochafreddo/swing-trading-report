@@ -93,8 +93,15 @@ def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -
         assert isinstance(rationale, list)
         rationale_items.extend(str(item) for item in rationale)
     rationale_text = "\n".join(rationale_items)
-    assert "portfolio policy blocked automatic entry" in rationale_text
-    assert "risk alignment requires manual review" in rationale_text
+    assert (
+        "AI Brief 포함 사유: portfolio policy blocked automatic entry" in rationale_text
+    )
+    assert "AI Brief 포함 사유: risk alignment requires manual review" in rationale_text
+    assert "진입 갭 스냅샷: 1.00%" in rationale_text
+    assert "수동 검토용 로컬 소스 맥락 있음" in rationale_text
+    assert "AI brief inclusion" not in rationale_text
+    assert "entry gap snapshot" not in rationale_text
+    assert "local source context is available" not in rationale_text
     assert "entry report marked this candidate ENTER" not in rationale_text
     assert result.recommendations[0]["candidate_role"] == "blocked_but_valid"
     assert result.recommendations[0]["entry_action"] == "SKIP"
@@ -103,6 +110,9 @@ def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -
     )
     assert result.recommendations[1]["candidate_role"] == "blocked_but_valid"
     assert result.recommendations[1]["entry_action"] == "REVIEW"
+    assert result.recommendations[1]["candidate_role_reason"] == (
+        "risk alignment requires manual review"
+    )
 
 
 def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
@@ -154,6 +164,56 @@ def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
     ]
     assert [row["ticker"] for row in user_payload["watch_candidates"]] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["ticker"] == "MSFT.NAS"
+
+
+def test_openai_prompt_requires_korean_display_fields() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    request_input = request["input"]
+    assert isinstance(request_input, list)
+    system_message = request_input[0]
+    assert isinstance(system_message, dict)
+    system_content = str(system_message["content"])
+    assert "Write user-facing display fields in Korean" in system_content
+    assert "recommendations[].rationale" in system_content
+    assert "recommendations[].checklist" in system_content
+    assert "vetoed_candidates[].reason" in system_content
+    assert "watch_candidates[].reason" in system_content
+    assert "watch_candidates[].retrigger_conditions" in system_content
+    assert "source_issues[].message" in system_content
+    assert "Keep ticker symbols" in system_content
+    assert "confidence/action enum values" in system_content
+    assert "issue codes and severities" in system_content
+    assert "source_refs" in system_content
+    assert "article titles, URLs, and published dates unchanged" in system_content
 
 
 def test_openai_payload_adds_source_ids_and_schema_uses_source_refs() -> None:
@@ -369,9 +429,9 @@ def test_openai_normalized_output_preserves_candidate_investment_readiness() -> 
     checklist = recommendation["checklist"]
     assert isinstance(rationale, list)
     assert isinstance(checklist, list)
-    assert "investment readiness requires context: CONTEXT_REQUIRED" in rationale
+    assert "투자 준비 상태에 추가 확인 필요: CONTEXT_REQUIRED" in rationale
     assert (
-        "confirm NAV/risk budget, exit liquidity, portfolio exposure, and source context before acting"
+        "NAV/위험 예산, 청산 유동성, 포트폴리오 노출, 소스 맥락을 행동 전 확인"
         in checklist
     )
 
@@ -1129,8 +1189,8 @@ def test_openai_replaces_watch_candidate_with_invalid_source_ref_with_fallback()
         "entry trigger requires re-confirmation"
     )
     assert result.watch_candidates[0]["retrigger_conditions"] == [
-        "price must satisfy the original entry trigger again",
-        "manual review must confirm source and market context",
+        "가격이 원래 진입 트리거를 다시 충족해야 함",
+        "소스와 시장 맥락을 수동 확인해야 함",
     ]
     sources = result.watch_candidates[0]["sources"]
     assert isinstance(sources, list)
