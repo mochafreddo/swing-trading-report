@@ -110,6 +110,19 @@ def _assert_alert_omits_secrets(alert_text: str) -> None:
     assert "test-chat" not in alert_text
 
 
+def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -> None:
+    generic_wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    ai_brief_wrapper = Path("scripts/launchd/sab-ai-brief-wrapper.sh")
+
+    assert generic_wrapper.is_file()
+    assert ai_brief_wrapper.is_file()
+
+    generic_text = generic_wrapper.read_text(encoding="utf-8")
+    assert "--pipeline" in generic_text
+    assert "--scope" in generic_text
+    assert "ai-brief|scan|sell" in generic_text
+
+
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     wrapper = Path("scripts/launchd/sab-ai-brief-wrapper.sh")
     text = wrapper.read_text(encoding="utf-8")
