@@ -140,6 +140,53 @@ def test_launchd_wrapper_suppresses_host_failure_for_structured_pipeline_failed(
     assert not alerts_path.exists()
 
 
+def test_launchd_wrapper_uses_status_file_before_stdout_tail(tmp_path: Path) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"pipeline_failed","storage_key":null}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            'printf \'%s\\n\' \'{"status":"pipeline_failed","storage_key":null}\'\n'
+            "printf '%s\\n' 'diagnostic: status json was followed by details'\n"
+            "exit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert "diagnostic: status json was followed by details" in result.stdout
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_writes_attempt_scoped_command_log(tmp_path: Path) -> None:
+    result, _alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"success","storage_key":"reports/example.json"}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            "exit 0\n"
+        ),
+    )
+
+    cmd_logs = sorted((tmp_path / "logs" / "scheduled").glob("**/*.cmd.log"))
+
+    assert result.returncode == 0
+    assert cmd_logs
+    for cmd_log in cmd_logs:
+        cmd_log_text = cmd_log.read_text(encoding="utf-8")
+        assert "TELEGRAM_BOT_TOKEN" not in cmd_log_text
+        assert "test-token" not in cmd_log_text
+
+
 def test_launchd_wrapper_sends_host_failure_without_structured_status(
     tmp_path: Path,
 ) -> None:

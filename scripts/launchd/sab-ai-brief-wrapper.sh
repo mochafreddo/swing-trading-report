@@ -94,6 +94,46 @@ extract_scheduler_status() {
   printf '%s' "${status}"
 }
 
+extract_scheduler_status_file() {
+  local status_file="$1"
+  local status
+  [[ -r "${status_file}" ]] || return 1
+  status="$(sed -nE 's/.*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${status_file}" | tail -n 1)"
+  [[ -n "${status}" ]] || return 1
+  printf '%s' "${status}"
+}
+
+write_attempt_summary() {
+  local status="$1"
+  if [[ -z "${attempt_summary_file:-}" ]]; then
+    return 0
+  fi
+  SUMMARY_FILE="${attempt_summary_file}" \
+    SUMMARY_ATTEMPT_ID="${attempt_id:-}" \
+    SUMMARY_MARKET="${market}" \
+    SUMMARY_SCHEDULE_ROLE="${schedule_role}" \
+    SUMMARY_RUNNER_ROLE="${runner_role}" \
+    SUMMARY_STATUS="${status}" \
+    python3 - <<'PY' || {
+import json
+import os
+
+summary = {
+    "attempt_id": os.environ["SUMMARY_ATTEMPT_ID"],
+    "market": os.environ["SUMMARY_MARKET"],
+    "schedule_role": os.environ["SUMMARY_SCHEDULE_ROLE"],
+    "runner_role": os.environ["SUMMARY_RUNNER_ROLE"],
+    "status": os.environ["SUMMARY_STATUS"],
+}
+with open(os.environ["SUMMARY_FILE"], "w", encoding="utf-8") as summary_file:
+    json.dump(summary, summary_file, ensure_ascii=True, separators=(",", ":"))
+    summary_file.write("\n")
+PY
+    printf 'failed to write attempt summary: %s\n' "${attempt_summary_file}" >&2
+    return 0
+  }
+}
+
 cleanup_capture_artifacts() {
   rm -f "${container_stdout:-}"
   rm -rf "${capture_dir:-}"
@@ -101,6 +141,7 @@ cleanup_capture_artifacts() {
 
 fail_stdout_capture() {
   local status="${1:-1}"
+  write_attempt_summary "scheduler_stdout_capture_failed"
   send_host_failure_alert "scheduler_stdout_capture_failed"
   exit "${status}"
 }
@@ -150,19 +191,37 @@ fi
 cd "${repo_root}"
 mkdir -p logs/launchd
 
+attempt_id="${scheduled_tick}-$(date -u +%Y%m%dT%H%M%SZ)-host$$"
+session_date="$(date +%Y-%m-%d)"
+attempt_dir="logs/scheduled/ai-brief/${session_date}"
+attempt_prefix="${market}-${schedule_role}-${attempt_id}"
+attempt_stdout="${attempt_dir}/${attempt_prefix}.stdout.log"
+attempt_stderr="${attempt_dir}/${attempt_prefix}.stderr.log"
+attempt_guard_log="${attempt_dir}/${attempt_prefix}.guard.log"
+attempt_cmd_log="${attempt_dir}/${attempt_prefix}.cmd.log"
+attempt_status_file="${attempt_dir}/${attempt_prefix}.status.json"
+attempt_summary_file="${attempt_dir}/${attempt_prefix}.summary.json"
+mkdir -p "${attempt_dir}"
+
+role_guard_log="logs/launchd/${market}-${schedule_role}.guard.log"
+role_cmd_log="logs/launchd/${market}-${schedule_role}.cmd.log"
+
 guard_status=0
 uv run python -m sab ai-brief-scheduled \
   --market "${market}" \
   --schedule-role "${schedule_role}" \
   --runner-role "${runner_role}" \
   --scheduled-tick "${scheduled_tick}" \
-  --guard-only > "logs/launchd/${market}-${schedule_role}.guard.log" 2>&1 || guard_status=$?
+  --guard-only > "${role_guard_log}" 2>&1 || guard_status=$?
+cp "${role_guard_log}" "${attempt_guard_log}" || true
 
 if [[ "${guard_status}" -eq 75 ]]; then
+  write_attempt_summary "guard_skipped"
   exit 0
 fi
 if [[ "${guard_status}" -ne 0 ]]; then
   load_host_alert_env
+  write_attempt_summary "guard_failed"
   send_host_failure_alert "guard_failed"
   printf 'guard failed before env/docker preflight: status=%s\n' "${guard_status}" >&2
   exit "${guard_status}"
@@ -171,23 +230,25 @@ fi
 SAB_SCHEDULER_ENV_FILE="${env_file}"
 if [[ ! -r "${SAB_SCHEDULER_ENV_FILE}" ]]; then
   printf 'scheduler env file is missing or unreadable: %s\n' "${SAB_SCHEDULER_ENV_FILE}" >&2
+  write_attempt_summary "scheduler_env_file_missing"
   exit 1
 fi
 
 load_host_alert_env
 
 if ! docker info >/dev/null 2>&1; then
+  write_attempt_summary "docker_daemon_unavailable"
   send_host_failure_alert "docker_daemon_unavailable"
   exit 1
 fi
 
-attempt_id="${scheduled_tick}-$(date -u +%Y%m%dT%H%M%SZ)-host$$"
 cmd=(
   docker compose
   -f docker-compose.yml
   -f docker-compose.scheduler.yml
   run
   --rm
+  -e "SAB_SCHEDULER_STATUS_FILE=${attempt_status_file}"
   scheduler
   uv run python -m sab ai-brief-scheduled
   --market "${market}"
@@ -200,9 +261,15 @@ if [[ "${dry_run}" == "true" ]]; then
   cmd+=(--dry-run)
 fi
 
-printf 'running command:' > "logs/launchd/${market}-${schedule_role}.cmd.log"
-printf ' %q' "${cmd[@]}" >> "logs/launchd/${market}-${schedule_role}.cmd.log"
-printf '\n' >> "logs/launchd/${market}-${schedule_role}.cmd.log"
+write_command_log() {
+  local log_file="$1"
+  printf 'running command:' > "${log_file}"
+  printf ' %q' "${cmd[@]}" >> "${log_file}"
+  printf '\n' >> "${log_file}"
+}
+
+write_command_log "${role_cmd_log}"
+write_command_log "${attempt_cmd_log}"
 
 container_status=0
 tee_status=0
@@ -220,9 +287,11 @@ container_pipe="${capture_dir}/stdout.pipe"
 if ! mkfifo "${container_pipe}"; then
   fail_stdout_capture
 fi
-tee "${container_stdout}" < "${container_pipe}" &
+tee "${container_stdout}" "${attempt_stdout}" < "${container_pipe}" &
 tee_pid=$!
-SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" "${cmd[@]}" > "${container_pipe}" || container_status=$?
+SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" \
+  SAB_SCHEDULER_STATUS_FILE="${attempt_status_file}" \
+  "${cmd[@]}" > "${container_pipe}" 2> "${attempt_stderr}" || container_status=$?
 if wait "${tee_pid}"; then
   tee_status=0
 else
@@ -232,10 +301,14 @@ if [[ "${tee_status}" -ne 0 ]]; then
   fail_stdout_capture "${tee_status}"
 fi
 if [[ "${container_status}" -ne 0 ]]; then
-  scheduler_status="$(extract_scheduler_status "${container_stdout}" || true)"
+  scheduler_status="$(extract_scheduler_status_file "${attempt_status_file}" || extract_scheduler_status "${container_stdout}" || true)"
   if [[ -n "${scheduler_status}" ]] && is_structured_scheduler_failure_status "${scheduler_status}"; then
+    write_attempt_summary "${scheduler_status}"
     exit "${container_status}"
   fi
+  write_attempt_summary "scheduler_container_failed"
   send_host_failure_alert "scheduler_container_failed"
   exit "${container_status}"
 fi
+scheduler_status="$(extract_scheduler_status_file "${attempt_status_file}" || extract_scheduler_status "${container_stdout}" || true)"
+write_attempt_summary "${scheduler_status:-success}"
