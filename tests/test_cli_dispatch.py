@@ -244,6 +244,9 @@ def test_dispatch_command_routes_scheduled_ai_brief_options(monkeypatch) -> None
             "guard_only": True,
         }
     ]
+    request = calls[0]["request"]
+    assert not hasattr(request, "fallback_model")
+    assert not hasattr(request, "fallback_timeout_seconds")
 
 
 def test_dispatch_command_prints_help_for_missing_command() -> None:
