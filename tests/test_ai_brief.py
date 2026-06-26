@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sab import ai_brief_sources
+from sab import ai_brief, ai_brief_sources
 from sab.__main__ import main
 from sab.ai_brief import FakeAiBriefProvider, run_ai_brief
 from sab.ai_brief_sources import (
@@ -7613,6 +7613,35 @@ def test_run_ai_brief_openai_requires_real_model_name(
 
     assert exit_code == 1
     assert list(report_dir.glob("*.ai-brief.json")) == []
+
+
+def test_ai_brief_reads_fallback_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    config = ai_brief._build_model_attempt_configs(
+        provider="openai",
+        primary_model_name="gpt-5.5",
+        primary_timeout_seconds=60.0,
+        fallback_model_name=None,
+        fallback_timeout_seconds=None,
+        total_timeout_seconds=None,
+    )
+
+    assert [attempt.role for attempt in config] == ["primary", "fallback"]
+    assert config[0].model_name == "gpt-5.5"
+    assert config[0].timeout_seconds == 60.0
+    assert config[1].model_name == "gpt-5.4-mini"
+    assert config[1].timeout_seconds == pytest.approx(30.0)
+
+
+def test_ai_brief_rejects_invalid_total_model_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(
+        ValueError, match="model_total_timeout_seconds must be positive"
+    ):
+        ai_brief._normalize_model_total_timeout_seconds(None)
 
 
 def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:

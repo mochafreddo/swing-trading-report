@@ -6,6 +6,7 @@ import logging
 import math
 import os
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from .ai_brief_candidates import (
@@ -166,6 +167,92 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
+
+
+@dataclass(frozen=True)
+class _ModelAttemptConfig:
+    role: str
+    model_name: str
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class _ModelAttemptRecord:
+    role: str
+    model_name: str
+    timeout_seconds: float
+    status: str
+    duration_ms: int
+    error_type: str | None = None
+    retryable: bool | None = None
+
+
+def _normalize_model_total_timeout_seconds(value: float | None) -> float | None:
+    if value is None:
+        value = _read_env_float(
+            "AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS must be a number",
+        )
+    if value is None:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("model_total_timeout_seconds must be positive")
+    return float(value)
+
+
+def _normalize_fallback_model_timeout_seconds(value: float | None) -> float:
+    if value is None:
+        value = _read_env_float(
+            "AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS must be a number",
+        )
+    if value is None:
+        return 30.0
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("model_fallback_timeout_seconds must be positive")
+    return float(value)
+
+
+def _fallback_model_name(provider: str, value: str | None) -> str | None:
+    if provider != _MODEL_PROVIDER_OPENAI:
+        return None
+    raw = value if value is not None else os.getenv("OPENAI_AI_BRIEF_FALLBACK_MODEL")
+    text = str(raw or "").strip()
+    return text or None
+
+
+def _build_model_attempt_configs(
+    *,
+    provider: str,
+    primary_model_name: str,
+    primary_timeout_seconds: float,
+    fallback_model_name: str | None,
+    fallback_timeout_seconds: float | None,
+    total_timeout_seconds: float | None,
+) -> list[_ModelAttemptConfig]:
+    attempts = [
+        _ModelAttemptConfig(
+            role="primary",
+            model_name=primary_model_name,
+            timeout_seconds=primary_timeout_seconds,
+        )
+    ]
+    fallback_name = _fallback_model_name(provider, fallback_model_name)
+    if fallback_name is None or fallback_name == primary_model_name:
+        return attempts
+    fallback_timeout = _normalize_fallback_model_timeout_seconds(
+        fallback_timeout_seconds
+    )
+    if total_timeout_seconds is not None:
+        fallback_timeout = min(fallback_timeout, total_timeout_seconds)
+    attempts.append(
+        _ModelAttemptConfig(
+            role="fallback",
+            model_name=fallback_name,
+            timeout_seconds=fallback_timeout,
+        )
+    )
+    return attempts
 
 
 def _normalize_article_reader(value: str | None) -> ArticleReaderName:
