@@ -488,10 +488,33 @@ def test_run_context_helper_normalizes_request_and_builds_attempt_id(
     assert context.market == "US"
     assert context.schedule_role == "local-primary"
     assert context.runner_role == "local-primary"
+    assert context.scheduled_tick == "0810"
     assert context.guard == _guard()
     assert context.session_date == "2026-05-28"
     assert context.attempt_id == "0810-20260528T121000Z-pid12345-abcdef12"
     assert state.preflight_calls == 0
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
+def test_invalid_scheduled_tick_exits_before_runtime_state_preflight() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="2460",
+            attempt_id=None,
+        )
+    )
+
+    assert result.status == "invalid_scheduled_tick"
+    assert result.session_date is None
+    assert state.preflight_calls == 0
+    assert state.upserts == []
     assert pipeline.calls == []
     assert storage.uploads == []
     assert notifier.sent == []

@@ -22,6 +22,7 @@ def _run_wrapper_with_stubs(
     tmp_path: Path,
     *,
     docker_script: str,
+    wrapper_args: list[str] | None = None,
     tee_script: str | None = None,
     mktemp_script: str | None = None,
     mkfifo_script: str | None = None,
@@ -65,9 +66,8 @@ def _run_wrapper_with_stubs(
     )
     wrapper_copy.chmod(0o755)
     env = {**os.environ, **(extra_env or {})}
-    result = subprocess.run(
-        [
-            str(wrapper_copy),
+    if wrapper_args is None:
+        wrapper_args = [
             "--repo-root",
             str(tmp_path),
             "--env-file",
@@ -80,7 +80,9 @@ def _run_wrapper_with_stubs(
             "local-primary",
             "--scheduled-tick",
             "0810",
-        ],
+        ]
+    result = subprocess.run(
+        [str(wrapper_copy), *wrapper_args],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -176,6 +178,105 @@ def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     assert "send_host_failure_alert" in text
     assert "TELEGRAM_BOT_TOKEN" in text
     assert "TELEGRAM_CHAT_ID" in text
+
+
+def test_launchd_wrapper_rejects_unsafe_path_tokens_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "../local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "0810",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_rejects_invalid_scheduled_tick_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "08/10",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_rejects_out_of_range_scheduled_tick_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "2460",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
 
 
 def test_launchd_wrapper_suppresses_host_failure_for_structured_pipeline_failed(
@@ -414,6 +515,13 @@ def test_us_cutoff_alert_plist_runs_after_github_fallback_grace() -> None:
 
 def test_launchd_log_directory_exists_before_bootstrap() -> None:
     assert Path("logs/launchd/.gitkeep").is_file()
+
+
+def test_scheduler_attempt_and_measurement_logs_are_gitignored() -> None:
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+
+    assert "/logs/scheduled/" in gitignore
+    assert "/logs/measurements/" in gitignore
 
 
 def test_scheduler_compose_has_one_shot_runner_service() -> None:

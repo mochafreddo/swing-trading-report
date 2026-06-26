@@ -26,6 +26,9 @@ def test_scheduled_sell_checks_runtime_state_before_holdings_and_provider_execut
     workflow = _load_workflow(".github/workflows/sell.yml")
     steps = workflow["jobs"]["sell"]["steps"]
 
+    assert "${{ github.event_name }}" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+
     preflight_index = _step_index(steps, "Scheduled runtime_state preflight")
     install_index = _step_index(steps, "Install dependencies")
     holdings_index = _step_index(steps, "Load holdings from Supabase")
@@ -35,9 +38,9 @@ def test_scheduled_sell_checks_runtime_state_before_holdings_and_provider_execut
 
     preflight = steps[preflight_index]
     assert preflight["if"] == "github.event_name == 'schedule'"
-    assert preflight.get("env") == {
-        "SUPABASE_URL": "${{ secrets.SUPABASE_URL }}",
-    }
+    assert "env" not in preflight
+    assert "marker-aware local upload is implemented" in preflight["run"]
+    assert "exit 1" in preflight["run"]
 
 
 def test_scheduled_sell_telegram_sender_keeps_token_out_of_shell_argv() -> None:

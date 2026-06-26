@@ -14,7 +14,37 @@ TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
 usage() {
-  printf '%s\n' "usage: $0 --repo-root PATH --env-file PATH --market KR|US --schedule-role ROLE --runner-role ROLE --scheduled-tick HHMM [--dry-run]" >&2
+  printf '%s\n' "usage: $0 --repo-root PATH --env-file PATH --market KR|US --schedule-role ROLE --runner-role ROLE --scheduled-tick HHMM|manual [--dry-run]" >&2
+}
+
+is_safe_token() {
+  [[ "$1" =~ ^[A-Za-z0-9_.-]+$ ]]
+}
+
+is_schedule_role() {
+  case "$1" in
+    local-primary|local-retry|early-monitor|github-fallback|cutoff-alert|manual)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_runner_role() {
+  case "$1" in
+    local-primary|local-retry|monitor-only|github-fallback|cutoff-alert|manual)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_scheduled_tick() {
+  [[ "$1" == "manual" || "$1" =~ ^([01][0-9]|2[0-3])[0-5][0-9]$ ]]
 }
 
 trim_value() {
@@ -85,7 +115,7 @@ EOF
 is_structured_scheduler_failure_status() {
   local status="$1"
   case "${status}" in
-    attempt_marker_failed|guard_failed|guard_failed_before_upload|guard_failed_before_notification|pipeline_failed|upload_failed|artifact_marker_failed|artifact_marker_invalid|entry_failure_artifact_claim_held|late_alert_send_failed|late_alert_sent_marker_failed|lock_lost_before_upload|skip_artifact_upload_failed|source_config_invalid|unsupported_runner_role)
+    attempt_marker_failed|guard_failed|guard_failed_before_upload|guard_failed_before_notification|pipeline_failed|upload_failed|artifact_marker_failed|artifact_marker_invalid|entry_failure_artifact_claim_held|late_alert_send_failed|late_alert_sent_marker_failed|lock_lost_before_upload|skip_artifact_upload_failed|source_config_invalid|invalid_scheduled_tick|unsupported_runner_role)
       return 0
       ;;
     *)
@@ -198,6 +228,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${repo_root}" || -z "${env_file}" || -z "${market}" || -z "${schedule_role}" || -z "${runner_role}" || -z "${scheduled_tick}" ]]; then
+  usage
+  exit 2
+fi
+
+if [[ "${market}" != "KR" && "${market}" != "US" ]]; then
+  usage
+  exit 2
+fi
+
+if ! is_safe_token "${schedule_role}" || ! is_schedule_role "${schedule_role}"; then
+  usage
+  exit 2
+fi
+
+if ! is_safe_token "${runner_role}" || ! is_runner_role "${runner_role}"; then
+  usage
+  exit 2
+fi
+
+if ! is_scheduled_tick "${scheduled_tick}"; then
   usage
   exit 2
 fi

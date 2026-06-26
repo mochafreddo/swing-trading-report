@@ -52,6 +52,8 @@ mise.local.lock
 /.worktrees/
 /data/
 /logs/launchd/*.log
+/logs/measurements/
+/logs/scheduled/
 /reports/
 /tmp/
 /tmp-replay/

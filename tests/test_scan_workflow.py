@@ -24,6 +24,9 @@ def test_scheduled_scan_checks_runtime_state_before_provider_execution() -> None
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]
 
+    assert "${{ github.event_name }}" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+
     preflight_index = _step_index(steps, "Scheduled runtime_state preflight")
     install_index = _step_index(steps, "Install dependencies")
     run_scan_index = _step_index(steps, "Run scan")
@@ -32,6 +35,6 @@ def test_scheduled_scan_checks_runtime_state_before_provider_execution() -> None
 
     preflight = steps[preflight_index]
     assert preflight["if"] == "github.event_name == 'schedule'"
-    assert preflight.get("env") == {
-        "SUPABASE_URL": "${{ secrets.SUPABASE_URL }}",
-    }
+    assert "env" not in preflight
+    assert "marker-aware local upload is implemented" in preflight["run"]
+    assert "exit 1" in preflight["run"]

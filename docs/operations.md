@@ -125,14 +125,20 @@ Notification checks:
 - If a successful run uploaded an AI Brief artifact but no report notification arrived, check `notification:claim` and `notification:sent` runtime markers first, then the Telegram/Slack delivery step logs. Missing `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, or `SLACK_WEBHOOK_URL` is a delivery configuration issue, not an AI Brief generation issue.
 - The launchd host wrapper sends `scheduler_container_failed` only when the Docker scheduler command exits without a recognized structured scheduler status. If the scheduler prints a JSON status such as `pipeline_failed`, treat the app-level late-alert and local scheduler logs as the source of truth rather than diagnosing Docker first. Stdout capture setup or tee failures are tagged `scheduler_stdout_capture_failed`, which keeps wrapper-level diagnostics distinct from scheduler execution status.
 
+Local log retention:
+
+- Attempt-scoped scheduler logs are written under `logs/scheduled/ai-brief/YYYY-MM-DD/`.
+- Model latency measurement logs are written under `logs/measurements/ai-brief-model-latency/YYYY-MM-DD.jsonl`.
+- Both directories are local-only and gitignored. Keep the latest 30 calendar days during normal operation. Before deleting older files, dry-run the target list with `find logs/scheduled logs/measurements -type f -mtime +30 -print`; delete only after confirming there is no active incident or audit need.
+
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 
 ## GitHub Actions
 
 | Workflow | Normal Signal | Failure Start Point |
 | --- | --- | --- |
-| `scan.yml` | report uploaded and indexed; scheduled empty-universe reports require issue review | KIS credentials, provider availability, upload step, report `system_issues` |
-| `sell.yml` | Supabase holdings snapshot then sell report | holdings query, KIS/pykrx provider, upload step |
+| `scan.yml` | manual run uploads and indexes a report; scheduled trigger intentionally fails closed until marker-aware local upload is implemented | KIS credentials, provider availability, upload step, report `system_issues`; scheduled failure message |
+| `sell.yml` | manual run loads Supabase holdings then uploads a sell report; scheduled trigger intentionally fails closed until marker-aware local upload is implemented | holdings query, KIS/pykrx provider, upload step; scheduled failure message |
 | `ai-brief.yml` | manual artifact passes recommendation quality gate before Supabase upload and opt-in notifications; scheduled artifact/skip marker after runtime_state guard and quality gate | context resolve, runtime_state lock, source/model provider, recommendation quality gate, gated Supabase upload step |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |
 | `ci.yml` | Python and web checks green | first failing job logs |

@@ -131,6 +131,7 @@ _FAILED_STATUSES = {
     "lock_lost_before_upload",
     "skip_artifact_upload_failed",
     "source_config_invalid",
+    "invalid_scheduled_tick",
     "unsupported_runner_role",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ class _ScheduledRunContext:
     market: str
     schedule_role: str
     runner_role: str
+    scheduled_tick: str
     guard: GuardSnapshot
     session_date: str
     attempt_id: str
@@ -323,6 +325,15 @@ def _normalize_role(role: str, *, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} must not be blank")
     return normalized
+
+
+def _normalize_scheduled_tick(scheduled_tick: str) -> str:
+    normalized = str(scheduled_tick or "").strip().lower()
+    if normalized == "manual":
+        return normalized
+    if re.fullmatch(r"([01][0-9]|2[0-3])[0-5][0-9]", normalized):
+        return normalized
+    raise ValueError("scheduled_tick must be HHMM or manual")
 
 
 def _optional_env(name: str) -> str | None:
@@ -931,6 +942,17 @@ class ScheduledAiBriefRunner:
             request.schedule_role, field_name="schedule_role"
         )
         runner_role = _normalize_role(request.runner_role, field_name="runner_role")
+        try:
+            scheduled_tick = _normalize_scheduled_tick(request.scheduled_tick)
+        except ValueError:
+            _LOGGER.error(
+                "scheduled AI brief invalid scheduled tick "
+                "market=%s schedule_role=%s runner_role=%s",
+                market,
+                schedule_role,
+                runner_role,
+            )
+            return ScheduledAiBriefResult(status="invalid_scheduled_tick")
         if not _is_within_role_window(
             market=market, schedule_role=schedule_role, now=now
         ):
@@ -951,7 +973,7 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
             )
         attempt_id = request.attempt_id or build_attempt_id(
-            scheduled_tick=request.scheduled_tick,
+            scheduled_tick=scheduled_tick,
             started_at=now,
             suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
         )
@@ -963,6 +985,7 @@ class ScheduledAiBriefRunner:
             market=market,
             schedule_role=schedule_role,
             runner_role=runner_role,
+            scheduled_tick=scheduled_tick,
             guard=guard,
             session_date=session_date,
             attempt_id=attempt_id,
@@ -978,6 +1001,7 @@ class ScheduledAiBriefRunner:
         market = run_context.market
         schedule_role = run_context.schedule_role
         runner_role = run_context.runner_role
+        scheduled_tick = run_context.scheduled_tick
         guard = run_context.guard
         session_date = run_context.session_date
         attempt_id = run_context.attempt_id
@@ -1003,7 +1027,7 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
                 schedule_role=schedule_role,
                 runner_role=runner_role,
-                scheduled_tick=request.scheduled_tick,
+                scheduled_tick=scheduled_tick,
                 attempt_id=attempt_id,
                 run_url=request.run_url,
                 now=now,
