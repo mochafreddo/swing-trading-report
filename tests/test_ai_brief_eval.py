@@ -959,10 +959,7 @@ def test_ai_brief_eval_fails_when_invalid_veto_drop_leaves_no_model_judgment(
             "ticker": "MSFT.NAS",
             "code": "model_ineligible_veto_dropped",
             "severity": "WARN",
-            "message": (
-                "model returned vetoed candidate outside eligible_tickers "
-                "and the row was dropped"
-            ),
+            "message": "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함",
         }
     ]
     payload["summary"]["source_issue_count"] = 1

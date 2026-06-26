@@ -1052,6 +1052,62 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
     assert "ENTER 후보" not in text
 
 
+def test_build_ai_brief_telegram_report_text_escapes_provider_status_diagnostics() -> (
+    None
+):
+    long_provider = "long-provider-" + ("x" * 420)
+    report = _minimal_ai_brief_report(
+        source_provider_summary={
+            "chain": ['feed<&"'],
+            "providers": [
+                {"provider": 'feed<&"', "status": "failed", "covered": 1, "total": 2},
+                {
+                    "provider": "partial-feed",
+                    "status": "partial",
+                    "covered": 1,
+                    "total": 3,
+                },
+                {"provider": "error-feed", "status": "error", "covered": 0, "total": 3},
+                {
+                    "provider": "skip-feed",
+                    "status": "skipped",
+                    "covered": 0,
+                    "total": 3,
+                },
+                {
+                    "provider": long_provider,
+                    "status": "failed",
+                    "covered": 0,
+                    "total": 3,
+                },
+            ],
+            "final": {
+                "recommendable_covered": 1,
+                "recommendable_total": 2,
+                "watch_covered": 0,
+                "watch_total": 1,
+            },
+        },
+    )
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "feed&lt;&amp;&quot;" in text
+    assert 'feed<&"' not in text
+    assert "feed&lt;&amp;&quot; 실패 1/2" in text
+    assert "partial-feed 부분 1/3" in text
+    assert "error-feed 오류 0/3" in text
+    assert "skip-feed 건너뜀 0/3" in text
+    assert "..." in text
+    assert long_provider not in text
+
+    parts = notification_text.split_telegram_message_text(text)
+    _assert_balanced_html_tags(parts)
+
+
 def test_build_ai_brief_telegram_report_text_explains_watch_only_state() -> None:
     report = {
         "generated_at": "2026-05-20T02:19:26+00:00",

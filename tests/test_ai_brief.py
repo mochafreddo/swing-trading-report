@@ -7581,10 +7581,7 @@ def test_run_ai_brief_openai_drops_unknown_vetoed_candidate(
             "ticker": "MSFT.NAS",
             "code": "model_ineligible_veto_dropped",
             "severity": "WARN",
-            "message": (
-                "model returned vetoed candidate outside eligible_tickers "
-                "and the row was dropped"
-            ),
+            "message": "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함",
         }
     ]
     assert payload["summary"]["source_issue_count"] == 1

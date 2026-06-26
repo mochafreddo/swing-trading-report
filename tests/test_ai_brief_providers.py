@@ -66,6 +66,63 @@ def test_fake_provider_returns_watch_candidates_separately() -> None:
     assert result.watch_candidates[0]["action"] == "WATCH"
 
 
+def test_fake_provider_localizes_known_watch_fallback_reason() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[
+            _candidate(
+                "MSFT.NAS",
+                role="watch_only",
+                ai_role_reason="entry trigger is pending re-confirmation",
+            )
+        ],
+    )
+
+    assert result.watch_candidates[0]["reason"] == "진입 트리거 재확인이 필요함"
+
+
+def test_fake_provider_preserves_custom_watch_reason() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[
+            _candidate(
+                "MSFT.NAS",
+                role="watch_only",
+                ai_role_reason="post-earnings source context needs review",
+            )
+        ],
+    )
+
+    assert (
+        result.watch_candidates[0]["reason"]
+        == "post-earnings source context needs review"
+    )
+
+
+def test_fake_provider_localizes_no_source_issue_message() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+    candidate = _candidate("AAPL.NAS", role="recommendable")
+    candidate["sources"] = []
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[candidate],
+        watch_candidates=[],
+    )
+
+    assert result.source_issues == [
+        {
+            "ticker": "AAPL.NAS",
+            "code": "fake_provider_no_external_sources",
+            "severity": "WARN",
+            "message": "fake provider는 외부 소스를 수집하지 않음",
+        }
+    ]
+
+
 def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -> None:
     provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
 
@@ -820,10 +877,7 @@ def test_openai_drops_unknown_veto_candidate_as_warn_source_issue() -> None:
             "ticker": "MSFT.NAS",
             "code": "model_ineligible_veto_dropped",
             "severity": "WARN",
-            "message": (
-                "model returned vetoed candidate outside eligible_tickers "
-                "and the row was dropped"
-            ),
+            "message": "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함",
         }
     ]
 
@@ -854,10 +908,7 @@ def test_openai_drops_unknown_veto_before_action_and_reason_validation() -> None
             "ticker": "MSFT.NAS",
             "code": "model_ineligible_veto_dropped",
             "severity": "WARN",
-            "message": (
-                "model returned vetoed candidate outside eligible_tickers "
-                "and the row was dropped"
-            ),
+            "message": "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함",
         }
     ]
 
@@ -1201,7 +1252,54 @@ def test_openai_replaces_watch_candidate_with_invalid_source_ref_with_fallback()
             "ticker": "MSFT.NAS",
             "code": "model_watch_source_ref_invalid",
             "severity": "WARN",
-            "message": "watch row source_refs were invalid and fallback was used",
+            "message": "watch row의 source_refs가 유효하지 않아 대체 행을 사용함",
+        }
+    ]
+
+
+def test_openai_localizes_known_watch_fallback_reason_after_invalid_source_ref() -> (
+    None
+):
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [
+                    {
+                        "ticker": "MSFT.NAS",
+                        "action": "WATCH",
+                        "reason": "model watch reason",
+                        "retrigger_conditions": ["model condition"],
+                        "source_refs": ["MSFT.NAS:404"],
+                    }
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[
+            _candidate(
+                "MSFT.NAS",
+                role="watch_only",
+                ai_role_reason="entry trigger is pending re-confirmation",
+            )
+        ],
+    )
+
+    assert result.watch_candidates[0]["reason"] == "진입 트리거 재확인이 필요함"
+    assert result.source_issues == [
+        {
+            "ticker": "MSFT.NAS",
+            "code": "model_watch_source_ref_invalid",
+            "severity": "WARN",
+            "message": "watch row의 source_refs가 유효하지 않아 대체 행을 사용함",
         }
     ]
 
@@ -1357,7 +1455,7 @@ def test_openai_drops_recommendation_with_invalid_source_ref_and_reranks() -> No
             "ticker": "AAPL.NAS",
             "code": "model_source_ref_invalid",
             "severity": "WARN",
-            "message": "model returned source_refs not present in candidate.sources",
+            "message": "모델이 candidate.sources에 없는 source_refs를 반환함",
         }
     ]
 

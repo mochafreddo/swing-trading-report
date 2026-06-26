@@ -1,6 +1,8 @@
 # AI Brief Korean Telegram Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Status:** Completed on 2026-06-26.
+
+> **Historical note:** This plan has been implemented on `feat/ai-brief-korean-telegram`. The checkbox steps below are retained as execution history, not active worker instructions.
 
 **Goal:** Make new AI Brief Telegram messages Korean-first by guiding OpenAI display text to Korean and localizing the remaining Telegram diagnostic labels.
 

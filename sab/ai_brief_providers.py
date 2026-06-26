@@ -42,6 +42,25 @@ _INVESTMENT_READINESS_FIELDS = (
 _INVESTMENT_READINESS_CHECKLIST_ITEM = (
     "NAV/위험 예산, 청산 유동성, 포트폴리오 노출, 소스 맥락을 행동 전 확인"
 )
+_WATCH_TRIGGER_PENDING_REASON_EN = "entry trigger is pending re-confirmation"
+_WATCH_TRIGGER_PENDING_REASON_KO = "진입 트리거 재확인이 필요함"
+_FAKE_PROVIDER_NO_EXTERNAL_SOURCES_MESSAGE = "fake provider는 외부 소스를 수집하지 않음"
+_MODEL_SOURCE_REF_INVALID_MESSAGE = (
+    "모델이 candidate.sources에 없는 source_refs를 반환함"
+)
+_MODEL_SOURCE_REF_MISSING_MESSAGE = (
+    "소스가 있는 후보에 대해 모델이 source_refs를 누락함"
+)
+_MODEL_UNBACKED_RECOMMENDATION_DROPPED_MESSAGE = "소스 근거가 없어 추천을 제외함"
+_MODEL_WATCH_SOURCE_REF_INVALID_MESSAGE = (
+    "watch row의 source_refs가 유효하지 않아 대체 행을 사용함"
+)
+_MODEL_WATCH_VETO_DROPPED_MESSAGE = (
+    "모델이 watch ticker를 vetoed_candidates에 반환해 해당 행을 제외함"
+)
+_MODEL_INELIGIBLE_VETO_DROPPED_MESSAGE = (
+    "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함"
+)
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
@@ -125,7 +144,7 @@ class FakeAiBriefProvider:
                         "ticker": ticker,
                         "code": "fake_provider_no_external_sources",
                         "severity": "WARN",
-                        "message": "fake provider does not collect external sources",
+                        "message": _FAKE_PROVIDER_NO_EXTERNAL_SOURCES_MESSAGE,
                     }
                 )
         watch_rows: list[dict[str, object]] = []
@@ -134,9 +153,7 @@ class FakeAiBriefProvider:
             watch_row: dict[str, object] = {
                 "ticker": ticker,
                 "action": "WATCH",
-                "reason": str(
-                    candidate.get("ai_role_reason") or "진입 트리거 재확인이 필요함"
-                ),
+                "reason": _watch_reason_for_display(candidate.get("ai_role_reason")),
                 "retrigger_conditions": [
                     "가격이 원래 진입 트리거를 다시 충족해야 함",
                     "소스와 시장 맥락을 수동 확인해야 함",
@@ -563,11 +580,9 @@ def _normalize_openai_provider_result(
                     code="model_source_ref_invalid"
                     if invalid_refs
                     else "model_source_ref_missing",
-                    message=(
-                        "model returned source_refs not present in candidate.sources"
-                        if invalid_refs
-                        else "model omitted source_refs for a sourced candidate"
-                    ),
+                    message=_MODEL_SOURCE_REF_INVALID_MESSAGE
+                    if invalid_refs
+                    else _MODEL_SOURCE_REF_MISSING_MESSAGE,
                 )
             )
             continue
@@ -576,9 +591,7 @@ def _normalize_openai_provider_result(
                 _model_source_issue(
                     ticker=ticker,
                     code="model_unbacked_recommendation_dropped",
-                    message=(
-                        "recommendation was dropped because it was not source-backed"
-                    ),
+                    message=_MODEL_UNBACKED_RECOMMENDATION_DROPPED_MESSAGE,
                 )
             )
             continue
@@ -636,7 +649,7 @@ def _normalize_openai_provider_result(
                 _model_source_issue(
                     ticker=ticker,
                     code="model_watch_source_ref_invalid",
-                    message="watch row source_refs were invalid and fallback was used",
+                    message=_MODEL_WATCH_SOURCE_REF_INVALID_MESSAGE,
                 )
             )
             normalized_watch_candidates.append(
@@ -785,10 +798,7 @@ def _sanitize_provider_vetoed_candidates(
                 _model_source_issue(
                     ticker=ticker,
                     code="model_watch_veto_dropped",
-                    message=(
-                        "model returned watch ticker in vetoed_candidates "
-                        "and the row was dropped"
-                    ),
+                    message=_MODEL_WATCH_VETO_DROPPED_MESSAGE,
                 )
             )
             continue
@@ -797,10 +807,7 @@ def _sanitize_provider_vetoed_candidates(
                 _model_source_issue(
                     ticker=ticker,
                     code="model_ineligible_veto_dropped",
-                    message=(
-                        "model returned vetoed candidate outside eligible_tickers "
-                        "and the row was dropped"
-                    ),
+                    message=_MODEL_INELIGIBLE_VETO_DROPPED_MESSAGE,
                 )
             )
             continue
@@ -832,6 +839,13 @@ def _model_source_issue(
         "severity": "WARN",
         "message": message,
     }
+
+
+def _watch_reason_for_display(reason: object) -> str:
+    text = str(reason or "").strip()
+    if text in {"", _WATCH_TRIGGER_PENDING_REASON_EN}:
+        return _WATCH_TRIGGER_PENDING_REASON_KO
+    return text
 
 
 def _copy_investment_readiness_fields(
@@ -897,9 +911,7 @@ def _provider_fallback_watch_candidate(
     candidate: Mapping[str, object],
 ) -> dict[str, object]:
     ticker = str(candidate.get("ticker") or "").strip()
-    reason = str(
-        candidate.get("ai_role_reason") or "진입 트리거 재확인이 필요함"
-    ).strip()
+    reason = _watch_reason_for_display(candidate.get("ai_role_reason"))
     row: dict[str, object] = {
         "ticker": ticker,
         "action": "WATCH",
