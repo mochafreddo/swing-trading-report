@@ -41,3 +41,22 @@ def test_invalid_pipeline_is_rejected() -> None:
             mode=ScheduledPipelineMode.SHADOW,
             github_marker_aware=True,
         )
+
+
+@pytest.mark.parametrize("mode", ["uplod", "", object()])
+def test_invalid_mode_is_rejected(mode: object) -> None:
+    with pytest.raises(ValueError, match="mode must be shadow or upload"):
+        validate_upload_enabled(
+            pipeline="scan",
+            mode=mode,  # type: ignore[arg-type]
+            github_marker_aware=True,
+        )
+
+
+def test_upload_mode_string_is_normalized() -> None:
+    with pytest.raises(ValueError, match="marker-aware GitHub fallback"):
+        validate_upload_enabled(
+            pipeline="scan",
+            mode="UPLOAD",
+            github_marker_aware=False,
+        )

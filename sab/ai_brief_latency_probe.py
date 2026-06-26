@@ -13,6 +13,22 @@ from .observability import is_sensitive_log_field, sanitize_log_value
 _MAX_REPETITIONS = 3
 DEFAULT_PRIMARY_MODEL = "gpt-5.5"
 DEFAULT_FALLBACK_MODEL = "gpt-5.4-mini"
+_ALLOWED_PROBE_ROW_FIELDS = frozenset(
+    {
+        "timestamp",
+        "market",
+        "model_name",
+        "timeout_seconds",
+        "attempt_number",
+        "status",
+        "duration_ms",
+        "recommendation_count",
+        "vetoed_count",
+        "watch_count",
+        "error_type",
+        "planned_live_model_call_count",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -57,7 +73,7 @@ def _safe_probe_row(row: Mapping[str, object]) -> dict[str, Any]:
     safe_row: dict[str, Any] = {}
     for key, value in row.items():
         key_text = str(key)
-        if _is_secret_field(key_text):
+        if key_text not in _ALLOWED_PROBE_ROW_FIELDS or _is_secret_field(key_text):
             continue
         safe_row[key_text] = sanitize_log_value(key_text, value)
     return safe_row
@@ -68,7 +84,10 @@ def write_probe_row(path: Path, row: Mapping[str, object]) -> None:
     line = json.dumps(_safe_probe_row(row), ensure_ascii=False, sort_keys=True) + "\n"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        os.write(fd, line.encode("utf-8"))
+        encoded = line.encode("utf-8")
+        written = os.write(fd, encoded)
+        if written != len(encoded):
+            raise OSError("short write while appending AI brief latency probe row")
     finally:
         os.close(fd)
 

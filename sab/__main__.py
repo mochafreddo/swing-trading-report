@@ -332,7 +332,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     probe = sub.add_parser(
         "ai-brief-latency-probe",
-        help="Measure AI Brief model latency without upload or notification",
+        help="Plan bounded AI Brief latency measurements without upload or notification",
     )
     probe.add_argument("--primary-model", required=True)
     probe.add_argument("--fallback-model", default=None)

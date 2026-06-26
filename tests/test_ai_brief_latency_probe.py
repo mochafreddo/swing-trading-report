@@ -75,7 +75,7 @@ def test_probe_writes_jsonl_with_sorted_no_secret_fields(tmp_path: Path) -> None
     payload = json.loads(lines[0])
     assert payload["status"] == "success"
     assert payload["duration_ms"] == 1234
-    assert payload["response"]["headers"]["Authorization"] == "[REDACTED]"
+    assert "response" not in payload
 
 
 def test_probe_write_uses_single_append_write(
@@ -96,3 +96,17 @@ def test_probe_write_uses_single_append_write(
     assert len(writes) == 1
     assert writes[0].endswith(b"\n")
     assert json.loads(output.read_text(encoding="utf-8")) == {"status": "success"}
+
+
+def test_probe_write_raises_on_short_append_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "latency.jsonl"
+
+    def fake_write(_fd: int, data: bytes) -> int:
+        return len(data) - 1
+
+    monkeypatch.setattr(ai_brief_latency_probe.os, "write", fake_write)
+
+    with pytest.raises(OSError, match="short write"):
+        ai_brief_latency_probe.write_probe_row(output, {"status": "success"})
