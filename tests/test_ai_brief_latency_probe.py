@@ -8,13 +8,15 @@ from sab import ai_brief_latency_probe
 
 
 def test_probe_plan_defaults_to_bounded_call_count() -> None:
-    plan = ai_brief_latency_probe.build_probe_plan(
-        primary_model="gpt-5.5",
-        fallback_model="gpt-5.4-mini",
-        repetitions=1,
-    )
+    plan = ai_brief_latency_probe.build_probe_plan()
 
     assert [item.timeout_seconds for item in plan] == [20.0, 30.0, 60.0, 30.0]
+    assert [item.model_name for item in plan] == [
+        "gpt-5.5",
+        "gpt-5.5",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+    ]
     assert sum(item.repetitions for item in plan) == 4
 
 
@@ -43,6 +45,10 @@ def test_probe_writes_jsonl_with_sorted_no_secret_fields(tmp_path: Path) -> None
             "vetoed_count": 0,
             "watch_count": 0,
             "OPENAI_API_KEY": "sk-test-secret",
+            "response": {
+                "headers": {"Authorization": "Bearer nested-secret-token"},
+                "message": "request failed api_key=nested-api-key",
+            },
         },
     )
     ai_brief_latency_probe.write_probe_row(
@@ -59,10 +65,34 @@ def test_probe_writes_jsonl_with_sorted_no_secret_fields(tmp_path: Path) -> None
     )
 
     lines = output.read_text(encoding="utf-8").splitlines()
+    file_text = output.read_text(encoding="utf-8")
     assert len(lines) == 2
     assert lines[0].startswith('{"attempt_number":')
-    assert "OPENAI_API_KEY" not in output.read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY" not in file_text
+    assert "nested-secret-token" not in file_text
+    assert "nested-api-key" not in file_text
 
     payload = json.loads(lines[0])
     assert payload["status"] == "success"
     assert payload["duration_ms"] == 1234
+    assert payload["response"]["headers"]["Authorization"] == "[REDACTED]"
+
+
+def test_probe_write_uses_single_append_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "latency.jsonl"
+    writes: list[bytes] = []
+    real_write = ai_brief_latency_probe.os.write
+
+    def fake_write(fd: int, data: bytes) -> int:
+        writes.append(data)
+        return real_write(fd, data)
+
+    monkeypatch.setattr(ai_brief_latency_probe.os, "write", fake_write)
+
+    ai_brief_latency_probe.write_probe_row(output, {"status": "success"})
+
+    assert len(writes) == 1
+    assert writes[0].endswith(b"\n")
+    assert json.loads(output.read_text(encoding="utf-8")) == {"status": "success"}

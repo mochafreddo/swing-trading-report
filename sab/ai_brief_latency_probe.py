@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from .observability import is_sensitive_log_field, sanitize_log_value
 
 _MAX_REPETITIONS = 3
+DEFAULT_PRIMARY_MODEL = "gpt-5.5"
+DEFAULT_FALLBACK_MODEL = "gpt-5.4-mini"
 
 
 @dataclass(frozen=True)
@@ -18,9 +24,9 @@ class ProbeItem:
 
 def build_probe_plan(
     *,
-    primary_model: str,
-    fallback_model: str | None,
-    repetitions: int,
+    primary_model: str = DEFAULT_PRIMARY_MODEL,
+    fallback_model: str | None = DEFAULT_FALLBACK_MODEL,
+    repetitions: int = 1,
 ) -> list[ProbeItem]:
     if repetitions < 1 or repetitions > _MAX_REPETITIONS:
         raise ValueError("repetitions must be <= 3 and >= 1")
@@ -44,23 +50,34 @@ def default_output_path(now: dt.datetime | None = None) -> Path:
 
 
 def _is_secret_field(name: str) -> bool:
-    upper_name = name.upper()
-    return any(token in upper_name for token in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
+    return is_sensitive_log_field(name)
+
+
+def _safe_probe_row(row: Mapping[str, object]) -> dict[str, Any]:
+    safe_row: dict[str, Any] = {}
+    for key, value in row.items():
+        key_text = str(key)
+        if _is_secret_field(key_text):
+            continue
+        safe_row[key_text] = sanitize_log_value(key_text, value)
+    return safe_row
 
 
 def write_probe_row(path: Path, row: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    safe_row = {key: value for key, value in row.items() if not _is_secret_field(key)}
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(safe_row, ensure_ascii=False, sort_keys=True))
-        handle.write("\n")
+    line = json.dumps(_safe_probe_row(row), ensure_ascii=False, sort_keys=True) + "\n"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, line.encode("utf-8"))
+    finally:
+        os.close(fd)
 
 
 def run_probe(
     *,
-    primary_model: str,
-    fallback_model: str | None,
-    repetitions: int,
+    primary_model: str = DEFAULT_PRIMARY_MODEL,
+    fallback_model: str | None = DEFAULT_FALLBACK_MODEL,
+    repetitions: int = 1,
 ) -> int:
     plan = build_probe_plan(
         primary_model=primary_model,

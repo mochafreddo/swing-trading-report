@@ -1,6 +1,7 @@
 import argparse
 from types import SimpleNamespace
 
+import pytest
 import sab.__main__ as sab_main
 from sab.scheduler.runner import ScheduledAiBriefRequest
 
@@ -225,6 +226,22 @@ def test_dispatch_command_routes_ai_brief_latency_probe_options(monkeypatch) -> 
             "repetitions": 2,
         }
     ]
+
+
+@pytest.mark.parametrize("repetitions", ["0", "4"])
+def test_ai_brief_latency_probe_repetitions_parse_error(repetitions: str) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _parse_args(
+            [
+                "ai-brief-latency-probe",
+                "--primary-model",
+                "gpt-5.5",
+                "--repetitions",
+                repetitions,
+            ]
+        )
+
+    assert exc_info.value.code == 2
 
 
 def test_dispatch_command_routes_scheduled_ai_brief_options(monkeypatch) -> None:

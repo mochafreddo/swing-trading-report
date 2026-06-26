@@ -20,6 +20,16 @@ from .sell import run_sell
 _CommandHandler = Callable[[argparse.Namespace], int]
 
 
+def _bounded_probe_repetitions(value: str) -> int:
+    try:
+        repetitions = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("repetitions must be an integer") from exc
+    if repetitions < 1 or repetitions > 3:
+        raise argparse.ArgumentTypeError("repetitions must be between 1 and 3")
+    return repetitions
+
+
 def _normalize_log_timezone(value: str | None) -> str:
     log_tz = (value or "local").strip().lower()
     if log_tz in {"local", "utc"}:
@@ -326,7 +336,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     probe.add_argument("--primary-model", required=True)
     probe.add_argument("--fallback-model", default=None)
-    probe.add_argument("--repetitions", type=int, default=1)
+    probe.add_argument("--repetitions", type=_bounded_probe_repetitions, default=1)
     return p
 
 
