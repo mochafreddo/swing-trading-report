@@ -160,6 +160,9 @@ def test_launchd_wrapper_uses_status_file_before_stdout_tail(tmp_path: Path) -> 
     assert result.returncode == 1
     assert "diagnostic: status json was followed by details" in result.stdout
     assert not alerts_path.exists()
+    attempt_logs = tmp_path / "logs" / "scheduled" / "ai-brief"
+    assert list(attempt_logs.glob("**/*.out.log"))
+    assert list(attempt_logs.glob("**/*.err.log"))
 
 
 def test_launchd_wrapper_writes_attempt_scoped_command_log(tmp_path: Path) -> None:
