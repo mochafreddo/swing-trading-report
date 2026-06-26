@@ -345,6 +345,8 @@ def test_run_ai_brief_logs_structured_run_lifecycle(
         "ai_brief_started",
         "ai_brief_entry_report_loaded",
         "ai_brief_source_provider_completed",
+        "ai_brief_model_attempt_started",
+        "ai_brief_model_attempt_completed",
         "ai_brief_model_provider_completed",
         "ai_brief_report_written",
         "ai_brief_completed",
