@@ -1,7 +1,7 @@
 # AI Brief Korean Telegram Design
 
 상태: Accepted
-Status: Approved design, pending written-spec review
+Status: Implemented on 2026-06-26
 Date: 2026-06-25
 Scope: AI Brief OpenAI display-language guidance and Telegram report text
 
