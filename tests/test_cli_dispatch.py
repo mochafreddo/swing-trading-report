@@ -1,4 +1,5 @@
 import argparse
+from types import SimpleNamespace
 
 import sab.__main__ as sab_main
 from sab.scheduler.runner import ScheduledAiBriefRequest
@@ -186,6 +187,42 @@ def test_dispatch_command_routes_ai_brief_options(monkeypatch) -> None:
             "article_reader_max_excerpt_chars": 900,
             "report_date": "2026-06-13",
             "upload": True,
+        }
+    ]
+
+
+def test_dispatch_command_routes_ai_brief_latency_probe_options(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run_probe(**kwargs) -> int:
+        calls.append(kwargs)
+        return 37
+
+    monkeypatch.setattr(
+        sab_main,
+        "ai_brief_latency_probe",
+        SimpleNamespace(run_probe=run_probe),
+        raising=False,
+    )
+
+    ns = _parse_args(
+        [
+            "ai-brief-latency-probe",
+            "--primary-model",
+            "gpt-5.5",
+            "--fallback-model",
+            "gpt-5.4-mini",
+            "--repetitions",
+            "2",
+        ]
+    )
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 37
+    assert calls == [
+        {
+            "primary_model": "gpt-5.5",
+            "fallback_model": "gpt-5.4-mini",
+            "repetitions": 2,
         }
     ]
 

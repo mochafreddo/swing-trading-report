@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml  # type: ignore[import-untyped]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -366,12 +368,15 @@ def test_launchd_log_directory_exists_before_bootstrap() -> None:
 
 
 def test_scheduler_compose_has_one_shot_runner_service() -> None:
-    compose = Path("docker-compose.scheduler.yml").read_text(encoding="utf-8")
+    compose = yaml.safe_load(
+        Path("docker-compose.scheduler.yml").read_text(encoding="utf-8")
+    )
+    scheduler = compose["services"]["scheduler"]
 
-    assert "scheduler:" in compose
-    assert 'restart: "no"' in compose
-    assert ".env.scheduler.local" in compose
-    assert "uv run python -m sab ai-brief-scheduled" in compose
+    assert scheduler["restart"] == "no"
+    assert "container_name" not in scheduler
+    assert scheduler["env_file"] == ["${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}"]
+    assert scheduler["command"] == "uv run python -m sab ai-brief-scheduled"
 
 
 def test_launchd_verify_script_is_non_destructive() -> None:

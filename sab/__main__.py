@@ -8,6 +8,7 @@ import os
 import sys
 from collections.abc import Callable
 
+from . import ai_brief_latency_probe
 from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
@@ -318,6 +319,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scheduled.add_argument("--dry-run", action="store_true")
     scheduled.add_argument("--guard-only", action="store_true")
+
+    probe = sub.add_parser(
+        "ai-brief-latency-probe",
+        help="Measure AI Brief model latency without upload or notification",
+    )
+    probe.add_argument("--primary-model", required=True)
+    probe.add_argument("--fallback-model", default=None)
+    probe.add_argument("--repetitions", type=int, default=1)
     return p
 
 
@@ -390,6 +399,14 @@ def _run_scheduled_ai_brief_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _run_ai_brief_latency_probe_command(ns: argparse.Namespace) -> int:
+    return ai_brief_latency_probe.run_probe(
+        primary_model=ns.primary_model,
+        fallback_model=ns.fallback_model,
+        repetitions=ns.repetitions,
+    )
+
+
 def _dispatch_command(
     ns: argparse.Namespace,
     parser: argparse.ArgumentParser,
@@ -400,6 +417,7 @@ def _dispatch_command(
         "entry": _run_entry_command,
         "ai-brief": _run_ai_brief_command,
         "ai-brief-scheduled": _run_scheduled_ai_brief_command,
+        "ai-brief-latency-probe": _run_ai_brief_latency_probe_command,
     }
     handler = handlers.get(ns.cmd)
     if handler is None:
