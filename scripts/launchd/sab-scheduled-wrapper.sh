@@ -11,15 +11,24 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pipeline)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        usage
+        exit 2
+      fi
       pipeline="${2:-}"
       shift 2
       ;;
     --scope)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        usage
+        exit 2
+      fi
       scope="${2:-}"
       shift 2
       ;;
     *)
-      break
+      usage
+      exit 2
       ;;
   esac
 done

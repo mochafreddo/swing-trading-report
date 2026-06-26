@@ -116,11 +116,46 @@ def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -
 
     assert generic_wrapper.is_file()
     assert ai_brief_wrapper.is_file()
+    assert os.access(generic_wrapper, os.X_OK)
 
     generic_text = generic_wrapper.read_text(encoding="utf-8")
     assert "--pipeline" in generic_text
     assert "--scope" in generic_text
     assert "ai-brief|scan|sell" in generic_text
+
+
+def test_generic_scheduled_wrapper_argument_validation() -> None:
+    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+
+    valid = subprocess.run(
+        [str(wrapper), "--pipeline", "scan", "--scope", "KR"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert valid.returncode == 2
+    assert (
+        "generic scheduled wrapper requires pipeline-specific execution "
+        "for pipeline=scan scope=KR"
+    ) in valid.stderr
+
+    for args in (
+        ["--pipeline"],
+        ["--scope"],
+        ["--pipeline", "scan", "--scope", "KR", "--unexpected"],
+        ["--pipeline", "entry", "--scope", "KR"],
+        ["--pipeline", "scan", "--scope", "BOTH"],
+    ):
+        result = subprocess.run(
+            [str(wrapper), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "usage:" in result.stderr
 
 
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
