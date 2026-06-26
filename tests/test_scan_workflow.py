@@ -29,3 +29,9 @@ def test_scheduled_scan_checks_runtime_state_before_provider_execution() -> None
     run_scan_index = _step_index(steps, "Run scan")
 
     assert preflight_index < install_index < run_scan_index
+
+    preflight = steps[preflight_index]
+    assert preflight["if"] == "github.event_name == 'schedule'"
+    assert preflight.get("env") == {
+        "SUPABASE_URL": "${{ secrets.SUPABASE_URL }}",
+    }

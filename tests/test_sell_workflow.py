@@ -32,3 +32,21 @@ def test_scheduled_sell_checks_runtime_state_before_holdings_and_provider_execut
     run_sell_index = _step_index(steps, "Run sell")
 
     assert preflight_index < install_index < holdings_index < run_sell_index
+
+    preflight = steps[preflight_index]
+    assert preflight["if"] == "github.event_name == 'schedule'"
+    assert preflight.get("env") == {
+        "SUPABASE_URL": "${{ secrets.SUPABASE_URL }}",
+    }
+
+
+def test_scheduled_sell_telegram_sender_keeps_token_out_of_shell_argv() -> None:
+    workflow = _load_workflow(".github/workflows/sell.yml")
+    steps = workflow["jobs"]["sell"]["steps"]
+    telegram = steps[_step_index(steps, "Send Telegram notification (schedule only)")]
+    run = telegram["run"]
+
+    assert "curl" not in run
+    assert "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}" not in run
+    assert "urllib.request.Request" in run
+    assert 'os.environ["TELEGRAM_BOT_TOKEN"]' in run

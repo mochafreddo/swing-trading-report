@@ -122,6 +122,7 @@ def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -
     assert "--pipeline" in generic_text
     assert "--scope" in generic_text
     assert "ai-brief|scan|sell" in generic_text
+    assert "[pipeline-specific args]" not in generic_text
 
 
 def test_generic_scheduled_wrapper_argument_validation() -> None:

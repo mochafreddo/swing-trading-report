@@ -5,7 +5,7 @@ pipeline=""
 scope=""
 
 usage() {
-  printf '%s\n' "usage: $0 --pipeline ai-brief|scan|sell --scope KR|US|MIXED [pipeline-specific args]" >&2
+  printf '%s\n' "usage: $0 --pipeline ai-brief|scan|sell --scope KR|US|MIXED" >&2
 }
 
 while [[ $# -gt 0 ]]; do
