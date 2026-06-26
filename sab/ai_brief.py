@@ -18,11 +18,13 @@ from .ai_brief_providers import (
     MODEL_PROVIDER_FAKE,
     MODEL_PROVIDER_OPENAI,
     PRESELECTION_LIMIT,
+    WATCH_RETRIGGER_CONDITIONS_KO,
     AiBriefProviderContractError,
     AiBriefProviderError,
     AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
+    watch_reason_for_display,
 )
 from .ai_brief_source_chain import (
     load_ai_brief_source_chain,
@@ -624,9 +626,6 @@ def _attach_candidate_sources(
 
 def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
     ticker = str(candidate["ticker"])
-    reason = str(
-        candidate.get("ai_role_reason") or "entry trigger is pending re-confirmation"
-    ).strip()
     sources = candidate.get("sources")
     source_rows = (
         [dict(source) for source in sources if isinstance(source, Mapping)]
@@ -636,11 +635,8 @@ def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, obje
     row: dict[str, object] = {
         "ticker": ticker,
         "action": "WATCH",
-        "reason": reason,
-        "retrigger_conditions": [
-            "price must satisfy the original entry trigger again",
-            "manual review must confirm source and market context",
-        ],
+        "reason": watch_reason_for_display(candidate.get("ai_role_reason")),
+        "retrigger_conditions": list(WATCH_RETRIGGER_CONDITIONS_KO),
         "sources": source_rows,
     }
     name = str(candidate.get("name") or "").strip()

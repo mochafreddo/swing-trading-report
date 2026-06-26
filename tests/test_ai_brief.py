@@ -1349,11 +1349,11 @@ def test_run_ai_brief_preserves_investment_readiness_for_provider_input(
     }
     assert recommendation["liquidity_warnings"] == ["small_cap_liquidity_risk"]
     assert (
-        "investment readiness requires context: CONTEXT_REQUIRED"
+        "투자 준비 상태에 추가 확인 필요: CONTEXT_REQUIRED"
         in recommendation["rationale"]
     )
     assert (
-        "confirm NAV/risk budget, exit liquidity, portfolio exposure, and source context before acting"
+        "NAV/위험 예산, 청산 유동성, 포트폴리오 노출, 소스 맥락을 행동 전 확인"
         in recommendation["checklist"]
     )
 
@@ -7246,7 +7246,11 @@ def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
     assert payload["watch_tickers"] == ["MSFT.NAS"]
     assert payload["watch_candidates"][0]["ticker"] == "MSFT.NAS"
     assert payload["watch_candidates"][0]["action"] == "WATCH"
-    assert payload["watch_candidates"][0]["retrigger_conditions"]
+    assert payload["watch_candidates"][0]["reason"] == "진입 트리거 재확인이 필요함"
+    assert payload["watch_candidates"][0]["retrigger_conditions"] == [
+        "가격이 원래 진입 트리거를 다시 충족해야 함",
+        "소스와 시장 맥락을 수동 확인해야 함",
+    ]
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
 
 
@@ -7577,10 +7581,7 @@ def test_run_ai_brief_openai_drops_unknown_vetoed_candidate(
             "ticker": "MSFT.NAS",
             "code": "model_ineligible_veto_dropped",
             "severity": "WARN",
-            "message": (
-                "model returned vetoed candidate outside eligible_tickers "
-                "and the row was dropped"
-            ),
+            "message": "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함",
         }
     ]
     assert payload["summary"]["source_issue_count"] == 1

@@ -515,12 +515,45 @@ def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
     assert "사유 <code>source_backed_final</code>" in text
     assert "뉴스 근거 확인된 추천 후보 2건" in text
     assert "<b>추천 후보 2건</b> (표시 <code>2</code>건)" in text
-    assert "source <code>0</code> · system <code>0</code>" in text
+    assert (
+        "추천 <code>2</code>건 · 표시 <code>2</code>건 · "
+        "모델 입력 <code>2</code>건 · 소스 이슈 <code>0</code> · "
+        "시스템 이슈 <code>0</code>"
+    ) in text
     assert "1. <b>AAPL.NAS Apple</b> · <code>HIGH</code>" in text
     assert "source-backed context supports manual review" in text
     assert "근거 <code>1</code>개 · Apple supply chain update" in text
     assert "2. <b>MSFT.NAS</b> · <code>MEDIUM</code>" in text
     assert "entry setup remains valid" in text
+
+
+def test_build_ai_brief_telegram_report_text_preserves_source_title_language() -> None:
+    report = _minimal_ai_brief_report(
+        summary={"preselected_count": 1, "recommendation_count": 1},
+        recommendations=[
+            {
+                "ticker": "AAPL.NAS",
+                "confidence": "HIGH",
+                "rationale": ["한국어 추천 사유"],
+                "sources": [
+                    {
+                        "title": "Apple supply chain update",
+                        "url": "https://example.test/aapl",
+                        "published_at": "2026-05-05T07:00:00+09:00",
+                    }
+                ],
+            }
+        ],
+    )
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/789",
+    )
+
+    assert "한국어 추천 사유" in text
+    assert "근거 <code>1</code>개 · Apple supply chain update" in text
+    assert "애플 공급망 업데이트" not in text
 
 
 def test_build_ai_brief_telegram_report_text_uses_html_rich_text() -> None:
@@ -565,7 +598,11 @@ def test_build_ai_brief_telegram_report_text_uses_html_rich_text() -> None:
     assert "1. <b>AAPL.NAS Apple</b> · <code>HIGH</code>" in text
     assert "근거 <code>1</code>개 · Apple supply chain update" in text
     assert "<b>진단</b>" in text
-    assert "source <code>0</code> · system <code>0</code>" in text
+    assert (
+        "추천 <code>1</code>건 · 표시 <code>1</code>건 · "
+        "모델 입력 <code>2</code>건 · 소스 이슈 <code>0</code> · "
+        "시스템 이슈 <code>0</code>"
+    ) in text
     assert "보관 <code>2026/05/2026-05-05.ai-brief.json</code>" in text
     assert (
         '<a href="https://github.com/example/repo/actions/runs/789">실행 보기</a>'
@@ -780,9 +817,9 @@ def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> No
     assert "뉴스 근거 약함, 기술 신호만 있음" in text
     assert "대상: AAPL.NAS, MSFT.NAS" in text
     assert (
-        "source issue: MSFT.NAS openai_no_external_sources - "
-        "No supplied source context."
+        "소스 이슈: MSFT.NAS openai_no_external_sources - 제공된 소스 맥락이 없음"
     ) in text
+    assert "No supplied source context." not in text
 
 
 def test_build_ai_brief_telegram_report_text_counts_issue_arrays_when_summary_is_stale() -> (
@@ -832,7 +869,11 @@ def test_build_ai_brief_telegram_report_text_counts_issue_arrays_when_summary_is
 
     assert "상태 <code>NEEDS_REVIEW_WEAK_NEWS</code>" in text
     assert "사유 <code>weak_news_coverage</code>" in text
-    assert "source <code>1</code> · system <code>0</code>" in text
+    assert (
+        "추천 <code>1</code>건 · 표시 <code>1</code>건 · "
+        "모델 입력 <code>1</code>건 · 소스 이슈 <code>1</code> · "
+        "시스템 이슈 <code>0</code>"
+    ) in text
 
 
 def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> None:
@@ -870,7 +911,8 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
     assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert "추천 후보 없음" in text
-    assert "system issue: model_provider_timeout - OpenAI request timed out." in text
+    assert "시스템 이슈: model_provider_timeout - OpenAI 요청 시간이 초과됨" in text
+    assert "OpenAI request timed out." not in text
 
 
 def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candidates() -> (
@@ -924,9 +966,10 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     assert "ENTER 후보" not in text
     assert "대상: AXTI.NAS, WELL.NYS, BABA.NYS" in text
     assert (
-        "system issue: model_provider_failed - OpenAI request failed with HTTP 429: "
+        "시스템 이슈: model_provider_failed - OpenAI 요청 실패(HTTP 429): "
         "quota exceeded"
     ) in text
+    assert "OpenAI request failed with HTTP 429" not in text
 
 
 def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -> None:
@@ -999,19 +1042,118 @@ def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -
     )
     assert "watch 후보 <code>2</code>건: AAPL.NAS, MSFT.NAS" in text
     assert (
-        "<code>source_chain=finnhub,benzinga-news final recommendable=3/7 "
-        "watch=1/2</code>" in text
-    )
-    assert (
-        "<code>source_providers=finnhub success 3/7; "
-        "benzinga-news success 0/4</code>" in text
-    )
+        "소스 체인 finnhub, benzinga-news · 추천 커버리지 3/7 · watch 커버리지 1/2"
+    ) in text
+    assert ("소스 제공자: finnhub 성공 3/7; benzinga-news 성공 0/4") in text
+    assert "source_chain=" not in text
+    assert "source_providers=" not in text
     assert (
         "추천 생성 실패/보류: 모델 후보 7건(모델 입력 5건)이 있었지만 "
         "추천 결과가 비었습니다." in text
     )
     assert "recommendable 후보" not in text
     assert "ENTER 후보" not in text
+
+
+def test_build_ai_brief_telegram_report_text_escapes_provider_status_diagnostics() -> (
+    None
+):
+    long_provider = "long-provider-" + ("x" * 420)
+    report = _minimal_ai_brief_report(
+        source_provider_summary={
+            "chain": ['feed<&"'],
+            "providers": [
+                {"provider": 'feed<&"', "status": "failed", "covered": 1, "total": 2},
+                {
+                    "provider": "partial-feed",
+                    "status": "partial",
+                    "covered": 1,
+                    "total": 3,
+                },
+                {"provider": "error-feed", "status": "error", "covered": 0, "total": 3},
+                {
+                    "provider": "skip-feed",
+                    "status": "skipped",
+                    "covered": 0,
+                    "total": 3,
+                },
+                {
+                    "provider": long_provider,
+                    "status": "failed",
+                    "covered": 0,
+                    "total": 3,
+                },
+            ],
+            "final": {
+                "recommendable_covered": 1,
+                "recommendable_total": 2,
+                "watch_covered": 0,
+                "watch_total": 1,
+            },
+        },
+    )
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "feed&lt;&amp;&quot;" in text
+    assert 'feed<&"' not in text
+    assert "feed&lt;&amp;&quot; 실패 1/2" in text
+    assert "partial-feed 부분 1/3" in text
+    assert "error-feed 오류 0/3" in text
+    assert "skip-feed 건너뜀 0/3" in text
+    assert "..." in text
+    assert long_provider not in text
+
+    parts = notification_text.split_telegram_message_text(text)
+    _assert_balanced_html_tags(parts)
+
+
+def test_build_ai_brief_telegram_report_text_localizes_source_provider_issues() -> None:
+    report = _minimal_ai_brief_report(
+        summary={
+            "preselected_count": 1,
+            "recommendation_count": 0,
+            "source_issue_count": 2,
+            "system_issue_count": 1,
+        },
+        source_issues=[
+            {
+                "ticker": "005930",
+                "code": "finnhub_source_unsupported_market",
+                "severity": "WARN",
+                "message": "Finnhub source provider supports US tickers only",
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "code": "finnhub_no_results",
+                "severity": "WARN",
+                "message": "finnhub returned no usable sources for AAPL.NAS",
+            },
+        ],
+        system_issues=[
+            {
+                "ticker": None,
+                "code": "http_429",
+                "severity": "WARN",
+                "message": "finnhub source provider failed: source API request failed with HTTP 429",
+            }
+        ],
+    )
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "Finnhub 소스 제공자는 US 티커만 지원함" in text
+    assert "finnhub에서 AAPL.NAS에 사용할 수 있는 소스를 찾지 못함" in text
+    assert "finnhub 소스 제공자 실패: source API request failed with HTTP 429" in text
+    assert "source provider supports US tickers only" not in text
+    assert "returned no usable sources for" not in text
+    assert "source provider failed" not in text
 
 
 def test_build_ai_brief_telegram_report_text_explains_watch_only_state() -> None:

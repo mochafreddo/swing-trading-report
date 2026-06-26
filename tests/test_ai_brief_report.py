@@ -68,7 +68,7 @@ def _artifact(*, generated_at: str | None = None) -> dict[str, object]:
                 "ticker": "AAPL.NAS",
                 "code": "fake_provider_no_external_sources",
                 "severity": "WARN",
-                "message": "fake provider does not collect external sources",
+                "message": "fake provider는 외부 소스를 수집하지 않음",
             }
         ],
         "system_issues": [],
@@ -719,7 +719,7 @@ def test_write_ai_brief_report_rejects_non_contiguous_recommendation_ranks(
             "ticker": "MSFT.NAS",
             "code": "fake_provider_no_external_sources",
             "severity": "WARN",
-            "message": "fake provider does not collect external sources",
+            "message": "fake provider는 외부 소스를 수집하지 않음",
         },
     ]
 

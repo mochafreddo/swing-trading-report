@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import html
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -23,6 +23,29 @@ TELEGRAM_MESSAGE_MAX_CHARS = 4096
 _HTML_LINK_MAX_CHARS = 1024
 _HTML_LINK_TOO_LONG_TEXT = "URL too long"
 _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
+_ISSUE_MESSAGE_TRANSLATIONS = {
+    "No supplied source context.": "제공된 소스 맥락이 없음",
+    "OpenAI request timed out.": "OpenAI 요청 시간이 초과됨",
+    "OpenAI request failed.": "OpenAI 요청 실패",
+    "Finnhub source provider supports US tickers only": (
+        "Finnhub 소스 제공자는 US 티커만 지원함"
+    ),
+    "Polygon News source provider supports US tickers only": (
+        "Polygon News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Alpha Vantage News source provider supports US tickers only": (
+        "Alpha Vantage News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Marketaux News source provider supports US tickers only": (
+        "Marketaux News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Benzinga News source provider supports US tickers only": (
+        "Benzinga News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Naver News source provider supports KR tickers only": (
+        "Naver News 소스 제공자는 KR 티커만 지원함"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -537,7 +560,7 @@ def build_ai_brief_slack_summary_text(
         lines.append(f"blocked_but_valid_count={counts.blocked_but_valid_count}")
         lines.append(f"executable_tickers={executable_tickers}")
         lines.append(f"blocked_but_valid_tickers={blocked_but_valid_tickers}")
-    source_chain_summary = _format_source_chain_summary(report)
+    source_chain_summary = _format_slack_source_chain_summary(report)
     if source_chain_summary:
         source_chain, _, source_final = source_chain_summary.partition(" final ")
         lines.append(source_chain)
@@ -547,7 +570,7 @@ def build_ai_brief_slack_summary_text(
                 f"source_final_recommendable={recommendable_part.removeprefix('recommendable=')}"
             )
             lines.append(f"source_final_watch={watch_part}")
-    source_provider_statuses = _format_source_provider_statuses(report)
+    source_provider_statuses = _format_slack_source_provider_statuses(report)
     if source_provider_statuses:
         lines.append(source_provider_statuses)
     key = _safe_str(storage_key)
@@ -688,11 +711,47 @@ def _first_source_title(recommendation: dict[str, Any]) -> str:
 def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
     ticker = _safe_single_line(issue.get("ticker"), max_chars=48)
     code = _safe_single_line(issue.get("code"), default="-", max_chars=80)
-    message = _safe_single_line(issue.get("message"), max_chars=180)
+    message = _safe_single_line(
+        _issue_message_for_display(issue.get("message")),
+        max_chars=180,
+    )
     base = f"{prefix}: {ticker} {code}" if ticker else f"{prefix}: {code}"
     if message:
         return f"{base} - {message}"
     return base
+
+
+def _issue_message_for_display(message: Any) -> str:
+    text = _safe_str(message)
+    if not text:
+        return ""
+    translated = _ISSUE_MESSAGE_TRANSLATIONS.get(text)
+    if translated:
+        return translated
+
+    http_failure_prefix = "OpenAI request failed with HTTP "
+    if text.startswith(http_failure_prefix):
+        detail = text.removeprefix(http_failure_prefix)
+        status, separator, remainder = detail.partition(": ")
+        if separator:
+            return f"OpenAI 요청 실패(HTTP {status}): {remainder}"
+        return f"OpenAI 요청 실패(HTTP {detail})"
+
+    request_failure_prefix = "OpenAI request failed: "
+    if text.startswith(request_failure_prefix):
+        return f"OpenAI 요청 실패: {text.removeprefix(request_failure_prefix)}"
+
+    no_results_marker = " returned no usable sources for "
+    if no_results_marker in text:
+        provider, _, ticker = text.partition(no_results_marker)
+        return f"{provider}에서 {ticker}에 사용할 수 있는 소스를 찾지 못함"
+
+    provider_failure_marker = " source provider failed: "
+    if provider_failure_marker in text:
+        provider, _, detail = text.partition(provider_failure_marker)
+        return f"{provider} 소스 제공자 실패: {detail}"
+
+    return text
 
 
 def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:
@@ -707,14 +766,82 @@ def _format_coverage(covered: Any, total: Any) -> str:
     return f"{_safe_int(covered, default=0)}/{_safe_int(total, default=0)}"
 
 
-def _format_source_chain_summary(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
+def _format_provider_status_label(status: Any) -> str:
+    normalized = _safe_str(status).lower()
+    labels = {
+        "success": "성공",
+        "partial": "부분",
+        "failed": "실패",
+        "error": "오류",
+        "skipped": "건너뜀",
+    }
+    return labels.get(normalized, _safe_str(status, default="-"))
+
+
+def _source_provider_summary(report: dict[str, Any]) -> dict[str, Any]:
+    return _as_dict(report.get("source_provider_summary"))
+
+
+def _source_provider_chain(report: dict[str, Any]) -> list[str]:
+    source_provider_summary = _source_provider_summary(report)
     chain = [_safe_str(item) for item in _as_list(source_provider_summary.get("chain"))]
-    chain = [provider for provider in chain if provider]
+    return [provider for provider in chain if provider]
+
+
+def _source_provider_status_parts(
+    report: dict[str, Any],
+    *,
+    status_label: Callable[[Any], str],
+) -> list[str]:
+    source_provider_summary = _source_provider_summary(report)
+    parts: list[str] = []
+    for raw_provider in _as_list(source_provider_summary.get("providers")):
+        provider = _as_dict(raw_provider)
+        name = _safe_str(provider.get("provider"))
+        if not name:
+            continue
+        status = status_label(provider.get("status"))
+        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
+        parts.append(f"{name} {status} {coverage}")
+    return parts
+
+
+def _format_source_chain_summary(report: dict[str, Any]) -> str:
+    chain = _source_provider_chain(report)
     if not chain:
         return ""
 
-    final = _as_dict(source_provider_summary.get("final"))
+    chain_text = ", ".join(chain)
+    final = _as_dict(_source_provider_summary(report).get("final"))
+    if not final:
+        return f"소스 체인 {chain_text}"
+    recommendable = _format_coverage(
+        final.get("recommendable_covered"),
+        final.get("recommendable_total"),
+    )
+    watch = _format_coverage(final.get("watch_covered"), final.get("watch_total"))
+    return (
+        f"소스 체인 {chain_text} · 추천 커버리지 {recommendable} · "
+        f"watch 커버리지 {watch}"
+    )
+
+
+def _format_source_provider_statuses(report: dict[str, Any]) -> str:
+    parts = _source_provider_status_parts(
+        report,
+        status_label=_format_provider_status_label,
+    )
+    if not parts:
+        return ""
+    return f"소스 제공자: {'; '.join(parts)}"
+
+
+def _format_slack_source_chain_summary(report: dict[str, Any]) -> str:
+    chain = _source_provider_chain(report)
+    if not chain:
+        return ""
+
+    final = _as_dict(_source_provider_summary(report).get("final"))
     if not final:
         return f"source_chain={','.join(chain)}"
     recommendable = _format_coverage(
@@ -725,17 +852,11 @@ def _format_source_chain_summary(report: dict[str, Any]) -> str:
     return f"source_chain={','.join(chain)} final recommendable={recommendable} watch={watch}"
 
 
-def _format_source_provider_statuses(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
-    parts: list[str] = []
-    for raw_provider in _as_list(source_provider_summary.get("providers")):
-        provider = _as_dict(raw_provider)
-        name = _safe_str(provider.get("provider"))
-        if not name:
-            continue
-        status = _safe_str(provider.get("status"), default="-")
-        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
-        parts.append(f"{name} {status} {coverage}")
+def _format_slack_source_provider_statuses(report: dict[str, Any]) -> str:
+    parts = _source_provider_status_parts(
+        report,
+        status_label=lambda status: _safe_str(status, default="-"),
+    )
     if not parts:
         return ""
     return f"source_providers={'; '.join(parts)}"
@@ -797,8 +918,8 @@ def build_ai_brief_telegram_report_text(
         (
             f"추천 {_html_code(total)}건 · 표시 {_html_code(shown)}건 · "
             f"모델 입력 {_html_code(counts.preselected_count)}건 · "
-            f"source {_html_code(counts.source_issue_count)} · "
-            f"system {_html_code(counts.system_issue_count)}"
+            f"소스 이슈 {_html_code(counts.source_issue_count)} · "
+            f"시스템 이슈 {_html_code(counts.system_issue_count)}"
         ),
     ]
 
@@ -925,25 +1046,25 @@ def build_ai_brief_telegram_report_text(
             "",
             _html_bold("진단"),
             (
-                f"source {_html_code(counts.source_issue_count)} · "
-                f"system {_html_code(counts.system_issue_count)}"
+                f"소스 이슈 {_html_code(counts.source_issue_count)} · "
+                f"시스템 이슈 {_html_code(counts.system_issue_count)}"
             ),
         ]
     )
     source_chain_summary = _format_source_chain_summary(report)
     if source_chain_summary:
-        lines.append(_html_code_single_line(source_chain_summary, max_chars=360))
+        lines.append(_html_single_line(source_chain_summary, max_chars=360))
     source_provider_statuses = _format_source_provider_statuses(report)
     if source_provider_statuses:
-        lines.append(_html_code_single_line(source_provider_statuses, max_chars=360))
+        lines.append(_html_single_line(source_provider_statuses, max_chars=360))
 
     for issue in counts.source_issues[:3]:
         lines.append(
-            _html_single_line(_format_issue("source issue", issue), max_chars=360)
+            _html_single_line(_format_issue("소스 이슈", issue), max_chars=360)
         )
     for issue in counts.system_issues[:3]:
         lines.append(
-            _html_single_line(_format_issue("system issue", issue), max_chars=360)
+            _html_single_line(_format_issue("시스템 이슈", issue), max_chars=360)
         )
 
     key = _safe_str(storage_key)

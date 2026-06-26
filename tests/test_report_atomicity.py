@@ -82,7 +82,7 @@ def _write_ai_brief_report(report_dir: str, idx: int) -> str:
                     "ticker": f"T{idx:03d}.NAS",
                     "code": "fake_provider_no_external_sources",
                     "severity": "WARN",
-                    "message": "fake provider does not collect external sources",
+                    "message": "fake provider는 외부 소스를 수집하지 않음",
                 }
             ],
             "system_issues": [],
