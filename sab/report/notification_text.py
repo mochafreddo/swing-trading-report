@@ -23,6 +23,29 @@ TELEGRAM_MESSAGE_MAX_CHARS = 4096
 _HTML_LINK_MAX_CHARS = 1024
 _HTML_LINK_TOO_LONG_TEXT = "URL too long"
 _TRADING_SESSION_TRUE_TEXT = {"1", "true", "yes", "open"}
+_ISSUE_MESSAGE_TRANSLATIONS = {
+    "No supplied source context.": "제공된 소스 맥락이 없음",
+    "OpenAI request timed out.": "OpenAI 요청 시간이 초과됨",
+    "OpenAI request failed.": "OpenAI 요청 실패",
+    "Finnhub source provider supports US tickers only": (
+        "Finnhub 소스 제공자는 US 티커만 지원함"
+    ),
+    "Polygon News source provider supports US tickers only": (
+        "Polygon News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Alpha Vantage News source provider supports US tickers only": (
+        "Alpha Vantage News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Marketaux News source provider supports US tickers only": (
+        "Marketaux News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Benzinga News source provider supports US tickers only": (
+        "Benzinga News 소스 제공자는 US 티커만 지원함"
+    ),
+    "Naver News source provider supports KR tickers only": (
+        "Naver News 소스 제공자는 KR 티커만 지원함"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -688,11 +711,47 @@ def _first_source_title(recommendation: dict[str, Any]) -> str:
 def _format_issue(prefix: str, issue: dict[str, Any]) -> str:
     ticker = _safe_single_line(issue.get("ticker"), max_chars=48)
     code = _safe_single_line(issue.get("code"), default="-", max_chars=80)
-    message = _safe_single_line(issue.get("message"), max_chars=180)
+    message = _safe_single_line(
+        _issue_message_for_display(issue.get("message")),
+        max_chars=180,
+    )
     base = f"{prefix}: {ticker} {code}" if ticker else f"{prefix}: {code}"
     if message:
         return f"{base} - {message}"
     return base
+
+
+def _issue_message_for_display(message: Any) -> str:
+    text = _safe_str(message)
+    if not text:
+        return ""
+    translated = _ISSUE_MESSAGE_TRANSLATIONS.get(text)
+    if translated:
+        return translated
+
+    http_failure_prefix = "OpenAI request failed with HTTP "
+    if text.startswith(http_failure_prefix):
+        detail = text.removeprefix(http_failure_prefix)
+        status, separator, remainder = detail.partition(": ")
+        if separator:
+            return f"OpenAI 요청 실패(HTTP {status}): {remainder}"
+        return f"OpenAI 요청 실패(HTTP {detail})"
+
+    request_failure_prefix = "OpenAI request failed: "
+    if text.startswith(request_failure_prefix):
+        return f"OpenAI 요청 실패: {text.removeprefix(request_failure_prefix)}"
+
+    no_results_marker = " returned no usable sources for "
+    if no_results_marker in text:
+        provider, _, ticker = text.partition(no_results_marker)
+        return f"{provider}에서 {ticker}에 사용할 수 있는 소스를 찾지 못함"
+
+    provider_failure_marker = " source provider failed: "
+    if provider_failure_marker in text:
+        provider, _, detail = text.partition(provider_failure_marker)
+        return f"{provider} 소스 제공자 실패: {detail}"
+
+    return text
 
 
 def _ticker_preview(value: Any, *, max_items: int = 5) -> tuple[str, int]:

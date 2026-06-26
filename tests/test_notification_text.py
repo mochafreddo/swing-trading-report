@@ -817,8 +817,9 @@ def test_build_ai_brief_telegram_report_text_explains_weak_news_coverage() -> No
     assert "뉴스 근거 약함, 기술 신호만 있음" in text
     assert "대상: AAPL.NAS, MSFT.NAS" in text
     assert (
-        "소스 이슈: MSFT.NAS openai_no_external_sources - No supplied source context."
+        "소스 이슈: MSFT.NAS openai_no_external_sources - 제공된 소스 맥락이 없음"
     ) in text
+    assert "No supplied source context." not in text
 
 
 def test_build_ai_brief_telegram_report_text_counts_issue_arrays_when_summary_is_stale() -> (
@@ -910,7 +911,8 @@ def test_build_ai_brief_telegram_report_text_handles_zero_recommendations() -> N
     assert "사유 <code>model_or_system_issue</code>" in text
     assert "AI 판단 보류: 모델/시스템 이슈 확인 필요" in text
     assert "추천 후보 없음" in text
-    assert "시스템 이슈: model_provider_timeout - OpenAI request timed out." in text
+    assert "시스템 이슈: model_provider_timeout - OpenAI 요청 시간이 초과됨" in text
+    assert "OpenAI request timed out." not in text
 
 
 def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candidates() -> (
@@ -964,9 +966,10 @@ def test_build_ai_brief_telegram_report_text_explains_model_failure_with_candida
     assert "ENTER 후보" not in text
     assert "대상: AXTI.NAS, WELL.NYS, BABA.NYS" in text
     assert (
-        "시스템 이슈: model_provider_failed - OpenAI request failed with HTTP 429: "
+        "시스템 이슈: model_provider_failed - OpenAI 요청 실패(HTTP 429): "
         "quota exceeded"
     ) in text
+    assert "OpenAI request failed with HTTP 429" not in text
 
 
 def test_build_ai_brief_telegram_report_text_includes_watch_and_source_chain() -> None:
@@ -1106,6 +1109,51 @@ def test_build_ai_brief_telegram_report_text_escapes_provider_status_diagnostics
 
     parts = notification_text.split_telegram_message_text(text)
     _assert_balanced_html_tags(parts)
+
+
+def test_build_ai_brief_telegram_report_text_localizes_source_provider_issues() -> None:
+    report = _minimal_ai_brief_report(
+        summary={
+            "preselected_count": 1,
+            "recommendation_count": 0,
+            "source_issue_count": 2,
+            "system_issue_count": 1,
+        },
+        source_issues=[
+            {
+                "ticker": "005930",
+                "code": "finnhub_source_unsupported_market",
+                "severity": "WARN",
+                "message": "Finnhub source provider supports US tickers only",
+            },
+            {
+                "ticker": "AAPL.NAS",
+                "code": "finnhub_no_results",
+                "severity": "WARN",
+                "message": "finnhub returned no usable sources for AAPL.NAS",
+            },
+        ],
+        system_issues=[
+            {
+                "ticker": None,
+                "code": "http_429",
+                "severity": "WARN",
+                "message": "finnhub source provider failed: source API request failed with HTTP 429",
+            }
+        ],
+    )
+
+    text = build_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/790",
+    )
+
+    assert "Finnhub 소스 제공자는 US 티커만 지원함" in text
+    assert "finnhub에서 AAPL.NAS에 사용할 수 있는 소스를 찾지 못함" in text
+    assert "finnhub 소스 제공자 실패: source API request failed with HTTP 429" in text
+    assert "source provider supports US tickers only" not in text
+    assert "returned no usable sources for" not in text
+    assert "source provider failed" not in text
 
 
 def test_build_ai_brief_telegram_report_text_explains_watch_only_state() -> None:

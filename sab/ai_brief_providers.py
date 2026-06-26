@@ -44,6 +44,12 @@ _INVESTMENT_READINESS_CHECKLIST_ITEM = (
 )
 _WATCH_TRIGGER_PENDING_REASON_EN = "entry trigger is pending re-confirmation"
 _WATCH_TRIGGER_PENDING_REASON_KO = "진입 트리거 재확인이 필요함"
+_AI_ROLE_REASON_DISPLAY_KO = {
+    "entry report action was ENTER": "entry report가 ENTER로 표시한 후보",
+    "portfolio policy blocked automatic entry": "포트폴리오 정책으로 자동 진입 차단",
+    "risk alignment requires manual review": "위험 정렬 문제로 수동 검토 필요",
+    _WATCH_TRIGGER_PENDING_REASON_EN: _WATCH_TRIGGER_PENDING_REASON_KO,
+}
 _FAKE_PROVIDER_NO_EXTERNAL_SOURCES_MESSAGE = "fake provider는 외부 소스를 수집하지 않음"
 _MODEL_SOURCE_REF_INVALID_MESSAGE = (
     "모델이 candidate.sources에 없는 source_refs를 반환함"
@@ -843,9 +849,14 @@ def _model_source_issue(
 
 def _watch_reason_for_display(reason: object) -> str:
     text = str(reason or "").strip()
-    if text in {"", _WATCH_TRIGGER_PENDING_REASON_EN}:
+    if not text:
         return _WATCH_TRIGGER_PENDING_REASON_KO
-    return text
+    return _AI_ROLE_REASON_DISPLAY_KO.get(text, text)
+
+
+def _ai_role_reason_for_display(reason: object) -> str:
+    text = str(reason or "").strip()
+    return _AI_ROLE_REASON_DISPLAY_KO.get(text, text)
 
 
 def _copy_investment_readiness_fields(
@@ -1325,7 +1336,7 @@ def _candidate_sources(candidate: Mapping[str, object]) -> list[dict[str, object
 
 
 def _build_fake_rationale(candidate: Mapping[str, object]) -> list[str]:
-    ai_role_reason = str(candidate.get("ai_role_reason") or "").strip()
+    ai_role_reason = _ai_role_reason_for_display(candidate.get("ai_role_reason"))
     rationale = [
         f"AI Brief 포함 사유: {ai_role_reason}"
         if ai_role_reason

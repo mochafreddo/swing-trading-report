@@ -150,10 +150,10 @@ def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -
         assert isinstance(rationale, list)
         rationale_items.extend(str(item) for item in rationale)
     rationale_text = "\n".join(rationale_items)
-    assert (
-        "AI Brief 포함 사유: portfolio policy blocked automatic entry" in rationale_text
-    )
-    assert "AI Brief 포함 사유: risk alignment requires manual review" in rationale_text
+    assert "AI Brief 포함 사유: 포트폴리오 정책으로 자동 진입 차단" in rationale_text
+    assert "AI Brief 포함 사유: 위험 정렬 문제로 수동 검토 필요" in rationale_text
+    assert "portfolio policy blocked automatic entry" not in rationale_text
+    assert "risk alignment requires manual review" not in rationale_text
     assert "진입 갭 스냅샷: 1.00%" in rationale_text
     assert "수동 검토용 로컬 소스 맥락 있음" in rationale_text
     assert "AI brief inclusion" not in rationale_text
