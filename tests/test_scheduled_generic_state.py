@@ -70,7 +70,9 @@ def test_scheduled_state_key_rejects_unsafe_tokens() -> None:
         )
 
 
-@pytest.mark.parametrize("kind", ["success\n", "success\r", "success\tlatest", "a*b"])
+@pytest.mark.parametrize(
+    "kind", ["success\n", "success\r", "success\tlatest", " success ", "a*b"]
+)
 def test_scheduled_state_key_rejects_unsafe_tokens_before_strip(kind: str) -> None:
     with pytest.raises(ValueError, match="kind contains unsafe characters"):
         build_scheduled_state_key(

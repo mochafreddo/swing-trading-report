@@ -13,16 +13,13 @@ _SAFE_TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 def _normalize_safe_token(value: str, *, field_name: str, lower: bool = False) -> str:
     raw_text = str(value or "")
-    if any(char in raw_text for char in _UNSAFE_TOKEN_CHARS) or any(
-        char.isspace() and char != " " for char in raw_text
+    if not raw_text:
+        raise ValueError(f"{field_name} must not be blank")
+    if any(char in raw_text for char in _UNSAFE_TOKEN_CHARS) or not (
+        _SAFE_TOKEN_RE.fullmatch(raw_text)
     ):
         raise ValueError(f"{field_name} contains unsafe characters")
-    text = raw_text.strip()
-    if not text:
-        raise ValueError(f"{field_name} must not be blank")
-    if not _SAFE_TOKEN_RE.fullmatch(text):
-        raise ValueError(f"{field_name} contains unsafe characters")
-    return text.lower() if lower else text
+    return raw_text.lower() if lower else raw_text
 
 
 def build_scheduled_state_key(
