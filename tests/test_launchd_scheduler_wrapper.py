@@ -103,6 +103,11 @@ def _run_plist_timing_check(repo_root: Path) -> subprocess.CompletedProcess[str]
     )
 
 
+def _assert_alert_omits_secrets(alert_text: str) -> None:
+    assert "test-token" not in alert_text
+    assert "test-chat" not in alert_text
+
+
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     wrapper = Path("scripts/launchd/sab-ai-brief-wrapper.sh")
     text = wrapper.read_text(encoding="utf-8")
@@ -188,6 +193,34 @@ def test_launchd_wrapper_writes_attempt_scoped_command_log(tmp_path: Path) -> No
         cmd_log_text = cmd_log.read_text(encoding="utf-8")
         assert "TELEGRAM_BOT_TOKEN" not in cmd_log_text
         assert "test-token" not in cmd_log_text
+        assert cmd_log.stat().st_mode & 0o077 == 0
+
+
+def test_launchd_wrapper_streams_stderr_to_launchd_and_attempt_log(
+    tmp_path: Path,
+) -> None:
+    result, _alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"success","storage_key":"reports/example.json"}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            "printf '%s\\n' 'scheduler stderr detail' >&2\n"
+            "exit 0\n"
+        ),
+    )
+
+    err_logs = sorted((tmp_path / "logs" / "scheduled").glob("**/*.err.log"))
+
+    assert result.returncode == 0
+    assert "scheduler stderr detail" in result.stderr
+    assert err_logs
+    assert "scheduler stderr detail" in err_logs[0].read_text(encoding="utf-8")
+    assert err_logs[0].stat().st_mode & 0o077 == 0
 
 
 def test_launchd_wrapper_sends_host_failure_without_structured_status(
@@ -207,6 +240,7 @@ def test_launchd_wrapper_sends_host_failure_without_structured_status(
     assert "container crashed before app status" in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_container_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
@@ -227,6 +261,7 @@ def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
     assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
@@ -250,6 +285,7 @@ def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
     assert "scheduler should not start" not in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
@@ -290,6 +326,7 @@ def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
     assert not stdout_file.exists()
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:

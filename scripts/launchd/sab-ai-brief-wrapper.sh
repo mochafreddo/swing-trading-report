@@ -51,21 +51,35 @@ load_host_alert_env() {
   done < "${env_file}"
 }
 
+curl_config_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "${value}"
+}
+
 send_host_failure_alert() {
   local reason="$1"
   if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
     return 0
   fi
-  local text
+  local text escaped_token escaped_chat_id
   text="[SAB][ai-brief][host-failure]
 market=${market}
 schedule_role=${schedule_role}
 runner_role=${runner_role}
 reason=${reason}"
-  curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-    -d "chat_id=${TELEGRAM_CHAT_ID}" \
+  escaped_token="$(curl_config_escape "${TELEGRAM_BOT_TOKEN}")"
+  escaped_chat_id="$(curl_config_escape "${TELEGRAM_CHAT_ID}")"
+  curl -fsS -K - \
     --data-urlencode "text=${text}" \
-    -d disable_web_page_preview=true >/dev/null || true
+    -d disable_web_page_preview=true >/dev/null <<EOF || true
+request = "POST"
+url = "https://api.telegram.org/bot${escaped_token}/sendMessage"
+data = "chat_id=${escaped_chat_id}"
+EOF
 }
 
 is_structured_scheduler_failure_status() {
@@ -189,6 +203,7 @@ if [[ -z "${repo_root}" || -z "${env_file}" || -z "${market}" || -z "${schedule_
 fi
 
 cd "${repo_root}"
+umask 077
 mkdir -p logs/launchd
 
 attempt_id="${scheduled_tick}-$(date -u +%Y%m%dT%H%M%SZ)-host$$"
@@ -276,6 +291,7 @@ tee_status=0
 container_stdout=""
 capture_dir=""
 container_pipe=""
+container_stderr_pipe=""
 trap cleanup_capture_artifacts EXIT
 if ! container_stdout="$(mktemp "${TMPDIR:-/tmp}/sab-ai-brief-wrapper.stdout.XXXXXX")"; then
   fail_stdout_capture
@@ -287,13 +303,24 @@ container_pipe="${capture_dir}/stdout.pipe"
 if ! mkfifo "${container_pipe}"; then
   fail_stdout_capture
 fi
+container_stderr_pipe="${capture_dir}/stderr.pipe"
+if ! mkfifo "${container_stderr_pipe}"; then
+  fail_stdout_capture
+fi
 tee "${container_stdout}" "${attempt_stdout}" < "${container_pipe}" &
 tee_pid=$!
+tee "${attempt_stderr}" < "${container_stderr_pipe}" >&2 &
+stderr_tee_pid=$!
 SAB_SCHEDULER_ENV_FILE="${SAB_SCHEDULER_ENV_FILE}" \
   SAB_SCHEDULER_STATUS_FILE="${attempt_status_file}" \
-  "${cmd[@]}" > "${container_pipe}" 2> "${attempt_stderr}" || container_status=$?
+  "${cmd[@]}" > "${container_pipe}" 2> "${container_stderr_pipe}" || container_status=$?
 if wait "${tee_pid}"; then
   tee_status=0
+else
+  tee_status=$?
+fi
+if wait "${stderr_tee_pid}"; then
+  :
 else
   tee_status=$?
 fi
