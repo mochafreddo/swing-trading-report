@@ -148,6 +148,26 @@ def role_window_end_grace(market: str, schedule_role: str) -> dt.timedelta:
     )
 
 
+def role_deadline_at(
+    market: str, schedule_role: str, now: dt.datetime
+) -> dt.datetime | None:
+    normalized_market = _normalize_market(market)
+    normalized_role = _normalize_role(schedule_role)
+    window = role_window(normalized_market, normalized_role)
+    if window is None:
+        return None
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.UTC)
+    zone = market_zone(normalized_market)
+    local_now = now.astimezone(zone)
+    deadline_local = dt.datetime.combine(
+        local_now.date(),
+        window.end,
+        tzinfo=zone,
+    ) + role_window_end_grace(normalized_market, normalized_role)
+    return deadline_local.astimezone(dt.UTC)
+
+
 def is_within_role_window(*, market: str, schedule_role: str, now: dt.datetime) -> bool:
     window = role_window(market, schedule_role)
     if window is None:
@@ -232,6 +252,7 @@ __all__ = [
     "launchd_start_calendar_intervals",
     "market_zone",
     "require_role_window",
+    "role_deadline_at",
     "role_window",
     "role_window_end_grace",
 ]

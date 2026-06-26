@@ -7324,6 +7324,125 @@ def test_run_ai_brief_falls_back_after_model_timeout(
     )
 
 
+def test_ai_brief_skips_fallback_when_deadline_budget_is_too_small(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[str] = []
+    report_dir = tmp_path / "reports"
+
+    def build_provider(**kwargs: object) -> object:
+        calls.append(str(kwargs["model_name"]))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                raise ai_brief.AiBriefProviderTimeoutError("OpenAI request timed out")
+
+        return TimeoutProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    caplog.set_level("INFO", logger="sab.ai_brief")
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_remaining_seconds=20.0,
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == ["gpt-5.5"]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, skipped_attempt = payload["model_attempts"]
+    assert timeout_attempt["status"] == "timeout"
+    assert {
+        key: skipped_attempt[key]
+        for key in ("status", "error_type", "retryable", "duration_ms")
+    } == {
+        "status": "deadline_skipped",
+        "error_type": "DeadlineBudgetSkipped",
+        "retryable": False,
+        "duration_ms": 0,
+    }
+    failed_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_attempt_failed"
+    )
+    skipped_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_fallback_deadline_skipped"
+    )
+    assert failed_record.levelname == "ERROR"
+    assert skipped_record.levelname == "WARNING"
+
+
+def test_ai_brief_deadline_budget_is_recomputed_after_primary_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[str] = []
+    report_dir = tmp_path / "reports"
+    clock = {"now": dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)}
+
+    def build_provider(**kwargs: object) -> object:
+        calls.append(str(kwargs["model_name"]))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                clock["now"] += dt.timedelta(seconds=20)
+                raise ai_brief.AiBriefProviderTimeoutError("OpenAI request timed out")
+
+        return TimeoutProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(
+        ai_brief,
+        "_current_utc_time",
+        lambda: clock["now"],
+        raising=False,
+    )
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_at=clock["now"] + dt.timedelta(seconds=40),
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == ["gpt-5.5"]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert [attempt["status"] for attempt in payload["model_attempts"]] == [
+        "timeout",
+        "deadline_skipped",
+    ]
+
+
 def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

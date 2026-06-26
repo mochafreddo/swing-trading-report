@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import plistlib
 import subprocess
 import sys
@@ -12,6 +13,8 @@ from sab.scheduler.schedule_policy import (
     github_schedule_crons,
     launchd_schedule_map,
     launchd_start_calendar_intervals,
+    market_zone,
+    role_deadline_at,
     role_window,
     role_window_end_grace,
 )
@@ -147,3 +150,34 @@ def test_us_cutoff_alert_starts_at_fallback_grace_boundary() -> None:
     assert fallback.end.hour == 9
     assert fallback.end.minute + fallback_grace_minutes == cutoff.start.minute
     assert cutoff.start.hour == 9
+
+
+def test_role_deadline_at_returns_window_end_plus_grace_in_utc() -> None:
+    now = dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)
+    zone = market_zone("US")
+    window = role_window("US", "local-primary")
+
+    assert window is not None
+    assert role_deadline_at(market="US", schedule_role="local-primary", now=now) == (
+        dt.datetime.combine(
+            now.astimezone(zone).date(),
+            window.end,
+            tzinfo=zone,
+        ).astimezone(dt.UTC)
+    )
+
+
+def test_role_deadline_at_returns_none_for_unknown_role() -> None:
+    now = dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)
+
+    assert role_deadline_at(market="US", schedule_role="unknown", now=now) is None
+
+
+def test_role_deadline_at_includes_github_fallback_grace() -> None:
+    now = dt.datetime(2026, 6, 26, 12, 56, tzinfo=dt.UTC)
+
+    assert role_deadline_at(
+        market="US",
+        schedule_role="github-fallback",
+        now=now,
+    ) == dt.datetime(2026, 6, 26, 13, 29, tzinfo=dt.UTC)

@@ -174,6 +174,8 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> None:
@@ -189,6 +191,10 @@ class _FakePipeline:
                     "source_provider_chain": source_provider_chain,
                     "model_provider": model_provider,
                     "dry_run": dry_run,
+                    "model_deadline_remaining_seconds": (
+                        model_deadline_remaining_seconds
+                    ),
+                    "model_deadline_at": model_deadline_at,
                 },
             )
         )
@@ -202,6 +208,8 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -214,6 +222,8 @@ class _FakePipeline:
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         if self.fail:
             raise RuntimeError(self.failure_message)
@@ -235,6 +245,8 @@ class _TypedEntryFailurePipeline(_FakePipeline):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -247,6 +259,8 @@ class _TypedEntryFailurePipeline(_FakePipeline):
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         raise scheduler_runner._ScheduledEntryStepError(self.entry_report_path)
 
@@ -265,6 +279,8 @@ class _BlockingPipeline(_FakePipeline):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -277,6 +293,8 @@ class _BlockingPipeline(_FakePipeline):
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         self.started_event.set()
         if not self.finish_event.wait(timeout=1):
@@ -522,6 +540,28 @@ def test_github_fallback_runs_inside_bounded_queue_grace() -> None:
     assert any(
         ":attempt:US:2026-05-28:github-fallback:" in key for key, _ in state.upserts
     )
+
+
+def test_runner_passes_role_deadline_remaining_seconds_to_pipeline() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-deadline-budget",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["model_deadline_at"] == dt.datetime(
+        2026, 5, 28, 12, 30, tzinfo=dt.UTC
+    )
+    assert state.preflight_calls == 1
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
 
 
 def test_github_fallback_queue_grace_remains_bounded() -> None:
@@ -2292,6 +2332,7 @@ def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
         owner_token="attempt-helper-lock-owner",
         artifact_key=artifact_key,
         now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+        model_deadline_at=None,
     )
 
     assert result.status == "completed"
@@ -2480,6 +2521,8 @@ def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> N
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -2934,6 +2977,8 @@ def test_wrapped_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipe
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3333,6 +3378,8 @@ def test_runner_pipeline_failure_log_keeps_original_exception_type_for_sanitized
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3397,6 +3444,8 @@ def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3465,6 +3514,8 @@ def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3528,6 +3579,8 @@ def test_runner_pipeline_failure_log_classifies_exception_group_entry_failure(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3722,6 +3775,8 @@ def test_runner_pipeline_failure_log_redacts_noted_windows_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3779,6 +3834,8 @@ def test_runner_pipeline_failure_log_redacts_split_scheduled_entry_note_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3832,6 +3889,8 @@ def test_runner_pipeline_failure_log_redacts_wrapped_scheduled_entry_exception_o
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3889,6 +3948,8 @@ def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3946,6 +4007,8 @@ def test_runner_pipeline_failure_log_omits_noted_unsafe_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -4681,6 +4744,8 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
         source_provider_chain=("finnhub", "benzinga-news"),
         model_provider="fake",
         dry_run=False,
+        model_deadline_remaining_seconds=1200.0,
+        model_deadline_at=dt.datetime(2026, 5, 28, 12, 30, tzinfo=dt.UTC),
     )
 
     expected_holdings_path = "data/scheduler/holdings.US.2026-05-28.yaml"
@@ -4691,6 +4756,10 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
     assert ai_brief_inputs[0]["source_provider"] is None
     assert ai_brief_inputs[0]["source_provider_chain"] == "finnhub,benzinga-news"
+    assert ai_brief_inputs[0]["model_deadline_remaining_seconds"] == 1200.0
+    assert ai_brief_inputs[0]["model_deadline_at"] == dt.datetime(
+        2026, 5, 28, 12, 30, tzinfo=dt.UTC
+    )
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 

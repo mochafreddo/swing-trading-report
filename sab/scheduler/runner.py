@@ -67,6 +67,7 @@ from .schedule_policy import (
 from .schedule_policy import (
     market_zone,
     require_role_window,
+    role_deadline_at,
     role_window,
     role_window_end_grace,
 )
@@ -188,6 +189,7 @@ class _ScheduledRunContext:
     guard: GuardSnapshot
     session_date: str
     attempt_id: str
+    model_deadline_at: dt.datetime | None
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,8 @@ class SchedulerPipeline(Protocol):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult: ...
@@ -932,6 +936,9 @@ class ScheduledAiBriefRunner:
             started_at=now,
             suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
         )
+        deadline_at = role_deadline_at(
+            market=market, schedule_role=schedule_role, now=now
+        )
         return _ScheduledRunContext(
             now=now,
             market=market,
@@ -940,6 +947,7 @@ class ScheduledAiBriefRunner:
             guard=guard,
             session_date=session_date,
             attempt_id=attempt_id,
+            model_deadline_at=deadline_at,
         )
 
     def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
@@ -954,6 +962,7 @@ class ScheduledAiBriefRunner:
         guard = run_context.guard
         session_date = run_context.session_date
         attempt_id = run_context.attempt_id
+        model_deadline_at = run_context.model_deadline_at
 
         self._state_store.preflight()
         if request.dry_run:
@@ -1020,6 +1029,7 @@ class ScheduledAiBriefRunner:
             guard=guard,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _claim_main_lock(
@@ -1157,6 +1167,7 @@ class ScheduledAiBriefRunner:
         guard: GuardSnapshot,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         _LOGGER.info(
             "scheduled AI brief dispatch resolved "
@@ -1236,6 +1247,7 @@ class ScheduledAiBriefRunner:
             model_provider=model_provider,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _log_source_context_resolved(
@@ -1425,6 +1437,7 @@ class ScheduledAiBriefRunner:
         model_provider: str,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         self._notifier.require_telegram()
         main_lock = self._claim_main_lock(
@@ -1451,6 +1464,7 @@ class ScheduledAiBriefRunner:
             owner_token=main_lock.owner_token,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _run_locked_pipeline(
@@ -1470,6 +1484,7 @@ class ScheduledAiBriefRunner:
         owner_token: str,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         lock_renewer = _MainLockRenewer(
             state_store=self._state_store,
@@ -1491,6 +1506,7 @@ class ScheduledAiBriefRunner:
                 source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=False,
+                model_deadline_at=model_deadline_at,
             )
         except Exception as err:
             pipeline_error = err
@@ -3492,6 +3508,8 @@ class DefaultScheduledPipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -3535,6 +3553,8 @@ class DefaultScheduledPipeline:
                 market=market,
                 model_provider=model_provider,
                 model_name="fake-ai-brief-v1",
+                model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+                model_deadline_at=model_deadline_at,
                 source_provider=source_provider,
                 source_provider_chain=source_provider_chain_value,
                 source_api_url=source_api_url,

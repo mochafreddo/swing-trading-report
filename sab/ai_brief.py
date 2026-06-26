@@ -106,6 +106,10 @@ _FIXED_API_SOURCE_PROVIDERS = frozenset(
 )
 
 
+def _current_utc_time() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
 def _source_provider_retryable(source_provider: str) -> bool:
     return source_provider in _TIMEOUT_SOURCE_PROVIDERS
 
@@ -169,6 +173,41 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
+
+
+def _normalize_model_deadline_remaining_seconds(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if not math.isfinite(value):
+        return None
+    return max(float(value), 0.0)
+
+
+def _normalize_model_deadline_at(value: dt.datetime | None) -> dt.datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.UTC)
+    return value.astimezone(dt.UTC)
+
+
+def _resolve_model_deadline_at(
+    *,
+    model_deadline_at: dt.datetime | None,
+    model_deadline_remaining_seconds: float | None,
+) -> dt.datetime | None:
+    normalized_deadline_at = _normalize_model_deadline_at(model_deadline_at)
+    if normalized_deadline_at is not None:
+        return normalized_deadline_at
+    if model_deadline_remaining_seconds is None:
+        return None
+    return _current_utc_time() + dt.timedelta(seconds=model_deadline_remaining_seconds)
+
+
+def _normalize_model_publish_margin_seconds(value: float) -> float:
+    if not math.isfinite(value):
+        return 15.0
+    return max(float(value), 0.0)
 
 
 @dataclass(frozen=True)
@@ -701,6 +740,8 @@ def _run_model_attempts(
     run_id: str,
     operation: str,
     market: str,
+    model_deadline_at: dt.datetime | None,
+    model_publish_margin_seconds: float,
 ) -> tuple[
     AiBriefProviderResult | None,
     str,
@@ -747,6 +788,28 @@ def _run_model_attempts(
                 and isinstance(exc, AiBriefProviderTimeoutError)
                 and index + 1 < len(attempts)
             )
+            deadline_skipped_attempt: _ModelAttemptRecord | None = None
+            current_remaining_seconds: float | None = None
+            remaining_after_margin_seconds: float | None = None
+            if fallback_next and model_deadline_at is not None:
+                next_attempt = attempts[index + 1]
+                current_remaining_seconds = (
+                    model_deadline_at - _current_utc_time()
+                ).total_seconds()
+                remaining_after_margin_seconds = (
+                    current_remaining_seconds - model_publish_margin_seconds
+                )
+                if next_attempt.timeout_seconds > remaining_after_margin_seconds:
+                    fallback_next = False
+                    deadline_skipped_attempt = _ModelAttemptRecord(
+                        role=next_attempt.role,
+                        model_name=next_attempt.model_name,
+                        timeout_seconds=next_attempt.timeout_seconds,
+                        status="deadline_skipped",
+                        duration_ms=0,
+                        error_type="DeadlineBudgetSkipped",
+                        retryable=False,
+                    )
             status = (
                 "timeout" if isinstance(exc, AiBriefProviderTimeoutError) else "failed"
             )
@@ -761,6 +824,8 @@ def _run_model_attempts(
                     retryable=retryable,
                 )
             )
+            if deadline_skipped_attempt is not None:
+                records.append(deadline_skipped_attempt)
             log_method = logger.warning if fallback_next else logger.error
             log_method(
                 "AI brief model attempt failed: %s",
@@ -785,6 +850,34 @@ def _run_model_attempts(
                     "fallback_next": fallback_next,
                 },
             )
+            if deadline_skipped_attempt is not None:
+                deadline_at_for_log = (
+                    None if model_deadline_at is None else model_deadline_at.isoformat()
+                )
+                logger.warning(
+                    "AI brief model fallback skipped because deadline budget is too small",
+                    extra={
+                        "event": "ai_brief_model_fallback_deadline_skipped",
+                        "run_id": run_id,
+                        "operation": operation,
+                        "status": "degraded",
+                        "model_provider": model_provider,
+                        "dependency": model_provider,
+                        "attempt_index": index,
+                        "model_name": attempt.model_name,
+                        "fallback_model_name": deadline_skipped_attempt.model_name,
+                        "market": market,
+                        "model_deadline_at": deadline_at_for_log,
+                        "remaining_deadline_seconds": current_remaining_seconds,
+                        "publish_margin_seconds": model_publish_margin_seconds,
+                        "remaining_after_margin_seconds": (
+                            remaining_after_margin_seconds
+                        ),
+                        "fallback_timeout_seconds": (
+                            deadline_skipped_attempt.timeout_seconds
+                        ),
+                    },
+                )
             last_error = exc
             if fallback_next:
                 next_attempt = attempts[index + 1]
@@ -916,6 +1009,9 @@ def run_ai_brief(
     model_provider: str | None,
     model_name: str | None,
     model_timeout_seconds: float | None = None,
+    model_deadline_remaining_seconds: float | None = None,
+    model_deadline_at: dt.datetime | None = None,
+    model_publish_margin_seconds: float = 15.0,
     source_provider: str | None = None,
     source_report_path: str | None = None,
     source_provider_chain: str | None = None,
@@ -941,6 +1037,20 @@ def run_ai_brief(
         )
         normalized_model_timeout_seconds = _normalize_model_timeout_seconds(
             model_timeout_seconds
+        )
+        normalized_model_deadline_remaining_seconds = (
+            _normalize_model_deadline_remaining_seconds(
+                model_deadline_remaining_seconds
+            )
+        )
+        normalized_model_deadline_at = _resolve_model_deadline_at(
+            model_deadline_at=model_deadline_at,
+            model_deadline_remaining_seconds=(
+                normalized_model_deadline_remaining_seconds
+            ),
+        )
+        normalized_model_publish_margin_seconds = (
+            _normalize_model_publish_margin_seconds(model_publish_margin_seconds)
         )
         normalized_source_provider = _normalize_source_provider(
             value=source_provider,
@@ -981,6 +1091,12 @@ def run_ai_brief(
             "market": normalized_market,
             "model_provider": normalized_model_provider,
             "model_name": normalized_model_name,
+            "model_deadline_at": (
+                None
+                if normalized_model_deadline_at is None
+                else normalized_model_deadline_at.isoformat()
+            ),
+            "model_publish_margin_seconds": normalized_model_publish_margin_seconds,
             "source_provider": normalized_source_provider,
             "source_provider_chain": source_provider_chain,
             "article_reader": article_reader_settings.reader,
@@ -1272,6 +1388,8 @@ def run_ai_brief(
                 run_id=run_id,
                 operation=operation,
                 market=target_market,
+                model_deadline_at=normalized_model_deadline_at,
+                model_publish_margin_seconds=normalized_model_publish_margin_seconds,
             )
         )
         if provider_result is not None:
