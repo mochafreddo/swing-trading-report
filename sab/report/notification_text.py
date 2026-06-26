@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import html
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -778,15 +778,41 @@ def _format_provider_status_label(status: Any) -> str:
     return labels.get(normalized, _safe_str(status, default="-"))
 
 
-def _format_source_chain_summary(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
+def _source_provider_summary(report: dict[str, Any]) -> dict[str, Any]:
+    return _as_dict(report.get("source_provider_summary"))
+
+
+def _source_provider_chain(report: dict[str, Any]) -> list[str]:
+    source_provider_summary = _source_provider_summary(report)
     chain = [_safe_str(item) for item in _as_list(source_provider_summary.get("chain"))]
-    chain = [provider for provider in chain if provider]
+    return [provider for provider in chain if provider]
+
+
+def _source_provider_status_parts(
+    report: dict[str, Any],
+    *,
+    status_label: Callable[[Any], str],
+) -> list[str]:
+    source_provider_summary = _source_provider_summary(report)
+    parts: list[str] = []
+    for raw_provider in _as_list(source_provider_summary.get("providers")):
+        provider = _as_dict(raw_provider)
+        name = _safe_str(provider.get("provider"))
+        if not name:
+            continue
+        status = status_label(provider.get("status"))
+        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
+        parts.append(f"{name} {status} {coverage}")
+    return parts
+
+
+def _format_source_chain_summary(report: dict[str, Any]) -> str:
+    chain = _source_provider_chain(report)
     if not chain:
         return ""
 
     chain_text = ", ".join(chain)
-    final = _as_dict(source_provider_summary.get("final"))
+    final = _as_dict(_source_provider_summary(report).get("final"))
     if not final:
         return f"소스 체인 {chain_text}"
     recommendable = _format_coverage(
@@ -801,29 +827,21 @@ def _format_source_chain_summary(report: dict[str, Any]) -> str:
 
 
 def _format_source_provider_statuses(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
-    parts: list[str] = []
-    for raw_provider in _as_list(source_provider_summary.get("providers")):
-        provider = _as_dict(raw_provider)
-        name = _safe_str(provider.get("provider"))
-        if not name:
-            continue
-        status = _format_provider_status_label(provider.get("status"))
-        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
-        parts.append(f"{name} {status} {coverage}")
+    parts = _source_provider_status_parts(
+        report,
+        status_label=_format_provider_status_label,
+    )
     if not parts:
         return ""
     return f"소스 제공자: {'; '.join(parts)}"
 
 
 def _format_slack_source_chain_summary(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
-    chain = [_safe_str(item) for item in _as_list(source_provider_summary.get("chain"))]
-    chain = [provider for provider in chain if provider]
+    chain = _source_provider_chain(report)
     if not chain:
         return ""
 
-    final = _as_dict(source_provider_summary.get("final"))
+    final = _as_dict(_source_provider_summary(report).get("final"))
     if not final:
         return f"source_chain={','.join(chain)}"
     recommendable = _format_coverage(
@@ -835,16 +853,10 @@ def _format_slack_source_chain_summary(report: dict[str, Any]) -> str:
 
 
 def _format_slack_source_provider_statuses(report: dict[str, Any]) -> str:
-    source_provider_summary = _as_dict(report.get("source_provider_summary"))
-    parts: list[str] = []
-    for raw_provider in _as_list(source_provider_summary.get("providers")):
-        provider = _as_dict(raw_provider)
-        name = _safe_str(provider.get("provider"))
-        if not name:
-            continue
-        status = _safe_str(provider.get("status"), default="-")
-        coverage = _format_coverage(provider.get("covered"), provider.get("total"))
-        parts.append(f"{name} {status} {coverage}")
+    parts = _source_provider_status_parts(
+        report,
+        status_label=lambda status: _safe_str(status, default="-"),
+    )
     if not parts:
         return ""
     return f"source_providers={'; '.join(parts)}"

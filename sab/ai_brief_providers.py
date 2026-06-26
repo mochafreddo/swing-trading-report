@@ -44,6 +44,10 @@ _INVESTMENT_READINESS_CHECKLIST_ITEM = (
 )
 _WATCH_TRIGGER_PENDING_REASON_EN = "entry trigger is pending re-confirmation"
 _WATCH_TRIGGER_PENDING_REASON_KO = "진입 트리거 재확인이 필요함"
+WATCH_RETRIGGER_CONDITIONS_KO = (
+    "가격이 원래 진입 트리거를 다시 충족해야 함",
+    "소스와 시장 맥락을 수동 확인해야 함",
+)
 _AI_ROLE_REASON_DISPLAY_KO = {
     "entry report action was ENTER": "entry report가 ENTER로 표시한 후보",
     "portfolio policy blocked automatic entry": "포트폴리오 정책으로 자동 진입 차단",
@@ -159,11 +163,8 @@ class FakeAiBriefProvider:
             watch_row: dict[str, object] = {
                 "ticker": ticker,
                 "action": "WATCH",
-                "reason": _watch_reason_for_display(candidate.get("ai_role_reason")),
-                "retrigger_conditions": [
-                    "가격이 원래 진입 트리거를 다시 충족해야 함",
-                    "소스와 시장 맥락을 수동 확인해야 함",
-                ],
+                "reason": watch_reason_for_display(candidate.get("ai_role_reason")),
+                "retrigger_conditions": list(WATCH_RETRIGGER_CONDITIONS_KO),
                 "sources": _candidate_sources(candidate),
                 "as_of": as_of,
             }
@@ -847,7 +848,7 @@ def _model_source_issue(
     }
 
 
-def _watch_reason_for_display(reason: object) -> str:
+def watch_reason_for_display(reason: object) -> str:
     text = str(reason or "").strip()
     if not text:
         return _WATCH_TRIGGER_PENDING_REASON_KO
@@ -922,15 +923,12 @@ def _provider_fallback_watch_candidate(
     candidate: Mapping[str, object],
 ) -> dict[str, object]:
     ticker = str(candidate.get("ticker") or "").strip()
-    reason = _watch_reason_for_display(candidate.get("ai_role_reason"))
+    reason = watch_reason_for_display(candidate.get("ai_role_reason"))
     row: dict[str, object] = {
         "ticker": ticker,
         "action": "WATCH",
         "reason": reason,
-        "retrigger_conditions": [
-            "가격이 원래 진입 트리거를 다시 충족해야 함",
-            "소스와 시장 맥락을 수동 확인해야 함",
-        ],
+        "retrigger_conditions": list(WATCH_RETRIGGER_CONDITIONS_KO),
         "sources": _candidate_sources(candidate),
     }
     name = str(candidate.get("name") or "").strip()

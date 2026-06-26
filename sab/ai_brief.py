@@ -18,11 +18,13 @@ from .ai_brief_providers import (
     MODEL_PROVIDER_FAKE,
     MODEL_PROVIDER_OPENAI,
     PRESELECTION_LIMIT,
+    WATCH_RETRIGGER_CONDITIONS_KO,
     AiBriefProviderContractError,
     AiBriefProviderError,
     AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
+    watch_reason_for_display,
 )
 from .ai_brief_source_chain import (
     load_ai_brief_source_chain,
@@ -624,12 +626,6 @@ def _attach_candidate_sources(
 
 def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
     ticker = str(candidate["ticker"])
-    raw_reason = str(candidate.get("ai_role_reason") or "").strip()
-    reason = (
-        "진입 트리거 재확인이 필요함"
-        if raw_reason in {"", "entry trigger is pending re-confirmation"}
-        else raw_reason
-    )
     sources = candidate.get("sources")
     source_rows = (
         [dict(source) for source in sources if isinstance(source, Mapping)]
@@ -639,11 +635,8 @@ def _fallback_watch_candidate(candidate: Mapping[str, object]) -> dict[str, obje
     row: dict[str, object] = {
         "ticker": ticker,
         "action": "WATCH",
-        "reason": reason,
-        "retrigger_conditions": [
-            "가격이 원래 진입 트리거를 다시 충족해야 함",
-            "소스와 시장 맥락을 수동 확인해야 함",
-        ],
+        "reason": watch_reason_for_display(candidate.get("ai_role_reason")),
+        "retrigger_conditions": list(WATCH_RETRIGGER_CONDITIONS_KO),
         "sources": source_rows,
     }
     name = str(candidate.get("name") or "").strip()
