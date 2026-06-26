@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -22,6 +23,7 @@ from .ai_brief_providers import (
     WATCH_RETRIGGER_CONDITIONS_KO,
     AiBriefProviderContractError,
     AiBriefProviderError,
+    AiBriefProviderResult,
     AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
@@ -675,6 +677,174 @@ def _build_provider(
     )
 
 
+def _attempt_record_dict(record: _ModelAttemptRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "role": record.role,
+        "model_name": record.model_name,
+        "timeout_seconds": record.timeout_seconds,
+        "status": record.status,
+        "duration_ms": record.duration_ms,
+    }
+    if record.error_type is not None:
+        payload["error_type"] = record.error_type
+    if record.retryable is not None:
+        payload["retryable"] = record.retryable
+    return payload
+
+
+def _run_model_attempts(
+    *,
+    model_provider: str,
+    attempts: list[_ModelAttemptConfig],
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    run_id: str,
+    operation: str,
+    market: str,
+) -> tuple[
+    AiBriefProviderResult | None,
+    str,
+    list[_ModelAttemptRecord],
+    AiBriefProviderError | None,
+]:
+    records: list[_ModelAttemptRecord] = []
+    last_error: AiBriefProviderError | None = None
+    for index, attempt in enumerate(attempts):
+        started = time.monotonic()
+        logger.info(
+            "AI brief model attempt started",
+            extra={
+                "event": "ai_brief_model_attempt_started",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "started",
+                "model_provider": model_provider,
+                "dependency": model_provider,
+                "model_role": attempt.role,
+                "attempt_index": index,
+                "model_name": attempt.model_name,
+                "market": market,
+                "ticker_count": len(recommendable_candidates),
+                "watch_count": len(watch_candidates),
+                "timeout_seconds": attempt.timeout_seconds,
+            },
+        )
+        provider = _build_provider(
+            model_provider=model_provider,
+            model_name=attempt.model_name,
+            model_timeout_seconds=attempt.timeout_seconds,
+        )
+        try:
+            result = provider.build_recommendations(
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+            )
+        except AiBriefProviderError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            retryable = _model_provider_retryable(exc)
+            fallback_next = (
+                retryable
+                and isinstance(exc, AiBriefProviderTimeoutError)
+                and index + 1 < len(attempts)
+            )
+            status = (
+                "timeout" if isinstance(exc, AiBriefProviderTimeoutError) else "failed"
+            )
+            records.append(
+                _ModelAttemptRecord(
+                    role=attempt.role,
+                    model_name=attempt.model_name,
+                    timeout_seconds=attempt.timeout_seconds,
+                    status=status,
+                    duration_ms=duration_ms,
+                    error_type=type(exc).__name__,
+                    retryable=retryable,
+                )
+            )
+            log_method = logger.warning if fallback_next else logger.error
+            log_method(
+                "AI brief model attempt failed: %s",
+                exc,
+                extra={
+                    "event": "ai_brief_model_attempt_failed",
+                    "run_id": run_id,
+                    "operation": operation,
+                    "status": "degraded",
+                    "model_provider": model_provider,
+                    "dependency": model_provider,
+                    "model_role": attempt.role,
+                    "attempt_index": index,
+                    "model_name": attempt.model_name,
+                    "market": market,
+                    "ticker_count": len(recommendable_candidates),
+                    "watch_count": len(watch_candidates),
+                    "timeout_seconds": attempt.timeout_seconds,
+                    "duration_ms": duration_ms,
+                    "error_type": type(exc).__name__,
+                    "retryable": retryable,
+                    "fallback_next": fallback_next,
+                },
+            )
+            last_error = exc
+            if fallback_next:
+                next_attempt = attempts[index + 1]
+                logger.warning(
+                    "AI brief model fallback selected",
+                    extra={
+                        "event": "ai_brief_model_fallback_selected",
+                        "run_id": run_id,
+                        "operation": operation,
+                        "status": "degraded",
+                        "model_provider": model_provider,
+                        "dependency": model_provider,
+                        "attempt_index": index,
+                        "model_name": attempt.model_name,
+                        "fallback_model_name": next_attempt.model_name,
+                        "market": market,
+                        "error_type": type(exc).__name__,
+                        "retryable": retryable,
+                        "fallback_next": True,
+                    },
+                )
+                continue
+            return None, attempt.model_name, records, exc
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        records.append(
+            _ModelAttemptRecord(
+                role=attempt.role,
+                model_name=attempt.model_name,
+                timeout_seconds=attempt.timeout_seconds,
+                status="success",
+                duration_ms=duration_ms,
+            )
+        )
+        logger.info(
+            "AI brief model attempt completed",
+            extra={
+                "event": "ai_brief_model_attempt_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "model_provider": model_provider,
+                "dependency": model_provider,
+                "model_role": attempt.role,
+                "attempt_index": index,
+                "model_name": attempt.model_name,
+                "market": market,
+                "ticker_count": len(recommendable_candidates),
+                "watch_count": len(watch_candidates),
+                "timeout_seconds": attempt.timeout_seconds,
+                "duration_ms": duration_ms,
+                "recommendation_count": len(result.recommendations),
+                "vetoed_count": len(result.vetoed_candidates),
+                "source_issue_count": len(result.source_issues),
+            },
+        )
+        return result, attempt.model_name, records, None
+    return None, attempts[0].model_name, records, last_error
+
+
 def _provider_system_issue(exc: AiBriefProviderError) -> dict[str, object]:
     return {
         "ticker": None,
@@ -1082,61 +1252,41 @@ def run_ai_brief(
         )
         return 1
 
+    model_attempts: list[_ModelAttemptRecord] = []
     try:
-        provider = _build_provider(
-            model_provider=normalized_model_provider,
-            model_name=normalized_model_name,
-            model_timeout_seconds=normalized_model_timeout_seconds,
+        model_total_timeout_seconds = _normalize_model_total_timeout_seconds(None)
+        attempt_configs = _build_model_attempt_configs(
+            provider=normalized_model_provider,
+            primary_model_name=normalized_model_name,
+            primary_timeout_seconds=normalized_model_timeout_seconds,
+            fallback_model_name=None,
+            fallback_timeout_seconds=None,
+            total_timeout_seconds=model_total_timeout_seconds,
         )
-        provider_result = provider.build_recommendations(
-            recommendable_candidates=preselected_candidates,
-            watch_candidates=watch_candidates,
+        provider_result, effective_model_name, model_attempts, provider_error = (
+            _run_model_attempts(
+                model_provider=normalized_model_provider,
+                attempts=attempt_configs,
+                recommendable_candidates=preselected_candidates,
+                watch_candidates=watch_candidates,
+                run_id=run_id,
+                operation=operation,
+                market=target_market,
+            )
         )
-        recommendations = provider_result.recommendations
-        source_issues = [*source_provider_issues, *provider_result.source_issues]
-        vetoed_candidates = provider_result.vetoed_candidates
-        model_watch_candidates = provider_result.watch_candidates
-        logger.info(
-            "AI brief model provider completed",
-            extra={
-                "event": "ai_brief_model_provider_completed",
-                "run_id": run_id,
-                "operation": operation,
-                "status": "success",
-                "model_provider": normalized_model_provider,
-                "dependency": normalized_model_provider,
-                "model_name": normalized_model_name,
-                "market": target_market,
-                "ticker_count": len(preselected_candidates),
-                "watch_count": len(watch_candidates),
-                "recommendation_count": len(recommendations),
-                "vetoed_count": len(vetoed_candidates),
-                "source_issue_count": len(source_issues),
-            },
-        )
-    except AiBriefProviderError as exc:
-        logger.error(
-            "AI brief provider failed: %s",
-            exc,
-            extra={
-                "event": "ai_brief_model_provider_failed",
-                "run_id": run_id,
-                "operation": operation,
-                "status": "degraded",
-                "model_provider": normalized_model_provider,
-                "dependency": normalized_model_provider,
-                "model_name": normalized_model_name,
-                "market": target_market,
-                "ticker_count": len(preselected_candidates),
-                "error_type": type(exc).__name__,
-                "retryable": _model_provider_retryable(exc),
-            },
-        )
-        recommendations = []
-        source_issues = source_provider_issues
-        vetoed_candidates = []
-        model_watch_candidates = _fallback_watch_candidates(watch_candidates)
-        system_issues.append(_provider_system_issue(exc))
+        if provider_result is not None:
+            recommendations = provider_result.recommendations
+            source_issues = [*source_provider_issues, *provider_result.source_issues]
+            vetoed_candidates = provider_result.vetoed_candidates
+            model_watch_candidates = provider_result.watch_candidates
+            normalized_model_name = effective_model_name
+        else:
+            assert provider_error is not None
+            recommendations = []
+            source_issues = source_provider_issues
+            vetoed_candidates = []
+            model_watch_candidates = _fallback_watch_candidates(watch_candidates)
+            system_issues.append(_provider_system_issue(provider_error))
     except ValueError as exc:
         logger.error(
             "%s",
@@ -1156,6 +1306,45 @@ def run_ai_brief(
         )
         return 1
 
+    if provider_result is not None:
+        logger.info(
+            "AI brief model provider completed",
+            extra={
+                "event": "ai_brief_model_provider_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": normalized_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "watch_count": len(watch_candidates),
+                "recommendation_count": len(recommendations),
+                "vetoed_count": len(vetoed_candidates),
+                "source_issue_count": len(source_issues),
+            },
+        )
+    else:
+        assert provider_error is not None
+        logger.error(
+            "AI brief provider failed: %s",
+            provider_error,
+            extra={
+                "event": "ai_brief_model_provider_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "degraded",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": effective_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "error_type": type(provider_error).__name__,
+                "retryable": _model_provider_retryable(provider_error),
+            },
+        )
+
     artifact = {
         "source_entry_report": os.path.basename(entry_report_path),
         "source_buy_report": (
@@ -1166,6 +1355,7 @@ def run_ai_brief(
         "market": target_market,
         "model_provider": normalized_model_provider,
         "model_name": normalized_model_name,
+        "model_attempts": [_attempt_record_dict(record) for record in model_attempts],
         "summary": _build_summary(
             entry_count=len(target_rows),
             recommendable_count=len(eligible_candidates),
@@ -1315,6 +1505,7 @@ def run_ai_brief(
 __all__ = [
     "AiBriefProviderContractError",
     "AiBriefProviderError",
+    "AiBriefProviderResult",
     "AiBriefProviderTimeoutError",
     "FakeAiBriefProvider",
     "OpenAiBriefProvider",
