@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import os
 import threading
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -5526,4 +5528,36 @@ def test_build_attempt_id_includes_tick_and_utc_started_at() -> None:
             suffix="pid123",
         )
         == "0810-20260528T121000Z-pid123"
+    )
+
+
+def test_run_scheduled_ai_brief_writes_status_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_file = tmp_path / "status.json"
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", str(status_file))
+
+    result = scheduler_runner.ScheduledAiBriefResult(
+        status="pipeline_failed",
+        session_date="2026-06-26",
+        storage_key=None,
+    )
+    scheduler_runner._write_scheduled_status_file(result)
+
+    payload = json.loads(status_file.read_text(encoding="utf-8"))
+    assert payload == {
+        "status": "pipeline_failed",
+        "session_date": "2026-06-26",
+        "storage_key": None,
+    }
+
+
+def test_write_scheduled_status_file_noops_without_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SAB_SCHEDULER_STATUS_FILE", raising=False)
+
+    scheduler_runner._write_scheduled_status_file(
+        scheduler_runner.ScheduledAiBriefResult(status="dry_run")
     )

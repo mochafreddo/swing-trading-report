@@ -57,6 +57,7 @@ from ..report.supabase_storage import (
     upload_report_artifact,
 )
 from ..scan import run_scan
+from . import status_file
 from .holdings import (
     SupabaseHoldingsExportConfig,
     export_active_holdings_snapshot,
@@ -161,6 +162,21 @@ class ScheduledAiBriefResult:
     status: str
     session_date: str | None = None
     storage_key: str | None = None
+
+
+def _scheduled_status_payload(result: ScheduledAiBriefResult) -> dict[str, object]:
+    return {
+        "status": result.status,
+        "session_date": result.session_date,
+        "storage_key": result.storage_key,
+    }
+
+
+def _write_scheduled_status_file(result: ScheduledAiBriefResult) -> None:
+    path = os.getenv("SAB_SCHEDULER_STATUS_FILE")
+    if not path:
+        return
+    status_file.write_status_json(path, _scheduled_status_payload(result))
 
 
 @dataclass(frozen=True)
@@ -3778,6 +3794,7 @@ def run_scheduled_ai_brief(
         notifier=DefaultScheduledNotifier(),
     )
     result = runner.run(request)
+    _write_scheduled_status_file(result)
     print(json.dumps({"status": result.status, "storage_key": result.storage_key}))
     return 0 if result.status not in _FAILED_STATUSES else 1
 
