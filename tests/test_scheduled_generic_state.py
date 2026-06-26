@@ -50,6 +50,16 @@ def test_scheduled_state_key_rejects_unknown_pipeline() -> None:
         )
 
 
+def test_scheduled_state_key_rejects_ai_brief_mixed_scope() -> None:
+    with pytest.raises(ValueError, match="ai-brief scope must be KR or US"):
+        build_scheduled_state_key(
+            pipeline="ai-brief",
+            kind="success",
+            scope="MIXED",
+            session_date="2026-06-26",
+        )
+
+
 def test_scheduled_state_key_rejects_unsafe_tokens() -> None:
     with pytest.raises(ValueError, match="kind contains unsafe characters"):
         build_scheduled_state_key(
@@ -57,4 +67,43 @@ def test_scheduled_state_key_rejects_unsafe_tokens() -> None:
             kind="success:latest",
             scope="KR",
             session_date="2026-06-26",
+        )
+
+
+@pytest.mark.parametrize("kind", ["success\n", "success\r", "success\tlatest", "a*b"])
+def test_scheduled_state_key_rejects_unsafe_tokens_before_strip(kind: str) -> None:
+    with pytest.raises(ValueError, match="kind contains unsafe characters"):
+        build_scheduled_state_key(
+            pipeline="scan",
+            kind=kind,
+            scope="KR",
+            session_date="2026-06-26",
+        )
+
+
+def test_scheduled_state_key_requires_attempt_suffix_pair() -> None:
+    with pytest.raises(
+        ValueError, match="runner_role and attempt_id must be provided together"
+    ):
+        build_scheduled_state_key(
+            pipeline="scan",
+            kind="attempt",
+            scope="KR",
+            session_date="2026-06-26",
+            runner_role="local-primary",
+        )
+
+
+def test_scheduled_state_key_rejects_suffixes_for_non_attempt_kind() -> None:
+    with pytest.raises(
+        ValueError,
+        match="runner_role and attempt_id are only supported for attempt markers",
+    ):
+        build_scheduled_state_key(
+            pipeline="scan",
+            kind="success",
+            scope="KR",
+            session_date="2026-06-26",
+            runner_role="local-primary",
+            attempt_id="try-1",
         )

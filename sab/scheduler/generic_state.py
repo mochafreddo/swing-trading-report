@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Final
 
 __all__ = ["build_scheduled_state_key"]
@@ -7,13 +8,19 @@ __all__ = ["build_scheduled_state_key"]
 _ALLOWED_PIPELINES: Final = frozenset({"scan", "sell", "ai-brief"})
 _ALLOWED_SCOPES: Final = frozenset({"KR", "US", "MIXED"})
 _UNSAFE_TOKEN_CHARS: Final = frozenset({":", "\n", "\r", "/", "\\"})
+_SAFE_TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def _normalize_safe_token(value: str, *, field_name: str, lower: bool = False) -> str:
-    text = str(value or "").strip()
+    raw_text = str(value or "")
+    if any(char in raw_text for char in _UNSAFE_TOKEN_CHARS) or any(
+        char.isspace() and char != " " for char in raw_text
+    ):
+        raise ValueError(f"{field_name} contains unsafe characters")
+    text = raw_text.strip()
     if not text:
         raise ValueError(f"{field_name} must not be blank")
-    if any(char in text for char in _UNSAFE_TOKEN_CHARS):
+    if not _SAFE_TOKEN_RE.fullmatch(text):
         raise ValueError(f"{field_name} contains unsafe characters")
     return text.lower() if lower else text
 
@@ -37,6 +44,16 @@ def build_scheduled_state_key(
     normalized_scope = _normalize_safe_token(scope, field_name="scope").upper()
     if normalized_scope not in _ALLOWED_SCOPES:
         raise ValueError("scope must be KR, US, or MIXED")
+    if normalized_pipeline == "ai-brief" and normalized_scope == "MIXED":
+        raise ValueError("ai-brief scope must be KR or US")
+    has_runner_role = runner_role is not None
+    has_attempt_id = attempt_id is not None
+    if has_runner_role != has_attempt_id:
+        raise ValueError("runner_role and attempt_id must be provided together")
+    if (has_runner_role or has_attempt_id) and normalized_kind != "attempt":
+        raise ValueError(
+            "runner_role and attempt_id are only supported for attempt markers"
+        )
 
     parts = [
         f"scheduled-{normalized_pipeline}",
