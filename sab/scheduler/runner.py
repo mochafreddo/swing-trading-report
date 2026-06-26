@@ -176,7 +176,10 @@ def _write_scheduled_status_file(result: ScheduledAiBriefResult) -> None:
     path = os.getenv("SAB_SCHEDULER_STATUS_FILE")
     if not path:
         return
-    status_file.write_status_json(path, _scheduled_status_payload(result))
+    try:
+        status_file.write_status_json(path, _scheduled_status_payload(result))
+    except Exception as exc:
+        _LOGGER.warning("failed to write scheduled status file: %s", exc)
 
 
 @dataclass(frozen=True)

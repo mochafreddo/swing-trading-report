@@ -15,6 +15,7 @@ import sab.scheduler.runner as scheduler_runner
 from sab.config import load_config
 from sab.config_loader import ConfigLoadError
 from sab.env_loader import getenv, load_dotenv_if_available
+from sab.scheduler import status_file as scheduler_status_file
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
     DefaultScheduledPipeline,
@@ -5531,11 +5532,11 @@ def test_build_attempt_id_includes_tick_and_utc_started_at() -> None:
     )
 
 
-def test_run_scheduled_ai_brief_writes_status_file(
+def test_write_scheduled_status_file_writes_status_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status_file = tmp_path / "status.json"
+    status_file = tmp_path / "nested" / "status.json"
     monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", str(status_file))
 
     result = scheduler_runner.ScheduledAiBriefResult(
@@ -5551,6 +5552,20 @@ def test_run_scheduled_ai_brief_writes_status_file(
         "session_date": "2026-06-26",
         "storage_key": None,
     }
+    assert (
+        status_file.read_text(encoding="utf-8")
+        == '{"session_date": "2026-06-26", "status": "pipeline_failed", "storage_key": null}\n'
+    )
+
+
+def test_write_status_json_removes_temp_file_on_failure(tmp_path: Path) -> None:
+    status_file = tmp_path / "nested" / "status.json"
+
+    with pytest.raises(TypeError):
+        scheduler_status_file.write_status_json(status_file, {"status": object()})
+
+    assert not status_file.exists()
+    assert list(status_file.parent.glob(f".{status_file.name}.*")) == []
 
 
 def test_write_scheduled_status_file_noops_without_env(
@@ -5561,3 +5576,59 @@ def test_write_scheduled_status_file_noops_without_env(
     scheduler_runner._write_scheduled_status_file(
         scheduler_runner.ScheduledAiBriefResult(status="dry_run")
     )
+
+
+def test_run_scheduled_ai_brief_preserves_result_when_status_file_write_fails(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def run(
+            self, _request: scheduler_runner.ScheduledAiBriefRequest
+        ) -> scheduler_runner.ScheduledAiBriefResult:
+            return scheduler_runner.ScheduledAiBriefResult(
+                status="completed",
+                session_date="2026-06-26",
+                storage_key="reports/x.ai-brief.json",
+            )
+
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", "/unwritable/status.json")
+    monkeypatch.setattr(
+        scheduler_runner.SupabaseRuntimeStateClient,
+        "from_env",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setattr(
+        scheduler_runner.DefaultScheduledStorage,
+        "from_env",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setattr(scheduler_runner, "DefaultScheduledPipeline", object)
+    monkeypatch.setattr(scheduler_runner, "DefaultScheduledNotifier", object)
+    monkeypatch.setattr(scheduler_runner, "ScheduledAiBriefRunner", _FakeRunner)
+    monkeypatch.setattr(
+        scheduler_runner.status_file,
+        "write_status_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("status denied")),
+    )
+    caplog.set_level("WARNING", logger="sab.scheduler.runner")
+
+    exit_code = scheduler_runner.run_scheduled_ai_brief(
+        request=scheduler_runner.ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+        )
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "completed",
+        "storage_key": "reports/x.ai-brief.json",
+    }
+    assert "failed to write scheduled status file: status denied" in caplog.text
