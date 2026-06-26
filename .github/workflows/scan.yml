@@ -120,6 +120,15 @@ jobs:
             echo "scan_universe_flag=${scan_universe_flag}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Scheduled runtime_state preflight
+        if: github.event_name == 'schedule'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          echo "scheduled scan runtime_state preflight: marker-aware conversion required before local upload"
+
       - name: Install dependencies
         run: |
           set -euo pipefail
