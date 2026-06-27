@@ -4,37 +4,12 @@
 
 ## Deferred
 
-- 2026-06-22: Design and implement a historical swing backtest runner for
-  profitability and parameter-sensitivity research, covering data source,
-  sample period, universe, benchmark/regime alignment, survivorship assumptions,
-  EOD entry timing, stop/target approximation, transaction costs, slippage, and
-  output metrics. The 2026-06-22 replay matrix intentionally covers
-  deterministic rule semantics only.
-- 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
-  console pages after admin credentials or browser cookies are available. The
-  2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
-  holdings, metrics, and run, but authenticated Supabase-backed page states
-  still need visual audit with real credentials or browser auth state.
-- 2026-06-20: Plan a focused typography pass for the web UI. `Inter` remains
-  the primary body font because `web/src/lib/__tests__/font-build-contract.test.ts`
-  currently locks the existing local font variables; a future pass should pick a
-  more distinctive operations-console type pairing and update that contract
-  deliberately.
-- 2026-06-19: Create a repo-wide `DESIGN.md` with `/design-consultation` after
-  Toss holdings sync is implemented or as a separate design-system cleanup.
-  The Toss Sync plan now documents the existing Holdings UI vocabulary locally,
-  but future UI work should not need to rediscover panel, spacing, responsive,
-  and state rules from code each time.
-- 2026-06-19: Add redacted Toss holdings snapshot upload only after the first
-  local-only Toss sync lands and real Toss fixture redaction tests prove that
-  account identifiers, bearer tokens, and sensitive raw response fields cannot
-  leak into Supabase Storage. First implementation keeps raw snapshots local and
-  stores only redacted summary/hash metadata in runtime state.
-- 2026-06-19: Add a Toss-powered account readiness layer after broker-backed
-  holdings sync is stable, covering NAV, buying power, sellable quantity,
-  stop-distance position sizing, exposure, and downside amount/portfolio-percent
-  context. Keep this out of the first holdings sync PR to avoid mixing state sync
-  with risk-budget decisions.
+- 2026-06-22: Design and implement a historical swing backtest runner for profitability and parameter-sensitivity research, covering data source, sample period, universe, benchmark/regime alignment, survivorship assumptions, EOD entry timing, stop/target approximation, transaction costs, slippage, and output metrics. The 2026-06-22 replay matrix intentionally covers deterministic rule semantics only.
+- 2026-06-20: Run a follow-up authenticated `/design-review` on the internal console pages after admin credentials or browser cookies are available. The 2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports, holdings, metrics, and run, but authenticated Supabase-backed page states still need visual audit with real credentials or browser auth state.
+- 2026-06-20: Plan a focused typography pass for the web UI. `Inter` remains the primary body font because `web/src/lib/__tests__/font-build-contract.test.ts` currently locks the existing local font variables; a future pass should pick a more distinctive operations-console type pairing and update that contract deliberately.
+- 2026-06-19: Create a repo-wide `DESIGN.md` with `/design-consultation` after Toss holdings sync is implemented or as a separate design-system cleanup. The Toss Sync plan now documents the existing Holdings UI vocabulary locally, but future UI work should not need to rediscover panel, spacing, responsive, and state rules from code each time.
+- 2026-06-19: Add redacted Toss holdings snapshot upload only after the first local-only Toss sync lands and real Toss fixture redaction tests prove that account identifiers, bearer tokens, and sensitive raw response fields cannot leak into Supabase Storage. First implementation keeps raw snapshots local and stores only redacted summary/hash metadata in runtime state.
+- 2026-06-19: Add a Toss-powered account readiness layer after broker-backed holdings sync is stable, covering NAV, buying power, sellable quantity, stop-distance position sizing, exposure, and downside amount/portfolio-percent context. Keep this out of the first holdings sync PR to avoid mixing state sync with risk-budget decisions.
 - 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. The 2026-06-18 swing-trader and investment reviews revalidated this as the top decision-readiness gap. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed
