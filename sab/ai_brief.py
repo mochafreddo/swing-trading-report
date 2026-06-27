@@ -743,6 +743,20 @@ def _attempt_record_dict(record: _ModelAttemptRecord) -> dict[str, object]:
     return payload
 
 
+def _skipped_model_attempt_record(
+    attempt: _ModelAttemptConfig, *, error_type: str
+) -> _ModelAttemptRecord:
+    return _ModelAttemptRecord(
+        role=attempt.role,
+        model_name=attempt.model_name,
+        timeout_seconds=0.0,
+        status="deadline_skipped",
+        duration_ms=0,
+        error_type=error_type,
+        retryable=False,
+    )
+
+
 def _build_recommendations_with_wall_clock_timeout(
     provider: _AiBriefModelProvider,
     *,
@@ -824,14 +838,9 @@ def _run_model_attempts(
             )
             if remaining_total_seconds <= 0:
                 records.append(
-                    _ModelAttemptRecord(
-                        role=attempt.role,
-                        model_name=attempt.model_name,
-                        timeout_seconds=0.0,
-                        status="deadline_skipped",
-                        duration_ms=0,
+                    _skipped_model_attempt_record(
+                        attempt,
                         error_type="TotalBudgetSkipped",
-                        retryable=False,
                     )
                 )
                 return (
@@ -853,14 +862,9 @@ def _run_model_attempts(
             ).total_seconds() - model_publish_margin_seconds
             if remaining_after_margin_seconds <= 0:
                 records.append(
-                    _ModelAttemptRecord(
-                        role=attempt.role,
-                        model_name=attempt.model_name,
-                        timeout_seconds=0.0,
-                        status="deadline_skipped",
-                        duration_ms=0,
+                    _skipped_model_attempt_record(
+                        attempt,
                         error_type="DeadlineBudgetSkipped",
-                        retryable=False,
                     )
                 )
                 return (
@@ -933,14 +937,9 @@ def _run_model_attempts(
                     )
                     if fallback_remaining_total_seconds <= 0:
                         fallback_next = False
-                        deadline_skipped_attempt = _ModelAttemptRecord(
-                            role=next_attempt.role,
-                            model_name=next_attempt.model_name,
-                            timeout_seconds=0.0,
-                            status="deadline_skipped",
-                            duration_ms=0,
+                        deadline_skipped_attempt = _skipped_model_attempt_record(
+                            next_attempt,
                             error_type="TotalBudgetSkipped",
-                            retryable=False,
                         )
                     else:
                         fallback_effective_timeout_seconds = min(
@@ -958,14 +957,9 @@ def _run_model_attempts(
                 )
                 if fallback_remaining_after_margin_seconds <= 0:
                     fallback_next = False
-                    deadline_skipped_attempt = _ModelAttemptRecord(
-                        role=next_attempt.role,
-                        model_name=next_attempt.model_name,
-                        timeout_seconds=0.0,
-                        status="deadline_skipped",
-                        duration_ms=0,
+                    deadline_skipped_attempt = _skipped_model_attempt_record(
+                        next_attempt,
                         error_type="DeadlineBudgetSkipped",
-                        retryable=False,
                     )
                 else:
                     fallback_effective_timeout_seconds = min(

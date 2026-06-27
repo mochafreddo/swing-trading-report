@@ -2056,13 +2056,7 @@ class ScheduledAiBriefRunner:
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
-        if late_alert_status == "lock_lost_before_upload":
-            return ScheduledAiBriefResult(
-                status="lock_lost_before_upload",
-                session_date=session_date,
-                storage_key=storage_key,
-            )
-        if late_alert_status == "late_alert_send_failed":
+        if late_alert_status in {"lock_lost_before_upload", "late_alert_send_failed"}:
             return ScheduledAiBriefResult(
                 status=late_alert_status,
                 session_date=session_date,
