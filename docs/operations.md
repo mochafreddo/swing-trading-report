@@ -128,7 +128,8 @@ Notification checks:
 Local log retention:
 
 - Attempt-scoped scheduler logs are written under `logs/scheduled/ai-brief/YYYY-MM-DD/`.
-- Model latency measurement logs are written under `logs/measurements/ai-brief-model-latency/YYYY-MM-DD.jsonl`.
+- AI Brief model latency probe planning is available with `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief-latency-probe --primary-model <model> --fallback-model <model> --repetitions 1`; it prints the planned live model call count before any operator-run measurement.
+- Model latency measurement rows, when written by measurement tooling, use `logs/measurements/ai-brief-model-latency/YYYY-MM-DD.jsonl`.
 - Both directories are local-only and gitignored. Keep the latest 30 calendar days during normal operation. Before deleting older files, dry-run the target list with `find logs/scheduled logs/measurements -type f -mtime +30 -print`; delete only after confirming there is no active incident or audit need.
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.

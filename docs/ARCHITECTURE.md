@@ -68,13 +68,14 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`ai-brief-scheduled` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py`(엔트리), `sab/scan_screener.py`, `sab/scan_evaluation.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py`(엔트리), `sab/sell_evaluation.py`, `sab/sell_runtime.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, 실행가능/차단·검토/watch/excluded 후보 분류, source provider chain context, opt-in article reader 검증, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_candidates.py`, `sab/ai_brief_source_chain.py`, `sab/ai_brief_sources.py`, `sab/ai_brief_providers.py`, `sab/article_reader.py` |
 | Scheduled AI Brief runner | market/session/role guard, runtime_state lock/marker, 로컬 one-shot scan→entry→ai-brief 실행, notification reconciliation, GitHub monitor/fallback 공통 entrypoint | `sab/scheduler/*`(시간 정책: `schedule_policy.py`), `docker-compose.scheduler.yml`, `scripts/launchd/*`, `.github/workflows/ai-brief.yml` |
 | AI Brief source 수집 보조 | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `http-json`/`local-json` 호환 `sources[]` payload로 변환 | `sab/ai_brief_source_collectors.py`, `scripts/collect_ai_brief_sources.py` |
 | AI Brief source 품질 평가/비교 | 수집한 `http-json` 호환 source payload는 네트워크/secret 없이 기존 source 정규화 규칙으로 평가/비교하고, live provider capture는 provider 호출 후 저장된 payload를 같은 evaluator로 비교하며 provider별 `duration_ms`를 남김 | `sab/ai_brief_source_eval.py`, `sab/ai_brief_source_live_compare.py`, `scripts/eval_ai_brief_sources.py`, `scripts/compare_ai_brief_live_sources.py` |
+| AI Brief 모델 latency probe | primary/fallback 모델 호출 수와 반복 횟수 계획을 출력하고 측정 row helper를 제공 | `sab/ai_brief_latency_probe.py` |
 | AI Brief recommendation 품질 평가 | 생성된 `*.ai-brief.json`을 네트워크/secret 없이 entry 후보 기준으로 검증하고, rank 연속성/source-backed ratio/article tier coverage/confidence 안전성/summary count를 수동·scheduled 성공 경로의 fail-closed 품질 게이트로 평가 | `sab/ai_brief_eval.py`, `scripts/eval_ai_brief_recommendations.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py`(facade), `sab/data/kis/{auth,calendar,common,quote,ranking}.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
