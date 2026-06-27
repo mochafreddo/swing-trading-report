@@ -93,9 +93,9 @@
 | `OPENAI_API_KEY` | required for OpenAI brief | none | `replace-with-openai-key` | `sab ai-brief`, scheduler | OpenAI model provider API key | Secret. |
 | `OPENAI_AI_BRIEF_MODEL` | no | CLI model name | `gpt-...` | `sab ai-brief` | OpenAI primary model | NEEDS_CONFIRMATION: production default model policy. |
 | `OPENAI_AI_BRIEF_FALLBACK_MODEL` | no | none | `gpt-...` | `sab ai-brief` | OpenAI fallback model after retryable primary timeout | Must differ from primary model. |
-| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | provider default | `20` | `sab ai-brief` | Primary model timeout | Positive finite number. |
+| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | provider default | `60` | `sab ai-brief` | Primary model timeout | Positive finite number. Scheduled recommended value. |
 | `AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS` | no | `30` | `30` | `sab ai-brief` | Fallback model timeout | Positive finite number. |
-| `AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS` | no | none | `80` | `sab ai-brief`, scheduler | Total model-attempt timeout budget | Positive finite number. Caps primary and remaining fallback timeout. |
+| `AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS` | no | none | `90` | `sab ai-brief`, scheduler | Total model-attempt timeout budget | Positive finite number. Caps primary and remaining fallback timeout. Scheduled recommended value. |
 | `AI_BRIEF_SOURCE_API_URL` | required for `http-json` provider | none | `https://source.example/api` | `sab ai-brief` | External source API URL | HTTPS only; no internal real URL in docs. |
 | `AI_BRIEF_SOURCE_API_URL_KR` | no | none | `https://source.example/kr` | scheduled workflow | KR scheduled source API URL | GitHub variable. |
 | `AI_BRIEF_SOURCE_API_URL_US` | no | none | `https://source.example/us` | scheduled workflow | US scheduled source API URL | GitHub variable. |

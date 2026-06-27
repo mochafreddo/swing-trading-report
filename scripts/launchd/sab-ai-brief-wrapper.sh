@@ -115,7 +115,7 @@ EOF
 is_structured_scheduler_failure_status() {
   local status="$1"
   case "${status}" in
-    attempt_marker_failed|guard_failed|guard_failed_before_upload|guard_failed_before_notification|pipeline_failed|upload_failed|artifact_marker_failed|artifact_marker_invalid|entry_failure_artifact_claim_held|late_alert_send_failed|late_alert_sent_marker_failed|lock_lost_before_upload|skip_artifact_upload_failed|source_config_invalid|invalid_scheduled_tick|unsupported_runner_role)
+    attempt_marker_failed|guard_failed|guard_failed_before_upload|guard_failed_before_notification|pipeline_failed|upload_failed|artifact_marker_failed|artifact_marker_invalid|entry_failure_artifact_claim_held|late_alert_send_failed|late_alert_sent_marker_failed|lock_lost_before_upload|skip_artifact_upload_failed|source_config_invalid|invalid_attempt_id|invalid_scheduled_tick|unsupported_runner_role)
       return 0
       ;;
     *)

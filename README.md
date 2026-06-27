@@ -2,7 +2,7 @@
 
 상태: Accepted (프로젝트 진입점)
 
-KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. GitHub Actions는 정기 scan/sell/cleanup과 AI Brief monitor/fallback을 실행합니다.
+KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당하며, scheduled scan/sell은 marker-aware fallback 전까지 fail closed입니다.
 
 ## 문서 상태
 
@@ -71,7 +71,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 | Python engine | Python 3.14, `uv`, `requests`, `PyYAML`, optional `pykrx` |
 | Web console | Next.js 16, React 19, TypeScript, pnpm |
 | Storage/backend | Supabase Postgres, Supabase Storage |
-| Automation | GitHub Actions, Docker Compose, macOS `launchd` scheduled AI Brief |
+| Automation | GitHub Actions, Docker Compose, macOS `launchd` scheduled AI Brief; scheduled scan/sell fail-closed guard |
 | Toolchain | `mise`, `just`, Ruff, Mypy, Pytest, ESLint, Vitest, Prettier |
 
 ## 문서 지도

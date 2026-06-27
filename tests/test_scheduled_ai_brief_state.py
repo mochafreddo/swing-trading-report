@@ -91,6 +91,17 @@ def test_scheduler_state_keys_include_market_session_role_and_attempt() -> None:
     )
 
 
+def test_scheduler_state_keys_reject_unsafe_attempt_tokens() -> None:
+    with pytest.raises(ValueError, match="attempt_id contains unsafe characters"):
+        build_scheduler_state_key(
+            kind="attempt",
+            market="US",
+            session_date="2026-05-28",
+            runner_role="local-primary",
+            attempt_id="attempt:ambiguous",
+        )
+
+
 def test_client_claim_lock_posts_owner_token_payload() -> None:
     session = _FakeSession(
         [_FakeResponse(200, [{"acquired": True, "expires_at": "2026-05-28T12:35:00Z"}])]

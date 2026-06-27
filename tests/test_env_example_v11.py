@@ -119,6 +119,17 @@ def test_env_example_uses_active_kis_interval_in_commented_override() -> None:
     assert "# KIS_MIN_INTERVAL_MS=500" not in text
 
 
+def test_env_example_uses_scheduled_ai_brief_timeout_recommendations() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+
+    assert "# AI_BRIEF_MODEL_TIMEOUT_SECONDS=60" in text
+    assert "# AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS=30" in text
+    assert "# AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS=90" in text
+    assert "# AI_BRIEF_MODEL_TIMEOUT_SECONDS=20" not in text
+    assert "# AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS=80" not in text
+
+
 def test_env_example_conflict_check_treats_zero_yaml_values_as_present() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     config_data = load_yaml_config(str(repo_root / "config.yaml")).raw

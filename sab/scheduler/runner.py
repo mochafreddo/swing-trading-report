@@ -90,6 +90,7 @@ _ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
 _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
 _NON_PIPELINE_RUNNER_ROLES = {"monitor-only", "cutoff-alert"}
 _SUPPORTED_RUNNER_ROLES = _PIPELINE_RUNNER_ROLES | _NON_PIPELINE_RUNNER_ROLES
+_SAFE_ATTEMPT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS = ("HOLDINGS_FILE",)
 _SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE = "none"
 _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE = "none"
@@ -131,6 +132,7 @@ _FAILED_STATUSES = {
     "lock_lost_before_upload",
     "skip_artifact_upload_failed",
     "source_config_invalid",
+    "invalid_attempt_id",
     "invalid_scheduled_tick",
     "unsupported_runner_role",
 }
@@ -334,6 +336,15 @@ def _normalize_scheduled_tick(scheduled_tick: str) -> str:
     if re.fullmatch(r"([01][0-9]|2[0-3])[0-5][0-9]", normalized):
         return normalized
     raise ValueError("scheduled_tick must be HHMM or manual")
+
+
+def _normalize_attempt_id(attempt_id: str) -> str:
+    normalized = str(attempt_id or "").strip()
+    if not normalized:
+        raise ValueError("attempt_id must not be blank")
+    if not _SAFE_ATTEMPT_ID_RE.fullmatch(normalized):
+        raise ValueError("attempt_id contains unsafe characters")
+    return normalized
 
 
 def _optional_env(name: str) -> str | None:
@@ -972,11 +983,28 @@ class ScheduledAiBriefRunner:
                 status="unsupported_runner_role",
                 session_date=session_date,
             )
-        attempt_id = request.attempt_id or build_attempt_id(
-            scheduled_tick=scheduled_tick,
-            started_at=now,
-            suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
-        )
+        if request.attempt_id is None:
+            attempt_id = build_attempt_id(
+                scheduled_tick=scheduled_tick,
+                started_at=now,
+                suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
+            )
+        else:
+            try:
+                attempt_id = _normalize_attempt_id(request.attempt_id)
+            except ValueError:
+                _LOGGER.error(
+                    "scheduled AI brief invalid attempt id "
+                    "market=%s session_date=%s schedule_role=%s runner_role=%s",
+                    market,
+                    session_date,
+                    schedule_role,
+                    runner_role,
+                )
+                return ScheduledAiBriefResult(
+                    status="invalid_attempt_id",
+                    session_date=session_date,
+                )
         deadline_at = role_deadline_at(
             market=market, schedule_role=schedule_role, now=now
         )
@@ -2031,6 +2059,12 @@ class ScheduledAiBriefRunner:
         if late_alert_status == "lock_lost_before_upload":
             return ScheduledAiBriefResult(
                 status="lock_lost_before_upload",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        if late_alert_status == "late_alert_send_failed":
+            return ScheduledAiBriefResult(
+                status=late_alert_status,
                 session_date=session_date,
                 storage_key=storage_key,
             )

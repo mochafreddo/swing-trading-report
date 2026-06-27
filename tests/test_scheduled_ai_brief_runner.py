@@ -520,6 +520,29 @@ def test_invalid_scheduled_tick_exits_before_runtime_state_preflight() -> None:
     assert notifier.sent == []
 
 
+def test_invalid_attempt_id_exits_before_runtime_state_preflight() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt:ambiguous",
+        )
+    )
+
+    assert result.status == "invalid_attempt_id"
+    assert result.session_date == "2026-05-28"
+    assert state.preflight_calls == 0
+    assert state.upserts == []
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert "invalid_attempt_id" in scheduler_runner._FAILED_STATUSES
+
+
 def test_off_window_candidate_exits_before_runtime_state_preflight() -> None:
     runner, state, pipeline, storage, notifier = _runner(
         now=dt.datetime(2026, 5, 28, 13, 10, tzinfo=dt.UTC)
@@ -4241,6 +4264,30 @@ def test_pipeline_failure_late_alert_marker_failure_preserves_pipeline_status() 
     assert result.status == "pipeline_failed"
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["pipeline_failed"]
+    assert any(":late-alert:claim:" in key for key in state.releases)
+
+
+def test_pipeline_failure_late_alert_delivery_failure_reports_alert_status() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True),
+        notifier=_FakeNotifier(fail_late_alert=True),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-pipeline-late-alert-send-fail",
+        )
+    )
+
+    assert result.status == "late_alert_send_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
     assert any(":late-alert:claim:" in key for key in state.releases)
 
 

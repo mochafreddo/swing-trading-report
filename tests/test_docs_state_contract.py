@@ -169,6 +169,48 @@ def test_operations_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> 
     assert "scheduled 기본값" in scheduled_section
 
 
+def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
+    readme_text = _read(Path("README.md"))
+    architecture_text = _read(Path("docs/ARCHITECTURE.md"))
+    scan_flow = architecture_text.split("### 4.1 `scan` 플로우", 1)[1].split(
+        "### 4.2 `sell` 플로우", 1
+    )[0]
+    sell_flow = architecture_text.split("### 4.2 `sell` 플로우", 1)[1].split(
+        "### 4.3 `entry` 플로우", 1
+    )[0]
+
+    assert "scheduled scan/sell은 marker-aware fallback 전까지 fail closed" in (
+        readme_text
+    )
+    assert "scheduled scan/sell은 marker-aware fallback 전까지 fail closed" in (
+        architecture_text
+    )
+    assert "GitHub Actions는 정기 scan/sell/cleanup" not in readme_text
+    assert "GitHub Actions는 `scan`/`sell`/`cleanup` 스케줄" not in (architecture_text)
+    assert "GitHub Actions에서는 필수" not in scan_flow
+    assert "manual `workflow_dispatch` `scan.yml`" in scan_flow
+    assert "scheduled `scan.yml`" in scan_flow
+    assert "fail closed" in scan_flow
+    assert "GitHub Actions `sell.yml` 실행 시" not in sell_flow
+    assert "manual `workflow_dispatch` `sell.yml`" in sell_flow
+    assert "scheduled `sell.yml`" in sell_flow
+    assert "fail closed" in sell_flow
+
+
+def test_ai_brief_model_timeout_docs_cover_primary_fallback_and_total() -> None:
+    config_reference_text = _read(Path("docs/config-reference.md"))
+    configuration_text = _read(Path("docs/configuration.md"))
+
+    for text in (config_reference_text, configuration_text):
+        assert "OPENAI_AI_BRIEF_MODEL" in text
+        assert "OpenAI primary model" in text
+        assert "OPENAI_AI_BRIEF_FALLBACK_MODEL" in text
+        assert "AI_BRIEF_MODEL_TIMEOUT_SECONDS" in text
+        assert "AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS" in text
+        assert "AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS" in text
+        assert "AI Brief model fallback" not in text
+
+
 def test_index_docs_link_existing_files() -> None:
     links = [
         (doc_path, resolved)

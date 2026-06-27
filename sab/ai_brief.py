@@ -773,8 +773,10 @@ def _build_recommendations_with_wall_clock_timeout(
         raise _ModelAttemptWallClockTimeout
 
     signal.signal(signal.SIGALRM, raise_timeout)
-    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    timer_armed = False
     try:
+        signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+        timer_armed = True
         return provider.build_recommendations(
             recommendable_candidates=recommendable_candidates,
             watch_candidates=watch_candidates,
@@ -784,8 +786,11 @@ def _build_recommendations_with_wall_clock_timeout(
             "AI brief model attempt exceeded wall-clock timeout"
         ) from exc
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0.0)
-        signal.signal(signal.SIGALRM, previous_handler)
+        try:
+            if timer_armed:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+        finally:
+            signal.signal(signal.SIGALRM, previous_handler)
 
 
 def _run_model_attempts(
@@ -951,19 +956,21 @@ def _run_model_attempts(
                 fallback_remaining_after_margin_seconds = (
                     fallback_current_remaining_seconds - model_publish_margin_seconds
                 )
-                if (
-                    fallback_effective_timeout_seconds
-                    > fallback_remaining_after_margin_seconds
-                ):
+                if fallback_remaining_after_margin_seconds <= 0:
                     fallback_next = False
                     deadline_skipped_attempt = _ModelAttemptRecord(
                         role=next_attempt.role,
                         model_name=next_attempt.model_name,
-                        timeout_seconds=fallback_effective_timeout_seconds,
+                        timeout_seconds=0.0,
                         status="deadline_skipped",
                         duration_ms=0,
                         error_type="DeadlineBudgetSkipped",
                         retryable=False,
+                    )
+                else:
+                    fallback_effective_timeout_seconds = min(
+                        fallback_effective_timeout_seconds,
+                        fallback_remaining_after_margin_seconds,
                     )
             status = (
                 "timeout" if isinstance(exc, AiBriefProviderTimeoutError) else "failed"
