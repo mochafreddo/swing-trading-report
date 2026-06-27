@@ -25,7 +25,7 @@ on:
           - pykrx
 
 concurrency:
-  group: scan-${{ github.workflow }}-${{ github.ref }}
+  group: scan-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -119,6 +119,13 @@ jobs:
             echo "markets=${markets}"
             echo "scan_universe_flag=${scan_universe_flag}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Scheduled runtime_state preflight
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          echo "scheduled scan is disabled until marker-aware local upload is implemented" >&2
+          exit 1
 
       - name: Install dependencies
         run: |

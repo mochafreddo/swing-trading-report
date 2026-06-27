@@ -1,14 +1,14 @@
 # 아키텍처 개요 — Swing Trading Report
 
 상태: Accepted (v1.1 기준)  
-대상: 로컬 단일 사용자 운영 + GitHub Actions 자동 실행
+대상: 로컬 단일 사용자 운영 + GitHub Actions CI/manual/monitor 자동화
 
 ## 문서 상태
 
 ### 현재 제공
 
 - `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
-- `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions `scan`/`sell`/`cleanup`/`ai-brief` 연결이 현재 제공 범위입니다.
+- `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions cleanup/manual/AI Brief monitor/fallback, 로컬 one-shot Docker scheduled AI Brief 연결이 현재 제공 범위입니다. scheduled scan/sell은 marker-aware fallback 전까지 fail closed입니다.
 
 ### 실험
 
@@ -36,7 +36,7 @@
 - Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, entry 결과를 로컬 `ai-brief` JSON으로 요약합니다.
 - Next.js 웹(`web`)은 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
-- GitHub Actions는 `scan`/`sell`/`cleanup` 스케줄과 수동 AI Brief 실행을 담당하고, scheduled AI Brief에서는 로컬 Docker primary를 감시하거나 fallback을 수행합니다.
+- GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. scheduled AI Brief는 로컬 Docker primary가 실행하고, scheduled scan/sell은 marker-aware fallback 전까지 fail closed입니다.
 
 ## 2. 시스템 컨텍스트
 
@@ -46,7 +46,7 @@ flowchart LR
   W -->|CRUD / 조회| SDB["Supabase Postgres"]
   W -->|Toss holdings sync| TOSS["Toss Securities Open API"]
   W -->|리포트 목록/상세| SST["Supabase Storage (reports)"]
-  W -->|workflow_dispatch| GHA["GitHub Actions (scan/sell/cleanup/ai-brief)"]
+  W -->|manual workflow_dispatch| GHA["GitHub Actions (cleanup/manual/ai-brief monitor)"]
   U -->|manual workflow_dispatch| GHA
   LD["macOS launchd"] --> DK["One-shot Docker scheduler"]
   DK --> P
@@ -68,13 +68,14 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`ai-brief-scheduled` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py`(엔트리), `sab/scan_screener.py`, `sab/scan_evaluation.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py`(엔트리), `sab/sell_evaluation.py`, `sab/sell_runtime.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, 실행가능/차단·검토/watch/excluded 후보 분류, source provider chain context, opt-in article reader 검증, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_candidates.py`, `sab/ai_brief_source_chain.py`, `sab/ai_brief_sources.py`, `sab/ai_brief_providers.py`, `sab/article_reader.py` |
 | Scheduled AI Brief runner | market/session/role guard, runtime_state lock/marker, 로컬 one-shot scan→entry→ai-brief 실행, notification reconciliation, GitHub monitor/fallback 공통 entrypoint | `sab/scheduler/*`(시간 정책: `schedule_policy.py`), `docker-compose.scheduler.yml`, `scripts/launchd/*`, `.github/workflows/ai-brief.yml` |
 | AI Brief source 수집 보조 | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `http-json`/`local-json` 호환 `sources[]` payload로 변환 | `sab/ai_brief_source_collectors.py`, `scripts/collect_ai_brief_sources.py` |
 | AI Brief source 품질 평가/비교 | 수집한 `http-json` 호환 source payload는 네트워크/secret 없이 기존 source 정규화 규칙으로 평가/비교하고, live provider capture는 provider 호출 후 저장된 payload를 같은 evaluator로 비교하며 provider별 `duration_ms`를 남김 | `sab/ai_brief_source_eval.py`, `sab/ai_brief_source_live_compare.py`, `scripts/eval_ai_brief_sources.py`, `scripts/compare_ai_brief_live_sources.py` |
+| AI Brief 모델 latency probe | primary/fallback 모델 호출 수와 반복 횟수 계획을 출력하고 측정 row helper를 제공 | `sab/ai_brief_latency_probe.py` |
 | AI Brief recommendation 품질 평가 | 생성된 `*.ai-brief.json`을 네트워크/secret 없이 entry 후보 기준으로 검증하고, rank 연속성/source-backed ratio/article tier coverage/confidence 안전성/summary count를 수동·scheduled 성공 경로의 fail-closed 품질 게이트로 평가 | `sab/ai_brief_eval.py`, `scripts/eval_ai_brief_recommendations.py` |
 | 데이터 파이프라인 | KIS/PyKRX 초기화, 캐시 조회, 폴백/재시도 | `sab/market_data_pipeline.py`, `sab/data/kis_client.py`(facade), `sab/data/kis/{auth,calendar,common,quote,ranking}.py` |
 | 시그널 엔진 | EMA/RSI/ATR 기반 평가 로직 | `sab/signals/*` |
@@ -85,7 +86,7 @@ flowchart LR
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
-| 배치 워크플로우 | scan/sell 실행, 업로드, 알림, cleanup, 수동 AI Brief artifact 생성, scheduled AI Brief monitor/fallback | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
+| 배치 워크플로우 | cleanup, 수동 workflow dispatch, 수동 AI Brief artifact 생성, scheduled AI Brief monitor/fallback. scheduled scan/sell은 marker-aware fallback 전까지 fail closed | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
 
 ## 4. 핵심 플로우
 
@@ -98,7 +99,7 @@ flowchart LR
 5. 선택적으로(`strategy.use_market_regime_filter=true`) 시장별 benchmark 종가가 SMA200 위인지 먼저 확인하고, 레짐이 약세인 시장의 ticker는 평가 전에 제외합니다. benchmark를 못 구하면 `strategy.market_regime_unavailable_policy`에 따라 경고 후 계속 진행하거나(`warn_continue`) 해당 시장을 제외합니다(`block_market`).
 6. 시그널 평가 후 후보 티커에 대해서만 raw 캔들을 배치 warmup하고, cache hit 기반으로 `entry_reference_close_raw_value`를 보강한 뒤 후보를 정렬하고 통화/시장 상태 표시를 덧붙입니다. `ema_cross`는 기존 점수/RS/유동성 순서를 유지하고, `sma_ema_hybrid`는 `quality_state`를 먼저 적용한 뒤 같은 tie-breaker를 사용합니다.
 7. `reports/YYYY-MM-DD(.n).buy.json`을 원자적으로 기록합니다. Buy artifact는 top-level `risk_disclosure`를 포함하고, 후보별 `risk_guide`의 계산용 stop/target 값(`risk_stop_price_value`, `risk_target_price_value`, `risk_price_basis`)을 함께 저장합니다.
-8. 업로드 조건 충족 시(SA: GitHub Actions에서는 필수, 로컬에서는 `SAB_UPLOAD_REPORTS=true`일 때) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다.
+8. 업로드 조건 충족 시(로컬에서는 `SAB_UPLOAD_REPORTS=true`, manual `workflow_dispatch` `scan.yml`에서는 강제 업로드) Supabase Storage 업로드 + `report_index` upsert를 수행합니다. manual GitHub Actions에서는 인덱스 upsert 실패를 경고로 무시하지 않고 즉시 실패 처리합니다. scheduled `scan.yml`은 marker-aware fallback 전까지 preflight에서 fail closed로 중단하므로 scan 생성/업로드 단계까지 진행하지 않습니다.
 9. `scan`은 holdings 파일을 읽지 않습니다. `entry`는 포트폴리오 가드가 설정된 경우 holdings 파일 입력을 읽을 수 있지만, 신호 계산은 buy report 기준을 유지합니다.
 
 ### 4.2 `sell` 플로우
@@ -109,7 +110,7 @@ flowchart LR
    - hybrid sell evaluator는 `entry_pattern`별 time-stop override를 전역 hybrid time-stop 위에 적용합니다. 기본 설정은 `swing_high_breakout`을 전역 30+15 세션보다 짧은 15+5 세션으로 평가합니다.
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다. Sell artifact는 `stop_price`/`target_price`가 체결 보장이나 계좌 손실 한도가 아닌 의사결정 가이드임을 top-level `risk_disclosure`에 기록합니다.
-4. GitHub Actions `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다.
+4. manual `workflow_dispatch` `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다. scheduled `sell.yml`은 marker-aware fallback 전까지 preflight에서 fail closed로 중단하므로 holdings export, sell 생성, 업로드 단계까지 진행하지 않습니다.
    - scheduled export field set은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`입니다. `entry_pattern` 컬럼이 PostgREST schema cache에 노출되지 않으면 export는 lossy snapshot을 만들지 않고 실패합니다.
 
 ### 4.3 `entry` 플로우

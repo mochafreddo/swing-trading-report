@@ -57,6 +57,7 @@ from ..report.supabase_storage import (
     upload_report_artifact,
 )
 from ..scan import run_scan
+from . import status_file
 from .holdings import (
     SupabaseHoldingsExportConfig,
     export_active_holdings_snapshot,
@@ -67,6 +68,7 @@ from .schedule_policy import (
 from .schedule_policy import (
     market_zone,
     require_role_window,
+    role_deadline_at,
     role_window,
     role_window_end_grace,
 )
@@ -88,6 +90,7 @@ _ATTEMPT_TTL_SECONDS = 7 * 24 * 60 * 60
 _PIPELINE_RUNNER_ROLES = {"local-primary", "local-retry", "github-fallback"}
 _NON_PIPELINE_RUNNER_ROLES = {"monitor-only", "cutoff-alert"}
 _SUPPORTED_RUNNER_ROLES = _PIPELINE_RUNNER_ROLES | _NON_PIPELINE_RUNNER_ROLES
+_SAFE_ATTEMPT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SCHEDULED_PIPELINE_SUPPRESSED_ENV_KEYS = ("HOLDINGS_FILE",)
 _SCHEDULED_SOURCE_PROVIDER_ORIGIN_NONE = "none"
 _SCHEDULED_SOURCE_API_URL_ORIGIN_NONE = "none"
@@ -129,6 +132,8 @@ _FAILED_STATUSES = {
     "lock_lost_before_upload",
     "skip_artifact_upload_failed",
     "source_config_invalid",
+    "invalid_attempt_id",
+    "invalid_scheduled_tick",
     "unsupported_runner_role",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -162,6 +167,24 @@ class ScheduledAiBriefResult:
     storage_key: str | None = None
 
 
+def _scheduled_status_payload(result: ScheduledAiBriefResult) -> dict[str, object]:
+    return {
+        "status": result.status,
+        "session_date": result.session_date,
+        "storage_key": result.storage_key,
+    }
+
+
+def _write_scheduled_status_file(result: ScheduledAiBriefResult) -> None:
+    path = os.getenv("SAB_SCHEDULER_STATUS_FILE")
+    if not path:
+        return
+    try:
+        status_file.write_status_json(path, _scheduled_status_payload(result))
+    except Exception as exc:
+        _LOGGER.warning("failed to write scheduled status file: %s", exc)
+
+
 @dataclass(frozen=True)
 class ScheduledPipelineResult:
     ai_brief_report_path: str
@@ -185,9 +208,11 @@ class _ScheduledRunContext:
     market: str
     schedule_role: str
     runner_role: str
+    scheduled_tick: str
     guard: GuardSnapshot
     session_date: str
     attempt_id: str
+    model_deadline_at: dt.datetime | None
 
 
 @dataclass(frozen=True)
@@ -263,6 +288,8 @@ class SchedulerPipeline(Protocol):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult: ...
@@ -299,6 +326,24 @@ def _normalize_role(role: str, *, field_name: str) -> str:
     normalized = str(role or "").strip().lower()
     if not normalized:
         raise ValueError(f"{field_name} must not be blank")
+    return normalized
+
+
+def _normalize_scheduled_tick(scheduled_tick: str) -> str:
+    normalized = str(scheduled_tick or "").strip().lower()
+    if normalized == "manual":
+        return normalized
+    if re.fullmatch(r"([01][0-9]|2[0-3])[0-5][0-9]", normalized):
+        return normalized
+    raise ValueError("scheduled_tick must be HHMM or manual")
+
+
+def _normalize_attempt_id(attempt_id: str) -> str:
+    normalized = str(attempt_id or "").strip()
+    if not normalized:
+        raise ValueError("attempt_id must not be blank")
+    if not _SAFE_ATTEMPT_ID_RE.fullmatch(normalized):
+        raise ValueError("attempt_id contains unsafe characters")
     return normalized
 
 
@@ -908,6 +953,17 @@ class ScheduledAiBriefRunner:
             request.schedule_role, field_name="schedule_role"
         )
         runner_role = _normalize_role(request.runner_role, field_name="runner_role")
+        try:
+            scheduled_tick = _normalize_scheduled_tick(request.scheduled_tick)
+        except ValueError:
+            _LOGGER.error(
+                "scheduled AI brief invalid scheduled tick "
+                "market=%s schedule_role=%s runner_role=%s",
+                market,
+                schedule_role,
+                runner_role,
+            )
+            return ScheduledAiBriefResult(status="invalid_scheduled_tick")
         if not _is_within_role_window(
             market=market, schedule_role=schedule_role, now=now
         ):
@@ -927,19 +983,41 @@ class ScheduledAiBriefRunner:
                 status="unsupported_runner_role",
                 session_date=session_date,
             )
-        attempt_id = request.attempt_id or build_attempt_id(
-            scheduled_tick=request.scheduled_tick,
-            started_at=now,
-            suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
+        if request.attempt_id is None:
+            attempt_id = build_attempt_id(
+                scheduled_tick=scheduled_tick,
+                started_at=now,
+                suffix=f"pid{os.getpid()}-{uuid.uuid4().hex[:8]}",
+            )
+        else:
+            try:
+                attempt_id = _normalize_attempt_id(request.attempt_id)
+            except ValueError:
+                _LOGGER.error(
+                    "scheduled AI brief invalid attempt id "
+                    "market=%s session_date=%s schedule_role=%s runner_role=%s",
+                    market,
+                    session_date,
+                    schedule_role,
+                    runner_role,
+                )
+                return ScheduledAiBriefResult(
+                    status="invalid_attempt_id",
+                    session_date=session_date,
+                )
+        deadline_at = role_deadline_at(
+            market=market, schedule_role=schedule_role, now=now
         )
         return _ScheduledRunContext(
             now=now,
             market=market,
             schedule_role=schedule_role,
             runner_role=runner_role,
+            scheduled_tick=scheduled_tick,
             guard=guard,
             session_date=session_date,
             attempt_id=attempt_id,
+            model_deadline_at=deadline_at,
         )
 
     def run(self, request: ScheduledAiBriefRequest) -> ScheduledAiBriefResult:
@@ -951,9 +1029,11 @@ class ScheduledAiBriefRunner:
         market = run_context.market
         schedule_role = run_context.schedule_role
         runner_role = run_context.runner_role
+        scheduled_tick = run_context.scheduled_tick
         guard = run_context.guard
         session_date = run_context.session_date
         attempt_id = run_context.attempt_id
+        model_deadline_at = run_context.model_deadline_at
 
         self._state_store.preflight()
         if request.dry_run:
@@ -975,7 +1055,7 @@ class ScheduledAiBriefRunner:
                 session_date=session_date,
                 schedule_role=schedule_role,
                 runner_role=runner_role,
-                scheduled_tick=request.scheduled_tick,
+                scheduled_tick=scheduled_tick,
                 attempt_id=attempt_id,
                 run_url=request.run_url,
                 now=now,
@@ -1020,6 +1100,7 @@ class ScheduledAiBriefRunner:
             guard=guard,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _claim_main_lock(
@@ -1157,6 +1238,7 @@ class ScheduledAiBriefRunner:
         guard: GuardSnapshot,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         _LOGGER.info(
             "scheduled AI brief dispatch resolved "
@@ -1236,6 +1318,7 @@ class ScheduledAiBriefRunner:
             model_provider=model_provider,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _log_source_context_resolved(
@@ -1425,6 +1508,7 @@ class ScheduledAiBriefRunner:
         model_provider: str,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         self._notifier.require_telegram()
         main_lock = self._claim_main_lock(
@@ -1451,6 +1535,7 @@ class ScheduledAiBriefRunner:
             owner_token=main_lock.owner_token,
             artifact_key=artifact_key,
             now=now,
+            model_deadline_at=model_deadline_at,
         )
 
     def _run_locked_pipeline(
@@ -1470,6 +1555,7 @@ class ScheduledAiBriefRunner:
         owner_token: str,
         artifact_key: str,
         now: dt.datetime,
+        model_deadline_at: dt.datetime | None,
     ) -> ScheduledAiBriefResult:
         lock_renewer = _MainLockRenewer(
             state_store=self._state_store,
@@ -1491,6 +1577,7 @@ class ScheduledAiBriefRunner:
                 source_provider_chain=source_provider_chain,
                 model_provider=model_provider,
                 dry_run=False,
+                model_deadline_at=model_deadline_at,
             )
         except Exception as err:
             pipeline_error = err
@@ -1969,9 +2056,9 @@ class ScheduledAiBriefRunner:
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
-        if late_alert_status == "lock_lost_before_upload":
+        if late_alert_status in {"lock_lost_before_upload", "late_alert_send_failed"}:
             return ScheduledAiBriefResult(
-                status="lock_lost_before_upload",
+                status=late_alert_status,
                 session_date=session_date,
                 storage_key=storage_key,
             )
@@ -3492,6 +3579,8 @@ class DefaultScheduledPipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -3535,6 +3624,8 @@ class DefaultScheduledPipeline:
                 market=market,
                 model_provider=model_provider,
                 model_name="fake-ai-brief-v1",
+                model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+                model_deadline_at=model_deadline_at,
                 source_provider=source_provider,
                 source_provider_chain=source_provider_chain_value,
                 source_api_url=source_api_url,
@@ -3758,6 +3849,7 @@ def run_scheduled_ai_brief(
         notifier=DefaultScheduledNotifier(),
     )
     result = runner.run(request)
+    _write_scheduled_status_file(result)
     print(json.dumps({"status": result.status, "storage_key": result.storage_key}))
     return 0 if result.status not in _FAILED_STATUSES else 1
 

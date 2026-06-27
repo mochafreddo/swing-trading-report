@@ -3,8 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 from urllib.parse import urlencode
 
 import requests  # type: ignore[import-untyped]
@@ -34,6 +35,9 @@ class RuntimeStateLockClaim:
     expires_at: str
 
 
+_SAFE_TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
@@ -49,6 +53,13 @@ def _require_non_blank(value: str, *, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
         raise ValueError(f"{field_name} must not be blank")
+    return text
+
+
+def _require_safe_token(value: str, *, field_name: str) -> str:
+    text = _require_non_blank(value, field_name=field_name)
+    if not _SAFE_TOKEN_RE.fullmatch(text):
+        raise ValueError(f"{field_name} contains unsafe characters")
     return text
 
 
@@ -70,10 +81,10 @@ def build_scheduler_state_key(
     if normalized_kind != "attempt":
         return base
 
-    normalized_runner_role = _require_non_blank(
+    normalized_runner_role = _require_safe_token(
         runner_role or "", field_name="runner_role"
     )
-    normalized_attempt_id = _require_non_blank(
+    normalized_attempt_id = _require_safe_token(
         attempt_id or "", field_name="attempt_id"
     )
     return f"{base}:{normalized_runner_role}:{normalized_attempt_id}"

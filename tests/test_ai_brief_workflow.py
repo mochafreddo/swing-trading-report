@@ -238,6 +238,18 @@ def test_ai_brief_workflow_scheduled_runs_use_monitor_fallback_context() -> None
         "secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}"
     )
     assert (
+        run_env["OPENAI_AI_BRIEF_FALLBACK_MODEL"]
+        == "${{ vars.OPENAI_AI_BRIEF_FALLBACK_MODEL }}"
+    )
+    assert (
+        run_env["AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS"]
+        == "${{ vars.AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS }}"
+    )
+    assert (
+        run_env["AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS"]
+        == "${{ vars.AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS }}"
+    )
+    assert (
         run_env.get("AI_BRIEF_SOURCE_API_URL")
         == "${{ needs.resolve_context.outputs.source_api_url }}"
     )

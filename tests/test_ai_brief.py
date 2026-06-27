@@ -4,12 +4,13 @@ import datetime as dt
 import email.utils
 import json
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sab import ai_brief_sources
+from sab import ai_brief, ai_brief_sources
 from sab.__main__ import main
 from sab.ai_brief import FakeAiBriefProvider, run_ai_brief
 from sab.ai_brief_sources import (
@@ -345,6 +346,8 @@ def test_run_ai_brief_logs_structured_run_lifecycle(
         "ai_brief_started",
         "ai_brief_entry_report_loaded",
         "ai_brief_source_provider_completed",
+        "ai_brief_model_attempt_started",
+        "ai_brief_model_attempt_completed",
         "ai_brief_model_provider_completed",
         "ai_brief_report_written",
         "ai_brief_completed",
@@ -6728,6 +6731,46 @@ class _OpenAiSession:
         )
 
 
+class _TimeoutThenSuccessProviderFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float]] = []
+
+    def __call__(
+        self,
+        *,
+        model_provider: str,
+        model_name: str,
+        model_timeout_seconds: float,
+    ) -> object:
+        self.calls.append((model_name, model_timeout_seconds))
+        if len(self.calls) == 1:
+
+            class TimeoutProvider:
+                def build_recommendations(self, **_: object) -> object:
+                    raise ai_brief.AiBriefProviderTimeoutError(
+                        "OpenAI request timed out"
+                    )
+
+            return TimeoutProvider()
+
+        class SuccessProvider:
+            def build_recommendations(self, **_: object) -> object:
+                return ai_brief.AiBriefProviderResult(
+                    recommendations=[],
+                    source_issues=[],
+                    vetoed_candidates=[
+                        {
+                            "ticker": "AAPL.NAS",
+                            "action": "SKIP",
+                            "reason": "fallback model vetoed the candidate",
+                        }
+                    ],
+                    watch_candidates=[],
+                )
+
+        return SuccessProvider()
+
+
 def test_run_ai_brief_openai_provider_writes_structured_recommendation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -7071,6 +7114,130 @@ def test_run_ai_brief_openai_rejects_non_contiguous_ranks(
     assert "contiguous" in payload["system_issues"][0]["message"]
 
 
+def test_run_ai_brief_openai_rejects_duplicate_recommendation_tickers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[_entry_row("AAPL.NAS"), _entry_row("MSFT.NAS")],
+    )
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "source_refs": [],
+                },
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 2,
+                    "confidence": "LOW",
+                    "rationale": ["duplicate recommendation for same ticker"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "source_refs": [],
+                },
+            ],
+            "vetoed_candidates": [],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "duplicate recommendation ticker" in payload["system_issues"][0]["message"]
+
+
+def test_run_ai_brief_openai_rejects_recommendation_and_veto_conflict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    session = _OpenAiSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid on the provided data"],
+                    "checklist": ["manually confirm price and risk before order"],
+                    "source_refs": [],
+                }
+            ],
+            "vetoed_candidates": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "action": "SKIP",
+                    "reason": "model also vetoed the recommended ticker",
+                }
+            ],
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "openai_no_external_sources",
+                    "severity": "WARN",
+                    "message": "OpenAI provider was run without a news source provider.",
+                }
+            ],
+        }
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["recommendations"] == []
+    assert payload["vetoed_candidates"] == []
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
+    assert "both recommendation and veto" in payload["system_issues"][0]["message"]
+
+
 def test_run_ai_brief_openai_rejects_korean_automated_order_language(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -7205,6 +7372,649 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
     assert payload["brief_reason"] == "model_or_system_issue"
 
 
+def test_run_ai_brief_falls_back_after_model_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    factory = _TimeoutThenSuccessProviderFactory()
+    written_paths: list[str] = []
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", factory)
+    caplog.set_level("INFO", logger="sab.ai_brief")
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        report_path_callback=written_paths.append,
+    )
+
+    assert status == 0
+    assert factory.calls == [("gpt-5.5", 60.0), ("gpt-5.4-mini", 30.0)]
+    assert len(written_paths) == 1
+    payload = json.loads(Path(written_paths[0]).read_text(encoding="utf-8"))
+    assert payload["model_name"] == "gpt-5.4-mini"
+    timeout_attempt, success_attempt = payload["model_attempts"]
+    assert {
+        key: timeout_attempt[key]
+        for key in (
+            "role",
+            "model_name",
+            "timeout_seconds",
+            "status",
+            "error_type",
+            "retryable",
+        )
+    } == {
+        "role": "primary",
+        "model_name": "gpt-5.5",
+        "timeout_seconds": 60.0,
+        "status": "timeout",
+        "error_type": "AiBriefProviderTimeoutError",
+        "retryable": True,
+    }
+    assert isinstance(timeout_attempt["duration_ms"], int)
+    assert timeout_attempt["duration_ms"] >= 0
+    assert {
+        key: success_attempt[key]
+        for key in ("role", "model_name", "timeout_seconds", "status")
+    } == {
+        "role": "fallback",
+        "model_name": "gpt-5.4-mini",
+        "timeout_seconds": 30.0,
+        "status": "success",
+    }
+    assert isinstance(success_attempt["duration_ms"], int)
+    assert success_attempt["duration_ms"] >= 0
+    recovered_failure = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_attempt_failed"
+    )
+    assert recovered_failure.levelname == "WARNING"
+    assert recovered_failure.__dict__["fallback_next"] is True
+    assert not any(
+        getattr(record, "event", None) == "ai_brief_model_attempt_failed"
+        and record.levelname == "ERROR"
+        for record in caplog.records
+    )
+
+
+def test_ai_brief_caps_primary_timeout_to_total_model_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[tuple[str, float]] = []
+    report_dir = tmp_path / "reports"
+
+    def build_provider(**kwargs: object) -> object:
+        timeout_seconds = kwargs["model_timeout_seconds"]
+        assert isinstance(timeout_seconds, float)
+        calls.append((str(kwargs["model_name"]), timeout_seconds))
+
+        class SuccessProvider:
+            def build_recommendations(self, **_: object) -> object:
+                return ai_brief.AiBriefProviderResult(
+                    recommendations=[],
+                    source_issues=[],
+                    vetoed_candidates=[
+                        {
+                            "ticker": "AAPL.NAS",
+                            "action": "SKIP",
+                            "reason": "primary model vetoed the candidate",
+                        }
+                    ],
+                    watch_candidates=[],
+                )
+
+        return SuccessProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "20")
+    monkeypatch.delenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+    )
+
+    assert status == 0
+    assert calls[0][0] == "gpt-5.5"
+    assert calls[0][1] == pytest.approx(20.0)
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["model_attempts"][0]["status"] == "success"
+    assert payload["model_attempts"][0]["timeout_seconds"] == pytest.approx(20.0)
+
+
+def test_ai_brief_recomputes_fallback_timeout_from_remaining_total_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[tuple[str, float]] = []
+    report_dir = tmp_path / "reports"
+    clock = {"mono": 1000.0}
+
+    def build_provider(**kwargs: object) -> object:
+        timeout_seconds = kwargs["model_timeout_seconds"]
+        assert isinstance(timeout_seconds, float)
+        calls.append((str(kwargs["model_name"]), timeout_seconds))
+        if len(calls) == 1:
+
+            class TimeoutProvider:
+                def build_recommendations(self, **_: object) -> object:
+                    clock["mono"] += 20.0
+                    raise ai_brief.AiBriefProviderTimeoutError(
+                        "OpenAI request timed out"
+                    )
+
+            return TimeoutProvider()
+
+        class SuccessProvider:
+            def build_recommendations(self, **_: object) -> object:
+                return ai_brief.AiBriefProviderResult(
+                    recommendations=[],
+                    source_issues=[],
+                    vetoed_candidates=[
+                        {
+                            "ticker": "AAPL.NAS",
+                            "action": "SKIP",
+                            "reason": "fallback model vetoed the candidate",
+                        }
+                    ],
+                    watch_candidates=[],
+                )
+
+        return SuccessProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "45")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(ai_brief.time, "monotonic", lambda: clock["mono"])
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+    )
+
+    assert status == 0
+    assert calls[0] == ("gpt-5.5", 45.0)
+    assert calls[1] == ("gpt-5.4-mini", 25.0)
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, success_attempt = payload["model_attempts"]
+    assert timeout_attempt["timeout_seconds"] == pytest.approx(45.0)
+    assert success_attempt["timeout_seconds"] == pytest.approx(25.0)
+    assert success_attempt["status"] == "success"
+
+
+def test_ai_brief_uses_total_capped_fallback_timeout_for_deadline_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[tuple[str, float]] = []
+    report_dir = tmp_path / "reports"
+    mono_clock = {"value": 1000.0}
+    now_clock = {"value": dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)}
+
+    def build_provider(**kwargs: object) -> object:
+        timeout_seconds = kwargs["model_timeout_seconds"]
+        assert isinstance(timeout_seconds, float)
+        calls.append((str(kwargs["model_name"]), timeout_seconds))
+        if len(calls) == 1:
+
+            class TimeoutProvider:
+                def build_recommendations(self, **_: object) -> object:
+                    mono_clock["value"] += 35.0
+                    now_clock["value"] += dt.timedelta(seconds=35)
+                    raise ai_brief.AiBriefProviderTimeoutError(
+                        "OpenAI request timed out"
+                    )
+
+            return TimeoutProvider()
+
+        class SuccessProvider:
+            def build_recommendations(self, **_: object) -> object:
+                return ai_brief.AiBriefProviderResult(
+                    recommendations=[],
+                    source_issues=[],
+                    vetoed_candidates=[
+                        {
+                            "ticker": "AAPL.NAS",
+                            "action": "SKIP",
+                            "reason": "fallback model vetoed the candidate",
+                        }
+                    ],
+                    watch_candidates=[],
+                )
+
+        return SuccessProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "45")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(ai_brief.time, "monotonic", lambda: mono_clock["value"])
+    monkeypatch.setattr(
+        ai_brief,
+        "_current_utc_time",
+        lambda: now_clock["value"],
+        raising=False,
+    )
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_at=now_clock["value"] + dt.timedelta(seconds=70),
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == [("gpt-5.5", 45.0), ("gpt-5.4-mini", 10.0)]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, success_attempt = payload["model_attempts"]
+    assert timeout_attempt["status"] == "timeout"
+    assert success_attempt["status"] == "success"
+    assert success_attempt["timeout_seconds"] == pytest.approx(10.0)
+
+
+def test_ai_brief_wall_clock_timeout_interrupts_blocking_model_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+
+    def build_provider(**_: object) -> object:
+        class BlockingProvider:
+            def build_recommendations(self, **__: object) -> object:
+                time.sleep(1.0)
+                raise AssertionError("model call should have timed out")
+
+        return BlockingProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", raising=False)
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+
+    started = time.monotonic()
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=0.05,
+    )
+    elapsed_seconds = time.monotonic() - started
+
+    assert status == 0
+    assert elapsed_seconds < 0.5
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    attempt = payload["model_attempts"][0]
+    assert attempt["status"] == "timeout"
+    assert attempt["error_type"] == "AiBriefProviderTimeoutError"
+    assert attempt["timeout_seconds"] == pytest.approx(0.05)
+    assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+
+
+def test_ai_brief_wall_clock_timeout_restores_signal_handler_when_timer_arm_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Provider:
+        def build_recommendations(
+            self,
+            *,
+            recommendable_candidates: list[dict[str, object]],
+            watch_candidates: list[dict[str, object]],
+        ) -> ai_brief.AiBriefProviderResult:
+            del recommendable_candidates, watch_candidates
+            raise AssertionError("provider should not run when timer arming fails")
+
+    def previous_handler(_signum: int, _frame: object) -> None:
+        return None
+
+    active_handler: dict[str, object] = {"value": previous_handler}
+
+    def fake_signal(_signum: int, handler: object) -> object:
+        active_handler["value"] = handler
+        return previous_handler
+
+    def fake_setitimer(_kind: int, _seconds: float) -> tuple[float, float]:
+        raise RuntimeError("timer arm failed")
+
+    monkeypatch.setattr(ai_brief.signal, "getitimer", lambda _kind: (0.0, 0.0))
+    monkeypatch.setattr(ai_brief.signal, "getsignal", lambda _signum: previous_handler)
+    monkeypatch.setattr(ai_brief.signal, "signal", fake_signal)
+    monkeypatch.setattr(ai_brief.signal, "setitimer", fake_setitimer)
+
+    with pytest.raises(RuntimeError, match="timer arm failed"):
+        ai_brief._build_recommendations_with_wall_clock_timeout(
+            Provider(),
+            timeout_seconds=10.0,
+            recommendable_candidates=[],
+            watch_candidates=[],
+        )
+
+    assert active_handler["value"] is previous_handler
+
+
+def test_ai_brief_caps_fallback_timeout_to_remaining_deadline_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[tuple[str, float]] = []
+    report_dir = tmp_path / "reports"
+    now_clock = {"value": dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)}
+
+    def build_provider(**kwargs: object) -> object:
+        timeout_seconds = kwargs["model_timeout_seconds"]
+        assert isinstance(timeout_seconds, float)
+        calls.append((str(kwargs["model_name"]), timeout_seconds))
+        if len(calls) == 1:
+
+            class TimeoutProvider:
+                def build_recommendations(self, **_: object) -> object:
+                    now_clock["value"] += dt.timedelta(seconds=10)
+                    raise ai_brief.AiBriefProviderTimeoutError(
+                        "OpenAI request timed out"
+                    )
+
+            return TimeoutProvider()
+
+        class SuccessProvider:
+            def build_recommendations(self, **_: object) -> object:
+                return ai_brief.AiBriefProviderResult(
+                    recommendations=[],
+                    source_issues=[],
+                    vetoed_candidates=[
+                        {
+                            "ticker": "AAPL.NAS",
+                            "action": "SKIP",
+                            "reason": "fallback model vetoed the candidate",
+                        }
+                    ],
+                    watch_candidates=[],
+                )
+
+        return SuccessProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(
+        ai_brief,
+        "_current_utc_time",
+        lambda: now_clock["value"],
+        raising=False,
+    )
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_at=now_clock["value"] + dt.timedelta(seconds=45),
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == [("gpt-5.5", 30.0), ("gpt-5.4-mini", 20.0)]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, success_attempt = payload["model_attempts"]
+    assert timeout_attempt["status"] == "timeout"
+    assert success_attempt["status"] == "success"
+    assert success_attempt["timeout_seconds"] == pytest.approx(20.0)
+
+
+def test_ai_brief_skips_fallback_when_total_model_budget_is_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[str] = []
+    report_dir = tmp_path / "reports"
+    clock = {"mono": 1000.0}
+
+    def build_provider(**kwargs: object) -> object:
+        calls.append(str(kwargs["model_name"]))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                clock["mono"] += 45.0
+                raise ai_brief.AiBriefProviderTimeoutError("OpenAI request timed out")
+
+        return TimeoutProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "45")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(ai_brief.time, "monotonic", lambda: clock["mono"])
+    caplog.set_level("INFO", logger="sab.ai_brief")
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+    )
+
+    assert status == 0
+    assert calls == ["gpt-5.5"]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, skipped_attempt = payload["model_attempts"]
+    assert timeout_attempt["timeout_seconds"] == pytest.approx(45.0)
+    assert timeout_attempt["status"] == "timeout"
+    assert {
+        key: skipped_attempt[key]
+        for key in ("status", "error_type", "retryable", "timeout_seconds")
+    } == {
+        "status": "deadline_skipped",
+        "error_type": "TotalBudgetSkipped",
+        "retryable": False,
+        "timeout_seconds": 0.0,
+    }
+    failed_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_attempt_failed"
+    )
+    skipped_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None)
+        == "ai_brief_model_fallback_total_timeout_skipped"
+    )
+    assert failed_record.levelname == "ERROR"
+    assert skipped_record.__dict__["remaining_total_seconds"] == pytest.approx(0.0)
+
+
+def test_ai_brief_skips_fallback_when_deadline_budget_is_too_small(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[str] = []
+    report_dir = tmp_path / "reports"
+    clock = {"now": dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)}
+
+    def build_provider(**kwargs: object) -> object:
+        calls.append(str(kwargs["model_name"]))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                clock["now"] += dt.timedelta(seconds=5)
+                raise ai_brief.AiBriefProviderTimeoutError("OpenAI request timed out")
+
+        return TimeoutProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(
+        ai_brief,
+        "_current_utc_time",
+        lambda: clock["now"],
+        raising=False,
+    )
+    caplog.set_level("INFO", logger="sab.ai_brief")
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_remaining_seconds=20.0,
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == ["gpt-5.5"]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    timeout_attempt, skipped_attempt = payload["model_attempts"]
+    assert timeout_attempt["status"] == "timeout"
+    assert {
+        key: skipped_attempt[key]
+        for key in ("status", "error_type", "retryable", "duration_ms")
+    } == {
+        "status": "deadline_skipped",
+        "error_type": "DeadlineBudgetSkipped",
+        "retryable": False,
+        "duration_ms": 0,
+    }
+    failed_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_attempt_failed"
+    )
+    skipped_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_fallback_deadline_skipped"
+    )
+    assert failed_record.levelname == "ERROR"
+    assert skipped_record.levelname == "WARNING"
+
+
+def test_ai_brief_deadline_budget_is_recomputed_after_primary_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[tuple[str, float]] = []
+    report_dir = tmp_path / "reports"
+    clock = {"now": dt.datetime(2026, 6, 26, 12, 10, tzinfo=dt.UTC)}
+
+    def build_provider(**kwargs: object) -> object:
+        timeout_seconds = kwargs["model_timeout_seconds"]
+        assert isinstance(timeout_seconds, float)
+        calls.append((str(kwargs["model_name"]), timeout_seconds))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                clock["now"] += dt.timedelta(seconds=20)
+                raise ai_brief.AiBriefProviderTimeoutError("OpenAI request timed out")
+
+        return TimeoutProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+    monkeypatch.setattr(
+        ai_brief,
+        "_current_utc_time",
+        lambda: clock["now"],
+        raising=False,
+    )
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+        model_deadline_at=clock["now"] + dt.timedelta(seconds=40),
+        model_publish_margin_seconds=15.0,
+    )
+
+    assert status == 0
+    assert calls == [("gpt-5.5", 25.0), ("gpt-5.4-mini", 5.0)]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert [attempt["status"] for attempt in payload["model_attempts"]] == [
+        "timeout",
+        "timeout",
+    ]
+
+
 def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -7252,6 +8062,68 @@ def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
         "소스와 시장 맥락을 수동 확인해야 함",
     ]
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+
+
+def test_run_ai_brief_does_not_fallback_on_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    calls: list[str] = []
+    report_dir = tmp_path / "reports"
+
+    def build_provider(**kwargs: object) -> object:
+        calls.append(str(kwargs["model_name"]))
+
+        class BadProvider:
+            def build_recommendations(self, **_: object) -> object:
+                raise ai_brief.AiBriefProviderContractError("bad model JSON")
+
+        return BadProvider()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", build_provider)
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+    )
+
+    assert status == 0
+    assert calls == ["gpt-5.5"]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert len(payload["model_attempts"]) == 1
+    failed_attempt = payload["model_attempts"][0]
+    assert {
+        key: failed_attempt[key]
+        for key in (
+            "role",
+            "model_name",
+            "timeout_seconds",
+            "status",
+            "error_type",
+            "retryable",
+        )
+    } == {
+        "role": "primary",
+        "model_name": "gpt-5.5",
+        "timeout_seconds": 60.0,
+        "status": "failed",
+        "error_type": "AiBriefProviderContractError",
+        "retryable": False,
+    }
+    assert isinstance(failed_attempt["duration_ms"], int)
+    assert failed_attempt["duration_ms"] >= 0
+    assert payload["system_issues"][0]["code"] == "model_provider_contract_error"
 
 
 def test_run_ai_brief_openai_http_error_writes_empty_artifact_with_system_issue(
@@ -7613,6 +8485,34 @@ def test_run_ai_brief_openai_requires_real_model_name(
 
     assert exit_code == 1
     assert list(report_dir.glob("*.ai-brief.json")) == []
+
+
+def test_ai_brief_reads_fallback_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    config = ai_brief._build_model_attempt_configs(
+        provider="openai",
+        primary_model_name="gpt-5.5",
+        primary_timeout_seconds=60.0,
+        fallback_model_name=None,
+        fallback_timeout_seconds=None,
+    )
+
+    assert [attempt.role for attempt in config] == ["primary", "fallback"]
+    assert config[0].model_name == "gpt-5.5"
+    assert config[0].timeout_seconds == 60.0
+    assert config[1].model_name == "gpt-5.4-mini"
+    assert config[1].timeout_seconds == pytest.approx(30.0)
+
+
+def test_ai_brief_rejects_invalid_total_model_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(
+        ValueError, match="model_total_timeout_seconds must be positive"
+    ):
+        ai_brief._normalize_model_total_timeout_seconds(None)
 
 
 def test_main_routes_ai_brief_command(monkeypatch: pytest.MonkeyPatch) -> None:

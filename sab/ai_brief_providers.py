@@ -564,6 +564,7 @@ def _normalize_openai_provider_result(
         parsed.get("recommendations"), field_name="recommendations"
     )
     _validate_raw_recommendation_ranks(raw_recommendations)
+    recommended_tickers: set[str] = set()
     recommendations: list[dict[str, object]] = []
     for raw_recommendation in raw_recommendations:
         ticker = str(raw_recommendation.get("ticker") or "").strip()
@@ -571,6 +572,11 @@ def _normalize_openai_provider_result(
             raise AiBriefProviderContractError(
                 f"OpenAI output included ineligible ticker {ticker!r}"
             )
+        if ticker in recommended_tickers:
+            raise AiBriefProviderContractError(
+                f"OpenAI output included duplicate recommendation ticker {ticker!r}"
+            )
+        recommended_tickers.add(ticker)
         source_refs = _provider_source_refs(
             raw_recommendation.get("source_refs"),
             field_name="recommendations[].source_refs",
@@ -627,6 +633,16 @@ def _normalize_openai_provider_result(
         eligible_tickers=set(candidate_by_ticker),
         watch_tickers=set(watch_candidate_by_ticker),
     )
+    veto_conflicts = sorted(
+        ticker
+        for row in vetoed_candidates
+        if (ticker := str(row.get("ticker") or "").strip()) in recommended_tickers
+    )
+    if veto_conflicts:
+        raise AiBriefProviderContractError(
+            "OpenAI output included ticker in both recommendation and veto: "
+            + ", ".join(veto_conflicts)
+        )
     source_issues.extend(veto_source_issues)
     normalized_watch_candidates: list[dict[str, object]] = []
     for watch_index, raw_watch in enumerate(

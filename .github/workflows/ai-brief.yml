@@ -301,7 +301,10 @@ jobs:
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
+          OPENAI_AI_BRIEF_FALLBACK_MODEL: ${{ vars.OPENAI_AI_BRIEF_FALLBACK_MODEL }}
           AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS }}
+          AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS }}
           AI_BRIEF_SOURCE_API_TOKEN: ${{ (needs.resolve_context.outputs.source_provider == 'http-json' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',http-json,')) && secrets.AI_BRIEF_SOURCE_API_TOKEN || '' }}
           FINNHUB_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'finnhub' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',finnhub,')) && secrets.FINNHUB_API_KEY || '' }}
           POLYGON_API_KEY: ${{ (needs.resolve_context.outputs.source_provider == 'polygon-news' || contains(needs.resolve_context.outputs.source_provider_chain_memberships, ',polygon-news,')) && secrets.POLYGON_API_KEY || '' }}

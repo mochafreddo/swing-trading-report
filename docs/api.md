@@ -47,8 +47,9 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `scan` | watchlist/screener universe를 평가해 buy report 생성 | `--limit`, `--watchlist`, `--provider kis|pykrx`, `--screener-limit`, `--universe watchlist|screener|both`, `--markets KR,US` | `reports/YYYY-MM-DD(-n).buy.json` |
 | `sell` | active holdings 평가 후 sell report 생성 | `--provider kis|pykrx`, `--holdings <path>` | `reports/YYYY-MM-DD(-n).sell.json` |
 | `entry` | buy report 후보의 다음 세션 진입 조건 평가 | `--buy-report`, `--provider kis|pykrx`, `--mode PRE_OPEN|INTRADAY|AFTER_CLOSE`, `--market KR|US`, `--upload` | `reports/YYYY-MM-DD(-n).entry.json` |
-| `ai-brief` | entry report의 executable/blocked/watch 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--source-provider`, `--source-report`, `--source-api-url`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
+| `ai-brief` | entry report의 executable/blocked/watch 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--model-timeout-seconds`, `--source-provider`, `--source-report`, `--source-api-url`, `--source-timeout-seconds`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
 | `ai-brief-scheduled` | runtime_state guard와 marker를 사용하는 scheduled runner | `--market`, `--schedule-role`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--source-provider`, `--model-provider`, `--dry-run`, `--guard-only` | `ai-brief` 또는 `ai-brief-skip` report, runtime_state marker |
+| `ai-brief-latency-probe` | AI Brief primary/fallback 모델 호출 수와 반복 횟수 계획을 확인 | `--primary-model`, `--fallback-model`, `--repetitions 1..3` | stdout `planned_live_model_call_count=<n>`; upload/notification 없음 |
 
 ## Report Artifacts
 

@@ -163,8 +163,8 @@ Workflow files are deployed by committing to the repository default branch.
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | `.github/workflows/ci.yml` | push/PR/manual | Ruff, Mypy, Pytest, web lint/typecheck/test/build |
-| `.github/workflows/scan.yml` | weekday schedule + manual | buy report scan/upload/notify |
-| `.github/workflows/sell.yml` | weekday schedule + manual | holdings snapshot + sell report/upload/notify |
+| `.github/workflows/scan.yml` | weekday schedule + manual | manual buy report scan/upload/notify; scheduled trigger fails closed until marker-aware local upload is implemented |
+| `.github/workflows/sell.yml` | weekday schedule + manual | manual holdings snapshot + sell report/upload/notify; scheduled trigger fails closed until marker-aware local upload is implemented |
 | `.github/workflows/ai-brief.yml` | weekday schedule + manual | manual AI Brief, local-primary monitor, GitHub fallback, cutoff alert |
 | `.github/workflows/cleanup.yml` | daily schedule + manual | Storage/report_index retention cleanup |
 | `.github/workflows/audit.yml` | weekly + manual | workflow/security audit |

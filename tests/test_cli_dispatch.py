@@ -1,5 +1,7 @@
 import argparse
+from types import SimpleNamespace
 
+import pytest
 import sab.__main__ as sab_main
 from sab.scheduler.runner import ScheduledAiBriefRequest
 
@@ -190,6 +192,58 @@ def test_dispatch_command_routes_ai_brief_options(monkeypatch) -> None:
     ]
 
 
+def test_dispatch_command_routes_ai_brief_latency_probe_options(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run_probe(**kwargs) -> int:
+        calls.append(kwargs)
+        return 37
+
+    monkeypatch.setattr(
+        sab_main,
+        "ai_brief_latency_probe",
+        SimpleNamespace(run_probe=run_probe),
+        raising=False,
+    )
+
+    ns = _parse_args(
+        [
+            "ai-brief-latency-probe",
+            "--primary-model",
+            "gpt-5.5",
+            "--fallback-model",
+            "gpt-5.4-mini",
+            "--repetitions",
+            "2",
+        ]
+    )
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 37
+    assert calls == [
+        {
+            "primary_model": "gpt-5.5",
+            "fallback_model": "gpt-5.4-mini",
+            "repetitions": 2,
+        }
+    ]
+
+
+@pytest.mark.parametrize("repetitions", ["0", "4"])
+def test_ai_brief_latency_probe_repetitions_parse_error(repetitions: str) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _parse_args(
+            [
+                "ai-brief-latency-probe",
+                "--primary-model",
+                "gpt-5.5",
+                "--repetitions",
+                repetitions,
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
 def test_dispatch_command_routes_scheduled_ai_brief_options(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -244,6 +298,9 @@ def test_dispatch_command_routes_scheduled_ai_brief_options(monkeypatch) -> None
             "guard_only": True,
         }
     ]
+    request = calls[0]["request"]
+    assert not hasattr(request, "fallback_model")
+    assert not hasattr(request, "fallback_timeout_seconds")
 
 
 def test_dispatch_command_prints_help_for_missing_command() -> None:

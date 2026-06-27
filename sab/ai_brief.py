@@ -5,8 +5,12 @@ import json
 import logging
 import math
 import os
+import signal
+import threading
+import time
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any, Protocol, cast
 
 from .ai_brief_candidates import (
     AiBriefEntryCandidate,
@@ -21,6 +25,7 @@ from .ai_brief_providers import (
     WATCH_RETRIGGER_CONDITIONS_KO,
     AiBriefProviderContractError,
     AiBriefProviderError,
+    AiBriefProviderResult,
     AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
@@ -103,6 +108,10 @@ _FIXED_API_SOURCE_PROVIDERS = frozenset(
 )
 
 
+def _current_utc_time() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
 def _source_provider_retryable(source_provider: str) -> bool:
     return source_provider in _TIMEOUT_SOURCE_PROVIDERS
 
@@ -166,6 +175,137 @@ def _normalize_model_timeout_seconds(value: float | None) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ValueError("model_timeout_seconds must be positive")
     return float(value)
+
+
+def _normalize_model_deadline_remaining_seconds(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if not math.isfinite(value):
+        return None
+    return max(float(value), 0.0)
+
+
+def _normalize_model_deadline_at(value: dt.datetime | None) -> dt.datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.UTC)
+    return value.astimezone(dt.UTC)
+
+
+def _resolve_model_deadline_at(
+    *,
+    model_deadline_at: dt.datetime | None,
+    model_deadline_remaining_seconds: float | None,
+) -> dt.datetime | None:
+    normalized_deadline_at = _normalize_model_deadline_at(model_deadline_at)
+    if normalized_deadline_at is not None:
+        return normalized_deadline_at
+    if model_deadline_remaining_seconds is None:
+        return None
+    return _current_utc_time() + dt.timedelta(seconds=model_deadline_remaining_seconds)
+
+
+def _normalize_model_publish_margin_seconds(value: float) -> float:
+    if not math.isfinite(value):
+        return 15.0
+    return max(float(value), 0.0)
+
+
+@dataclass(frozen=True)
+class _ModelAttemptConfig:
+    role: str
+    model_name: str
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class _ModelAttemptRecord:
+    role: str
+    model_name: str
+    timeout_seconds: float
+    status: str
+    duration_ms: int
+    error_type: str | None = None
+    retryable: bool | None = None
+
+
+class _AiBriefModelProvider(Protocol):
+    def build_recommendations(
+        self,
+        *,
+        recommendable_candidates: list[dict[str, object]],
+        watch_candidates: list[dict[str, object]],
+    ) -> AiBriefProviderResult: ...
+
+
+class _ModelAttemptWallClockTimeout(TimeoutError):
+    pass
+
+
+def _normalize_model_total_timeout_seconds(value: float | None) -> float | None:
+    if value is None:
+        value = _read_env_float(
+            "AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS must be a number",
+        )
+    if value is None:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("model_total_timeout_seconds must be positive")
+    return float(value)
+
+
+def _normalize_fallback_model_timeout_seconds(value: float | None) -> float:
+    if value is None:
+        value = _read_env_float(
+            "AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS",
+            error_message="AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS must be a number",
+        )
+    if value is None:
+        return 30.0
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("model_fallback_timeout_seconds must be positive")
+    return float(value)
+
+
+def _fallback_model_name(provider: str, value: str | None) -> str | None:
+    if provider != _MODEL_PROVIDER_OPENAI:
+        return None
+    raw = value if value is not None else os.getenv("OPENAI_AI_BRIEF_FALLBACK_MODEL")
+    text = str(raw or "").strip()
+    return text or None
+
+
+def _build_model_attempt_configs(
+    *,
+    provider: str,
+    primary_model_name: str,
+    primary_timeout_seconds: float,
+    fallback_model_name: str | None,
+    fallback_timeout_seconds: float | None,
+) -> list[_ModelAttemptConfig]:
+    attempts = [
+        _ModelAttemptConfig(
+            role="primary",
+            model_name=primary_model_name,
+            timeout_seconds=primary_timeout_seconds,
+        )
+    ]
+    fallback_name = _fallback_model_name(provider, fallback_model_name)
+    if fallback_name is None or fallback_name == primary_model_name:
+        return attempts
+    fallback_timeout = _normalize_fallback_model_timeout_seconds(
+        fallback_timeout_seconds
+    )
+    attempts.append(
+        _ModelAttemptConfig(
+            role="fallback",
+            model_name=fallback_name,
+            timeout_seconds=fallback_timeout,
+        )
+    )
+    return attempts
 
 
 def _normalize_article_reader(value: str | None) -> ArticleReaderName:
@@ -588,6 +728,385 @@ def _build_provider(
     )
 
 
+def _attempt_record_dict(record: _ModelAttemptRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "role": record.role,
+        "model_name": record.model_name,
+        "timeout_seconds": record.timeout_seconds,
+        "status": record.status,
+        "duration_ms": record.duration_ms,
+    }
+    if record.error_type is not None:
+        payload["error_type"] = record.error_type
+    if record.retryable is not None:
+        payload["retryable"] = record.retryable
+    return payload
+
+
+def _skipped_model_attempt_record(
+    attempt: _ModelAttemptConfig, *, error_type: str
+) -> _ModelAttemptRecord:
+    return _ModelAttemptRecord(
+        role=attempt.role,
+        model_name=attempt.model_name,
+        timeout_seconds=0.0,
+        status="deadline_skipped",
+        duration_ms=0,
+        error_type=error_type,
+        retryable=False,
+    )
+
+
+def _build_recommendations_with_wall_clock_timeout(
+    provider: _AiBriefModelProvider,
+    *,
+    timeout_seconds: float,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+) -> AiBriefProviderResult:
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or not hasattr(signal, "getitimer")
+        or not hasattr(signal, "setitimer")
+    ):
+        return provider.build_recommendations(
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
+
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    if previous_timer[0] > 0 or previous_timer[1] > 0:
+        return provider.build_recommendations(
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def raise_timeout(_signum: int, _frame: object) -> None:
+        raise _ModelAttemptWallClockTimeout
+
+    signal.signal(signal.SIGALRM, raise_timeout)
+    timer_armed = False
+    try:
+        signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+        timer_armed = True
+        return provider.build_recommendations(
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+        )
+    except _ModelAttemptWallClockTimeout as exc:
+        raise AiBriefProviderTimeoutError(
+            "AI brief model attempt exceeded wall-clock timeout"
+        ) from exc
+    finally:
+        try:
+            if timer_armed:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+        finally:
+            signal.signal(signal.SIGALRM, previous_handler)
+
+
+def _run_model_attempts(
+    *,
+    model_provider: str,
+    attempts: list[_ModelAttemptConfig],
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    run_id: str,
+    operation: str,
+    market: str,
+    model_deadline_at: dt.datetime | None,
+    model_publish_margin_seconds: float,
+    model_total_timeout_seconds: float | None,
+) -> tuple[
+    AiBriefProviderResult | None,
+    str,
+    list[_ModelAttemptRecord],
+    AiBriefProviderError | None,
+]:
+    records: list[_ModelAttemptRecord] = []
+    last_error: AiBriefProviderError | None = None
+    total_started = (
+        time.monotonic() if model_total_timeout_seconds is not None else None
+    )
+    for index, attempt in enumerate(attempts):
+        attempt_timeout_seconds = attempt.timeout_seconds
+        if total_started is not None and model_total_timeout_seconds is not None:
+            remaining_total_seconds = model_total_timeout_seconds - (
+                time.monotonic() - total_started
+            )
+            if remaining_total_seconds <= 0:
+                records.append(
+                    _skipped_model_attempt_record(
+                        attempt,
+                        error_type="TotalBudgetSkipped",
+                    )
+                )
+                return (
+                    None,
+                    attempt.model_name,
+                    records,
+                    last_error
+                    or AiBriefProviderTimeoutError(
+                        "AI brief model total timeout budget exhausted"
+                    ),
+                )
+            attempt_timeout_seconds = min(
+                attempt_timeout_seconds,
+                remaining_total_seconds,
+            )
+        if model_deadline_at is not None:
+            remaining_after_margin_seconds = (
+                model_deadline_at - _current_utc_time()
+            ).total_seconds() - model_publish_margin_seconds
+            if remaining_after_margin_seconds <= 0:
+                records.append(
+                    _skipped_model_attempt_record(
+                        attempt,
+                        error_type="DeadlineBudgetSkipped",
+                    )
+                )
+                return (
+                    None,
+                    attempt.model_name,
+                    records,
+                    last_error
+                    or AiBriefProviderTimeoutError(
+                        "AI brief model deadline budget exhausted"
+                    ),
+                )
+            attempt_timeout_seconds = min(
+                attempt_timeout_seconds,
+                remaining_after_margin_seconds,
+            )
+        started = time.monotonic()
+        logger.info(
+            "AI brief model attempt started",
+            extra={
+                "event": "ai_brief_model_attempt_started",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "started",
+                "model_provider": model_provider,
+                "dependency": model_provider,
+                "model_role": attempt.role,
+                "attempt_index": index,
+                "model_name": attempt.model_name,
+                "market": market,
+                "ticker_count": len(recommendable_candidates),
+                "watch_count": len(watch_candidates),
+                "timeout_seconds": attempt_timeout_seconds,
+            },
+        )
+        provider = _build_provider(
+            model_provider=model_provider,
+            model_name=attempt.model_name,
+            model_timeout_seconds=attempt_timeout_seconds,
+        )
+        try:
+            result = _build_recommendations_with_wall_clock_timeout(
+                provider,
+                timeout_seconds=attempt_timeout_seconds,
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+            )
+        except AiBriefProviderError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            retryable = _model_provider_retryable(exc)
+            fallback_next = (
+                retryable
+                and isinstance(exc, AiBriefProviderTimeoutError)
+                and index + 1 < len(attempts)
+            )
+            deadline_skipped_attempt: _ModelAttemptRecord | None = None
+            fallback_current_remaining_seconds: float | None = None
+            fallback_remaining_after_margin_seconds: float | None = None
+            fallback_remaining_total_seconds: float | None = None
+            fallback_effective_timeout_seconds: float | None = None
+            next_attempt: _ModelAttemptConfig | None = None
+            if fallback_next:
+                next_attempt = attempts[index + 1]
+                fallback_effective_timeout_seconds = next_attempt.timeout_seconds
+                if (
+                    total_started is not None
+                    and model_total_timeout_seconds is not None
+                ):
+                    fallback_remaining_total_seconds = model_total_timeout_seconds - (
+                        time.monotonic() - total_started
+                    )
+                    if fallback_remaining_total_seconds <= 0:
+                        fallback_next = False
+                        deadline_skipped_attempt = _skipped_model_attempt_record(
+                            next_attempt,
+                            error_type="TotalBudgetSkipped",
+                        )
+                    else:
+                        fallback_effective_timeout_seconds = min(
+                            fallback_effective_timeout_seconds,
+                            fallback_remaining_total_seconds,
+                        )
+            if fallback_next and model_deadline_at is not None:
+                assert next_attempt is not None
+                assert fallback_effective_timeout_seconds is not None
+                fallback_current_remaining_seconds = (
+                    model_deadline_at - _current_utc_time()
+                ).total_seconds()
+                fallback_remaining_after_margin_seconds = (
+                    fallback_current_remaining_seconds - model_publish_margin_seconds
+                )
+                if fallback_remaining_after_margin_seconds <= 0:
+                    fallback_next = False
+                    deadline_skipped_attempt = _skipped_model_attempt_record(
+                        next_attempt,
+                        error_type="DeadlineBudgetSkipped",
+                    )
+                else:
+                    fallback_effective_timeout_seconds = min(
+                        fallback_effective_timeout_seconds,
+                        fallback_remaining_after_margin_seconds,
+                    )
+            status = (
+                "timeout" if isinstance(exc, AiBriefProviderTimeoutError) else "failed"
+            )
+            records.append(
+                _ModelAttemptRecord(
+                    role=attempt.role,
+                    model_name=attempt.model_name,
+                    timeout_seconds=attempt_timeout_seconds,
+                    status=status,
+                    duration_ms=duration_ms,
+                    error_type=type(exc).__name__,
+                    retryable=retryable,
+                )
+            )
+            if deadline_skipped_attempt is not None:
+                records.append(deadline_skipped_attempt)
+            log_method = logger.warning if fallback_next else logger.error
+            log_method(
+                "AI brief model attempt failed: %s",
+                exc,
+                extra={
+                    "event": "ai_brief_model_attempt_failed",
+                    "run_id": run_id,
+                    "operation": operation,
+                    "status": "degraded",
+                    "model_provider": model_provider,
+                    "dependency": model_provider,
+                    "model_role": attempt.role,
+                    "attempt_index": index,
+                    "model_name": attempt.model_name,
+                    "market": market,
+                    "ticker_count": len(recommendable_candidates),
+                    "watch_count": len(watch_candidates),
+                    "timeout_seconds": attempt_timeout_seconds,
+                    "duration_ms": duration_ms,
+                    "error_type": type(exc).__name__,
+                    "retryable": retryable,
+                    "fallback_next": fallback_next,
+                },
+            )
+            if deadline_skipped_attempt is not None:
+                deadline_at_for_log = (
+                    None if model_deadline_at is None else model_deadline_at.isoformat()
+                )
+                skip_event = "ai_brief_model_fallback_deadline_skipped"
+                skip_message = "AI brief model fallback skipped because deadline budget is too small"
+                if deadline_skipped_attempt.error_type == "TotalBudgetSkipped":
+                    skip_event = "ai_brief_model_fallback_total_timeout_skipped"
+                    skip_message = (
+                        "AI brief model fallback skipped because total timeout budget "
+                        "is exhausted"
+                    )
+                logger.warning(
+                    skip_message,
+                    extra={
+                        "event": skip_event,
+                        "run_id": run_id,
+                        "operation": operation,
+                        "status": "degraded",
+                        "model_provider": model_provider,
+                        "dependency": model_provider,
+                        "attempt_index": index,
+                        "model_name": attempt.model_name,
+                        "fallback_model_name": deadline_skipped_attempt.model_name,
+                        "market": market,
+                        "model_deadline_at": deadline_at_for_log,
+                        "remaining_deadline_seconds": (
+                            fallback_current_remaining_seconds
+                        ),
+                        "publish_margin_seconds": model_publish_margin_seconds,
+                        "remaining_after_margin_seconds": (
+                            fallback_remaining_after_margin_seconds
+                        ),
+                        "model_total_timeout_seconds": model_total_timeout_seconds,
+                        "remaining_total_seconds": fallback_remaining_total_seconds,
+                        "skip_error_type": deadline_skipped_attempt.error_type,
+                        "fallback_timeout_seconds": (
+                            deadline_skipped_attempt.timeout_seconds
+                        ),
+                    },
+                )
+            last_error = exc
+            if fallback_next:
+                next_attempt = attempts[index + 1]
+                logger.warning(
+                    "AI brief model fallback selected",
+                    extra={
+                        "event": "ai_brief_model_fallback_selected",
+                        "run_id": run_id,
+                        "operation": operation,
+                        "status": "degraded",
+                        "model_provider": model_provider,
+                        "dependency": model_provider,
+                        "attempt_index": index,
+                        "model_name": attempt.model_name,
+                        "fallback_model_name": next_attempt.model_name,
+                        "market": market,
+                        "error_type": type(exc).__name__,
+                        "retryable": retryable,
+                        "fallback_next": True,
+                    },
+                )
+                continue
+            return None, attempt.model_name, records, exc
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        records.append(
+            _ModelAttemptRecord(
+                role=attempt.role,
+                model_name=attempt.model_name,
+                timeout_seconds=attempt_timeout_seconds,
+                status="success",
+                duration_ms=duration_ms,
+            )
+        )
+        logger.info(
+            "AI brief model attempt completed",
+            extra={
+                "event": "ai_brief_model_attempt_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "model_provider": model_provider,
+                "dependency": model_provider,
+                "model_role": attempt.role,
+                "attempt_index": index,
+                "model_name": attempt.model_name,
+                "market": market,
+                "ticker_count": len(recommendable_candidates),
+                "watch_count": len(watch_candidates),
+                "timeout_seconds": attempt_timeout_seconds,
+                "duration_ms": duration_ms,
+                "recommendation_count": len(result.recommendations),
+                "vetoed_count": len(result.vetoed_candidates),
+                "source_issue_count": len(result.source_issues),
+            },
+        )
+        return result, attempt.model_name, records, None
+    return None, attempts[0].model_name, records, last_error
+
+
 def _provider_system_issue(exc: AiBriefProviderError) -> dict[str, object]:
     return {
         "ticker": None,
@@ -659,6 +1178,9 @@ def run_ai_brief(
     model_provider: str | None,
     model_name: str | None,
     model_timeout_seconds: float | None = None,
+    model_deadline_remaining_seconds: float | None = None,
+    model_deadline_at: dt.datetime | None = None,
+    model_publish_margin_seconds: float = 15.0,
     source_provider: str | None = None,
     source_report_path: str | None = None,
     source_provider_chain: str | None = None,
@@ -684,6 +1206,20 @@ def run_ai_brief(
         )
         normalized_model_timeout_seconds = _normalize_model_timeout_seconds(
             model_timeout_seconds
+        )
+        normalized_model_deadline_remaining_seconds = (
+            _normalize_model_deadline_remaining_seconds(
+                model_deadline_remaining_seconds
+            )
+        )
+        normalized_model_deadline_at = _resolve_model_deadline_at(
+            model_deadline_at=model_deadline_at,
+            model_deadline_remaining_seconds=(
+                normalized_model_deadline_remaining_seconds
+            ),
+        )
+        normalized_model_publish_margin_seconds = (
+            _normalize_model_publish_margin_seconds(model_publish_margin_seconds)
         )
         normalized_source_provider = _normalize_source_provider(
             value=source_provider,
@@ -724,6 +1260,12 @@ def run_ai_brief(
             "market": normalized_market,
             "model_provider": normalized_model_provider,
             "model_name": normalized_model_name,
+            "model_deadline_at": (
+                None
+                if normalized_model_deadline_at is None
+                else normalized_model_deadline_at.isoformat()
+            ),
+            "model_publish_margin_seconds": normalized_model_publish_margin_seconds,
             "source_provider": normalized_source_provider,
             "source_provider_chain": source_provider_chain,
             "article_reader": article_reader_settings.reader,
@@ -995,61 +1537,43 @@ def run_ai_brief(
         )
         return 1
 
+    model_attempts: list[_ModelAttemptRecord] = []
     try:
-        provider = _build_provider(
-            model_provider=normalized_model_provider,
-            model_name=normalized_model_name,
-            model_timeout_seconds=normalized_model_timeout_seconds,
+        model_total_timeout_seconds = _normalize_model_total_timeout_seconds(None)
+        attempt_configs = _build_model_attempt_configs(
+            provider=normalized_model_provider,
+            primary_model_name=normalized_model_name,
+            primary_timeout_seconds=normalized_model_timeout_seconds,
+            fallback_model_name=None,
+            fallback_timeout_seconds=None,
         )
-        provider_result = provider.build_recommendations(
-            recommendable_candidates=preselected_candidates,
-            watch_candidates=watch_candidates,
+        provider_result, effective_model_name, model_attempts, provider_error = (
+            _run_model_attempts(
+                model_provider=normalized_model_provider,
+                attempts=attempt_configs,
+                recommendable_candidates=preselected_candidates,
+                watch_candidates=watch_candidates,
+                run_id=run_id,
+                operation=operation,
+                market=target_market,
+                model_deadline_at=normalized_model_deadline_at,
+                model_publish_margin_seconds=normalized_model_publish_margin_seconds,
+                model_total_timeout_seconds=model_total_timeout_seconds,
+            )
         )
-        recommendations = provider_result.recommendations
-        source_issues = [*source_provider_issues, *provider_result.source_issues]
-        vetoed_candidates = provider_result.vetoed_candidates
-        model_watch_candidates = provider_result.watch_candidates
-        logger.info(
-            "AI brief model provider completed",
-            extra={
-                "event": "ai_brief_model_provider_completed",
-                "run_id": run_id,
-                "operation": operation,
-                "status": "success",
-                "model_provider": normalized_model_provider,
-                "dependency": normalized_model_provider,
-                "model_name": normalized_model_name,
-                "market": target_market,
-                "ticker_count": len(preselected_candidates),
-                "watch_count": len(watch_candidates),
-                "recommendation_count": len(recommendations),
-                "vetoed_count": len(vetoed_candidates),
-                "source_issue_count": len(source_issues),
-            },
-        )
-    except AiBriefProviderError as exc:
-        logger.error(
-            "AI brief provider failed: %s",
-            exc,
-            extra={
-                "event": "ai_brief_model_provider_failed",
-                "run_id": run_id,
-                "operation": operation,
-                "status": "degraded",
-                "model_provider": normalized_model_provider,
-                "dependency": normalized_model_provider,
-                "model_name": normalized_model_name,
-                "market": target_market,
-                "ticker_count": len(preselected_candidates),
-                "error_type": type(exc).__name__,
-                "retryable": _model_provider_retryable(exc),
-            },
-        )
-        recommendations = []
-        source_issues = source_provider_issues
-        vetoed_candidates = []
-        model_watch_candidates = _fallback_watch_candidates(watch_candidates)
-        system_issues.append(_provider_system_issue(exc))
+        if provider_result is not None:
+            recommendations = provider_result.recommendations
+            source_issues = [*source_provider_issues, *provider_result.source_issues]
+            vetoed_candidates = provider_result.vetoed_candidates
+            model_watch_candidates = provider_result.watch_candidates
+            normalized_model_name = effective_model_name
+        else:
+            assert provider_error is not None
+            recommendations = []
+            source_issues = source_provider_issues
+            vetoed_candidates = []
+            model_watch_candidates = _fallback_watch_candidates(watch_candidates)
+            system_issues.append(_provider_system_issue(provider_error))
     except ValueError as exc:
         logger.error(
             "%s",
@@ -1069,6 +1593,45 @@ def run_ai_brief(
         )
         return 1
 
+    if provider_result is not None:
+        logger.info(
+            "AI brief model provider completed",
+            extra={
+                "event": "ai_brief_model_provider_completed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "success",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": normalized_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "watch_count": len(watch_candidates),
+                "recommendation_count": len(recommendations),
+                "vetoed_count": len(vetoed_candidates),
+                "source_issue_count": len(source_issues),
+            },
+        )
+    else:
+        assert provider_error is not None
+        logger.error(
+            "AI brief provider failed: %s",
+            provider_error,
+            extra={
+                "event": "ai_brief_model_provider_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "degraded",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "model_name": effective_model_name,
+                "market": target_market,
+                "ticker_count": len(preselected_candidates),
+                "error_type": type(provider_error).__name__,
+                "retryable": _model_provider_retryable(provider_error),
+            },
+        )
+
     artifact = {
         "source_entry_report": os.path.basename(entry_report_path),
         "source_buy_report": (
@@ -1079,6 +1642,7 @@ def run_ai_brief(
         "market": target_market,
         "model_provider": normalized_model_provider,
         "model_name": normalized_model_name,
+        "model_attempts": [_attempt_record_dict(record) for record in model_attempts],
         "summary": _build_summary(
             entry_count=len(target_rows),
             recommendable_count=len(eligible_candidates),
@@ -1228,6 +1792,7 @@ def run_ai_brief(
 __all__ = [
     "AiBriefProviderContractError",
     "AiBriefProviderError",
+    "AiBriefProviderResult",
     "AiBriefProviderTimeoutError",
     "FakeAiBriefProvider",
     "OpenAiBriefProvider",

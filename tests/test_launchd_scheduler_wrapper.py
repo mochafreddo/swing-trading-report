@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml  # type: ignore[import-untyped]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,6 +22,7 @@ def _run_wrapper_with_stubs(
     tmp_path: Path,
     *,
     docker_script: str,
+    wrapper_args: list[str] | None = None,
     tee_script: str | None = None,
     mktemp_script: str | None = None,
     mkfifo_script: str | None = None,
@@ -63,9 +66,8 @@ def _run_wrapper_with_stubs(
     )
     wrapper_copy.chmod(0o755)
     env = {**os.environ, **(extra_env or {})}
-    result = subprocess.run(
-        [
-            str(wrapper_copy),
+    if wrapper_args is None:
+        wrapper_args = [
             "--repo-root",
             str(tmp_path),
             "--env-file",
@@ -78,7 +80,9 @@ def _run_wrapper_with_stubs(
             "local-primary",
             "--scheduled-tick",
             "0810",
-        ],
+        ]
+    result = subprocess.run(
+        [str(wrapper_copy), *wrapper_args],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -103,6 +107,60 @@ def _run_plist_timing_check(repo_root: Path) -> subprocess.CompletedProcess[str]
     )
 
 
+def _assert_alert_omits_secrets(alert_text: str) -> None:
+    assert "test-token" not in alert_text
+    assert "test-chat" not in alert_text
+
+
+def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -> None:
+    generic_wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    ai_brief_wrapper = Path("scripts/launchd/sab-ai-brief-wrapper.sh")
+
+    assert generic_wrapper.is_file()
+    assert ai_brief_wrapper.is_file()
+    assert os.access(generic_wrapper, os.X_OK)
+
+    generic_text = generic_wrapper.read_text(encoding="utf-8")
+    assert "--pipeline" in generic_text
+    assert "--scope" in generic_text
+    assert "ai-brief|scan|sell" in generic_text
+    assert "[pipeline-specific args]" not in generic_text
+
+
+def test_generic_scheduled_wrapper_argument_validation() -> None:
+    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+
+    valid = subprocess.run(
+        [str(wrapper), "--pipeline", "scan", "--scope", "KR"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert valid.returncode == 2
+    assert (
+        "generic scheduled wrapper requires pipeline-specific execution "
+        "for pipeline=scan scope=KR"
+    ) in valid.stderr
+
+    for args in (
+        ["--pipeline"],
+        ["--scope"],
+        ["--pipeline", "scan", "--scope", "KR", "--unexpected"],
+        ["--pipeline", "entry", "--scope", "KR"],
+        ["--pipeline", "scan", "--scope", "BOTH"],
+    ):
+        result = subprocess.run(
+            [str(wrapper), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "usage:" in result.stderr
+
+
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     wrapper = Path("scripts/launchd/sab-ai-brief-wrapper.sh")
     text = wrapper.read_text(encoding="utf-8")
@@ -120,6 +178,105 @@ def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
     assert "send_host_failure_alert" in text
     assert "TELEGRAM_BOT_TOKEN" in text
     assert "TELEGRAM_CHAT_ID" in text
+
+
+def test_launchd_wrapper_rejects_unsafe_path_tokens_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "../local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "0810",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_rejects_invalid_scheduled_tick_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "08/10",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
+
+
+def test_launchd_wrapper_rejects_out_of_range_scheduled_tick_before_log_creation(
+    tmp_path: Path,
+) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' 'docker should not start' >&2\n"
+            "exit 1\n"
+        ),
+        wrapper_args=[
+            "--repo-root",
+            str(tmp_path),
+            "--env-file",
+            str(tmp_path / ".env.scheduler.local"),
+            "--market",
+            "US",
+            "--schedule-role",
+            "local-primary",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "2460",
+        ],
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert "docker should not start" not in result.stderr
+    assert not (tmp_path / "logs").exists()
+    assert not alerts_path.exists()
 
 
 def test_launchd_wrapper_suppresses_host_failure_for_structured_pipeline_failed(
@@ -140,6 +297,84 @@ def test_launchd_wrapper_suppresses_host_failure_for_structured_pipeline_failed(
     assert not alerts_path.exists()
 
 
+def test_launchd_wrapper_uses_status_file_before_stdout_tail(tmp_path: Path) -> None:
+    result, alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"pipeline_failed","storage_key":null}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            'printf \'%s\\n\' \'{"status":"pipeline_failed","storage_key":null}\'\n'
+            "printf '%s\\n' 'diagnostic: status json was followed by details'\n"
+            "exit 1\n"
+        ),
+    )
+
+    assert result.returncode == 1
+    assert "diagnostic: status json was followed by details" in result.stdout
+    assert not alerts_path.exists()
+    attempt_logs = tmp_path / "logs" / "scheduled" / "ai-brief"
+    assert list(attempt_logs.glob("**/*.out.log"))
+    assert list(attempt_logs.glob("**/*.err.log"))
+
+
+def test_launchd_wrapper_writes_attempt_scoped_command_log(tmp_path: Path) -> None:
+    result, _alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"success","storage_key":"reports/example.json"}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            "exit 0\n"
+        ),
+    )
+
+    cmd_logs = sorted((tmp_path / "logs" / "scheduled").glob("**/*.cmd.log"))
+
+    assert result.returncode == 0
+    assert cmd_logs
+    for cmd_log in cmd_logs:
+        cmd_log_text = cmd_log.read_text(encoding="utf-8")
+        assert "TELEGRAM_BOT_TOKEN" not in cmd_log_text
+        assert "test-token" not in cmd_log_text
+        assert cmd_log.stat().st_mode & 0o077 == 0
+
+
+def test_launchd_wrapper_streams_stderr_to_launchd_and_attempt_log(
+    tmp_path: Path,
+) -> None:
+    result, _alerts_path = _run_wrapper_with_stubs(
+        tmp_path,
+        docker_script=(
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ -n "${SAB_SCHEDULER_STATUS_FILE:-}" ]]; then\n'
+            "  printf '%s\\n' "
+            '\'{"status":"success","storage_key":"reports/example.json"}\' '
+            '> "${SAB_SCHEDULER_STATUS_FILE}"\n'
+            "fi\n"
+            "printf '%s\\n' 'scheduler stderr detail' >&2\n"
+            "exit 0\n"
+        ),
+    )
+
+    err_logs = sorted((tmp_path / "logs" / "scheduled").glob("**/*.err.log"))
+
+    assert result.returncode == 0
+    assert "scheduler stderr detail" in result.stderr
+    assert err_logs
+    assert "scheduler stderr detail" in err_logs[0].read_text(encoding="utf-8")
+    assert err_logs[0].stat().st_mode & 0o077 == 0
+
+
 def test_launchd_wrapper_sends_host_failure_without_structured_status(
     tmp_path: Path,
 ) -> None:
@@ -157,6 +392,7 @@ def test_launchd_wrapper_sends_host_failure_without_structured_status(
     assert "container crashed before app status" in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_container_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
@@ -177,6 +413,7 @@ def test_launchd_wrapper_sends_host_failure_when_stdout_capture_fails(
     assert '{"status": "pipeline_failed", "storage_key": null}' in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
@@ -200,6 +437,7 @@ def test_launchd_wrapper_sends_host_failure_when_capture_setup_fails(
     assert "scheduler should not start" not in result.stdout
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
@@ -240,6 +478,7 @@ def test_launchd_wrapper_cleans_stdout_tempfile_when_capture_dir_setup_fails(
     assert not stdout_file.exists()
     alert_text = alerts_path.read_text(encoding="utf-8")
     assert "reason=scheduler_stdout_capture_failed" in alert_text
+    _assert_alert_omits_secrets(alert_text)
 
 
 def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:
@@ -278,13 +517,23 @@ def test_launchd_log_directory_exists_before_bootstrap() -> None:
     assert Path("logs/launchd/.gitkeep").is_file()
 
 
-def test_scheduler_compose_has_one_shot_runner_service() -> None:
-    compose = Path("docker-compose.scheduler.yml").read_text(encoding="utf-8")
+def test_scheduler_attempt_and_measurement_logs_are_gitignored() -> None:
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
 
-    assert "scheduler:" in compose
-    assert 'restart: "no"' in compose
-    assert ".env.scheduler.local" in compose
-    assert "uv run python -m sab ai-brief-scheduled" in compose
+    assert "/logs/scheduled/" in gitignore
+    assert "/logs/measurements/" in gitignore
+
+
+def test_scheduler_compose_has_one_shot_runner_service() -> None:
+    compose = yaml.safe_load(
+        Path("docker-compose.scheduler.yml").read_text(encoding="utf-8")
+    )
+    scheduler = compose["services"]["scheduler"]
+
+    assert scheduler["restart"] == "no"
+    assert "container_name" not in scheduler
+    assert scheduler["env_file"] == ["${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}"]
+    assert scheduler["command"] == "uv run python -m sab ai-brief-scheduled"
 
 
 def test_launchd_verify_script_is_non_destructive() -> None:

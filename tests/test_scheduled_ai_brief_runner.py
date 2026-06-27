@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import os
 import threading
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +15,7 @@ import sab.scheduler.runner as scheduler_runner
 from sab.config import load_config
 from sab.config_loader import ConfigLoadError
 from sab.env_loader import getenv, load_dotenv_if_available
+from sab.scheduler import status_file as scheduler_status_file
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
     DefaultScheduledPipeline,
@@ -174,6 +177,8 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> None:
@@ -189,6 +194,10 @@ class _FakePipeline:
                     "source_provider_chain": source_provider_chain,
                     "model_provider": model_provider,
                     "dry_run": dry_run,
+                    "model_deadline_remaining_seconds": (
+                        model_deadline_remaining_seconds
+                    ),
+                    "model_deadline_at": model_deadline_at,
                 },
             )
         )
@@ -202,6 +211,8 @@ class _FakePipeline:
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -214,6 +225,8 @@ class _FakePipeline:
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         if self.fail:
             raise RuntimeError(self.failure_message)
@@ -235,6 +248,8 @@ class _TypedEntryFailurePipeline(_FakePipeline):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -247,6 +262,8 @@ class _TypedEntryFailurePipeline(_FakePipeline):
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         raise scheduler_runner._ScheduledEntryStepError(self.entry_report_path)
 
@@ -265,6 +282,8 @@ class _BlockingPipeline(_FakePipeline):
         source_provider: str | None,
         model_provider: str,
         dry_run: bool,
+        model_deadline_remaining_seconds: float | None = None,
+        model_deadline_at: dt.datetime | None = None,
         source_api_url: str | None = None,
         source_provider_chain: tuple[str, ...] | None = None,
     ) -> ScheduledPipelineResult:
@@ -277,6 +296,8 @@ class _BlockingPipeline(_FakePipeline):
             source_provider_chain=source_provider_chain,
             model_provider=model_provider,
             dry_run=dry_run,
+            model_deadline_remaining_seconds=model_deadline_remaining_seconds,
+            model_deadline_at=model_deadline_at,
         )
         self.started_event.set()
         if not self.finish_event.wait(timeout=1):
@@ -467,6 +488,7 @@ def test_run_context_helper_normalizes_request_and_builds_attempt_id(
     assert context.market == "US"
     assert context.schedule_role == "local-primary"
     assert context.runner_role == "local-primary"
+    assert context.scheduled_tick == "0810"
     assert context.guard == _guard()
     assert context.session_date == "2026-05-28"
     assert context.attempt_id == "0810-20260528T121000Z-pid12345-abcdef12"
@@ -474,6 +496,51 @@ def test_run_context_helper_normalizes_request_and_builds_attempt_id(
     assert pipeline.calls == []
     assert storage.uploads == []
     assert notifier.sent == []
+
+
+def test_invalid_scheduled_tick_exits_before_runtime_state_preflight() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="2460",
+            attempt_id=None,
+        )
+    )
+
+    assert result.status == "invalid_scheduled_tick"
+    assert result.session_date is None
+    assert state.preflight_calls == 0
+    assert state.upserts == []
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
+def test_invalid_attempt_id_exits_before_runtime_state_preflight() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt:ambiguous",
+        )
+    )
+
+    assert result.status == "invalid_attempt_id"
+    assert result.session_date == "2026-05-28"
+    assert state.preflight_calls == 0
+    assert state.upserts == []
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+    assert "invalid_attempt_id" in scheduler_runner._FAILED_STATUSES
 
 
 def test_off_window_candidate_exits_before_runtime_state_preflight() -> None:
@@ -522,6 +589,28 @@ def test_github_fallback_runs_inside_bounded_queue_grace() -> None:
     assert any(
         ":attempt:US:2026-05-28:github-fallback:" in key for key, _ in state.upserts
     )
+
+
+def test_runner_passes_role_deadline_remaining_seconds_to_pipeline() -> None:
+    runner, state, pipeline, storage, notifier = _runner()
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-deadline-budget",
+        )
+    )
+
+    assert result.status == "completed"
+    assert pipeline.calls[0][1]["model_deadline_at"] == dt.datetime(
+        2026, 5, 28, 12, 30, tzinfo=dt.UTC
+    )
+    assert state.preflight_calls == 1
+    assert storage.uploads == ["reports/2026-05-28.ai-brief.json"]
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
 
 
 def test_github_fallback_queue_grace_remains_bounded() -> None:
@@ -2292,6 +2381,7 @@ def test_locked_pipeline_helper_completes_and_releases_main_lock() -> None:
         owner_token="attempt-helper-lock-owner",
         artifact_key=artifact_key,
         now=dt.datetime(2026, 5, 28, 12, 10, tzinfo=dt.UTC),
+        model_deadline_at=None,
     )
 
     assert result.status == "completed"
@@ -2480,6 +2570,8 @@ def test_pipeline_failure_late_alert_includes_scheduled_entry_report_hint() -> N
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -2934,6 +3026,8 @@ def test_wrapped_scheduled_entry_failure_alert_is_not_suppressed_by_generic_pipe
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3333,6 +3427,8 @@ def test_runner_pipeline_failure_log_keeps_original_exception_type_for_sanitized
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3397,6 +3493,8 @@ def test_runner_pipeline_failure_log_keeps_sanitized_exception_chain(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3465,6 +3563,8 @@ def test_runner_pipeline_failure_log_redacts_wrapper_and_note_entry_report_paths
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3528,6 +3628,8 @@ def test_runner_pipeline_failure_log_classifies_exception_group_entry_failure(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3722,6 +3824,8 @@ def test_runner_pipeline_failure_log_redacts_noted_windows_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3779,6 +3883,8 @@ def test_runner_pipeline_failure_log_redacts_split_scheduled_entry_note_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3832,6 +3938,8 @@ def test_runner_pipeline_failure_log_redacts_wrapped_scheduled_entry_exception_o
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3889,6 +3997,8 @@ def test_runner_pipeline_failure_log_omits_chained_unsafe_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -3946,6 +4056,8 @@ def test_runner_pipeline_failure_log_omits_noted_unsafe_entry_report_path(
             source_provider: str | None,
             model_provider: str,
             dry_run: bool,
+            model_deadline_remaining_seconds: float | None = None,
+            model_deadline_at: dt.datetime | None = None,
             source_api_url: str | None = None,
             source_provider_chain: tuple[str, ...] | None = None,
         ) -> ScheduledPipelineResult:
@@ -4152,6 +4264,30 @@ def test_pipeline_failure_late_alert_marker_failure_preserves_pipeline_status() 
     assert result.status == "pipeline_failed"
     assert any(":lock:" in key for key in state.releases)
     assert notifier.sent == ["pipeline_failed"]
+    assert any(":late-alert:claim:" in key for key in state.releases)
+
+
+def test_pipeline_failure_late_alert_delivery_failure_reports_alert_status() -> None:
+    runner, state, _pipeline, _storage, notifier = _runner(
+        pipeline=_FakePipeline(fail=True),
+        notifier=_FakeNotifier(fail_late_alert=True),
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+            attempt_id="attempt-pipeline-late-alert-send-fail",
+        )
+    )
+
+    assert result.status == "late_alert_send_failed"
+    assert any(":lock:" in key for key in state.releases)
+    assert notifier.sent == []
+    assert notifier.late_alerts == []
+    assert not any(":late-alert:sent:" in key for key, _payload in state.upserts)
     assert any(":late-alert:claim:" in key for key in state.releases)
 
 
@@ -4681,6 +4817,8 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
         source_provider_chain=("finnhub", "benzinga-news"),
         model_provider="fake",
         dry_run=False,
+        model_deadline_remaining_seconds=1200.0,
+        model_deadline_at=dt.datetime(2026, 5, 28, 12, 30, tzinfo=dt.UTC),
     )
 
     expected_holdings_path = "data/scheduler/holdings.US.2026-05-28.yaml"
@@ -4691,6 +4829,10 @@ def test_default_pipeline_uses_report_paths_returned_by_each_step(
     assert ai_brief_inputs[0]["entry_report_path"] == "reports/current.entry.json"
     assert ai_brief_inputs[0]["source_provider"] is None
     assert ai_brief_inputs[0]["source_provider_chain"] == "finnhub,benzinga-news"
+    assert ai_brief_inputs[0]["model_deadline_remaining_seconds"] == 1200.0
+    assert ai_brief_inputs[0]["model_deadline_at"] == dt.datetime(
+        2026, 5, 28, 12, 30, tzinfo=dt.UTC
+    )
     assert result.ai_brief_report_path == "reports/current.ai-brief.json"
 
 
@@ -5458,3 +5600,105 @@ def test_build_attempt_id_includes_tick_and_utc_started_at() -> None:
         )
         == "0810-20260528T121000Z-pid123"
     )
+
+
+def test_write_scheduled_status_file_writes_status_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_file = tmp_path / "nested" / "status.json"
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", str(status_file))
+
+    result = scheduler_runner.ScheduledAiBriefResult(
+        status="pipeline_failed",
+        session_date="2026-06-26",
+        storage_key=None,
+    )
+    scheduler_runner._write_scheduled_status_file(result)
+
+    payload = json.loads(status_file.read_text(encoding="utf-8"))
+    assert payload == {
+        "status": "pipeline_failed",
+        "session_date": "2026-06-26",
+        "storage_key": None,
+    }
+    assert (
+        status_file.read_text(encoding="utf-8")
+        == '{"session_date": "2026-06-26", "status": "pipeline_failed", "storage_key": null}\n'
+    )
+
+
+def test_write_status_json_removes_temp_file_on_failure(tmp_path: Path) -> None:
+    status_file = tmp_path / "nested" / "status.json"
+
+    with pytest.raises(TypeError):
+        scheduler_status_file.write_status_json(status_file, {"status": object()})
+
+    assert not status_file.exists()
+    assert list(status_file.parent.glob(f".{status_file.name}.*")) == []
+
+
+def test_write_scheduled_status_file_noops_without_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SAB_SCHEDULER_STATUS_FILE", raising=False)
+
+    scheduler_runner._write_scheduled_status_file(
+        scheduler_runner.ScheduledAiBriefResult(status="dry_run")
+    )
+
+
+def test_run_scheduled_ai_brief_preserves_result_when_status_file_write_fails(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def run(
+            self, _request: scheduler_runner.ScheduledAiBriefRequest
+        ) -> scheduler_runner.ScheduledAiBriefResult:
+            return scheduler_runner.ScheduledAiBriefResult(
+                status="completed",
+                session_date="2026-06-26",
+                storage_key="reports/x.ai-brief.json",
+            )
+
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", "/unwritable/status.json")
+    monkeypatch.setattr(
+        scheduler_runner.SupabaseRuntimeStateClient,
+        "from_env",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setattr(
+        scheduler_runner.DefaultScheduledStorage,
+        "from_env",
+        staticmethod(lambda: object()),
+    )
+    monkeypatch.setattr(scheduler_runner, "DefaultScheduledPipeline", object)
+    monkeypatch.setattr(scheduler_runner, "DefaultScheduledNotifier", object)
+    monkeypatch.setattr(scheduler_runner, "ScheduledAiBriefRunner", _FakeRunner)
+    monkeypatch.setattr(
+        scheduler_runner.status_file,
+        "write_status_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("status denied")),
+    )
+    caplog.set_level("WARNING", logger="sab.scheduler.runner")
+
+    exit_code = scheduler_runner.run_scheduled_ai_brief(
+        request=scheduler_runner.ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-primary",
+            runner_role="local-primary",
+            scheduled_tick="0810",
+        )
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "completed",
+        "storage_key": "reports/x.ai-brief.json",
+    }
+    assert "failed to write scheduled status file: status denied" in caplog.text

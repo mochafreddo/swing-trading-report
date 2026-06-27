@@ -85,8 +85,11 @@
 | `SLACK_WEBHOOK_URL` | scheduled/Actions notification | 선택 |
 | `SAB_SCHEDULER_ENV_FILE` | Docker scheduler env_file | 기본 `.env.scheduler.local` |
 | `OPENAI_API_KEY` | `sab ai-brief --model-provider openai` | scheduled AI Brief에서 필요 |
-| `OPENAI_AI_BRIEF_MODEL` | AI Brief model fallback | CLI `--model-name`으로도 지정 가능 |
-| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | AI Brief model timeout | 선택. 양의 finite 숫자만 허용 |
+| `OPENAI_AI_BRIEF_MODEL` | OpenAI primary model | CLI `--model-name`으로도 지정 가능 |
+| `OPENAI_AI_BRIEF_FALLBACK_MODEL` | OpenAI fallback model after retryable primary timeout | primary와 달라야 함 |
+| `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | OpenAI primary model timeout | 선택. 양의 finite 숫자만 허용. scheduled 권장값 60 |
+| `AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS` | OpenAI fallback model timeout | 선택. 양의 finite 숫자만 허용. scheduled 권장값 30 |
+| `AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS` | OpenAI total model-attempt timeout budget | 선택. primary와 fallback의 남은 timeout을 cap. scheduled 권장값 90 |
 | `AI_BRIEF_SOURCE_API_URL` | `http-json` source provider | HTTPS URL 필요 |
 | `AI_BRIEF_SOURCE_API_URL_KR`, `AI_BRIEF_SOURCE_API_URL_US` | scheduled provider URL | GitHub Actions variable 용도 |
 | `AI_BRIEF_SOURCE_API_TOKEN` | `http-json` source provider | 실행 URL이 `AI_BRIEF_SOURCE_API_URL`, `_KR`, `_US` 중 하나와 일치할 때만 Bearer 전송 |
