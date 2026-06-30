@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 
 import pytest
+import requests
 from sab.ai_brief_providers import (
     AiBriefProviderContractError,
+    AiBriefProviderError,
+    AiBriefProviderTimeoutError,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
+    build_ai_brief_provider_trace_metadata,
 )
 
 
@@ -53,6 +58,11 @@ def _candidate(
     }
 
 
+def _json_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
 def test_fake_provider_returns_watch_candidates_separately() -> None:
     provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
 
@@ -64,6 +74,64 @@ def test_fake_provider_returns_watch_candidates_separately() -> None:
     assert [row["ticker"] for row in result.recommendations] == ["AAPL.NAS"]
     assert [row["ticker"] for row in result.watch_candidates] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["action"] == "WATCH"
+
+
+def test_fake_provider_returns_deterministic_trace_metadata() -> None:
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+    recommendable_candidate = _candidate("AAPL.NAS", role="recommendable")
+    watch_candidate = _candidate("MSFT.NAS", role="watch_only")
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[recommendable_candidate],
+        watch_candidates=[watch_candidate],
+    )
+
+    trace_metadata = result.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.prompt_version == "fake-ai-brief-v1"
+    assert trace_metadata.output_schema_version == "fake-ai-brief-output-v1"
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(
+        {
+            "model": "fake-ai-brief-v1",
+            "recommendable_candidates": [recommendable_candidate],
+            "watch_candidates": [watch_candidate],
+        }
+    )
+    assert trace_metadata.source_catalog_hash == _json_hash(
+        {
+            "recommendable_candidates": [recommendable_candidate],
+            "watch_candidates": [watch_candidate],
+        }
+    )
+
+
+def test_fake_provider_contract_error_after_result_build_carries_trace_metadata() -> (
+    None
+):
+    provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
+    stale_candidate = _candidate(
+        "AAPL.NAS",
+        role="recommendable",
+        published_at=_published_at(-dt.timedelta(hours=73)),
+    )
+
+    with pytest.raises(AiBriefProviderContractError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[stale_candidate],
+            watch_candidates=[],
+        )
+
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(
+        {
+            "model": "fake-ai-brief-v1",
+            "recommendable_candidates": [stale_candidate],
+            "watch_candidates": [],
+        }
+    )
 
 
 def test_fake_provider_localizes_known_watch_fallback_reason() -> None:
@@ -221,6 +289,332 @@ def test_openai_payload_separates_recommendable_and_watch_candidates() -> None:
     ]
     assert [row["ticker"] for row in user_payload["watch_candidates"]] == ["MSFT.NAS"]
     assert result.watch_candidates[0]["ticker"] == "MSFT.NAS"
+
+
+def test_openai_result_includes_trace_metadata_for_sent_request() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid"],
+                    "checklist": ["confirm price"],
+                    "source_refs": ["AAPL.NAS:1"],
+                }
+            ],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    user_payload = json.loads(str(request["input"][1]["content"]))
+    trace_metadata = result.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.prompt_version == "openai-ai-brief-v1"
+    assert trace_metadata.output_schema_version == "openai-ai-brief-output-v1"
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(request)
+    assert trace_metadata.source_catalog_hash == _json_hash(
+        {
+            "recommendable_candidates": user_payload["recommendable_candidates"],
+            "watch_candidates": user_payload["watch_candidates"],
+        }
+    )
+
+
+def test_openai_planned_trace_hashes_would_send_request_shape() -> None:
+    recommendable_candidate = _candidate("AAPL.NAS", role="recommendable")
+    watch_candidate = _candidate("MSFT.NAS", role="watch_only")
+
+    planned = build_ai_brief_provider_trace_metadata(
+        model_provider="openai",
+        model_name="gpt-test",
+        recommendable_candidates=[recommendable_candidate],
+        watch_candidates=[watch_candidate],
+        request_status="planned_not_sent",
+    )
+    sent = build_ai_brief_provider_trace_metadata(
+        model_provider="openai",
+        model_name="gpt-test",
+        recommendable_candidates=[recommendable_candidate],
+        watch_candidates=[watch_candidate],
+        request_status="sent",
+    )
+
+    assert planned.request_status == "planned_not_sent"
+    assert planned.request_hash == sent.request_hash
+    assert planned.source_catalog_hash == sent.source_catalog_hash
+
+
+def test_openai_empty_input_returns_planned_not_sent_trace_metadata() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[],
+        watch_candidates=[],
+    )
+
+    assert session.requests == []
+    trace_metadata = result.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "planned_not_sent"
+    assert trace_metadata.prompt_version == "openai-ai-brief-v1"
+    assert trace_metadata.output_schema_version == "openai-ai-brief-output-v1"
+    assert trace_metadata.source_catalog_hash == _json_hash(
+        {"recommendable_candidates": [], "watch_candidates": []}
+    )
+
+
+def test_openai_preflight_contract_error_carries_planned_trace_metadata() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    recommendable_candidate = _candidate("AAPL.NAS", role="recommendable")
+    watch_candidate = _candidate("AAPL.NAS", role="watch_only")
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderContractError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[recommendable_candidate],
+            watch_candidates=[watch_candidate],
+        )
+
+    assert session.requests == []
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "planned_not_sent"
+    assert (
+        trace_metadata.source_catalog_hash
+        == build_ai_brief_provider_trace_metadata(
+            model_provider="openai",
+            model_name="gpt-test",
+            recommendable_candidates=[recommendable_candidate],
+            watch_candidates=[watch_candidate],
+            request_status="sent",
+        ).source_catalog_hash
+    )
+
+
+def test_openai_normalized_rows_preserve_validated_source_refs() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "rank": 1,
+                    "confidence": "LOW",
+                    "rationale": ["entry setup remains valid"],
+                    "checklist": ["confirm price"],
+                    "source_refs": ["AAPL.NAS:1"],
+                }
+            ],
+            "vetoed_candidates": [],
+            "watch_candidates": [
+                {
+                    "ticker": "MSFT.NAS",
+                    "action": "WATCH",
+                    "reason": "trigger pending",
+                    "retrigger_conditions": ["price back above trigger"],
+                    "source_refs": ["MSFT.NAS:1"],
+                }
+            ],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[_candidate("MSFT.NAS", role="watch_only")],
+    )
+
+    assert result.recommendations[0]["source_refs"] == ["AAPL.NAS:1"]
+    assert result.watch_candidates[0]["source_refs"] == ["MSFT.NAS:1"]
+
+
+def test_openai_payload_keeps_same_ticker_candidate_sources_distinct() -> None:
+    first_candidate = _candidate("AAPL.NAS", role="recommendable")
+    second_candidate = _candidate("AAPL.NAS", role="recommendable", action="REVIEW")
+    first_candidate["sources"] = [
+        {
+            "title": "first candidate source",
+            "url": "https://news.example/aapl-first",
+            "published_at": _fresh_published_at(),
+        }
+    ]
+    second_candidate["sources"] = [
+        {
+            "title": "second candidate source",
+            "url": "https://news.example/aapl-second",
+            "published_at": _fresh_published_at(),
+        }
+    ]
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    provider.build_recommendations(
+        recommendable_candidates=[first_candidate, second_candidate],
+        watch_candidates=[],
+    )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    user_payload = json.loads(str(request["input"][1]["content"]))
+    model_candidates = user_payload["recommendable_candidates"]
+    assert [row["sources"][0]["title"] for row in model_candidates] == [
+        "first candidate source",
+        "second candidate source",
+    ]
+    source_ids = [row["sources"][0]["source_id"] for row in model_candidates]
+    assert source_ids[0] != source_ids[1]
+
+
+def test_openai_timeout_error_carries_trace_metadata() -> None:
+    session = _TimeoutSession()
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderTimeoutError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(request)
+
+
+def test_openai_request_error_carries_trace_metadata() -> None:
+    session = _RequestExceptionSession()
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(request)
+
+
+def test_openai_http_error_carries_trace_metadata() -> None:
+    session = _HttpErrorSession()
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(request)
+
+
+def test_openai_contract_error_carries_trace_metadata() -> None:
+    session = _InvalidStructuredOutputSession()
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderContractError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+    request = session.requests[0]["json"]
+    assert isinstance(request, dict)
+    trace_metadata = excinfo.value.trace_metadata
+    assert trace_metadata is not None
+    assert trace_metadata.request_status == "sent"
+    assert trace_metadata.request_hash == _json_hash(request)
 
 
 def test_openai_prompt_requires_korean_display_fields() -> None:
@@ -1253,6 +1647,8 @@ def test_openai_replaces_watch_candidate_with_invalid_source_ref_with_fallback()
             "code": "model_watch_source_ref_invalid",
             "severity": "WARN",
             "message": "watch row의 source_refs가 유효하지 않아 대체 행을 사용함",
+            "source_refs": ["MSFT.NAS:404"],
+            "invalid_source_refs": ["MSFT.NAS:404"],
         }
     ]
 
@@ -1300,6 +1696,8 @@ def test_openai_localizes_known_watch_fallback_reason_after_invalid_source_ref()
             "code": "model_watch_source_ref_invalid",
             "severity": "WARN",
             "message": "watch row의 source_refs가 유효하지 않아 대체 행을 사용함",
+            "source_refs": ["MSFT.NAS:404"],
+            "invalid_source_refs": ["MSFT.NAS:404"],
         }
     ]
 
@@ -1456,6 +1854,8 @@ def test_openai_drops_recommendation_with_invalid_source_ref_and_reranks() -> No
             "code": "model_source_ref_invalid",
             "severity": "WARN",
             "message": "모델이 candidate.sources에 없는 source_refs를 반환함",
+            "source_refs": ["AAPL.NAS:404"],
+            "invalid_source_refs": ["AAPL.NAS:404"],
         }
     ]
 
@@ -1543,3 +1943,55 @@ class _CapturingSession:
     def post(self, url: str, **kwargs: object) -> _Response:
         self.requests.append({"url": url, **kwargs})
         return _Response(self.payload)
+
+
+class _TimeoutSession:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _Response:
+        self.requests.append({"url": url, **kwargs})
+        raise requests.Timeout("timed out")
+
+
+class _RequestExceptionSession:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _Response:
+        self.requests.append({"url": url, **kwargs})
+        raise requests.ConnectionError("connection reset")
+
+
+class _HttpErrorResponse:
+    status_code = 429
+    text = "rate limited"
+
+    def json(self) -> dict[str, object]:
+        return {}
+
+
+class _HttpErrorSession:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _HttpErrorResponse:
+        self.requests.append({"url": url, **kwargs})
+        return _HttpErrorResponse()
+
+
+class _InvalidStructuredOutputResponse:
+    status_code = 200
+    text = "not json"
+
+    def json(self) -> dict[str, object]:
+        return {"output_text": "not json"}
+
+
+class _InvalidStructuredOutputSession:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _InvalidStructuredOutputResponse:
+        self.requests.append({"url": url, **kwargs})
+        return _InvalidStructuredOutputResponse()

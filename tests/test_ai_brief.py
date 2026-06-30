@@ -313,6 +313,130 @@ def test_run_ai_brief_writes_recommendations_from_entry_report_only(
     assert "NOT-ELIGIBLE.NAS" not in json.dumps(payload)
 
 
+def test_run_ai_brief_writes_model_trace_and_candidate_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(
+        tmp_path,
+        entries=[_entry_row("AAPL.NAS", action="ENTER")],
+    )
+    buy_report = _write_buy_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=buy_report.as_posix(),
+        market=None,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        source_provider=None,
+        source_report_path=None,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    model_trace = payload["model_trace"]
+    assert model_trace["schema"] == "sab.ai_brief.model_trace.v1"
+    assert str(model_trace["model_trace_id"]).startswith("aibt_")
+    assert model_trace["prompt_version"] == "fake-ai-brief-v1"
+    assert model_trace["output_schema_version"] == "fake-ai-brief-output-v1"
+    assert str(model_trace["request_hash"]).startswith("sha256:")
+    assert str(model_trace["source_catalog_hash"]).startswith("sha256:")
+    assert model_trace["candidate_count"] == 1
+    assert model_trace["candidate_summaries"] == [
+        {
+            "candidate_id": payload["recommendations"][0]["candidate_id"],
+            "ticker": "AAPL.NAS",
+            "candidate_role": "executable",
+            "entry_action": "ENTER",
+            "model_output_status": "recommended",
+            "source_refs_available": [],
+            "source_count": 0,
+        }
+    ]
+    recommendation = payload["recommendations"][0]
+    assert str(recommendation["candidate_id"]).startswith("aibc_")
+    assert recommendation["model_trace_id"] == model_trace["model_trace_id"]
+
+
+def test_model_trace_keeps_same_ticker_candidates_distinct() -> None:
+    trace_metadata = ai_brief.AiBriefProviderTraceMetadata(
+        prompt_version="fake-ai-brief-v1",
+        output_schema_version="fake-ai-brief-output-v1",
+        request_hash="sha256:" + "1" * 64,
+        source_catalog_hash="sha256:" + "2" * 64,
+        request_status="sent",
+    )
+    candidates: list[dict[str, object]] = [
+        {
+            "ticker": "AAPL.NAS",
+            "action": "ENTER",
+            "ai_role": "executable",
+            "sources": [
+                {
+                    "title": "A",
+                    "url": "https://news.example/a",
+                    "published_at": _fresh_published_at(),
+                }
+            ],
+        },
+        {
+            "ticker": "AAPL.NAS",
+            "action": "REVIEW",
+            "ai_role": "blocked_but_valid",
+            "sources": [
+                {
+                    "title": "B",
+                    "url": "https://news.example/b",
+                    "published_at": _fresh_published_at(),
+                }
+            ],
+        },
+    ]
+
+    model_trace, candidate_ids_by_ticker = ai_brief._build_model_trace(
+        trace_metadata=trace_metadata,
+        model_provider="fake",
+        model_name="fake-ai-brief-v1",
+        market="US",
+        source_entry_report="2026-05-05.entry.json",
+        preselected_candidates=candidates,
+        watch_candidates=[],
+        recommendations=[{"ticker": "AAPL.NAS"}],
+        vetoed_candidates=[],
+        model_watch_candidates=[],
+        model_attempts=[],
+        model_output_available=True,
+    )
+    summaries = cast(list[dict[str, object]], model_trace["candidate_summaries"])
+    candidate_ids = [str(summary["candidate_id"]) for summary in summaries]
+
+    assert len(set(candidate_ids)) == 2
+    assert [summary["model_output_status"] for summary in summaries] == [
+        "ambiguous_ticker_match",
+        "ambiguous_ticker_match",
+    ]
+    assert (
+        summaries[0]["source_refs_available"] != summaries[1]["source_refs_available"]
+    )
+    traced_rows = ai_brief._attach_trace_ids_to_rows(
+        [{"ticker": "AAPL.NAS"}],
+        model_trace_id=str(model_trace["model_trace_id"]),
+        candidate_ids_by_ticker=candidate_ids_by_ticker,
+    )
+    assert traced_rows == [
+        {
+            "ticker": "AAPL.NAS",
+            "candidate_ids": candidate_ids,
+            "model_trace_id": model_trace["model_trace_id"],
+        }
+    ]
+
+
 def test_run_ai_brief_logs_structured_run_lifecycle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -6771,6 +6895,28 @@ class _TimeoutThenSuccessProviderFactory:
         return SuccessProvider()
 
 
+class _TimeoutThenTimeoutProviderFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float]] = []
+
+    def __call__(
+        self,
+        *,
+        model_provider: str,
+        model_name: str,
+        model_timeout_seconds: float,
+    ) -> object:
+        self.calls.append((model_name, model_timeout_seconds))
+
+        class TimeoutProvider:
+            def build_recommendations(self, **_: object) -> object:
+                raise ai_brief.AiBriefProviderTimeoutError(
+                    f"{model_name} request timed out"
+                )
+
+        return TimeoutProvider()
+
+
 def test_run_ai_brief_openai_provider_writes_structured_recommendation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -7368,6 +7514,31 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
     assert payload["summary"]["system_issue_count"] == 1
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
     assert payload["system_issues"][0]["severity"] == "ERROR"
+    model_trace = payload["model_trace"]
+    assert str(model_trace["model_trace_id"]).startswith("aibt_")
+    assert model_trace["request_status"] == "sent"
+    assert payload["model_attempts"][0]["request_hash"] == model_trace["request_hash"]
+    assert (
+        payload["model_attempts"][0]["source_catalog_hash"]
+        == (model_trace["source_catalog_hash"])
+    )
+    assert (
+        payload["model_attempts"][0]["prompt_version"]
+        == (model_trace["prompt_version"])
+    )
+    assert model_trace["candidate_summaries"] == [
+        {
+            "candidate_id": payload["model_trace"]["candidate_summaries"][0][
+                "candidate_id"
+            ],
+            "ticker": "AAPL.NAS",
+            "candidate_role": "executable",
+            "entry_action": "ENTER",
+            "model_output_status": "no_output",
+            "source_refs_available": [],
+            "source_count": 0,
+        }
+    ]
     assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
     assert payload["brief_reason"] == "model_or_system_issue"
 
@@ -7444,11 +7615,59 @@ def test_run_ai_brief_falls_back_after_model_timeout(
     )
     assert recovered_failure.levelname == "WARNING"
     assert recovered_failure.__dict__["fallback_next"] is True
+    assert recovered_failure.__dict__["request_status"] == "sent"
+    assert str(recovered_failure.__dict__["request_hash"]).startswith("sha256:")
+    assert str(recovered_failure.__dict__["source_catalog_hash"]).startswith("sha256:")
+    completed_attempt = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "ai_brief_model_attempt_completed"
+    )
+    assert completed_attempt.__dict__["request_status"] == "sent"
+    assert str(completed_attempt.__dict__["request_hash"]).startswith("sha256:")
+    assert str(completed_attempt.__dict__["source_catalog_hash"]).startswith("sha256:")
     assert not any(
         getattr(record, "event", None) == "ai_brief_model_attempt_failed"
         and record.levelname == "ERROR"
         for record in caplog.records
     )
+
+
+def test_run_ai_brief_failed_fallback_artifact_uses_fallback_model_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    factory = _TimeoutThenTimeoutProviderFactory()
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AI_BRIEF_FALLBACK_MODEL", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(ai_brief, "_build_provider", factory)
+
+    status = ai_brief.run_ai_brief(
+        entry_report_path=str(entry_report),
+        buy_report_path=None,
+        market="US",
+        model_provider="openai",
+        model_name="gpt-5.5",
+        model_timeout_seconds=60.0,
+    )
+
+    assert status == 0
+    assert factory.calls == [("gpt-5.5", 60.0), ("gpt-5.4-mini", 30.0)]
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["model_name"] == "gpt-5.4-mini"
+    assert payload["model_trace"]["model_name"] == "gpt-5.4-mini"
+    assert payload["model_attempts"][-1]["model_name"] == "gpt-5.4-mini"
+    assert (
+        payload["model_trace"]["request_hash"]
+        == payload["model_attempts"][-1]["request_hash"]
+    )
+    assert payload["system_issues"][0]["message"] == "gpt-5.4-mini request timed out"
 
 
 def test_ai_brief_caps_primary_timeout_to_total_model_budget(
@@ -7697,6 +7916,10 @@ def test_ai_brief_wall_clock_timeout_interrupts_blocking_model_attempt(
     assert attempt["status"] == "timeout"
     assert attempt["error_type"] == "AiBriefProviderTimeoutError"
     assert attempt["timeout_seconds"] == pytest.approx(0.05)
+    model_trace = payload["model_trace"]
+    assert attempt["request_hash"] == model_trace["request_hash"]
+    assert attempt["source_catalog_hash"] == model_trace["source_catalog_hash"]
+    assert model_trace["request_status"] == "sent"
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
 
 
@@ -7864,12 +8087,19 @@ def test_ai_brief_skips_fallback_when_total_model_budget_is_exhausted(
     assert timeout_attempt["status"] == "timeout"
     assert {
         key: skipped_attempt[key]
-        for key in ("status", "error_type", "retryable", "timeout_seconds")
+        for key in (
+            "status",
+            "error_type",
+            "retryable",
+            "timeout_seconds",
+            "request_status",
+        )
     } == {
         "status": "deadline_skipped",
         "error_type": "TotalBudgetSkipped",
         "retryable": False,
         "timeout_seconds": 0.0,
+        "request_status": "planned_not_sent",
     }
     failed_record = next(
         record
@@ -7939,12 +8169,19 @@ def test_ai_brief_skips_fallback_when_deadline_budget_is_too_small(
     assert timeout_attempt["status"] == "timeout"
     assert {
         key: skipped_attempt[key]
-        for key in ("status", "error_type", "retryable", "duration_ms")
+        for key in (
+            "status",
+            "error_type",
+            "retryable",
+            "duration_ms",
+            "request_status",
+        )
     } == {
         "status": "deadline_skipped",
         "error_type": "DeadlineBudgetSkipped",
         "retryable": False,
         "duration_ms": 0,
+        "request_status": "planned_not_sent",
     }
     failed_record = next(
         record
@@ -8061,6 +8298,20 @@ def test_run_ai_brief_openai_timeout_preserves_watch_candidates(
         "가격이 원래 진입 트리거를 다시 충족해야 함",
         "소스와 시장 맥락을 수동 확인해야 함",
     ]
+    assert (
+        payload["watch_candidates"][0]["model_trace_id"]
+        == (payload["model_trace"]["model_trace_id"])
+    )
+    assert str(payload["watch_candidates"][0]["candidate_id"]).startswith("aibc_")
+    watch_summary = next(
+        summary
+        for summary in payload["model_trace"]["candidate_summaries"]
+        if summary["ticker"] == "MSFT.NAS"
+    )
+    assert watch_summary["model_output_status"] == "no_output"
+    assert (
+        watch_summary["candidate_id"] == payload["watch_candidates"][0]["candidate_id"]
+    )
     assert payload["system_issues"][0]["code"] == "model_provider_timeout"
 
 

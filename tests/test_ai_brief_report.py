@@ -129,6 +129,80 @@ def _artifact_with_candidate_roles() -> dict[str, object]:
     return artifact
 
 
+def _artifact_with_model_trace() -> dict[str, object]:
+    artifact = _artifact_with_candidate_roles()
+    artifact["schema"] = "sab.ai_brief.v1"
+    artifact["type"] = "ai_brief"
+    artifact["generated_at"] = "2026-05-05T08:40:00+00:00"
+    artifact["report_date"] = "2026-05-05"
+    recommendation = artifact["recommendations"]
+    assert isinstance(recommendation, list)
+    row = recommendation[0]
+    assert isinstance(row, dict)
+    row["candidate_id"] = "aibc_aaaaaaaaaaaaaaaaaaaaaaaa"
+    row["model_trace_id"] = "aibt_bbbbbbbbbbbbbbbbbbbbbbbb"
+    watch_candidates = artifact["watch_candidates"]
+    assert isinstance(watch_candidates, list)
+    watch_row = watch_candidates[0]
+    assert isinstance(watch_row, dict)
+    watch_row["candidate_id"] = "aibc_cccccccccccccccccccccccc"
+    watch_row["model_trace_id"] = "aibt_bbbbbbbbbbbbbbbbbbbbbbbb"
+    artifact["model_attempts"] = [
+        {
+            "role": "primary",
+            "model_name": "fake-ai-brief-v1",
+            "timeout_seconds": 60.0,
+            "status": "success",
+            "duration_ms": 1,
+            "prompt_version": "fake-ai-brief-v1",
+            "output_schema_version": "fake-ai-brief-output-v1",
+            "request_hash": "sha256:" + "1" * 64,
+            "source_catalog_hash": "sha256:" + "2" * 64,
+            "request_status": "sent",
+        }
+    ]
+    artifact["model_trace"] = {
+        "schema": "sab.ai_brief.model_trace.v1",
+        "model_trace_id": "aibt_bbbbbbbbbbbbbbbbbbbbbbbb",
+        "prompt_version": "fake-ai-brief-v1",
+        "output_schema_version": "fake-ai-brief-output-v1",
+        "request_hash": "sha256:" + "1" * 64,
+        "source_catalog_hash": "sha256:" + "2" * 64,
+        "request_status": "sent",
+        "model_provider": "fake",
+        "model_name": "fake-ai-brief-v1",
+        "market": "US",
+        "source_entry_report": "2026-05-05.entry.json",
+        "eligible_tickers": ["AAPL.NAS"],
+        "watch_tickers": ["MSFT.NAS"],
+        "candidate_count": 2,
+        "source_count": 0,
+        "attempt_ids": ["primary:fake-ai-brief-v1"],
+        "candidate_summaries": [
+            {
+                "candidate_id": "aibc_aaaaaaaaaaaaaaaaaaaaaaaa",
+                "ticker": "AAPL.NAS",
+                "candidate_role": "executable",
+                "entry_action": "ENTER",
+                "model_output_status": "recommended",
+                "source_refs_available": [],
+                "source_count": 0,
+            },
+            {
+                "candidate_id": "aibc_cccccccccccccccccccccccc",
+                "ticker": "MSFT.NAS",
+                "candidate_role": "watch_only",
+                "entry_action": "SKIP",
+                "model_output_status": "no_output",
+                "source_refs_available": [],
+                "source_count": 0,
+            },
+        ],
+        "normalization_issues": [],
+    }
+    return artifact
+
+
 def test_write_ai_brief_report_writes_schema_and_offset_generated_at(
     tmp_path: Path,
 ) -> None:
@@ -147,6 +221,97 @@ def test_write_ai_brief_report_writes_schema_and_offset_generated_at(
     assert payload["recommendations"][0]["ticker"] == "AAPL.NAS"
     assert payload["brief_state"] == "NEEDS_REVIEW_WEAK_NEWS"
     assert payload["brief_reason"] == "weak_news_coverage"
+
+
+def test_validate_ai_brief_artifact_accepts_model_trace_links() -> None:
+    validate_ai_brief_artifact(
+        _artifact_with_model_trace(),
+        now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+    )
+
+
+def test_validate_ai_brief_artifact_rejects_broken_model_trace_candidate_link() -> None:
+    artifact = _artifact_with_model_trace()
+    recommendations = artifact["recommendations"]
+    assert isinstance(recommendations, list)
+    row = recommendations[0]
+    assert isinstance(row, dict)
+    row["candidate_id"] = "aibc_missingmissingmissingmiss"
+
+    with pytest.raises(AiBriefValidationError, match="candidate_id"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_cross_ticker_model_trace_link() -> None:
+    artifact = _artifact_with_model_trace()
+    recommendations = artifact["recommendations"]
+    assert isinstance(recommendations, list)
+    row = recommendations[0]
+    assert isinstance(row, dict)
+    row["candidate_id"] = "aibc_cccccccccccccccccccccccc"
+
+    with pytest.raises(AiBriefValidationError, match="candidate_id"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_broken_model_trace_id_link() -> None:
+    artifact = _artifact_with_model_trace()
+    recommendations = artifact["recommendations"]
+    assert isinstance(recommendations, list)
+    row = recommendations[0]
+    assert isinstance(row, dict)
+    row["model_trace_id"] = "aibt_wrongwrongwrongwrongwrong"
+
+    with pytest.raises(AiBriefValidationError, match="model_trace_id"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_model_trace_context_mismatch() -> None:
+    artifact = _artifact_with_model_trace()
+    model_trace = artifact["model_trace"]
+    assert isinstance(model_trace, dict)
+    model_trace["market"] = "KR"
+
+    with pytest.raises(AiBriefValidationError, match="market"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_model_trace_attempt_mismatch() -> None:
+    artifact = _artifact_with_model_trace()
+    model_trace = artifact["model_trace"]
+    assert isinstance(model_trace, dict)
+    model_trace["attempt_ids"] = ["fallback:gpt-other"]
+
+    with pytest.raises(AiBriefValidationError, match="attempt_ids"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_non_hex_model_trace_hash() -> None:
+    artifact = _artifact_with_model_trace()
+    model_trace = artifact["model_trace"]
+    assert isinstance(model_trace, dict)
+    model_trace["request_hash"] = "sha256:" + "z" * 64
+
+    with pytest.raises(AiBriefValidationError, match="sha256"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
 
 
 def test_write_ai_brief_report_marks_no_signal_when_no_enter_candidates(
