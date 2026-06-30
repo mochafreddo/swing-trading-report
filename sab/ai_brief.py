@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import logging
 import math
@@ -8,9 +9,9 @@ import os
 import signal
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from .ai_brief_candidates import (
     AiBriefEntryCandidate,
@@ -27,8 +28,11 @@ from .ai_brief_providers import (
     AiBriefProviderError,
     AiBriefProviderResult,
     AiBriefProviderTimeoutError,
+    AiBriefProviderTraceMetadata,
     FakeAiBriefProvider,
     OpenAiBriefProvider,
+    build_ai_brief_provider_trace_metadata,
+    candidate_source_ref_lists,
     watch_reason_for_display,
 )
 from .ai_brief_source_chain import (
@@ -68,6 +72,7 @@ logger = logging.getLogger(__name__)
 _MODEL_PROVIDER_FAKE = MODEL_PROVIDER_FAKE
 _MODEL_PROVIDER_OPENAI = MODEL_PROVIDER_OPENAI
 _DEFAULT_MODEL_NAME = "fake-ai-brief-v1"
+_MODEL_TRACE_SCHEMA = "sab.ai_brief.model_trace.v1"
 _DEFAULT_MODEL_TIMEOUT_SECONDS = DEFAULT_MODEL_TIMEOUT_SECONDS
 _PRESELECTION_LIMIT = PRESELECTION_LIMIT
 _ALLOWED_MODEL_PROVIDERS = frozenset({_MODEL_PROVIDER_FAKE, _MODEL_PROVIDER_OPENAI})
@@ -228,6 +233,7 @@ class _ModelAttemptRecord:
     duration_ms: int
     error_type: str | None = None
     retryable: bool | None = None
+    trace_metadata: AiBriefProviderTraceMetadata | None = None
 
 
 class _AiBriefModelProvider(Protocol):
@@ -707,6 +713,216 @@ def _build_summary(
     return summary
 
 
+def _hash_json(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _short_trace_id(prefix: str, value: object) -> str:
+    return f"{prefix}_{_hash_json(value).removeprefix('sha256:')[:24]}"
+
+
+def _candidate_role(candidate: Mapping[str, object]) -> str:
+    return str(
+        candidate.get("ai_role") or candidate.get("candidate_role") or ""
+    ).strip()
+
+
+def _candidate_entry_action(candidate: Mapping[str, object]) -> str:
+    return str(candidate.get("action") or candidate.get("entry_action") or "").strip()
+
+
+def _source_count(candidate: Mapping[str, object]) -> int:
+    sources = candidate.get("sources")
+    if not isinstance(sources, list):
+        return 0
+    return sum(1 for source in sources if isinstance(source, Mapping))
+
+
+def _candidate_id(
+    *,
+    model_trace_id: str,
+    candidate: Mapping[str, object],
+    occurrence_index: int,
+    source_refs_available: Sequence[str],
+) -> str:
+    identity = {
+        "model_trace_id": model_trace_id,
+        "occurrence_index": occurrence_index,
+        "ticker": str(candidate.get("ticker") or "").strip(),
+        "candidate_role": _candidate_role(candidate),
+        "entry_action": _candidate_entry_action(candidate),
+        "source_refs_available": list(source_refs_available),
+    }
+    return _short_trace_id("aibc", identity)
+
+
+def _model_output_status_by_ticker(
+    *,
+    recommendations: list[dict[str, object]],
+    vetoed_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    for row in recommendations:
+        ticker = str(row.get("ticker") or "").strip()
+        if ticker:
+            statuses[ticker] = "recommended"
+    for row in vetoed_candidates:
+        ticker = str(row.get("ticker") or "").strip()
+        if ticker:
+            statuses[ticker] = "vetoed"
+    for row in watch_candidates:
+        ticker = str(row.get("ticker") or "").strip()
+        if ticker:
+            statuses[ticker] = "watch"
+    return statuses
+
+
+def _attach_trace_ids_to_rows(
+    rows: list[dict[str, object]],
+    *,
+    model_trace_id: str,
+    candidate_ids_by_ticker: Mapping[str, Sequence[str]],
+) -> list[dict[str, object]]:
+    traced_rows: list[dict[str, object]] = []
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip()
+        candidate_ids = list(candidate_ids_by_ticker.get(ticker, []))
+        if not candidate_ids:
+            traced_rows.append(row)
+            continue
+        trace_fields: dict[str, object]
+        if len(candidate_ids) == 1:
+            trace_fields = {"candidate_id": candidate_ids[0]}
+        else:
+            trace_fields = {"candidate_ids": candidate_ids}
+        traced_rows.append(
+            {
+                **row,
+                **trace_fields,
+                "model_trace_id": model_trace_id,
+            }
+        )
+    return traced_rows
+
+
+def _build_model_trace(
+    *,
+    trace_metadata: AiBriefProviderTraceMetadata,
+    model_provider: str,
+    model_name: str,
+    market: str,
+    source_entry_report: str,
+    preselected_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    recommendations: list[dict[str, object]],
+    vetoed_candidates: list[dict[str, object]],
+    model_watch_candidates: list[dict[str, object]],
+    model_attempts: list[_ModelAttemptRecord],
+    model_output_available: bool,
+) -> tuple[dict[str, object], dict[str, list[str]]]:
+    trace_identity = {
+        "model_provider": model_provider,
+        "model_name": model_name,
+        "market": market,
+        "source_entry_report": source_entry_report,
+        "request_hash": trace_metadata.request_hash,
+        "source_catalog_hash": trace_metadata.source_catalog_hash,
+        "eligible_tickers": [
+            str(candidate["ticker"]) for candidate in preselected_candidates
+        ],
+        "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
+        "attempts": [
+            {
+                "role": attempt.role,
+                "model_name": attempt.model_name,
+                "status": attempt.status,
+            }
+            for attempt in model_attempts
+        ],
+    }
+    model_trace_id = _short_trace_id("aibt", trace_identity)
+    decision_candidates = [*preselected_candidates, *watch_candidates]
+    source_refs_by_candidate = candidate_source_ref_lists(decision_candidates)
+    candidate_entries = [
+        (
+            candidate,
+            source_refs_available,
+            _candidate_id(
+                model_trace_id=model_trace_id,
+                candidate=candidate,
+                occurrence_index=occurrence_index,
+                source_refs_available=source_refs_available,
+            ),
+        )
+        for occurrence_index, (candidate, source_refs_available) in enumerate(
+            zip(decision_candidates, source_refs_by_candidate, strict=True)
+        )
+    ]
+    candidate_ids_by_ticker: dict[str, list[str]] = {}
+    for candidate, _source_refs_available, candidate_id in candidate_entries:
+        candidate_ids_by_ticker.setdefault(str(candidate["ticker"]), []).append(
+            candidate_id
+        )
+    statuses = (
+        _model_output_status_by_ticker(
+            recommendations=recommendations,
+            vetoed_candidates=vetoed_candidates,
+            watch_candidates=model_watch_candidates,
+        )
+        if model_output_available
+        else {}
+    )
+
+    def candidate_status(candidate: Mapping[str, object]) -> str:
+        ticker = str(candidate["ticker"])
+        status = statuses.get(ticker, "no_output")
+        if status != "no_output" and len(candidate_ids_by_ticker.get(ticker, [])) > 1:
+            return "ambiguous_ticker_match"
+        return status
+
+    candidate_summaries = [
+        {
+            "candidate_id": candidate_id,
+            "ticker": str(candidate["ticker"]),
+            "candidate_role": _candidate_role(candidate),
+            "entry_action": _candidate_entry_action(candidate),
+            "model_output_status": candidate_status(candidate),
+            "source_refs_available": list(source_refs_available),
+            "source_count": _source_count(candidate),
+        }
+        for candidate, source_refs_available, candidate_id in candidate_entries
+    ]
+    model_trace: dict[str, object] = {
+        "schema": _MODEL_TRACE_SCHEMA,
+        "model_trace_id": model_trace_id,
+        "prompt_version": trace_metadata.prompt_version,
+        "output_schema_version": trace_metadata.output_schema_version,
+        "request_hash": trace_metadata.request_hash,
+        "source_catalog_hash": trace_metadata.source_catalog_hash,
+        "request_status": trace_metadata.request_status,
+        "model_provider": model_provider,
+        "model_name": model_name,
+        "market": market,
+        "source_entry_report": source_entry_report,
+        "eligible_tickers": [
+            str(candidate["ticker"]) for candidate in preselected_candidates
+        ],
+        "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
+        "candidate_count": len(decision_candidates),
+        "source_count": sum(
+            _source_count(candidate) for candidate in decision_candidates
+        ),
+        "attempt_ids": [
+            f"{attempt.role}:{attempt.model_name}" for attempt in model_attempts
+        ],
+        "candidate_summaries": candidate_summaries,
+        "normalization_issues": [],
+    }
+    return model_trace, candidate_ids_by_ticker
+
+
 def _build_provider(
     *,
     model_provider: str,
@@ -740,11 +956,51 @@ def _attempt_record_dict(record: _ModelAttemptRecord) -> dict[str, object]:
         payload["error_type"] = record.error_type
     if record.retryable is not None:
         payload["retryable"] = record.retryable
+    if record.trace_metadata is not None:
+        payload["prompt_version"] = record.trace_metadata.prompt_version
+        payload["output_schema_version"] = record.trace_metadata.output_schema_version
+        payload["request_hash"] = record.trace_metadata.request_hash
+        payload["source_catalog_hash"] = record.trace_metadata.source_catalog_hash
+        payload["request_status"] = record.trace_metadata.request_status
     return payload
 
 
+def _trace_metadata_log_fields(
+    trace_metadata: AiBriefProviderTraceMetadata | None,
+) -> dict[str, object]:
+    if trace_metadata is None:
+        return {}
+    return {
+        "prompt_version": trace_metadata.prompt_version,
+        "output_schema_version": trace_metadata.output_schema_version,
+        "request_hash": trace_metadata.request_hash,
+        "source_catalog_hash": trace_metadata.source_catalog_hash,
+        "request_status": trace_metadata.request_status,
+    }
+
+
+def _trace_metadata_for_attempt(
+    *,
+    model_provider: str,
+    model_name: str,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    request_status: Literal["sent", "planned_not_sent"],
+) -> AiBriefProviderTraceMetadata:
+    return build_ai_brief_provider_trace_metadata(
+        model_provider=model_provider,
+        model_name=model_name,
+        recommendable_candidates=recommendable_candidates,
+        watch_candidates=watch_candidates,
+        request_status=request_status,
+    )
+
+
 def _skipped_model_attempt_record(
-    attempt: _ModelAttemptConfig, *, error_type: str
+    attempt: _ModelAttemptConfig,
+    *,
+    error_type: str,
+    trace_metadata: AiBriefProviderTraceMetadata,
 ) -> _ModelAttemptRecord:
     return _ModelAttemptRecord(
         role=attempt.role,
@@ -754,6 +1010,7 @@ def _skipped_model_attempt_record(
         duration_ms=0,
         error_type=error_type,
         retryable=False,
+        trace_metadata=trace_metadata,
     )
 
 
@@ -841,6 +1098,13 @@ def _run_model_attempts(
                     _skipped_model_attempt_record(
                         attempt,
                         error_type="TotalBudgetSkipped",
+                        trace_metadata=_trace_metadata_for_attempt(
+                            model_provider=model_provider,
+                            model_name=attempt.model_name,
+                            recommendable_candidates=recommendable_candidates,
+                            watch_candidates=watch_candidates,
+                            request_status="planned_not_sent",
+                        ),
                     )
                 )
                 return (
@@ -865,6 +1129,13 @@ def _run_model_attempts(
                     _skipped_model_attempt_record(
                         attempt,
                         error_type="DeadlineBudgetSkipped",
+                        trace_metadata=_trace_metadata_for_attempt(
+                            model_provider=model_provider,
+                            model_name=attempt.model_name,
+                            recommendable_candidates=recommendable_candidates,
+                            watch_candidates=watch_candidates,
+                            request_status="planned_not_sent",
+                        ),
                     )
                 )
                 return (
@@ -880,6 +1151,18 @@ def _run_model_attempts(
                 attempt_timeout_seconds,
                 remaining_after_margin_seconds,
             )
+        attempt_request_status: Literal["sent", "planned_not_sent"] = (
+            "sent"
+            if recommendable_candidates or watch_candidates
+            else "planned_not_sent"
+        )
+        attempt_trace_metadata = _trace_metadata_for_attempt(
+            model_provider=model_provider,
+            model_name=attempt.model_name,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+            request_status=attempt_request_status,
+        )
         started = time.monotonic()
         logger.info(
             "AI brief model attempt started",
@@ -897,6 +1180,7 @@ def _run_model_attempts(
                 "ticker_count": len(recommendable_candidates),
                 "watch_count": len(watch_candidates),
                 "timeout_seconds": attempt_timeout_seconds,
+                **_trace_metadata_log_fields(attempt_trace_metadata),
             },
         )
         provider = _build_provider(
@@ -912,6 +1196,8 @@ def _run_model_attempts(
                 watch_candidates=watch_candidates,
             )
         except AiBriefProviderError as exc:
+            if exc.trace_metadata is None:
+                exc.trace_metadata = attempt_trace_metadata
             duration_ms = int((time.monotonic() - started) * 1000)
             retryable = _model_provider_retryable(exc)
             fallback_next = (
@@ -940,6 +1226,13 @@ def _run_model_attempts(
                         deadline_skipped_attempt = _skipped_model_attempt_record(
                             next_attempt,
                             error_type="TotalBudgetSkipped",
+                            trace_metadata=_trace_metadata_for_attempt(
+                                model_provider=model_provider,
+                                model_name=next_attempt.model_name,
+                                recommendable_candidates=recommendable_candidates,
+                                watch_candidates=watch_candidates,
+                                request_status="planned_not_sent",
+                            ),
                         )
                     else:
                         fallback_effective_timeout_seconds = min(
@@ -960,6 +1253,13 @@ def _run_model_attempts(
                     deadline_skipped_attempt = _skipped_model_attempt_record(
                         next_attempt,
                         error_type="DeadlineBudgetSkipped",
+                        trace_metadata=_trace_metadata_for_attempt(
+                            model_provider=model_provider,
+                            model_name=next_attempt.model_name,
+                            recommendable_candidates=recommendable_candidates,
+                            watch_candidates=watch_candidates,
+                            request_status="planned_not_sent",
+                        ),
                     )
                 else:
                     fallback_effective_timeout_seconds = min(
@@ -978,6 +1278,7 @@ def _run_model_attempts(
                     duration_ms=duration_ms,
                     error_type=type(exc).__name__,
                     retryable=retryable,
+                    trace_metadata=exc.trace_metadata,
                 )
             )
             if deadline_skipped_attempt is not None:
@@ -1004,6 +1305,7 @@ def _run_model_attempts(
                     "error_type": type(exc).__name__,
                     "retryable": retryable,
                     "fallback_next": fallback_next,
+                    **_trace_metadata_log_fields(exc.trace_metadata),
                 },
             )
             if deadline_skipped_attempt is not None:
@@ -1045,6 +1347,9 @@ def _run_model_attempts(
                         "fallback_timeout_seconds": (
                             deadline_skipped_attempt.timeout_seconds
                         ),
+                        **_trace_metadata_log_fields(
+                            deadline_skipped_attempt.trace_metadata
+                        ),
                     },
                 )
             last_error = exc
@@ -1072,6 +1377,7 @@ def _run_model_attempts(
             return None, attempt.model_name, records, exc
 
         duration_ms = int((time.monotonic() - started) * 1000)
+        result_trace_metadata = result.trace_metadata or attempt_trace_metadata
         records.append(
             _ModelAttemptRecord(
                 role=attempt.role,
@@ -1079,6 +1385,7 @@ def _run_model_attempts(
                 timeout_seconds=attempt_timeout_seconds,
                 status="success",
                 duration_ms=duration_ms,
+                trace_metadata=result_trace_metadata,
             )
         )
         logger.info(
@@ -1101,6 +1408,7 @@ def _run_model_attempts(
                 "recommendation_count": len(result.recommendations),
                 "vetoed_count": len(result.vetoed_candidates),
                 "source_issue_count": len(result.source_issues),
+                **_trace_metadata_log_fields(result_trace_metadata),
             },
         )
         return result, attempt.model_name, records, None
@@ -1573,6 +1881,7 @@ def run_ai_brief(
             source_issues = source_provider_issues
             vetoed_candidates = []
             model_watch_candidates = _fallback_watch_candidates(watch_candidates)
+            normalized_model_name = effective_model_name
             system_issues.append(_provider_system_issue(provider_error))
     except ValueError as exc:
         logger.error(
@@ -1632,13 +1941,65 @@ def run_ai_brief(
             },
         )
 
+    source_entry_report_basename = os.path.basename(entry_report_path)
+    source_buy_report_value = (
+        os.path.basename(buy_report_path)
+        if buy_report_path
+        else source_report.get("source_buy_report")
+    )
+    trace_metadata = (
+        provider_result.trace_metadata if provider_result is not None else None
+    )
+    if trace_metadata is None:
+        trace_metadata = (
+            getattr(provider_error, "trace_metadata", None)
+            if provider_error is not None
+            else None
+        )
+    if trace_metadata is None:
+        trace_metadata = next(
+            (
+                record.trace_metadata
+                for record in reversed(model_attempts)
+                if record.trace_metadata is not None
+            ),
+            None,
+        )
+    model_trace: dict[str, object] | None = None
+    if trace_metadata is not None:
+        model_trace, candidate_ids_by_ticker = _build_model_trace(
+            trace_metadata=trace_metadata,
+            model_provider=normalized_model_provider,
+            model_name=normalized_model_name,
+            market=target_market,
+            source_entry_report=source_entry_report_basename,
+            preselected_candidates=preselected_candidates,
+            watch_candidates=watch_candidates,
+            recommendations=recommendations,
+            vetoed_candidates=vetoed_candidates,
+            model_watch_candidates=model_watch_candidates,
+            model_attempts=model_attempts,
+            model_output_available=provider_result is not None,
+        )
+        recommendations = _attach_trace_ids_to_rows(
+            recommendations,
+            model_trace_id=str(model_trace["model_trace_id"]),
+            candidate_ids_by_ticker=candidate_ids_by_ticker,
+        )
+        vetoed_candidates = _attach_trace_ids_to_rows(
+            vetoed_candidates,
+            model_trace_id=str(model_trace["model_trace_id"]),
+            candidate_ids_by_ticker=candidate_ids_by_ticker,
+        )
+        model_watch_candidates = _attach_trace_ids_to_rows(
+            model_watch_candidates,
+            model_trace_id=str(model_trace["model_trace_id"]),
+            candidate_ids_by_ticker=candidate_ids_by_ticker,
+        )
+
     artifact = {
-        "source_entry_report": os.path.basename(entry_report_path),
-        "source_buy_report": (
-            os.path.basename(buy_report_path)
-            if buy_report_path
-            else source_report.get("source_buy_report")
-        ),
+        "source_entry_report": source_entry_report_basename,
+        "source_buy_report": source_buy_report_value,
         "market": target_market,
         "model_provider": normalized_model_provider,
         "model_name": normalized_model_name,
@@ -1677,6 +2038,8 @@ def run_ai_brief(
         "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
         "source_provider_summary": source_provider_summary,
     }
+    if model_trace is not None:
+        artifact["model_trace"] = model_trace
 
     try:
         out_path = write_ai_brief_report(

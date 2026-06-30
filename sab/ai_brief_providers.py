@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 import requests  # type: ignore[import-untyped]
 
@@ -71,6 +72,10 @@ _MODEL_WATCH_VETO_DROPPED_MESSAGE = (
 _MODEL_INELIGIBLE_VETO_DROPPED_MESSAGE = (
     "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함"
 )
+_OPENAI_PROMPT_VERSION = "openai-ai-brief-v1"
+_OPENAI_OUTPUT_SCHEMA_VERSION = "openai-ai-brief-output-v1"
+_FAKE_PROMPT_VERSION = "fake-ai-brief-v1"
+_FAKE_OUTPUT_SCHEMA_VERSION = "fake-ai-brief-output-v1"
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
 )
@@ -88,15 +93,34 @@ class _AiBriefProviderSession(Protocol):
 
 
 @dataclass(frozen=True)
+class AiBriefProviderTraceMetadata:
+    prompt_version: str
+    output_schema_version: str
+    request_hash: str
+    source_catalog_hash: str
+    request_status: Literal["sent", "planned_not_sent"]
+
+
+@dataclass(frozen=True)
 class AiBriefProviderResult:
     recommendations: list[dict[str, object]]
     source_issues: list[dict[str, object]]
     vetoed_candidates: list[dict[str, object]] = field(default_factory=list)
     watch_candidates: list[dict[str, object]] = field(default_factory=list)
+    trace_metadata: AiBriefProviderTraceMetadata | None = None
 
 
 class AiBriefProviderError(RuntimeError):
     code = "model_provider_failed"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        trace_metadata: AiBriefProviderTraceMetadata | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.trace_metadata = trace_metadata
 
 
 class AiBriefProviderTimeoutError(AiBriefProviderError):
@@ -117,10 +141,20 @@ class FakeAiBriefProvider:
         recommendable_candidates: list[dict[str, object]],
         watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
-        eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
-            recommendable_candidates=recommendable_candidates,
-            watch_candidates=watch_candidates,
-        )
+        try:
+            eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+            )
+        except AiBriefProviderContractError as exc:
+            exc.trace_metadata = build_ai_brief_provider_trace_metadata(
+                model_provider=MODEL_PROVIDER_FAKE,
+                model_name=self.model_name,
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+                request_status="planned_not_sent",
+            )
+            raise
         expected_watch_tickers = _candidate_ticker_order(watch_candidates)
         as_of = _offset_now_iso()
         recommendations: list[dict[str, object]] = []
@@ -174,15 +208,25 @@ class FakeAiBriefProvider:
             recommendations=recommendations,
             source_issues=source_issues,
             watch_candidates=watch_rows,
+            trace_metadata=_build_fake_trace_metadata(
+                model_name=self.model_name,
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+            ),
         )
-        _validate_provider_result_contract(
-            result,
-            eligible_tickers=eligible_tickers,
-            watch_tickers=watch_tickers,
-            expected_watch_tickers=expected_watch_tickers,
-            source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
-            watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
-        )
+        try:
+            _validate_provider_result_contract(
+                result,
+                eligible_tickers=eligible_tickers,
+                watch_tickers=watch_tickers,
+                expected_watch_tickers=expected_watch_tickers,
+                source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
+                watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
+            )
+        except AiBriefProviderContractError as exc:
+            if exc.trace_metadata is None:
+                exc.trace_metadata = result.trace_metadata
+            raise
         return result
 
 
@@ -210,26 +254,54 @@ class OpenAiBriefProvider:
         recommendable_candidates: list[dict[str, object]],
         watch_candidates: list[dict[str, object]],
     ) -> AiBriefProviderResult:
-        eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
-            recommendable_candidates=recommendable_candidates,
-            watch_candidates=watch_candidates,
-        )
+        try:
+            eligible_tickers, watch_tickers = _candidate_role_ticker_sets(
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+            )
+        except AiBriefProviderContractError as exc:
+            exc.trace_metadata = build_ai_brief_provider_trace_metadata(
+                model_provider=MODEL_PROVIDER_OPENAI,
+                model_name=self.model_name,
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+                request_status="planned_not_sent",
+            )
+            raise
         expected_watch_tickers = _candidate_ticker_order(watch_candidates)
         if not recommendable_candidates and not watch_candidates:
-            return AiBriefProviderResult(recommendations=[], source_issues=[])
+            return AiBriefProviderResult(
+                recommendations=[],
+                source_issues=[],
+                trace_metadata=build_ai_brief_provider_trace_metadata(
+                    model_provider=MODEL_PROVIDER_OPENAI,
+                    model_name=self.model_name,
+                    recommendable_candidates=recommendable_candidates,
+                    watch_candidates=watch_candidates,
+                    request_status="planned_not_sent",
+                ),
+            )
 
         recommendable_source_catalog = _SourceReferenceCatalog(recommendable_candidates)
         watch_source_catalog = _SourceReferenceCatalog(watch_candidates)
         eligible_ticker_order = _candidate_ticker_order(recommendable_candidates)
         watch_ticker_order = _candidate_ticker_order(watch_candidates)
+        recommendable_model_candidates = recommendable_source_catalog.model_candidates(
+            recommendable_candidates
+        )
+        watch_model_candidates = watch_source_catalog.model_candidates(watch_candidates)
         request_payload = _build_openai_request_payload(
             model_name=self.model_name,
-            recommendable_candidates=recommendable_source_catalog.model_candidates(
-                recommendable_candidates
-            ),
-            watch_candidates=watch_source_catalog.model_candidates(watch_candidates),
+            recommendable_candidates=recommendable_model_candidates,
+            watch_candidates=watch_model_candidates,
             eligible_tickers=eligible_ticker_order,
             watch_tickers=watch_ticker_order,
+        )
+        trace_metadata = _build_openai_trace_metadata(
+            request_payload=request_payload,
+            recommendable_candidates=recommendable_model_candidates,
+            watch_candidates=watch_model_candidates,
+            request_status="sent",
         )
         try:
             response = self._session.post(
@@ -242,39 +314,53 @@ class OpenAiBriefProvider:
                 timeout=self._timeout_seconds,
             )
         except requests.Timeout as exc:
-            raise AiBriefProviderTimeoutError("OpenAI request timed out") from exc
+            raise AiBriefProviderTimeoutError(
+                "OpenAI request timed out",
+                trace_metadata=trace_metadata,
+            ) from exc
         except requests.RequestException as exc:
-            raise AiBriefProviderError(f"OpenAI request failed: {exc}") from exc
+            raise AiBriefProviderError(
+                f"OpenAI request failed: {exc}",
+                trace_metadata=trace_metadata,
+            ) from exc
 
         if response.status_code >= 400:
             raise AiBriefProviderError(
                 f"OpenAI request failed with HTTP {response.status_code}: "
-                f"{response.text[:200]}"
+                f"{response.text[:200]}",
+                trace_metadata=trace_metadata,
             )
 
         try:
             response_payload = response.json()
         except ValueError as exc:
             raise AiBriefProviderContractError(
-                "OpenAI response was not valid JSON"
+                "OpenAI response was not valid JSON",
+                trace_metadata=trace_metadata,
             ) from exc
 
-        parsed = _parse_openai_structured_output(response_payload)
-        result = _normalize_openai_provider_result(
-            parsed,
-            recommendable_candidates=recommendable_candidates,
-            watch_candidates=watch_candidates,
-            recommendable_source_catalog=recommendable_source_catalog,
-            watch_source_catalog=watch_source_catalog,
-        )
-        _validate_provider_result_contract(
-            result,
-            eligible_tickers=eligible_tickers,
-            watch_tickers=watch_tickers,
-            expected_watch_tickers=expected_watch_tickers,
-            source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
-            watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
-        )
+        try:
+            parsed = _parse_openai_structured_output(response_payload)
+            result = _normalize_openai_provider_result(
+                parsed,
+                recommendable_candidates=recommendable_candidates,
+                watch_candidates=watch_candidates,
+                recommendable_source_catalog=recommendable_source_catalog,
+                watch_source_catalog=watch_source_catalog,
+                trace_metadata=trace_metadata,
+            )
+            _validate_provider_result_contract(
+                result,
+                eligible_tickers=eligible_tickers,
+                watch_tickers=watch_tickers,
+                expected_watch_tickers=expected_watch_tickers,
+                source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
+                watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
+            )
+        except AiBriefProviderContractError as exc:
+            if exc.trace_metadata is None:
+                exc.trace_metadata = trace_metadata
+            raise
         return result
 
 
@@ -499,6 +585,90 @@ def _openai_result_schema(
     }
 
 
+def _json_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _build_openai_trace_metadata(
+    *,
+    request_payload: Mapping[str, object],
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    request_status: Literal["sent", "planned_not_sent"],
+) -> AiBriefProviderTraceMetadata:
+    return AiBriefProviderTraceMetadata(
+        prompt_version=_OPENAI_PROMPT_VERSION,
+        output_schema_version=_OPENAI_OUTPUT_SCHEMA_VERSION,
+        request_hash=_json_hash(request_payload),
+        source_catalog_hash=_json_hash(
+            {
+                "recommendable_candidates": recommendable_candidates,
+                "watch_candidates": watch_candidates,
+            }
+        ),
+        request_status=request_status,
+    )
+
+
+def _build_fake_trace_metadata(
+    *,
+    model_name: str,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    request_status: Literal["sent", "planned_not_sent"] = "sent",
+) -> AiBriefProviderTraceMetadata:
+    source_catalog = {
+        "recommendable_candidates": recommendable_candidates,
+        "watch_candidates": watch_candidates,
+    }
+    return AiBriefProviderTraceMetadata(
+        prompt_version=_FAKE_PROMPT_VERSION,
+        output_schema_version=_FAKE_OUTPUT_SCHEMA_VERSION,
+        request_hash=_json_hash({"model": model_name, **source_catalog}),
+        source_catalog_hash=_json_hash(source_catalog),
+        request_status=request_status,
+    )
+
+
+def build_ai_brief_provider_trace_metadata(
+    *,
+    model_provider: str,
+    model_name: str,
+    recommendable_candidates: list[dict[str, object]],
+    watch_candidates: list[dict[str, object]],
+    request_status: Literal["sent", "planned_not_sent"],
+) -> AiBriefProviderTraceMetadata:
+    if model_provider == MODEL_PROVIDER_FAKE:
+        return _build_fake_trace_metadata(
+            model_name=model_name,
+            recommendable_candidates=recommendable_candidates,
+            watch_candidates=watch_candidates,
+            request_status=request_status,
+        )
+    if model_provider == MODEL_PROVIDER_OPENAI:
+        recommendable_source_catalog = _SourceReferenceCatalog(recommendable_candidates)
+        watch_source_catalog = _SourceReferenceCatalog(watch_candidates)
+        recommendable_model_candidates = recommendable_source_catalog.model_candidates(
+            recommendable_candidates
+        )
+        watch_model_candidates = watch_source_catalog.model_candidates(watch_candidates)
+        request_payload = _build_openai_request_payload(
+            model_name=model_name,
+            recommendable_candidates=recommendable_model_candidates,
+            watch_candidates=watch_model_candidates,
+            eligible_tickers=_candidate_ticker_order(recommendable_candidates),
+            watch_tickers=_candidate_ticker_order(watch_candidates),
+        )
+        return _build_openai_trace_metadata(
+            request_payload=request_payload,
+            recommendable_candidates=recommendable_model_candidates,
+            watch_candidates=watch_model_candidates,
+            request_status=request_status,
+        )
+    raise AiBriefProviderContractError(f"unsupported model provider {model_provider!r}")
+
+
 def _parse_openai_structured_output(payload: object) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise AiBriefProviderContractError("OpenAI response must be an object")
@@ -549,6 +719,7 @@ def _normalize_openai_provider_result(
     watch_candidates: list[dict[str, object]],
     recommendable_source_catalog: _SourceReferenceCatalog,
     watch_source_catalog: _SourceReferenceCatalog,
+    trace_metadata: AiBriefProviderTraceMetadata | None = None,
 ) -> AiBriefProviderResult:
     candidate_by_ticker = {
         str(candidate["ticker"]): candidate for candidate in recommendable_candidates
@@ -596,6 +767,8 @@ def _normalize_openai_provider_result(
                     message=_MODEL_SOURCE_REF_INVALID_MESSAGE
                     if invalid_refs
                     else _MODEL_SOURCE_REF_MISSING_MESSAGE,
+                    source_refs=source_refs,
+                    invalid_source_refs=invalid_refs,
                 )
             )
             continue
@@ -617,6 +790,7 @@ def _normalize_openai_provider_result(
             "confidence": str(raw_recommendation.get("confidence") or "LOW").upper(),
             "rationale": string_list(raw_recommendation.get("rationale")),
             "checklist": string_list(raw_recommendation.get("checklist")),
+            "source_refs": source_refs,
             "sources": sources,
             "as_of": _offset_now_iso(),
         }
@@ -673,6 +847,8 @@ def _normalize_openai_provider_result(
                     ticker=ticker,
                     code="model_watch_source_ref_invalid",
                     message=_MODEL_WATCH_SOURCE_REF_INVALID_MESSAGE,
+                    source_refs=source_refs,
+                    invalid_source_refs=invalid_refs,
                 )
             )
             normalized_watch_candidates.append(
@@ -684,6 +860,7 @@ def _normalize_openai_provider_result(
             "action": action,
             "reason": reason,
             "retrigger_conditions": retrigger_conditions,
+            "source_refs": source_refs,
             "sources": sources,
         }
         _copy_investment_readiness_fields(
@@ -695,6 +872,7 @@ def _normalize_openai_provider_result(
         source_issues=source_issues,
         vetoed_candidates=vetoed_candidates,
         watch_candidates=normalized_watch_candidates,
+        trace_metadata=trace_metadata,
     )
 
 
@@ -713,32 +891,80 @@ def _as_provider_mapping_rows(
     return rows
 
 
-def _source_id_for(ticker: str, index: int) -> str:
+def _source_id_for(
+    ticker: str,
+    index: int,
+    *,
+    occurrence_index: int,
+    duplicate_ticker: bool,
+) -> str:
+    if duplicate_ticker:
+        return f"{ticker}#{occurrence_index}:{index}"
     return f"{ticker}:{index}"
+
+
+def candidate_source_ref_lists(
+    candidates: list[dict[str, object]],
+) -> list[list[str]]:
+    ticker_counts: dict[str, int] = {}
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").strip()
+        if ticker:
+            ticker_counts[ticker] = ticker_counts.get(ticker, 0) + 1
+
+    occurrence_counts: dict[str, int] = {}
+    refs_by_candidate: list[list[str]] = []
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            refs_by_candidate.append([])
+            continue
+        occurrence_counts[ticker] = occurrence_counts.get(ticker, 0) + 1
+        duplicate_ticker = ticker_counts.get(ticker, 0) > 1
+        refs_by_candidate.append(
+            [
+                _source_id_for(
+                    ticker,
+                    index,
+                    occurrence_index=occurrence_counts[ticker],
+                    duplicate_ticker=duplicate_ticker,
+                )
+                for index, _source in enumerate(_candidate_sources(candidate), start=1)
+            ]
+        )
+    return refs_by_candidate
 
 
 class _SourceReferenceCatalog:
     def __init__(self, candidates: list[dict[str, object]]) -> None:
         self._sources_by_ticker: dict[str, dict[str, dict[str, object]]] = {}
-        for candidate in candidates:
+        self._sources_by_candidate_index: list[dict[str, dict[str, object]]] = []
+        source_refs_by_candidate = candidate_source_ref_lists(candidates)
+        for candidate_index, candidate in enumerate(candidates):
             ticker = str(candidate.get("ticker") or "").strip()
             if not ticker:
+                self._sources_by_candidate_index.append({})
                 continue
             rows_by_id: dict[str, dict[str, object]] = {}
-            for index, source in enumerate(_candidate_sources(candidate), start=1):
-                source_id = _source_id_for(ticker, index)
+            for source_id, source in zip(
+                source_refs_by_candidate[candidate_index],
+                _candidate_sources(candidate),
+                strict=True,
+            ):
                 rows_by_id[source_id] = source
-            self._sources_by_ticker[ticker] = rows_by_id
+                self._sources_by_ticker.setdefault(ticker, {})[source_id] = source
+            self._sources_by_candidate_index.append(rows_by_id)
 
     def model_candidates(
         self, candidates: list[dict[str, object]]
     ) -> list[dict[str, object]]:
         model_rows: list[dict[str, object]] = []
-        for candidate in candidates:
-            ticker = str(candidate.get("ticker") or "").strip()
+        for candidate_index, candidate in enumerate(candidates):
             sources = [
                 {"source_id": source_id, **source}
-                for source_id, source in self._sources_by_ticker.get(ticker, {}).items()
+                for source_id, source in self._sources_by_candidate_index[
+                    candidate_index
+                ].items()
             ]
             model_rows.append({**candidate, "sources": sources})
         return model_rows
@@ -855,13 +1081,20 @@ def _model_source_issue(
     ticker: str,
     code: str,
     message: str,
+    source_refs: list[str] | None = None,
+    invalid_source_refs: list[str] | None = None,
 ) -> dict[str, object]:
-    return {
+    issue: dict[str, object] = {
         "ticker": ticker,
         "code": code,
         "severity": "WARN",
         "message": message,
     }
+    if source_refs is not None:
+        issue["source_refs"] = source_refs
+    if invalid_source_refs:
+        issue["invalid_source_refs"] = invalid_source_refs
+    return issue
 
 
 def watch_reason_for_display(reason: object) -> str:
@@ -1379,6 +1612,9 @@ __all__ = [
     "AiBriefProviderContractError",
     "AiBriefProviderError",
     "AiBriefProviderTimeoutError",
+    "AiBriefProviderTraceMetadata",
     "FakeAiBriefProvider",
     "OpenAiBriefProvider",
+    "build_ai_brief_provider_trace_metadata",
+    "candidate_source_ref_lists",
 ]

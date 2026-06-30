@@ -29,6 +29,7 @@ from .paths import ensure_dir, next_report_path
 from .time_label import normalize_artifact_date
 
 _ARTIFACT_SCHEMA = "sab.ai_brief.v1"
+_MODEL_TRACE_SCHEMA = "sab.ai_brief.model_trace.v1"
 _REPORT_TYPE = "ai_brief"
 _MAX_RECOMMENDATIONS = 3
 _MAX_SOURCES_PER_TICKER = 3
@@ -41,6 +42,10 @@ _ALLOWED_SOURCE_BACKING_TIERS = frozenset(
     {"metadata_backed", "article_accessed", "article_verified"}
 )
 _ALLOWED_ARTICLE_READERS = frozenset({"none", "lightpanda"})
+_ALLOWED_MODEL_TRACE_REQUEST_STATUSES = frozenset({"sent", "planned_not_sent"})
+_ALLOWED_MODEL_OUTPUT_STATUSES = frozenset(
+    {"recommended", "vetoed", "watch", "no_output", "ambiguous_ticker_match"}
+)
 _EXPANDED_SUMMARY_COUNT_FIELDS = ("recommendable_count", "watch_count")
 _ARTICLE_READ_SUMMARY_COUNT_FIELDS = (
     "article_read_attempted_count",
@@ -832,6 +837,290 @@ def _validate_source_provider_summary(
         )
 
 
+def _validate_hash_string(value: object, *, field_name: str) -> None:
+    text = str(value or "").strip()
+    digest = text.removeprefix("sha256:")
+    if (
+        not text.startswith("sha256:")
+        or len(digest) != 64
+        or any(char not in "0123456789abcdefABCDEF" for char in digest)
+    ):
+        raise AiBriefValidationError(f"{field_name} must be a sha256 hash")
+
+
+def _model_trace_string_list(value: object, *, field_name: str) -> list[str]:
+    rows = _require_list(value, field_name=field_name)
+    strings: list[str] = []
+    for idx, raw_row in enumerate(rows):
+        if not isinstance(raw_row, str) or not raw_row.strip():
+            raise AiBriefValidationError(f"{field_name}[{idx}] must be a string")
+        strings.append(raw_row.strip())
+    return strings
+
+
+def _validate_model_trace_candidate_summaries(
+    model_trace: Mapping[str, Any],
+) -> dict[str, tuple[str, str]]:
+    summaries = _require_list(
+        model_trace.get("candidate_summaries"),
+        field_name="model_trace.candidate_summaries",
+    )
+    expected_count = _non_negative_int(
+        model_trace.get("candidate_count"),
+        field_name="model_trace.candidate_count",
+    )
+    if len(summaries) != expected_count:
+        raise AiBriefValidationError(
+            "model_trace.candidate_count must match candidate_summaries"
+        )
+    candidates_by_id: dict[str, tuple[str, str]] = {}
+    source_count_total = 0
+    for idx, raw_summary in enumerate(summaries):
+        summary = _require_mapping(
+            raw_summary,
+            field_name=f"model_trace.candidate_summaries[{idx}]",
+        )
+        candidate_id = str(summary.get("candidate_id") or "").strip()
+        if not candidate_id:
+            raise AiBriefValidationError(
+                f"model_trace.candidate_summaries[{idx}].candidate_id is required"
+            )
+        if candidate_id in candidates_by_id:
+            raise AiBriefValidationError(
+                "model_trace candidate_id values must be unique"
+            )
+        ticker = str(summary.get("ticker") or "").strip()
+        if not ticker:
+            raise AiBriefValidationError(
+                f"model_trace.candidate_summaries[{idx}].ticker is required"
+            )
+        status = str(summary.get("model_output_status") or "").strip()
+        if status not in _ALLOWED_MODEL_OUTPUT_STATUSES:
+            raise AiBriefValidationError(
+                "model_trace.candidate_summaries[].model_output_status must be one of "
+                f"{sorted(_ALLOWED_MODEL_OUTPUT_STATUSES)}"
+            )
+        _model_trace_string_list(
+            summary.get("source_refs_available"),
+            field_name=(
+                f"model_trace.candidate_summaries[{idx}].source_refs_available"
+            ),
+        )
+        source_count_total += _non_negative_int(
+            summary.get("source_count"),
+            field_name=f"model_trace.candidate_summaries[{idx}].source_count",
+        )
+        candidates_by_id[candidate_id] = (ticker, status)
+    expected_source_count = _non_negative_int(
+        model_trace.get("source_count"),
+        field_name="model_trace.source_count",
+    )
+    if source_count_total != expected_source_count:
+        raise AiBriefValidationError(
+            "model_trace.source_count must match candidate_summaries"
+        )
+    return candidates_by_id
+
+
+def _validate_model_trace_row_links(
+    payload: Mapping[str, Any],
+    *,
+    model_trace_id: str,
+    candidates_by_id: Mapping[str, tuple[str, str]],
+) -> None:
+    allowed_statuses_by_field = {
+        "recommendations": {"recommended", "ambiguous_ticker_match"},
+        "vetoed_candidates": {"vetoed", "ambiguous_ticker_match"},
+        "watch_candidates": {"watch", "no_output", "ambiguous_ticker_match"},
+    }
+    for field_name in ("recommendations", "vetoed_candidates", "watch_candidates"):
+        rows = _optional_list(payload, field_name)
+        if rows is None:
+            continue
+        allowed_statuses = allowed_statuses_by_field[field_name]
+        for idx, raw_row in enumerate(rows):
+            if not isinstance(raw_row, Mapping):
+                continue
+            row_ticker = str(raw_row.get("ticker") or "").strip()
+            row_trace_id = str(raw_row.get("model_trace_id") or "").strip()
+            if row_trace_id != model_trace_id:
+                raise AiBriefValidationError(
+                    f"{field_name}[{idx}].model_trace_id must match model_trace"
+                )
+            row_candidate_id = raw_row.get("candidate_id")
+            row_candidate_ids = raw_row.get("candidate_ids")
+            if row_candidate_id is not None and row_candidate_ids is not None:
+                raise AiBriefValidationError(
+                    f"{field_name}[{idx}] must not include both candidate_id and "
+                    "candidate_ids"
+                )
+            if row_candidate_ids is not None:
+                candidate_ids = _model_trace_string_list(
+                    row_candidate_ids,
+                    field_name=f"{field_name}[{idx}].candidate_ids",
+                )
+                if not candidate_ids:
+                    raise AiBriefValidationError(
+                        f"{field_name}[{idx}].candidate_ids is required"
+                    )
+            else:
+                candidate_id = str(row_candidate_id or "").strip()
+                if not candidate_id:
+                    raise AiBriefValidationError(
+                        f"{field_name}[{idx}].candidate_id is required"
+                    )
+                candidate_ids = [candidate_id]
+            unknown_ids = sorted(
+                candidate_id
+                for candidate_id in set(candidate_ids)
+                if candidate_id not in candidates_by_id
+            )
+            if unknown_ids:
+                raise AiBriefValidationError(
+                    f"{field_name}[{idx}].candidate_id must exist in model_trace"
+                )
+            for candidate_id in candidate_ids:
+                candidate_ticker, candidate_status = candidates_by_id[candidate_id]
+                if row_ticker and candidate_ticker != row_ticker:
+                    raise AiBriefValidationError(
+                        f"{field_name}[{idx}].candidate_id must match row ticker"
+                    )
+                if candidate_status not in allowed_statuses:
+                    raise AiBriefValidationError(
+                        f"{field_name}[{idx}].candidate_id must match row status"
+                    )
+
+
+def _validate_model_trace_context(
+    payload: Mapping[str, Any],
+    model_trace: Mapping[str, Any],
+) -> None:
+    for field_name in (
+        "market",
+        "model_provider",
+        "model_name",
+        "source_entry_report",
+    ):
+        if (
+            str(model_trace.get(field_name) or "").strip()
+            != str(payload.get(field_name) or "").strip()
+        ):
+            raise AiBriefValidationError(
+                f"model_trace.{field_name} must match artifact"
+            )
+
+    eligible_tickers = _model_trace_string_list(
+        model_trace.get("eligible_tickers"),
+        field_name="model_trace.eligible_tickers",
+    )
+    artifact_eligible_tickers = _model_trace_string_list(
+        payload.get("eligible_tickers"),
+        field_name="eligible_tickers",
+    )
+    if eligible_tickers != artifact_eligible_tickers:
+        raise AiBriefValidationError("model_trace.eligible_tickers must match artifact")
+
+    watch_tickers = _model_trace_string_list(
+        model_trace.get("watch_tickers"),
+        field_name="model_trace.watch_tickers",
+    )
+    artifact_watch_tickers = _model_trace_string_list(
+        payload.get("watch_tickers"),
+        field_name="watch_tickers",
+    )
+    if watch_tickers != artifact_watch_tickers:
+        raise AiBriefValidationError("model_trace.watch_tickers must match artifact")
+
+    attempt_ids = _model_trace_string_list(
+        model_trace.get("attempt_ids"),
+        field_name="model_trace.attempt_ids",
+    )
+    model_attempts = _require_list(
+        payload.get("model_attempts"),
+        field_name="model_attempts",
+    )
+    expected_attempt_ids: list[str] = []
+    for idx, raw_attempt in enumerate(model_attempts):
+        attempt = _require_mapping(raw_attempt, field_name=f"model_attempts[{idx}]")
+        role = str(attempt.get("role") or "").strip()
+        model_name = str(attempt.get("model_name") or "").strip()
+        if role and model_name:
+            expected_attempt_ids.append(f"{role}:{model_name}")
+    if attempt_ids != expected_attempt_ids:
+        raise AiBriefValidationError(
+            "model_trace.attempt_ids must match model_attempts"
+        )
+
+
+def _validate_model_trace(payload: Mapping[str, Any]) -> None:
+    if "model_trace" not in payload:
+        return
+    model_trace = _require_mapping(payload.get("model_trace"), field_name="model_trace")
+    if model_trace.get("schema") != _MODEL_TRACE_SCHEMA:
+        raise AiBriefValidationError(
+            f"model_trace.schema must be {_MODEL_TRACE_SCHEMA!r}"
+        )
+    model_trace_id = str(model_trace.get("model_trace_id") or "").strip()
+    if not model_trace_id:
+        raise AiBriefValidationError("model_trace.model_trace_id is required")
+    for field_name in (
+        "prompt_version",
+        "output_schema_version",
+        "model_provider",
+        "model_name",
+        "market",
+        "source_entry_report",
+    ):
+        if not str(model_trace.get(field_name) or "").strip():
+            raise AiBriefValidationError(f"model_trace.{field_name} is required")
+    _validate_hash_string(
+        model_trace.get("request_hash"),
+        field_name="model_trace.request_hash",
+    )
+    _validate_hash_string(
+        model_trace.get("source_catalog_hash"),
+        field_name="model_trace.source_catalog_hash",
+    )
+    request_status = str(model_trace.get("request_status") or "").strip()
+    if request_status not in _ALLOWED_MODEL_TRACE_REQUEST_STATUSES:
+        raise AiBriefValidationError(
+            "model_trace.request_status must be one of "
+            f"{sorted(_ALLOWED_MODEL_TRACE_REQUEST_STATUSES)}"
+        )
+    _model_trace_string_list(
+        model_trace.get("eligible_tickers"),
+        field_name="model_trace.eligible_tickers",
+    )
+    _model_trace_string_list(
+        model_trace.get("watch_tickers"),
+        field_name="model_trace.watch_tickers",
+    )
+    _model_trace_string_list(
+        model_trace.get("attempt_ids"),
+        field_name="model_trace.attempt_ids",
+    )
+    _non_negative_int(
+        model_trace.get("source_count"),
+        field_name="model_trace.source_count",
+    )
+    normalization_issues = _require_list(
+        model_trace.get("normalization_issues"),
+        field_name="model_trace.normalization_issues",
+    )
+    for idx, raw_issue in enumerate(normalization_issues):
+        if not isinstance(raw_issue, Mapping):
+            raise AiBriefValidationError(
+                f"model_trace.normalization_issues[{idx}] must be an object"
+            )
+    _validate_model_trace_context(payload, model_trace)
+    candidates_by_id = _validate_model_trace_candidate_summaries(model_trace)
+    _validate_model_trace_row_links(
+        payload,
+        model_trace_id=model_trace_id,
+        candidates_by_id=candidates_by_id,
+    )
+
+
 def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) -> None:
     if payload.get("schema") != _ARTIFACT_SCHEMA:
         raise AiBriefValidationError(f"schema must be {_ARTIFACT_SCHEMA!r}")
@@ -879,6 +1168,7 @@ def validate_ai_brief_artifact(payload: Mapping[str, Any], *, now: dt.datetime) 
         summary=summary,
         watch_tickers=watch_tickers,
     )
+    _validate_model_trace(payload)
     _validate_summary_counts(payload, summary=summary, watch_tickers=watch_tickers)
     try:
         validate_optional_ai_brief_state_fields(payload)
