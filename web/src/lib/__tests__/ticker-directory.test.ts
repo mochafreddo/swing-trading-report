@@ -18,6 +18,7 @@ vi.mock("@/lib/supabase-admin", () => ({
 
 import {
   extractBuyCandidatesFromReport,
+  listTickerDirectoryExactBaseCandidates,
   listRecentBuyCandidates,
   searchTickerDirectory,
 } from "@/lib/ticker-directory";
@@ -312,6 +313,86 @@ describe("searchTickerDirectory", () => {
       }),
       expect.any(String),
     );
+  });
+});
+
+describe("listTickerDirectoryExactBaseCandidates", () => {
+  it("returns exact-base US candidates only when the cached directory is fresh", async () => {
+    vi.mocked(fetchRuntimeStateEntry).mockResolvedValueOnce(
+      cachedDirectoryState({
+        builtAtMs: Date.now() - 1000,
+        buyReportKeys: ["2026/02/2026-02-27.buy.json"],
+        entries: [
+          cachedTickerEntry({
+            ticker: "HOOD.NAS",
+            name: "Robinhood Markets",
+            reportDate: "2026-02-27",
+            reportKey: "2026/02/2026-02-27.buy.json",
+          }),
+          cachedTickerEntry({
+            ticker: "HOOD.NYS",
+            name: "Different HOOD",
+            reportDate: "2026-02-27",
+            reportKey: "2026/02/2026-02-27.buy.json",
+          }),
+          cachedTickerEntry({
+            ticker: "BRK.B.NYS",
+            name: "Berkshire Hathaway",
+            reportDate: "2026-02-27",
+            reportKey: "2026/02/2026-02-27.buy.json",
+          }),
+        ],
+      }),
+    );
+    vi.mocked(fetchReportIndexPage).mockResolvedValueOnce(
+      reportIndexPage([
+        buyReportRow("2026/02/2026-02-27.buy.json", "2026-02-27"),
+      ]),
+    );
+
+    const result = await listTickerDirectoryExactBaseCandidates([
+      "HOOD",
+      "BRK/B",
+    ]);
+
+    expect(result.directory.usableForAutoMapping).toBe(true);
+    expect(result.candidates).toEqual([
+      { ticker: "BRK.B.NYS", name: "Berkshire Hathaway" },
+      { ticker: "HOOD.NAS", name: "Robinhood Markets" },
+      { ticker: "HOOD.NYS", name: "Different HOOD" },
+    ]);
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
+  });
+
+  it("does not return exact-base candidates from stale cached directory data after refresh failure", async () => {
+    vi.mocked(fetchRuntimeStateEntry).mockResolvedValueOnce(
+      cachedDirectoryState({
+        builtAtMs: Date.now() - 25 * 60 * 60 * 1000,
+        buyReportKeys: ["2026/02/2026-02-26.buy.json"],
+        entries: [
+          cachedTickerEntry({
+            ticker: "HOOD.NAS",
+            name: "Robinhood Markets",
+            reportDate: "2026-02-26",
+            reportKey: "2026/02/2026-02-26.buy.json",
+            updatedAtMs: Date.now() - 25 * 60 * 60 * 1000,
+          }),
+        ],
+      }),
+    );
+    vi.mocked(fetchReportIndexPage)
+      .mockResolvedValueOnce(
+        reportIndexPage([
+          buyReportRow("2026/02/2026-02-27.buy.json", "2026-02-27"),
+        ]),
+      )
+      .mockRejectedValueOnce(new Error("report index unavailable"));
+
+    const result = await listTickerDirectoryExactBaseCandidates(["HOOD"]);
+
+    expect(result.directory.usableForAutoMapping).toBe(false);
+    expect(result.candidates).toEqual([]);
+    expect(vi.mocked(upsertRuntimeStateEntry)).not.toHaveBeenCalled();
   });
 });
 

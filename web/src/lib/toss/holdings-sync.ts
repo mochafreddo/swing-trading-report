@@ -2,6 +2,7 @@ import {
   buildHoldingsReconciliation,
   type HoldingsReconciliation,
 } from "@/lib/holdings-reconciliation";
+import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import type { HoldingRecord, HoldingReplaceSnapshot } from "@/lib/types";
 import { createHash } from "node:crypto";
 
@@ -15,6 +16,10 @@ export interface TossHoldingsItem {
   currency: string;
   quantity: string;
   averagePurchasePrice: string;
+}
+
+export interface TossTickerDirectoryCandidate {
+  ticker: string;
 }
 
 export type TossHoldingsBlockedReason =
@@ -34,6 +39,7 @@ export interface TossHoldingsBlockedRow {
 export interface TossHoldingsDryRunInput {
   currentHoldings: readonly HoldingRecord[];
   items: readonly TossHoldingsItem[];
+  tickerDirectoryCandidates?: readonly TossTickerDirectoryCandidate[];
 }
 
 export interface TossHoldingsDryRunResult {
@@ -47,6 +53,11 @@ const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
 const DECIMAL_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const QUANTITY_DECIMAL_DIGITS = 6;
 const ENTRY_PRICE_DECIMAL_DIGITS = 4;
+
+type UsTickerResolution =
+  | { status: "matched"; ticker: string }
+  | { status: "ambiguous" }
+  | { status: "unresolved" };
 
 function roundTo(value: number, digits: number): number {
   const factor = 10 ** digits;
@@ -79,18 +90,71 @@ function classifyCurrency(value: string): TossCurrency | null {
   return value === "KRW" || value === "USD" ? value : null;
 }
 
+function normalizeUsSymbol(value: string): string {
+  const trimmed = value.trim();
+  const normalizedMaybeTicker = normalizeHoldingTickerForMutation(trimmed);
+  const maybeMatch = EXPLICIT_US_SUFFIX_PATTERN.exec(normalizedMaybeTicker);
+  if (maybeMatch) {
+    return maybeMatch[1] ?? "";
+  }
+
+  const normalizedTicker = normalizeHoldingTickerForMutation(`${trimmed}.NAS`);
+  const match = EXPLICIT_US_SUFFIX_PATTERN.exec(normalizedTicker);
+  return match?.[1] ?? trimmed.toUpperCase();
+}
+
 function findExistingUsTicker(
   symbol: string,
   currentHoldings: readonly HoldingRecord[],
-): string | null {
+): UsTickerResolution {
+  const normalizedSymbol = normalizeUsSymbol(symbol);
   const matches = currentHoldings
     .map((row) => {
       const match = EXPLICIT_US_SUFFIX_PATTERN.exec(row.ticker);
-      return match && match[1] === symbol ? row.ticker : null;
+      return match && match[1] === normalizedSymbol ? row.ticker : null;
     })
     .filter((ticker): ticker is string => ticker !== null);
+  const uniqueMatches = Array.from(new Set(matches));
 
-  return matches.length === 1 ? matches[0] : null;
+  if (uniqueMatches.length === 1) {
+    return { status: "matched", ticker: uniqueMatches[0] };
+  }
+  return uniqueMatches.length > 1
+    ? { status: "ambiguous" }
+    : { status: "unresolved" };
+}
+
+function findTickerDirectoryUsTicker(
+  symbol: string,
+  candidates: readonly TossTickerDirectoryCandidate[] = [],
+): UsTickerResolution {
+  const normalizedSymbol = normalizeUsSymbol(symbol);
+  const matches = candidates
+    .map((candidate) => {
+      const match = EXPLICIT_US_SUFFIX_PATTERN.exec(candidate.ticker);
+      return match && match[1] === normalizedSymbol ? candidate.ticker : null;
+    })
+    .filter((ticker): ticker is string => ticker !== null);
+  const uniqueMatches = Array.from(new Set(matches));
+
+  if (uniqueMatches.length === 1) {
+    return { status: "matched", ticker: uniqueMatches[0] };
+  }
+  return uniqueMatches.length > 1
+    ? { status: "ambiguous" }
+    : { status: "unresolved" };
+}
+
+function resolveUsTicker(
+  symbol: string,
+  currentHoldings: readonly HoldingRecord[],
+  tickerDirectoryCandidates: readonly TossTickerDirectoryCandidate[] = [],
+): UsTickerResolution {
+  const existing = findExistingUsTicker(symbol, currentHoldings);
+  if (existing.status !== "unresolved") {
+    return existing;
+  }
+  return findTickerDirectoryUsTicker(symbol, tickerDirectoryCandidates);
 }
 
 function preserveAppOwnedMetadata(
@@ -204,11 +268,18 @@ export function buildTossHoldingsDryRun(
       continue;
     }
 
-    const ticker =
+    const tickerResolution =
       marketCountry === "KR"
-        ? item.symbol
-        : findExistingUsTicker(item.symbol, input.currentHoldings);
-    if (!ticker) {
+        ? ({
+            status: "matched",
+            ticker: item.symbol,
+          } satisfies UsTickerResolution)
+        : resolveUsTicker(
+            item.symbol,
+            input.currentHoldings,
+            input.tickerDirectoryCandidates,
+          );
+    if (tickerResolution.status !== "matched") {
       blockedRows.push(
         blockedRow(
           item,
@@ -218,6 +289,7 @@ export function buildTossHoldingsDryRun(
       );
       continue;
     }
+    const ticker = tickerResolution.ticker;
 
     targetRows.push(
       preserveAppOwnedMetadata(

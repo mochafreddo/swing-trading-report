@@ -25,8 +25,10 @@ interface TossSyncPanelProps {
   canRunDryRun: boolean;
   canApply: boolean;
   onRunDryRun: () => void | Promise<void>;
-  onApply: () => void | Promise<void>;
+  onApply: (confirmationText: string) => void | Promise<void>;
 }
+
+const TOSS_APPLY_CONFIRMATION_TEXT = "APPLY TOSS HOLDINGS";
 
 const FIELD_LABELS: Record<string, string> = {
   quantity: "qty",
@@ -202,6 +204,7 @@ export function TossSyncPanel({
   onRunDryRun,
   onApply,
 }: TossSyncPanelProps) {
+  const [confirmationText, setConfirmationText] = useState("");
   const actionLabel =
     status === "idle" || status === "error" || status === "rate-limited"
       ? "Fetch Toss Snapshot"
@@ -306,11 +309,25 @@ export function TossSyncPanel({
 
           {canApply && (
             <div className={styles.applyGuard}>
+              <label className={styles.applyConfirmLabel}>
+                Confirm apply
+                <input
+                  name="tossConfirmation"
+                  value={confirmationText}
+                  onChange={(event) => setConfirmationText(event.target.value)}
+                  placeholder={TOSS_APPLY_CONFIRMATION_TEXT}
+                  autoComplete="off"
+                />
+              </label>
               <button
                 type="button"
                 className={styles.dangerButton}
-                onClick={() => void onApply()}
-                disabled={applying || loading}
+                onClick={() => void onApply(confirmationText)}
+                disabled={
+                  applying ||
+                  loading ||
+                  confirmationText !== TOSS_APPLY_CONFIRMATION_TEXT
+                }
               >
                 {applying ? "Applying..." : "Apply Toss Snapshot"}
               </button>

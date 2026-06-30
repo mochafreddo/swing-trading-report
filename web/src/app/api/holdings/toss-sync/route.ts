@@ -13,6 +13,7 @@ import {
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { tossHoldingsSyncRequestSchema } from "@/lib/schemas";
 import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
+import { listTickerDirectoryExactBaseCandidates } from "@/lib/ticker-directory";
 import {
   TossInvestApiError,
   TossInvestConfigError,
@@ -21,7 +22,9 @@ import {
 import {
   buildTossHoldingsDiffHash,
   buildTossHoldingsDryRun,
+  type TossHoldingsItem,
   type TossHoldingsDryRunResult,
+  type TossTickerDirectoryCandidate,
 } from "@/lib/toss/holdings-sync";
 
 import {
@@ -58,6 +61,29 @@ function buildResponsePayload(
     blockedRows: dryRun.blockedRows,
     targetRows: dryRun.targetRows,
   };
+}
+
+async function fetchTossTickerDirectoryCandidates(
+  items: readonly TossHoldingsItem[],
+): Promise<TossTickerDirectoryCandidate[]> {
+  const usSymbols = Array.from(
+    new Set(
+      items
+        .filter((item) => item.marketCountry === "US")
+        .map((item) => item.symbol.trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  if (usSymbols.length <= 0) {
+    return [];
+  }
+
+  try {
+    const result = await listTickerDirectoryExactBaseCandidates(usSymbols);
+    return result.candidates.map((row) => ({ ticker: row.ticker }));
+  } catch {
+    return [];
+  }
 }
 
 function logRejectedTossSyncRequest(
@@ -179,9 +205,12 @@ export async function POST(request: NextRequest) {
       fetchAllHoldings(),
       fetchDefaultTossHoldingsItems(),
     ]);
+    const tickerDirectoryCandidates =
+      await fetchTossTickerDirectoryCandidates(tossItems);
     const dryRun = buildTossHoldingsDryRun({
       currentHoldings,
       items: tossItems,
+      tickerDirectoryCandidates,
     });
     const diffHash = buildTossHoldingsDiffHash(dryRun);
 

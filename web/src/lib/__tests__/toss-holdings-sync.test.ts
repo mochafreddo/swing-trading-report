@@ -118,6 +118,146 @@ describe("toss holdings sync dry-run", () => {
     );
   });
 
+  it("maps a new US Toss symbol from one matching ticker directory candidate", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [],
+      tickerDirectoryCandidates: [{ ticker: "HOOD.NAS" }],
+      items: [
+        {
+          symbol: "HOOD",
+          name: "Robinhood Markets",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "2",
+          averagePurchasePrice: "81.25",
+        },
+      ],
+    });
+
+    expect(dryRun.applyBlocked).toBe(false);
+    expect(dryRun.blockedRows).toEqual([]);
+    expect(dryRun.targetRows).toEqual([
+      expect.objectContaining({
+        ticker: "HOOD.NAS",
+        quantity: 2,
+        entry_price: 81.25,
+        entry_currency: "USD",
+      }),
+    ]);
+    expect(dryRun.reconciliation.summary).toEqual(
+      expect.objectContaining({
+        incomingCount: 1,
+        createCount: 1,
+      }),
+    );
+  });
+
+  it("keeps a new US Toss symbol blocked when ticker directory candidates are ambiguous", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [],
+      tickerDirectoryCandidates: [{ ticker: "ABC.NAS" }, { ticker: "ABC.NYS" }],
+      items: [
+        {
+          symbol: "ABC",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "10",
+        },
+      ],
+    });
+
+    expect(dryRun.applyBlocked).toBe(true);
+    expect(dryRun.targetRows).toEqual([]);
+    expect(dryRun.blockedRows).toEqual([
+      expect.objectContaining({
+        symbol: "ABC",
+        reason: "ticker_exchange_unresolved",
+      }),
+    ]);
+  });
+
+  it("keeps a US Toss symbol blocked when existing holding suffixes are ambiguous", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [
+        holding({ ticker: "ABC.NAS" }),
+        holding({ ticker: "ABC.NYS" }),
+      ],
+      tickerDirectoryCandidates: [{ ticker: "ABC.NAS" }],
+      items: [
+        {
+          symbol: "ABC",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "10",
+        },
+      ],
+    });
+
+    expect(dryRun.applyBlocked).toBe(true);
+    expect(dryRun.targetRows).toEqual([]);
+    expect(dryRun.blockedRows).toEqual([
+      expect.objectContaining({
+        symbol: "ABC",
+        reason: "ticker_exchange_unresolved",
+      }),
+    ]);
+  });
+
+  it("prefers an existing holding suffix over a different ticker directory candidate", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [
+        holding({
+          ticker: "ABC.NYS",
+          quantity: 1,
+          entry_price: 10,
+          entry_currency: "USD",
+        }),
+      ],
+      tickerDirectoryCandidates: [{ ticker: "ABC.NAS" }],
+      items: [
+        {
+          symbol: "ABC",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "2",
+          averagePurchasePrice: "11",
+        },
+      ],
+    });
+
+    expect(dryRun.applyBlocked).toBe(false);
+    expect(dryRun.targetRows).toEqual([
+      expect.objectContaining({
+        ticker: "ABC.NYS",
+        quantity: 2,
+        entry_price: 11,
+      }),
+    ]);
+  });
+
+  it("canonicalizes class-share US Toss symbols before matching ticker directory candidates", () => {
+    const dryRun = buildTossHoldingsDryRun({
+      currentHoldings: [],
+      tickerDirectoryCandidates: [{ ticker: "BRK.B.NYS" }],
+      items: [
+        {
+          symbol: "BRK/B",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "500",
+        },
+      ],
+    });
+
+    expect(dryRun.applyBlocked).toBe(false);
+    expect(dryRun.targetRows).toEqual([
+      expect.objectContaining({ ticker: "BRK.B.NYS" }),
+    ]);
+  });
+
   it("builds a stable diff hash that changes when normalized holdings change", () => {
     const currentHoldings = [
       holding({

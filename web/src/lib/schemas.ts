@@ -318,6 +318,7 @@ export const tossHoldingsSyncRequestSchema = z.union([
     .object({
       mode: z.literal("apply"),
       diffHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+      confirmationText: z.literal("APPLY TOSS HOLDINGS"),
     })
     .strict(),
   z

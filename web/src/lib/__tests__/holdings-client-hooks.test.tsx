@@ -451,11 +451,12 @@ describe("holdings client hooks", () => {
     expect(hook.current.canApply).toBe(true);
 
     await act(async () => {
-      await hook.current.apply();
+      await hook.current.apply("APPLY TOSS HOLDINGS");
     });
 
     expect(requestApply).toHaveBeenCalledWith(
       "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "APPLY TOSS HOLDINGS",
     );
     expect(onApplied).toHaveBeenCalledTimes(1);
     expect(hook.current.status).toBe("applied");
@@ -701,7 +702,7 @@ describe("HoldingsClient composition", () => {
     );
   });
 
-  it("applies a Toss dry-run from the panel without confirmation text", async () => {
+  it("applies a Toss dry-run from the panel after confirmation text", async () => {
     const fetchMock = vi.mocked(globalThis.fetch as typeof fetch);
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
@@ -797,15 +798,24 @@ describe("HoldingsClient composition", () => {
     });
 
     const applyButton = findButton(container, "Apply Toss Snapshot");
-    expect(applyButton.disabled).toBe(false);
+    expect(applyButton.disabled).toBe(true);
 
     const confirmationInput = container.querySelector<HTMLInputElement>(
       'input[name="tossConfirmation"]',
     );
-    expect(confirmationInput).toBeNull();
+    expect(confirmationInput).not.toBeNull();
 
     await act(async () => {
-      applyButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      setControlValue(confirmationInput!, "APPLY TOSS HOLDINGS");
+      await Promise.resolve();
+    });
+    const confirmedApplyButton = findButton(container, "Apply Toss Snapshot");
+    expect(confirmedApplyButton.disabled).toBe(false);
+
+    await act(async () => {
+      confirmedApplyButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -819,6 +829,7 @@ describe("HoldingsClient composition", () => {
           mode: "apply",
           diffHash:
             "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          confirmationText: "APPLY TOSS HOLDINGS",
         }),
       }),
     );

@@ -25,6 +25,7 @@ const DIRECTORY_EXPIRES_MS = 365 * 24 * 60 * 60 * 1000;
 const DIRECTORY_BUILD_REPORT_LIMIT = 60;
 const REPORT_PAGE_SIZE = 20;
 const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
+const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
 
 export type {
   RecentBuyCandidate,
@@ -72,6 +73,20 @@ export interface RecentBuyCandidatesResponse {
   candidates: RecentBuyCandidate[];
 }
 
+export interface TickerDirectoryExactBaseCandidate {
+  ticker: string;
+  name: string | null;
+}
+
+export interface TickerDirectoryExactBaseResponse {
+  candidates: TickerDirectoryExactBaseCandidate[];
+  directory: {
+    builtAtMs: number;
+    sourceReports: number;
+    usableForAutoMapping: boolean;
+  };
+}
+
 type ReportIndexRow = Awaited<
   ReturnType<typeof fetchReportIndexPage>
 >["items"][number];
@@ -99,6 +114,24 @@ function normalizeSearchText(value: string): string {
   const normalized = value.trim().toUpperCase().normalize("NFKC");
   const compact = normalized.replace(/[^\p{L}\p{N}]+/gu, "");
   return compact || normalized;
+}
+
+function normalizeUsBaseSymbol(value: string): string {
+  const trimmed = value.trim();
+  const normalizedMaybeTicker = normalizeCandidateTicker(trimmed);
+  const maybeMatch = EXPLICIT_US_SUFFIX_PATTERN.exec(normalizedMaybeTicker);
+  if (maybeMatch) {
+    return maybeMatch[1] ?? "";
+  }
+
+  const normalizedTicker = normalizeCandidateTicker(`${trimmed}.NAS`);
+  const match = EXPLICIT_US_SUFFIX_PATTERN.exec(normalizedTicker);
+  return match?.[1] ?? trimmed.toUpperCase();
+}
+
+function directoryUsBase(ticker: string): string | null {
+  const match = EXPLICIT_US_SUFFIX_PATTERN.exec(ticker);
+  return match?.[1] ?? null;
 }
 
 function parseTickerDirectoryPayload(
@@ -554,6 +587,39 @@ export async function searchTickerDirectory(
     directory: {
       builtAtMs: directory.builtAtMs,
       sourceReports: directory.source.buyReportKeys.length,
+    },
+  };
+}
+
+export async function listTickerDirectoryExactBaseCandidates(
+  symbols: readonly string[],
+): Promise<TickerDirectoryExactBaseResponse> {
+  const directory = await loadDirectoryForSearch();
+  const sourceReports = directory.source.buyReportKeys.length;
+  const usableForAutoMapping =
+    sourceReports > 0 && Date.now() - directory.builtAtMs <= DIRECTORY_STALE_MS;
+  const wantedBases = new Set(
+    symbols.map(normalizeUsBaseSymbol).filter(Boolean),
+  );
+  const candidates = usableForAutoMapping
+    ? directory.entries
+        .filter((entry) => {
+          const base = directoryUsBase(entry.ticker);
+          return base !== null && wantedBases.has(base);
+        })
+        .sort((left, right) => left.ticker.localeCompare(right.ticker))
+        .map((entry) => ({
+          ticker: entry.ticker,
+          name: entry.name,
+        }))
+    : [];
+
+  return {
+    candidates,
+    directory: {
+      builtAtMs: directory.builtAtMs,
+      sourceReports,
+      usableForAutoMapping,
     },
   };
 }

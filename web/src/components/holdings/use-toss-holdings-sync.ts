@@ -100,6 +100,7 @@ export async function requestTossHoldingsDryRun(
 
 export async function requestTossHoldingsApply(
   diffHash: string,
+  confirmationText: string,
   fetcher: Fetcher = fetch,
 ): Promise<TossHoldingsDryRunResponse> {
   const response = await fetcher("/api/holdings/toss-sync", {
@@ -111,6 +112,7 @@ export async function requestTossHoldingsApply(
     body: JSON.stringify({
       mode: "apply",
       diffHash,
+      confirmationText,
     }),
   });
   const payload = (await response.json()) as unknown;
@@ -165,7 +167,10 @@ function statusMessage(status: TossSyncStatus): string {
 
 interface UseTossHoldingsSyncOptions {
   requestDryRun?: () => Promise<TossHoldingsDryRunResponse>;
-  requestApply?: (diffHash: string) => Promise<TossHoldingsDryRunResponse>;
+  requestApply?: (
+    diffHash: string,
+    confirmationText: string,
+  ) => Promise<TossHoldingsDryRunResponse>;
   onApplied?: () => void | Promise<void>;
 }
 
@@ -205,34 +210,37 @@ export function useTossHoldingsSync({
     }
   }, [requestDryRun]);
 
-  const apply = useCallback(async () => {
-    if (!dryRun?.diffHash) {
-      setError("Run a Toss dry-run before applying.");
-      return;
-    }
-    if (dryRun.applyBlocked) {
-      setError("Resolve blocked Toss rows before applying.");
-      return;
-    }
+  const apply = useCallback(
+    async (confirmationText: string) => {
+      if (!dryRun?.diffHash) {
+        setError("Run a Toss dry-run before applying.");
+        return;
+      }
+      if (dryRun.applyBlocked) {
+        setError("Resolve blocked Toss rows before applying.");
+        return;
+      }
 
-    setStatus("applying");
-    setError(null);
-    setSuccess(null);
-    try {
-      const response = await requestApply(dryRun.diffHash);
-      setDryRun(response);
-      setStatus("applied");
-      setSuccess("Applied Toss holdings sync");
-      await onApplied?.();
-    } catch (applyError) {
-      setStatus("error");
-      setError(
-        applyError instanceof Error
-          ? applyError.message
-          : "Failed to apply Toss holdings sync",
-      );
-    }
-  }, [dryRun, onApplied, requestApply]);
+      setStatus("applying");
+      setError(null);
+      setSuccess(null);
+      try {
+        const response = await requestApply(dryRun.diffHash, confirmationText);
+        setDryRun(response);
+        setStatus("applied");
+        setSuccess("Applied Toss holdings sync");
+        await onApplied?.();
+      } catch (applyError) {
+        setStatus("error");
+        setError(
+          applyError instanceof Error
+            ? applyError.message
+            : "Failed to apply Toss holdings sync",
+        );
+      }
+    },
+    [dryRun, onApplied, requestApply],
+  );
 
   return useMemo(
     () => ({

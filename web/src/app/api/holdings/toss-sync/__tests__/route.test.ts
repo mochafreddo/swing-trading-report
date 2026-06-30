@@ -77,12 +77,20 @@ vi.mock("@/lib/toss/client", () => ({
   fetchDefaultTossHoldingsItems: vi.fn(async () => []),
 }));
 
+vi.mock("@/lib/ticker-directory", () => ({
+  listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
+    candidates: [],
+    directory: { builtAtMs: 0, sourceReports: 0, usableForAutoMapping: false },
+  })),
+}));
+
 import { POST } from "@/app/api/holdings/toss-sync/route";
 import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
+import { listTickerDirectoryExactBaseCandidates } from "@/lib/ticker-directory";
 import { fetchDefaultTossHoldingsItems } from "@/lib/toss/client";
 
 function makePostRequest(body: object | string): NextRequest {
@@ -101,6 +109,14 @@ function makePostRequest(body: object | string): NextRequest {
 describe("/api/holdings/toss-sync route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(listTickerDirectoryExactBaseCandidates).mockResolvedValue({
+      candidates: [],
+      directory: {
+        builtAtMs: 0,
+        sourceReports: 0,
+        usableForAutoMapping: false,
+      },
+    });
   });
 
   it("maps local-request guard failures to 403", async () => {
@@ -180,6 +196,78 @@ describe("/api/holdings/toss-sync route", () => {
     expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
   });
 
+  it("uses one ticker directory match to create a new US Toss holding in dry-run", async () => {
+    vi.mocked(fetchAllHoldings).mockResolvedValueOnce([]);
+    vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValueOnce([
+      {
+        symbol: "HOOD",
+        marketCountry: "US",
+        currency: "USD",
+        quantity: "2",
+        averagePurchasePrice: "81.25",
+      },
+    ]);
+    vi.mocked(listTickerDirectoryExactBaseCandidates).mockResolvedValueOnce({
+      candidates: [{ ticker: "HOOD.NAS", name: "Robinhood Markets" }],
+      directory: {
+        builtAtMs: 1,
+        sourceReports: 10,
+        usableForAutoMapping: true,
+      },
+    });
+
+    const response = await POST(makePostRequest({ mode: "dry-run" }));
+    const payload = (await response.json()) as {
+      applyBlocked: boolean;
+      summary: { createCount: number };
+      blockedRows: Array<{ reason: string }>;
+      targetRows: Array<{ ticker: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.applyBlocked).toBe(false);
+    expect(payload.summary.createCount).toBe(1);
+    expect(payload.blockedRows).toEqual([]);
+    expect(payload.targetRows).toEqual([
+      expect.objectContaining({ ticker: "HOOD.NAS" }),
+    ]);
+    expect(
+      vi.mocked(listTickerDirectoryExactBaseCandidates),
+    ).toHaveBeenCalledWith(["HOOD"]);
+    expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
+  });
+
+  it("keeps unresolved US Toss rows blocked when ticker directory lookup fails", async () => {
+    vi.mocked(fetchAllHoldings).mockResolvedValueOnce([]);
+    vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValueOnce([
+      {
+        symbol: "HOOD",
+        marketCountry: "US",
+        currency: "USD",
+        quantity: "2",
+        averagePurchasePrice: "81.25",
+      },
+    ]);
+    vi.mocked(listTickerDirectoryExactBaseCandidates).mockRejectedValueOnce(
+      new Error("directory unavailable"),
+    );
+
+    const response = await POST(makePostRequest({ mode: "dry-run" }));
+    const payload = (await response.json()) as {
+      applyBlocked: boolean;
+      blockedRows: Array<{ reason: string }>;
+      targetRows: Array<{ ticker: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.applyBlocked).toBe(true);
+    expect(payload.targetRows).toEqual([]);
+    expect(payload.blockedRows).toEqual([
+      expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
+    ]);
+    expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
+  });
+
   it("applies a reviewed Toss holdings diff when the server recomputed hash still matches", async () => {
     vi.mocked(fetchAllHoldings).mockResolvedValue([
       {
@@ -223,6 +311,7 @@ describe("/api/holdings/toss-sync route", () => {
       makePostRequest({
         mode: "apply",
         diffHash: dryRunPayload.diffHash,
+        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const applyPayload = (await applyResponse.json()) as {
@@ -247,6 +336,36 @@ describe("/api/holdings/toss-sync route", () => {
     ]);
   });
 
+  it("rejects Toss holdings apply without confirmation text before writing Supabase", async () => {
+    vi.mocked(fetchAllHoldings).mockResolvedValue([]);
+    vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValue([
+      {
+        symbol: "005930",
+        marketCountry: "KR",
+        currency: "KRW",
+        quantity: "1",
+        averagePurchasePrice: "70000",
+      },
+    ]);
+
+    const dryRunResponse = await POST(makePostRequest({ mode: "dry-run" }));
+    const dryRunPayload = (await dryRunResponse.json()) as {
+      diffHash: string;
+    };
+
+    const applyResponse = await POST(
+      makePostRequest({
+        mode: "apply",
+        diffHash: dryRunPayload.diffHash,
+      }),
+    );
+    const payload = (await applyResponse.json()) as { error: string };
+
+    expect(applyResponse.status).toBe(400);
+    expect(payload.error).toBe("Invalid Toss holdings sync payload");
+    expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
+  });
+
   it("rejects stale Toss holdings apply hashes before writing Supabase", async () => {
     vi.mocked(fetchAllHoldings).mockResolvedValueOnce([]);
     vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValueOnce([
@@ -264,6 +383,7 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
@@ -294,6 +414,7 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
