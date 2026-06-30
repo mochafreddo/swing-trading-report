@@ -340,10 +340,14 @@
 
 .diffGroupToggle {
   width: 100%;
-  justify-content: space-between;
   background: transparent;
   color: var(--ink);
   border-color: color-mix(in srgb, var(--line) 80%, transparent);
+}
+
+.wrapper section button.diffGroupToggle {
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .diffGroupDanger .diffGroupToggle {
