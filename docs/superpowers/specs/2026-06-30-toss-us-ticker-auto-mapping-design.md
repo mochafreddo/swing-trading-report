@@ -1,3 +1,5 @@
+상태: Accepted
+
 # Toss US Ticker Auto Mapping Design
 
 ## Goal
