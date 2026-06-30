@@ -319,6 +319,42 @@ for issue in payload.get("source_issues", []):
 PY
 ```
 
+For model-output/source-ref triage or feedback on a past AI review, inspect the
+model trace fields that tie the final artifact back to model-attempt logs:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("reports/YYYY-MM-DD.ai-brief.json")
+payload = json.loads(path.read_text())
+trace = payload.get("model_trace", {})
+print({
+    "model_trace_id": trace.get("model_trace_id"),
+    "request_hash": trace.get("request_hash"),
+    "source_catalog_hash": trace.get("source_catalog_hash"),
+    "request_status": trace.get("request_status"),
+    "attempt_ids": trace.get("attempt_ids"),
+})
+for attempt in payload.get("model_attempts", []):
+    print({
+        "role": attempt.get("role"),
+        "model_name": attempt.get("model_name"),
+        "status": attempt.get("status"),
+        "request_hash": attempt.get("request_hash"),
+        "source_catalog_hash": attempt.get("source_catalog_hash"),
+    })
+PY
+```
+
+Match those hashes with structured log events
+`ai_brief_model_attempt_started`, `ai_brief_model_attempt_failed`,
+`ai_brief_model_attempt_completed`, `ai_brief_model_fallback_selected`, and
+fallback skip events. `model_trace.candidate_summaries[]` maps final
+`candidate_id`/`candidate_ids` rows back to the model-output status, candidate
+role, and request-local source refs that were available to the model.
+
 ### Resolution
 
 - Treat `ai-brief-skip` as an artifact, not a silent failure.

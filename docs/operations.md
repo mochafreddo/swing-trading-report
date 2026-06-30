@@ -117,6 +117,8 @@ If a run fails with `scheduled ai-brief quality gate failed`, treat it as a gene
 
 `model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, `model_watch_source_ref_invalid`은 모델이 canonical source catalog의 ref를 제대로 선택하지 못했다는 뜻입니다. 이 진단이 `WARN`이고 최종 추천이 source-backed이면 scheduled run은 partial publish로 정상 업로드될 수 있습니다. 같은 진단 뒤 추천이 모두 제거되거나 source-backed ratio가 부족하면 기존처럼 quality `FAIL`로 처리됩니다.
 
+과거 AI 검토를 피드백할 때는 AI Brief artifact의 `model_trace.request_hash`, `model_trace.source_catalog_hash`, `model_trace.request_status`, `model_trace.attempt_ids`, `model_trace.candidate_summaries[]`, `model_attempts[]`를 먼저 대조합니다. 구조화 로그의 `ai_brief_model_attempt_started`, `ai_brief_model_attempt_failed`, `ai_brief_model_attempt_completed`, `ai_brief_model_fallback_selected`, fallback skip 이벤트도 같은 prompt/source catalog hash를 남기므로, raw prompt나 source payload를 로그에 남기지 않고 어떤 모델 입력과 시도가 검토됐는지 추적할 수 있습니다.
+
 Notification checks:
 
 - AI Brief report Telegram messages are rich text and are sent with `parse_mode=HTML`. The GitHub workflow reads `ai-brief.telegram.txt`, splits it with `split_telegram_message_text()`, and sends each part separately.
