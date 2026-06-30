@@ -822,6 +822,11 @@ def _build_model_trace(
     model_attempts: list[_ModelAttemptRecord],
     model_output_available: bool,
 ) -> tuple[dict[str, object], dict[str, list[str]]]:
+    eligible_tickers = [
+        str(candidate["ticker"]) for candidate in preselected_candidates
+    ]
+    watch_tickers = [str(candidate["ticker"]) for candidate in watch_candidates]
+    attempt_ids = [f"{attempt.role}:{attempt.model_name}" for attempt in model_attempts]
     trace_identity = {
         "model_provider": model_provider,
         "model_name": model_name,
@@ -829,10 +834,8 @@ def _build_model_trace(
         "source_entry_report": source_entry_report,
         "request_hash": trace_metadata.request_hash,
         "source_catalog_hash": trace_metadata.source_catalog_hash,
-        "eligible_tickers": [
-            str(candidate["ticker"]) for candidate in preselected_candidates
-        ],
-        "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
+        "eligible_tickers": eligible_tickers,
+        "watch_tickers": watch_tickers,
         "attempts": [
             {
                 "role": attempt.role,
@@ -906,17 +909,13 @@ def _build_model_trace(
         "model_name": model_name,
         "market": market,
         "source_entry_report": source_entry_report,
-        "eligible_tickers": [
-            str(candidate["ticker"]) for candidate in preselected_candidates
-        ],
-        "watch_tickers": [str(candidate["ticker"]) for candidate in watch_candidates],
+        "eligible_tickers": eligible_tickers,
+        "watch_tickers": watch_tickers,
         "candidate_count": len(decision_candidates),
         "source_count": sum(
             _source_count(candidate) for candidate in decision_candidates
         ),
-        "attempt_ids": [
-            f"{attempt.role}:{attempt.model_name}" for attempt in model_attempts
-        ],
+        "attempt_ids": attempt_ids,
         "candidate_summaries": candidate_summaries,
         "normalization_issues": [],
     }
@@ -957,11 +956,7 @@ def _attempt_record_dict(record: _ModelAttemptRecord) -> dict[str, object]:
     if record.retryable is not None:
         payload["retryable"] = record.retryable
     if record.trace_metadata is not None:
-        payload["prompt_version"] = record.trace_metadata.prompt_version
-        payload["output_schema_version"] = record.trace_metadata.output_schema_version
-        payload["request_hash"] = record.trace_metadata.request_hash
-        payload["source_catalog_hash"] = record.trace_metadata.source_catalog_hash
-        payload["request_status"] = record.trace_metadata.request_status
+        payload.update(_trace_metadata_log_fields(record.trace_metadata))
     return payload
 
 

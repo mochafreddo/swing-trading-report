@@ -940,14 +940,16 @@ class _SourceReferenceCatalog:
         self._sources_by_ticker: dict[str, dict[str, dict[str, object]]] = {}
         self._sources_by_candidate_index: list[dict[str, dict[str, object]]] = []
         source_refs_by_candidate = candidate_source_ref_lists(candidates)
-        for candidate_index, candidate in enumerate(candidates):
+        for candidate, source_refs in zip(
+            candidates, source_refs_by_candidate, strict=True
+        ):
             ticker = str(candidate.get("ticker") or "").strip()
             if not ticker:
                 self._sources_by_candidate_index.append({})
                 continue
             rows_by_id: dict[str, dict[str, object]] = {}
             for source_id, source in zip(
-                source_refs_by_candidate[candidate_index],
+                source_refs,
                 _candidate_sources(candidate),
                 strict=True,
             ):
@@ -959,12 +961,14 @@ class _SourceReferenceCatalog:
         self, candidates: list[dict[str, object]]
     ) -> list[dict[str, object]]:
         model_rows: list[dict[str, object]] = []
-        for candidate_index, candidate in enumerate(candidates):
+        for candidate, sources_by_id in zip(
+            candidates,
+            self._sources_by_candidate_index,
+            strict=True,
+        ):
             sources = [
                 {"source_id": source_id, **source}
-                for source_id, source in self._sources_by_candidate_index[
-                    candidate_index
-                ].items()
+                for source_id, source in sources_by_id.items()
             ]
             model_rows.append({**candidate, "sources": sources})
         return model_rows
