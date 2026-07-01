@@ -25,6 +25,7 @@ def _run_runner(
     env_file_text: str = "TOSS_SYNC_JOB_TOKEN=test-token\n",
     default_web_host_port: str | None = "55300",
     extra_env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -37,6 +38,10 @@ def _run_runner(
         or (
             "#!/usr/bin/env bash\n"
             'printf \'%s\\n\' "$*" > "$UV_STUB_ARGS_FILE"\n'
+            'printf \'%s\\n\' "$PWD" > "$UV_STUB_PWD_FILE"\n'
+            'if [[ -n "${EXPECTED_REPO_ROOT:-}" && "$PWD" != "$EXPECTED_REPO_ROOT" ]]; then\n'
+            "  exit 98\n"
+            "fi\n"
             'if [[ "$1" != "run" || "$2" != "python" || "$3" != "-" ]]; then\n'
             "  exit 97\n"
             "fi\n"
@@ -51,13 +56,14 @@ def _run_runner(
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
         "TOSS_SYNC_ENV_FILE": str(env_file),
         "UV_STUB_ARGS_FILE": str(tmp_path / "uv.args"),
+        "UV_STUB_PWD_FILE": str(tmp_path / "uv.pwd"),
         **(extra_env or {}),
     }
     if default_web_host_port is not None:
         env.setdefault("WEB_HOST_PORT", default_web_host_port)
     return subprocess.run(
         [str(REPO_ROOT / "scripts/toss_daily_auto_sync.sh")],
-        cwd=REPO_ROOT,
+        cwd=cwd or REPO_ROOT,
         env=env,
         capture_output=True,
         text=True,
@@ -67,6 +73,10 @@ def _run_runner(
 
 def _read_uv_args(tmp_path: Path) -> str:
     return (tmp_path / "uv.args").read_text(encoding="utf-8")
+
+
+def _read_uv_pwd(tmp_path: Path) -> str:
+    return (tmp_path / "uv.pwd").read_text(encoding="utf-8").strip()
 
 
 def _curl_response(
@@ -182,6 +192,34 @@ def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     args = recorder.read_text(encoding="utf-8")
     assert "http://127.0.0.1:55444/api/holdings/toss-sync/scheduled" in args
     assert "Origin: http://127.0.0.1:55444" in args
+
+
+def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_uv_run(
+    tmp_path: Path,
+) -> None:
+    result = _run_runner(
+        tmp_path,
+        cwd=tmp_path,
+        extra_env={"EXPECTED_REPO_ROOT": str(REPO_ROOT)},
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "unchanged",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            tmp_path / "curl.args",
+        ),
+    )
+
+    assert result.returncode == 0
+    assert _read_uv_pwd(tmp_path) == str(REPO_ROOT)
 
 
 @pytest.mark.parametrize(

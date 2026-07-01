@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_file="${TOSS_SYNC_ENV_FILE:-${repo_root}/.env.scheduler.local}"
 
+cd "${repo_root}"
+
 load_env_file() {
   local file_path="$1"
   if [[ ! -f "${file_path}" ]]; then

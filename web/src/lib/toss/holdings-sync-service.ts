@@ -59,6 +59,10 @@ export interface TossHoldingsSyncPreview {
   payload: TossHoldingsSyncResponsePayload;
 }
 
+export interface TossHoldingsSyncPreviewOptions {
+  tickerDirectoryLookupFailureMode?: "ignore" | "throw";
+}
+
 export interface TossHoldingsSyncDependencies {
   fetchAllHoldings: () => Promise<HoldingRecord[]>;
   fetchTossHoldingsItems: () => Promise<TossHoldingsItem[]>;
@@ -123,6 +127,7 @@ async function fetchTossTickerDirectoryCandidates(
     TossHoldingsSyncDependencies,
     "listTickerDirectoryExactBaseCandidates"
   >,
+  options: TossHoldingsSyncPreviewOptions = {},
 ): Promise<TossTickerDirectoryCandidate[]> {
   const usSymbols = Array.from(
     new Set(
@@ -139,13 +144,17 @@ async function fetchTossTickerDirectoryCandidates(
   try {
     const result = await deps.listTickerDirectoryExactBaseCandidates(usSymbols);
     return result.candidates.map((row) => ({ ticker: row.ticker }));
-  } catch {
+  } catch (error) {
+    if (options.tickerDirectoryLookupFailureMode === "throw") {
+      throw error;
+    }
     return [];
   }
 }
 
 export async function buildTossHoldingsSyncPreview(
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
+  options: TossHoldingsSyncPreviewOptions = {},
 ): Promise<TossHoldingsSyncPreview> {
   const [currentHoldings, tossItems] = await Promise.all([
     deps.fetchAllHoldings(),
@@ -154,6 +163,7 @@ export async function buildTossHoldingsSyncPreview(
   const tickerDirectoryCandidates = await fetchTossTickerDirectoryCandidates(
     tossItems,
     deps,
+    options,
   );
   const dryRun = buildTossHoldingsDryRun({
     currentHoldings,
@@ -223,7 +233,9 @@ export async function runScheduledTossAutoApply(
     };
   }
 
-  const preview = await buildTossHoldingsSyncPreview(deps);
+  const preview = await buildTossHoldingsSyncPreview(deps, {
+    tickerDirectoryLookupFailureMode: "throw",
+  });
   const base = {
     mode: "auto-apply" as const,
     diffHash: preview.diffHash,

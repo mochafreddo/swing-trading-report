@@ -147,6 +147,52 @@ describe("toss holdings sync service", () => {
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
   });
 
+  it("dry-run preview degrades to blocked rows when ticker-directory lookup fails", async () => {
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => {
+        throw new Error("ticker directory unavailable");
+      }),
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(preview.payload.applyBlocked).toBe(true);
+    expect(preview.payload.blockedRows).toEqual([
+      expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
+    ]);
+  });
+
+  it("scheduled auto apply fails closed when ticker-directory lookup fails", async () => {
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => {
+        throw new Error("ticker directory unavailable");
+      }),
+    });
+
+    await expect(
+      runScheduledTossAutoApply({ autoApplyEnabled: true }, testDeps),
+    ).rejects.toThrow("ticker directory unavailable");
+    expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+  });
+
   it("scheduled auto apply blocks an empty Toss snapshot from wiping active holdings", async () => {
     const testDeps = deps({
       fetchAllHoldings: vi.fn(async () => [
