@@ -60,11 +60,42 @@ def _run_runner(
     )
 
 
-def _curl_response(payload: dict[str, object], recorder: Path) -> str:
+def _curl_response(
+    payload: dict[str, object],
+    recorder: Path,
+    *,
+    http_status: str = "200",
+    exit_code: int = 0,
+) -> str:
     return (
         "#!/usr/bin/env bash\n"
         f"printf '%s\\n' \"$*\" > {shlex.quote(recorder.as_posix())}\n"
-        f"cat <<'JSON'\n{json.dumps(payload)}\nJSON\n"
+        "output_file=''\n"
+        "write_out=''\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        '  case "$1" in\n'
+        "    --output)\n"
+        '      output_file="$2"\n'
+        "      shift 2\n"
+        "      ;;\n"
+        "    --write-out)\n"
+        '      write_out="$2"\n'
+        "      shift 2\n"
+        "      ;;\n"
+        "    *)\n"
+        "      shift\n"
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        'if [[ -n "$output_file" ]]; then\n'
+        f"  cat <<'JSON' > \"$output_file\"\n{json.dumps(payload)}\nJSON\n"
+        "else\n"
+        f"  cat <<'JSON'\n{json.dumps(payload)}\nJSON\n"
+        "fi\n"
+        "if [[ \"$write_out\" == '%{http_code}' ]]; then\n"
+        f"  printf '%s' {shlex.quote(http_status)}\n"
+        "fi\n"
+        f"exit {exit_code}\n"
     )
 
 
@@ -108,7 +139,7 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_and_token(
     assert "Authorization: Bearer test-token" in args
     assert "Origin: http://127.0.0.1:55300" in args
     assert '"mode":"auto-apply"' in args
-    assert "status=applied" in result.stdout
+    assert "http=200 status=applied" in result.stdout
     assert "test-token" not in result.stdout
 
 
@@ -177,7 +208,64 @@ def test_toss_daily_auto_sync_runner_exits_nonzero_for_unsuccessful_statuses(
     )
 
     assert result.returncode != 0
-    assert f"status={status}" in result.stdout
+    assert f"http=200 status={status}" in result.stdout
+
+
+def test_toss_daily_auto_sync_runner_prints_bounded_summary_for_http_error_json(
+    tmp_path: Path,
+) -> None:
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "error",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            tmp_path / "curl.args",
+            http_status="500",
+        ),
+    )
+
+    assert result.returncode != 0
+    assert (
+        "http=500 status=error incoming=0 create=0 update=0 delete=0 "
+        "unchanged=0 blocked=0"
+    ) in result.stdout
+
+
+def test_toss_daily_auto_sync_runner_fail_closed_on_http_error_status(
+    tmp_path: Path,
+) -> None:
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 1,
+                    "createCount": 0,
+                    "updateCount": 1,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            tmp_path / "curl.args",
+            http_status="500",
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "http=500 status=applied" in result.stdout
 
 
 def test_toss_daily_auto_sync_launchd_plist_runs_at_0805() -> None:

@@ -197,6 +197,23 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     assert "fail closed" in sell_flow
 
 
+def test_toss_sync_docs_do_not_reference_removed_confirmation_text_contract() -> None:
+    stale_phrases = (
+        'confirmationText: "APPLY TOSS HOLDINGS"',
+        "requires `confirmationText",
+        "requires confirmation",
+        "server-side confirmation text",
+        "apply confirmation input",
+    )
+
+    for path in (Path("docs/api.md"), Path("docs/ARCHITECTURE.md")):
+        text = _read(path)
+        for phrase in stale_phrases:
+            assert phrase not in text, (
+                f"{path} still references removed Toss confirmation contract: {phrase}"
+            )
+
+
 def test_ai_brief_model_timeout_docs_cover_primary_fallback_and_total() -> None:
     config_reference_text = _read(Path("docs/config-reference.md"))
     configuration_text = _read(Path("docs/configuration.md"))

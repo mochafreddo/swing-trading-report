@@ -55,29 +55,49 @@ fi
 response_file="$(mktemp "${TMPDIR:-/tmp}/toss-auto-sync.XXXXXX.json")"
 trap 'rm -f "${response_file}"' EXIT
 
-curl -fsS \
-  -X POST "${endpoint}" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -H "Origin: ${base_url}" \
-  -H "Authorization: Bearer ${TOSS_SYNC_JOB_TOKEN}" \
-  --data '{"mode":"auto-apply"}' \
-  > "${response_file}"
+set +e
+http_status="$(
+  curl -sS \
+    -X POST "${endpoint}" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -H "Origin: ${base_url}" \
+    -H "Authorization: Bearer ${TOSS_SYNC_JOB_TOKEN}" \
+    --data '{"mode":"auto-apply"}' \
+    --output "${response_file}" \
+    --write-out '%{http_code}'
+)"
+curl_status=$?
+set -e
 
 set +e
-status="$(
-  python3 - "${response_file}" <<'PY'
+summary_line="$(
+  python3 - "${response_file}" "${http_status:-000}" "${curl_status}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+response_path = Path(sys.argv[1])
+http_status = sys.argv[2] or "000"
+curl_status = int(sys.argv[3])
+
+payload = {}
+raw = response_path.read_text(encoding="utf-8") if response_path.exists() else ""
+if raw.strip():
+    try:
+        candidate = json.loads(raw)
+    except json.JSONDecodeError:
+        candidate = {}
+    if isinstance(candidate, dict):
+        payload = candidate
+
 status = str(payload.get("status") or "error")
 summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
 blocked = payload.get("blockedRows") if isinstance(payload.get("blockedRows"), list) else []
 print(
-    "status={status} incoming={incoming} create={create} update={update} "
+    "http={http_status} status={status} incoming={incoming} create={create} update={update} "
     "delete={delete} unchanged={unchanged} blocked={blocked}".format(
+        http_status=http_status,
         status=status,
         incoming=summary.get("incomingCount", 0),
         create=summary.get("createCount", 0),
@@ -87,10 +107,13 @@ print(
         blocked=len(blocked),
     )
 )
-raise SystemExit(0 if status in {"applied", "unchanged"} else 1)
+http_ok = http_status.isdigit() and 200 <= int(http_status) < 300
+raise SystemExit(
+    0 if curl_status == 0 and http_ok and status in {"applied", "unchanged"} else 1
+)
 PY
 )"
 parse_status=$?
 set -e
-printf '%s\n' "${status}"
+printf '%s\n' "${summary_line}"
 exit "${parse_status}"
