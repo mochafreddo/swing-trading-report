@@ -193,6 +193,18 @@ The scheduler reads `${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}`. Keep that
 
 NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 사용자의 LaunchAgents 경로는 코드만으로 확정하지 않습니다. `scripts/launchd/`와 로컬 환경을 함께 확인해야 합니다.
 
+## Local Toss Holdings Auto Sync
+
+The local daily Toss holdings sync runs at `08:05 Asia/Seoul` through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist`.
+
+Manual smoke:
+
+```bash
+TOSS_SYNC_ENV_FILE=.env.scheduler.local scripts/toss_daily_auto_sync.sh
+```
+
+`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>` from the selected env file. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, and `error` exit non-zero and do not write holdings.
+
 ## Rollback
 
 | Surface | Rollback Action | Notes |

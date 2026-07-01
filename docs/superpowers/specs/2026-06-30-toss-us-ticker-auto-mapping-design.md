@@ -31,8 +31,7 @@ candidates as an optional resolver input. It never receives browser-provided
 mappings and never exposes Toss tokens or account metadata.
 
 Dry-run and apply both recompute the same mapping and `diffHash`. Apply still
-requires the reviewed hash, server-side confirmation text, and still refuses
-blocked or stale diffs.
+requires the reviewed hash and still refuses blocked or stale diffs.
 
 ## Testing
 
@@ -47,5 +46,5 @@ Add unit coverage for:
 - class-share symbols such as `BRK/B` resolve to canonical `BRK.B.*` bases.
 
 Add route coverage that proves dry-run can create a new US holding from a
-directory-backed Toss symbol without writing Supabase, and that apply requires
-`confirmationText: "APPLY TOSS HOLDINGS"` before writing Supabase.
+directory-backed Toss symbol without writing Supabase, and that apply writes
+only when the server-recomputed diff hash still matches the reviewed hash.
