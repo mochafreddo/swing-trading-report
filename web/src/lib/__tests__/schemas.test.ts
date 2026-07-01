@@ -9,6 +9,7 @@ import {
   reportDetailQuerySchema,
   reportListQuerySchema,
   runDispatchSchema,
+  tossHoldingsScheduledSyncRequestSchema,
   tossHoldingsSyncRequestSchema,
 } from "@/lib/schemas";
 
@@ -421,6 +422,24 @@ describe("tossHoldingsSyncRequestSchema", () => {
     const parsed = tossHoldingsSyncRequestSchema.safeParse({
       mode: "apply",
       diffHash: "not-a-diff-hash",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("tossHoldingsScheduledSyncRequestSchema", () => {
+  it("accepts scheduled auto-apply payload", () => {
+    expect(
+      tossHoldingsScheduledSyncRequestSchema.parse({ mode: "auto-apply" }),
+    ).toEqual({ mode: "auto-apply" });
+  });
+
+  it("rejects unknown scheduled payload keys", () => {
+    const parsed = tossHoldingsScheduledSyncRequestSchema.safeParse({
+      mode: "auto-apply",
+      diffHash:
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444",
     });
 
     expect(parsed.success).toBe(false);

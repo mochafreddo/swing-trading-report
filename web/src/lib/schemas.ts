@@ -327,6 +327,12 @@ export const tossHoldingsSyncRequestSchema = z.union([
     .strict(),
 ]);
 
+export const tossHoldingsScheduledSyncRequestSchema = z
+  .object({
+    mode: z.literal("auto-apply"),
+  })
+  .strict();
+
 export const runDispatchSchema = z.union([
   z
     .object({
