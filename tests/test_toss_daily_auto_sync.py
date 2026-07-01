@@ -36,7 +36,11 @@ def _run_runner(
         uv_script
         or (
             "#!/usr/bin/env bash\n"
-            "shift 2\n"
+            'printf \'%s\\n\' "$*" > "$UV_STUB_ARGS_FILE"\n'
+            'if [[ "$1" != "run" || "$2" != "python" || "$3" != "-" ]]; then\n'
+            "  exit 97\n"
+            "fi\n"
+            "shift 3\n"
             "script=''\n"
             "while IFS= read -r line; do script+=\"$line\"$'\\n'; done\n"
             'python3 - "$@" <<< "$script"\n'
@@ -46,6 +50,7 @@ def _run_runner(
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
         "TOSS_SYNC_ENV_FILE": str(env_file),
+        "UV_STUB_ARGS_FILE": str(tmp_path / "uv.args"),
         **(extra_env or {}),
     }
     if default_web_host_port is not None:
@@ -58,6 +63,10 @@ def _run_runner(
         text=True,
         check=False,
     )
+
+
+def _read_uv_args(tmp_path: Path) -> str:
+    return (tmp_path / "uv.args").read_text(encoding="utf-8")
 
 
 def _curl_response(
@@ -139,6 +148,7 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_and_token(
     assert "Authorization: Bearer test-token" in args
     assert "Origin: http://127.0.0.1:55300" in args
     assert '"mode":"auto-apply"' in args
+    assert _read_uv_args(tmp_path).startswith("run python - ")
     assert "http=200 status=applied" in result.stdout
     assert "test-token" not in result.stdout
 

@@ -72,7 +72,7 @@ set -e
 
 set +e
 summary_line="$(
-  python3 - "${response_file}" "${http_status:-000}" "${curl_status}" <<'PY'
+  uv run python - "${response_file}" "${http_status:-000}" "${curl_status}" <<'PY'
 import json
 import sys
 from pathlib import Path

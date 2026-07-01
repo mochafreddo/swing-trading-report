@@ -51,7 +51,7 @@ def test_env_example_has_no_duplicate_keys() -> None:
     assert not duplicates, f"Duplicate keys in .env.example: {duplicates}"
 
 
-def test_docker_compose_forwards_toss_invest_env_to_web() -> None:
+def test_docker_compose_forwards_toss_sync_env_to_web() -> None:
     compose_path = Path(__file__).resolve().parents[1] / "docker-compose.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
 
@@ -60,8 +60,23 @@ def test_docker_compose_forwards_toss_invest_env_to_web() -> None:
         "TOSS_INVEST_CLIENT_SECRET",
         "TOSS_INVEST_ACCOUNT",
         "TOSS_INVEST_BASE_URL",
+        "TOSS_SYNC_JOB_TOKEN",
+        "TOSS_SYNC_AUTO_APPLY_ENABLED",
     ):
         assert f"{key}:" in compose_text
+
+
+def test_env_example_documents_toss_scheduled_sync_examples_without_active_keys() -> (
+    None
+):
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+    active_keys = set(_extract_env_keys(env_example_path))
+
+    assert "# TOSS_SYNC_JOB_TOKEN=replace-with-random-local-token" in text
+    assert "# TOSS_SYNC_AUTO_APPLY_ENABLED=0" in text
+    assert "TOSS_SYNC_JOB_TOKEN" not in active_keys
+    assert "TOSS_SYNC_AUTO_APPLY_ENABLED" not in active_keys
 
 
 def test_env_example_retention_default_is_30_days() -> None:
