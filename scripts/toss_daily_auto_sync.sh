@@ -3,9 +3,6 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_file="${TOSS_SYNC_ENV_FILE:-${repo_root}/.env.scheduler.local}"
-web_host_port="${WEB_HOST_PORT:-55300}"
-base_url="http://127.0.0.1:${web_host_port}"
-endpoint="${base_url}/api/holdings/toss-sync/scheduled"
 
 load_env_file() {
   local file_path="$1"
@@ -45,6 +42,10 @@ load_env_file() {
 }
 
 load_env_file "${env_file}"
+
+web_host_port="${WEB_HOST_PORT:-55300}"
+base_url="http://127.0.0.1:${web_host_port}"
+endpoint="${base_url}/api/holdings/toss-sync/scheduled"
 
 if [[ -z "${TOSS_SYNC_JOB_TOKEN:-}" ]]; then
   printf '%s\n' "TOSS_SYNC_JOB_TOKEN must be set" >&2

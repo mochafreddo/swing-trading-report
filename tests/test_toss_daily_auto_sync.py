@@ -7,6 +7,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -21,6 +23,7 @@ def _run_runner(
     curl_script: str,
     uv_script: str | None = None,
     env_file_text: str = "TOSS_SYNC_JOB_TOKEN=test-token\n",
+    default_web_host_port: str | None = "55300",
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
@@ -43,9 +46,10 @@ def _run_runner(
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
         "TOSS_SYNC_ENV_FILE": str(env_file),
-        "WEB_HOST_PORT": "55300",
         **(extra_env or {}),
     }
+    if default_web_host_port is not None:
+        env.setdefault("WEB_HOST_PORT", default_web_host_port)
     return subprocess.run(
         [str(REPO_ROOT / "scripts/toss_daily_auto_sync.sh")],
         cwd=REPO_ROOT,
@@ -108,20 +112,62 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_and_token(
     assert "test-token" not in result.stdout
 
 
-def test_toss_daily_auto_sync_runner_exits_nonzero_for_blocked(
+def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "unchanged",
+                "summary": {
+                    "incomingCount": 1,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 1,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        env_file_text="TOSS_SYNC_JOB_TOKEN=test-token\nWEB_HOST_PORT=55444\n",
+        default_web_host_port=None,
+    )
+
+    assert result.returncode == 0
+    args = recorder.read_text(encoding="utf-8")
+    assert "http://127.0.0.1:55444/api/holdings/toss-sync/scheduled" in args
+    assert "Origin: http://127.0.0.1:55444" in args
+
+
+@pytest.mark.parametrize(
+    ("status", "incoming_count", "delete_count"),
+    [
+        ("disabled", 0, 0),
+        ("wipe_guard_blocked", 0, 2),
+        ("error", 0, 0),
+    ],
+)
+def test_toss_daily_auto_sync_runner_exits_nonzero_for_unsuccessful_statuses(
+    tmp_path: Path,
+    status: str,
+    incoming_count: int,
+    delete_count: int,
 ) -> None:
     result = _run_runner(
         tmp_path,
         curl_script=_curl_response(
             {
                 "mode": "auto-apply",
-                "status": "wipe_guard_blocked",
+                "status": status,
                 "summary": {
-                    "incomingCount": 0,
+                    "incomingCount": incoming_count,
                     "createCount": 0,
                     "updateCount": 0,
-                    "deleteCount": 2,
+                    "deleteCount": delete_count,
                     "unchangedCount": 0,
                 },
                 "blockedRows": [],
@@ -131,7 +177,7 @@ def test_toss_daily_auto_sync_runner_exits_nonzero_for_blocked(
     )
 
     assert result.returncode != 0
-    assert "status=wipe_guard_blocked" in result.stdout
+    assert f"status={status}" in result.stdout
 
 
 def test_toss_daily_auto_sync_launchd_plist_runs_at_0805() -> None:
