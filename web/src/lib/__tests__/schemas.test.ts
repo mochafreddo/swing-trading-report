@@ -403,27 +403,24 @@ describe("holding schemas", () => {
 });
 
 describe("tossHoldingsSyncRequestSchema", () => {
-  it("accepts apply payload with a reviewed diff hash and confirmation text", () => {
+  it("accepts apply payload with only a reviewed diff hash", () => {
     const parsed = tossHoldingsSyncRequestSchema.parse({
       mode: "apply",
       diffHash:
         "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-      confirmationText: "APPLY TOSS HOLDINGS",
     });
 
     expect(parsed).toEqual({
       mode: "apply",
       diffHash:
         "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-      confirmationText: "APPLY TOSS HOLDINGS",
     });
   });
 
-  it("rejects apply payload without confirmation text", () => {
+  it("rejects apply payload with an invalid reviewed diff hash", () => {
     const parsed = tossHoldingsSyncRequestSchema.safeParse({
       mode: "apply",
-      diffHash:
-        "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      diffHash: "not-a-diff-hash",
     });
 
     expect(parsed.success).toBe(false);

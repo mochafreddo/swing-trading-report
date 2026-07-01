@@ -311,7 +311,6 @@ describe("/api/holdings/toss-sync route", () => {
       makePostRequest({
         mode: "apply",
         diffHash: dryRunPayload.diffHash,
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const applyPayload = (await applyResponse.json()) as {
@@ -336,7 +335,7 @@ describe("/api/holdings/toss-sync route", () => {
     ]);
   });
 
-  it("rejects Toss holdings apply without confirmation text before writing Supabase", async () => {
+  it("applies Toss holdings without confirmation text before writing Supabase", async () => {
     vi.mocked(fetchAllHoldings).mockResolvedValue([]);
     vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValue([
       {
@@ -359,11 +358,13 @@ describe("/api/holdings/toss-sync route", () => {
         diffHash: dryRunPayload.diffHash,
       }),
     );
-    const payload = (await applyResponse.json()) as { error: string };
+    const payload = (await applyResponse.json()) as { mode: string };
 
-    expect(applyResponse.status).toBe(400);
-    expect(payload.error).toBe("Invalid Toss holdings sync payload");
-    expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
+    expect(applyResponse.status).toBe(200);
+    expect(payload.mode).toBe("apply");
+    expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledWith([
+      expect.objectContaining({ ticker: "005930" }),
+    ]);
   });
 
   it("rejects stale Toss holdings apply hashes before writing Supabase", async () => {
@@ -383,7 +384,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
@@ -414,7 +414,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
