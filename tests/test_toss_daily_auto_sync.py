@@ -5,6 +5,7 @@ import os
 import plistlib
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,14 +27,21 @@ def _run_runner(
     default_web_host_port: str | None = "55300",
     extra_env: dict[str, str] | None = None,
     cwd: Path | None = None,
+    home_dir: Path | None = None,
+    path_env: str | None = None,
+    curl_bin_dir: Path | None = None,
+    uv_bin_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    effective_home_dir = home_dir or (tmp_path / "home")
+    default_curl_bin_dir = curl_bin_dir or (effective_home_dir / ".local/bin")
+    default_uv_bin_dir = uv_bin_dir or (effective_home_dir / ".local/share/mise/shims")
+    default_curl_bin_dir.mkdir(parents=True, exist_ok=True)
+    default_uv_bin_dir.mkdir(parents=True, exist_ok=True)
     env_file = tmp_path / ".env.scheduler.local"
     env_file.write_text(env_file_text, encoding="utf-8")
-    _write_executable(bin_dir / "curl", curl_script)
+    _write_executable(default_curl_bin_dir / "curl", curl_script)
     _write_executable(
-        bin_dir / "uv",
+        default_uv_bin_dir / "uv",
         uv_script
         or (
             "#!/usr/bin/env bash\n"
@@ -48,12 +56,13 @@ def _run_runner(
             "shift 3\n"
             "script=''\n"
             "while IFS= read -r line; do script+=\"$line\"$'\\n'; done\n"
-            'python3 - "$@" <<< "$script"\n'
+            f'{shlex.quote(sys.executable)} - "$@" <<< "$script"\n'
         ),
     )
     env = {
         **os.environ,
-        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "HOME": str(effective_home_dir),
+        "PATH": path_env or os.environ.get("PATH", ""),
         "TOSS_SYNC_ENV_FILE": str(env_file),
         "UV_STUB_ARGS_FILE": str(tmp_path / "uv.args"),
         "UV_STUB_PWD_FILE": str(tmp_path / "uv.pwd"),
@@ -220,6 +229,48 @@ def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_uv_run(
 
     assert result.returncode == 0
     assert _read_uv_pwd(tmp_path) == str(REPO_ROOT)
+
+
+def test_toss_daily_auto_sync_runner_bootstraps_path_for_launchd_environment(
+    tmp_path: Path,
+) -> None:
+    fake_home = tmp_path / "fake-home"
+    curl_bin_dir = fake_home / ".local/bin"
+    uv_bin_dir = fake_home / ".local/share/mise/shims"
+    recorder = tmp_path / "curl.args"
+
+    result = _run_runner(
+        tmp_path,
+        curl_bin_dir=curl_bin_dir,
+        uv_bin_dir=uv_bin_dir,
+        home_dir=fake_home,
+        path_env="/bin",
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 3,
+                    "createCount": 1,
+                    "updateCount": 1,
+                    "deleteCount": 0,
+                    "unchangedCount": 1,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+    )
+
+    assert result.returncode == 0
+    assert "http=200 status=applied" in result.stdout
+    assert (
+        "incoming=3 create=1 update=1 delete=0 unchanged=1 blocked=0" in result.stdout
+    )
+    assert "test-token" not in result.stdout
+    args = recorder.read_text(encoding="utf-8")
+    assert "Authorization: Bearer test-token" in args
+    assert _read_uv_args(tmp_path).startswith("run python - ")
 
 
 @pytest.mark.parametrize(
