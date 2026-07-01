@@ -117,23 +117,32 @@ business days if Toss API limits or logs become noisy.
    call `replace_holdings_v1`.
 6. If there are no changes, the service returns a no-op result.
 7. If there are changes and the safety guards pass, the service calls
-   `replaceAllHoldings(targetRows)` and returns the apply result.
+   `replaceAllHoldings(targetRows, { expectedCurrentHoldings })` and returns the
+   apply result. The Supabase RPC compares the expected snapshot inside the
+   table lock before writing, so write-time races fail closed.
 
 The existing manual route should also call the same shared service for dry-run
-and apply so manual and scheduled behavior stay identical.
+and apply so manual and scheduled behavior share normalization and write-time
+race protection. The scheduled route is intentionally stricter for deletes.
 
 ## Safety Policy
 
-Automatic apply may create, update, and delete holdings. The scheduled path must
-still fail closed under these conditions:
+Automatic apply may create and update holdings. It must not delete holdings
+until the Toss response is proven to be a complete account snapshot. Destructive
+delete diffs remain a manual reviewed `/api/holdings/toss-sync` apply action.
+The scheduled path must fail closed under these conditions:
 
 - `applyBlocked=true` because at least one Toss row cannot be normalized safely.
 - The Toss snapshot has zero incoming rows while Supabase currently has one or
-  more active holdings. This prevents an API shape change or temporary upstream
-  empty response from wiping the holdings table.
+  more holdings. This prevents an API shape change or temporary upstream empty
+  response from wiping the holdings table.
+- Any scheduled reconciliation contains a delete diff. This protects against
+  non-empty but partial upstream snapshots.
 - The Toss API, Supabase API, ticker directory lookup, or JSON parsing fails.
 - The replace-all RPC response is malformed.
 - The job token is missing, invalid, or supplied from a non-local request.
+- The current holdings snapshot changes between preview construction and the
+  replace-all RPC transaction.
 
 Manual UI sync may continue to show and apply a zero-row diff after review if
 that becomes necessary, but the scheduled path must not automatically wipe all
@@ -146,6 +155,7 @@ The scheduled result should include a machine-readable status:
 - `disabled`
 - `blocked`
 - `wipe_guard_blocked`
+- `delete_guard_blocked`
 - `error`
 
 ## API and Service Shape
@@ -204,8 +214,14 @@ Responsibilities:
 
 - resolve `WEB_HOST_PORT`, defaulting to `55300`,
 - require `TOSS_SYNC_JOB_TOKEN`,
-- call the scheduled endpoint,
-- exit non-zero for `disabled`, `blocked`, `wipe_guard_blocked`, and `error`,
+- read root `.env` by default so the runner and Docker Compose web container
+  share the same token/enable flag,
+- preflight the JSON parser before the write request,
+- call the scheduled endpoint with the bearer header passed through curl stdin
+  config rather than process argv,
+- use bounded curl timeouts/retries,
+- exit non-zero for `disabled`, `blocked`, `wipe_guard_blocked`,
+  `delete_guard_blocked`, and `error`,
 - print only bounded summaries without secrets or raw Toss payloads.
 
 The script can be run by launchd on macOS. A later release can add a Docker
@@ -219,11 +235,13 @@ If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` or `SLACK_WEBHOOK_URL` are already
 available in the local scheduler environment, the runner may send a short
 summary:
 
-- applied: `create/update/delete/unchanged` counts,
+- applied: `create/update/unchanged` counts,
 - unchanged: no changes,
 - disabled: explicit note that no write occurred because auto apply is off,
 - blocked: blocked count and reasons,
 - wipe guard: explicit warning that no write occurred,
+- delete guard: explicit warning that no write occurred because delete diffs
+  require manual review,
 - error: failure category only.
 
 No notification should include raw account identifiers, access tokens, or
@@ -267,14 +285,17 @@ Add tests before implementation code.
 
 Unit/service coverage:
 
-- auto apply writes `create/update/delete` when preview has changes and no
-  blocked rows.
+- auto apply writes create/update diffs when preview has changes and no blocked
+  rows or delete diffs.
 - blocked rows skip `replaceAllHoldings`.
-- empty Toss snapshot plus existing active Supabase holdings triggers
-  `wipe_guard_blocked`.
-- empty Toss snapshot plus no active Supabase holdings returns unchanged or
-  applies no write.
-- `replaceAllHoldings` result counts are propagated.
+- delete diffs from a non-empty Toss snapshot trigger `delete_guard_blocked`.
+- empty Toss snapshot plus existing Supabase holdings triggers
+  `wipe_guard_blocked`, including inactive holdings.
+- empty Toss snapshot plus no Supabase holdings returns unchanged and writes
+  nothing.
+- `replaceAllHoldings` receives `expectedCurrentHoldings`.
+- RPC result counts that diverge from the preview fail instead of returning a
+  mixed summary/change response.
 
 Route coverage:
 
@@ -315,9 +336,11 @@ Regression checks:
 
 - Manual Toss Sync still works from the holdings UI.
 - Scheduled auto sync can run without a browser session.
-- Scheduled auto sync applies `create/update/delete` when safe.
+- Scheduled auto sync applies create/update diffs when safe.
+- Scheduled auto sync never auto-applies delete diffs; manual reviewed Toss Sync
+  owns destructive deletes.
 - Scheduled auto sync never writes when normalization is blocked.
-- Scheduled auto sync never wipes non-empty Supabase holdings from an empty Toss
+- Scheduled auto sync never wipes Supabase holdings from an empty or partial Toss
   snapshot.
 - Logs and notifications contain summaries only, not secrets or raw account
   payloads.

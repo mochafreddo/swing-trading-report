@@ -28,6 +28,7 @@ export type ScheduledTossAutoSyncStatus =
   | "disabled"
   | "blocked"
   | "wipe_guard_blocked"
+  | "delete_guard_blocked"
   | "error";
 
 export interface TossHoldingsSyncResponsePayload {
@@ -55,7 +56,7 @@ export interface TossHoldingsSyncPreview {
   dryRun: TossHoldingsDryRunResult;
   diffHash: string;
   hasChanges: boolean;
-  hasActiveCurrentHoldings: boolean;
+  hasCurrentHoldings: boolean;
   payload: TossHoldingsSyncResponsePayload;
 }
 
@@ -71,6 +72,7 @@ export interface TossHoldingsSyncDependencies {
   ) => Promise<TickerDirectoryExactBaseResponse>;
   replaceAllHoldings: (
     rows: HoldingReplaceSnapshot[],
+    options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
   ) => Promise<ReplaceAllHoldingsResult>;
 }
 
@@ -90,21 +92,6 @@ function hasChanges(summary: HoldingsYamlImportSummary): boolean {
   );
 }
 
-function hasActiveQuantity(value: unknown): boolean {
-  if (typeof value === "boolean" || value == null) {
-    return false;
-  }
-  if (typeof value !== "number" && typeof value !== "string") {
-    return false;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0;
-}
-
-function hasActiveHoldings(rows: readonly HoldingRecord[]): boolean {
-  return rows.some((row) => hasActiveQuantity(row.quantity));
-}
-
 function buildResponsePayload(
   mode: TossHoldingsSyncMode,
   dryRun: TossHoldingsDryRunResult,
@@ -119,6 +106,20 @@ function buildResponsePayload(
     blockedRows: dryRun.blockedRows,
     targetRows: dryRun.targetRows,
   };
+}
+
+function assertReplaceAllResultMatchesPreview(
+  result: ReplaceAllHoldingsResult,
+  summary: HoldingsYamlImportSummary,
+): void {
+  const matches =
+    result.insertedCount === summary.createCount &&
+    result.updatedCount === summary.updateCount &&
+    result.deletedCount === summary.deleteCount &&
+    result.unchangedCount === summary.unchangedCount;
+  if (!matches) {
+    throw new Error("replace_holdings_v1 result did not match preview");
+  }
 }
 
 async function fetchTossTickerDirectoryCandidates(
@@ -180,7 +181,7 @@ export async function buildTossHoldingsSyncPreview(
     dryRun,
     diffHash,
     hasChanges: hasChanges(dryRun.reconciliation.summary),
-    hasActiveCurrentHoldings: hasActiveHoldings(currentHoldings),
+    hasCurrentHoldings: currentHoldings.length > 0,
     payload,
   };
 }
@@ -195,14 +196,13 @@ export async function applyTossHoldingsSyncPreview(
     preview.diffHash,
   );
   if (preview.hasChanges) {
-    const result = await deps.replaceAllHoldings(preview.dryRun.targetRows);
-    responsePayload.summary = {
-      ...responsePayload.summary,
-      createCount: result.insertedCount,
-      updateCount: result.updatedCount,
-      deleteCount: result.deletedCount,
-      unchangedCount: result.unchangedCount,
-    };
+    const result = await deps.replaceAllHoldings(preview.dryRun.targetRows, {
+      expectedCurrentHoldings: preview.currentHoldings,
+    });
+    assertReplaceAllResultMatchesPreview(
+      result,
+      preview.dryRun.reconciliation.summary,
+    );
   }
   return responsePayload;
 }
@@ -249,8 +249,15 @@ export async function runScheduledTossAutoApply(
   if (preview.dryRun.applyBlocked) {
     return { ...base, status: "blocked" };
   }
-  if (preview.tossItems.length === 0 && preview.hasActiveCurrentHoldings) {
+  if (
+    preview.tossItems.length === 0 &&
+    preview.hasCurrentHoldings &&
+    preview.dryRun.reconciliation.summary.deleteCount > 0
+  ) {
     return { ...base, status: "wipe_guard_blocked" };
+  }
+  if (preview.dryRun.reconciliation.summary.deleteCount > 0) {
+    return { ...base, status: "delete_guard_blocked" };
   }
   if (!preview.hasChanges) {
     return { ...base, status: "unchanged" };

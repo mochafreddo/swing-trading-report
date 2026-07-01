@@ -175,8 +175,8 @@ export async function POST(request: NextRequest) {
       unchanged_count: result.summary.unchangedCount,
     });
     return withApiRequestId(response, requestId);
-  } catch (error) {
-    logApiError(error, {
+  } catch {
+    logApiError(new Error("Scheduled Toss holdings sync failed"), {
       event: "web_api_request_failed",
       request_id: requestId,
       route: ROUTE,

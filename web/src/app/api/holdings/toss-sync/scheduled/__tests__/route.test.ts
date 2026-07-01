@@ -141,6 +141,25 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
 
   it("passes disabled flag through when auto apply is not enabled", async () => {
     process.env.TOSS_SYNC_AUTO_APPLY_ENABLED = "0";
+    vi.mocked(runScheduledTossAutoApply).mockResolvedValueOnce({
+      mode: "auto-apply",
+      status: "disabled",
+      diffHash: "",
+      applyBlocked: false,
+      summary: {
+        incomingCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        deleteCount: 0,
+        unchangedCount: 0,
+        createTickers: [],
+        updateTickers: [],
+        deleteTickers: [],
+      },
+      changes: { create: [], update: [], delete: [], unchanged: [] },
+      blockedRows: [],
+      targetRows: [],
+    });
 
     const response = await POST(
       makePostRequest(
@@ -148,8 +167,14 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
         { authorization: "Bearer job-token" },
       ),
     );
+    const payload = (await response.json()) as {
+      status: string;
+      applyBlocked: boolean;
+    };
 
     expect(response.status).toBe(200);
+    expect(payload.status).toBe("disabled");
+    expect(payload.applyBlocked).toBe(false);
     expect(runScheduledTossAutoApply).toHaveBeenCalledWith({
       autoApplyEnabled: false,
     });
@@ -237,5 +262,26 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
       blockedRows: [],
       targetRows: [],
     });
+  });
+
+  it("logs only a stable scheduled failure category when the sync service throws", async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    vi.mocked(runScheduledTossAutoApply).mockRejectedValueOnce(
+      new Error("Toss accountSeq 1234567890 upstream failure"),
+    );
+
+    await POST(
+      makePostRequest(
+        { mode: "auto-apply" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+
+    const logged = JSON.stringify(consoleErrorSpy.mock.calls);
+    expect(logged).toContain("scheduled_toss_holdings_sync");
+    expect(logged).not.toContain("accountSeq");
+    expect(logged).not.toContain("1234567890");
   });
 });

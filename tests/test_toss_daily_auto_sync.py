@@ -71,6 +71,8 @@ def _run_runner(
     }
     if default_web_host_port is not None:
         env.setdefault("WEB_HOST_PORT", default_web_host_port)
+    else:
+        env.pop("WEB_HOST_PORT", None)
     return subprocess.run(
         [str(REPO_ROOT / "scripts/toss_daily_auto_sync.sh")],
         cwd=cwd or REPO_ROOT,
@@ -89,6 +91,14 @@ def _read_uv_pwd(tmp_path: Path) -> str:
     return (tmp_path / "uv.pwd").read_text(encoding="utf-8").strip()
 
 
+def _curl_stdin_recorder(recorder: Path) -> Path:
+    return Path(f"{recorder}.stdin")
+
+
+def _curl_pwd_recorder(recorder: Path) -> Path:
+    return Path(f"{recorder}.pwd")
+
+
 def _curl_response(
     payload: dict[str, object],
     recorder: Path,
@@ -99,6 +109,8 @@ def _curl_response(
     return (
         "#!/usr/bin/env bash\n"
         f"printf '%s\\n' \"$*\" > {shlex.quote(recorder.as_posix())}\n"
+        f"printf '%s\\n' \"$PWD\" > {shlex.quote(_curl_pwd_recorder(recorder).as_posix())}\n"
+        f"cat > {shlex.quote(_curl_stdin_recorder(recorder).as_posix())}\n"
         "output_file=''\n"
         "write_out=''\n"
         "while [[ $# -gt 0 ]]; do\n"
@@ -139,7 +151,7 @@ def test_toss_daily_auto_sync_runner_requires_job_token(tmp_path: Path) -> None:
     assert "TOSS_SYNC_JOB_TOKEN must be set" in result.stderr
 
 
-def test_toss_daily_auto_sync_runner_posts_local_origin_and_token(
+def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     tmp_path: Path,
 ) -> None:
     recorder = tmp_path / "curl.args"
@@ -164,11 +176,16 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_and_token(
 
     assert result.returncode == 0
     args = recorder.read_text(encoding="utf-8")
-    assert "http://127.0.0.1:55300/api/holdings/toss-sync/scheduled" in args
-    assert "Authorization: Bearer test-token" in args
-    assert "Origin: http://127.0.0.1:55300" in args
-    assert '"mode":"auto-apply"' in args
-    assert _read_uv_args(tmp_path).startswith("run python - ")
+    curl_config = _curl_stdin_recorder(recorder).read_text(encoding="utf-8")
+    assert "test-token" not in args
+    assert "http://127.0.0.1:55300/api/holdings/toss-sync/scheduled" in curl_config
+    assert "Authorization: Bearer test-token" in curl_config
+    assert "Origin: http://127.0.0.1:55300" in curl_config
+    assert '\\"mode\\":\\"auto-apply\\"' in curl_config
+    assert "--connect-timeout" in args
+    assert "--max-time" in args
+    assert "--retry" in args
+    assert "--retry-all-errors" in args
     assert "http=200 status=applied" in result.stdout
     assert "test-token" not in result.stdout
 
@@ -199,14 +216,15 @@ def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     )
 
     assert result.returncode == 0
-    args = recorder.read_text(encoding="utf-8")
-    assert "http://127.0.0.1:55444/api/holdings/toss-sync/scheduled" in args
-    assert "Origin: http://127.0.0.1:55444" in args
+    curl_config = _curl_stdin_recorder(recorder).read_text(encoding="utf-8")
+    assert "http://127.0.0.1:55444/api/holdings/toss-sync/scheduled" in curl_config
+    assert "Origin: http://127.0.0.1:55444" in curl_config
 
 
-def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_uv_run(
+def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_http_request(
     tmp_path: Path,
 ) -> None:
+    recorder = tmp_path / "curl.args"
     result = _run_runner(
         tmp_path,
         cwd=tmp_path,
@@ -224,12 +242,14 @@ def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_uv_run(
                 },
                 "blockedRows": [],
             },
-            tmp_path / "curl.args",
+            recorder,
         ),
     )
 
     assert result.returncode == 0
-    assert _read_uv_pwd(tmp_path) == str(REPO_ROOT)
+    assert _curl_pwd_recorder(recorder).read_text(encoding="utf-8").strip() == str(
+        REPO_ROOT
+    )
 
 
 def test_toss_daily_auto_sync_runner_bootstraps_path_for_launchd_environment(
@@ -270,8 +290,40 @@ def test_toss_daily_auto_sync_runner_bootstraps_path_for_launchd_environment(
     )
     assert "test-token" not in result.stdout
     args = recorder.read_text(encoding="utf-8")
-    assert "Authorization: Bearer test-token" in args
-    assert _read_uv_args(tmp_path).startswith("run python - ")
+    curl_config = _curl_stdin_recorder(recorder).read_text(encoding="utf-8")
+    assert "test-token" not in args
+    assert "Authorization: Bearer test-token" in curl_config
+
+
+def test_toss_daily_auto_sync_runner_preflights_json_parser_before_http_request(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    missing_parser = tmp_path / "missing-python3"
+
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 1,
+                    "createCount": 1,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        extra_env={"TOSS_SYNC_PYTHON_BIN": str(missing_parser)},
+    )
+
+    assert result.returncode != 0
+    assert "JSON parser command is not available" in result.stderr
+    assert not recorder.exists()
 
 
 def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
@@ -308,6 +360,7 @@ def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
     [
         ("disabled", 0, 0),
         ("wipe_guard_blocked", 0, 2),
+        ("delete_guard_blocked", 1, 1),
         ("error", 0, 0),
     ],
 )

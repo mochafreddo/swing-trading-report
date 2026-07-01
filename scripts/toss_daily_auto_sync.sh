@@ -4,7 +4,7 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/share/mise/shims:${HOME}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:${PATH}}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-env_file="${TOSS_SYNC_ENV_FILE:-${repo_root}/.env.scheduler.local}"
+env_file="${TOSS_SYNC_ENV_FILE:-${repo_root}/.env}"
 
 cd "${repo_root}"
 
@@ -99,6 +99,20 @@ if [[ -z "${TOSS_SYNC_JOB_TOKEN:-}" ]]; then
   printf '%s\n' "TOSS_SYNC_JOB_TOKEN must be set" >&2
   exit 2
 fi
+job_token="${TOSS_SYNC_JOB_TOKEN}"
+unset TOSS_SYNC_JOB_TOKEN
+
+python_bin="${TOSS_SYNC_PYTHON_BIN:-python3}"
+if ! command -v "${python_bin}" >/dev/null 2>&1; then
+  printf '%s\n' "JSON parser command is not available: ${python_bin}" >&2
+  exit 4
+fi
+if ! "${python_bin}" - <<'PY' >/dev/null 2>&1; then
+import json
+PY
+  printf '%s\n' "JSON parser command failed: ${python_bin}" >&2
+  exit 4
+fi
 
 response_file="$(mktemp "${TMPDIR:-/tmp}/toss-auto-sync.XXXXXX.json")"
 trap 'rm -f "${response_file}"' EXIT
@@ -106,21 +120,29 @@ trap 'rm -f "${response_file}"' EXIT
 set +e
 http_status="$(
   curl -sS \
-    -X POST "${endpoint}" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -H "Origin: ${base_url}" \
-    -H "Authorization: Bearer ${TOSS_SYNC_JOB_TOKEN}" \
-    --data '{"mode":"auto-apply"}' \
+    --connect-timeout "${TOSS_SYNC_CURL_CONNECT_TIMEOUT_SECONDS:-5}" \
+    --max-time "${TOSS_SYNC_CURL_MAX_TIME_SECONDS:-30}" \
+    --retry "${TOSS_SYNC_CURL_RETRY:-2}" \
+    --retry-delay "${TOSS_SYNC_CURL_RETRY_DELAY_SECONDS:-5}" \
+    --retry-all-errors \
+    --config - \
     --output "${response_file}" \
-    --write-out '%{http_code}'
+    --write-out '%{http_code}' <<CURL_CONFIG
+request = "POST"
+url = "${endpoint}"
+header = "Content-Type: application/json"
+header = "Accept: application/json"
+header = "Origin: ${base_url}"
+header = "Authorization: Bearer ${job_token}"
+data = "{\"mode\":\"auto-apply\"}"
+CURL_CONFIG
 )"
 curl_status=$?
 set -e
 
 set +e
 summary_line="$(
-  uv run python - "${response_file}" "${http_status:-000}" "${curl_status}" <<'PY'
+  "${python_bin}" - "${response_file}" "${http_status:-000}" "${curl_status}" <<'PY'
 import json
 import sys
 from pathlib import Path
