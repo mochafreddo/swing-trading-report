@@ -12,20 +12,12 @@ import {
 } from "@/lib/api-request-log";
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { tossHoldingsSyncRequestSchema } from "@/lib/schemas";
-import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
-import { listTickerDirectoryExactBaseCandidates } from "@/lib/ticker-directory";
 import {
-  TossInvestApiError,
-  TossInvestConfigError,
-  fetchDefaultTossHoldingsItems,
-} from "@/lib/toss/client";
-import {
-  buildTossHoldingsDiffHash,
-  buildTossHoldingsDryRun,
-  type TossHoldingsItem,
-  type TossHoldingsDryRunResult,
-  type TossTickerDirectoryCandidate,
-} from "@/lib/toss/holdings-sync";
+  applyTossHoldingsSyncPreview,
+  buildTossHoldingsSyncPreview,
+} from "@/lib/toss/holdings-sync-service";
+import { TossInvestApiError, TossInvestConfigError } from "@/lib/toss/client";
+import { type TossHoldingsDryRunResult } from "@/lib/toss/holdings-sync";
 
 import {
   holdingsDependency,
@@ -37,54 +29,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ROUTE = "/api/holdings/toss-sync";
-
-function hasChanges(dryRun: TossHoldingsDryRunResult): boolean {
-  const summary = dryRun.reconciliation.summary;
-  return (
-    summary.createCount > 0 ||
-    summary.updateCount > 0 ||
-    summary.deleteCount > 0
-  );
-}
-
-function buildResponsePayload(
-  mode: "dry-run" | "apply",
-  dryRun: TossHoldingsDryRunResult,
-  diffHash: string,
-) {
-  return {
-    mode,
-    diffHash,
-    applyBlocked: dryRun.applyBlocked,
-    summary: dryRun.reconciliation.summary,
-    changes: dryRun.reconciliation.changes,
-    blockedRows: dryRun.blockedRows,
-    targetRows: dryRun.targetRows,
-  };
-}
-
-async function fetchTossTickerDirectoryCandidates(
-  items: readonly TossHoldingsItem[],
-): Promise<TossTickerDirectoryCandidate[]> {
-  const usSymbols = Array.from(
-    new Set(
-      items
-        .filter((item) => item.marketCountry === "US")
-        .map((item) => item.symbol.trim())
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right));
-  if (usSymbols.length <= 0) {
-    return [];
-  }
-
-  try {
-    const result = await listTickerDirectoryExactBaseCandidates(usSymbols);
-    return result.candidates.map((row) => ({ ticker: row.ticker }));
-  } catch {
-    return [];
-  }
-}
 
 function logRejectedTossSyncRequest(
   requestId: string,
@@ -201,18 +145,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const [currentHoldings, tossItems] = await Promise.all([
-      fetchAllHoldings(),
-      fetchDefaultTossHoldingsItems(),
-    ]);
-    const tickerDirectoryCandidates =
-      await fetchTossTickerDirectoryCandidates(tossItems);
-    const dryRun = buildTossHoldingsDryRun({
-      currentHoldings,
-      items: tossItems,
-      tickerDirectoryCandidates,
-    });
-    const diffHash = buildTossHoldingsDiffHash(dryRun);
+    const preview = await buildTossHoldingsSyncPreview();
+    const dryRun = preview.dryRun;
+    const diffHash = preview.diffHash;
 
     if (parsedRequest.data.mode === "apply") {
       if (dryRun.applyBlocked) {
@@ -254,17 +189,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const responsePayload = buildResponsePayload("apply", dryRun, diffHash);
-      if (hasChanges(dryRun)) {
-        const result = await replaceAllHoldings(dryRun.targetRows);
-        responsePayload.summary = {
-          ...responsePayload.summary,
-          createCount: result.insertedCount,
-          updateCount: result.updatedCount,
-          deleteCount: result.deletedCount,
-          unchangedCount: result.unchangedCount,
-        };
-      }
+      const responsePayload = await applyTossHoldingsSyncPreview(preview);
       const response = NextResponse.json(responsePayload);
       logApiInfo({
         event: "web_api_request_completed",
@@ -277,7 +202,7 @@ export async function POST(request: NextRequest) {
         dependency: "toss,supabase",
         duration_ms: elapsedMs(startedAtMs),
         mode: responsePayload.mode,
-        toss_item_count: tossItems.length,
+        toss_item_count: preview.tossItems.length,
         blocked_count: dryRun.blockedRows.length,
         create_count: responsePayload.summary.createCount,
         update_count: responsePayload.summary.updateCount,
@@ -287,7 +212,7 @@ export async function POST(request: NextRequest) {
       return withApiRequestId(response, requestId);
     }
 
-    const responsePayload = buildResponsePayload("dry-run", dryRun, diffHash);
+    const responsePayload = preview.payload;
     const response = NextResponse.json(responsePayload);
     logApiInfo({
       event: "web_api_request_completed",
@@ -300,7 +225,7 @@ export async function POST(request: NextRequest) {
       dependency: "toss,supabase",
       duration_ms: elapsedMs(startedAtMs),
       mode: responsePayload.mode,
-      toss_item_count: tossItems.length,
+      toss_item_count: preview.tossItems.length,
       blocked_count: dryRun.blockedRows.length,
       create_count: dryRun.reconciliation.summary.createCount,
       update_count: dryRun.reconciliation.summary.updateCount,
