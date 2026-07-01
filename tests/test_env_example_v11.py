@@ -61,6 +61,7 @@ def test_docker_compose_forwards_toss_sync_env_to_web() -> None:
         "TOSS_INVEST_ACCOUNT",
         "TOSS_INVEST_BASE_URL",
         "TOSS_SYNC_SOURCE",
+        "TOSS_SYNC_QA_FIXTURE_ENABLED",
         "TOSS_SYNC_JOB_TOKEN",
         "TOSS_SYNC_AUTO_APPLY_ENABLED",
     ):

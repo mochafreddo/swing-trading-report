@@ -365,6 +365,8 @@ describe("toss holdings sync service", () => {
 
   it("builds runtime dependencies that read QA holdings from a fixture file", async () => {
     vi.stubEnv("TOSS_SYNC_SOURCE", "fixture");
+    vi.stubEnv("TOSS_SYNC_QA_FIXTURE_ENABLED", "1");
+    vi.stubEnv("SUPABASE_URL", "http://host.docker.internal:54321");
     vi.stubEnv("TOSS_INVEST_CLIENT_ID", "");
     vi.stubEnv("TOSS_INVEST_CLIENT_SECRET", "");
     vi.stubEnv("TOSS_INVEST_ACCOUNT", "");
@@ -379,5 +381,24 @@ describe("toss holdings sync service", () => {
         marketCountry: "US",
       }),
     ]);
+  });
+
+  it("refuses fixture source without the explicit QA guard", () => {
+    vi.stubEnv("TOSS_SYNC_SOURCE", "fixture");
+    vi.stubEnv("SUPABASE_URL", "http://host.docker.internal:54321");
+
+    expect(() => buildTossHoldingsSyncDependenciesFromEnv()).toThrow(
+      "TOSS_SYNC_QA_FIXTURE_ENABLED=1",
+    );
+  });
+
+  it("refuses fixture source when Supabase is not local", () => {
+    vi.stubEnv("TOSS_SYNC_SOURCE", "fixture");
+    vi.stubEnv("TOSS_SYNC_QA_FIXTURE_ENABLED", "1");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+
+    expect(() => buildTossHoldingsSyncDependenciesFromEnv()).toThrow(
+      "local Supabase",
+    );
   });
 });

@@ -168,9 +168,42 @@ async function fetchFixtureTossHoldingsItems(): Promise<TossHoldingsItem[]> {
   return readFixtureItems(qaTossHoldingsFixture);
 }
 
+function isLocalFixtureSupabaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:") {
+      return false;
+    }
+    return (
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "localhost" ||
+      url.hostname === "::1" ||
+      url.hostname === "host.docker.internal"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function assertFixtureSourceAllowed(): void {
+  if (process.env.TOSS_SYNC_QA_FIXTURE_ENABLED !== "1") {
+    throw new TossHoldingsFixtureError(
+      "TOSS_SYNC_SOURCE=fixture requires TOSS_SYNC_QA_FIXTURE_ENABLED=1.",
+    );
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL?.trim() ?? "";
+  if (!isLocalFixtureSupabaseUrl(supabaseUrl)) {
+    throw new TossHoldingsFixtureError(
+      "TOSS_SYNC_SOURCE=fixture requires a local Supabase URL.",
+    );
+  }
+}
+
 export function buildTossHoldingsSyncDependenciesFromEnv(): TossHoldingsSyncDependencies {
   const source = process.env.TOSS_SYNC_SOURCE?.trim().toLowerCase();
   if (source === "fixture") {
+    assertFixtureSourceAllowed();
     return {
       ...defaultTossHoldingsSyncDependencies,
       fetchTossHoldingsItems: fetchFixtureTossHoldingsItems,
