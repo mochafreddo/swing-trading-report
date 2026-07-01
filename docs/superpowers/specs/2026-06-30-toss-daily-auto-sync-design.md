@@ -1,4 +1,4 @@
-상태: Draft for Review
+상태: Accepted
 
 # Toss Daily Auto Sync Design
 
