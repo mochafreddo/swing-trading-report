@@ -47,6 +47,50 @@ load_env_file() {
 
 load_env_file "${env_file}"
 
+normalize_timezone() {
+  case "$1" in
+    Asia/Seoul | KST)
+      printf '%s\n' "Asia/Seoul"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+detect_current_timezone() {
+  if [[ -n "${TOSS_SYNC_CURRENT_TZ_FOR_TEST:-}" ]]; then
+    printf '%s\n' "${TOSS_SYNC_CURRENT_TZ_FOR_TEST}"
+    return 0
+  fi
+  if command -v readlink >/dev/null 2>&1 && [[ -L /etc/localtime ]]; then
+    local localtime_target
+    localtime_target="$(readlink /etc/localtime 2>/dev/null || true)"
+    case "${localtime_target}" in
+      */Asia/Seoul)
+        printf '%s\n' "Asia/Seoul"
+        return 0
+        ;;
+    esac
+  fi
+  if [[ -f /etc/timezone ]]; then
+    local timezone_file_value
+    timezone_file_value="$(tr -d '[:space:]' < /etc/timezone)"
+    if [[ -n "${timezone_file_value}" ]]; then
+      printf '%s\n' "${timezone_file_value}"
+      return 0
+    fi
+  fi
+  date +%Z
+}
+
+expected_timezone="${TOSS_SYNC_EXPECTED_TZ:-Asia/Seoul}"
+current_timezone="$(detect_current_timezone)"
+if [[ "$(normalize_timezone "${current_timezone}")" != "$(normalize_timezone "${expected_timezone}")" ]]; then
+  printf '%s\n' "Host timezone must be ${expected_timezone}; detected ${current_timezone:-unknown}" >&2
+  exit 3
+fi
+
 web_host_port="${WEB_HOST_PORT:-55300}"
 base_url="http://127.0.0.1:${web_host_port}"
 endpoint="${base_url}/api/holdings/toss-sync/scheduled"

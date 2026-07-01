@@ -64,6 +64,7 @@ def _run_runner(
         "HOME": str(effective_home_dir),
         "PATH": path_env or os.environ.get("PATH", ""),
         "TOSS_SYNC_ENV_FILE": str(env_file),
+        "TOSS_SYNC_CURRENT_TZ_FOR_TEST": "Asia/Seoul",
         "UV_STUB_ARGS_FILE": str(tmp_path / "uv.args"),
         "UV_STUB_PWD_FILE": str(tmp_path / "uv.pwd"),
         **(extra_env or {}),
@@ -273,6 +274,35 @@ def test_toss_daily_auto_sync_runner_bootstraps_path_for_launchd_environment(
     assert _read_uv_args(tmp_path).startswith("run python - ")
 
 
+def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 1,
+                    "createCount": 1,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        extra_env={"TOSS_SYNC_CURRENT_TZ_FOR_TEST": "UTC"},
+    )
+
+    assert result.returncode != 0
+    assert "Host timezone must be Asia/Seoul; detected UTC" in result.stderr
+    assert not recorder.exists()
+
+
 @pytest.mark.parametrize(
     ("status", "incoming_count", "delete_count"),
     [
@@ -308,6 +338,33 @@ def test_toss_daily_auto_sync_runner_exits_nonzero_for_unsuccessful_statuses(
 
     assert result.returncode != 0
     assert f"http=200 status={status}" in result.stdout
+
+
+def test_toss_daily_auto_sync_runner_exits_nonzero_for_blocked_status(
+    tmp_path: Path,
+) -> None:
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "blocked",
+                "summary": {
+                    "incomingCount": 1,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [{"symbol": "AAPL.NAS"}],
+            },
+            tmp_path / "curl.args",
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "http=200 status=blocked" in result.stdout
+    assert "blocked=1" in result.stdout
 
 
 def test_toss_daily_auto_sync_runner_prints_bounded_summary_for_http_error_json(

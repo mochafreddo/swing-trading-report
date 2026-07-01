@@ -203,7 +203,7 @@ Manual smoke:
 TOSS_SYNC_ENV_FILE=.env.scheduler.local scripts/toss_daily_auto_sync.sh
 ```
 
-`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>` from the selected env file. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, and `error` exit non-zero and do not write holdings.
+`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>` from the selected env file. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the `08:05` contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, and `error` exit non-zero and do not write holdings.
 
 ## Rollback
 
