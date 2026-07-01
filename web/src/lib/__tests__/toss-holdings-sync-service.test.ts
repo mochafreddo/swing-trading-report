@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyTossHoldingsSyncPreview,
+  buildTossHoldingsSyncDependenciesFromEnv,
   buildTossHoldingsSyncPreview,
   runScheduledTossAutoApply,
   type TossHoldingsSyncDependencies,
@@ -51,6 +52,10 @@ function deps(
 }
 
 describe("toss holdings sync service", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("builds a preview and applies create update delete changes", async () => {
     const testDeps = deps({
       fetchAllHoldings: vi.fn(async () => [
@@ -356,5 +361,23 @@ describe("toss holdings sync service", () => {
     expect(result.status).toBe("unchanged");
     expect(result.summary.incomingCount).toBe(0);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+  });
+
+  it("builds runtime dependencies that read QA holdings from a fixture file", async () => {
+    vi.stubEnv("TOSS_SYNC_SOURCE", "fixture");
+    vi.stubEnv("TOSS_INVEST_CLIENT_ID", "");
+    vi.stubEnv("TOSS_INVEST_CLIENT_SECRET", "");
+    vi.stubEnv("TOSS_INVEST_ACCOUNT", "");
+
+    const runtimeDeps = buildTossHoldingsSyncDependenciesFromEnv();
+
+    await expect(runtimeDeps.fetchTossHoldingsItems()).resolves.toEqual([
+      expect.objectContaining({ symbol: "005930", marketCountry: "KR" }),
+      expect.objectContaining({
+        symbol: "AAPL",
+        name: "Apple Inc.",
+        marketCountry: "US",
+      }),
+    ]);
   });
 });

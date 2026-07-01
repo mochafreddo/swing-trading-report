@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_executable(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _run_qa_script(
+    tmp_path: Path,
+    *,
+    env_file_text: str,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    env_file = tmp_path / ".env.qa.local"
+    env_file.write_text(env_file_text, encoding="utf-8")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "TOSS_SYNC_QA_ENV_FILE": str(env_file),
+        "TOSS_SYNC_QA_DOCKER_LOG": str(tmp_path / "docker.log"),
+        "TOSS_SYNC_QA_CURL_LOG": str(tmp_path / "curl.log"),
+        "TOSS_SYNC_QA_RUNNER_BIN": str(tmp_path / "runner.sh"),
+        "TOSS_SYNC_QA_WORK_DIR": str(tmp_path / "qa-work"),
+        **(extra_env or {}),
+    }
+    _write_executable(
+        bin_dir / "docker",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$TOSS_SYNC_QA_DOCKER_LOG"\n'
+        'env | sort | grep "^TOSS_SYNC_" >> "$TOSS_SYNC_QA_DOCKER_LOG"\n',
+    )
+    _write_executable(
+        bin_dir / "curl",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$TOSS_SYNC_QA_CURL_LOG"\n'
+        'cat >> "$TOSS_SYNC_QA_CURL_LOG"\n'
+        'if [[ "$*" == *"/login"* && "$*" != *"/api/auth/login"* ]]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == *"/api/holdings/yaml"* && "$*" == *"--request POST"* ]]; then\n'
+        '  printf "%s\\n" \'{"mode":"apply","summary":{"incomingCount":2,"createCount":0,"updateCount":2,"deleteCount":0,"unchangedCount":0}}\'\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == *"/api/holdings/yaml"* ]]; then\n'
+        '  printf "%s\\n" "version: 1"\n'
+        '  printf "%s\\n" "holdings: []"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == *"/api/holdings?"* ]]; then\n'
+        '  printf "%s\\n" \'{"items":[{"ticker":"005930"},{"ticker":"AAPL.NAS"}],"nextCursor":null}\'\n'
+        "  exit 0\n"
+        "fi\n"
+        'printf "%s\\n" \'{"ok":true}\'\n',
+    )
+    _write_executable(
+        Path(env["TOSS_SYNC_QA_RUNNER_BIN"]),
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "runner" > "$TOSS_SYNC_QA_WORK_DIR/runner.log"\n'
+        'printf "%s\\n" "http=200 status=applied incoming=2 create=0 update=2 delete=0 unchanged=0 blocked=0"\n',
+    )
+    return subprocess.run(
+        [str(REPO_ROOT / "scripts/qa_toss_sync_local.sh")],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_toss_sync_qa_local_refuses_non_loopback_supabase(
+    tmp_path: Path,
+) -> None:
+    result = _run_qa_script(
+        tmp_path,
+        env_file_text=(
+            "SUPABASE_URL=https://example.supabase.co\n"
+            "SUPABASE_SECRET_KEY=secret\n"
+            "SAB_BASIC_AUTH_USER=admin\n"
+            "SAB_BASIC_AUTH_PASS=password\n"
+            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
+            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "refuses to run against non-local SUPABASE_URL" in result.stderr
+    assert not (tmp_path / "docker.log").exists()
+
+
+def test_toss_sync_qa_local_starts_web_with_fixture_source_and_runs_valid_token_flow(
+    tmp_path: Path,
+) -> None:
+    result = _run_qa_script(
+        tmp_path,
+        env_file_text=(
+            "SUPABASE_URL=http://127.0.0.1:54321\n"
+            "SUPABASE_SECRET_KEY=secret\n"
+            "SAB_BASIC_AUTH_USER=admin\n"
+            "SAB_BASIC_AUTH_PASS=password\n"
+            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
+            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
+            "WEB_HOST_PORT=55444\n"
+        ),
+    )
+
+    assert result.returncode == 0, result.stderr
+    docker_log = (tmp_path / "docker.log").read_text(encoding="utf-8")
+    assert "compose up -d --build web" in docker_log
+    assert "TOSS_SYNC_SOURCE=fixture" in docker_log
+    assert "TOSS_SYNC_AUTO_APPLY_ENABLED=1" in docker_log
+    assert "status=applied" in result.stdout
+    assert (tmp_path / "qa-work/runner.log").exists()

@@ -15,6 +15,7 @@ import {
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { tossHoldingsScheduledSyncRequestSchema } from "@/lib/schemas";
 import {
+  buildTossHoldingsSyncDependenciesFromEnv,
   runScheduledTossAutoApply,
   type ScheduledTossAutoSyncResponse,
 } from "@/lib/toss/holdings-sync-service";
@@ -149,9 +150,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await runScheduledTossAutoApply({
-      autoApplyEnabled: process.env.TOSS_SYNC_AUTO_APPLY_ENABLED === "1",
-    });
+    const deps = buildTossHoldingsSyncDependenciesFromEnv();
+    const result = await runScheduledTossAutoApply(
+      {
+        autoApplyEnabled: process.env.TOSS_SYNC_AUTO_APPLY_ENABLED === "1",
+      },
+      deps,
+    );
     const response = NextResponse.json(result);
     logApiInfo({
       event: "web_api_request_completed",

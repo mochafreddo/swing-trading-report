@@ -207,6 +207,14 @@ scripts/toss_daily_auto_sync.sh
 
 `scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the `08:05` contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and `error` exit non-zero and do not write holdings. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
 
+Full local QA, including authenticated holdings access and a valid scheduled job token path:
+
+```bash
+just qa-toss-sync
+```
+
+`just qa-toss-sync` runs `scripts/qa_toss_sync_local.sh`. It refuses to start unless `SUPABASE_URL` is loopback (`127.0.0.1`, `localhost`, or `[::1]`) unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_SUPABASE=1` is explicitly set. The script rebuilds the web container with `TOSS_SYNC_SOURCE=fixture` and `TOSS_SYNC_AUTO_APPLY_ENABLED=1`; logs in with the local admin credentials from `.env`; exports the current holdings YAML; seeds a two-row QA holdings set; runs the scheduled sync runner with the real local job token; verifies `005930` and `AAPL.NAS`; and restores the original holdings YAML on exit. This is the preferred QA path when browser/API tests must cover authenticated UI entry and valid-token auto-apply without touching live Toss or remote holdings data.
+
 ## Rollback
 
 | Surface | Rollback Action | Notes |

@@ -13,6 +13,7 @@ import {
   type TossHoldingsItem,
   type TossTickerDirectoryCandidate,
 } from "@/lib/toss/holdings-sync";
+import qaTossHoldingsFixture from "../../../fixtures/toss-holdings.qa.json";
 import type {
   HoldingRecord,
   HoldingReplaceSnapshot,
@@ -83,6 +84,100 @@ export const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies =
     listTickerDirectoryExactBaseCandidates,
     replaceAllHoldings,
   };
+
+export class TossHoldingsFixtureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TossHoldingsFixtureError";
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readFixtureString(
+  record: Record<string, unknown>,
+  field: keyof TossHoldingsItem,
+  context: string,
+): string {
+  const value = record[field];
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  throw new TossHoldingsFixtureError(
+    `${context}: '${field}' must be a non-empty string or finite number.`,
+  );
+}
+
+function readOptionalFixtureString(
+  record: Record<string, unknown>,
+  field: keyof TossHoldingsItem,
+): string | null {
+  const value = record[field];
+  if (value == null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseFixtureItem(value: unknown, index: number): TossHoldingsItem {
+  const record = asRecord(value);
+  const context = `Toss holdings fixture item ${index + 1}`;
+  if (!record) {
+    throw new TossHoldingsFixtureError(`${context} must be an object.`);
+  }
+
+  return {
+    symbol: readFixtureString(record, "symbol", context),
+    name: readOptionalFixtureString(record, "name"),
+    marketCountry: readFixtureString(record, "marketCountry", context),
+    currency: readFixtureString(record, "currency", context),
+    quantity: readFixtureString(record, "quantity", context),
+    averagePurchasePrice: readFixtureString(
+      record,
+      "averagePurchasePrice",
+      context,
+    ),
+  };
+}
+
+function readFixtureItems(payload: unknown): TossHoldingsItem[] {
+  const holdings = Array.isArray(payload)
+    ? payload
+    : asRecord(payload)?.holdings;
+  if (!Array.isArray(holdings)) {
+    throw new TossHoldingsFixtureError(
+      "Toss holdings fixture must be an array or an object with a holdings array.",
+    );
+  }
+  return holdings.map(parseFixtureItem);
+}
+
+async function fetchFixtureTossHoldingsItems(): Promise<TossHoldingsItem[]> {
+  return readFixtureItems(qaTossHoldingsFixture);
+}
+
+export function buildTossHoldingsSyncDependenciesFromEnv(): TossHoldingsSyncDependencies {
+  const source = process.env.TOSS_SYNC_SOURCE?.trim().toLowerCase();
+  if (source === "fixture") {
+    return {
+      ...defaultTossHoldingsSyncDependencies,
+      fetchTossHoldingsItems: fetchFixtureTossHoldingsItems,
+    };
+  }
+  return defaultTossHoldingsSyncDependencies;
+}
 
 function hasChanges(summary: HoldingsYamlImportSummary): boolean {
   return (

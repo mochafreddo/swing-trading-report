@@ -17,7 +17,10 @@ vi.mock("@/lib/local-request-guard", () => {
   };
 });
 
+const MOCK_RUNTIME_DEPS = { qa: "runtime-deps" };
+
 vi.mock("@/lib/toss/holdings-sync-service", () => ({
+  buildTossHoldingsSyncDependenciesFromEnv: vi.fn(() => MOCK_RUNTIME_DEPS),
   runScheduledTossAutoApply: vi.fn(async () => ({
     mode: "auto-apply",
     status: "unchanged",
@@ -45,7 +48,10 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
-import { runScheduledTossAutoApply } from "@/lib/toss/holdings-sync-service";
+import {
+  buildTossHoldingsSyncDependenciesFromEnv,
+  runScheduledTossAutoApply,
+} from "@/lib/toss/holdings-sync-service";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -175,9 +181,12 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(response.status).toBe(200);
     expect(payload.status).toBe("disabled");
     expect(payload.applyBlocked).toBe(false);
-    expect(runScheduledTossAutoApply).toHaveBeenCalledWith({
-      autoApplyEnabled: false,
-    });
+    expect(runScheduledTossAutoApply).toHaveBeenCalledWith(
+      {
+        autoApplyEnabled: false,
+      },
+      MOCK_RUNTIME_DEPS,
+    );
   });
 
   it("returns bounded auto-sync result for valid local job requests", async () => {
@@ -199,9 +208,13 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(payload.diffHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(payload).not.toHaveProperty("accessToken");
     expect(payload).not.toHaveProperty("account");
-    expect(runScheduledTossAutoApply).toHaveBeenCalledWith({
-      autoApplyEnabled: true,
-    });
+    expect(buildTossHoldingsSyncDependenciesFromEnv).toHaveBeenCalledTimes(1);
+    expect(runScheduledTossAutoApply).toHaveBeenCalledWith(
+      {
+        autoApplyEnabled: true,
+      },
+      MOCK_RUNTIME_DEPS,
+    );
   });
 
   it("returns a stable scheduled error result when the sync service throws", async () => {
