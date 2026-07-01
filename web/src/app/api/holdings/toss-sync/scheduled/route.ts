@@ -14,13 +14,40 @@ import {
 } from "@/lib/local-request-guard";
 import { parseJsonBody } from "@/lib/parse-json-body";
 import { tossHoldingsScheduledSyncRequestSchema } from "@/lib/schemas";
-import { runScheduledTossAutoApply } from "@/lib/toss/holdings-sync-service";
+import {
+  runScheduledTossAutoApply,
+  type ScheduledTossAutoSyncResponse,
+} from "@/lib/toss/holdings-sync-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ROUTE = "/api/holdings/toss-sync/scheduled";
-// Scheduled local jobs intentionally do not call enforceAdminApiGuard(request).
+
+function buildScheduledErrorResult(
+  error = "Scheduled Toss holdings sync failed",
+): ScheduledTossAutoSyncResponse & { error: string } {
+  return {
+    mode: "auto-apply",
+    status: "error",
+    error,
+    diffHash: "",
+    applyBlocked: false,
+    summary: {
+      incomingCount: 0,
+      createCount: 0,
+      updateCount: 0,
+      deleteCount: 0,
+      unchangedCount: 0,
+      createTickers: [],
+      updateTickers: [],
+      deleteTickers: [],
+    },
+    changes: { create: [], update: [], delete: [], unchanged: [] },
+    blockedRows: [],
+    targetRows: [],
+  };
+}
 
 function constantTimeEqual(left: string, right: string): boolean {
   if (left.length !== right.length) {
@@ -161,10 +188,7 @@ export async function POST(request: NextRequest) {
       retryable: true,
     });
     return withApiRequestId(
-      NextResponse.json(
-        { error: "Scheduled Toss holdings sync failed" },
-        { status: 500 },
-      ),
+      NextResponse.json(buildScheduledErrorResult(), { status: 500 }),
       requestId,
     );
   }

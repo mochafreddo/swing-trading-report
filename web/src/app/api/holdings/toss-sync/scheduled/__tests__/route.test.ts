@@ -103,6 +103,24 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(runScheduledTossAutoApply).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid payloads with the scheduled route contract", async () => {
+    const response = await POST(
+      makePostRequest(
+        { mode: "dry-run" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+    const payload = (await response.json()) as {
+      error: string;
+      details?: { fieldErrors?: Record<string, string[]> };
+    };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid scheduled Toss holdings sync payload");
+    expect(payload.details?.fieldErrors?.mode).toBeDefined();
+    expect(runScheduledTossAutoApply).not.toHaveBeenCalled();
+  });
+
   it("rejects non-local requests before running sync", async () => {
     vi.mocked(assertLocalRequest).mockImplementationOnce(() => {
       throw new LocalRequestGuardError("Local only");
@@ -158,6 +176,66 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(payload).not.toHaveProperty("account");
     expect(runScheduledTossAutoApply).toHaveBeenCalledWith({
       autoApplyEnabled: true,
+    });
+  });
+
+  it("returns a stable scheduled error result when the sync service throws", async () => {
+    vi.mocked(runScheduledTossAutoApply).mockRejectedValueOnce(
+      new Error("boom"),
+    );
+
+    const response = await POST(
+      makePostRequest(
+        { mode: "auto-apply" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+    const payload = (await response.json()) as {
+      mode: string;
+      status: string;
+      error: string;
+      diffHash: string;
+      applyBlocked: boolean;
+      blockedRows: unknown[];
+      targetRows: unknown[];
+      summary: {
+        incomingCount: number;
+        createCount: number;
+        updateCount: number;
+        deleteCount: number;
+        unchangedCount: number;
+        createTickers: string[];
+        updateTickers: string[];
+        deleteTickers: string[];
+      };
+      changes: {
+        create: unknown[];
+        update: unknown[];
+        delete: unknown[];
+        unchanged: unknown[];
+      };
+    };
+
+    expect(response.status).toBe(500);
+    expect(payload).toEqual({
+      mode: "auto-apply",
+      status: "error",
+      error: "Scheduled Toss holdings sync failed",
+      diffHash: "",
+      applyBlocked: false,
+      summary: {
+        incomingCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        deleteCount: 0,
+        unchangedCount: 0,
+        createTickers: [],
+        updateTickers: [],
+        deleteTickers: [],
+      },
+      changes: { create: [], update: [], delete: [], unchanged: [] },
+      blockedRows: [],
+      targetRows: [],
     });
   });
 });

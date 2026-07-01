@@ -6,6 +6,23 @@ import { describe, it } from "vitest";
 const API_ROOT = path.resolve(process.cwd(), "src/app/api");
 const PUBLIC_ROUTES = new Set(["auth/login/route.ts", "auth/logout/route.ts"]);
 const ADMIN_GUARD_CALL = "enforceAdminApiGuard(";
+const NON_ADMIN_ROUTE_EXCEPTIONS = new Map<
+  string,
+  { rationale: string; requiredFragments: string[] }
+>([
+  [
+    "holdings/toss-sync/scheduled/route.ts",
+    {
+      rationale:
+        "scheduled Toss auto-sync is an intentional non-admin-session route guarded by local request checks plus the TOSS_SYNC_JOB_TOKEN bearer token",
+      requiredFragments: [
+        "assertLocalRequest(request)",
+        "LocalRequestGuardError",
+        "TOSS_SYNC_JOB_TOKEN",
+      ],
+    },
+  ],
+]);
 const GUARDED_PASSTHROUGH_ROUTES = new Map<string, string>([
   ["holdings/[...ticker]/route.ts", 'from "../[ticker]/route"'],
   [
@@ -56,6 +73,17 @@ describe("api guard contract", () => {
           throw new Error(
             `${relative} must delegate to guarded route via ${expectedDelegateImport}`,
           );
+        }
+        continue;
+      }
+      const nonAdminException = NON_ADMIN_ROUTE_EXCEPTIONS.get(relative);
+      if (nonAdminException) {
+        for (const fragment of nonAdminException.requiredFragments) {
+          if (!source.includes(fragment)) {
+            throw new Error(
+              `${relative} is exempt from enforceAdminApiGuard() only when it keeps ${nonAdminException.rationale}; missing ${fragment}`,
+            );
+          }
         }
         continue;
       }
