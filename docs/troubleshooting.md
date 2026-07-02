@@ -377,6 +377,45 @@ role, and request-local source refs that were available to the model.
 
 NEEDS_CONFIRMATION: notification owner, late-alert policy, and rerun approval.
 
+## Symptom: Local Toss daily auto-sync exits non-zero
+
+### Possible Causes
+
+- `TOSS_SYNC_JOB_TOKEN` is missing or does not match the web container env.
+- `TOSS_SYNC_AUTO_APPLY_ENABLED` is unset, so the scheduled route returns `disabled`.
+- The host timezone is not `Asia/Seoul` or `KST`.
+- The web container is down or using stale env after `.env` changed.
+- The scheduled diff is blocked, would wipe holdings, or contains deletes that
+  require manual reviewed apply in the web UI.
+
+### Checks
+
+```bash
+tail -n 20 logs/launchd/toss-daily-auto-sync.out.log
+tail -n 20 logs/launchd/toss-daily-auto-sync.err.log
+docker compose ps
+docker compose logs web
+```
+
+Expected successful runner statuses are `status=applied` or `status=unchanged`.
+`status=disabled`, `status=blocked`, `status=wipe_guard_blocked`,
+`status=delete_guard_blocked`, and `status=error` are fail-closed outcomes.
+
+### Resolution
+
+- Keep `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root
+  `.env`, then recreate the web container with `docker compose up -d --build web`.
+- Keep the launchd host timezone aligned with `TOSS_SYNC_EXPECTED_TZ`, default
+  `Asia/Seoul`.
+- Use the web Holdings Toss Sync panel for destructive delete diffs.
+- Run `just qa-toss-sync` against local Supabase when you need to verify the
+  valid-token scheduled path without live Toss or remote holdings data.
+
+### Escalation
+
+NEEDS_CONFIRMATION: actual launchd bootstrap state, host timezone policy, and
+whether a blocked/delete diff should be manually applied are operator decisions.
+
 ## Symptom: Cleanup workflow wants to delete too much
 
 ### Possible Causes

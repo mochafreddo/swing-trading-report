@@ -197,6 +197,18 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 
 로컬 QA 리포트, baseline, 스크린샷은 `.gstack/qa-reports/`에 저장합니다. 이 디렉터리는 검증 증거용 로컬 산출물이므로 git에 커밋하지 않습니다.
 
+Toss scheduled holdings sync 경로를 live Toss나 remote holdings 없이 확인하려면 local
+Supabase와 web env를 준비한 뒤 fixture-backed QA를 실행합니다.
+
+```bash
+just qa-toss-sync
+```
+
+이 명령은 web 컨테이너를 QA fixture source로 재생성하고, local admin login,
+scheduled route bearer token, seeded holdings diff apply, 원복, fixture 해제를 한 번에
+검증합니다. 운영/live sync에서는 `TOSS_SYNC_SOURCE`와
+`TOSS_SYNC_QA_FIXTURE_ENABLED`를 unset 상태로 둡니다.
+
 ## 8. 자주 발생하는 로컬 문제
 
 | Symptom | First check |
