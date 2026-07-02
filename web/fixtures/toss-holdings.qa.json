@@ -1,0 +1,20 @@
+{
+  "holdings": [
+    {
+      "symbol": "005930",
+      "name": "Samsung Electronics",
+      "marketCountry": "KR",
+      "currency": "KRW",
+      "quantity": "2",
+      "averagePurchasePrice": "70000"
+    },
+    {
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "marketCountry": "US",
+      "currency": "USD",
+      "quantity": "1",
+      "averagePurchasePrice": "190"
+    }
+  ]
+}

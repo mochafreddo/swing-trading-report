@@ -84,6 +84,9 @@ live-integration-smoke *args:
 runtime-state-lock-smoke *args:
   uv run python scripts/runtime_state_lock_smoke.py {{args}}
 
+qa-toss-sync:
+  scripts/qa_toss_sync_local.sh
+
 # Python quality gates
 ruff:
   uv run ruff check .

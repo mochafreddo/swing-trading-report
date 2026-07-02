@@ -73,9 +73,24 @@ vi.mock("@/lib/supabase-admin", () => {
   };
 });
 
-vi.mock("@/lib/toss/client", () => ({
-  fetchDefaultTossHoldingsItems: vi.fn(async () => []),
-}));
+vi.mock("@/lib/toss/client", () => {
+  class TossInvestApiError extends Error {
+    status: number;
+
+    constructor(message: string, status = 502) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  class TossInvestConfigError extends Error {}
+
+  return {
+    TossInvestApiError,
+    TossInvestConfigError,
+    fetchDefaultTossHoldingsItems: vi.fn(async () => []),
+  };
+});
 
 vi.mock("@/lib/ticker-directory", () => ({
   listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
@@ -311,7 +326,6 @@ describe("/api/holdings/toss-sync route", () => {
       makePostRequest({
         mode: "apply",
         diffHash: dryRunPayload.diffHash,
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const applyPayload = (await applyResponse.json()) as {
@@ -324,19 +338,26 @@ describe("/api/holdings/toss-sync route", () => {
     expect(applyPayload.mode).toBe("apply");
     expect(applyPayload.diffHash).toBe(dryRunPayload.diffHash);
     expect(applyPayload.summary.updateCount).toBe(1);
-    expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledWith([
-      expect.objectContaining({
-        ticker: "AAPL.NAS",
-        quantity: 3,
-        entry_price: 188.5,
-        entry_currency: "USD",
-        entry_pattern: "swing_high_breakout",
-        notes: "core",
-      }),
-    ]);
+    expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          ticker: "AAPL.NAS",
+          quantity: 3,
+          entry_price: 188.5,
+          entry_currency: "USD",
+          entry_pattern: "swing_high_breakout",
+          notes: "core",
+        }),
+      ],
+      {
+        expectedCurrentHoldings: [
+          expect.objectContaining({ ticker: "AAPL.NAS", quantity: 2 }),
+        ],
+      },
+    );
   });
 
-  it("rejects Toss holdings apply without confirmation text before writing Supabase", async () => {
+  it("applies Toss holdings without confirmation text before writing Supabase", async () => {
     vi.mocked(fetchAllHoldings).mockResolvedValue([]);
     vi.mocked(fetchDefaultTossHoldingsItems).mockResolvedValue([
       {
@@ -347,6 +368,12 @@ describe("/api/holdings/toss-sync route", () => {
         averagePurchasePrice: "70000",
       },
     ]);
+    vi.mocked(replaceAllHoldings).mockResolvedValueOnce({
+      insertedCount: 1,
+      updatedCount: 0,
+      deletedCount: 0,
+      unchangedCount: 0,
+    });
 
     const dryRunResponse = await POST(makePostRequest({ mode: "dry-run" }));
     const dryRunPayload = (await dryRunResponse.json()) as {
@@ -359,11 +386,14 @@ describe("/api/holdings/toss-sync route", () => {
         diffHash: dryRunPayload.diffHash,
       }),
     );
-    const payload = (await applyResponse.json()) as { error: string };
+    const payload = (await applyResponse.json()) as { mode: string };
 
-    expect(applyResponse.status).toBe(400);
-    expect(payload.error).toBe("Invalid Toss holdings sync payload");
-    expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();
+    expect(applyResponse.status).toBe(200);
+    expect(payload.mode).toBe("apply");
+    expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledWith(
+      [expect.objectContaining({ ticker: "005930" })],
+      { expectedCurrentHoldings: [] },
+    );
   });
 
   it("rejects stale Toss holdings apply hashes before writing Supabase", async () => {
@@ -383,7 +413,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {
@@ -414,7 +443,6 @@ describe("/api/holdings/toss-sync route", () => {
         mode: "apply",
         diffHash:
           "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        confirmationText: "APPLY TOSS HOLDINGS",
       }),
     );
     const payload = (await response.json()) as {

@@ -30,7 +30,7 @@
 | Reports | Supabase Storage `reports` + `report_index` | Web `Reports`, workflow logs |
 | Holdings | Supabase `holdings` | Web `Holdings`, SQL checks |
 | Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief checks |
-| Automation | GitHub Actions + local scheduler | GitHub run logs, Docker scheduler logs |
+| Automation | GitHub Actions + local scheduler + Toss launchd runner | GitHub run logs, Docker scheduler logs, Toss launchd logs |
 | Web console | local Docker `web` service | `/login` liveness, container logs |
 | Secrets | `.env`, `.env.scheduler.local`, GitHub Secrets | Do not print values |
 
@@ -44,6 +44,7 @@
 | Latest workflows | `gh run list --limit 10` | scheduled jobs not repeatedly failing |
 | Reports visible | Web `Reports` | latest `buy`/`sell`/`entry`/`ai-brief` as expected |
 | Holdings visible | Web `Holdings` | active holdings match operator expectation |
+| Toss daily auto-sync log | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` | when enabled, latest run ends with `status=applied` or `status=unchanged` |
 | Local uncommitted secrets | `git status --short` | no secret files staged |
 
 ## Weekly Checklist
@@ -65,6 +66,7 @@
 | Web liveness | unauthenticated page | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` |
 | Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
+| Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
 | Supabase reports | SQL/dashboard | `report_index`, Storage `reports` bucket |
 | Supabase locks | SQL/dashboard | `runtime_state` rows prefixed `scheduled-ai-brief:` |
@@ -135,6 +137,26 @@ Local log retention:
 - Both directories are local-only and gitignored. Keep the latest 30 calendar days during normal operation. Before deleting older files, dry-run the target list with `find logs/scheduled logs/measurements -type f -mtime +30 -print`; delete only after confirming there is no active incident or audit need.
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
+
+## Local Toss Daily Auto Sync
+
+The Toss daily auto-sync launchd job calls the local web route
+`/api/holdings/toss-sync/scheduled` at `08:05 Asia/Seoul`. Keep the web
+container on the same root `.env` values as the runner for `TOSS_SYNC_JOB_TOKEN`
+and `TOSS_SYNC_AUTO_APPLY_ENABLED`.
+
+Operational checks:
+
+```bash
+tail -n 20 logs/launchd/toss-daily-auto-sync.out.log
+tail -n 20 logs/launchd/toss-daily-auto-sync.err.log
+```
+
+Only `status=applied` and `status=unchanged` are successful runner outcomes.
+`disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and
+`error` are fail-closed outcomes; inspect the web container logs and the current
+Holdings page before rerunning. Full setup and QA steps live in
+[deployment.md](deployment.md#local-toss-holdings-auto-sync).
 
 ## GitHub Actions
 

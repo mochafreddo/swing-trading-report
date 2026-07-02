@@ -197,6 +197,50 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     assert "fail closed" in sell_flow
 
 
+def test_toss_sync_docs_do_not_reference_removed_confirmation_text_contract() -> None:
+    stale_phrases = (
+        'confirmationText: "APPLY TOSS HOLDINGS"',
+        "requires `confirmationText",
+        "requires confirmation",
+        "server-side confirmation text",
+        "apply confirmation input",
+    )
+
+    for path in (Path("docs/api.md"), Path("docs/ARCHITECTURE.md")):
+        text = _read(path)
+        for phrase in stale_phrases:
+            assert phrase not in text, (
+                f"{path} still references removed Toss confirmation contract: {phrase}"
+            )
+
+
+def test_toss_scheduled_sync_docs_reflect_auto_apply_guardrails() -> None:
+    docs_to_check = (
+        Path("docs/api.md"),
+        Path("docs/ARCHITECTURE.md"),
+        Path("docs/configuration.md"),
+        Path("docs/config-reference.md"),
+        Path("docs/deployment.md"),
+    )
+
+    for path in docs_to_check:
+        text = _read(path)
+        assert "TOSS_SYNC_JOB_TOKEN" in text, f"{path} missing scheduled token docs"
+
+    api_text = _read(Path("docs/api.md"))
+    assert "applyBlocked" in api_text
+    assert "delete_guard_blocked" in api_text
+    assert "create/update only" in api_text
+
+    deployment_text = _read(Path("docs/deployment.md"))
+    assert "root `.env`" in deployment_text
+    assert "TOSS_SYNC_ENV_FILE=.env.scheduler.local" not in deployment_text
+
+    architecture_text = _read(Path("docs/ARCHITECTURE.md"))
+    assert "holdings-sync-service.ts" in architecture_text
+    assert "toss_daily_auto_sync.sh" in architecture_text
+
+
 def test_ai_brief_model_timeout_docs_cover_primary_fallback_and_total() -> None:
     config_reference_text = _read(Path("docs/config-reference.md"))
     configuration_text = _read(Path("docs/configuration.md"))

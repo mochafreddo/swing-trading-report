@@ -71,7 +71,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 | Python engine | Python 3.14, `uv`, `requests`, `PyYAML`, optional `pykrx` |
 | Web console | Next.js 16, React 19, TypeScript, pnpm |
 | Storage/backend | Supabase Postgres, Supabase Storage |
-| Automation | GitHub Actions, Docker Compose, macOS `launchd` scheduled AI Brief; scheduled scan/sell fail-closed guard |
+| Automation | GitHub Actions, Docker Compose, macOS `launchd` scheduled AI Brief and Toss daily holdings sync; scheduled scan/sell fail-closed guard |
 | Toolchain | `mise`, `just`, Ruff, Mypy, Pytest, ESLint, Vitest, Prettier |
 
 ## 문서 지도

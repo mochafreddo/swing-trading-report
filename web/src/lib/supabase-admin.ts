@@ -42,5 +42,6 @@ export type {
   FetchHoldingsPageOptions,
   FetchHoldingsPageResult,
   HoldingAddBuyInput,
+  ReplaceAllHoldingsOptions,
   ReplaceAllHoldingsResult,
 } from "@/lib/supabase/holdings";

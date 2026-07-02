@@ -55,6 +55,10 @@ export interface ReplaceAllHoldingsResult {
   unchangedCount: number;
 }
 
+export interface ReplaceAllHoldingsOptions {
+  expectedCurrentHoldings?: readonly HoldingRecord[];
+}
+
 export async function fetchHoldingsPage(
   options: FetchHoldingsPageOptions = {},
 ): Promise<FetchHoldingsPageResult> {
@@ -197,49 +201,91 @@ function parseReplaceAllHoldingsResult(
   };
 }
 
+function serializeHoldingReplaceRow(row: HoldingReplaceSnapshot) {
+  const payload = {
+    ticker: row.ticker,
+    quantity: row.quantity,
+    entry_price: row.entry_price,
+    entry_currency: row.entry_currency,
+    entry_date: row.entry_date,
+    strategy: row.strategy,
+    ...(hasOwn(row, "entry_pattern") && row.entry_pattern !== undefined
+      ? { entry_pattern: row.entry_pattern }
+      : {}),
+    notes: row.notes,
+    tags: row.tags,
+    stop_override: row.stop_override,
+    target_override: row.target_override,
+  } satisfies HoldingMutationInput & {
+    ticker: string;
+    quantity: number;
+    entry_price: number;
+    tags: string[];
+  };
+  return normalizeHoldingMutationForPersistence(payload);
+}
+
+function serializeExpectedHolding(row: HoldingRecord) {
+  return normalizeHoldingMutationForPersistence({
+    ticker: row.ticker,
+    quantity: row.quantity,
+    entry_price: row.entry_price,
+    entry_currency: row.entry_currency,
+    entry_date: row.entry_date,
+    strategy: row.strategy,
+    entry_pattern: row.entry_pattern,
+    notes: row.notes,
+    tags: row.tags,
+    stop_override: row.stop_override,
+    target_override: row.target_override,
+  } satisfies HoldingMutationInput & {
+    ticker: string;
+    quantity: number;
+    entry_price: number;
+    tags: string[];
+  });
+}
+
 export async function replaceAllHoldings(
   input: HoldingReplaceSnapshot[],
+  options: ReplaceAllHoldingsOptions = {},
 ): Promise<ReplaceAllHoldingsResult> {
   const env = getSupabaseEnv();
   const url = `${env.SUPABASE_URL}/rest/v1/rpc/replace_holdings_v1`;
+  const body: {
+    p_holdings: Array<ReturnType<typeof serializeHoldingReplaceRow>>;
+    p_expected_holdings?: Array<ReturnType<typeof serializeExpectedHolding>>;
+  } = {
+    p_holdings: input.map(serializeHoldingReplaceRow),
+  };
+  if (options.expectedCurrentHoldings) {
+    body.p_expected_holdings = options.expectedCurrentHoldings.map(
+      serializeExpectedHolding,
+    );
+  }
   const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json",
       Accept: "application/json",
     }),
-    body: JSON.stringify({
-      p_holdings: input.map((row) => {
-        const payload = {
-          ticker: row.ticker,
-          quantity: row.quantity,
-          entry_price: row.entry_price,
-          entry_currency: row.entry_currency,
-          entry_date: row.entry_date,
-          strategy: row.strategy,
-          ...(hasOwn(row, "entry_pattern") && row.entry_pattern !== undefined
-            ? { entry_pattern: row.entry_pattern }
-            : {}),
-          notes: row.notes,
-          tags: row.tags,
-          stop_override: row.stop_override,
-          target_override: row.target_override,
-        } satisfies HoldingMutationInput & {
-          ticker: string;
-          quantity: number;
-          entry_price: number;
-          tags: string[];
-        };
-        return normalizeHoldingMutationForPersistence(payload);
-      }),
-    }),
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
   if (!response.ok) {
+    const parsedError = await parseErrorPayload(response);
+    const isSnapshotConflict =
+      parsedError.code === "40001" ||
+      parsedError.details === "holdings_snapshot_conflict";
     throw new SupabaseApiError(
-      `Failed to replace holdings: ${await parseError(response)}`,
-      response.status,
+      `Failed to replace holdings: ${parsedError.message}`,
+      isSnapshotConflict ? 409 : response.status,
+      {
+        upstreamCode: parsedError.code,
+        details: parsedError.details,
+        hint: parsedError.hint,
+      },
     );
   }
 

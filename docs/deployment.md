@@ -193,6 +193,28 @@ The scheduler reads `${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}`. Keep that
 
 NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 사용자의 LaunchAgents 경로는 코드만으로 확정하지 않습니다. `scripts/launchd/`와 로컬 환경을 함께 확인해야 합니다.
 
+## Local Toss Holdings Auto Sync
+
+The local daily Toss holdings sync runs at `08:05 Asia/Seoul` through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist`.
+
+Configure `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root `.env`. Docker Compose reads that file when creating the web container, and `scripts/toss_daily_auto_sync.sh` uses the same root `.env` by default. After changing either value, recreate the web container with `docker compose up -d --build web` before relying on the launchd runner. `TOSS_SYNC_ENV_FILE` is only an override for isolated smoke tests; do not use a separate scheduler-only env file for the production Toss auto-sync token because the route and runner must share the same value.
+
+Manual smoke:
+
+```bash
+scripts/toss_daily_auto_sync.sh
+```
+
+`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the `08:05` contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and `error` exit non-zero and do not write holdings. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
+
+Full local QA, including authenticated holdings access and a valid scheduled job token path:
+
+```bash
+just qa-toss-sync
+```
+
+`just qa-toss-sync` runs `scripts/qa_toss_sync_local.sh`. It refuses to start unless `SUPABASE_URL` is local (`127.0.0.1`, `localhost`, `[::1]`, or `host.docker.internal`) unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_SUPABASE=1` is explicitly set; it also refuses non-loopback `TOSS_SYNC_QA_BASE_URL` unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_BASE_URL=1` is set. For Dockerized web, loopback Supabase URLs are translated to `host.docker.internal` so the container can reach the host-published local Supabase API. The script rebuilds the web container with `TOSS_SYNC_SOURCE=fixture`, `TOSS_SYNC_QA_FIXTURE_ENABLED=1`, and `TOSS_SYNC_AUTO_APPLY_ENABLED=1`; logs in with the local admin credentials from `.env`; exports the current holdings YAML; seeds a two-row QA holdings set; requires the scheduled sync runner to return `status=applied`; verifies `005930` and `AAPL.NAS` quantities/prices; restores the original holdings YAML; removes local auth/cookie temp files; and recreates the web container with fixture mode unset on exit. This is the preferred QA path when browser/API tests must cover authenticated UI entry and valid-token auto-apply without touching live Toss or remote holdings data.
+
 ## Rollback
 
 | Surface | Rollback Action | Notes |

@@ -623,21 +623,42 @@ describe("replaceAllHoldings", () => {
       ),
     );
 
-    const result = await replaceAllHoldings([
+    const result = await replaceAllHoldings(
+      [
+        {
+          ticker: "TSLA.NAS",
+          quantity: 1,
+          entry_price: 250.5,
+          entry_currency: "USD",
+          entry_date: "2026-03-28",
+          strategy: "swing",
+          entry_pattern: "swing_high_breakout",
+          notes: "leader",
+          tags: ["us"],
+          stop_override: 220,
+          target_override: 300,
+        },
+      ],
       {
-        ticker: "TSLA.NAS",
-        quantity: 1,
-        entry_price: 250.5,
-        entry_currency: "USD",
-        entry_date: "2026-03-28",
-        strategy: "swing",
-        entry_pattern: "swing_high_breakout",
-        notes: "leader",
-        tags: ["us"],
-        stop_override: 220,
-        target_override: 300,
+        expectedCurrentHoldings: [
+          {
+            ticker: "AAPL.NAS",
+            quantity: 2,
+            entry_price: 180,
+            entry_currency: "USD",
+            entry_date: "2026-03-01",
+            strategy: "swing",
+            entry_pattern: "trend_pullback_bounce",
+            notes: "preserve",
+            tags: ["watch"],
+            stop_override: 160,
+            target_override: 220,
+            created_at: "2026-02-01T00:00:00Z",
+            updated_at: "2026-03-01T00:00:00Z",
+          },
+        ],
       },
-    ]);
+    );
 
     expect(result).toEqual({
       insertedCount: 1,
@@ -667,8 +688,51 @@ describe("replaceAllHoldings", () => {
             target_override: 300,
           },
         ],
+        p_expected_holdings: [
+          {
+            ticker: "AAPL.NAS",
+            quantity: 2,
+            entry_price: 180,
+            entry_currency: "USD",
+            entry_date: "2026-03-01",
+            strategy: "swing",
+            entry_pattern: "trend_pullback_bounce",
+            notes: "preserve",
+            tags: ["watch"],
+            stop_override: 160,
+            target_override: 220,
+          },
+        ],
       }),
     );
+  });
+
+  it("omits the compare-and-swap snapshot when replaceAllHoldings has no expected holdings", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            inserted_count: 0,
+            updated_count: 0,
+            deleted_count: 0,
+            unchanged_count: 0,
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await replaceAllHoldings([]);
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const body =
+      typeof requestInit?.body === "string"
+        ? (JSON.parse(requestInit.body) as Record<string, unknown>)
+        : null;
+    expect(body).toEqual({ p_holdings: [] });
   });
 
   it("replaceAllHoldings omits undefined entry pattern but keeps explicit null", async () => {
@@ -727,6 +791,32 @@ describe("replaceAllHoldings", () => {
         : null;
     expect(body?.p_holdings[0]).not.toHaveProperty("entry_pattern");
     expect(body?.p_holdings[1]).toHaveProperty("entry_pattern", null);
+  });
+
+  it("maps replace_holdings_v1 snapshot conflicts to SupabaseApiError(409)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "40001",
+          details: "holdings_snapshot_conflict",
+          message: "holdings snapshot changed before replace",
+        }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(
+      replaceAllHoldings([], { expectedCurrentHoldings: [] }),
+    ).rejects.toMatchObject({
+      status: 409,
+      upstreamCode: "40001",
+      details: "holdings_snapshot_conflict",
+      message:
+        "Failed to replace holdings: holdings snapshot changed before replace",
+    } satisfies Partial<SupabaseApiError>);
   });
 });
 
