@@ -10,6 +10,19 @@ DEFAULT_HOLDINGS_RESPONSE = (
     '{"ticker":"AAPL.NAS","quantity":1,"entry_price":190}],"nextCursor":null}'
 )
 DEFAULT_RUNNER_STDOUT = "http=200 status=applied incoming=2 create=0 update=2 delete=0 unchanged=0 blocked=0"
+LOCAL_QA_ENV = {
+    "SUPABASE_URL": "http://127.0.0.1:54321",
+    "SUPABASE_SECRET_KEY": "secret",
+    "SAB_BASIC_AUTH_USER": "admin",
+    "SAB_BASIC_AUTH_PASS": "password",
+    "SAB_SESSION_SECRET": "abcdefghijklmnopqrstuvwxyz123456",
+    "TOSS_SYNC_JOB_TOKEN": "qa-token",
+}
+
+
+def _env_file_text(**overrides: str) -> str:
+    values = {**LOCAL_QA_ENV, **overrides}
+    return "".join(f"{key}={value}\n" for key, value in values.items())
 
 
 def _write_executable(path: Path, text: str) -> None:
@@ -89,14 +102,7 @@ def test_toss_sync_qa_local_refuses_non_loopback_supabase(
 ) -> None:
     result = _run_qa_script(
         tmp_path,
-        env_file_text=(
-            "SUPABASE_URL=https://example.supabase.co\n"
-            "SUPABASE_SECRET_KEY=secret\n"
-            "SAB_BASIC_AUTH_USER=admin\n"
-            "SAB_BASIC_AUTH_PASS=password\n"
-            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
-            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
-        ),
+        env_file_text=_env_file_text(SUPABASE_URL="https://example.supabase.co"),
     )
 
     assert result.returncode != 0
@@ -109,15 +115,7 @@ def test_toss_sync_qa_local_starts_web_with_fixture_source_and_runs_valid_token_
 ) -> None:
     result = _run_qa_script(
         tmp_path,
-        env_file_text=(
-            "SUPABASE_URL=http://127.0.0.1:54321\n"
-            "SUPABASE_SECRET_KEY=secret\n"
-            "SAB_BASIC_AUTH_USER=admin\n"
-            "SAB_BASIC_AUTH_PASS=password\n"
-            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
-            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
-            "WEB_HOST_PORT=55444\n"
-        ),
+        env_file_text=_env_file_text(WEB_HOST_PORT="55444"),
     )
 
     assert result.returncode == 0, result.stderr
@@ -144,14 +142,7 @@ def test_toss_sync_qa_local_refuses_non_loopback_base_url(
 ) -> None:
     result = _run_qa_script(
         tmp_path,
-        env_file_text=(
-            "SUPABASE_URL=http://127.0.0.1:54321\n"
-            "SUPABASE_SECRET_KEY=secret\n"
-            "SAB_BASIC_AUTH_USER=admin\n"
-            "SAB_BASIC_AUTH_PASS=password\n"
-            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
-            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
-        ),
+        env_file_text=_env_file_text(),
         extra_env={"TOSS_SYNC_QA_BASE_URL": "https://example.com"},
     )
 
@@ -165,14 +156,7 @@ def test_toss_sync_qa_local_requires_the_seeded_diff_to_apply(
 ) -> None:
     result = _run_qa_script(
         tmp_path,
-        env_file_text=(
-            "SUPABASE_URL=http://127.0.0.1:54321\n"
-            "SUPABASE_SECRET_KEY=secret\n"
-            "SAB_BASIC_AUTH_USER=admin\n"
-            "SAB_BASIC_AUTH_PASS=password\n"
-            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
-            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
-        ),
+        env_file_text=_env_file_text(),
         runner_stdout=(
             "http=200 status=unchanged incoming=2 create=0 update=0 "
             "delete=0 unchanged=2 blocked=0"
@@ -188,14 +172,7 @@ def test_toss_sync_qa_local_verifies_expected_fixture_values(
 ) -> None:
     result = _run_qa_script(
         tmp_path,
-        env_file_text=(
-            "SUPABASE_URL=http://127.0.0.1:54321\n"
-            "SUPABASE_SECRET_KEY=secret\n"
-            "SAB_BASIC_AUTH_USER=admin\n"
-            "SAB_BASIC_AUTH_PASS=password\n"
-            "SAB_SESSION_SECRET=abcdefghijklmnopqrstuvwxyz123456\n"
-            "TOSS_SYNC_JOB_TOKEN=qa-token\n"
-        ),
+        env_file_text=_env_file_text(),
         holdings_response=(
             '{"items":[{"ticker":"005930","quantity":1,"entry_price":69000},'
             '{"ticker":"AAPL.NAS","quantity":1,"entry_price":185}],'

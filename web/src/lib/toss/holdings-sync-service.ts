@@ -92,6 +92,13 @@ export class TossHoldingsFixtureError extends Error {
   }
 }
 
+const FIXTURE_SUPABASE_HOSTS = new Set([
+  "127.0.0.1",
+  "localhost",
+  "::1",
+  "host.docker.internal",
+]);
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -174,12 +181,7 @@ function isLocalFixtureSupabaseUrl(value: string): boolean {
     if (url.protocol !== "http:") {
       return false;
     }
-    return (
-      url.hostname === "127.0.0.1" ||
-      url.hostname === "localhost" ||
-      url.hostname === "::1" ||
-      url.hostname === "host.docker.internal"
-    );
+    return FIXTURE_SUPABASE_HOSTS.has(url.hostname);
   } catch {
     return false;
   }
