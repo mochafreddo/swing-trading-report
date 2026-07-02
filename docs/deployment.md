@@ -195,7 +195,14 @@ NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 �
 
 ## Local Toss Holdings Auto Sync
 
-The local daily Toss holdings sync runs at `08:05 Asia/Seoul` through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist`.
+The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist` shortly before scheduled signal judgment and AI feedback paths:
+
+| Purpose | KST launchd time | Why |
+| --- | --- | --- |
+| Pre-scan holdings refresh | Tue-Sat `06:55` | Runs before the scheduled `scan.yml` candidate at `07:00 KST`. |
+| Pre-sell holdings refresh | Tue-Sat `07:15` | Runs before the scheduled `sell.yml` candidate at `07:20 KST`. |
+| Pre-US AI Brief primary refresh | Mon-Fri `21:05` and `22:05` | Covers EDT/EST local-primary candidates before `08:10 ET`. |
+| Pre-US AI Brief retry refresh | Mon-Fri `21:40` and `22:40` | Covers EDT/EST local-retry candidates before `08:45 ET`. |
 
 Configure `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root `.env`. Docker Compose reads that file when creating the web container, and `scripts/toss_daily_auto_sync.sh` uses the same root `.env` by default. After changing either value, recreate the web container with `docker compose up -d --build web` before relying on the launchd runner. `TOSS_SYNC_ENV_FILE` is only an override for isolated smoke tests; do not use a separate scheduler-only env file for the production Toss auto-sync token because the route and runner must share the same value.
 
@@ -205,7 +212,7 @@ Manual smoke:
 scripts/toss_daily_auto_sync.sh
 ```
 
-`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the `08:05` contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and `error` exit non-zero and do not write holdings. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
+`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the pre-signal sync contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and `error` exit non-zero and do not write holdings. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
 
 Full local QA, including authenticated holdings access and a valid scheduled job token path:
 

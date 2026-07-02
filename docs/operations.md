@@ -140,10 +140,12 @@ NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자,
 
 ## Local Toss Daily Auto Sync
 
-The Toss daily auto-sync launchd job calls the local web route
-`/api/holdings/toss-sync/scheduled` at `08:05 Asia/Seoul`. Keep the web
-container on the same root `.env` values as the runner for `TOSS_SYNC_JOB_TOKEN`
-and `TOSS_SYNC_AUTO_APPLY_ENABLED`.
+The Toss auto-sync launchd job calls the local web route
+`/api/holdings/toss-sync/scheduled` before scheduled scan/sell judgment and
+US AI Brief feedback paths. Current KST launch times are Tue-Sat `06:55`,
+Tue-Sat `07:15`, and Mon-Fri `21:05`, `21:40`, `22:05`, `22:40`.
+Keep the web container on the same root `.env` values as the runner for
+`TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED`.
 
 Operational checks:
 

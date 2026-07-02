@@ -5,20 +5,28 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
-_ISOLATED_REPORT_UPLOAD_ENV_VARS = (
+_ISOLATED_AMBIENT_ENV_VARS = (
     "GITHUB_ACTIONS",
     "SAB_SUPPRESS_REPORT_UPLOADS",
     "SAB_UPLOAD_REPORTS",
     "SUPABASE_URL",
     "SUPABASE_SECRET_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
+    "TOSS_SYNC_AUTO_APPLY_ENABLED",
+    "TOSS_SYNC_CURRENT_TZ_FOR_TEST",
+    "TOSS_SYNC_ENV_FILE",
+    "TOSS_SYNC_EXPECTED_TZ",
+    "TOSS_SYNC_JOB_TOKEN",
+    "TOSS_SYNC_PYTHON_BIN",
+    "TOSS_SYNC_SOURCE",
+    "TOSS_SYNC_QA_FIXTURE_ENABLED",
 )
 
 
 @pytest.fixture(autouse=True)
-def isolate_report_upload_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep tests deterministic regardless of ambient CI/upload environment."""
-    for name in _ISOLATED_REPORT_UPLOAD_ENV_VARS:
+def isolate_ambient_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests deterministic regardless of ambient CI/runtime environment."""
+    for name in _ISOLATED_AMBIENT_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
 
 

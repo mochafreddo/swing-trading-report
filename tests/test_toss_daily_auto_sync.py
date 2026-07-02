@@ -477,7 +477,7 @@ def test_toss_daily_auto_sync_runner_fail_closed_on_http_error_status(
     assert "http=500 status=applied" in result.stdout
 
 
-def test_toss_daily_auto_sync_launchd_plist_runs_at_0805() -> None:
+def test_toss_daily_auto_sync_launchd_plist_runs_before_signal_jobs() -> None:
     plist_path = (
         REPO_ROOT / "scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist"
     )
@@ -485,5 +485,22 @@ def test_toss_daily_auto_sync_launchd_plist_runs_at_0805() -> None:
 
     assert payload["Label"] == "com.mochafreddo.sab.toss-daily-auto-sync"
     assert payload["ProgramArguments"][0].endswith("scripts/toss_daily_auto_sync.sh")
-    interval = payload["StartCalendarInterval"]
-    assert interval == {"Hour": 8, "Minute": 5}
+    intervals = payload["StartCalendarInterval"]
+    assert isinstance(intervals, list)
+    assert sorted(
+        intervals, key=lambda item: (item["Weekday"], item["Hour"], item["Minute"])
+    ) == sorted(
+        [
+            *(
+                {"Hour": hour, "Minute": minute, "Weekday": weekday}
+                for hour, minute in ((6, 55), (7, 15))
+                for weekday in range(2, 7)
+            ),
+            *(
+                {"Hour": hour, "Minute": minute, "Weekday": weekday}
+                for hour, minute in ((21, 5), (21, 40), (22, 5), (22, 40))
+                for weekday in range(1, 6)
+            ),
+        ],
+        key=lambda item: (item["Weekday"], item["Hour"], item["Minute"]),
+    )
