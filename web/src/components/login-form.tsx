@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { loginAction } from "@/app/actions/auth";
@@ -40,15 +40,20 @@ function getLoginErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Login failed";
 
   if (message === "Unauthorized") {
-    return "Username or password did not match. Check the local web credentials and try again.";
+    return "사용자 이름 또는 비밀번호가 맞지 않습니다. 로컬 웹 자격 증명을 확인한 뒤 다시 시도하세요.";
   }
 
   return message;
 }
 
+const REQUIRED_CREDENTIALS_MESSAGE =
+  "사용자 이름과 비밀번호를 입력한 뒤 다시 시도하세요.";
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const usernameInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
   const redirectPath = useMemo(
     () => sanitizeNextPath(searchParams.get("next")),
     [searchParams],
@@ -66,11 +71,22 @@ export function LoginForm() {
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+
+    if (!username.trim() || !password) {
+      setError(REQUIRED_CREDENTIALS_MESSAGE);
+      if (!username.trim()) {
+        usernameInputRef.current?.focus();
+      } else {
+        passwordInputRef.current?.focus();
+      }
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const result = await loginAction({
-        username,
+        username: username.trim(),
         password,
       });
       if (!result.ok) {
@@ -88,7 +104,11 @@ export function LoginForm() {
 
   return (
     <section className={styles.wrapper}>
-      <form className={styles.form} onSubmit={(event) => void onSubmit(event)}>
+      <form
+        className={styles.form}
+        noValidate
+        onSubmit={(event) => void onSubmit(event)}
+      >
         <div className={styles.destination}>
           <span>After sign-in</span>
           <strong>{redirectLabel}</strong>
@@ -97,6 +117,7 @@ export function LoginForm() {
         <label className={styles.field}>
           <span className={styles.label}>Username</span>
           <input
+            ref={usernameInputRef}
             className={styles.input}
             autoComplete="username"
             name="username"
@@ -110,6 +131,7 @@ export function LoginForm() {
         <label className={styles.field}>
           <span className={styles.label}>Password</span>
           <input
+            ref={passwordInputRef}
             className={styles.input}
             autoComplete="current-password"
             name="password"
@@ -126,7 +148,7 @@ export function LoginForm() {
 
         {error ? (
           <div className={styles.error} role="alert">
-            <strong>Sign-in failed</strong>
+            <strong>로그인 실패</strong>
             <span>{error}</span>
           </div>
         ) : null}
@@ -153,7 +175,7 @@ export function LoginForm() {
               Signing in…
             </>
           ) : (
-            "Sign In"
+            "Sign in"
           )}
         </button>
       </form>
