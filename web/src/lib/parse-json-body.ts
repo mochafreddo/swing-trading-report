@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 type ParsedJsonBody =
-  | { ok: true; payload: unknown }
-  | { ok: false; response: NextResponse };
+  { ok: true; payload: unknown } | { ok: false; response: NextResponse };
 
 export async function parseJsonBody(
   request: NextRequest,
