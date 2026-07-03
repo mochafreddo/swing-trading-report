@@ -4,6 +4,30 @@
 
 ## Deferred
 
+### Scheduled Sell AI Brief delivery
+
+**What:** Add marker-aware scheduled delivery for Sell AI Brief after the manual V1 is stable.
+
+**Why:** Sell AI Brief Telegram delivery needs runtime_state/upload/notification markers before scheduled alerts are safe; the current scheduled sell workflow intentionally fails early until marker-aware local upload exists.
+
+**Context:** The 2026-07-02 Sell AI Brief engineering review scoped V1 to manual `sab sell-ai-brief --sell-report ...` plus Telegram judgment. A production scheduled path should either repair `.github/workflows/sell.yml` with idempotent upload/notification markers or route Sell AI Brief through the local marker-aware scheduler pattern used by scheduled AI Brief. Duplicate sell alerts are worse than deferring scheduled delivery.
+
+**Effort:** L
+**Priority:** P2
+**Depends on:** Manual Sell AI Brief V1 artifact, Telegram formatter, and upload/report_index support.
+
+### HOLD/watch explanations for Sell AI Brief V2
+
+**What:** Decide whether `HOLD` rows should enter a V2 Sell AI Brief `hold_watch` or drilldown-only role.
+
+**Why:** V1 keeps Telegram focused on `SELL`, `SELL_PARTIAL`, and `REVIEW`; later, operators may still want occasional explanations for why quiet holdings stayed quiet.
+
+**Context:** The 2026-07-02 design deliberately excluded `HOLD` from model-reviewed judgments to keep the first Telegram useful and short. Revisit after account-readiness, stop/target override context, and source-backed sell judgments are stable enough to avoid turning every holding into noisy model commentary.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** Manual Sell AI Brief V1 adoption and account/readiness context.
+
 - 2026-06-22: Design and implement a historical swing backtest runner for
   profitability and parameter-sensitivity research, covering data source,
   sample period, universe, benchmark/regime alignment, survivorship assumptions,

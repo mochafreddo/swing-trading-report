@@ -502,6 +502,54 @@ def test_upload_report_artifact_indexes_ai_brief_skip_artifact(
     assert b'"tickers": []' in index_payload
 
 
+def test_upload_report_artifact_indexes_sell_ai_brief_tickers(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-05-05.sell-ai-brief.json"
+    report_path.write_text(
+        (
+            '{"schema":"sab.sell_ai_brief.v1","type":"sell-ai-brief",'
+            '"tickers":["AAPL.NAS"],'
+            '"actionable_tickers":["AAPL.NAS"],'
+            '"judgments":[{"ticker":"AAPL.NAS"}],'
+            '"vetoed_candidates":[{"ticker":"MSFT.NAS"}],'
+            '"cap_excluded_candidates":[{"ticker":"NVDA.NAS"}],'
+            '"excluded_hold_candidates":[{"ticker":"HOLD.NAS"}],'
+            '"unsupported_action_candidates":[{"ticker":"BAD.NAS"}],'
+            '"summary":{"judgment_count":1}}'
+        ),
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    key = upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="sell-ai-brief",
+        report_date=date(2026, 5, 5),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert key == "2026/05/2026-05-05.sell-ai-brief.json"
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert b'"report_type": "sell-ai-brief"' in index_payload
+    assert b'"summary": {"judgment_count": 1}' in index_payload
+    assert (
+        b'"tickers": ["AAPL.NAS", "MSFT.NAS", "NVDA.NAS", "HOLD.NAS", "BAD.NAS"]'
+        in index_payload
+    )
+
+
 def test_upload_report_artifact_raises_index_error_when_upsert_fails(
     tmp_path: Path,
 ) -> None:

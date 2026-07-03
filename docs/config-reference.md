@@ -102,6 +102,7 @@
 | `AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS` | AI Brief article reader timeout | 선택. 양의 finite 숫자만 허용 |
 | `AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS` | AI Brief article excerpt cap | 선택. 기본 1200, 전체 본문은 저장하지 않음 |
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | scheduled/source provider chain | market chain > global chain > single-provider fallback. 일반 `sab ai-brief`는 명시 `--source-provider`/source path/API URL이 없을 때만 env chain 사용 |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN` | Sell AI Brief source provider chain | 명시 `--source-provider`/source path/API URL이 없을 때 사용. `MIXED`가 없으면 KR 체인 뒤 US 체인을 결합하고, 없으면 global sell chain > `AI_BRIEF_SOURCE_PROVIDER_CHAIN` 순서로 fallback |
 | `AI_BRIEF_SOURCE_PROVIDER_KR`, `AI_BRIEF_SOURCE_PROVIDER_US`, `AI_BRIEF_SOURCE_PROVIDER` | scheduled source provider | market-specific 값 우선 |
 | `FINNHUB_API_KEY` | `finnhub` source provider | US-only |
 | `POLYGON_API_KEY` | `polygon-news` source provider | US-only |

@@ -10,6 +10,7 @@ REPORT_RUN_TYPES: Final[tuple[str, ...]] = (
     "entry",
     "ai-brief",
     "ai-brief-skip",
+    "sell-ai-brief",
 )
 REPORT_RUN_TYPE_PATTERN: Final[str] = (
     "(?:" + "|".join(re.escape(run_type) for run_type in REPORT_RUN_TYPES) + ")"

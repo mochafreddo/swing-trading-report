@@ -68,7 +68,7 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`sell-ai-brief`/`ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py`(엔트리), `sab/scan_screener.py`, `sab/scan_evaluation.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py`(엔트리), `sab/sell_evaluation.py`, `sab/sell_runtime.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, 실행가능/차단·검토/watch/excluded 후보 분류, source provider chain context, opt-in article reader 검증, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_candidates.py`, `sab/ai_brief_source_chain.py`, `sab/ai_brief_sources.py`, `sab/ai_brief_providers.py`, `sab/article_reader.py` |
@@ -110,7 +110,7 @@ flowchart LR
    - hybrid sell evaluator는 `entry_pattern`별 time-stop override를 전역 hybrid time-stop 위에 적용합니다. 기본 설정은 `swing_high_breakout`을 전역 30+15 세션보다 짧은 15+5 세션으로 평가합니다.
 2. KIS/PyKRX로 캔들 데이터를 수집하고 매도/점검 규칙을 평가합니다.
 3. `reports/YYYY-MM-DD(.n).sell.json`을 생성하고, 필요 시 Supabase에 업로드합니다. Sell artifact는 `stop_price`/`target_price`가 체결 보장이나 계좌 손실 한도가 아닌 의사결정 가이드임을 top-level `risk_disclosure`에 기록합니다.
-4. manual `workflow_dispatch` `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다. scheduled `sell.yml`은 marker-aware fallback 전까지 preflight에서 fail closed로 중단하므로 holdings export, sell 생성, 업로드 단계까지 진행하지 않습니다.
+4. manual `workflow_dispatch` `sell.yml` 실행 시에는 사전 단계에서 Supabase `holdings`를 읽어 `holdings.generated.yaml`을 만들고 `--holdings` 인자로 주입합니다. 수동 workflow는 sell 생성 뒤 Sell AI Brief를 생성/평가/업로드하고, 입력 `send_sell_ai_brief_notifications=true`일 때 Telegram HTML 알림을 전송합니다. scheduled `sell.yml`은 marker-aware fallback 전까지 preflight에서 fail closed로 중단하므로 holdings export, sell 생성, 업로드 단계까지 진행하지 않습니다.
    - scheduled export field set은 `ticker`, `quantity`, `entry_price`, `entry_currency`, `entry_date`, `strategy`, `entry_pattern`, `notes`, `tags`, `stop_override`, `target_override`입니다. `entry_pattern` 컬럼이 PostgREST schema cache에 노출되지 않으면 export는 lossy snapshot을 만들지 않고 실패합니다.
 
 ### 4.3 `entry` 플로우
@@ -162,6 +162,18 @@ flowchart LR
 13. Scheduled AI Brief primary는 macOS `launchd`가 host wrapper를 실행하고, wrapper가 role window guard 통과 후 one-shot Docker scheduler를 실행하는 구조입니다. Runner는 `runtime_state`에 `attempt`, `lock`, `artifact`, `skip-artifact`, `entry-failure-artifact`, `notification:claim`, `notification:sent`, `success`, `late-alert:*` marker를 기록해 같은 시장/session date 리포트와 알림을 dedupe합니다. `attempt`는 pre-lock 관측 marker이고, artifact/skip/entry-failure/notification/success/late-alert sent marker는 main lock이 필요한 경로에서 소유권을 재확인한 뒤에만 기록합니다. Pipeline runner가 runtime guard에서 중단되면 정상 AI Brief 판단과 섞지 않고 `*.ai-brief-skip.json` artifact(`skip_state=RUNTIME_GUARD_SKIPPED`)를 Storage/`report_index`에 기록합니다. Scheduled AI Brief 품질 게이트가 실패하면 AI Brief Storage upload, artifact marker, success marker, notification reconciliation을 수행하지 않고 pipeline failure로 기록됩니다. OpenAI provider normalization은 eligible ticker set 밖의 잘못된 veto row를 WARN `source_issues[]`로 격리하며, preselected 후보가 있는데 유효한 recommendation/veto가 모두 없으면 recommendation 품질 게이트는 계속 실패합니다. launchd wrapper는 `pipeline_failed`처럼 인식 가능한 구조화 scheduler failure status에는 `scheduler_container_failed`를 보내지 않고, 이 alert를 app status가 없는 host/container 실행 실패에만 남깁니다. `scheduler_stdout_capture_failed`는 wrapper의 stdout capture setup 또는 tee 실패에만 사용해 wrapper 진단과 scheduler 실행 status를 분리합니다. Scheduled entry 실패 진단은 `DefaultScheduledPipeline`의 typed entry-step failure만 late-alert marker reason `scheduled_entry_failed`로 분리하고, 안전한 기본 `reports/...*.entry.json`은 main lock 소유권과 중복 marker를 확인한 뒤 `entry` artifact로 Storage/`report_index`에 업로드합니다. 업로드 후 marker/late-alert 전에도 main lock 소유권을 다시 확인해 오래된 runner가 성공한 fallback 뒤에 실패 상태를 게시하지 못하게 하고, lock을 잃으면 이미 업로드된 객체의 storage key만 반환하며 canonical runtime marker는 쓰지 않습니다. 소유권이 유지될 때만 `entryReportStorageKey`를 late-alert/state에 남깁니다. DefaultScheduledPipeline이 unsafe path를 만든 경우에는 `unsafe` sentinel을 남기며 업로드하지 않습니다. 외부/원시 wrapper의 문자열 메시지는 scheduled entry 실패로 분류하지 않고, 로그에서만 맥락을 유지하되 unsafe raw path를 `entry_report_path=unsafe`로 축약합니다.
 14. GitHub Actions schedule은 US canary 기간에 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `resolve_context` job이 dependency-free boundary로 checkout 후 stdlib-only `sab/scheduler/schedule_policy.py`를 import해 cron mapping과 role window 정책으로 market/session_date/schedule_role/runner_role을 산출하고, scheduled job concurrency는 `market + session_date + schedule_role` 기준으로 묶되 cancel은 하지 않습니다. `github-fallback`은 같은 runtime_state lock/artifact marker를 사용하므로 로컬 primary와 동시 실행되어도 새 report 생성은 한 runner만 진행합니다. GitHub queue delay로 `github-fallback`이 명목 08:55 <= t < 09:25 ET window 이후 시작되면 09:29 ET 전까지만 bounded grace로 role guard를 통과시키며, PRE_OPEN/runtime_state guard는 그대로 적용합니다.
 
+### 4.3.2 `sell-ai-brief` 로컬/manual workflow 플로우
+
+1. `sab sell-ai-brief --sell-report <path>`가 sell 리포트의 `evaluated[]`를 읽습니다.
+2. `sab/sell_ai_brief_candidates.py`가 원본 action을 기준으로 후보를 분류합니다. `SELL`, `SELL_PARTIAL`, `REVIEW`만 모델 판단 대상이고, `HOLD`는 `excluded_hold_candidates[]`에만 보존합니다. unsupported action과 ticker 누락 row는 `unsupported_action_candidates[]` 및 `system_issues[]`로 격리합니다.
+3. 모델 입력은 sell report 순서를 보존해 최대 5개로 제한하며, 초과 행은 `cap_excluded_candidates[]`에 남깁니다. Actionable 후보가 없으면 provider/model 호출 없이 `NO_ACTION` artifact를 씁니다.
+4. source provider와 optional article reader는 AI Brief와 같은 provider chain, source row 검증, request-local source catalog, article metadata 계약을 재사용합니다. `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_<MARKET>`과 `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN`이 있으면 sell 전용 chain으로 우선 해석하고, 없으면 AI Brief 전역 source chain으로 fallback합니다. `market="MIXED"`에서는 `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED`가 우선이고, 없으면 KR 체인 뒤 US 체인을 결합해 최신 source coverage를 유지합니다.
+5. `fake` provider는 외부 모델/API를 호출하지 않는 deterministic contract exerciser입니다. `openai` provider는 Responses API structured output을 사용하지만 ticker 추가, `HOLD` 승격, 원본 `sell_action` 변경, 자동 주문/체결 언어를 허용하지 않습니다.
+6. `reports/YYYY-MM-DD(.n).sell-ai-brief.json`은 `brief_state`, `brief_reason`, `actionable_tickers`, `judgments[]`, `vetoed_candidates[]`, `excluded_hold_candidates[]`, `unsupported_action_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `model_trace`를 포함합니다.
+7. `scripts/eval_sell_ai_brief.py`는 source sell report와 artifact를 함께 읽어 HOLD 제외, actionable/cap/unsupported 후보 정합성, summary count, 원본 action 보존, source-backed ratio, 자동 주문/체결 문구를 평가합니다.
+8. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab sell-ai-brief --upload`일 때 Supabase Storage 업로드 + `report_index` upsert를 수행합니다. 수동 `sell.yml` workflow는 생성 직후 업로드를 억제하고, `scripts/eval_sell_ai_brief.py` 통과 뒤 force upload합니다. Dedicated scheduled Sell AI Brief delivery는 아직 별도 V2 작업입니다.
+9. `notification_text`는 Sell AI Brief artifact를 Telegram HTML rich text로 렌더링할 수 있습니다. 수동 `sell.yml` workflow는 업로드 후 `send_sell_ai_brief_notifications=true`일 때 이 텍스트를 Telegram으로 전송합니다. 본문은 원본 `sell_action`, AI stance/confidence, 판단 이유, 체크리스트, source/시스템 이슈를 표시하지만 자동 체결이나 브로커 실행을 의미하지 않습니다.
+
 ### 4.4 웹 리포트 조회 플로우
 
 1. `/api/reports`는 `report_index`에서 목록을 조회합니다.
@@ -176,6 +188,7 @@ flowchart LR
 8. sell 상세는 `stop_price`/`target_price`를 `Stop Guide`/`Target Guide` 열로 표시해 자동 체결/계좌 손실 한도가 아니라는 의미를 유지합니다.
 9. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열, `liquidity_exit_capacity`/`liquidity_warnings` 기반 Exit Capacity 열, `downside_risk` 기반 Downside 열, `portfolio_exposure_buckets` 기반 Exposure 열을 표시해 기술적 `ENTER`, 계좌 실행 준비도, 유동성, 가이드 기준 하방 손실, 포트폴리오 집중 bucket을 분리해 보여줍니다.
 10. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
+11. Sell AI Brief artifact는 `report_index` type/filter와 ticker 검색 대상에 포함되며, 상세 화면은 generic JSON fallback으로 원본 판단 artifact를 열람할 수 있습니다. Dedicated 판단 UI는 별도 후속 작업입니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
@@ -231,11 +244,12 @@ flowchart LR
   - `YYYY-MM-DD(.n).entry.json`
   - `YYYY-MM-DD(.n).ai-brief.json`
   - `YYYY-MM-DD(.n).ai-brief-skip.json`
+  - `YYYY-MM-DD(.n).sell-ai-brief.json`
 
 ### 5.2 Supabase Storage
 
 - 버킷: `reports` (private, JSON MIME 제한)
-- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry|ai-brief|ai-brief-skip}.json`
+- 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json`
 
 ### 5.3 Supabase Postgres
 
@@ -243,13 +257,14 @@ flowchart LR
   - 앱과 동일한 ticker 계약을 DB 제약으로 강제합니다(`KR 6자리` 또는 명시 거래소 suffix `.NAS/.NYS/.AMS`).
   - 모호한 `.US` suffix는 DB에서도 허용하지 않으며, 기존 row는 migration 시 수동 정리 대상으로 남깁니다.
   - `entry_pattern`은 buy/entry report의 `pattern`을 active holding에 보존하는 nullable marker입니다. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`이고 inactive row(`quantity=0`)는 `null`만 허용합니다. `replace_holdings_v1`은 omitted active key preserve, explicit null clear, entry identity/strategy change guard를 적용합니다.
-- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry|ai-brief|ai-brief-skip`)
+- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief`)
   - `summary`는 Reports 목록 요약과 `/metrics` 운영 대시보드의 단일 집계 소스입니다.
   - `buy.summary`: `candidate_count`, `system_issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`, `rs_benchmark_requested/unavailable_count`, `rs_benchmark_unavailable_ratio`, `market_regime_unavailable_count`, `market_regime_blocked_count`, `market_regime_blocked_by_market`, `market_regime_unavailable_by_market`
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
   - `entry.summary`: `entry_count`, `system_issue_count`, `missing_entry_price_count`, `missing_entry_price_ratio`, `missing_entry_price_by_reason`, `entry_price_sources`, `portfolio_blocked_by_market`, `portfolio_blocked_by_exposure`
   - `ai-brief.summary`: `entry_count`, `recommendable_count`, `executable_count`, `blocked_but_valid_count`, `watch_count`, `preselected_count`, `recommendation_count`, `excluded_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`, 선택적 article reader 카운트(`article_read_attempted_count`, `article_accessed_count`, `article_verified_count`, `article_read_issue_count`); artifact top-level에는 `brief_state`, `brief_reason`, `eligible_tickers`, `executable_tickers`, `blocked_but_valid_tickers`, `watch_tickers`, `source_provider_summary`가 함께 저장됩니다.
   - `ai-brief-skip.summary`: `skip_state`, `skip_reason`, `session_state`, `expected_state`, `trading_session`; artifact top-level에는 `skip_state`, `skip_reason`, `session_date`, `local_time`, `run_url`이 함께 저장됩니다.
+  - `sell-ai-brief.summary`: `evaluated_count`, `actionable_count`, `preselected_count`, `judgment_count`, `excluded_hold_count`, `unsupported_action_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`; artifact top-level에는 `brief_state`, `brief_reason`, `actionable_tickers`, `judgments`, `excluded_hold_candidates`, `unsupported_action_candidates`, `source_provider_summary`가 함께 저장됩니다.
 - `runtime_state`: 로그인 시도 제한 상태와 scheduled AI Brief idempotency/lock/notification marker 등 단기 런타임 상태(기본 저장소)
 - 예외: `SAB_RUNTIME_STATE_STORE=memory` 또는 테스트 환경(`NODE_ENV=test`)에서는 메모리 저장소를 사용합니다.
 - 장애 정책: `SAB_LOGIN_THROTTLE_FAIL_MODE=strict`(기본)에서는 Supabase 장애 시 즉시 실패하고, `degrade`에서만 메모리 스로틀로 폴백합니다.
@@ -337,6 +352,12 @@ flowchart LR
   - 모델 출력에 소스가 없으면 ticker별 source issue로 disclose해야 합니다.
   - 생성된 `*.ai-brief.json`은 Storage, `report_index`, 웹 Reports UI와 연동됩니다.
   - 로컬 `notification_text` builder와 `ai-brief.yml` preview 단계는 `ai-brief` artifact를 Telegram/Slack 텍스트로 렌더링합니다. Scheduled path는 runtime_state notification sent marker로 Telegram 중복을 줄이고, artifact만 있고 sent marker가 없으면 report를 재생성하지 않고 notification reconciliation을 수행합니다.
+- Sell AI Brief 파이프라인(`sell-ai-brief`)은 sell artifact의 후속 로컬 소비자입니다.
+  - 후보를 새로 발굴하지 않고 sell row를 원본 `action` 기준으로 actionable(`SELL|SELL_PARTIAL|REVIEW`), excluded HOLD, unsupported/cap-excluded로 재분류합니다.
+  - source provider chain과 optional article reader는 AI Brief와 같은 source safety boundary를 재사용하며, sell 전용 env chain이 있으면 우선 적용합니다.
+  - 모델은 판단과 이유를 설명하지만 원본 `sell_action`을 바꾸거나 `HOLD`를 판단으로 승격할 수 없습니다.
+  - 생성된 `*.sell-ai-brief.json`은 Storage, `report_index`, 웹 Reports 목록 필터와 연동됩니다.
+  - 로컬 `notification_text` builder와 수동 `sell.yml` workflow는 Sell AI Brief artifact를 Telegram HTML rich text로 렌더링합니다. Dedicated scheduled delivery는 후속 작업입니다.
 
 ## 10. 관련 문서
 

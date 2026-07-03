@@ -96,8 +96,10 @@
 | `SAB_SCHEDULER_ENV_FILE` | no | `.env.scheduler.local` | `.env.scheduler.local` | Docker scheduler | Env file path for one-shot scheduler | File is ignored by git. |
 | `OPENAI_API_KEY` | required for OpenAI brief | none | `replace-with-openai-key` | `sab ai-brief`, scheduler | OpenAI model provider API key | Secret. |
 | `OPENAI_AI_BRIEF_MODEL` | no | CLI model name | `gpt-...` | `sab ai-brief` | OpenAI primary model | NEEDS_CONFIRMATION: production default model policy. |
+| `OPENAI_SELL_AI_BRIEF_MODEL` | no | `OPENAI_AI_BRIEF_MODEL` fallback | `gpt-...` | `sab sell-ai-brief` | OpenAI Sell AI Brief model | Optional sell-specific model override. |
 | `OPENAI_AI_BRIEF_FALLBACK_MODEL` | no | none | `gpt-...` | `sab ai-brief` | OpenAI fallback model after retryable primary timeout | Must differ from primary model. |
 | `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | provider default | `60` | `sab ai-brief` | Primary model timeout | Positive finite number. Scheduled recommended value. |
+| `SELL_AI_BRIEF_MODEL_TIMEOUT_SECONDS` | no | `AI_BRIEF_MODEL_TIMEOUT_SECONDS` fallback, then provider default | `60` | `sab sell-ai-brief` | Sell AI Brief model timeout | Positive finite number. |
 | `AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS` | no | `30` | `30` | `sab ai-brief` | Fallback model timeout | Positive finite number. |
 | `AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS` | no | none | `90` | `sab ai-brief`, scheduler | Total model-attempt timeout budget | Positive finite number. Caps primary and remaining fallback timeout. Scheduled recommended value. |
 | `AI_BRIEF_SOURCE_API_URL` | required for `http-json` provider | none | `https://source.example/api` | `sab ai-brief` | External source API URL | HTTPS only; no internal real URL in docs. |
@@ -112,6 +114,10 @@
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR` | no | global chain/single-provider fallback | `naver-news` | scheduled runner | KR scheduled source provider chain | Market-specific chain wins over global chain and single-provider env. |
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | no | global chain/single-provider fallback | `finnhub,benzinga-news,polygon-news` | scheduled workflow, scheduled runner | US scheduled source provider chain | Each provider's secret must be configured when that provider appears in the chain. |
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | no | single-provider fallback | `finnhub,benzinga-news` | `sab ai-brief`, scheduled runner | Global source provider chain fallback | Used only when no explicit single provider/source path/API URL overrides it. |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR` | no | global sell chain, then AI Brief chain fallback | `naver-news` | `sab sell-ai-brief` | KR Sell AI Brief source provider chain | Used only when no explicit source provider/source path/API URL is passed. |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | no | global sell chain, then AI Brief chain fallback | `finnhub,benzinga-news` | `sab sell-ai-brief` | US Sell AI Brief source provider chain | Each provider's secret must be configured when that provider appears in the chain. |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED` | no | KR+US sell chain combination, then global sell chain | `naver-news,finnhub,benzinga-news` | `sab sell-ai-brief` | MIXED Sell AI Brief source provider chain | Optional explicit override for mixed KR/US sell reports. If unset, KR then US chains are combined with duplicates removed. |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN` | no | `AI_BRIEF_SOURCE_PROVIDER_CHAIN` fallback | `finnhub,benzinga-news` | `sab sell-ai-brief` | Global Sell AI Brief source provider chain | Sell-specific chain override. |
 | `AI_BRIEF_SOURCE_PROVIDER_KR` | no | global provider/API URL fallback | `naver-news` | scheduled workflow | KR scheduled source provider | GitHub variable. |
 | `AI_BRIEF_SOURCE_PROVIDER_US` | no | global provider/API URL fallback | `finnhub` | scheduled workflow | US scheduled source provider | Current docs identify Finnhub as default single-provider fallback. |
 | `AI_BRIEF_SOURCE_PROVIDER` | no | API URL fallback | `finnhub` | scheduled workflow | Global source provider fallback | Market-specific wins. |

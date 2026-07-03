@@ -10,6 +10,7 @@ from sab.report.notification_text import (
     build_ai_brief_telegram_report_text,
     build_scan_slack_summary_text,
     build_scan_telegram_report_text,
+    build_sell_ai_brief_telegram_report_text,
     build_sell_slack_summary_text,
     build_sell_telegram_report_text,
 )
@@ -30,6 +31,52 @@ def _minimal_ai_brief_report(**overrides: Any) -> dict[str, Any]:
         "model_name": "fake-ai-brief-v1",
         "summary": {"recommendation_count": 0},
         "recommendations": [],
+        "source_issues": [],
+        "system_issues": [],
+    }
+    report.update(overrides)
+    return report
+
+
+def _minimal_sell_ai_brief_report(**overrides: Any) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "generated_at": "2026-05-05T08:40:00+09:00",
+        "market": "US",
+        "model_provider": "fake",
+        "model_name": "fake-sell-ai-brief-v1",
+        "brief_state": "FINAL_JUDGMENT",
+        "brief_reason": "model_judgment_ready",
+        "summary": {
+            "actionable_count": 1,
+            "preselected_count": 1,
+            "judgment_count": 1,
+            "excluded_hold_count": 0,
+            "unsupported_action_count": 0,
+            "vetoed_count": 0,
+            "cap_excluded_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        "judgments": [
+            {
+                "ticker": "AAPL.NAS",
+                "name": "Apple",
+                "sell_action": "SELL",
+                "ai_stance": "AGREE",
+                "confidence": "LOW",
+                "deterministic_reasons": ["stop loss breached"],
+                "rationale": ["기계적 매도 사유와 최근 리스크가 같은 방향입니다."],
+                "checklist": ["수량과 유동성을 수동 확인"],
+                "sources": [
+                    {
+                        "title": "Apple risk update",
+                        "url": "https://example.test/aapl",
+                        "published_at": "2026-05-05T07:00:00+09:00",
+                    }
+                ],
+            }
+        ],
+        "vetoed_candidates": [],
         "source_issues": [],
         "system_issues": [],
     }
@@ -286,6 +333,148 @@ def test_build_sell_telegram_report_text_handles_hold_only() -> None:
 
     assert "대상: 0건 (매도 0, 부분매도 0, 점검 0, 보유 2 제외)" in text
     assert "매도/점검 대상 없음" in text
+
+
+def test_build_sell_ai_brief_telegram_report_text_includes_judgment() -> None:
+    report = _minimal_sell_ai_brief_report(
+        summary={
+            "actionable_count": 2,
+            "preselected_count": 2,
+            "judgment_count": 2,
+            "excluded_hold_count": 1,
+            "unsupported_action_count": 1,
+            "vetoed_count": 0,
+            "cap_excluded_count": 0,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+        judgments=[
+            _minimal_sell_ai_brief_report()["judgments"][0],
+            {
+                "ticker": "MSFT.NAS",
+                "sell_action": "REVIEW",
+                "ai_stance": "CAUTION",
+                "confidence": "LOW",
+                "deterministic_reasons": ["market data missing"],
+                "rationale": ["최신 기사 근거가 약해 수동 점검만 유지합니다."],
+                "checklist": ["데이터 공백과 가격을 확인"],
+                "sources": [],
+            },
+        ],
+        source_issues=[
+            {
+                "ticker": "MSFT.NAS",
+                "code": "fake_provider_no_external_sources",
+                "severity": "WARN",
+                "message": "fake provider는 외부 소스를 수집하지 않음",
+            }
+        ],
+    )
+
+    text = build_sell_ai_brief_telegram_report_text(
+        report=report,
+        run_url="https://github.com/example/repo/actions/runs/456",
+        storage_key="2026/05/2026-05-05.sell-ai-brief.json",
+    )
+
+    assert text.startswith("<b>SAB Sell AI Brief</b>")
+    assert "시장 <code>US</code>" in text
+    assert "모델 <code>fake/fake-sell-ai-brief-v1</code>" in text
+    assert "상태 <code>FINAL_JUDGMENT</code>" in text
+    assert "사유 <code>model_judgment_ready</code>" in text
+    assert "AI 매도 판단 2건" in text
+    assert (
+        "판단 <code>2</code>건 · 표시 <code>2</code>건 · "
+        "모델 입력 <code>2</code>건 · HOLD 제외 <code>1</code>건 · "
+        "소스 이슈 <code>1</code> · 시스템 이슈 <code>0</code>"
+    ) in text
+    assert "1. <b>AAPL.NAS Apple</b> · <code>SELL</code> · <code>AGREE</code>" in text
+    assert "stop loss breached" in text
+    assert "근거 <code>1</code>개 · Apple risk update" in text
+    assert "2. <b>MSFT.NAS</b> · <code>REVIEW</code> · <code>CAUTION</code>" in text
+    assert "근거 <code>0</code>개" in text
+    assert "소스 이슈: MSFT.NAS fake_provider_no_external_sources" in text
+    assert "보관 <code>2026/05/2026-05-05.sell-ai-brief.json</code>" in text
+    assert (
+        '<a href="https://github.com/example/repo/actions/runs/456">실행 보기</a>'
+        in text
+    )
+
+
+def test_build_sell_ai_brief_telegram_report_text_handles_no_action() -> None:
+    report = _minimal_sell_ai_brief_report(
+        brief_state="NO_ACTION",
+        brief_reason="no_actionable_sell_candidates",
+        summary={
+            "actionable_count": 0,
+            "preselected_count": 0,
+            "judgment_count": 0,
+            "excluded_hold_count": 2,
+            "unsupported_action_count": 0,
+            "vetoed_count": 0,
+            "cap_excluded_count": 0,
+            "source_issue_count": 0,
+            "system_issue_count": 0,
+        },
+        judgments=[],
+    )
+
+    text = build_sell_ai_brief_telegram_report_text(report=report, run_url="")
+
+    assert "상태 <code>NO_ACTION</code>" in text
+    assert "매도/점검 대상 없음" in text
+    assert "HOLD 제외 <code>2</code>건" in text
+
+
+def test_build_sell_ai_brief_telegram_report_text_escapes_html_values() -> None:
+    report = _minimal_sell_ai_brief_report(
+        model_name="gpt<&test>",
+        judgments=[
+            {
+                "ticker": "AAPL.NAS",
+                "name": 'AT&T <Alpha "A">',
+                "sell_action": "SELL",
+                "ai_stance": "AGREE",
+                "confidence": "LOW",
+                "deterministic_reasons": ['2 < 3 & "quoted"'],
+                "rationale": ['risk <tag> & "quoted"'],
+                "checklist": ["manual"],
+                "sources": [{"title": "News <b>bold</b> & supply"}],
+            }
+        ],
+        source_issues=[
+            {
+                "ticker": "AAPL.NAS",
+                "code": "source_coverage_below_threshold",
+                "severity": "WARN",
+                "message": 'bad <tag> & "quoted"',
+            }
+        ],
+        summary={
+            "actionable_count": 1,
+            "preselected_count": 1,
+            "judgment_count": 1,
+            "excluded_hold_count": 0,
+            "unsupported_action_count": 0,
+            "vetoed_count": 0,
+            "cap_excluded_count": 0,
+            "source_issue_count": 1,
+            "system_issue_count": 0,
+        },
+    )
+
+    text = build_sell_ai_brief_telegram_report_text(
+        report=report,
+        run_url="javascript:alert(1)",
+    )
+
+    assert "모델 <code>fake/gpt&lt;&amp;test&gt;</code>" in text
+    assert "<b>AAPL.NAS AT&amp;T &lt;Alpha &quot;A&quot;&gt;</b>" in text
+    assert "2 &lt; 3 &amp; &quot;quoted&quot;" in text
+    assert "risk &lt;tag&gt; &amp; &quot;quoted&quot;" in text
+    assert "News &lt;b&gt;bold&lt;/b&gt; &amp; supply" in text
+    assert "bad &lt;tag&gt; &amp; &quot;quoted&quot;" in text
+    assert "<a href=" not in text
 
 
 @pytest.mark.parametrize(
