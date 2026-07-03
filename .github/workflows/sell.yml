@@ -14,6 +14,60 @@ on:
         options:
           - kis
           - pykrx
+      sell_ai_brief_model_provider:
+        description: "Sell AI Brief model provider"
+        required: false
+        default: openai
+        type: choice
+        options:
+          - fake
+          - openai
+      sell_ai_brief_model_name:
+        description: "Sell AI Brief model name; openai can also use OPENAI_SELL_AI_BRIEF_MODEL"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_model_timeout_seconds:
+        description: "Optional Sell AI Brief model timeout in seconds"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_source_provider:
+        description: "Optional source provider; empty uses configured Sell AI Brief source chain"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_source_report_path:
+        description: "Local source JSON path when sell_ai_brief_source_provider=local-json"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_source_api_url:
+        description: "External source API URL when sell_ai_brief_source_provider=http-json"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_source_timeout_seconds:
+        description: "Optional source provider timeout in seconds"
+        required: false
+        default: ""
+        type: string
+      sell_ai_brief_article_reader:
+        description: "Optional article reader"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - lightpanda
+      send_sell_ai_brief_notifications:
+        description: "Send Sell AI Brief Telegram notification after upload"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: sell-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -211,6 +265,266 @@ jobs:
           name: sell-report-${{ github.run_id }}
           path: ${{ steps.run_sell.outputs.report_path }}
           if-no-files-found: error
+
+      - name: Run Sell AI Brief
+        id: run_sell_ai_brief
+        if: github.event_name == 'workflow_dispatch' && success()
+        env:
+          OPENAI_API_KEY: ${{ github.event.inputs.sell_ai_brief_model_provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          OPENAI_SELL_AI_BRIEF_MODEL: ${{ vars.OPENAI_SELL_AI_BRIEF_MODEL }}
+          OPENAI_AI_BRIEF_MODEL: ${{ vars.OPENAI_AI_BRIEF_MODEL }}
+          SELL_AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.SELL_AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          AI_BRIEF_MODEL_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_MODEL_TIMEOUT_SECONDS }}
+          SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR: ${{ vars.SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR }}
+          SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US: ${{ vars.SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US }}
+          SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN: ${{ vars.SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN }}
+          AI_BRIEF_SOURCE_PROVIDER_CHAIN: ${{ vars.AI_BRIEF_SOURCE_PROVIDER_CHAIN }}
+          AI_BRIEF_SOURCE_API_URL: ${{ vars.AI_BRIEF_SOURCE_API_URL }}
+          AI_BRIEF_SOURCE_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_SOURCE_TIMEOUT_SECONDS }}
+          AI_BRIEF_ARTICLE_READER: ${{ vars.AI_BRIEF_ARTICLE_READER }}
+          AI_BRIEF_ARTICLE_READER_MAX_URLS: ${{ vars.AI_BRIEF_ARTICLE_READER_MAX_URLS }}
+          AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS: ${{ vars.AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS }}
+          AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS: ${{ vars.AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS }}
+          AI_BRIEF_SOURCE_API_TOKEN: ${{ secrets.AI_BRIEF_SOURCE_API_TOKEN }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          MARKETAUX_API_TOKEN: ${{ secrets.MARKETAUX_API_TOKEN }}
+          BENZINGA_API_TOKEN: ${{ secrets.BENZINGA_API_TOKEN }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          SAB_SUPPRESS_REPORT_UPLOADS: "true"
+          PARAM_MODEL_PROVIDER: ${{ github.event.inputs.sell_ai_brief_model_provider }}
+          PARAM_MODEL_NAME: ${{ github.event.inputs.sell_ai_brief_model_name }}
+          PARAM_MODEL_TIMEOUT_SECONDS: ${{ github.event.inputs.sell_ai_brief_model_timeout_seconds }}
+          PARAM_SOURCE_PROVIDER: ${{ github.event.inputs.sell_ai_brief_source_provider }}
+          PARAM_SOURCE_REPORT_PATH: ${{ github.event.inputs.sell_ai_brief_source_report_path }}
+          PARAM_SOURCE_API_URL: ${{ github.event.inputs.sell_ai_brief_source_api_url }}
+          PARAM_SOURCE_TIMEOUT_SECONDS: ${{ github.event.inputs.sell_ai_brief_source_timeout_seconds }}
+          PARAM_ARTICLE_READER: ${{ github.event.inputs.sell_ai_brief_article_reader }}
+        run: |
+          set -euo pipefail
+          model_provider="${PARAM_MODEL_PROVIDER:-openai}"
+          model_provider="${model_provider,,}"
+          model_name="${PARAM_MODEL_NAME:-fake-sell-ai-brief-v1}"
+          source_provider="${PARAM_SOURCE_PROVIDER:-}"
+          source_provider="${source_provider,,}"
+          article_reader="${PARAM_ARTICLE_READER:-none}"
+          article_reader="${article_reader,,}"
+
+          provider_enabled() {
+            local provider="$1"
+            local chain="$2"
+            local normalized_chain
+            normalized_chain="$(printf '%s' "${chain}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+            [[ ",${normalized_chain}," == *",${provider},"* ]]
+          }
+
+          disable_unused_source_provider_secrets() {
+            local source_chain=""
+            if [[ -n "${source_provider}" ]]; then
+              source_chain="${source_provider}"
+            elif [[ -n "${PARAM_SOURCE_REPORT_PATH}" ]]; then
+              source_chain="local-json"
+            elif [[ -n "${PARAM_SOURCE_API_URL}" ]]; then
+              source_chain="http-json"
+            else
+              source_chain="${SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR:-},${SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US:-},${SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN:-},${AI_BRIEF_SOURCE_PROVIDER_CHAIN:-}"
+            fi
+
+            provider_enabled http-json "${source_chain}" || unset AI_BRIEF_SOURCE_API_TOKEN
+            provider_enabled finnhub "${source_chain}" || unset FINNHUB_API_KEY
+            provider_enabled polygon-news "${source_chain}" || unset POLYGON_API_KEY
+            provider_enabled alpha-vantage-news "${source_chain}" || unset ALPHA_VANTAGE_API_KEY
+            provider_enabled marketaux-news "${source_chain}" || unset MARKETAUX_API_TOKEN
+            provider_enabled benzinga-news "${source_chain}" || unset BENZINGA_API_TOKEN
+            if ! provider_enabled naver-news "${source_chain}"; then
+              unset NAVER_CLIENT_ID
+              unset NAVER_CLIENT_SECRET
+            fi
+          }
+
+          disable_unused_source_provider_secrets
+
+          cmd=(
+            uv run -m sab sell-ai-brief
+            --sell-report "${{ steps.run_sell.outputs.report_path }}"
+            --model-provider "${model_provider}"
+            --model-name "${model_name}"
+          )
+          if [[ -n "${PARAM_MODEL_TIMEOUT_SECONDS}" ]]; then
+            cmd+=(--model-timeout-seconds "${PARAM_MODEL_TIMEOUT_SECONDS}")
+          fi
+          if [[ -n "${source_provider}" ]]; then
+            cmd+=(--source-provider "${source_provider}")
+            if [[ "${source_provider}" == "local-json" ]]; then
+              cmd+=(--source-report "${PARAM_SOURCE_REPORT_PATH}")
+            elif [[ "${source_provider}" == "http-json" ]]; then
+              cmd+=(--source-api-url "${PARAM_SOURCE_API_URL}")
+            fi
+          elif [[ -n "${PARAM_SOURCE_REPORT_PATH}" ]]; then
+            cmd+=(--source-report "${PARAM_SOURCE_REPORT_PATH}")
+          elif [[ -n "${PARAM_SOURCE_API_URL}" ]]; then
+            cmd+=(--source-api-url "${PARAM_SOURCE_API_URL}")
+          fi
+          if [[ -n "${PARAM_SOURCE_TIMEOUT_SECONDS}" ]]; then
+            cmd+=(--source-timeout-seconds "${PARAM_SOURCE_TIMEOUT_SECONDS}")
+          fi
+          if [[ "${article_reader}" != "none" ]]; then
+            cmd+=(--article-reader "${article_reader}")
+          fi
+
+          "${cmd[@]}" 2>&1 | tee sell-ai-brief.log
+
+          report_path="$(sed -n 's/.*Sell AI brief written to: //p' sell-ai-brief.log | tail -n 1 | tr -d '\r')"
+          if [[ -z "${report_path}" ]]; then
+            report_path="$(python - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(
+              Path("reports").glob("*.sell-ai-brief.json"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(paths[0] if paths else "")
+          PY
+          )"
+          fi
+
+          if [[ -z "${report_path}" || ! -f "${report_path}" ]]; then
+            echo "Sell AI Brief report (*.sell-ai-brief.json) not found under reports/" >&2
+            exit 1
+          fi
+
+          echo "report_path=${report_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Evaluate Sell AI Brief quality
+        if: github.event_name == 'workflow_dispatch' && success()
+        run: |
+          set -euo pipefail
+          uv run python scripts/eval_sell_ai_brief.py \
+            --sell-report "${{ steps.run_sell.outputs.report_path }}" \
+            --sell-ai-brief-report "${{ steps.run_sell_ai_brief.outputs.report_path }}" \
+            --pretty
+
+      - name: Upload generated Sell AI Brief artifact
+        if: github.event_name == 'workflow_dispatch' && steps.run_sell_ai_brief.outputs.report_path != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sell-ai-brief-report-${{ github.run_id }}
+          path: |
+            ${{ steps.run_sell.outputs.report_path }}
+            ${{ steps.run_sell_ai_brief.outputs.report_path }}
+          if-no-files-found: error
+
+      - name: Upload Sell AI Brief to Supabase
+        id: upload_sell_ai_brief
+        if: github.event_name == 'workflow_dispatch' && success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SELL_AI_BRIEF_REPORT_PATH: ${{ steps.run_sell_ai_brief.outputs.report_path }}
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import logging
+          import os
+          from pathlib import Path
+
+          from sab.report.supabase_storage import maybe_upload_report_artifact
+
+          logging.basicConfig(level=logging.INFO)
+          storage_key = maybe_upload_report_artifact(
+              artifact_path=os.environ["SELL_AI_BRIEF_REPORT_PATH"],
+              run_type="sell-ai-brief",
+              logger=logging.getLogger("sab.workflow.sell_ai_brief_upload"),
+              force=True,
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+              fh.write(f"storage_key={storage_key or ''}\n")
+          PY
+
+      - name: Build Sell AI Brief notification preview
+        if: github.event_name == 'workflow_dispatch' && success()
+        env:
+          REPORT_PATH: ${{ steps.run_sell_ai_brief.outputs.report_path }}
+          STORAGE_KEY: ${{ steps.upload_sell_ai_brief.outputs.storage_key }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from sab.report.notification_text import build_sell_ai_brief_telegram_report_text
+
+          report_path = Path(os.environ["REPORT_PATH"])
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+          storage_key = os.environ.get("STORAGE_KEY", "").strip() or None
+
+          Path("sell-ai-brief.telegram.txt").write_text(
+              build_sell_ai_brief_telegram_report_text(
+                  report=report,
+                  run_url=run_url,
+                  storage_key=storage_key,
+                  max_items=5,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload Sell AI Brief notification preview
+        if: github.event_name == 'workflow_dispatch' && success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sell-ai-brief-notification-${{ github.run_id }}
+          path: sell-ai-brief.telegram.txt
+          if-no-files-found: error
+
+      - name: Send Sell AI Brief Telegram notification
+        if: github.event_name == 'workflow_dispatch' && success() && github.event.inputs.send_sell_ai_brief_notifications == 'true'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
+            echo "Telegram secrets not set; skipping."
+            exit 0
+          fi
+          python - <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          from sab.report.notification_text import split_telegram_message_text
+
+          bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+          telegram_text = Path("sell-ai-brief.telegram.txt").read_text(encoding="utf-8")
+
+          for message_text in split_telegram_message_text(telegram_text):
+              payload = urllib.parse.urlencode(
+                  {
+                      "chat_id": chat_id,
+                      "text": message_text,
+                      "parse_mode": "HTML",
+                      "disable_web_page_preview": "true",
+                  }
+              ).encode("utf-8")
+              req = urllib.request.Request(url, data=payload, method="POST")
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  if resp.status >= 300:
+                      raise RuntimeError(f"Telegram returned HTTP {resp.status}")
+          PY
 
       - name: Build notification summary
         id: summary

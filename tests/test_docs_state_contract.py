@@ -241,6 +241,24 @@ def test_toss_scheduled_sync_docs_reflect_auto_apply_guardrails() -> None:
     assert "toss_daily_auto_sync.sh" in architecture_text
 
 
+def test_sell_ai_brief_docs_match_current_report_contract() -> None:
+    for path in (
+        Path("docs/api.md"),
+        Path("docs/ARCHITECTURE.md"),
+        Path("docs/STRATEGY.md"),
+    ):
+        text = _read(path)
+        assert "evaluated_count" in text, f"{path} missing evaluated_count"
+        assert "sell_row_count" not in text, f"{path} still documents sell_row_count"
+
+    spec_v11_text = _read(Path("docs/spec-v1.1.md"))
+    assert "sell-ai-brief" in spec_v11_text
+    assert "{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json" in spec_v11_text
+
+    spec_v13_text = _read(Path("docs/spec-v1.3.md"))
+    assert "sell-ai-brief" in spec_v13_text
+
+
 def test_ai_brief_model_timeout_docs_cover_primary_fallback_and_total() -> None:
     config_reference_text = _read(Path("docs/config-reference.md"))
     configuration_text = _read(Path("docs/configuration.md"))

@@ -389,6 +389,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 
 def _extract_report_tickers(report: dict[str, object]) -> list[str]:
+    report_type = str(report.get("type") or "").strip()
     tickers_raw = report.get("tickers")
     tickers: list[str] = []
     if isinstance(tickers_raw, list):
@@ -396,16 +397,21 @@ def _extract_report_tickers(report: dict[str, object]) -> list[str]:
             ticker = _normalize_ticker(value)
             if ticker:
                 tickers.append(ticker)
-    if tickers:
+    if tickers and report_type != "sell-ai-brief":
         return _dedupe_preserve_order(tickers)
 
     candidates = _extract_tickers_from_rows(report.get("candidates"))
     evaluated = _extract_tickers_from_rows(report.get("evaluated"))
     entries = _extract_tickers_from_rows(report.get("entries"))
     recommendations = _extract_tickers_from_rows(report.get("recommendations"))
+    judgments = _extract_tickers_from_rows(report.get("judgments"))
     excluded = _extract_tickers_from_rows(report.get("excluded_candidates"))
     vetoed = _extract_tickers_from_rows(report.get("vetoed_candidates"))
     cap_excluded = _extract_tickers_from_rows(report.get("cap_excluded_candidates"))
+    excluded_hold = _extract_tickers_from_rows(report.get("excluded_hold_candidates"))
+    unsupported_action = _extract_tickers_from_rows(
+        report.get("unsupported_action_candidates")
+    )
 
     eligible_raw = report.get("eligible_tickers")
     eligible: list[str] = []
@@ -414,16 +420,28 @@ def _extract_report_tickers(report: dict[str, object]) -> list[str]:
             ticker = _normalize_ticker(value)
             if ticker:
                 eligible.append(ticker)
+    actionable_raw = report.get("actionable_tickers")
+    actionable: list[str] = []
+    if isinstance(actionable_raw, list):
+        for value in actionable_raw:
+            ticker = _normalize_ticker(value)
+            if ticker:
+                actionable.append(ticker)
 
     return _dedupe_preserve_order(
-        candidates
+        tickers
+        + candidates
         + evaluated
         + entries
         + recommendations
+        + judgments
         + excluded
         + vetoed
         + cap_excluded
+        + excluded_hold
+        + unsupported_action
         + eligible
+        + actionable
     )
 
 

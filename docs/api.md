@@ -48,6 +48,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `sell` | active holdings 평가 후 sell report 생성 | `--provider kis|pykrx`, `--holdings <path>` | `reports/YYYY-MM-DD(-n).sell.json` |
 | `entry` | buy report 후보의 다음 세션 진입 조건 평가 | `--buy-report`, `--provider kis|pykrx`, `--mode PRE_OPEN|INTRADAY|AFTER_CLOSE`, `--market KR|US`, `--upload` | `reports/YYYY-MM-DD(-n).entry.json` |
 | `ai-brief` | entry report의 executable/blocked/watch 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--model-timeout-seconds`, `--source-provider`, `--source-report`, `--source-api-url`, `--source-timeout-seconds`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
+| `sell-ai-brief` | sell report의 SELL/SELL_PARTIAL/REVIEW 후보를 AI 판단/이유와 최신 source context로 요약 | `--sell-report`, `--model-provider fake|openai`, `--model-name`, `--model-timeout-seconds`, `--source-provider`, `--source-report`, `--source-api-url`, `--source-timeout-seconds`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).sell-ai-brief.json` |
 | `ai-brief-scheduled` | runtime_state guard와 marker를 사용하는 scheduled runner | `--market`, `--schedule-role`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--source-provider`, `--model-provider`, `--dry-run`, `--guard-only` | `ai-brief` 또는 `ai-brief-skip` report, runtime_state marker |
 | `ai-brief-latency-probe` | AI Brief primary/fallback 모델 호출 수와 반복 횟수 계획을 확인 | `--primary-model`, `--fallback-model`, `--repetitions 1..3` | stdout `planned_live_model_call_count=<n>`; upload/notification 없음 |
 
@@ -60,6 +61,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `entry` | `reports/YYYY-MM-DD(-n).entry.json` | `YYYY/MM/YYYY-MM-DD(-n).entry.json` | `report_index` |
 | `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
 | `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
+| `sell-ai-brief` | `reports/YYYY-MM-DD(-n).sell-ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).sell-ai-brief.json` | `report_index` |
 
 ### Buy/Sell Risk Disclosure Notes
 
@@ -94,11 +96,20 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - `brief_state` is one of `NO_SIGNAL`, `NEEDS_REVIEW_WATCH_ONLY`, `FINAL_JUDGMENT`, or `NEEDS_REVIEW_WEAK_NEWS`. `NO_SIGNAL` means no executable/blocked or watch candidates; `NEEDS_REVIEW_WATCH_ONLY` means only trigger-pending watch candidates remain.
 - `scripts/eval_ai_brief_recommendations.py` is the offline recommendation quality gate. The manual GitHub AI Brief workflow and scheduled runner treat `FAIL` as a stop before normal notification/success handling.
 
+### Sell AI Brief Artifact Notes
+
+- `sell-ai-brief.summary` includes `evaluated_count`, `actionable_count`, `preselected_count`, `judgment_count`, `excluded_hold_count`, `unsupported_action_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, and `system_issue_count`.
+- `actionable_tickers[]` records source sell rows whose original action was `SELL`, `SELL_PARTIAL`, or `REVIEW`. `HOLD` rows are preserved only in `excluded_hold_candidates[]`.
+- `judgments[]` is capped by the 5-row model input cap and must preserve the source `sell_action`. The model may explain, defer, or veto a candidate, but it may not add tickers, convert `HOLD` rows, or change the deterministic sell action.
+- `source_provider_summary`, source row freshness/URL validation, optional `article_read`, and OpenAI request-local `source_refs` follow the same source safety boundary used by AI Brief.
+- `brief_state` is one of `NO_ACTION`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS`, or `MODEL_OR_SYSTEM_ISSUE`. `NO_ACTION` means there were no actionable sell rows, so no model call is attempted.
+- `scripts/eval_sell_ai_brief.py` is the offline quality gate for this artifact. It checks source sell alignment, HOLD exclusion, unsupported/cap rows, summary counts, source-backed ratio, action preservation, and automated-order language.
+
 ### Notification Text Contracts
 
-- AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first, Korean-first for operator-facing explanation text, and uses only `<b>`, `<code>`, and `<a>` tags. Source article titles, tickers, enum values, issue codes, URLs, and storage keys remain original/untranslated.
+- AI Brief and Sell AI Brief Telegram report notifications use Telegram HTML rich text. The body is decision-first, Korean-first for operator-facing explanation text, and uses only `<b>`, `<code>`, and `<a>` tags. Source article titles, tickers, enum values, issue codes, URLs, and storage keys remain original/untranslated.
 - Report-derived values are HTML-escaped, normalized to single-line text where needed, and length-bounded before rendering. Unsafe, malformed, too-long, or whitespace/control-character HTTP(S) `run_url` values are not emitted as Telegram links.
-- GitHub Actions and the scheduled notifier split the AI Brief Telegram report body with `split_telegram_message_text()` and send each part through `sendMessage` with `parse_mode=HTML` and web previews disabled.
+- GitHub Actions and the scheduled notifier split the AI Brief Telegram report body with `split_telegram_message_text()` and send each part through `sendMessage` with `parse_mode=HTML` and web previews disabled. Sell AI Brief uses the same Telegram-safe renderer contract when its artifact is notified.
 - AI Brief skipped notifications, scan/sell Telegram notifications, host late alerts, and Slack summaries remain plain text. Scan/sell Telegram notifications append the same stop/target decision-guide caveat used in report artifacts when rows are shown. Slack keeps the key-value summary format.
 
 ## Web API Routes
@@ -107,7 +118,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/auth/login` | 관리자 로그인 | JSON `{ "username": string, "password": string }` | `200 { "ok": true }`, sets HttpOnly session cookie |
 | `POST` | `/api/auth/logout` | 관리자 로그아웃 | no body required | `200 { "ok": true }`, clears session cookie |
-| `GET` | `/api/reports` | report_index 목록 조회 | query `type=all|buy|sell|entry|ai-brief|ai-brief-skip`, `q`, `limit=1..200`, `refresh=true|false` | `ReportsListResponse` |
+| `GET` | `/api/reports` | report_index 목록 조회 | query `type=all|buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief`, `q`, `limit=1..200`, `refresh=true|false` | `ReportsListResponse` |
 | `GET` | `/api/reports/detail` | Storage JSON 상세 조회 | query `key=<storage-key>`, `refresh=true|false` | report JSON |
 | `POST` | `/api/run` | `scan.yml`/`sell.yml` workflow_dispatch | scan: `{ "workflow":"scan", "provider":"kis|pykrx", "universe":"KR|US|both" }`; sell: `{ "workflow":"sell", "provider":"kis|pykrx" }` | `202 WorkflowDispatchResult` |
 | `GET` | `/api/holdings` | holdings 목록 | query `limit=1..200`, optional `cursor` | `{ items, nextCursor, hasMore }` |

@@ -192,6 +192,69 @@ def test_dispatch_command_routes_ai_brief_options(monkeypatch) -> None:
     ]
 
 
+def test_dispatch_command_routes_sell_ai_brief_options(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run_sell_ai_brief(**kwargs) -> int:
+        calls.append(kwargs)
+        return 41
+
+    monkeypatch.setattr(sab_main, "run_sell_ai_brief", run_sell_ai_brief)
+
+    ns = _parse_args(
+        [
+            "sell-ai-brief",
+            "--sell-report",
+            "reports/2026-06-13.sell.json",
+            "--model-provider",
+            "openai",
+            "--model-name",
+            "gpt-example",
+            "--model-timeout-seconds",
+            "15",
+            "--source-provider",
+            "http-json",
+            "--source-report",
+            "sources.json",
+            "--source-api-url",
+            "https://example.test/sources",
+            "--source-timeout-seconds",
+            "5",
+            "--article-reader",
+            "lightpanda",
+            "--article-reader-max-urls",
+            "3",
+            "--article-reader-timeout-seconds",
+            "4.5",
+            "--article-reader-max-excerpt-chars",
+            "900",
+            "--report-date",
+            "2026-06-13",
+            "--upload",
+        ]
+    )
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 41
+    assert calls == [
+        {
+            "sell_report_path": "reports/2026-06-13.sell.json",
+            "model_provider": "openai",
+            "model_name": "gpt-example",
+            "model_timeout_seconds": 15.0,
+            "source_provider": "http-json",
+            "source_report_path": "sources.json",
+            "source_api_url": "https://example.test/sources",
+            "source_timeout_seconds": 5.0,
+            "article_reader": "lightpanda",
+            "article_reader_max_urls": 3,
+            "article_reader_timeout_seconds": 4.5,
+            "article_reader_max_excerpt_chars": 900,
+            "report_date": "2026-06-13",
+            "upload": True,
+        }
+    ]
+
+
 def test_dispatch_command_routes_ai_brief_latency_probe_options(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 

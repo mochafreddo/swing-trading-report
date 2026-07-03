@@ -16,6 +16,7 @@ from .observability import sanitize_log_text, structured_log_fields
 from .scan import run_scan
 from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
 from .sell import run_sell
+from .sell_ai_brief import run_sell_ai_brief
 
 _CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -313,6 +314,107 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override AI brief artifact report_date (YYYY-MM-DD)",
     )
 
+    sell_ai_brief = sub.add_parser(
+        "sell-ai-brief",
+        help="Build a local AI sell judgment brief from a sell report",
+    )
+    sell_ai_brief.add_argument(
+        "--sell-report",
+        type=str,
+        required=True,
+        help="Input sell report path",
+    )
+    sell_ai_brief.add_argument(
+        "--model-provider",
+        type=str,
+        default="fake",
+        choices=["fake", "openai"],
+        help="AI model provider for the sell brief",
+    )
+    sell_ai_brief.add_argument(
+        "--model-name",
+        type=str,
+        default="fake-sell-ai-brief-v1",
+        help="AI model name for the sell brief",
+    )
+    sell_ai_brief.add_argument(
+        "--model-timeout-seconds",
+        type=float,
+        default=None,
+        help="AI model provider timeout in seconds",
+    )
+    sell_ai_brief.add_argument(
+        "--source-provider",
+        type=str,
+        default=None,
+        choices=[
+            "none",
+            "local-json",
+            "http-json",
+            "finnhub",
+            "polygon-news",
+            "alpha-vantage-news",
+            "marketaux-news",
+            "benzinga-news",
+            "naver-news",
+        ],
+        help="Optional source provider for sell candidate context",
+    )
+    sell_ai_brief.add_argument(
+        "--source-report",
+        type=str,
+        default=None,
+        help="Optional local JSON source report path",
+    )
+    sell_ai_brief.add_argument(
+        "--source-api-url",
+        type=str,
+        default=None,
+        help="Optional external source API URL when source_provider=http-json",
+    )
+    sell_ai_brief.add_argument(
+        "--source-timeout-seconds",
+        type=float,
+        default=None,
+        help="External source provider timeout in seconds",
+    )
+    sell_ai_brief.add_argument(
+        "--article-reader",
+        type=str,
+        default=None,
+        choices=["none", "lightpanda"],
+        help="Optional article reader for source URL verification",
+    )
+    sell_ai_brief.add_argument(
+        "--article-reader-max-urls",
+        type=int,
+        default=None,
+        help="Maximum source URLs to read for article verification",
+    )
+    sell_ai_brief.add_argument(
+        "--article-reader-timeout-seconds",
+        type=float,
+        default=None,
+        help="Article reader timeout per URL in seconds",
+    )
+    sell_ai_brief.add_argument(
+        "--article-reader-max-excerpt-chars",
+        type=int,
+        default=None,
+        help="Maximum extracted article excerpt characters per source",
+    )
+    sell_ai_brief.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload Sell AI brief report to Supabase Storage/report_index",
+    )
+    sell_ai_brief.add_argument(
+        "--report-date",
+        type=str,
+        default=None,
+        help="Override Sell AI brief artifact report_date (YYYY-MM-DD)",
+    )
+
     scheduled = sub.add_parser(
         "ai-brief-scheduled",
         help="Run scheduled AI Brief with runtime_state idempotency guards",
@@ -386,6 +488,25 @@ def _run_ai_brief_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _run_sell_ai_brief_command(ns: argparse.Namespace) -> int:
+    return run_sell_ai_brief(
+        sell_report_path=ns.sell_report,
+        model_provider=ns.model_provider,
+        model_name=ns.model_name,
+        model_timeout_seconds=ns.model_timeout_seconds,
+        source_provider=ns.source_provider,
+        source_report_path=ns.source_report,
+        source_api_url=ns.source_api_url,
+        source_timeout_seconds=ns.source_timeout_seconds,
+        article_reader=ns.article_reader,
+        article_reader_max_urls=ns.article_reader_max_urls,
+        article_reader_timeout_seconds=ns.article_reader_timeout_seconds,
+        article_reader_max_excerpt_chars=ns.article_reader_max_excerpt_chars,
+        report_date=ns.report_date,
+        upload=ns.upload,
+    )
+
+
 def _scheduled_ai_brief_request_from_args(
     ns: argparse.Namespace,
 ) -> ScheduledAiBriefRequest:
@@ -426,6 +547,7 @@ def _dispatch_command(
         "sell": _run_sell_command,
         "entry": _run_entry_command,
         "ai-brief": _run_ai_brief_command,
+        "sell-ai-brief": _run_sell_ai_brief_command,
         "ai-brief-scheduled": _run_scheduled_ai_brief_command,
         "ai-brief-latency-probe": _run_ai_brief_latency_probe_command,
     }

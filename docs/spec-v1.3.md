@@ -166,9 +166,9 @@ v1.3 계약:
 
 ### 5.3 Supabase `report_index`와 entry/AI Brief 연동 계약
 
-- `report_index.report_type` 허용값 확장: `buy|sell|entry|ai-brief|ai-brief-skip`
-- Storage key 정규식/파서 확장: `.entry.json`, `.ai-brief.json`, `.ai-brief-skip.json`을 허용
-- key 생성기 확장: `build_report_storage_key(run_type="entry")`, `build_report_storage_key(run_type="ai-brief")`, `build_report_storage_key(run_type="ai-brief-skip")` 지원
+- `report_index.report_type` 허용값 확장: `buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief`
+- Storage key 정규식/파서 확장: `.entry.json`, `.ai-brief.json`, `.ai-brief-skip.json`, `.sell-ai-brief.json`을 허용
+- key 생성기 확장: `build_report_storage_key(run_type="entry")`, `build_report_storage_key(run_type="ai-brief")`, `build_report_storage_key(run_type="ai-brief-skip")`, `build_report_storage_key(run_type="sell-ai-brief")` 지원
 - scheduled AI Brief pipeline runner가 runtime guard에서 중단되면 `type="ai_brief_skip"` JSON을 `ai-brief-skip` run type으로 Storage/`report_index`에 게시합니다.
 
 > 이 변경은 DB check constraint, Python 업로드 경로, 웹 목록/상세 경로 모두에 적용됩니다. `docs/spec-v1.1.md`와 테스트는 동일 계약으로 동기화되어야 합니다.

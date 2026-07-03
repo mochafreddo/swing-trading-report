@@ -15,18 +15,28 @@ ALLOWED_CONFIDENCE = frozenset({"LOW", "MEDIUM", "HIGH"})
 ALLOWED_ISSUE_SEVERITY = frozenset({"INFO", "WARN", "ERROR"})
 AUTOMATED_ORDER_PHRASES = (
     "buy now",
+    "sell now",
     "execute order",
     "place order",
+    "place sell order",
     "submit order",
     "automatic order",
     "automated order",
+    "execute sell",
+    "liquidate now",
     "지금 매수",
+    "지금 매도",
     "즉시 매수",
+    "즉시 매도",
     "바로 매수",
+    "바로 매도",
     "매수하세요",
+    "매도하세요",
+    "매도 주문",
     "주문 실행",
     "주문하세요",
     "자동 매수",
+    "자동 매도",
     "자동 주문",
 )
 AUTOMATED_ORDER_PROMPT_EXAMPLES = (

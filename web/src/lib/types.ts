@@ -7,6 +7,7 @@ export const REPORT_TYPES = [
   "entry",
   "ai-brief",
   "ai-brief-skip",
+  "sell-ai-brief",
 ] as const;
 export const REPORT_TYPE_PATTERN = REPORT_TYPES.join("|");
 export type ReportType = (typeof REPORT_TYPES)[number];

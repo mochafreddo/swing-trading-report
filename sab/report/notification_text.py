@@ -70,6 +70,23 @@ class _AiBriefCounts:
     system_issues: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class _SellAiBriefCounts:
+    actionable_count: int
+    preselected_count: int
+    judgment_count: int
+    excluded_hold_count: int
+    unsupported_action_count: int
+    vetoed_count: int
+    cap_excluded_count: int
+    source_issue_count: int
+    system_issue_count: int
+    judgments: list[dict[str, Any]]
+    vetoed_candidates: list[dict[str, Any]]
+    source_issues: list[dict[str, Any]]
+    system_issues: list[dict[str, Any]]
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -336,6 +353,68 @@ def _ai_brief_counts(report: dict[str, Any]) -> _AiBriefCounts:
         blocked_but_valid_tickers=blocked_but_valid_tickers,
         watch_tickers=watch_tickers,
         recommendations=recommendations,
+        vetoed_candidates=vetoed_candidates,
+        source_issues=source_issues,
+        system_issues=system_issues,
+    )
+
+
+def _sell_ai_brief_counts(report: dict[str, Any]) -> _SellAiBriefCounts:
+    summary = _as_dict(report.get("summary"))
+    judgments_raw = _as_list(report.get("judgments"))
+    judgments = [row for row in judgments_raw if isinstance(row, dict)]
+    vetoed_raw = _as_list(report.get("vetoed_candidates"))
+    vetoed_candidates = [row for row in vetoed_raw if isinstance(row, dict)]
+    source_issues_raw = _as_list(report.get("source_issues"))
+    source_issues = [row for row in source_issues_raw if isinstance(row, dict)]
+    system_issues_raw = _as_list(report.get("system_issues"))
+    system_issues = [row for row in system_issues_raw if isinstance(row, dict)]
+    actionable_tickers = [
+        _safe_str(item) for item in _as_list(report.get("actionable_tickers"))
+    ]
+    actionable_tickers = [ticker for ticker in actionable_tickers if ticker]
+    preselected_default = len(actionable_tickers) or len(judgments)
+    preselected_count = _safe_int(
+        summary.get("preselected_count"),
+        default=preselected_default,
+    )
+    judgment_count = _safe_int(
+        summary.get("judgment_count"),
+        default=len(judgments),
+    )
+    return _SellAiBriefCounts(
+        actionable_count=_safe_int(
+            summary.get("actionable_count"),
+            default=preselected_count
+            + _safe_int(summary.get("cap_excluded_count"), default=0),
+        ),
+        preselected_count=preselected_count,
+        judgment_count=judgment_count,
+        excluded_hold_count=_safe_int(
+            summary.get("excluded_hold_count"),
+            default=len(_as_list(report.get("excluded_hold_candidates"))),
+        ),
+        unsupported_action_count=_safe_int(
+            summary.get("unsupported_action_count"),
+            default=len(_as_list(report.get("unsupported_action_candidates"))),
+        ),
+        vetoed_count=_safe_int(
+            summary.get("vetoed_count"),
+            default=len(vetoed_candidates),
+        ),
+        cap_excluded_count=_safe_int(
+            summary.get("cap_excluded_count"),
+            default=len(_as_list(report.get("cap_excluded_candidates"))),
+        ),
+        source_issue_count=_safe_int(
+            summary.get("source_issue_count"),
+            default=len(source_issues),
+        ),
+        system_issue_count=_safe_int(
+            summary.get("system_issue_count"),
+            default=len(system_issues),
+        ),
+        judgments=judgments,
         vetoed_candidates=vetoed_candidates,
         source_issues=source_issues,
         system_issues=system_issues,
@@ -881,6 +960,181 @@ def _ai_brief_decision_text(
     return "AI 판단 보류: 추천을 확정하지 않음"
 
 
+def _sell_ai_brief_decision_text(
+    *,
+    state: str,
+    reason: str,
+    judgment_count: int,
+) -> str:
+    if state == "NO_ACTION":
+        return "매도/점검 대상 없음"
+    if state == "FINAL_JUDGMENT":
+        return f"AI 매도 판단 {judgment_count}건"
+    if state == "NEEDS_REVIEW_WEAK_NEWS":
+        return "최신 기사 근거 약함, 기술적 매도 신호 중심"
+    if state == "MODEL_OR_SYSTEM_ISSUE":
+        return "AI 판단 보류: 모델/시스템 이슈 확인 필요"
+    if reason == "weak_news_coverage":
+        return "최신 기사 근거 약함, 기술적 매도 신호 중심"
+    return "AI 판단 보류: 매도 판단을 확정하지 않음"
+
+
+def build_sell_ai_brief_telegram_report_text(
+    *,
+    report: dict[str, Any],
+    run_url: str,
+    storage_key: str | None = None,
+    max_items: int = 5,
+) -> str:
+    counts = _sell_ai_brief_counts(report)
+    total = len(counts.judgments)
+    shown = min(total, max(max_items, 0), 5)
+    model_provider = _safe_str(report.get("model_provider"), default="fake")
+    model_name = _safe_str(report.get("model_name"), default="-")
+    model_label = f"{model_provider}/{model_name}"
+    brief_state = _safe_str(report.get("brief_state"), default="FINAL_JUDGMENT").upper()
+    brief_reason = _safe_str(report.get("brief_reason"), default="model_judgment_ready")
+    decision = _sell_ai_brief_decision_text(
+        state=brief_state,
+        reason=brief_reason,
+        judgment_count=total,
+    )
+
+    lines = [
+        _html_bold("SAB Sell AI Brief"),
+        (
+            f"시장 {_html_code_single_line(report.get('market'), default='-', max_chars=24)} · "
+            f"모델 {_html_code_single_line(model_label)}"
+        ),
+        f"생성 {_html_code_single_line(_generated_at(report), max_chars=80)}",
+        "",
+        _html_bold("판단"),
+        (
+            f"상태 {_html_code_single_line(brief_state, max_chars=80)} · "
+            f"사유 {_html_code_single_line(brief_reason, max_chars=80)}"
+        ),
+        _html_escape(decision),
+        (
+            f"판단 {_html_code(total)}건 · 표시 {_html_code(shown)}건 · "
+            f"모델 입력 {_html_code(counts.preselected_count)}건 · "
+            f"HOLD 제외 {_html_code(counts.excluded_hold_count)}건 · "
+            f"소스 이슈 {_html_code(counts.source_issue_count)} · "
+            f"시스템 이슈 {_html_code(counts.system_issue_count)}"
+        ),
+    ]
+    if counts.unsupported_action_count or counts.cap_excluded_count:
+        lines.append(
+            f"미지원 액션 {_html_code(counts.unsupported_action_count)}건 · "
+            f"cap 제외 {_html_code(counts.cap_excluded_count)}건"
+        )
+
+    lines.append("")
+    if total == 0:
+        lines.extend([_html_bold("매도 판단"), "매도/점검 대상 없음"])
+    else:
+        lines.append(
+            f"{_html_bold(f'매도 판단 {total}건')} (표시 {_html_code(shown)}건)"
+        )
+        for idx, row in enumerate(counts.judgments[:shown], start=1):
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            name = _safe_single_line(row.get("name"), max_chars=96)
+            ticker_name = f"{ticker} {name}".strip()
+            sell_action = _safe_single_line(
+                row.get("sell_action") or row.get("action"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            ai_stance = _safe_single_line(
+                row.get("ai_stance"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            confidence = _safe_single_line(
+                row.get("confidence"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            reason = _first_list_text(row.get("deterministic_reasons"))
+            rationale = _first_list_text(row.get("rationale"))
+            source_count = len(_recommendation_sources(row))
+            lines.append(
+                f"{idx}. {_html_bold_single_line(ticker_name)} · "
+                f"{_html_code_single_line(sell_action, max_chars=24)} · "
+                f"{_html_code_single_line(ai_stance, max_chars=24)} · "
+                f"{_html_code_single_line(confidence, max_chars=24)}"
+            )
+            lines.append(f"   규칙 {_html_single_line(reason)}")
+            lines.append(f"   판단 {_html_single_line(rationale)}")
+            source_title = _first_source_title(row)
+            if source_title:
+                lines.append(
+                    f"   근거 {_html_code(source_count)}개 · "
+                    f"{_html_single_line(source_title)}"
+                )
+            else:
+                lines.append(f"   근거 {_html_code(source_count)}개")
+        extra = total - shown
+        if extra > 0:
+            lines.append(f"외 {_html_code(extra)}건")
+
+    vetoed_total = len(counts.vetoed_candidates)
+    vetoed_shown = min(vetoed_total, max(max_items, 0), 5)
+    if vetoed_total > 0:
+        lines.extend(["", _html_bold(f"AI 판단 보류 {vetoed_total}건")])
+        for row in counts.vetoed_candidates[:vetoed_shown]:
+            ticker = _safe_single_line(row.get("ticker"), default="-", max_chars=48)
+            sell_action = _safe_single_line(
+                row.get("sell_action") or row.get("action"),
+                default="-",
+                max_chars=24,
+            ).upper()
+            reason = _safe_single_line(row.get("reason"), default="-", max_chars=180)
+            lines.append(
+                f"- {_html_code_single_line(ticker, max_chars=48)} · "
+                f"{_html_code_single_line(sell_action, max_chars=24)} · "
+                f"{_html_single_line(reason)}"
+            )
+        extra = vetoed_total - vetoed_shown
+        if extra > 0:
+            lines.append(f"보류 외 {_html_code(extra)}건")
+
+    lines.extend(
+        [
+            "",
+            _html_bold("진단"),
+            (
+                f"소스 이슈 {_html_code(counts.source_issue_count)} · "
+                f"시스템 이슈 {_html_code(counts.system_issue_count)}"
+            ),
+        ]
+    )
+    source_chain_summary = _format_source_chain_summary(report)
+    if source_chain_summary:
+        lines.append(_html_single_line(source_chain_summary, max_chars=360))
+    source_provider_statuses = _format_source_provider_statuses(report)
+    if source_provider_statuses:
+        lines.append(_html_single_line(source_provider_statuses, max_chars=360))
+    for issue in counts.source_issues[:3]:
+        lines.append(
+            _html_single_line(_format_issue("소스 이슈", issue), max_chars=360)
+        )
+    for issue in counts.system_issues[:3]:
+        lines.append(
+            _html_single_line(_format_issue("시스템 이슈", issue), max_chars=360)
+        )
+
+    key = _safe_str(storage_key)
+    if key:
+        lines.append(f"보관 {_html_code_single_line(key)}")
+    run_link = _html_link(run_url, "실행 보기")
+    if run_link:
+        if _is_http_url(_safe_str(run_url)):
+            lines.append(run_link)
+        else:
+            lines.append(f"실행 {run_link}")
+    return "\n".join(lines)
+
+
 def build_ai_brief_telegram_report_text(
     *,
     report: dict[str, Any],
@@ -1144,6 +1398,7 @@ __all__ = [
     "build_ai_brief_telegram_report_text",
     "build_scan_slack_summary_text",
     "build_scan_telegram_report_text",
+    "build_sell_ai_brief_telegram_report_text",
     "build_sell_slack_summary_text",
     "build_sell_telegram_report_text",
     "split_telegram_message_text",

@@ -2,15 +2,15 @@
 
 상태: Accepted
 계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-06-24
-대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
+최종 확인: 2026-07-02
+대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`/`sab sell-ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
 ## 문서 상태
 
 ### 현재 제공
 
-- `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
+- `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, 로컬 `sab sell-ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
 
 ### 실험
@@ -569,6 +569,19 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - `action`은 `HOLD|SELL_PARTIAL|REVIEW|SELL` 중 하나입니다.
 - buy report의 `risk_guide`와 sell report의 `stop_price`, `target_price`는 모두 “의사결정 가이드”입니다. 리포트 top-level `risk_disclosure`는 해당 필드가 체결 보장이나 계좌 손실 한도가 아니며, gap/slippage로 실제 체결·손실이 가이드를 벗어날 수 있음을 명시합니다.
 - sell `stop_price`, `target_price`는 override가 있으면 override가 우선합니다.
+
+### 7.2.1 Sell AI Brief report (sell 후속 판단)
+
+- `sab sell-ai-brief`는 새 매도 신호 생성기가 아니라 `sab sell` 결과의 후속 설명/판단 레이어입니다.
+- 입력은 `*.sell.json`이며, 모델 판단 대상은 원본 `action`이 `SELL`, `SELL_PARTIAL`, `REVIEW`인 row로 제한합니다. `HOLD`는 `excluded_hold_candidates[]`에 남기고 모델 입력과 최종 판단에서 제외합니다.
+- 모델 ranking 입력은 sell report 순서 기준 최대 5개(`actionable_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 지원하지 않는 action, ticker 누락, 잘못된 ticker row는 `unsupported_action_candidates[]`와 `system_issues[]`로 격리합니다.
+- 최종 `judgments[]`는 원본 `sell_action`을 보존해야 합니다. 모델은 ticker를 추가하거나, `HOLD`를 판단으로 승격하거나, `SELL`/`SELL_PARTIAL`/`REVIEW`를 다른 action으로 바꿀 수 없습니다.
+- 모델은 `ai_stance`, `confidence`, `rationale`, `checklist[]`, `sources[]`로 판단과 이유를 설명합니다. 최신 기사/source가 부족하거나 접근/검증 문제가 있으면 자신감 있는 최종 판단이 아니라 weak-news/manual-review 상태로 낮춥니다.
+- OpenAI provider는 request-local `source_refs[]`만 선택하고, 최종 artifact는 로컬 코드가 canonical `sources[]`로 복원한 값만 저장합니다. 모델이 source title/url/published time을 새로 쓰는 것은 허용하지 않습니다.
+- `summary`는 `evaluated_count`, `actionable_count`, `preselected_count`, `judgment_count`, `excluded_hold_count`, `unsupported_action_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`를 기록해 HOLD 제외, cap, 모델 판단, 이슈를 분리 검증합니다.
+- `brief_state`는 `NO_ACTION`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS`, `MODEL_OR_SYSTEM_ISSUE` 중 하나입니다. `NO_ACTION`이면 모델 호출을 시도하지 않고, actionable 후보가 있는데 judgment/veto가 모두 없거나 시스템 문제가 있으면 최종 판단으로 표시하지 않습니다.
+- `scripts/eval_sell_ai_brief.py`는 source sell report와 Sell AI Brief artifact의 정합성을 평가합니다. Actionable/HOLD/unsupported/cap 후보 정합성, summary count, 원본 action 보존, source-backed ratio, 자동 주문/체결 문구 금지를 확인하며, 새 매도 신호를 생성하지 않습니다.
+- Sell AI Brief Telegram 본문은 판단과 이유를 보여주는 HTML rich text입니다. 표시되는 `sell_action`은 원본 sell action이며 자동 주문, 자동 체결, 브로커 실행을 뜻하지 않습니다.
 
 ## 8. 운영/재현성 권장 사항
 
