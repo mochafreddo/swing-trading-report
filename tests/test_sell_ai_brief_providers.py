@@ -181,6 +181,37 @@ def test_openai_contract_error_when_model_omits_actionable_candidate() -> None:
         )
 
 
+def test_openai_contract_error_when_model_duplicates_vetoed_candidate() -> None:
+    provider = OpenAiSellAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "judgments": [],
+                "vetoed_candidates": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "sell_action": "SELL",
+                        "reason": "source confidence was too weak",
+                    },
+                    {
+                        "ticker": "AAPL.NAS",
+                        "sell_action": "SELL",
+                        "reason": "duplicate veto",
+                    },
+                ],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(SellAiBriefProviderContractError, match="unique"):
+        provider.build_judgments(
+            actionable_candidates=[_candidate("AAPL.NAS", sell_action="SELL")]
+        )
+
+
 def test_openai_contract_error_when_invalid_source_refs_drop_candidate() -> None:
     provider = OpenAiSellAiBriefProvider(
         model_name="gpt-test",

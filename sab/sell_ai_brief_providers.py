@@ -623,7 +623,6 @@ def _normalize_openai_provider_result(
         judgments.append(judgment)
 
     vetoed_candidates: list[dict[str, object]] = []
-    seen_vetoes: set[str] = set()
     for raw_veto in _as_provider_mapping_rows(
         parsed.get("vetoed_candidates"),
         field_name="vetoed_candidates",
@@ -633,11 +632,6 @@ def _normalize_openai_provider_result(
             raise SellAiBriefProviderContractError(
                 f"OpenAI output included ineligible veto ticker {ticker!r}"
             )
-        if ticker in seen_vetoes:
-            raise SellAiBriefProviderContractError(
-                f"OpenAI output included duplicate veto ticker {ticker!r}"
-            )
-        seen_vetoes.add(ticker)
         candidate = candidate_by_ticker[ticker]
         sell_action = str(raw_veto.get("sell_action") or "").strip().upper()
         if sell_action != _candidate_sell_action(candidate):
@@ -654,12 +648,9 @@ def _normalize_openai_provider_result(
             {"ticker": ticker, "sell_action": sell_action, "reason": reason}
         )
     judgment_tickers = {str(row["ticker"]) for row in judgments}
-    veto_conflicts = sorted(
-        str(row.get("ticker") or "")
-        for row in vetoed_candidates
-        if str(row.get("ticker") or "") in judgment_tickers
-    )
-    if veto_conflicts:
+    if any(
+        str(row.get("ticker") or "") in judgment_tickers for row in vetoed_candidates
+    ):
         raise SellAiBriefProviderContractError(
             "OpenAI output included ticker in both judgments and vetoed_candidates"
         )
@@ -1082,12 +1073,18 @@ def _validate_provider_vetoed_candidates(
     *,
     candidate_by_ticker: Mapping[str, Mapping[str, object]],
 ) -> None:
+    seen_tickers: set[str] = set()
     for idx, candidate in enumerate(vetoed_candidates):
         ticker = str(candidate.get("ticker") or "").strip()
         if ticker not in candidate_by_ticker:
             raise SellAiBriefProviderContractError(
                 f"OpenAI output vetoed_candidates[{idx}].ticker must be actionable"
             )
+        if ticker in seen_tickers:
+            raise SellAiBriefProviderContractError(
+                "OpenAI output vetoed_candidates[].ticker must be unique"
+            )
+        seen_tickers.add(ticker)
         sell_action = str(candidate.get("sell_action") or "").strip().upper()
         if sell_action != _candidate_sell_action(candidate_by_ticker[ticker]):
             raise SellAiBriefProviderContractError(
