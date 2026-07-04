@@ -34,6 +34,7 @@
 .form select,
 .form textarea,
 .form button,
+.formActions button,
 .wrapper section button {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -53,11 +54,13 @@
 .form select:focus-visible,
 .form textarea:focus-visible,
 .form button:focus-visible,
+.formActions button:focus-visible,
 .wrapper section button:focus-visible {
   border-color: var(--line-focus);
 }
 
 .form button,
+.formActions button,
 .wrapper section button {
   background: var(--ink);
   color: var(--bg);
@@ -70,16 +73,19 @@
 }
 
 .form button:hover:not(:disabled),
+.formActions button:hover:not(:disabled),
 .wrapper section button:hover:not(:disabled) {
   opacity: 0.9;
 }
 
 .form button:active:not(:disabled),
+.formActions button:active:not(:disabled),
 .wrapper section button:active:not(:disabled) {
   transform: scale(0.98);
 }
 
 .form button:disabled,
+.formActions button:disabled,
 .wrapper section button:disabled {
   opacity: 0.65;
   cursor: progress;
@@ -133,6 +139,7 @@
   background: var(--bg);
   color: var(--ink);
   padding: var(--space-2) var(--space-3);
+  min-height: 44px;
   font: inherit;
 }
 
@@ -259,6 +266,11 @@
   max-width: 320px;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.updatedCell {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
 }
 
 .inlineActions {
@@ -435,16 +447,20 @@
   .tableWrap tr {
     border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
     border-radius: 10px;
-    padding: var(--space-2);
+    padding: var(--space-3);
     margin-bottom: var(--space-2);
     background: color-mix(in srgb, var(--panel) 82%, transparent);
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
+    gap: var(--space-2) var(--space-3);
   }
 
   .tableWrap td {
     border: 0;
     padding: 0;
-    margin: var(--space-1) 0 0;
+    margin: 0;
     white-space: normal;
+    min-width: 0;
   }
 
   .tableWrap td::before {
@@ -455,5 +471,44 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     margin-bottom: var(--space-1);
+  }
+
+  .tableWrap td[data-label="Ticker"] {
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .tableWrap td[data-label="Updated"] {
+    grid-column: 1 / span 2;
+  }
+
+  .tableWrap td[data-label="Action"] {
+    grid-column: 1 / -1;
+  }
+
+  .tableWrap .optionalEmptyCell {
+    display: none;
+  }
+
+  .inlineActions {
+    flex-wrap: wrap;
+  }
+
+  .inlineActions button {
+    min-width: 72px;
+  }
+}
+
+@media (max-width: 560px) {
+  .tableWrap tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tableWrap td[data-label="Ticker"] {
+    grid-column: 1 / -1;
+  }
+
+  .tableWrap td[data-label="Updated"] {
+    grid-column: 1 / -1;
   }
 }

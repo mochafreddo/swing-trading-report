@@ -3,6 +3,19 @@ import styles from "../holdings-client.module.css";
 import { isActiveHoldingQuantity } from "@/lib/holding-activity";
 import type { HoldingRecord } from "@/lib/types";
 
+function formatUpdatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
 interface HoldingsTableProps {
   items: HoldingRecord[];
   visibleItems: HoldingRecord[];
@@ -119,6 +132,10 @@ export function HoldingsTable({
             <tbody>
               {visibleItems.map((row) => {
                 const inactive = !isActiveHoldingQuantity(row.quantity);
+                const tagsValue = row.tags.join(", ");
+                const hasTags =
+                  tagsValue.length > 0 || Boolean(row.entry_pattern);
+                const updatedAt = formatUpdatedAt(row.updated_at);
                 return (
                   <tr
                     key={row.ticker}
@@ -134,19 +151,42 @@ export function HoldingsTable({
                       )}
                     </td>
                     <td data-label="Entry">{row.entry_price}</td>
-                    <td data-label="Date">{row.entry_date ?? "-"}</td>
-                    <td data-label="Notes" className={styles.notesCell}>
+                    <td
+                      data-label="Date"
+                      className={
+                        !row.entry_date ? styles.optionalEmptyCell : undefined
+                      }
+                    >
+                      {row.entry_date ?? "-"}
+                    </td>
+                    <td
+                      data-label="Notes"
+                      className={`${styles.notesCell} ${
+                        row.notes ? "" : styles.optionalEmptyCell
+                      }`}
+                    >
                       {row.notes ?? "-"}
                     </td>
-                    <td data-label="Tags">
-                      {row.tags.join(", ") || "-"}
+                    <td
+                      data-label="Tags"
+                      className={
+                        !hasTags ? styles.optionalEmptyCell : undefined
+                      }
+                    >
+                      {tagsValue || "-"}
                       {row.entry_pattern && (
                         <span className={styles.entryPatternMeta}>
                           Entry Pattern: {row.entry_pattern}
                         </span>
                       )}
                     </td>
-                    <td data-label="Updated">{row.updated_at}</td>
+                    <td
+                      data-label="Updated"
+                      className={styles.updatedCell}
+                      title={row.updated_at}
+                    >
+                      {updatedAt}
+                    </td>
                     <td data-label="Action">
                       <div className={styles.inlineActions}>
                         <button type="button" onClick={() => onEdit(row)}>
