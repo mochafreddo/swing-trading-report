@@ -45,6 +45,8 @@ mise.local.lock
 # Local docs
 /PLAN.md
 /BOILERPLATE.md
+*.local.md
+*.private.md
 
 # Local project data
 /.superpowers/
