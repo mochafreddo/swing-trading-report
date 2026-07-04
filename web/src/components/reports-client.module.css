@@ -509,8 +509,23 @@
     grid-template-columns: 1fr;
   }
 
+  .right {
+    order: -1;
+  }
+
   .sidebarPanel {
     position: static;
+  }
+
+  .detailPanel {
+    min-height: 0;
+  }
+
+  .list {
+    max-height: min(58svh, 32rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding-right: 0.15rem;
   }
 
   .metaGrid {

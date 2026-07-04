@@ -28,8 +28,8 @@
   background: transparent;
   color: var(--ink-muted);
   text-decoration: none;
-  padding: 0 0 0.55rem;
-  min-height: 32px;
+  padding: 0 0.1rem 0.55rem;
+  min-height: 44px;
   font-size: 0.8rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -93,7 +93,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--ink);
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 var(--space-4);
   font: inherit;
   font-size: 0.82rem;
@@ -135,5 +135,45 @@
   .link,
   .action {
     transition: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .container {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .row {
+    justify-content: flex-start;
+    gap: var(--space-2);
+  }
+
+  .nav {
+    flex: 1 1 100%;
+    gap: var(--space-2);
+  }
+
+  .link {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 var(--space-2);
+    border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    font-size: 0.76rem;
+  }
+
+  .link::after {
+    display: none;
+  }
+
+  .active {
+    border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+
+  .action {
+    width: 100%;
   }
 }

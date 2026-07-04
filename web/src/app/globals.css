@@ -492,10 +492,25 @@ a {
 @media (max-width: 680px) {
   .app-shell {
     padding-inline: 1rem;
+    padding-top: 1rem;
+  }
+
+  .top-bar {
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+    padding-bottom: var(--space-4);
   }
 
   .title {
-    font-size: clamp(2.2rem, 13vw, 3.4rem);
+    font-size: clamp(2rem, 10.5vw, 2.9rem);
+  }
+
+  .lede {
+    font-size: 1rem;
+  }
+
+  .header-note {
+    display: none;
   }
 
   .auth-title {
