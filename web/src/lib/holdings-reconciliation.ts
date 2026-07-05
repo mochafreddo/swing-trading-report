@@ -20,24 +20,24 @@ export type HoldingReconciliationField =
   | "stop_override"
   | "target_override";
 
-export interface HoldingCreateChange {
+interface HoldingCreateChange {
   ticker: string;
   after: HoldingReplaceSnapshot;
 }
 
-export interface HoldingUpdateChange {
+interface HoldingUpdateChange {
   ticker: string;
   before: HoldingSnapshot;
   after: HoldingReplaceSnapshot;
   changedFields: HoldingReconciliationField[];
 }
 
-export interface HoldingDeleteChange {
+interface HoldingDeleteChange {
   ticker: string;
   before: HoldingSnapshot;
 }
 
-export interface HoldingUnchangedChange {
+interface HoldingUnchangedChange {
   ticker: string;
   before: HoldingSnapshot;
   after: HoldingReplaceSnapshot;

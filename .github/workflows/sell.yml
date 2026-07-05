@@ -1,9 +1,6 @@
 name: Sell pipeline
 
 on:
-  schedule:
-    # Weekdays at 22:20 UTC (adjust to your market/strategy cadence)
-    - cron: "20 22 * * 1-5"
   workflow_dispatch:
     inputs:
       provider:
@@ -124,13 +121,6 @@ jobs:
               ;;
           esac
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
-
-      - name: Scheduled runtime_state preflight
-        if: github.event_name == 'schedule'
-        run: |
-          set -euo pipefail
-          echo "scheduled sell is disabled until marker-aware local upload is implemented" >&2
-          exit 1
 
       - name: Install dependencies
         run: |

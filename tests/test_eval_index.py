@@ -167,6 +167,46 @@ def test_choose_eval_index_uses_explicit_data_dir_over_env(monkeypatch, tmp_path
     assert dropped_explicit is False
 
 
+def test_choose_eval_index_reloads_us_holidays_when_cache_file_changes(
+    monkeypatch, tmp_path
+):
+    import sab.signals.eval_index as ei
+
+    monkeypatch.setattr(ei, "_US_HOLIDAYS_CACHE", {}, raising=False)
+    holidays_path = tmp_path / "holidays_us.json"
+    holidays_path.write_text(
+        json.dumps({"20260708": {"note": None, "is_open": True}}),
+        encoding="utf-8",
+    )
+    candles = _build_candles(
+        [
+            dt.date(2026, 7, 7),
+            dt.date(2026, 7, 8),
+        ]
+    )
+    now = dt.datetime(2026, 7, 8, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    idx_open, dropped_open = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=str(tmp_path),
+    )
+    holidays_path.write_text(
+        json.dumps({"20260708": {"note": "Emergency closure", "is_open": False}}),
+        encoding="utf-8",
+    )
+    idx_closed, dropped_closed = choose_eval_index(
+        candles,
+        meta={"currency": "USD"},
+        now=now,
+        data_dir=str(tmp_path),
+    )
+
+    assert (idx_open, dropped_open) == (0, True)
+    assert (idx_closed, dropped_closed) == (1, False)
+
+
 def test_choose_eval_index_us_intraday_without_today_keeps_last():
     # Simulate EOD-only data (last date < session date) during intraday.
     dates = [

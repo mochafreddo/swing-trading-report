@@ -12,7 +12,7 @@ export type CatchAllTickerRouteContext = {
       }>;
 };
 
-export function joinTickerPath(segments: string[]): string {
+function joinTickerPath(segments: string[]): string {
   return segments.join("/");
 }
 

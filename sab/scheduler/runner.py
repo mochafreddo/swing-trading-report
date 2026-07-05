@@ -964,7 +964,8 @@ class ScheduledAiBriefRunner:
                 runner_role,
             )
             return ScheduledAiBriefResult(status="invalid_scheduled_tick")
-        if not _is_within_role_window(
+        allow_manual_dry_run = request.dry_run and scheduled_tick == "manual"
+        if not allow_manual_dry_run and not _is_within_role_window(
             market=market, schedule_role=schedule_role, now=now
         ):
             return ScheduledAiBriefResult(status="off_window_noop")

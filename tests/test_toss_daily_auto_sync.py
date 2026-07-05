@@ -190,6 +190,36 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     assert "test-token" not in result.stdout
 
 
+def test_toss_daily_auto_sync_runner_escapes_job_token_in_curl_config(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "unchanged",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        env_file_text='TOSS_SYNC_JOB_TOKEN=line"one\\nsecond\\\\token\n',
+    )
+
+    assert result.returncode == 0
+    curl_config = _curl_stdin_recorder(recorder).read_text(encoding="utf-8")
+    assert 'Authorization: Bearer line\\"one\\\\nsecond\\\\\\\\token' in curl_config
+    assert 'Authorization: Bearer line"one' not in curl_config
+
+
 def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     tmp_path: Path,
 ) -> None:

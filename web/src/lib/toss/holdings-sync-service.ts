@@ -21,9 +21,9 @@ import type {
 } from "@/lib/types";
 import type { ReplaceAllHoldingsResult } from "@/lib/supabase/holdings";
 
-export type TossHoldingsSyncMode = "dry-run" | "apply";
+type TossHoldingsSyncMode = "dry-run" | "apply";
 
-export type ScheduledTossAutoSyncStatus =
+type ScheduledTossAutoSyncStatus =
   | "applied"
   | "unchanged"
   | "disabled"
@@ -77,15 +77,14 @@ export interface TossHoldingsSyncDependencies {
   ) => Promise<ReplaceAllHoldingsResult>;
 }
 
-export const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies =
-  {
-    fetchAllHoldings,
-    fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
-    listTickerDirectoryExactBaseCandidates,
-    replaceAllHoldings,
-  };
+const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
+  fetchAllHoldings,
+  fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
+  listTickerDirectoryExactBaseCandidates,
+  replaceAllHoldings,
+};
 
-export class TossHoldingsFixtureError extends Error {
+class TossHoldingsFixtureError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "TossHoldingsFixtureError";

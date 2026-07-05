@@ -27,10 +27,7 @@ const REPORT_PAGE_SIZE = 20;
 const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
 const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
 
-export type {
-  RecentBuyCandidate,
-  TickerDirectoryCandidate,
-} from "@/lib/ticker-directory-candidates";
+export type { TickerDirectoryCandidate } from "@/lib/ticker-directory-candidates";
 
 interface TickerDirectoryEntryV1 {
   ticker: string;
@@ -73,7 +70,7 @@ export interface RecentBuyCandidatesResponse {
   candidates: RecentBuyCandidate[];
 }
 
-export interface TickerDirectoryExactBaseCandidate {
+interface TickerDirectoryExactBaseCandidate {
   ticker: string;
   name: string | null;
 }
@@ -541,7 +538,7 @@ export function extractBuyCandidatesFromReport(
   return extractBuyCandidatesFromRows(rows);
 }
 
-export function extractRecentBuyCandidatesFromReport(
+function extractRecentBuyCandidatesFromReport(
   report: Record<string, unknown>,
 ): RecentBuyCandidate[] {
   const rows = Array.isArray(report.candidates) ? report.candidates : [];

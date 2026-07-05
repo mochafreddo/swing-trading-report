@@ -47,6 +47,15 @@ load_env_file() {
 
 load_env_file "${env_file}"
 
+curl_config_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "${value}"
+}
+
 normalize_timezone() {
   case "$1" in
     Asia/Seoul | KST)
@@ -101,6 +110,7 @@ if [[ -z "${TOSS_SYNC_JOB_TOKEN:-}" ]]; then
 fi
 job_token="${TOSS_SYNC_JOB_TOKEN}"
 unset TOSS_SYNC_JOB_TOKEN
+escaped_job_token="$(curl_config_escape "${job_token}")"
 
 python_bin="${TOSS_SYNC_PYTHON_BIN:-python3}"
 if ! command -v "${python_bin}" >/dev/null 2>&1; then
@@ -133,7 +143,7 @@ url = "${endpoint}"
 header = "Content-Type: application/json"
 header = "Accept: application/json"
 header = "Origin: ${base_url}"
-header = "Authorization: Bearer ${job_token}"
+header = "Authorization: Bearer ${escaped_job_token}"
 data = "{\"mode\":\"auto-apply\"}"
 CURL_CONFIG
 )"

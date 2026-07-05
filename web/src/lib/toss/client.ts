@@ -1,5 +1,6 @@
 import "server-only";
 
+import { FetchTimeoutError, fetchWithTimeout } from "@/lib/fetch-timeout";
 import type { TossHoldingsItem } from "@/lib/toss/holdings-sync";
 
 interface TossInvestConfig {
@@ -127,12 +128,20 @@ async function fetchTossJson(
     headers.set("X-Tossinvest-Account", options.account);
   }
 
-  const response = await fetch(makeUrl(config, path), {
-    method: options.method,
-    headers,
-    body: options.body,
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(String(makeUrl(config, path)), {
+      method: options.method,
+      headers,
+      body: options.body,
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof FetchTimeoutError) {
+      throw new TossInvestApiError("Toss Open API request timed out", 504);
+    }
+    throw error;
+  }
   const payload = await parseJsonResponse(response);
   if (!response.ok) {
     throw new TossInvestApiError(

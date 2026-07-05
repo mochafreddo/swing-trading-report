@@ -534,6 +534,9 @@ def test_scheduler_compose_has_one_shot_runner_service() -> None:
     assert "container_name" not in scheduler
     assert scheduler["env_file"] == ["${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}"]
     assert scheduler["command"] == "uv run python -m sab ai-brief-scheduled"
+    assert ".:/workspace:ro" in scheduler["volumes"]
+    assert "./data:/workspace/data" in scheduler["volumes"]
+    assert "./reports:/workspace/reports" in scheduler["volumes"]
 
 
 def test_launchd_verify_script_is_non_destructive() -> None:

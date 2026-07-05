@@ -32,7 +32,7 @@ export function normalizeCandidateName(value: unknown): string | null {
   return text ? text : null;
 }
 
-export function normalizeCandidatePattern(value: unknown): string | null {
+function normalizeCandidatePattern(value: unknown): string | null {
   const text = toCleanString(value);
   return isHoldingEntryPattern(text) ? text : null;
 }
@@ -99,7 +99,7 @@ export function extractBuyCandidatesFromRows(
   return results;
 }
 
-export function extractRecentBuyCandidateFromRow(
+function extractRecentBuyCandidateFromRow(
   row: unknown,
 ): RecentBuyCandidate | null {
   const candidate = extractBuyCandidateFromRow(row);

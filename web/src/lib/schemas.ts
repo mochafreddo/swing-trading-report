@@ -160,7 +160,7 @@ const toBooleanRefreshFlag = z.preprocess((value) => {
   return value;
 }, z.boolean().default(false));
 
-export const holdingTickerSchema = z
+const holdingTickerSchema = z
   .string()
   .trim()
   .min(1)

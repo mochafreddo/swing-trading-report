@@ -1,9 +1,6 @@
 name: Scan pipeline
 
 on:
-  schedule:
-    # Weekdays at 22:00 UTC (adjust to your market/strategy cadence)
-    - cron: "0 22 * * 1-5"
   workflow_dispatch:
     inputs:
       universe:
@@ -119,13 +116,6 @@ jobs:
             echo "markets=${markets}"
             echo "scan_universe_flag=${scan_universe_flag}"
           } >> "${GITHUB_OUTPUT}"
-
-      - name: Scheduled runtime_state preflight
-        if: github.event_name == 'schedule'
-        run: |
-          set -euo pipefail
-          echo "scheduled scan is disabled until marker-aware local upload is implemented" >&2
-          exit 1
 
       - name: Install dependencies
         run: |

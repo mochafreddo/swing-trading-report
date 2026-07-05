@@ -164,8 +164,8 @@ Holdings page before rerunning. Full setup and QA steps live in
 
 | Workflow | Normal Signal | Failure Start Point |
 | --- | --- | --- |
-| `scan.yml` | manual run uploads and indexes a report; scheduled trigger intentionally fails closed until marker-aware local upload is implemented | KIS credentials, provider availability, upload step, report `system_issues`; scheduled failure message |
-| `sell.yml` | manual run loads Supabase holdings then uploads a sell report; scheduled trigger intentionally fails closed until marker-aware local upload is implemented | holdings query, KIS/pykrx provider, upload step; scheduled failure message |
+| `scan.yml` | manual run uploads and indexes a report; no scheduled trigger until marker-aware local upload is implemented | KIS credentials, provider availability, upload step, report `system_issues` |
+| `sell.yml` | manual run loads Supabase holdings then uploads a sell report; no scheduled trigger until marker-aware local upload is implemented | holdings query, KIS/pykrx provider, upload step |
 | `ai-brief.yml` | manual artifact passes recommendation quality gate before Supabase upload and opt-in notifications; scheduled artifact/skip marker after runtime_state guard and quality gate | context resolve, runtime_state lock, source/model provider, recommendation quality gate, gated Supabase upload step |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |
 | `ci.yml` | Python and web checks green | first failing job logs |

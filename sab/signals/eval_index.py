@@ -32,7 +32,8 @@ class EvalContext:
     state: str
 
 
-_US_HOLIDAYS_CACHE: dict[str, dict[str, bool]] | None = None
+_HolidayCacheToken = tuple[int | None, int | None]
+_US_HOLIDAYS_CACHE: dict[str, tuple[_HolidayCacheToken, dict[str, bool]]] | None = None
 
 
 def _resolve_data_dir(data_dir: str | None) -> str:
@@ -47,11 +48,19 @@ def _load_us_holidays(data_dir: str | None = None) -> dict[str, bool]:
         _US_HOLIDAYS_CACHE = {}
 
     resolved_data_dir = os.path.abspath(_resolve_data_dir(data_dir))
+    path = os.path.join(resolved_data_dir, "holidays_us.json")
+    try:
+        stat = os.stat(path)
+        cache_token: _HolidayCacheToken = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        cache_token = (None, None)
+
     cached = _US_HOLIDAYS_CACHE.get(resolved_data_dir)
     if cached is not None:
-        return cached
+        cached_token, cached_holidays = cached
+        if cached_token == cache_token:
+            return cached_holidays
 
-    path = os.path.join(resolved_data_dir, "holidays_us.json")
     holidays: dict[str, bool] = {}
 
     # Seed with built-in US calendar.
@@ -69,7 +78,7 @@ def _load_us_holidays(data_dir: str | None = None) -> dict[str, bool]:
     except OSError, json.JSONDecodeError:
         pass
 
-    _US_HOLIDAYS_CACHE[resolved_data_dir] = holidays
+    _US_HOLIDAYS_CACHE[resolved_data_dir] = (cache_token, holidays)
     return holidays
 
 

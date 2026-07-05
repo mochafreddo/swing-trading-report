@@ -96,4 +96,19 @@ describe("Toss Open API client", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("converts outbound Toss request timeouts into API errors", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(
+        new DOMException("The operation timed out", "TimeoutError"),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDefaultTossHoldingsItems()).rejects.toMatchObject({
+      name: "TossInvestApiError",
+      status: 504,
+      message: "Toss Open API request timed out",
+    });
+  });
 });

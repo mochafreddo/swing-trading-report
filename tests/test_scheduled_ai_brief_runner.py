@@ -565,6 +565,30 @@ def test_off_window_candidate_exits_before_runtime_state_preflight() -> None:
     assert notifier.sent == []
 
 
+def test_manual_dry_run_preflights_even_outside_role_window() -> None:
+    runner, state, pipeline, storage, notifier = _runner(
+        now=dt.datetime(2026, 5, 28, 16, 0, tzinfo=dt.UTC)
+    )
+
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="github-fallback",
+            runner_role="github-fallback",
+            scheduled_tick="manual",
+            attempt_id="manual-dry-run",
+            dry_run=True,
+        )
+    )
+
+    assert result.status == "dry_run"
+    assert result.session_date == "2026-05-28"
+    assert state.preflight_calls == 1
+    assert pipeline.calls == []
+    assert storage.uploads == []
+    assert notifier.sent == []
+
+
 def test_github_fallback_runs_inside_bounded_queue_grace() -> None:
     storage = _FakeStorage(uploaded_generated_at="2026-05-28T09:27:00-04:00")
     runner, state, pipeline, storage, notifier = _runner(

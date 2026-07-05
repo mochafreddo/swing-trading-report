@@ -42,7 +42,7 @@ export interface TossHoldingDeleteChange {
   before: HoldingSnapshot;
 }
 
-export interface TossHoldingUnchangedChange {
+interface TossHoldingUnchangedChange {
   ticker: string;
   before: HoldingSnapshot;
   after: HoldingReplaceSnapshot;
@@ -67,7 +67,7 @@ export interface TossHoldingsDryRunResponse {
   targetRows: HoldingReplaceSnapshot[];
 }
 
-export class TossHoldingsSyncRequestError extends Error {
+class TossHoldingsSyncRequestError extends Error {
   status: number;
 
   constructor(message: string, status: number) {
@@ -77,7 +77,7 @@ export class TossHoldingsSyncRequestError extends Error {
   }
 }
 
-export async function requestTossHoldingsDryRun(
+async function requestTossHoldingsDryRun(
   fetcher: Fetcher = fetch,
 ): Promise<TossHoldingsDryRunResponse> {
   const response = await fetcher("/api/holdings/toss-sync", {
@@ -98,7 +98,7 @@ export async function requestTossHoldingsDryRun(
   return payload as TossHoldingsDryRunResponse;
 }
 
-export async function requestTossHoldingsApply(
+async function requestTossHoldingsApply(
   diffHash: string,
   fetcher: Fetcher = fetch,
 ): Promise<TossHoldingsDryRunResponse> {

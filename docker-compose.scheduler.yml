@@ -12,7 +12,7 @@ services:
       LOG_FORMAT: json
       LOG_TZ: utc
     volumes:
-      - .:/workspace
+      - .:/workspace:ro
       - ./.uv-cache:/workspace/.uv-cache
       - ./data:/workspace/data
       - ./reports:/workspace/reports
