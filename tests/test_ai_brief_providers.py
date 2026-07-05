@@ -191,6 +191,79 @@ def test_fake_provider_localizes_no_source_issue_message() -> None:
     ]
 
 
+def test_openai_drops_source_less_recommendation_with_model_source_issue() -> None:
+    candidate = _candidate("AAPL.NAS", role="recommendable")
+    candidate["sources"] = []
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["model says source is missing"],
+                        "checklist": ["manual source check"],
+                        "source_refs": [],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "code": "openai_no_sources",
+                        "severity": "WARN",
+                        "message": "모델이 소스 없음 문제를 보고함",
+                    }
+                ],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[candidate],
+        watch_candidates=[],
+    )
+
+    assert result.recommendations == []
+    assert [issue["code"] for issue in result.source_issues] == [
+        "openai_no_sources",
+        "model_unbacked_recommendation_dropped",
+    ]
+
+
+def test_openai_rejects_duplicate_recommendable_tickers_before_request() -> None:
+    session = _CapturingSession(
+        {
+            "recommendations": [],
+            "vetoed_candidates": [],
+            "watch_candidates": [],
+            "source_issues": [],
+        }
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="unique"):
+        provider.build_recommendations(
+            recommendable_candidates=[
+                _candidate("AAPL.NAS", role="recommendable"),
+                _candidate("AAPL.NAS", role="recommendable"),
+            ],
+            watch_candidates=[],
+        )
+
+    assert session.requests == []
+
+
 def test_fake_provider_rationale_uses_ai_role_reason_for_promoted_candidates() -> None:
     provider = FakeAiBriefProvider(model_name="fake-ai-brief-v1")
 
@@ -476,7 +549,7 @@ def test_openai_normalized_rows_preserve_validated_source_refs() -> None:
     assert result.watch_candidates[0]["source_refs"] == ["MSFT.NAS:1"]
 
 
-def test_openai_payload_keeps_same_ticker_candidate_sources_distinct() -> None:
+def test_openai_payload_rejects_same_ticker_candidate_sources_before_request() -> None:
     first_candidate = _candidate("AAPL.NAS", role="recommendable")
     second_candidate = _candidate("AAPL.NAS", role="recommendable", action="REVIEW")
     first_candidate["sources"] = [
@@ -508,21 +581,13 @@ def test_openai_payload_keeps_same_ticker_candidate_sources_distinct() -> None:
         session=session,
     )
 
-    provider.build_recommendations(
-        recommendable_candidates=[first_candidate, second_candidate],
-        watch_candidates=[],
-    )
+    with pytest.raises(AiBriefProviderContractError, match="unique"):
+        provider.build_recommendations(
+            recommendable_candidates=[first_candidate, second_candidate],
+            watch_candidates=[],
+        )
 
-    request = session.requests[0]["json"]
-    assert isinstance(request, dict)
-    user_payload = json.loads(str(request["input"][1]["content"]))
-    model_candidates = user_payload["recommendable_candidates"]
-    assert [row["sources"][0]["title"] for row in model_candidates] == [
-        "first candidate source",
-        "second candidate source",
-    ]
-    source_ids = [row["sources"][0]["source_id"] for row in model_candidates]
-    assert source_ids[0] != source_ids[1]
+    assert session.requests == []
 
 
 def test_openai_timeout_error_carries_trace_metadata() -> None:

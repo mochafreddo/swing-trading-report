@@ -38,11 +38,11 @@ audit: audit-python audit-web
 
 audit-python:
   uv export --quiet --locked --all-extras --all-groups --no-emit-project --output-file {{python_audit_requirements}}
-  pip-audit --disable-pip -r {{python_audit_requirements}}
+  uv run pip-audit --disable-pip -r {{python_audit_requirements}}
 
 audit-python-osv:
   uv export --quiet --locked --all-extras --all-groups --no-emit-project --output-file {{python_audit_requirements}}
-  pip-audit --disable-pip -s osv -r {{python_audit_requirements}}
+  uv run pip-audit --disable-pip -s osv -r {{python_audit_requirements}}
 
 audit-web:
   {{web_tool_path}} pnpm --dir web audit --audit-level low

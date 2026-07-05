@@ -514,6 +514,12 @@ describe("holding mutations alias handling", () => {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([holdingRow({ ticker: "BRK/B.NYS" })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
       );
 
     const updated = await updateHolding("BRK/B.NYS", {
@@ -522,12 +528,44 @@ describe("holding mutations alias handling", () => {
     });
 
     expect(updated?.ticker).toBe("BRK/B.NYS");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    const thirdUrl = new URL(String(fetchMock.mock.calls[2]?.[0]));
     expect(firstUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
     expect(secondUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+    expect(thirdUrl.searchParams.get("ticker")).toBe("eq.BRK/B.NYS");
+  });
+
+  it("updateHolding blocks ticker rename when another row already uses an alias", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([holdingRow({ ticker: "AAPL.NAS" })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([holdingRow({ ticker: "BRK/B.NYS" })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    await expect(
+      updateHolding("AAPL.NAS", {
+        ticker: "BRK.B.NYS",
+        quantity: 1,
+        entry_price: 450,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "Holding 'BRK/B.NYS' already exists",
+    } satisfies Partial<SupabaseApiError>);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("updateHolding clears entry pattern when quantity is zero", async () => {

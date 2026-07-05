@@ -357,6 +357,7 @@ class OpenAiBriefProvider:
                 expected_watch_tickers=expected_watch_tickers,
                 source_urls_by_ticker=_source_urls_by_ticker(recommendable_candidates),
                 watch_source_urls_by_ticker=_source_urls_by_ticker(watch_candidates),
+                trusted_source_issue_tickers=set(),
             )
         except AiBriefProviderContractError as exc:
             if exc.trace_metadata is None:
@@ -731,7 +732,7 @@ def _normalize_openai_provider_result(
     source_issues = _as_provider_mapping_rows(
         parsed.get("source_issues"), field_name="source_issues"
     )
-    source_issue_tickers = _provider_source_issue_tickers(source_issues)
+    trusted_source_issue_tickers: set[str] = set()
     raw_recommendations = _as_provider_mapping_rows(
         parsed.get("recommendations"), field_name="recommendations"
     )
@@ -773,7 +774,7 @@ def _normalize_openai_provider_result(
                 )
             )
             continue
-        if not sources and ticker not in source_issue_tickers:
+        if not sources and ticker not in trusted_source_issue_tickers:
             source_issues.append(
                 _model_source_issue(
                     ticker=ticker,
@@ -1229,11 +1230,34 @@ def _candidate_role_ticker_sets(
     recommendable_candidates: list[dict[str, object]],
     watch_candidates: list[dict[str, object]],
 ) -> tuple[set[str], set[str]]:
+    _validate_unique_candidate_tickers(
+        recommendable_candidates,
+        field_name="recommendable_candidates",
+    )
+    _validate_unique_candidate_tickers(
+        watch_candidates,
+        field_name="watch_candidates",
+    )
     eligible_tickers = _candidate_ticker_set(recommendable_candidates)
     watch_tickers = _candidate_ticker_set(watch_candidates)
     if eligible_tickers & watch_tickers:
         raise AiBriefProviderContractError("candidate ticker roles must be disjoint")
     return eligible_tickers, watch_tickers
+
+
+def _validate_unique_candidate_tickers(
+    candidates: list[dict[str, object]],
+    *,
+    field_name: str,
+) -> None:
+    seen_tickers: set[str] = set()
+    for candidate in candidates:
+        ticker = str(candidate.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        if ticker in seen_tickers:
+            raise AiBriefProviderContractError(f"{field_name}[].ticker must be unique")
+        seen_tickers.add(ticker)
 
 
 def _candidate_ticker_set(candidates: list[dict[str, object]]) -> set[str]:
@@ -1316,6 +1340,7 @@ def _validate_provider_result_contract(
     expected_watch_tickers: list[str] | None = None,
     source_urls_by_ticker: dict[str, set[str]] | None = None,
     watch_source_urls_by_ticker: dict[str, set[str]] | None = None,
+    trusted_source_issue_tickers: set[str] | None = None,
 ) -> None:
     if len(result.recommendations) > RECOMMENDATION_LIMIT:
         raise AiBriefProviderContractError(
@@ -1336,7 +1361,11 @@ def _validate_provider_result_contract(
         now=now,
         source_urls_by_ticker=watch_source_urls_by_ticker,
     )
-    source_issue_tickers = _provider_source_issue_tickers(result.source_issues)
+    source_issue_tickers = (
+        _provider_source_issue_tickers(result.source_issues)
+        if trusted_source_issue_tickers is None
+        else trusted_source_issue_tickers
+    )
     seen_ranks: set[int] = set()
     ranks: list[int] = []
     for idx, recommendation in enumerate(result.recommendations):

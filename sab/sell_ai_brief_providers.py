@@ -285,6 +285,7 @@ class OpenAiSellAiBriefProvider:
                 result,
                 candidate_by_ticker=_candidate_by_ticker(actionable_candidates),
                 source_urls_by_ticker=_source_urls_by_ticker(actionable_candidates),
+                trusted_source_issue_tickers=set(),
             )
         except SellAiBriefProviderContractError as exc:
             if exc.trace_metadata is None:
@@ -553,7 +554,7 @@ def _normalize_openai_provider_result(
         parsed.get("source_issues"),
         field_name="source_issues",
     )
-    source_issue_tickers = _provider_source_issue_tickers(source_issues)
+    trusted_source_issue_tickers: set[str] = set()
     judgments: list[dict[str, object]] = []
     seen_judgments: set[str] = set()
     for raw_judgment in _as_provider_mapping_rows(
@@ -600,7 +601,7 @@ def _normalize_openai_provider_result(
                 )
             )
             continue
-        if not sources and ticker not in source_issue_tickers:
+        if not sources and ticker not in trusted_source_issue_tickers:
             source_issues.append(
                 _model_source_issue(
                     ticker=ticker,
@@ -883,6 +884,7 @@ def _validate_provider_result_contract(
     *,
     candidate_by_ticker: Mapping[str, Mapping[str, object]],
     source_urls_by_ticker: Mapping[str, set[str]],
+    trusted_source_issue_tickers: set[str] | None = None,
 ) -> None:
     if len(result.judgments) > PRESELECTION_LIMIT:
         raise SellAiBriefProviderContractError(
@@ -897,7 +899,11 @@ def _validate_provider_result_contract(
         result,
         candidate_by_ticker=candidate_by_ticker,
     )
-    source_issue_tickers = _provider_source_issue_tickers(result.source_issues)
+    source_issue_tickers = (
+        _provider_source_issue_tickers(result.source_issues)
+        if trusted_source_issue_tickers is None
+        else trusted_source_issue_tickers
+    )
     seen_tickers: set[str] = set()
     now = dt.datetime.now().astimezone()
     for idx, judgment in enumerate(result.judgments):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -20,6 +21,11 @@ from sab.report.supabase_storage import SupabaseReportIndexError
 from sab.scan import run_scan
 from sab.sell import _resolve_sell_target_bars, run_sell
 from sab.signals.sell_rules import SellEvaluation
+
+
+def _write_json_artifact(path: Path, payload: dict[str, Any]) -> str:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return str(path)
 
 
 @pytest.mark.parametrize(
@@ -669,14 +675,22 @@ def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
         screener_only=False,
     )
 
+    report_path = tmp_path / "2026-02-19.buy.json"
+
+    def _write_scan_report(**kwargs: Any) -> str:
+        return _write_json_artifact(
+            report_path,
+            {
+                "issues": list(kwargs.get("failures") or []),
+                "system_issues": list(kwargs.get("system_issues") or []),
+            },
+        )
+
     with (
         patch("sab.scan.load_config", return_value=cfg),
         patch("sab.scan.load_watchlist", return_value=["005930"]),
         patch("sab.market_data_common.KISClient", _FakeKISClient),
-        patch(
-            "sab.scan.write_report",
-            return_value=str(tmp_path / "2026-02-19.buy.md"),
-        ),
+        patch("sab.scan.write_report", side_effect=_write_scan_report),
         patch(
             "sab.scan.maybe_upload_report_artifact",
             side_effect=SupabaseReportIndexError(
@@ -694,6 +708,11 @@ def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
         )
 
     assert code == 1
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert any(
+        "Supabase upload failed: index down" in issue
+        for issue in report["system_issues"]
+    )
 
 
 def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:
@@ -708,14 +727,19 @@ def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
         holdings=_build_holdings(["005930"]),
     )
 
+    report_path = tmp_path / "2026-02-19.sell.json"
+
+    def _write_sell_report(**kwargs: Any) -> str:
+        return _write_json_artifact(
+            report_path,
+            {"issues": list(kwargs.get("failures") or [])},
+        )
+
     with (
         patch("sab.sell.load_config", return_value=cfg),
         patch("sab.market_data_common.KISClient", _FakeKISClient),
         patch("sab.sell.resolve_fx_rate", return_value=(None, None, [])),
-        patch(
-            "sab.sell.write_sell_report",
-            return_value=str(tmp_path / "2026-02-19.sell.md"),
-        ),
+        patch("sab.sell.write_sell_report", side_effect=_write_sell_report),
         patch(
             "sab.sell.maybe_upload_report_artifact",
             side_effect=SupabaseReportIndexError(
@@ -727,6 +751,10 @@ def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
         code = run_sell(provider=None)
 
     assert code == 1
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert any(
+        "Supabase upload failed: index down" in issue for issue in report["issues"]
+    )
 
 
 def test_run_scan_returns_1_when_unexpected_ticker_evaluation_error_occurs(

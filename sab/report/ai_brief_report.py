@@ -600,7 +600,10 @@ def _article_read_summary_counts(payload: Mapping[str, Any]) -> dict[str, int]:
         issue_code = str(raw_read.get("issue_code") or "").strip()
         if status != "not_attempted":
             counts["article_read_attempted_count"] += 1
-        if status == "accessed" or tier == "article_accessed":
+        if status in {"accessed", "verified"} or tier in {
+            "article_accessed",
+            "article_verified",
+        }:
             counts["article_accessed_count"] += 1
         if status == "verified" or tier == "article_verified":
             counts["article_verified_count"] += 1

@@ -10,9 +10,11 @@ import {
   LoginThrottleError,
   recordLoginAttemptFailure,
 } from "@/lib/login-throttle";
+import { quotePostgrestValue } from "@/lib/postgrest-filter";
 
 afterEach(() => {
   __resetLoginThrottleForTests();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
@@ -22,6 +24,15 @@ describe("login-throttle", () => {
     expect(buildLoginThrottleKey("")).toBe("user:unknown");
     expect(buildGlobalLoginThrottleKey()).toBe("__global__");
     expect(buildLoginThrottleKey("__global__")).toBe("user:__global__");
+  });
+
+  it("does not include raw malformed usernames in throttle keys", () => {
+    const username = `${"A".repeat(300)}\nadmin@example.com,role.eq.owner`;
+    const key = buildLoginThrottleKey(username);
+
+    expect(key).toMatch(/^user-sha256:[a-f0-9]{64}$/);
+    expect(key).not.toContain(username.trim().toLowerCase());
+    expect(key.length).toBeLessThanOrEqual(80);
   });
 
   it("blocks after max failed attempts", async () => {
@@ -210,9 +221,16 @@ describe("login-throttle", () => {
 
       if (url.pathname.endsWith("/rest/v1/runtime_state")) {
         const stateKeyFilter = url.searchParams.get("state_key") ?? "";
-        const stateKey = stateKeyFilter.startsWith("eq.")
+        const rawStateKey = stateKeyFilter.startsWith("eq.")
           ? stateKeyFilter.slice(3)
           : "";
+        const stateKey =
+          rawStateKey.startsWith('"') && rawStateKey.endsWith('"')
+            ? rawStateKey
+                .slice(1, -1)
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, "\\")
+            : rawStateKey;
 
         if (method === "GET") {
           const row = runtimeState.get(stateKey);
@@ -246,6 +264,35 @@ describe("login-throttle", () => {
     await expect(
       assertLoginAttemptAllowed(key, now + 2_500),
     ).rejects.toBeInstanceOf(LoginThrottleError);
+  });
+
+  it("quotes runtime-state equality filters for special-character throttle keys", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_RUNTIME_STATE_STORE", "supabase");
+    vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+
+    const key = buildLoginThrottleKey('Alice "Admin" \\ Ops');
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await assertLoginAttemptAllowed(key, 1_700_000_000_000);
+
+    const url = fetchMock.mock.calls
+      .map(([input]) => new URL(String(input)))
+      .find((candidate) =>
+        candidate.pathname.endsWith("/rest/v1/runtime_state"),
+      );
+    if (!url) {
+      throw new Error("Expected runtime_state request");
+    }
+    expect(url.searchParams.get("state_key")).toBe(
+      `eq.${quotePostgrestValue(`login_throttle:${key}`)}`,
+    );
   });
 
   it("ignores stale-state cleanup failure in supabase mode", async () => {

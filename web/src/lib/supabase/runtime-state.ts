@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSupabaseEnv } from "@/lib/env.server";
+import { quotePostgrestValue } from "@/lib/postgrest-filter";
 import {
   buildAuthHeaders,
   fetchSupabase,
@@ -91,7 +92,7 @@ export async function fetchRuntimeStateEntry(
   const env = getSupabaseEnv();
   const query = new URLSearchParams({
     select: RUNTIME_STATE_SELECT,
-    state_key: `eq.${key}`,
+    state_key: `eq.${quotePostgrestValue(key)}`,
     limit: "1",
   });
   const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
@@ -146,7 +147,7 @@ export async function upsertRuntimeStateEntry(
 export async function deleteRuntimeStateEntry(key: string): Promise<void> {
   const env = getSupabaseEnv();
   const query = new URLSearchParams({
-    state_key: `eq.${key}`,
+    state_key: `eq.${quotePostgrestValue(key)}`,
   });
   const url = `${env.SUPABASE_URL}/rest/v1/runtime_state?${query.toString()}`;
   const response = await fetchSupabase(url, {

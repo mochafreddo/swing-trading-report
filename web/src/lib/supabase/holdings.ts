@@ -332,6 +332,18 @@ async function fetchHoldingByExactTicker(
   return payload[0] as HoldingRecord;
 }
 
+async function fetchHoldingByAnyTickerAlias(
+  ticker: string,
+): Promise<HoldingRecord | null> {
+  for (const alias of buildHoldingTickerAliases(ticker)) {
+    const existing = await fetchHoldingByExactTicker(alias);
+    if (existing) {
+      return existing;
+    }
+  }
+  return null;
+}
+
 async function patchHoldingByExactTicker(
   ticker: string,
   patch: HoldingMutationInput,
@@ -402,14 +414,12 @@ export async function createHolding(
 ): Promise<HoldingRecord> {
   const ticker = typeof input.ticker === "string" ? input.ticker : "";
   if (ticker) {
-    for (const alias of buildHoldingTickerAliases(ticker)) {
-      const existing = await fetchHoldingByExactTicker(alias);
-      if (existing) {
-        throw new SupabaseApiError(
-          `Holding '${existing.ticker}' already exists`,
-          409,
-        );
-      }
+    const existing = await fetchHoldingByAnyTickerAlias(ticker);
+    if (existing) {
+      throw new SupabaseApiError(
+        `Holding '${existing.ticker}' already exists`,
+        409,
+      );
     }
   }
 
@@ -447,6 +457,27 @@ export async function updateHolding(
   ticker: string,
   patch: HoldingMutationInput,
 ): Promise<HoldingRecord | null> {
+  if (typeof patch.ticker === "string" && patch.ticker) {
+    const target = await fetchHoldingByAnyTickerAlias(ticker);
+    if (target) {
+      const targetAliases = new Set(buildHoldingTickerAliases(target.ticker));
+      const patchAliases = buildHoldingTickerAliases(patch.ticker);
+      const isSameLogicalTicker = patchAliases.some((alias) =>
+        targetAliases.has(alias),
+      );
+      if (!isSameLogicalTicker) {
+        const existing = await fetchHoldingByAnyTickerAlias(patch.ticker);
+        if (existing && !targetAliases.has(existing.ticker)) {
+          throw new SupabaseApiError(
+            `Holding '${existing.ticker}' already exists`,
+            409,
+          );
+        }
+      }
+      return patchHoldingByExactTicker(target.ticker, patch);
+    }
+  }
+
   for (const alias of buildHoldingTickerAliases(ticker)) {
     const updated = await patchHoldingByExactTicker(alias, patch);
     if (updated) {

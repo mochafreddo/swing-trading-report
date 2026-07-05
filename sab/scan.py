@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from .fx import resolve_fx_rate
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import ScanMarketData
 from .observability import current_run_id
+from .report.artifact_update import append_report_issues
 from .report.markdown import write_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .scan_types import (
@@ -322,6 +324,26 @@ def run_scan(
     except SupabaseStorageError as exc:
         _record_system_issue(runtime, f"Supabase upload failed: {exc}")
         runtime.fatal_failure = True
+        try:
+            append_report_issues(
+                out_path,
+                issues=runtime.failures,
+                system_issues=runtime.system_issues,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as update_exc:
+            runtime.logger.warning(
+                "Failed to update scan report after upload failure: %s",
+                update_exc,
+                extra={
+                    "event": "scan_upload_failure_report_update_failed",
+                    "operation": "scan",
+                    "run_id": run_id,
+                    "report_path": out_path,
+                    "report_type": "buy",
+                    "status": "failed",
+                    "error_type": type(update_exc).__name__,
+                },
+            )
         runtime.logger.error(
             "Supabase report upload failed: %s",
             exc,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 
 from . import sell_evaluation, sell_runtime
@@ -12,6 +13,7 @@ from .holdings_loader import HoldingsData, HoldingsLoadError, load_holdings
 from .market_data_common import build_market_data_dependencies
 from .market_data_service import SellMarketData
 from .observability import current_run_id
+from .report.artifact_update import append_report_issues
 from .report.sell_report import SellReportRow, write_sell_report
 from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
 from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_suffix
@@ -204,6 +206,22 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     except SupabaseStorageError as exc:
         runtime.failures.append(f"Supabase upload failed: {exc}")
         runtime.fatal_failure = True
+        try:
+            append_report_issues(out_path, issues=runtime.failures)
+        except (OSError, ValueError, json.JSONDecodeError) as update_exc:
+            logger.warning(
+                "Failed to update sell report after upload failure: %s",
+                update_exc,
+                extra={
+                    "event": "sell_upload_failure_report_update_failed",
+                    "operation": "sell",
+                    "run_id": run_id,
+                    "report_path": out_path,
+                    "report_type": "sell",
+                    "status": "failed",
+                    "error_type": type(update_exc).__name__,
+                },
+            )
         logger.error(
             "Supabase report upload failed: %s",
             exc,

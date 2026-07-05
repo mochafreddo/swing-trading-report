@@ -47,16 +47,14 @@ def test_scheduled_sell_checks_runtime_state_before_holdings_and_provider_execut
     )
 
 
-def test_scheduled_sell_telegram_sender_keeps_token_out_of_shell_argv() -> None:
+def test_sell_workflow_has_no_unreachable_schedule_notifications() -> None:
     workflow = _load_workflow(".github/workflows/sell.yml")
     steps = workflow["jobs"]["sell"]["steps"]
-    telegram = steps[_step_index(steps, "Send Telegram notification (schedule only)")]
-    run = telegram["run"]
 
-    assert "curl" not in run
-    assert "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}" not in run
-    assert "urllib.request.Request" in run
-    assert 'os.environ["TELEGRAM_BOT_TOKEN"]' in run
+    step_names = {str(step.get("name") or "") for step in steps}
+    assert "Build notification summary" not in step_names
+    assert "Send Telegram notification (schedule only)" not in step_names
+    assert "Send Slack notification (schedule only)" not in step_names
 
 
 def test_sell_workflow_dispatch_exposes_sell_ai_brief_inputs() -> None:

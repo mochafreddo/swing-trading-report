@@ -9,9 +9,12 @@
 
 ### 결정
 
-- `scan`/`sell` 자동 실행은 **GitHub Actions `schedule`** 로 수행한다.
+- `scan`/`sell` GitHub Actions workflow는 현재 manual-only `workflow_dispatch`로
+  운영한다.
+- scheduled `scan`/`sell`은 marker-aware fallback 설계 전까지 fail closed로
+  두며, schedule 전용 Telegram/Slack 요약 알림도 제공하지 않는다.
 - 실행 결과(리포트/이력/보유 목록)는 **Supabase(Postgres/Storage)** 를 단일 소스로 저장한다.
-- 요약 알림은 **텔레그램**으로 전송하며, **자동 실행일 때만** 전송한다.
+- 요약 알림은 명시적으로 지원되는 수동/스케줄 경로에서만 전송한다.
 - 워크플로우 실패/에러 알림은 GitHub Actions 기본 알림(Notifications/메일/모바일 푸시)으로 수신한다.
 
 ### 결과/영향
@@ -27,4 +30,5 @@
 ### 후속 결정
 
 - 2026-05-28 [ADR-0012](ADR-0012-local-docker-scheduled-runs.md)가 시간 민감한 장전 AI Brief scheduled 실행에 한해 이 결정을 부분 대체했습니다.
-- `scan`/`sell` 및 비시간 민감 자동화는 별도 ADR 전까지 이 결정의 GitHub Actions + Supabase 구조를 유지합니다.
+- `scan`/`sell`은 별도 ADR 전까지 GitHub Actions + Supabase 구조를 유지하되,
+  workflow trigger는 manual-only로 둡니다.

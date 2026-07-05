@@ -32,6 +32,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GITHUB_ACTIONS",
         "CI",
         "MIN_DOLLAR_VOLUME",
+        "MIN_PRICE",
         "RS_BENCHMARK_RETURN",
         "RS_BENCHMARK_TICKER_KR",
         "RS_BENCHMARK_TICKER_US",
@@ -40,6 +41,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "HYBRID_RSI_OVERSOLD_LOW",
         "HYBRID_RSI_OVERSOLD_HIGH",
         "HYBRID_BREAKOUT_CONS_MAX_RANGE_PCT",
+        "HYBRID_SELL_STOP_LOSS_PCT_MIN",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -103,6 +105,61 @@ def test_load_config_strict_mode_rejects_invalid_numeric_threshold(
     monkeypatch.setenv("MIN_DOLLAR_VOLUME", "not-a-number")
 
     with pytest.raises(ConfigLoadError, match="Strict config parsing failed"):
+        load_config()
+
+
+@pytest.mark.parametrize(
+    ("env_key", "yaml_text", "error_pattern"),
+    [
+        ("MIN_DOLLAR_VOLUME", "", "MIN_DOLLAR_VOLUME"),
+        ("MIN_PRICE", "", "MIN_PRICE"),
+        (
+            "HYBRID_SELL_STOP_LOSS_PCT_MIN",
+            "",
+            "HYBRID_SELL_STOP_LOSS_PCT_MIN",
+        ),
+        (
+            "",
+            "screener:\n  min_dollar_volume: not-a-number\n",
+            r"screener\.min_dollar_volume",
+        ),
+        ("", "screener:\n  min_price: not-a-number\n", r"screener\.min_price"),
+        (
+            "",
+            "screener:\n  us:\n    min_dollar_volume: not-a-number\n",
+            r"screener\.us\.min_dollar_volume",
+        ),
+        (
+            "",
+            "screener:\n  us:\n    min_price: not-a-number\n",
+            r"screener\.us\.min_price",
+        ),
+        (
+            "",
+            "sell:\n  hybrid:\n    stop_loss_pct_min: not-a-number\n",
+            r"sell\.hybrid\.stop_loss_pct_min",
+        ),
+    ],
+)
+def test_load_config_rejects_explicit_invalid_numeric_threshold_without_strict(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    env_key: str,
+    yaml_text: str,
+    error_pattern: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text or "{}\n", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+    if env_key:
+        monkeypatch.setenv(env_key, "not-a-number")
+
+    with pytest.raises(ConfigLoadError, match=error_pattern):
         load_config()
 
 

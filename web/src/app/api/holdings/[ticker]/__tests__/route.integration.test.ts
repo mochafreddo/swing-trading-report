@@ -133,12 +133,26 @@ describe("/api/holdings/[ticker] integration", () => {
   });
 
   it("PATCH forwards normalized ticker rename payload", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify([{ ticker: "MSFT.NAS", quantity: 2 }]), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "AAPL.NAS", quantity: 1 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "MSFT.NAS", quantity: 2 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
 
     const response = await PATCH(
       makePatchRequest(
@@ -153,12 +167,16 @@ describe("/api/holdings/[ticker] integration", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ticker).toBe("MSFT.NAS");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
 
-    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const originalLookupUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const collisionLookupUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    const requestUrl = new URL(String(fetchSpy.mock.calls[2]?.[0]));
+    expect(originalLookupUrl.searchParams.get("ticker")).toBe("eq.AAPL.NAS");
+    expect(collisionLookupUrl.searchParams.get("ticker")).toBe("eq.MSFT.NAS");
     expect(requestUrl.searchParams.get("ticker")).toBe("eq.AAPL.NAS");
 
-    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const requestInit = fetchSpy.mock.calls[2]?.[1] as RequestInit;
     const requestBody = JSON.parse(String(requestInit.body)) as {
       ticker: string;
       quantity: number;
@@ -172,12 +190,20 @@ describe("/api/holdings/[ticker] integration", () => {
   });
 
   it("PATCH keeps class ticker dot notation as canonical in request body", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify([{ ticker: "BRK.B.NYS", quantity: 2 }]), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK.B.NYS", quantity: 1 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ ticker: "BRK.B.NYS", quantity: 2 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
 
     const response = await PATCH(
       makePatchRequest(
@@ -192,12 +218,14 @@ describe("/api/holdings/[ticker] integration", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ticker).toBe("BRK.B.NYS");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
 
-    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const originalLookupUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    const requestUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    expect(originalLookupUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
     expect(requestUrl.searchParams.get("ticker")).toBe("eq.BRK.B.NYS");
 
-    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const requestInit = fetchSpy.mock.calls[1]?.[1] as RequestInit;
     const requestBody = JSON.parse(String(requestInit.body)) as {
       ticker: string;
       quantity: number;

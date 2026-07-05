@@ -22,7 +22,7 @@
 - 로컬 scheduler는 host scheduler(`launchd` 권장)가 one-shot Docker container를 실행하는 구조를 우선합니다.
   - container 내부 cron보다 host scheduler가 재부팅/로그/권한 관리가 명확합니다.
   - Docker container는 `sab scan -> sab entry -> sab ai-brief`를 한 번 수행하고, 최종 AI Brief artifact upload와 필수 Telegram schedule notification까지 처리한 뒤 종료합니다.
-- 이 결정은 ADR-0005의 "자동 실행은 GitHub Actions schedule" 결정을 **장전 AI Brief scheduled 실행에 한해 부분 대체**합니다. `scan`/`sell` 및 비시간 민감 자동화는 별도 결정 전까지 ADR-0005를 따릅니다.
+- 이 결정은 ADR-0005의 GitHub Actions + Supabase 자동화 결정을 **장전 AI Brief scheduled 실행에 한해 부분 대체**합니다. `scan`/`sell` scheduled workflow는 현재 제공하지 않습니다.
 
 ### 목표
 
