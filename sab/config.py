@@ -296,7 +296,10 @@ class Config:
     entry_fatal_missing_price_ratio: float = 0.0
 
 
-def _normalize_kis_base(url: str | None) -> str | None:
+_VALID_UNIVERSE_MARKETS = frozenset({"KR", "US"})
+
+
+def _normalize_kis_base(url: str | None, *, source: str = "kis.base_url") -> str | None:
     if not url:
         return None
 
@@ -312,13 +315,46 @@ def _normalize_kis_base(url: str | None) -> str | None:
         return url.rstrip("/")
 
     host = parsed.hostname.lower()
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as err:
+        raise ConfigLoadError(
+            f"Invalid config value '{source}': URL port is invalid ({url!r})."
+        ) from err
     if port is None:
         port = 29443 if "openapivts" in host else 9443
 
     netloc = parsed.hostname if port in (80, 443) else f"{parsed.hostname}:{port}"
     normalized = f"{parsed.scheme}://{netloc}"
     return normalized.rstrip("/")
+
+
+def _normalize_universe_markets(raw_markets: Any, *, source: str) -> list[str]:
+    if not isinstance(raw_markets, list):
+        raise ConfigLoadError(
+            f"Invalid config value '{source}': must be a list of KR/US markets."
+        )
+
+    markets: list[str] = []
+    for idx, raw_market in enumerate(raw_markets):
+        market = str(raw_market).strip().upper()
+        if not market:
+            raise ConfigLoadError(
+                f"Invalid config value '{source}[{idx}]': market must not be blank."
+            )
+        if market not in _VALID_UNIVERSE_MARKETS:
+            raise ConfigLoadError(
+                f"Invalid config value '{source}[{idx}]': unsupported market "
+                f"{raw_market!r}; expected one of KR, US."
+            )
+        if market not in markets:
+            markets.append(market)
+
+    if not markets:
+        raise ConfigLoadError(
+            f"Invalid config value '{source}': must contain at least one market."
+        )
+    return markets
 
 
 _BOOL_TRUE_VALUES = frozenset({"1", "true", "yes", "y", "on"})
@@ -746,24 +782,22 @@ def _parse_data_section(
     watchlist_path = parser.env_str("WATCHLIST_FILE", "files.watchlist", None)
 
     if markets_override is not None:
-        universe_markets = [
-            market.strip().upper() for market in markets_override if market.strip()
-        ]
+        universe_markets = _normalize_universe_markets(
+            markets_override,
+            source="markets_override",
+        )
     else:
         markets_env = getenv("UNIVERSE_MARKETS")
         if markets_env is not None:
-            universe_markets = [
-                market.strip().upper()
-                for market in markets_env.split(",")
-                if market.strip()
-            ]
+            universe_markets = _normalize_universe_markets(
+                markets_env.split(","),
+                source="UNIVERSE_MARKETS",
+            )
         else:
-            raw_markets = parser.from_yaml("universe.markets", ["KR"]) or ["KR"]
-            universe_markets = [
-                str(market).strip().upper()
-                for market in raw_markets
-                if str(market).strip()
-            ]
+            universe_markets = _normalize_universe_markets(
+                parser.from_yaml("universe.markets", ["KR"]),
+                source="universe.markets",
+            )
 
     us_screener_defaults_raw = parser.from_yaml("screener.us_defaults", []) or []
     us_screener_defaults: list[str] = []
@@ -806,9 +840,7 @@ def _parse_data_section(
         us_screener_limit=parser.env_int("US_SCREENER_LIMIT", "screener.us_limit", 20),
         kis_app_key=getenv("KIS_APP_KEY"),
         kis_app_secret=getenv("KIS_APP_SECRET"),
-        kis_base_url=_normalize_kis_base(
-            getenv("KIS_BASE_URL") or parser.from_yaml("kis.base_url")
-        ),
+        kis_base_url=_parse_kis_base_url(parser),
         kis_min_interval_ms=parser.env_optional_float(
             "KIS_MIN_INTERVAL_MS", "kis.min_interval_ms"
         ),
@@ -823,6 +855,13 @@ def _parse_data_section(
             0,
         ),
     )
+
+
+def _parse_kis_base_url(parser: _ConfigParser) -> str | None:
+    env_value = getenv("KIS_BASE_URL")
+    if env_value is not None:
+        return _normalize_kis_base(env_value, source="KIS_BASE_URL")
+    return _normalize_kis_base(parser.from_yaml("kis.base_url"), source="kis.base_url")
 
 
 def _build_hybrid_strategy_config(parser: _ConfigParser) -> HybridStrategyConfig:
