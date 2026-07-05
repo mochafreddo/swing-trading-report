@@ -356,6 +356,41 @@ def test_openai_timeout_error_carries_trace_metadata() -> None:
     assert excinfo.value.trace_metadata.request_hash == _json_hash(request)
 
 
+def test_openai_http_error_message_omits_raw_response_body() -> None:
+    session = _HttpErrorSession(
+        status_code=500,
+        text=(
+            '{"error":{"message":"bad key sk-secret-123",'
+            '"code":"server_error","type":"api_error"}}'
+        ),
+        payload={
+            "error": {
+                "message": "bad key sk-secret-123",
+                "code": "server_error",
+                "type": "api_error",
+            }
+        },
+    )
+    provider = OpenAiSellAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(SellAiBriefProviderError) as excinfo:
+        provider.build_judgments(
+            actionable_candidates=[_candidate("AAPL.NAS", sell_action="SELL")]
+        )
+
+    message = str(excinfo.value)
+    assert "HTTP 500" in message
+    assert "server_error" in message
+    assert "api_error" in message
+    assert "sk-secret-123" not in message
+    assert "bad key" not in message
+
+
 def test_planned_trace_hashes_would_send_request_shape() -> None:
     candidate = _candidate("AAPL.NAS", sell_action="SELL")
 
@@ -434,6 +469,42 @@ class _RequestExceptionSession:
     def post(self, url: str, **kwargs: object) -> _Response:
         self.requests.append({"url": url, **kwargs})
         raise requests.RequestException("failed")
+
+
+class _HttpErrorResponse:
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        text: str,
+        payload: dict[str, object],
+    ) -> None:
+        self.status_code = status_code
+        self.text = text
+        self._payload = payload
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _HttpErrorSession:
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        text: str,
+        payload: dict[str, object],
+    ) -> None:
+        self.requests: list[dict[str, object]] = []
+        self._response = _HttpErrorResponse(
+            status_code=status_code,
+            text=text,
+            payload=payload,
+        )
+
+    def post(self, url: str, **kwargs: object) -> _HttpErrorResponse:
+        self.requests.append({"url": url, **kwargs})
+        return self._response
 
 
 def test_openai_request_error_carries_trace_metadata() -> None:

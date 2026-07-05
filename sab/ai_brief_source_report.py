@@ -7,6 +7,7 @@ from typing import Any
 
 from . import ai_brief_url_safety as url_safety
 from .ai_brief_eval_common import parse_iso_offset_datetime
+from .observability import sanitize_log_text
 
 SOURCE_REPORT_SCHEMA = "sab.ai_brief_sources.v1"
 SOURCE_REPORT_TYPE = "ai_brief_sources"
@@ -192,7 +193,7 @@ def normalize_source_report_issue(
             ),
         )
     code = str(raw_issue.get("code") or "").strip()
-    message = str(raw_issue.get("message") or "").strip()
+    message = sanitize_log_text(str(raw_issue.get("message") or "").strip())
     severity = str(raw_issue.get("severity") or "WARN").strip().upper()
     if not code or not message:
         return source_issue(
@@ -317,7 +318,7 @@ def source_issue(*, ticker: str | None, code: str, message: str) -> dict[str, ob
         "ticker": ticker,
         "code": code,
         "severity": "WARN",
-        "message": message,
+        "message": sanitize_log_text(message),
     }
 
 

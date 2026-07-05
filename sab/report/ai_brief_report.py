@@ -18,6 +18,7 @@ from ..ai_brief_sources import (
     is_ai_brief_source_stale,
     validate_ai_brief_source_url,
 )
+from ..observability import sanitize_log_text
 from ..utils.atomic_io import advisory_path_lock, atomic_write_json
 from ..utils.datetime import offset_iso
 from .ai_brief_state import (
@@ -125,6 +126,14 @@ def _validate_issue_list(payload: Mapping[str, Any], field_name: str) -> None:
             raise AiBriefValidationError(f"{field_name}[{idx}].code is required")
         if not message:
             raise AiBriefValidationError(f"{field_name}[{idx}].message is required")
+        if sanitize_log_text(message) != message:
+            raise AiBriefValidationError(
+                f"{field_name}[{idx}].message must not contain sensitive value"
+            )
+        if field_name == "source_issues" and contains_automated_order_language(message):
+            raise AiBriefValidationError(
+                f"{field_name}[{idx}].message must avoid automated-order language"
+            )
         if severity not in ALLOWED_ISSUE_SEVERITY:
             raise AiBriefValidationError(
                 f"{field_name}[{idx}].severity must be one of "

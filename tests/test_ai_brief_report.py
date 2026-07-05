@@ -230,6 +230,42 @@ def test_validate_ai_brief_artifact_accepts_model_trace_links() -> None:
     )
 
 
+def test_validate_ai_brief_artifact_rejects_automated_order_source_issue() -> None:
+    artifact = _artifact()
+    artifact["schema"] = "sab.ai_brief.v1"
+    artifact["type"] = "ai_brief"
+    artifact["generated_at"] = "2026-05-05T08:40:00+00:00"
+    issues = artifact["source_issues"]
+    assert isinstance(issues, list)
+    issue = issues[0]
+    assert isinstance(issue, dict)
+    issue["message"] = "지금 매수하세요"
+
+    with pytest.raises(AiBriefValidationError, match="automated-order language"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
+def test_validate_ai_brief_artifact_rejects_unsanitized_secret_issue() -> None:
+    artifact = _artifact()
+    artifact["schema"] = "sab.ai_brief.v1"
+    artifact["type"] = "ai_brief"
+    artifact["generated_at"] = "2026-05-05T08:40:00+00:00"
+    issues = artifact["source_issues"]
+    assert isinstance(issues, list)
+    issue = issues[0]
+    assert isinstance(issue, dict)
+    issue["message"] = "provider failed with api_key=source-token-123"
+
+    with pytest.raises(AiBriefValidationError, match="sensitive value"):
+        validate_ai_brief_artifact(
+            artifact,
+            now=datetime(2026, 5, 5, 8, 40, tzinfo=UTC),
+        )
+
+
 def test_validate_ai_brief_artifact_rejects_broken_model_trace_candidate_link() -> None:
     artifact = _artifact_with_model_trace()
     recommendations = artifact["recommendations"]

@@ -659,6 +659,42 @@ def test_openai_http_error_carries_trace_metadata() -> None:
     assert trace_metadata.request_hash == _json_hash(request)
 
 
+def test_openai_http_error_message_omits_raw_response_body() -> None:
+    session = _HttpErrorSession(
+        status_code=429,
+        text=(
+            '{"error":{"message":"bad key sk-secret-123",'
+            '"code":"rate_limit_exceeded","type":"requests"}}'
+        ),
+        payload={
+            "error": {
+                "message": "bad key sk-secret-123",
+                "code": "rate_limit_exceeded",
+                "type": "requests",
+            }
+        },
+    )
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=session,
+    )
+
+    with pytest.raises(AiBriefProviderError) as excinfo:
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+    message = str(excinfo.value)
+    assert "HTTP 429" in message
+    assert "rate_limit_exceeded" in message
+    assert "requests" in message
+    assert "sk-secret-123" not in message
+    assert "bad key" not in message
+
+
 def test_openai_contract_error_carries_trace_metadata() -> None:
     session = _InvalidStructuredOutputSession()
     provider = OpenAiBriefProvider(
@@ -2078,20 +2114,39 @@ class _RequestExceptionSession:
 
 
 class _HttpErrorResponse:
-    status_code = 429
-    text = "rate limited"
+    def __init__(
+        self,
+        *,
+        status_code: int = 429,
+        text: str = "rate limited",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.text = text
+        self._payload = {} if payload is None else payload
 
     def json(self) -> dict[str, object]:
-        return {}
+        return self._payload
 
 
 class _HttpErrorSession:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        status_code: int = 429,
+        text: str = "rate limited",
+        payload: dict[str, object] | None = None,
+    ) -> None:
         self.requests: list[dict[str, object]] = []
+        self._response = _HttpErrorResponse(
+            status_code=status_code,
+            text=text,
+            payload=payload,
+        )
 
     def post(self, url: str, **kwargs: object) -> _HttpErrorResponse:
         self.requests.append({"url": url, **kwargs})
-        return _HttpErrorResponse()
+        return self._response
 
 
 class _InvalidStructuredOutputResponse:

@@ -30,6 +30,7 @@ from .ai_brief_sources import (
     is_ai_brief_source_stale,
     validate_ai_brief_source_url,
 )
+from .observability import sanitize_log_text
 
 MODEL_PROVIDER_FAKE = "fake"
 MODEL_PROVIDER_OPENAI = "openai"
@@ -257,8 +258,7 @@ class OpenAiSellAiBriefProvider:
 
         if response.status_code >= 400:
             raise SellAiBriefProviderError(
-                f"OpenAI request failed with HTTP {response.status_code}: "
-                f"{response.text[:200]}",
+                _openai_http_error_message(response),
                 trace_metadata=trace_metadata,
             )
 
@@ -356,6 +356,25 @@ def _build_openai_request_payload(
             }
         },
     }
+
+
+def _openai_http_error_message(response: _SellAiBriefProviderResponse) -> str:
+    details: list[str] = []
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, Mapping):
+        error = payload.get("error")
+        if isinstance(error, Mapping):
+            error_code = sanitize_log_text(str(error.get("code") or "").strip())
+            error_type = sanitize_log_text(str(error.get("type") or "").strip())
+            if error_code:
+                details.append(f"error_code={error_code}")
+            if error_type:
+                details.append(f"error_type={error_type}")
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"OpenAI request failed with HTTP {response.status_code}{suffix}"
 
 
 def _ticker_schema(tickers: list[str]) -> dict[str, _JsonValue]:

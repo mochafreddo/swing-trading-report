@@ -45,6 +45,27 @@ def test_source_report_boundary_normalizes_local_rows_without_dns(
     }
 
 
+def test_source_report_issue_normalization_redacts_configured_token() -> None:
+    issues = source_report.normalize_source_report_issues(
+        {
+            "source_issues": [
+                {
+                    "ticker": "AAPL.NAS",
+                    "code": "external_provider_failed",
+                    "severity": "WARN",
+                    "message": ("upstream failed with access_token=source-token-123"),
+                }
+            ]
+        },
+        issue_prefix="external_source",
+        issue_subject="external source",
+        eligible_tickers={"AAPL.NAS"},
+    )
+
+    assert issues[0]["message"] == "upstream failed with access_token=[REDACTED]"
+    assert "source-token-123" not in str(issues[0]["message"])
+
+
 def test_source_url_safety_boundary_resolves_and_rejects_private_api_dns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
