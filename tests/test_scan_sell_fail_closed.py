@@ -28,6 +28,11 @@ def _write_json_artifact(path: Path, payload: dict[str, Any]) -> str:
     return str(path)
 
 
+def _write_watchlist(path: Path, tickers: list[str]) -> Path:
+    path.write_text("\n".join(tickers) + "\n", encoding="utf-8")
+    return path
+
+
 @pytest.mark.parametrize(
     "err",
     [ConfigLoadError("bad config")],
@@ -663,6 +668,7 @@ def test_run_sell_expands_target_bars_for_long_held_positions(tmp_path: Path) ->
 
 
 def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> None:
+    watchlist_file = _write_watchlist(tmp_path / "watchlist.txt", ["005930"])
     cfg = replace(
         Config(),
         data_provider="kis",
@@ -671,6 +677,7 @@ def test_run_scan_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
         kis_base_url="https://example.com",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
     )
@@ -760,11 +767,16 @@ def test_run_sell_returns_1_when_supabase_index_upsert_fails(tmp_path: Path) -> 
 def test_run_scan_returns_1_when_unexpected_ticker_evaluation_error_occurs(
     tmp_path: Path,
 ) -> None:
+    watchlist_file = _write_watchlist(
+        tmp_path / "watchlist.txt",
+        ["AAPL.US", "MSFT.US"],
+    )
     cfg = replace(
         Config(),
         data_provider="pykrx",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
         universe_markets=["US"],
@@ -898,11 +910,16 @@ def test_run_sell_returns_1_when_all_market_data_missing(tmp_path: Path) -> None
 
 
 def test_run_scan_returns_1_when_partial_market_data_missing(tmp_path: Path) -> None:
+    watchlist_file = _write_watchlist(
+        tmp_path / "watchlist.txt",
+        ["AAPL.US", "MSFT.US"],
+    )
     cfg = replace(
         Config(),
         data_provider="pykrx",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
         universe_markets=["US"],
@@ -1092,11 +1109,16 @@ def test_run_sell_allows_partial_market_data_when_coverage_meets_threshold(
 def test_run_scan_hybrid_returns_1_when_unexpected_ticker_evaluation_error_occurs(
     tmp_path: Path,
 ) -> None:
+    watchlist_file = _write_watchlist(
+        tmp_path / "watchlist.txt",
+        ["AAPL.US", "MSFT.US"],
+    )
     cfg = replace(
         Config(),
         data_provider="pykrx",
         data_dir=str(tmp_path),
         report_dir=str(tmp_path),
+        watchlist_path=str(watchlist_file),
         screener_enabled=False,
         screener_only=False,
         strategy_mode="sma_ema_hybrid",
