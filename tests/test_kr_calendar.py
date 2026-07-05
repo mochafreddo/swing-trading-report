@@ -9,7 +9,9 @@ from datetime import date
 from typing import Self
 from unittest.mock import patch
 
+import pytest
 from sab.data.kr_calendar import _maybe_pandas_holidays, load_kr_trading_calendar
+from sab.data.trading_calendar import TradingCalendarError
 
 
 class KRCalendarTests(unittest.TestCase):
@@ -69,6 +71,33 @@ class KRCalendarTests(unittest.TestCase):
 
         self.assertEqual(cal["20260504"], "KR Market Holiday")
         self.assertEqual(cal["20270104"], "KR Market Holiday")
+
+    def test_current_static_year_fails_closed_when_pmc_disabled(self) -> None:
+        class _FixedDate(date):
+            @classmethod
+            def today(cls) -> Self:
+                return cls(2026, 5, 30)
+
+        with (
+            patch("sab.data.kr_calendar.date", _FixedDate),
+            patch.dict(os.environ, {"SAB_USE_PMC_CALENDAR": "0"}, clear=False),
+            pytest.raises(TradingCalendarError, match="KR trading calendar"),
+        ):
+            load_kr_trading_calendar()
+
+    def test_current_static_year_fails_closed_when_pmc_missing(self) -> None:
+        class _FixedDate(date):
+            @classmethod
+            def today(cls) -> Self:
+                return cls(2026, 5, 30)
+
+        with (
+            patch("sab.data.kr_calendar.date", _FixedDate),
+            patch.dict(os.environ, {"SAB_USE_PMC_CALENDAR": "1"}, clear=False),
+            patch.dict(sys.modules, {"pandas_market_calendars": None}),
+            pytest.raises(TradingCalendarError, match="pandas_market_calendars"),
+        ):
+            load_kr_trading_calendar()
 
     def test_pmc_discontinued_break_warning_is_suppressed(self) -> None:
         message = "['break_end', 'break_start'] are discontinued"

@@ -35,6 +35,42 @@ def test_load_holdings_raises_on_non_mapping_root(tmp_path) -> None:
         load_holdings(str(path))
 
 
+def test_load_holdings_raises_on_duplicate_top_level_yaml_key(tmp_path) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        (
+            "holdings: []\n"
+            "holdings:\n"
+            "  - ticker: AAPL.NAS\n"
+            "    quantity: 1\n"
+            "    entry_price: 100\n"
+            "    entry_currency: USD\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HoldingsLoadError, match="duplicate YAML key 'holdings'"):
+        load_holdings(str(path))
+
+
+def test_load_holdings_raises_on_duplicate_nested_yaml_key(tmp_path) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        (
+            "holdings:\n"
+            "  - ticker: AAPL.NAS\n"
+            "    quantity: 1\n"
+            "    quantity: 2\n"
+            "    entry_price: 100\n"
+            "    entry_currency: USD\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HoldingsLoadError, match="duplicate YAML key 'quantity'"):
+        load_holdings(str(path))
+
+
 def test_load_holdings_raises_on_non_mapping_settings(tmp_path) -> None:
     path = tmp_path / "holdings.yaml"
     path.write_text("settings:\n  - invalid\nholdings: []\n", encoding="utf-8")

@@ -61,12 +61,16 @@ def _load_override_file(data_dir: str | None) -> dict[str, str]:
     return load_calendar_override_file(data_dir, "kr_trading_calendar.json")
 
 
-def _maybe_pandas_holidays(start_year: int, end_year: int) -> dict[str, str]:
+def _maybe_pandas_holidays(
+    start_year: int, end_year: int, *, required: bool = False
+) -> dict[str, str]:
     return maybe_pandas_holidays(
         calendar_name="XKRX",
+        calendar_label="KR",
         holiday_note="KR Market Holiday",
         start_year=start_year,
         end_year=end_year,
+        required=required,
     )
 
 
@@ -81,7 +85,7 @@ def load_kr_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
         supplement_static_years=True,
     )
     if year_range is not None:
-        merged.update(_maybe_pandas_holidays(*year_range))
+        merged.update(_maybe_pandas_holidays(*year_range, required=True))
     merged.update(overrides)
     return merged
 
