@@ -55,6 +55,16 @@ def test_sell_workflow_concurrency_matches_dispatch_lock_dimensions() -> None:
     assert "github.event.inputs.provider" in group
 
 
+def test_cleanup_workflow_serializes_retention_deletes() -> None:
+    workflow = _load_workflow(".github/workflows/cleanup.yml")
+
+    concurrency = workflow.get("concurrency") or {}
+    group = str(concurrency.get("group") or "")
+    assert "github.workflow" in group
+    assert "github.ref" not in group
+    assert concurrency.get("cancel-in-progress") is False
+
+
 def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]

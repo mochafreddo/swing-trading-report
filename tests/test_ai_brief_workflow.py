@@ -600,7 +600,15 @@ def test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in() -> None:
     assert '"text": message_text' in telegram_script
     assert "text@ai-brief.telegram.txt" not in telegram_script
     assert "parse_mode" not in skipped_telegram_script
-    assert "text@ai-brief.skipped.telegram.txt" in skipped_telegram_script
+    assert 'Path("ai-brief.skipped.telegram.txt").read_text' in (
+        skipped_telegram_script
+    )
+    assert "urllib.request" in skipped_telegram_script
+    assert "text@ai-brief.skipped.telegram.txt" not in skipped_telegram_script
+    assert "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}" not in (
+        skipped_telegram_script
+    )
+    assert "TELEGRAM_BOT_TOKEN" in str(skipped_telegram_step.get("env") or {})
     assert "SLACK_WEBHOOK_URL" in str(slack_step.get("env") or {})
 
 

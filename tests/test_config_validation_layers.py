@@ -17,6 +17,7 @@ def _reset_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "HOLDINGS_FILE",
         "REPORT_DIR",
         "DATA_DIR",
+        "KIS_BASE_URL",
         "UNIVERSE_MARKETS",
         "MARKET_CACHE_STALE_SESSIONS_KR",
         "MARKET_CACHE_STALE_SESSIONS_US",
@@ -549,6 +550,43 @@ def test_load_config_rejects_top_level_dotted_config_binding_key(
     assert "top-level dotted key" in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        "kis:\n  base_url: https://openapi.example.invalid:99999\n",
+        "kis:\n  base_url: https://openapi.example.invalid:notaport\n",
+    ],
+)
+def test_load_config_rejects_invalid_kis_base_url_port_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, config_text: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=r"kis\.base_url"):
+        load_config()
+
+
+def test_load_config_rejects_invalid_kis_base_url_port_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("KIS_BASE_URL", "https://openapi.example.invalid:99999")
+
+    with pytest.raises(ConfigLoadError, match="KIS_BASE_URL"):
+        load_config()
+
+
 def test_load_config_uses_active_entry_fatal_missing_price_ratio_default_when_yaml_loaded(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -933,6 +971,60 @@ holdings:
     assert cfg.holdings_path == str(override_holdings)
     assert cfg.holdings.holdings == []
     assert cfg.universe_markets == ["US"]
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        "universe:\n  markets: US\n",
+        "universe:\n  markets: []\n",
+        "universe:\n  markets:\n    - JP\n",
+        "universe:\n  markets:\n    - ''\n",
+    ],
+)
+def test_load_config_rejects_invalid_universe_markets_from_yaml(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, config_text: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("SAB_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigLoadError, match=r"universe\.markets"):
+        load_config()
+
+
+@pytest.mark.parametrize("env_value", ["", "US,JP", " , "])
+def test_load_config_rejects_invalid_universe_markets_from_env(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, env_value: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+    monkeypatch.setenv("UNIVERSE_MARKETS", env_value)
+
+    with pytest.raises(ConfigLoadError, match="UNIVERSE_MARKETS"):
+        load_config()
+
+
+@pytest.mark.parametrize("markets_override", [[], ["JP"], ["US", ""]])
+def test_load_config_rejects_invalid_universe_markets_override(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, markets_override: list[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+
+    _reset_config_env(monkeypatch)
+    _force_fallback_dotenv(monkeypatch)
+
+    with pytest.raises(ConfigLoadError, match="markets_override"):
+        load_config(markets_override=markets_override)
 
 
 def test_load_config_rejects_env_yaml_conflict_even_for_empty_env_value(

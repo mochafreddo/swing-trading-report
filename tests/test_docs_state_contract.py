@@ -197,6 +197,18 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     assert "fail closed" in sell_flow
 
 
+def test_deployment_docs_match_current_action_triggers() -> None:
+    deployment_text = _read(Path("docs/deployment.md"))
+
+    assert "| `.github/workflows/mise-lock-sync.yml` | Renovate PR |" in (
+        deployment_text
+    )
+    assert "scheduled `scan.yml` candidate" not in deployment_text
+    assert "scheduled `sell.yml` candidate" not in deployment_text
+    assert "`scan.yml` is currently manual-only" in deployment_text
+    assert "`sell.yml` is currently manual-only" in deployment_text
+
+
 def test_toss_sync_docs_do_not_reference_removed_confirmation_text_contract() -> None:
     stale_phrases = (
         'confirmationText: "APPLY TOSS HOLDINGS"',
