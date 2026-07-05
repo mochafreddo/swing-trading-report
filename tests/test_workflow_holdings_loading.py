@@ -40,6 +40,21 @@ def test_scan_workflow_does_not_load_holdings_from_supabase() -> None:
     assert "HOLDINGS_FILE" not in env
 
 
+def test_scan_workflow_concurrency_matches_dispatch_lock_dimensions() -> None:
+    workflow = _load_workflow(".github/workflows/scan.yml")
+
+    group = str(workflow["concurrency"]["group"])
+    assert "github.event.inputs.provider" in group
+    assert "github.event.inputs.universe" in group
+
+
+def test_sell_workflow_concurrency_matches_dispatch_lock_dimensions() -> None:
+    workflow = _load_workflow(".github/workflows/sell.yml")
+
+    group = str(workflow["concurrency"]["group"])
+    assert "github.event.inputs.provider" in group
+
+
 def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]
@@ -140,6 +155,25 @@ def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     assert '--holdings "${{ steps.holdings.outputs.holdings_file }}"' in run_script
 
 
+def test_sell_workflow_load_holdings_accepts_service_role_key_fallback() -> None:
+    workflow = _load_workflow(".github/workflows/sell.yml")
+    steps = workflow["jobs"]["sell"]["steps"]
+
+    holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
+    env = holdings_step.get("env") or {}
+    run_script = str(holdings_step.get("run") or "")
+
+    assert env.get("SUPABASE_SECRET_KEY") == "${{ secrets.SUPABASE_SECRET_KEY }}"
+    assert (
+        env.get("SUPABASE_SERVICE_ROLE_KEY")
+        == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+    )
+    assert 'supabase_key="${SUPABASE_SECRET_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"' in (
+        run_script
+    )
+    assert "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set" in run_script
+
+
 def test_ai_brief_workflow_manual_holdings_export_includes_entry_pattern() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = workflow["jobs"]["ai_brief"]["steps"]
@@ -155,3 +189,24 @@ def test_ai_brief_workflow_manual_holdings_export_includes_entry_pattern() -> No
     assert '"entry_pattern",' in run_script
     assert 'key == "entry_pattern"' in run_script
     assert "Supabase holdings response omitted entry_pattern" in run_script
+
+
+def test_ai_brief_workflow_manual_holdings_export_accepts_service_role_key_fallback() -> (
+    None
+):
+    workflow = _load_workflow(".github/workflows/ai-brief.yml")
+    steps = workflow["jobs"]["ai_brief"]["steps"]
+
+    holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
+    env = holdings_step.get("env") or {}
+    run_script = str(holdings_step.get("run") or "")
+
+    assert env.get("SUPABASE_SECRET_KEY") == "${{ secrets.SUPABASE_SECRET_KEY }}"
+    assert (
+        env.get("SUPABASE_SERVICE_ROLE_KEY")
+        == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+    )
+    assert 'supabase_key="${SUPABASE_SECRET_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"' in (
+        run_script
+    )
+    assert "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set" in run_script

@@ -33,6 +33,7 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:
       - name: Checkout
@@ -139,9 +140,14 @@ jobs:
           if not supabase_url:
               raise SystemExit("SUPABASE_URL must be set")
 
-          supabase_key = (os.environ.get("SUPABASE_SECRET_KEY") or "").strip()
+          supabase_key = (
+              (os.environ.get("SUPABASE_SECRET_KEY") or "").strip()
+              or (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+          )
           if not supabase_key:
-              raise SystemExit("SUPABASE_SECRET_KEY must be set")
+              raise SystemExit(
+                  "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set"
+              )
           if supabase_key.startswith("sb_publishable_"):
               raise SystemExit(
                   "Publishable key is not allowed for server-side cleanup workflow"

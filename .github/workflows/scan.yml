@@ -22,7 +22,7 @@ on:
           - pykrx
 
 concurrency:
-  group: scan-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: scan-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.event.inputs.provider || 'kis' }}-${{ github.event.inputs.universe || 'both' }}
   cancel-in-progress: true
 
 permissions:
@@ -162,6 +162,7 @@ jobs:
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p reports

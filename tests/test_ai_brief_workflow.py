@@ -649,6 +649,10 @@ def test_ai_brief_workflow_evaluates_quality_before_supabase_upload_and_delivery
         supabase_upload_env.get("SUPABASE_SECRET_KEY")
         == "${{ secrets.SUPABASE_SECRET_KEY }}"
     )
+    assert (
+        supabase_upload_env.get("SUPABASE_SERVICE_ROLE_KEY")
+        == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+    )
 
 
 def test_ai_brief_workflow_top_level_concurrency_does_not_cancel_monitor_runs() -> None:

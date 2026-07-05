@@ -61,3 +61,21 @@ def test_cleanup_workflow_sanitizes_manual_inputs_before_shell_use() -> None:
     assert 'require_single_line "retention_days" "${retention_days}"' in params_script
     assert 'require_single_line "bucket" "${bucket}"' in params_script
     assert "Unsupported cleanup bucket" in params_script
+
+
+def test_cleanup_workflow_accepts_service_role_key_fallback() -> None:
+    workflow = _load_workflow(".github/workflows/cleanup.yml")
+    env = workflow["jobs"]["cleanup"].get("env") or {}
+    cleanup_step = _find_step_by_name(
+        _steps(workflow), "Cleanup expired report objects"
+    )
+    run_script = str(cleanup_step.get("run") or "")
+
+    assert env.get("SUPABASE_SECRET_KEY") == "${{ secrets.SUPABASE_SECRET_KEY }}"
+    assert (
+        env.get("SUPABASE_SERVICE_ROLE_KEY")
+        == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+    )
+    assert 'os.environ.get("SUPABASE_SECRET_KEY")' in run_script
+    assert 'os.environ.get("SUPABASE_SERVICE_ROLE_KEY")' in run_script
+    assert "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set" in run_script
