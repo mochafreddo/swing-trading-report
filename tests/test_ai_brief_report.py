@@ -492,7 +492,7 @@ def test_validate_ai_brief_artifact_accepts_source_article_read_metadata() -> No
         **summary,
         "source_issue_count": 0,
         "article_read_attempted_count": 1,
-        "article_accessed_count": 0,
+        "article_accessed_count": 1,
         "article_verified_count": 1,
         "article_read_issue_count": 0,
     }
@@ -574,7 +574,7 @@ def test_validate_ai_brief_artifact_rejects_stale_article_read_summary_counts() 
         **summary,
         "source_issue_count": 0,
         "article_read_attempted_count": 1,
-        "article_accessed_count": 0,
+        "article_accessed_count": 1,
         "article_verified_count": 0,
         "article_read_issue_count": 0,
     }
@@ -636,7 +636,7 @@ def test_validate_ai_brief_artifact_does_not_count_not_attempted_as_attempted() 
         **summary,
         "source_issue_count": 0,
         "article_read_attempted_count": 1,
-        "article_accessed_count": 0,
+        "article_accessed_count": 1,
         "article_verified_count": 1,
         "article_read_issue_count": 0,
     }

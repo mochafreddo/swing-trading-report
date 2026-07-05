@@ -15,6 +15,7 @@ import {
   normalizeHoldingTickerForMutation,
   US_TICKER_PATTERN,
 } from "@/lib/holding-ticker";
+import { MAX_HOLDINGS_YAML_DOCUMENT_BYTES } from "@/lib/holdings-yaml";
 
 const REPORT_LIST_TYPES = ["all", ...REPORT_TYPES] as const;
 const ISO_CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -351,7 +352,17 @@ export const holdingAddBuySchema = z
 
 export const holdingYamlImportRequestSchema = z
   .object({
-    document: z.string().min(1),
+    document: z
+      .string()
+      .min(1)
+      .refine(
+        (document) =>
+          new TextEncoder().encode(document).byteLength <=
+          MAX_HOLDINGS_YAML_DOCUMENT_BYTES,
+        {
+          message: `document must be <= ${MAX_HOLDINGS_YAML_DOCUMENT_BYTES} bytes`,
+        },
+      ),
     apply: z.boolean().default(false),
   })
   .strict();

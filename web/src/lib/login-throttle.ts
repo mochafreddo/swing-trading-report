@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { toErrorMessage } from "@/lib/error-utils";
 import {
   consumeLoginThrottleAttempt,
@@ -27,8 +29,11 @@ const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_WINDOW_SECONDS = 15 * 60;
 const DEFAULT_BLOCK_SECONDS = 15 * 60;
 const MAX_TRACKED_LOGIN_KEYS = 512;
+const MAX_RAW_LOGIN_THROTTLE_SUBJECT_LENGTH = 128;
+const SAFE_LOGIN_THROTTLE_SUBJECT_PATTERN = /^[a-z0-9._@+-]+$/;
 const GLOBAL_LOGIN_THROTTLE_KEY = "__global__";
 const USER_LOGIN_THROTTLE_PREFIX = "user:";
+const USER_LOGIN_THROTTLE_HASH_PREFIX = "user-sha256:";
 const LOGIN_THROTTLE_RUNTIME_STATE_PREFIX = "login_throttle:";
 
 let globalAttemptState: LoginAttemptState | null = null;
@@ -359,7 +364,17 @@ export function buildGlobalLoginThrottleKey(): string {
 
 export function buildLoginThrottleKey(username: string): string {
   const normalizedUsername = username.trim().toLowerCase();
-  return `${USER_LOGIN_THROTTLE_PREFIX}${normalizedUsername || "unknown"}`;
+  if (!normalizedUsername) {
+    return `${USER_LOGIN_THROTTLE_PREFIX}unknown`;
+  }
+  if (
+    normalizedUsername.length <= MAX_RAW_LOGIN_THROTTLE_SUBJECT_LENGTH &&
+    SAFE_LOGIN_THROTTLE_SUBJECT_PATTERN.test(normalizedUsername)
+  ) {
+    return `${USER_LOGIN_THROTTLE_PREFIX}${normalizedUsername}`;
+  }
+  const digest = createHash("sha256").update(normalizedUsername).digest("hex");
+  return `${USER_LOGIN_THROTTLE_HASH_PREFIX}${digest}`;
 }
 
 export async function assertLoginAttemptAllowed(

@@ -266,7 +266,7 @@ def test_run_ai_brief_enriches_sources_with_article_reader(
     assert article_read["status"] == "verified"
     assert article_read["tier"] == "article_verified"
     assert payload["summary"]["article_read_attempted_count"] == 1
-    assert payload["summary"]["article_accessed_count"] == 0
+    assert payload["summary"]["article_accessed_count"] == 1
     assert payload["summary"]["article_verified_count"] == 1
     assert payload["summary"]["article_read_issue_count"] == 0
 
@@ -6921,6 +6921,7 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
     report_dir = tmp_path / "reports"
     session = _OpenAiSession(
         {
@@ -6933,7 +6934,7 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
                     "checklist": [
                         "manually confirm price, cash, and risk before order"
                     ],
-                    "source_refs": [],
+                    "source_refs": ["AAPL.NAS:1"],
                 }
             ],
             "vetoed_candidates": [],
@@ -6965,7 +6966,7 @@ def test_run_ai_brief_openai_provider_writes_structured_recommendation(
         model_name="gpt-test",
         model_timeout_seconds=7.5,
         source_provider=None,
-        source_report_path=None,
+        source_report_path=source_report.as_posix(),
     )
 
     assert exit_code == 0
@@ -7388,6 +7389,7 @@ def test_run_ai_brief_openai_rejects_korean_automated_order_language(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
     report_dir = tmp_path / "reports"
     session = _OpenAiSession(
         {
@@ -7398,7 +7400,7 @@ def test_run_ai_brief_openai_rejects_korean_automated_order_language(
                     "confidence": "LOW",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["지금 매수하고 주문 실행"],
-                    "source_refs": [],
+                    "source_refs": ["AAPL.NAS:1"],
                 }
             ],
             "vetoed_candidates": [],
@@ -7427,7 +7429,7 @@ def test_run_ai_brief_openai_rejects_korean_automated_order_language(
         model_name="gpt-test",
         model_timeout_seconds=0.1,
         source_provider=None,
-        source_report_path=None,
+        source_report_path=source_report.as_posix(),
     )
 
     assert exit_code == 0
@@ -8453,6 +8455,7 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry_report = _write_entry_report(tmp_path)
+    source_report = _write_source_report(tmp_path)
     report_dir = tmp_path / "reports"
     session = _OpenAiSession(
         {
@@ -8463,7 +8466,7 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
                     "confidence": "BAD",
                     "rationale": ["entry setup remains valid on the provided data"],
                     "checklist": ["manually confirm price and risk before order"],
-                    "source_refs": [],
+                    "source_refs": ["AAPL.NAS:1"],
                 }
             ],
             "vetoed_candidates": [],
@@ -8492,7 +8495,7 @@ def test_run_ai_brief_openai_contract_error_writes_empty_artifact_with_system_is
         model_name="gpt-test",
         model_timeout_seconds=0.1,
         source_provider=None,
-        source_report_path=None,
+        source_report_path=source_report.as_posix(),
     )
 
     assert exit_code == 0

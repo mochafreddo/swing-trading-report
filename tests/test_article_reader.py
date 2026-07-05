@@ -108,7 +108,7 @@ def test_article_read_summary_counts_statuses_and_tiers() -> None:
 
     assert article_read_summary(rows) == {
         "article_read_attempted_count": 2,
-        "article_accessed_count": 0,
+        "article_accessed_count": 1,
         "article_verified_count": 1,
         "article_read_issue_count": 1,
     }
@@ -348,7 +348,7 @@ def test_enrich_sources_marks_remaining_rows_not_attempted_after_cap() -> None:
     assert second_read["status"] == "not_attempted"
     assert article_read_summary(enriched) == {
         "article_read_attempted_count": 1,
-        "article_accessed_count": 0,
+        "article_accessed_count": 1,
         "article_verified_count": 1,
         "article_read_issue_count": 0,
     }

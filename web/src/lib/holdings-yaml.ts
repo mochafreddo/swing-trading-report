@@ -24,6 +24,8 @@ import type {
 const SUPPORTED_ENTRY_CURRENCIES = new Set(["KRW", "USD"]);
 const NUMERIC_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 const ISO_CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+export const MAX_HOLDINGS_YAML_DOCUMENT_BYTES = 1_048_576;
+export const MAX_HOLDINGS_YAML_ROW_COUNT = 1_000;
 
 interface HoldingsYamlSettings {
   default_currency: string | null;
@@ -361,6 +363,13 @@ export function buildHoldingsYamlDocument(
 export function parseHoldingsYamlDocument(
   document: string,
 ): HoldingReplaceSnapshot[] {
+  const byteLength = new TextEncoder().encode(document).byteLength;
+  if (byteLength > MAX_HOLDINGS_YAML_DOCUMENT_BYTES) {
+    throw new HoldingsYamlError(
+      `holdings.yaml document must be <= ${MAX_HOLDINGS_YAML_DOCUMENT_BYTES} bytes.`,
+    );
+  }
+
   let raw: unknown;
   try {
     raw = parseYaml(document);
@@ -385,6 +394,11 @@ export function parseHoldingsYamlDocument(
   const holdingsValue = root.holdings;
   if (!Array.isArray(holdingsValue)) {
     throw new HoldingsYamlError("'holdings' must be an array.");
+  }
+  if (holdingsValue.length > MAX_HOLDINGS_YAML_ROW_COUNT) {
+    throw new HoldingsYamlError(
+      `holdings.yaml supports at most ${MAX_HOLDINGS_YAML_ROW_COUNT} holdings.`,
+    );
   }
 
   const preliminaryRows = holdingsValue.map((value, index) => {

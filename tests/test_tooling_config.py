@@ -47,3 +47,17 @@ def test_just_web_recipes_force_mise_pinned_node_runtime() -> None:
     for recipe_name in web_pnpm_recipes:
         block = _just_recipe_block(justfile, recipe_name)
         assert "{{web_tool_path}} pnpm --dir web" in block
+
+
+def test_python_audit_uses_project_pinned_pip_audit() -> None:
+    with (REPO_ROOT / "pyproject.toml").open("rb") as file:
+        pyproject = tomllib.load(file)
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+
+    dev_dependencies = pyproject["dependency-groups"]["dev"]
+    assert any(str(dep).startswith("pip-audit>=") for dep in dev_dependencies)
+
+    for recipe_name in ("audit-python", "audit-python-osv"):
+        block = _just_recipe_block(justfile, recipe_name)
+        assert "uv run pip-audit" in block
+        assert "\n  pip-audit " not in block

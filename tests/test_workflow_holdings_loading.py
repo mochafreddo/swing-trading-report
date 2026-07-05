@@ -75,7 +75,7 @@ def test_scan_workflow_ensures_watchlist_file_exists_before_run_scan() -> None:
     assert ": > watchlist.txt" in run_script
 
 
-def test_scan_workflow_allows_empty_scheduled_scan_only() -> None:
+def test_scan_workflow_fails_closed_without_schedule_empty_scan_exception() -> None:
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]
 
@@ -92,22 +92,9 @@ def test_scan_workflow_allows_empty_scheduled_scan_only() -> None:
         run_script,
         'if [[ -z "${report_path}" || ! -f "${report_path}" ]]; then',
     )
-    empty_scan_default_index = _script_index(
-        run_script,
-        'allow_empty_scan="false"',
-    )
-    scheduled_guard_index = _script_index(
-        run_script,
-        'if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then',
-    )
-    no_tickers_match_index = _script_index(
-        run_script,
-        '"No tickers provided (watchlist empty or missing)"',
-    )
-    allow_empty_index = _script_index(run_script, 'allow_empty_scan="true"')
     failure_exit_index = _script_index(
         run_script,
-        'if [[ "${scan_status}" -ne 0 && "${allow_empty_scan}" != "true" ]]; then',
+        'if [[ "${scan_status}" -ne 0 ]]; then',
     )
     output_index = _script_index(run_script, 'echo "report_path=${report_path}"')
 
@@ -116,28 +103,23 @@ def test_scan_workflow_allows_empty_scheduled_scan_only() -> None:
         < scan_status_index
         < report_lookup_index
         < missing_report_check_index
-        < empty_scan_default_index
-        < scheduled_guard_index
-        < no_tickers_match_index
-        < allow_empty_index
         < failure_exit_index
         < output_index
     )
     assert _script_index(run_script, 'exit "${scan_status}"') > failure_exit_index
+    assert "GITHUB_EVENT_NAME" not in run_script
+    assert "allow_empty_scan" not in run_script
+    assert "No tickers provided (watchlist empty or missing)" not in run_script
 
 
-def test_scan_workflow_sends_telegram_message_chunks() -> None:
+def test_scan_workflow_has_no_unreachable_schedule_notifications() -> None:
     workflow = _load_workflow(".github/workflows/scan.yml")
     steps = workflow["jobs"]["scan"]["steps"]
 
-    telegram_step = _find_step_by_name(
-        steps, "Send Telegram notification (schedule only)"
-    )
-    run_script = str(telegram_step.get("run") or "")
-
-    assert "split_telegram_message_text" in run_script
-    assert "sendMessage" in run_script
-    assert "for message_text in" in run_script
+    step_names = {str(step.get("name") or "") for step in steps}
+    assert "Build notification summary" not in step_names
+    assert "Send Telegram notification (schedule only)" not in step_names
+    assert "Send Slack notification (schedule only)" not in step_names
 
 
 def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:

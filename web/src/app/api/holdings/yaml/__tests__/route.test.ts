@@ -55,6 +55,7 @@ vi.mock("@/lib/holdings-yaml", () => {
   class HoldingsYamlError extends Error {}
 
   return {
+    MAX_HOLDINGS_YAML_DOCUMENT_BYTES: 1_048_576,
     HoldingsYamlError,
     buildHoldingsYamlDocument: vi.fn(() => "version: 1\nholdings: []\n"),
     buildHoldingsYamlImportSummary: vi.fn(() => ({
@@ -182,6 +183,20 @@ describe("/api/holdings/yaml route", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toBe("Invalid holdings YAML import payload");
+  });
+
+  it("rejects oversized documents before YAML parsing", async () => {
+    const response = await POST(
+      makePostRequest({
+        document: `# ${"x".repeat(1_048_576)}`,
+        apply: false,
+      }),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid holdings YAML import payload");
+    expect(vi.mocked(parseHoldingsYamlDocument)).not.toHaveBeenCalled();
   });
 
   it("returns 400 for YAML validation failures", async () => {

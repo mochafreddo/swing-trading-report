@@ -41,6 +41,28 @@ function record(
 }
 
 describe("holdings-yaml", () => {
+  it("rejects documents larger than the import limit before YAML parsing", () => {
+    const document = `# ${"x".repeat(1_048_576)}`;
+
+    expect(() => parseHoldingsYamlDocument(document)).toThrow(
+      /holdings.yaml document must be <= 1048576 bytes/,
+    );
+  });
+
+  it("rejects imports with too many holdings", () => {
+    const rows = Array.from(
+      { length: 1001 },
+      (_, index) => `
+  - ticker: "${String(index).padStart(6, "0")}"
+    quantity: 0
+    entry_price: 0`,
+    ).join("");
+
+    expect(() => parseHoldingsYamlDocument(`holdings:${rows}`)).toThrow(
+      /holdings.yaml supports at most 1000 holdings/,
+    );
+  });
+
   it("builds a round-trippable export document", () => {
     const document = buildHoldingsYamlDocument([
       snapshot({

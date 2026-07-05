@@ -128,7 +128,10 @@ def article_read_summary(
             issue_code = str(raw_read.get("issue_code") or "").strip()
             if status != "not_attempted":
                 attempted += 1
-            if status == "accessed" or tier == "article_accessed":
+            if status in {"accessed", "verified"} or tier in {
+                "article_accessed",
+                "article_verified",
+            }:
                 accessed += 1
             if status == "verified" or tier == "article_verified":
                 verified += 1

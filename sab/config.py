@@ -464,9 +464,14 @@ class _ConfigParser:
         try:
             return parser(raw)
         except (TypeError, ValueError) as err:
-            if self._strict and provided:
+            if provided:
+                prefix = (
+                    "Strict config parsing failed: "
+                    if self._strict
+                    else "Invalid config value: "
+                )
                 raise ConfigLoadError(
-                    f"Strict config parsing failed: {source} must be {expected_type}, got {raw!r}."
+                    f"{prefix}{source} must be {expected_type}, got {raw!r}."
                 ) from err
             return default
 
@@ -534,9 +539,14 @@ class _ConfigParser:
         try:
             return float(raw)
         except (TypeError, ValueError) as err:
-            if self._strict and provided:
+            if provided:
+                prefix = (
+                    "Strict config parsing failed: "
+                    if self._strict
+                    else "Invalid config value: "
+                )
                 raise ConfigLoadError(
-                    f"Strict config parsing failed: config.yaml '{path}' must be a float, got {raw!r}."
+                    f"{prefix}config.yaml '{path}' must be a float, got {raw!r}."
                 ) from err
             return None
 

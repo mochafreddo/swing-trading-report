@@ -172,6 +172,13 @@ def test_operations_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> 
 def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     readme_text = _read(Path("README.md"))
     architecture_text = _read(Path("docs/ARCHITECTURE.md"))
+    prd_text = _read(Path("docs/PRD.md"))
+    automation_adr_text = _read(
+        Path("docs/adr/ADR-0005-automation-github-actions-supabase.md")
+    )
+    local_scheduler_adr_text = _read(
+        Path("docs/adr/ADR-0012-local-docker-scheduled-runs.md")
+    )
     scan_flow = architecture_text.split("### 4.1 `scan` 플로우", 1)[1].split(
         "### 4.2 `sell` 플로우", 1
     )[0]
@@ -195,6 +202,29 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     assert "manual `workflow_dispatch` `sell.yml`" in sell_flow
     assert "scheduled `sell.yml`" in sell_flow
     assert "fail closed" in sell_flow
+    assert (
+        "GitHub Actions `scan`/`sell` schedule 실행과 Telegram/Slack 요약 알림은"
+        not in (prd_text)
+    )
+    current_prd_section = prd_text.split("### 현재 제공", 1)[1].split("### 실험", 1)[0]
+    assert "schedule 실행과 Telegram/Slack 요약 알림은\n  현재 제공됩니다." not in (
+        current_prd_section
+    )
+    assert "`scan`/`sell` GitHub Actions workflow는 manual-only" in prd_text
+    assert (
+        "`scan`/`sell` 자동 실행은 **GitHub Actions `schedule`** 로 수행한다."
+        not in (automation_adr_text)
+    )
+    assert "`scan`/`sell` GitHub Actions workflow는 현재 manual-only" in (
+        automation_adr_text
+    )
+    assert (
+        "`scan`/`sell` 및 비시간 민감 자동화는 별도 결정 전까지 ADR-0005를 따릅니다."
+        not in (local_scheduler_adr_text)
+    )
+    assert "`scan`/`sell` scheduled workflow는 현재 제공하지 않습니다." in (
+        local_scheduler_adr_text
+    )
 
 
 def test_deployment_docs_match_current_action_triggers() -> None:

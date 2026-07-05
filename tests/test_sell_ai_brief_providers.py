@@ -135,6 +135,45 @@ def test_openai_payload_uses_source_refs_and_sell_action_schema() -> None:
     assert judgment_props["sell_action"] == {"type": "string", "enum": ["SELL"]}
 
 
+def test_openai_rejects_source_less_judgment_with_model_source_issue() -> None:
+    provider = OpenAiSellAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "judgments": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "sell_action": "SELL",
+                        "ai_stance": "CAUTION",
+                        "confidence": "LOW",
+                        "rationale": ["model says source is missing"],
+                        "checklist": ["manual source check"],
+                        "source_refs": [],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "source_issues": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "code": "openai_no_sources",
+                        "severity": "WARN",
+                        "message": "모델이 소스 없음 문제를 보고함",
+                    }
+                ],
+            }
+        ),
+    )
+
+    with pytest.raises(SellAiBriefProviderContractError, match="no sources"):
+        provider.build_judgments(
+            actionable_candidates=[
+                _candidate("AAPL.NAS", sell_action="SELL", sources=[])
+            ]
+        )
+
+
 def test_openai_contract_error_when_model_changes_sell_action() -> None:
     provider = OpenAiSellAiBriefProvider(
         model_name="gpt-test",
