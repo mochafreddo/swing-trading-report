@@ -359,6 +359,26 @@ class _CapturingSession:
         return _Response(self._payload)
 
 
+class _DefaultSession:
+    def __init__(self) -> None:
+        self.trust_env = True
+
+
+def test_openai_default_session_disables_trust_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _DefaultSession()
+    monkeypatch.setattr("sab.sell_ai_brief_providers.requests.Session", lambda: session)
+
+    OpenAiSellAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+    )
+
+    assert session.trust_env is False
+
+
 class _TimeoutSession:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []

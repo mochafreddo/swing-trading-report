@@ -184,11 +184,12 @@ class OpenAiSellAiBriefProvider:
         self.model_name = model_name
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
-        self._session = (
-            session
-            if session is not None
-            else cast(_SellAiBriefProviderSession, requests.Session())
-        )
+        if session is None:
+            created_session = requests.Session()
+            created_session.trust_env = False
+            self._session = cast(_SellAiBriefProviderSession, created_session)
+        else:
+            self._session = session
 
     def build_judgments(
         self,

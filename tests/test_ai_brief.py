@@ -7543,6 +7543,45 @@ def test_run_ai_brief_openai_timeout_writes_empty_artifact_with_system_issue(
     assert payload["brief_reason"] == "model_or_system_issue"
 
 
+def test_run_ai_brief_openai_timeout_with_upload_does_not_publish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry_report = _write_entry_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    upload_calls: list[dict[str, object]] = []
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "sab.ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    monkeypatch.setattr(
+        "sab.ai_brief_providers.requests.Session", lambda: _TimeoutSession()
+    )
+
+    def _fake_upload(**kwargs: object) -> str:
+        upload_calls.append(kwargs)
+        return "2026/05/2026-05-05.ai-brief.json"
+
+    monkeypatch.setattr("sab.ai_brief.maybe_upload_report_artifact", _fake_upload)
+
+    exit_code = run_ai_brief(
+        entry_report_path=entry_report.as_posix(),
+        buy_report_path=None,
+        market=None,
+        model_provider="openai",
+        model_name="gpt-test",
+        model_timeout_seconds=0.1,
+        source_provider=None,
+        source_report_path=None,
+        upload=True,
+    )
+
+    assert exit_code == 1
+    assert upload_calls == []
+    payload = json.loads(next(report_dir.glob("*.ai-brief.json")).read_text())
+    assert payload["system_issues"][0]["code"] == "model_provider_timeout"
+
+
 def test_run_ai_brief_falls_back_after_model_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

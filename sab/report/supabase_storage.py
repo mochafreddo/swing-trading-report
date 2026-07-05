@@ -500,11 +500,17 @@ def _upsert_report_index(
     )
     response: _HttpResponseData | None = None
     for attempt in range(1, _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS + 1):
-        response = _report_index_upsert_request(
-            config=config,
-            row=row,
-            session=session,
-        )
+        try:
+            response = _report_index_upsert_request(
+                config=config,
+                row=row,
+                session=session,
+            )
+        except requests.RequestException as exc:
+            raise SupabaseReportIndexError(
+                f"failed to upsert report index for '{storage_key}': {exc}",
+                storage_key=storage_key,
+            ) from exc
         if response.status_code in {200, 201, 204}:
             return
         if (

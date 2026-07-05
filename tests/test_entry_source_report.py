@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import sab.entry as entry
 
 
@@ -51,3 +52,38 @@ def test_entry_source_report_context_filters_market_override_without_losing_sour
         market: [row["ticker"] for row in rows]
         for market, rows in context.candidates_by_market.items()
     } == {"US": ["AAPL.NASD"]}
+
+
+def test_entry_source_report_rejects_non_object_json_root(tmp_path: Path) -> None:
+    assert hasattr(entry, "_load_entry_source_report")
+    helper = entry._load_entry_source_report
+    buy_report_path = tmp_path / "2026-02-25.buy.json"
+    buy_report_path.write_text(json.dumps([_candidate("AAPL.NASD")]), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Buy report root must be an object"):
+        helper(
+            report_dir=tmp_path.as_posix(),
+            buy_report_path=buy_report_path.as_posix(),
+            market_override="US",
+        )
+
+
+def test_entry_source_report_rejects_non_object_candidate_rows(
+    tmp_path: Path,
+) -> None:
+    assert hasattr(entry, "_load_entry_source_report")
+    helper = entry._load_entry_source_report
+    buy_report_path = tmp_path / "2026-02-25.buy.json"
+    buy_report_path.write_text(
+        json.dumps({"candidates": [_candidate("AAPL.NASD"), "bad row"]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError, match=r"Buy report candidates\[1\] must be an object"
+    ):
+        helper(
+            report_dir=tmp_path.as_posix(),
+            buy_report_path=buy_report_path.as_posix(),
+            market_override="US",
+        )

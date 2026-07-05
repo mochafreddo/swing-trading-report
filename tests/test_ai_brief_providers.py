@@ -1487,6 +1487,35 @@ def test_openai_rejects_watch_candidate_with_automated_order_language() -> None:
         )
 
 
+def test_openai_rejects_source_issue_with_automated_order_language() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "code": "model_warning",
+                        "severity": "WARN",
+                        "message": "buy now because source coverage is weak",
+                    }
+                ],
+            }
+        ),
+    )
+
+    with pytest.raises(AiBriefProviderContractError, match="automated-order"):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
+
+
 def test_openai_rejects_watch_candidate_stale_source() -> None:
     stale_published_at = _published_at(-dt.timedelta(hours=73))
     provider = OpenAiBriefProvider(
@@ -1943,6 +1972,26 @@ class _CapturingSession:
     def post(self, url: str, **kwargs: object) -> _Response:
         self.requests.append({"url": url, **kwargs})
         return _Response(self.payload)
+
+
+class _DefaultSession:
+    def __init__(self) -> None:
+        self.trust_env = True
+
+
+def test_openai_default_session_disables_trust_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _DefaultSession()
+    monkeypatch.setattr("sab.ai_brief_providers.requests.Session", lambda: session)
+
+    OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+    )
+
+    assert session.trust_env is False
 
 
 class _TimeoutSession:

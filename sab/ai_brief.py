@@ -2078,6 +2078,22 @@ def run_ai_brief(
     )
     if report_path_callback is not None:
         report_path_callback(out_path)
+    if provider_error is not None and upload:
+        logger.error(
+            "AI brief provider failed; skipping Supabase upload",
+            extra={
+                "event": "ai_brief_upload_skipped_provider_failed",
+                "run_id": run_id,
+                "operation": operation,
+                "status": "failed",
+                "model_provider": normalized_model_provider,
+                "dependency": normalized_model_provider,
+                "market": target_market,
+                "report_path": out_path,
+                "system_issue_count": len(system_issues),
+            },
+        )
+        return 1
     try:
         uploaded_key = maybe_upload_report_artifact(
             artifact_path=out_path,

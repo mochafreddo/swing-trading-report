@@ -88,6 +88,7 @@ class _FakeStateStore:
     fail_notification_sent_upsert: bool = False
     fail_late_alert_sent_upsert: bool = False
     claim_results: list[bool] = field(default_factory=list)
+    held_locks: dict[str, str] = field(default_factory=dict)
     renewed_event: threading.Event | None = None
 
     def preflight(self) -> None:
@@ -142,12 +143,20 @@ class _FakeStateStore:
     ) -> RuntimeStateLockClaim:
         self.claims.append(key)
         self.claim_payloads.append((key, payload))
-        acquired = self.claim_results.pop(0) if self.claim_results else True
+        acquired = (
+            self.claim_results.pop(0)
+            if self.claim_results
+            else key not in self.held_locks
+        )
+        if acquired:
+            self.held_locks[key] = owner_token
         return RuntimeStateLockClaim(acquired=acquired, expires_at="soon")
 
     def release_lock(self, key: str, *, owner_token: str) -> bool:
         self.events.append(("release", key))
         self.releases.append(key)
+        if self.held_locks.get(key) == owner_token:
+            del self.held_locks[key]
         return True
 
     def renew_lock(self, key: str, *, owner_token: str, ttl_seconds: int) -> bool:
@@ -1199,7 +1208,7 @@ def test_artifact_only_reconciliation_releases_notification_claim_when_download_
     assert any(":notification:claim:" in key for key in state.releases)
 
 
-def test_artifact_only_reconciliation_releases_notification_claim_when_sent_marker_fails() -> (
+def test_artifact_only_reconciliation_retains_notification_claim_when_sent_marker_fails() -> (
     None
 ):
     artifact_key = build_scheduler_state_key(
@@ -1225,19 +1234,72 @@ def test_artifact_only_reconciliation_releases_notification_claim_when_sent_mark
         now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
     )
 
-    with pytest.raises(RuntimeError, match="notification sent write failed"):
-        runner.run(
-            ScheduledAiBriefRequest(
-                market="US",
-                schedule_role="local-retry",
-                runner_role="local-retry",
-                scheduled_tick="0845",
-                attempt_id="attempt-sent-marker-fail",
-            )
+    result = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-retry",
+            runner_role="local-retry",
+            scheduled_tick="0845",
+            attempt_id="attempt-sent-marker-fail",
         )
+    )
 
+    assert result.status == "notification_sent_marker_failed"
+    assert result.storage_key == "2026/05/2026-05-28.ai-brief.json"
     assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
-    assert any(":notification:claim:" in key for key in state.releases)
+    assert not any(":notification:claim:" in key for key in state.releases)
+    assert any(":notification:claim:" in key for key in state.held_locks)
+    assert "notification_sent_marker_failed" in scheduler_runner._FAILED_STATUSES
+
+
+def test_artifact_only_reconciliation_does_not_resend_after_sent_marker_failure() -> (
+    None
+):
+    artifact_key = build_scheduler_state_key(
+        kind="artifact", market="US", session_date="2026-05-28"
+    )
+    state = _FakeStateStore(
+        fail_notification_sent_upsert=True,
+        entries={
+            artifact_key: RuntimeStateEntry(
+                state_key=artifact_key,
+                state_payload={
+                    "storageKey": "2026/05/2026-05-28.ai-brief.json",
+                    "market": "US",
+                    "sessionDate": "2026-05-28",
+                    "reportDate": "2026-05-28",
+                },
+                expires_at="2026-05-30T00:00:00Z",
+            )
+        },
+    )
+    runner, state, _pipeline, _storage, notifier = _runner(
+        state=state,
+        now=dt.datetime(2026, 5, 28, 12, 45, tzinfo=dt.UTC),
+    )
+
+    first = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-retry",
+            runner_role="local-retry",
+            scheduled_tick="0845",
+            attempt_id="attempt-sent-marker-fail",
+        )
+    )
+    second = runner.run(
+        ScheduledAiBriefRequest(
+            market="US",
+            schedule_role="local-retry",
+            runner_role="local-retry",
+            scheduled_tick="0845",
+            attempt_id="attempt-sent-marker-retry",
+        )
+    )
+
+    assert first.status == "notification_sent_marker_failed"
+    assert second.status == "notification_claim_held"
+    assert notifier.sent == ["2026/05/2026-05-28.ai-brief.json"]
 
 
 def test_report_index_repair_happens_before_new_pipeline() -> None:

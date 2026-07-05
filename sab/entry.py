@@ -1211,13 +1211,20 @@ def _load_entry_source_report(
         buy_report_path=buy_report_path,
     )
     with open(resolved_report_path, encoding="utf-8") as fp:
-        source_report = cast(dict[str, Any], json.load(fp))
+        source_report_raw = json.load(fp)
+    if not isinstance(source_report_raw, dict):
+        raise ValueError("Buy report root must be an object")
+    source_report = cast(dict[str, Any], source_report_raw)
 
     candidates_raw = source_report.get("candidates")
     if not isinstance(candidates_raw, list):
         raise ValueError("Buy report is missing candidates[]")
 
-    candidates = [item for item in candidates_raw if isinstance(item, dict)]
+    candidates: list[dict[str, Any]] = []
+    for idx, item in enumerate(candidates_raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"Buy report candidates[{idx}] must be an object")
+        candidates.append(cast(dict[str, Any], item))
     if not candidates:
         if candidates_raw:
             raise ValueError("Buy report has no valid candidate rows")
@@ -1857,6 +1864,7 @@ def _apply_portfolio_guards(
     exposure_limits: Any = (),
 ) -> dict[str, int]:
     accepted_new_entries_by_market = {"KR": 0, "US": 0}
+    accepted_new_tickers: set[str] = set()
     blocked_by_market = {"KR": 0, "US": 0}
     current_active_total = active_total
     exposure_counts = Counter(active_exposure_counts or {})
@@ -1866,10 +1874,17 @@ def _apply_portfolio_guards(
         if row.action != "ENTER":
             continue
 
-        if _canonical_ticker(row.ticker) in active_tickers:
+        canonical_ticker = _canonical_ticker(row.ticker)
+        if canonical_ticker in active_tickers:
             continue
 
         market = _infer_market_from_ticker(row.ticker)
+        if canonical_ticker in accepted_new_tickers:
+            row.action = "SKIP"
+            row.reasons.append("duplicate entry candidate")
+            blocked_by_market[market] = blocked_by_market.get(market, 0) + 1
+            continue
+
         if (
             max_active_holdings is not None
             and current_active_total >= max_active_holdings
@@ -1903,6 +1918,7 @@ def _apply_portfolio_guards(
         accepted_new_entries_by_market[market] = (
             accepted_new_entries_by_market.get(market, 0) + 1
         )
+        accepted_new_tickers.add(canonical_ticker)
         current_active_total += 1
         exposure_counts.update(row.portfolio_exposure_buckets)
 

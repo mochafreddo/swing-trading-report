@@ -134,6 +134,7 @@ _FAILED_STATUSES = {
     "source_config_invalid",
     "invalid_attempt_id",
     "invalid_scheduled_tick",
+    "notification_sent_marker_failed",
     "unsupported_runner_role",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -2675,6 +2676,7 @@ class ScheduledAiBriefRunner:
         )
         if isinstance(notification_claim, ScheduledAiBriefResult):
             return notification_claim
+        release_notification_claim = True
         try:
             if require_main_lock and not self._owns_main_lock(
                 main_lock_key=main_lock_key,
@@ -2722,6 +2724,7 @@ class ScheduledAiBriefRunner:
                     storage_key=storage_key,
                 )
             self._notifier.send_schedule(report=report, storage_key=storage_key)
+            release_notification_claim = False
             if require_main_lock and not self._owns_main_lock(
                 main_lock_key=main_lock_key,
                 main_owner_token=main_owner_token,
@@ -2731,16 +2734,33 @@ class ScheduledAiBriefRunner:
                     session_date=session_date,
                     storage_key=storage_key,
                 )
-            self._state_store.upsert_marker(
-                key=sent_key,
-                payload={
-                    "market": market,
-                    "sessionDate": session_date,
-                    "storageKey": storage_key,
-                    "attemptId": attempt_id,
-                },
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
-            )
+            try:
+                self._state_store.upsert_marker(
+                    key=sent_key,
+                    payload={
+                        "market": market,
+                        "sessionDate": session_date,
+                        "storageKey": storage_key,
+                        "attemptId": attempt_id,
+                    },
+                    ttl_seconds=_SUCCESS_TTL_SECONDS,
+                )
+                release_notification_claim = True
+            except Exception:
+                _LOGGER.exception(
+                    "Scheduled AI brief notification sent marker failed",
+                    extra={
+                        "event": "scheduled_ai_brief_notification_sent_marker_failed",
+                        "market": market,
+                        "session_date": session_date,
+                        "storage_key": storage_key,
+                    },
+                )
+                return ScheduledAiBriefResult(
+                    status="notification_sent_marker_failed",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             if require_main_lock and not self._owns_main_lock(
                 main_lock_key=main_lock_key,
                 main_owner_token=main_owner_token,
@@ -2768,10 +2788,11 @@ class ScheduledAiBriefRunner:
                 storage_key=storage_key,
             )
         finally:
-            self._state_store.release_lock(
-                notification_claim.claim_key,
-                owner_token=notification_claim.owner_token,
-            )
+            if release_notification_claim:
+                self._state_store.release_lock(
+                    notification_claim.claim_key,
+                    owner_token=notification_claim.owner_token,
+                )
 
     def _owns_main_lock(
         self,

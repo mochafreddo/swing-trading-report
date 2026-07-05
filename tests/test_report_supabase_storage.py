@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import requests
 import sab.report.supabase_storage as supabase_storage
 from sab.report.supabase_storage import (
     SupabaseReportIndexError,
@@ -72,6 +73,37 @@ class _FakeSession:
         if not self._delete_responses:
             raise AssertionError("unexpected DELETE request")
         return self._delete_responses.pop(0)
+
+
+class _FakeSessionWithPostException(_FakeSession):
+    def __init__(self, *, post_exception_at_call: int) -> None:
+        super().__init__(
+            get_responses=[_FakeResponse(404)],
+            post_responses=[_FakeResponse(201)],
+            delete_responses=[_FakeResponse(200)],
+        )
+        self._post_exception_at_call = post_exception_at_call
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        data: bytes,
+        timeout: float,
+    ) -> _FakeResponse:
+        next_call_number = len(self.post_calls) + 1
+        if next_call_number == self._post_exception_at_call:
+            self.post_calls.append(
+                {
+                    "url": url,
+                    "headers": headers,
+                    "data": data,
+                    "timeout": timeout,
+                }
+            )
+            raise requests.Timeout("index request timed out")
+        return super().post(url, headers=headers, data=data, timeout=timeout)
 
 
 def test_is_not_found_response_classifies_expected_statuses() -> None:
@@ -583,6 +615,33 @@ def test_upload_report_artifact_raises_index_error_when_upsert_fails(
 
     assert exc_info.value.storage_key == "2026/02/2026-02-13.buy.json"
     assert not exc_info.value.cleanup_failed
+    assert len(session.delete_calls) == 1
+
+
+def test_upload_report_artifact_rolls_back_when_index_request_raises(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSessionWithPostException(post_exception_at_call=2)
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="request timed out") as exc:
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.storage_key == "2026/02/2026-02-13.buy.json"
+    assert not exc.value.cleanup_failed
     assert len(session.delete_calls) == 1
 
 

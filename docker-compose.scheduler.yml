@@ -15,6 +15,7 @@ services:
       - .:/workspace:ro
       - ./.uv-cache:/workspace/.uv-cache
       - ./data:/workspace/data
+      - ./logs:/workspace/logs
       - ./reports:/workspace/reports
       - sab_scheduler_venv:/opt/sab-scheduler-venv
     command: uv run python -m sab ai-brief-scheduled

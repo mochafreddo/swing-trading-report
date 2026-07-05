@@ -242,11 +242,12 @@ class OpenAiBriefProvider:
         self.model_name = model_name
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
-        self._session = (
-            session
-            if session is not None
-            else cast(_AiBriefProviderSession, requests.Session())
-        )
+        if session is None:
+            created_session = requests.Session()
+            created_session.trust_env = False
+            self._session = cast(_AiBriefProviderSession, created_session)
+        else:
+            self._session = session
 
     def build_recommendations(
         self,
@@ -1514,9 +1515,15 @@ def _validate_provider_issue_list(source_issues: list[dict[str, object]]) -> Non
             raise AiBriefProviderContractError(
                 f"OpenAI output source_issues[{idx}].code is required"
             )
-        if not str(issue.get("message") or "").strip():
+        message = str(issue.get("message") or "").strip()
+        if not message:
             raise AiBriefProviderContractError(
                 f"OpenAI output source_issues[{idx}].message is required"
+            )
+        if contains_automated_order_language(message):
+            raise AiBriefProviderContractError(
+                "OpenAI output source_issues[].message must avoid "
+                "automated-order language"
             )
         severity = str(issue.get("severity") or "").strip().upper()
         if severity not in ALLOWED_ISSUE_SEVERITY:

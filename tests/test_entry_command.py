@@ -620,6 +620,31 @@ def test_apply_entry_portfolio_guards_uses_config_and_existing_holdings() -> Non
     assert blocked_by_market == {"KR": 0, "US": 1}
 
 
+def test_apply_entry_portfolio_guards_blocks_duplicate_new_entry_tickers() -> None:
+    rows, issues = evaluate_entry_candidates(
+        candidates=[
+            _entry_candidate("AAPL.NASD"),
+            _entry_candidate("AAPL.NASD"),
+        ],
+        price_lookup_fn=lambda _ticker: _entry_price_result(101.0),
+        gap_breach_action="SKIP",
+    )
+    assert issues == []
+
+    blocked_by_market = entry._apply_entry_portfolio_guards(
+        cfg=cast(
+            Config,
+            SimpleNamespace(portfolio=_portfolio_config(max_new_entries_us=8)),
+        ),
+        holdings_data=_holdings_data([]),
+        rows=rows,
+    )
+
+    assert [row.action for row in rows] == ["ENTER", "SKIP"]
+    assert "duplicate entry candidate" in rows[1].reasons
+    assert blocked_by_market == {"KR": 0, "US": 1}
+
+
 def test_apply_entry_portfolio_guards_blocks_configured_exposure_bucket() -> None:
     rows, issues = evaluate_entry_candidates(
         candidates=[
