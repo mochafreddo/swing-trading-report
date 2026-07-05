@@ -394,6 +394,56 @@ def test_hybrid_sell_profit_protection_state_preserves_peak_stop_contract() -> N
     ]
 
 
+def test_hybrid_sell_hard_stop_preserves_tighter_profit_stop(
+    monkeypatch,
+) -> None:
+    _patch_indicators(monkeypatch)
+    settings = HybridSellSettings(
+        min_bars=2,
+        ema_short_period=2,
+        ema_mid_period=2,
+        sma_trend_period=2,
+        stop_loss_pct_max=0.05,
+    )
+
+    result = evaluate_sell_signals_hybrid(
+        "FAKE.US",
+        _profit_trail_candles(peak_close=112.0, last_close=94.0),
+        {"entry_price": 100.0, "entry_date": "2025-01-01"},
+        settings,
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == 105.0
+    assert any("Price closed below profit protection stop" in r for r in result.reasons)
+    assert any("Hit hard stop max" in r for r in result.reasons)
+
+
+@pytest.mark.parametrize(
+    ("existing_stop", "expected_stop"),
+    [
+        (97.0, 97.0),
+        (93.0, 95.0),
+    ],
+)
+def test_hybrid_sell_hard_stop_keeps_tighter_long_stop(
+    existing_stop: float,
+    expected_stop: float,
+) -> None:
+    result = hybrid_sell._apply_hard_stop_band(
+        entry_price=100.0,
+        last_close=94.0,
+        stop_override=None,
+        settings=HybridSellSettings(stop_loss_pct_max=0.05),
+        action="HOLD",
+        stop_price=existing_stop,
+    )
+
+    assert result.action == "SELL"
+    assert result.stop_price == expected_stop
+    assert any("Hit hard stop max" in reason for reason in result.reasons)
+
+
 def test_hybrid_sell_profit_exit_state_preserves_override_and_profit_order() -> None:
     helper = getattr(hybrid_sell, "_apply_profit_exit_rules", None)
 

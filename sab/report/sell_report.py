@@ -41,6 +41,7 @@ def _build_rules_payload(
     *,
     atr_trail_multiplier: float | None,
     time_stop_days: int | None,
+    hybrid_time_stop: dict[str, Any] | None,
     sell_mode: str | None,
     sell_mode_note: str | None,
 ) -> dict[str, Any] | None:
@@ -49,6 +50,8 @@ def _build_rules_payload(
         payload["atr_trail_multiplier"] = atr_trail_multiplier
     if time_stop_days is not None:
         payload["time_stop_days"] = time_stop_days
+    if hybrid_time_stop is not None:
+        payload["hybrid_time_stop"] = hybrid_time_stop
     if sell_mode:
         payload["sell_mode"] = sell_mode
     if sell_mode_note:
@@ -65,6 +68,7 @@ def write_sell_report(
     cache_hint: str | None = None,
     atr_trail_multiplier: float | None = None,
     time_stop_days: int | None = None,
+    hybrid_time_stop: dict[str, Any] | None = None,
     fx_rate: float | None = None,
     fx_note: str | None = None,
     sell_mode: str | None = None,
@@ -126,6 +130,7 @@ def write_sell_report(
     rules = _build_rules_payload(
         atr_trail_multiplier=atr_trail_multiplier,
         time_stop_days=time_stop_days,
+        hybrid_time_stop=hybrid_time_stop,
         sell_mode=sell_mode,
         sell_mode_note=sell_mode_note,
     )

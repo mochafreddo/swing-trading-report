@@ -21,6 +21,10 @@ def test_scan_type_helpers_basic_behavior() -> None:
     assert _filter_tickers_by_markets(["005930", "AAPL.NAS"], ["KR"]) == ["005930"]
     assert _filter_tickers_by_markets(["AAPL.NAS-DAQ"], ["US"]) == ["AAPL.NAS-DAQ"]
     assert _to_float("1.25") == 1.25
+    assert _to_float(float("nan")) is None
+    assert _to_float(float("inf")) is None
+    assert _to_float(float("-inf")) is None
+    assert _to_float("inf") is None
     assert _split_overseas("AAPL.NAS") == ("AAPL", "NAS")
     assert _excd_from_suffix("NASDAQ") == "NAS"
     assert _coerce_nday("3") == 3

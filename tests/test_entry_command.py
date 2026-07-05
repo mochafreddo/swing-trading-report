@@ -127,8 +127,11 @@ def test_evaluate_entry_candidates_applies_gap_guard_and_strategy() -> None:
 
     by_ticker = {row.ticker: row for row in rows}
     assert by_ticker["AAPL.NASD"].action == "ENTER"
+    assert by_ticker["AAPL.NASD"].entry_state == "READY"
     assert by_ticker["MSFT.NASD"].action == "SKIP"
+    assert by_ticker["MSFT.NASD"].entry_state is None
     assert by_ticker["NVDA.NASD"].action == "REVIEW"
+    assert by_ticker["NVDA.NASD"].entry_state == "WATCH"
     assert issues == []
 
 
@@ -1802,7 +1805,7 @@ def test_run_entry_e2e_market_override_filters_mixed_buy_report(
             "gap_guard_down_price": 97.0,
             "strategy_mode": "ema_cross",
             "pattern": None,
-            "entry_state": None,
+            "entry_state": "READY",
             "entry_price_status": "available",
             "entry_price_source": "kis_live_snapshot",
             "entry_price_issue_code": None,

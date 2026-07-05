@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import cast
 
+import pytest
 from sab.sell_evaluation import _extract_system_issues_from_reasons
 from sab.signals.hybrid_buy import HybridEvaluationSettings, evaluate_ticker_hybrid
 from sab.signals.sell_rules import Candle, SellSettings, evaluate_sell_signals
@@ -55,6 +56,39 @@ def _hybrid_settings() -> HybridEvaluationSettings:
     )
 
 
+def _zero_lookback_reversal_candles(
+    latest_volume: float,
+) -> list[dict[str, object]]:
+    steady_rows = [
+        {
+            "date": date,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": volume,
+        }
+        for date, volume in (
+            ("20260102", 1_000_000.0),
+            ("20260103", 1_000_000.0),
+            ("20260104", 1_000_000.0),
+            ("20260105", 0.0),
+            ("20260106", 0.0),
+        )
+    ]
+    return [
+        *steady_rows,
+        {
+            "date": "20260107",
+            "open": 102.0,
+            "high": 104.0,
+            "low": 100.0,
+            "close": 103.0,
+            "volume": latest_volume,
+        },
+    ]
+
+
 def test_hybrid_buy_reports_missing_core_indicators_as_system_issue() -> None:
     result = evaluate_ticker_hybrid(
         "AAPL.NASD",
@@ -82,6 +116,51 @@ def test_hybrid_buy_reports_missing_sma60_filter_as_system_issue() -> None:
     assert result.candidate is None
     assert result.reason_kind == "system"
     assert result.reason == "Indicator data unavailable for hybrid buy: SMA60"
+
+
+@pytest.mark.parametrize("latest_volume", [0.0, 1_000_000.0])
+def test_hybrid_buy_rsi_reversal_requires_positive_lookback_volume(
+    monkeypatch,
+    latest_volume: float,
+) -> None:
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.choose_eval_index",
+        lambda data, **_: (len(data) - 1, True),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_trend_pullback_bounce",
+        lambda *_args, **_kwargs: (False, ["No pullback"], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy._detect_swing_high_breakout",
+        lambda *_args, **_kwargs: (False, ["No breakout"], None, {}),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.sma",
+        lambda closes, n: [90.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.ema",
+        lambda closes, n: [100.0] * len(closes) if n == 10 else [99.0] * len(closes),
+    )
+    monkeypatch.setattr(
+        "sab.signals.hybrid_buy.rsi",
+        lambda closes, n: [50.0, 50.0, 50.0, 35.0, 35.0, 45.0],
+    )
+
+    settings = _hybrid_settings()
+    settings.volume_lookback_days = 2
+
+    result = evaluate_ticker_hybrid(
+        "AAPL.NASD",
+        _zero_lookback_reversal_candles(latest_volume),
+        settings,
+        {"currency": "USD", "exchange": "NASD"},
+    )
+
+    assert result.candidate is None
+    assert result.reason_kind == "signal"
+    assert result.reason == "Did not meet hybrid signal criteria"
 
 
 def test_generic_sell_reports_missing_sma200_as_system_issue() -> None:

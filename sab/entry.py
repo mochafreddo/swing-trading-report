@@ -1020,6 +1020,14 @@ def _evaluate_entry_candidate(
     if not reasons:
         reasons.append("entry conditions satisfied")
 
+    report_entry_state = entry_state
+    if (
+        action == "ENTER"
+        and strategy_mode != "sma_ema_hybrid"
+        and report_entry_state is None
+    ):
+        report_entry_state = "READY"
+
     liquidity_exit_capacity, liquidity_warnings, liquidity_available = (
         _resolve_liquidity_exit_capacity(candidate)
     )
@@ -1041,7 +1049,7 @@ def _evaluate_entry_candidate(
         gap_guard_down_price=gap_guard_down_price,
         strategy_mode=strategy_mode,
         pattern=pattern,
-        entry_state=entry_state,
+        entry_state=report_entry_state,
         entry_price_status=lookup_result.status,
         entry_price_source=lookup_result.source,
         entry_price_issue_code=(

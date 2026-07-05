@@ -278,6 +278,18 @@ def test_write_sell_report_emits_rules_and_fx_metadata(tmp_path: Path) -> None:
         evaluated=[row],
         atr_trail_multiplier=1.5,
         time_stop_days=7,
+        hybrid_time_stop={
+            "time_stop_days": 30,
+            "time_stop_grace_days": 15,
+            "time_stop_profit_floor": 0.03,
+            "pattern_time_stops": {
+                "swing_high_breakout": {
+                    "time_stop_days": 10,
+                    "time_stop_grace_days": 2,
+                    "time_stop_profit_floor": 0.01,
+                }
+            },
+        },
         fx_rate=1380.0,
         fx_note="manual",
         sell_mode="sma_ema_hybrid",
@@ -286,6 +298,18 @@ def test_write_sell_report_emits_rules_and_fx_metadata(tmp_path: Path) -> None:
     payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
     assert payload["rules"]["atr_trail_multiplier"] == 1.5
     assert payload["rules"]["time_stop_days"] == 7
+    assert payload["rules"]["hybrid_time_stop"] == {
+        "time_stop_days": 30,
+        "time_stop_grace_days": 15,
+        "time_stop_profit_floor": 0.03,
+        "pattern_time_stops": {
+            "swing_high_breakout": {
+                "time_stop_days": 10,
+                "time_stop_grace_days": 2,
+                "time_stop_profit_floor": 0.01,
+            }
+        },
+    }
     assert payload["rules"]["sell_mode"] == "sma_ema_hybrid"
     assert payload["fx"]["usd_krw_rate"] == 1380.0
     assert payload["fx"]["note"] == "manual"

@@ -60,7 +60,7 @@ def _to_float(value: Any) -> float | None:
         if value is None:
             return None
         val = float(value)
-        if math.isnan(val):
+        if not math.isfinite(val):
             return None
         return val
     except TypeError, ValueError:

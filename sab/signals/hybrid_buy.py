@@ -532,7 +532,7 @@ def _detect_rsi_oversold_reversal(
     o = _to_finite_or_default(today.get("open"))
     c = _to_finite_or_default(today.get("close"))
     v, _ = _to_volume_and_invalid(today.get("volume"))
-    if c <= o or not (avg_vol == 0.0 or v >= avg_vol):
+    if c <= o or not (avg_vol > 0.0 and v >= avg_vol):
         return False, ["No strong bullish candle with rising volume"], None, {}
 
     low = _to_finite_or_default(today.get("low"))

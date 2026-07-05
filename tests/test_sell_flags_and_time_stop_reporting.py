@@ -325,6 +325,68 @@ def test_write_sell_runtime_report_uses_resolved_session_state(
     )
 
 
+def test_write_sell_runtime_report_passes_hybrid_time_stop_rules() -> None:
+    runtime = _runtime_with_single_holding()
+    runtime.unique_tickers = ["AAPL.NASD"]
+    runtime.cache_hint = None
+    runtime.fx_rate = None
+    runtime.fx_note = None
+    runtime.cfg.sell_mode = "sma_ema_hybrid"
+    runtime.cfg.hybrid_sell.time_stop_days = 30
+    runtime.cfg.hybrid_sell.time_stop_grace_days = 15
+    runtime.cfg.hybrid_sell.time_stop_profit_floor = 0.03
+    runtime.cfg.hybrid_sell.pattern_time_stops = {
+        "swing_high_breakout": SimpleNamespace(
+            time_stop_days=10,
+            time_stop_grace_days=2,
+            time_stop_profit_floor=0.01,
+        )
+    }
+
+    rows = [
+        SellReportRow(
+            ticker="AAPL.NASD",
+            name="Apple",
+            quantity=1.0,
+            entry_price=100.0,
+            entry_date="2025-01-10",
+            last_price=101.0,
+            pnl_pct=0.01,
+            action="HOLD",
+            reasons=["No sell criteria triggered"],
+            stop_price=None,
+            target_price=None,
+            currency="USD",
+            eval_date="20250113",
+            flags=None,
+            days_in_trade_sessions=1,
+            time_stop_triggered=False,
+        )
+    ]
+
+    captured: dict[str, Any] = {}
+
+    def _fake_write_sell_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-sell.json"
+
+    _write_sell_report(runtime, rows, write_sell_report_fn=_fake_write_sell_report)
+
+    assert captured["time_stop_days"] == 10
+    assert captured["hybrid_time_stop"] == {
+        "time_stop_days": 30,
+        "time_stop_grace_days": 15,
+        "time_stop_profit_floor": 0.03,
+        "pattern_time_stops": {
+            "swing_high_breakout": {
+                "time_stop_days": 10,
+                "time_stop_grace_days": 2,
+                "time_stop_profit_floor": 0.01,
+            }
+        },
+    }
+
+
 def test_write_sell_runtime_report_emits_session_state_by_market_for_mixed_run(
     monkeypatch,
 ) -> None:

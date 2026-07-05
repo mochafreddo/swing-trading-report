@@ -346,7 +346,17 @@ def _write_sell_report(
         "sell_rsi_floor_alt": runtime.cfg.sell_rsi_floor_alt,
         "sell_min_bars": runtime.cfg.sell_min_bars,
     }
+    hybrid_time_stop: dict[str, Any] | None = None
     if runtime.cfg.sell_mode == "sma_ema_hybrid":
+        pattern_time_stops = _hybrid_pattern_time_stops_snapshot(
+            runtime.cfg.hybrid_sell
+        )
+        hybrid_time_stop = {
+            "time_stop_days": runtime.cfg.hybrid_sell.time_stop_days,
+            "time_stop_grace_days": runtime.cfg.hybrid_sell.time_stop_grace_days,
+            "time_stop_profit_floor": runtime.cfg.hybrid_sell.time_stop_profit_floor,
+            "pattern_time_stops": pattern_time_stops,
+        }
         config_snapshot["hybrid_sell"] = {
             "profit_target_low": runtime.cfg.hybrid_sell.profit_target_low,
             "profit_target_high": runtime.cfg.hybrid_sell.profit_target_high,
@@ -361,9 +371,7 @@ def _write_sell_report(
             "time_stop_days": runtime.cfg.hybrid_sell.time_stop_days,
             "time_stop_grace_days": runtime.cfg.hybrid_sell.time_stop_grace_days,
             "time_stop_profit_floor": runtime.cfg.hybrid_sell.time_stop_profit_floor,
-            "pattern_time_stops": _hybrid_pattern_time_stops_snapshot(
-                runtime.cfg.hybrid_sell
-            ),
+            "pattern_time_stops": pattern_time_stops,
         }
     run_meta = build_run_meta(
         market=eval_market,
@@ -401,6 +409,7 @@ def _write_sell_report(
         cache_hint=runtime.cache_hint,
         atr_trail_multiplier=runtime.cfg.sell_atr_multiplier,
         time_stop_days=runtime.cfg.sell_time_stop_days,
+        hybrid_time_stop=hybrid_time_stop,
         fx_rate=runtime.fx_rate,
         fx_note=runtime.fx_note,
         sell_mode=runtime.cfg.sell_mode,

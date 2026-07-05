@@ -58,7 +58,7 @@ assumptions.
 - **investment_readiness / implementation_ready**: 계좌 NAV/리스크 예산, 의도 포지션 규모 기준 유동성/청산 가능성, 포트폴리오 노출, source/fundamental context까지 확인됐는지 나타내는 실행 준비도 레이어입니다.
 - **candidate**: buy 리포트에 들어가는 종목 단위 결과(dict).
 - **sell action**: `HOLD|SELL_PARTIAL|REVIEW|SELL`.
-- **entry_state**(hybrid buy 전용): `WATCH|READY`(대기 vs 종가 기반 확인 신호).
+- **entry_state**: hybrid buy candidate에서는 `WATCH|READY`(대기 vs 종가 기반 확인 신호)를 뜻합니다. entry report에서는 AI Brief 호환성을 위해 비하이브리드 `ENTER` row도 `READY`를 기록할 수 있습니다.
 
 ## 3. 입력 데이터 계약
 
@@ -297,6 +297,7 @@ Scan은 “후보 발굴 + 리스크 가이드” 목적이며, **매수 주문�
 - Hybrid buy의 볼륨 확인은 패턴별 신호봉을 제외한 직전 `strategy.hybrid.volume_lookback_days`일 평균 거래량 대비로 평가합니다.
   - 적용 대상: Trend pullback bounce, Swing high breakout, RSI oversold reversal.
   - 의도: 신호봉 당일 거래량이 자기 자신의 비교 기준선을 움직이지 않게 해 `volume > Nd avg` 해석을 고정합니다.
+  - RSI oversold reversal은 직전 lookback 평균 거래량이 양수이고 신호봉 거래량이 그 이상일 때만 볼륨 확인을 통과합니다. 직전 lookback 거래량이 0이면 신호봉 거래량만으로 후보를 만들지 않습니다.
 - KR breakout confirmation이 켜진 경우 첫 돌파 종가는 `WATCH`가 될 수 있습니다.
   - 다음 완성 일봉이 **원래 박스권 swing high** 위에서 한 번 더 마감하면 `READY`로 승격할 수 있습니다.
   - 이때 직전 돌파봉의 고점을 새 swing high로 잘못 재계산하지 않고, 돌파 전 박스권의 swing high를 유지합니다.
@@ -336,6 +337,7 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 - hybrid buy candidate도 `ema_cross`와 동일하게 `rs_return_value`, `rs_diff_value`, `rs_benchmark_value`, `rs_benchmark_ticker`를 포함합니다.
 - `rs_return_value`는 candidate 종목의 adjusted 완료 일봉 종가와 `rs_lookback_days` 기준으로 계산합니다.
 - `rs_benchmark_value`는 scan 단계가 주입한 같은 시장 benchmark 수익률을 우선 사용하고, 없으면 정적 `strategy.rs_benchmark_return`을 사용합니다.
+- benchmark close series에 NaN/inf 같은 non-finite 값이 있으면 benchmark를 사용할 수 없는 것으로 처리합니다.
 - `rs_diff_value = rs_return_value - rs_benchmark_value`이며, 전체 후보 정렬의 tie-breaker에 사용됩니다(5.2.4 참고).
 
 #### 5.3.7 리스크 정합성/품질 상태 계약
@@ -447,9 +449,11 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - Supabase/web/scheduled export 경로는 active holdings의 `entry_pattern`을 보존합니다. 런타임이 `entry_pattern` 컬럼을 선택하므로 DB migration과 PostgREST schema cache가 먼저 적용되어야 합니다.
 - 하드 스탑 밴드(기본 3–5%):
   - 손실이 밴드 내면 `REVIEW`, 최대치 이상이면 `SELL`
+  - long position stop 가이드는 기존 보호 stop과 hard stop 중 더 타이트한 값(더 높은 stop price)을 유지합니다. 따라서 profit protection stop이 이미 더 높으면 hard stop이 리포트 stop을 낮추지 않습니다.
 - (옵션) extended time stop:
   - 기본 time stop은 `sell.hybrid.time_stop_days`, `sell.hybrid.time_stop_grace_days`, `sell.hybrid.time_stop_profit_floor`를 사용합니다.
-  - `sell.hybrid.pattern_time_stops.<pattern>`이 있으면 해당 holding pattern에 한해 지정된 time stop 필드만 override하고, 누락된 필드는 전역 hybrid 값을 상속합니다.
+  - `sell.hybrid.pattern_time_stops.<pattern>`이 있으면 구조화 필드(`pattern`, `entry_pattern`, `signal_pattern`)의 exact pattern ID에 한해 지정된 time stop 필드만 override하고, 누락된 필드는 전역 hybrid 값을 상속합니다.
+  - free-form `strategy`/`tags`의 `breakout` substring은 failed-breakout 손실 청산 호환성에는 계속 쓰지만, pattern-specific time stop override를 활성화하지 않습니다.
   - pattern key는 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`만 허용합니다.
   - 운영 기본값은 `swing_high_breakout`을 15 trading sessions + 5 grace sessions + 1% profit floor로 짧게 적용해, 약한 breakout 셋업을 전역 30+15 세션보다 빨리 수동검토/청산 후보로 올립니다.
   - grace 이후에도 수익/추세 조건이 약하면 `SELL`
@@ -495,6 +499,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - `risk_alignment`가 명시된 hybrid candidate는 `aligned`일 때만 자동 `ENTER` 대상이 될 수 있습니다. `tight_stop_vs_volatility`나 `unknown`은 entry row에 수동검토 reason을 남기고 `REVIEW`로 처리합니다.
   - `risk_alignment`가 없는 레거시 candidate는 기존 호환성을 위해 이 규칙만으로 차단하지 않습니다.
 - `sma_ema_hybrid` buy report의 `config_snapshot`은 공통 전략 설정과 함께 `strategy.hybrid.*` 값을 기록해, hybrid 후보 평가 파라미터를 사후 재현할 수 있게 합니다.
+- `strategy_mode=ema_cross` 같은 비하이브리드 entry row는 최종 `action=ENTER`이고 source `entry_state`가 비어 있으면 `entry_state=READY`를 기록합니다. 이는 AI Brief base gate와 후속 소비자가 실행 가능 기술 신호를 동일하게 해석하도록 하기 위한 호환 필드입니다.
 - static `strategy.rs_benchmark_return`이 설정된 buy report는 `config_snapshot.rs_benchmark_return`도 기록해 RS tie-breaker 입력을 사후 재현할 수 있게 합니다.
 - `sab entry`는 mixed KR/US buy report를 시장별로 분리해 평가할 수 있습니다.
 - `sab entry`는 종목별 판정이 끝난 뒤 포트폴리오 가드(`portfolio.max_active_holdings`, `portfolio.max_new_entries_per_market`, `portfolio.exposure_limits`)를 최종 `ENTER` 후보에만 적용합니다.
@@ -569,6 +574,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - `action`은 `HOLD|SELL_PARTIAL|REVIEW|SELL` 중 하나입니다.
 - buy report의 `risk_guide`와 sell report의 `stop_price`, `target_price`는 모두 “의사결정 가이드”입니다. 리포트 top-level `risk_disclosure`는 해당 필드가 체결 보장이나 계좌 손실 한도가 아니며, gap/slippage로 실제 체결·손실이 가이드를 벗어날 수 있음을 명시합니다.
 - sell `stop_price`, `target_price`는 override가 있으면 override가 우선합니다.
+- `rules.time_stop_days`는 generic sell time stop 설정을 유지합니다. `sell_mode=sma_ema_hybrid` 리포트는 별도 `rules.hybrid_time_stop` 객체에 hybrid 전역 time stop과 `pattern_time_stops` override snapshot을 기록합니다.
 
 ### 7.2.1 Sell AI Brief report (sell 후속 판단)
 

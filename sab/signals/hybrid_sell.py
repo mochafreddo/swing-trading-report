@@ -276,8 +276,6 @@ def _resolve_structured_holding_pattern(holding: dict[str, Any]) -> str | None:
         pattern = value.strip()
         if pattern in HOLDINGS_ENTRY_PATTERNS:
             return pattern
-    if _is_breakout_holding(holding):
-        return _FAILED_BREAKOUT_PATTERN
     return None
 
 
@@ -887,7 +885,11 @@ def _apply_hard_stop_band(
                     f"{settings.stop_loss_pct_max * 100:.1f}% max)"
                 )
                 action_out = "SELL"
-                stop_price_out = hard_stop_price
+                stop_price_out = (
+                    max(stop_price_out, hard_stop_price)
+                    if stop_price_out is not None
+                    else hard_stop_price
+                )
             elif loss_abs >= settings.stop_loss_pct_min:
                 reasons.append(
                     f"Loss within hard stop band ({loss_abs * 100:.1f}% in "
@@ -896,7 +898,11 @@ def _apply_hard_stop_band(
                 )
                 if action_out != "SELL":
                     action_out = "REVIEW"
-                stop_price_out = hard_stop_price
+                stop_price_out = (
+                    max(stop_price_out, hard_stop_price)
+                    if stop_price_out is not None
+                    else hard_stop_price
+                )
 
     return _HardStopBandState(
         action=action_out,
