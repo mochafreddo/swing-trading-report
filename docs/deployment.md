@@ -168,7 +168,7 @@ Workflow files are deployed by committing to the repository default branch.
 | `.github/workflows/ai-brief.yml` | weekday schedule + manual | manual AI Brief, local-primary monitor, GitHub fallback, cutoff alert |
 | `.github/workflows/cleanup.yml` | daily schedule + manual | Storage/report_index retention cleanup |
 | `.github/workflows/audit.yml` | weekly + manual | workflow/security audit |
-| `.github/workflows/mise-lock-sync.yml` | manual | tool lock sync |
+| `.github/workflows/mise-lock-sync.yml` | Renovate PR | tool lock sync |
 | `.github/workflows/release-please.yml` | push/manual | release automation |
 
 Manual dispatch examples:
@@ -199,8 +199,8 @@ The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.t
 
 | Purpose | KST launchd time | Why |
 | --- | --- | --- |
-| Pre-scan holdings refresh | Tue-Sat `06:55` | Runs before the scheduled `scan.yml` candidate at `07:00 KST`. |
-| Pre-sell holdings refresh | Tue-Sat `07:15` | Runs before the scheduled `sell.yml` candidate at `07:20 KST`. |
+| Pre-scan holdings refresh | Tue-Sat `06:55` | Preserves the intended pre-scan timing; `scan.yml` is currently manual-only until scheduled scan rollout. |
+| Pre-sell holdings refresh | Tue-Sat `07:15` | Preserves the intended pre-sell timing; `sell.yml` is currently manual-only until scheduled sell rollout. |
 | Pre-US AI Brief primary refresh | Mon-Fri `21:05` and `22:05` | Covers EDT/EST local-primary candidates before `08:10 ET`. |
 | Pre-US AI Brief retry refresh | Mon-Fri `21:40` and `22:40` | Covers EDT/EST local-retry candidates before `08:45 ET`. |
 
