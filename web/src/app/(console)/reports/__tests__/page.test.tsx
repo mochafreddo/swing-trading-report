@@ -106,4 +106,33 @@ describe("ReportsPage", () => {
       },
     );
   });
+
+  it("prefetches a requested report key even when it is outside the current list", async () => {
+    hasValidAdminSession.mockResolvedValue(true);
+    listReports.mockResolvedValueOnce({
+      items: [{ key: "2026/02/2026-02-28.buy.json" }],
+      total: 1,
+      searched: 1,
+      truncated: false,
+      searchWindow: 100,
+      warnings: [],
+    });
+    readReportDetail.mockResolvedValueOnce({
+      key: "2026/01/2026-01-31.buy.json",
+      report: { type: "buy" },
+    });
+
+    await expect(
+      loadReportsInitialState(
+        Promise.resolve({ key: "2026/01/2026-01-31.buy.json" }),
+      ),
+    ).resolves.toMatchObject({
+      selectedKey: "2026/01/2026-01-31.buy.json",
+      detailKey: "2026/01/2026-01-31.buy.json",
+      detail: { type: "buy" },
+    });
+    expect(readReportDetail).toHaveBeenCalledWith(
+      "2026/01/2026-01-31.buy.json",
+    );
+  });
 });

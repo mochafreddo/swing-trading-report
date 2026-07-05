@@ -132,6 +132,28 @@ describe("holding schemas", () => {
     expect(parsed.ticker).toBe("005930");
   });
 
+  it("rejects KR create payload with USD entry_currency", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "005930",
+      quantity: 1,
+      entry_price: 70000,
+      entry_currency: "USD",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects US create payload with KRW entry_currency", () => {
+    const parsed = holdingCreateSchema.safeParse({
+      ticker: "AAPL.NAS",
+      quantity: 1,
+      entry_price: 172.5,
+      entry_currency: "KRW",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("accepts US ticker format with slash", () => {
     const parsed = holdingCreateSchema.parse({
       ticker: "brk/b.nys",
@@ -316,20 +338,21 @@ describe("holding schemas", () => {
     expect(parsed.success).toBe(false);
   });
 
-  it("accepts ticker-only patch payload and normalizes ticker", () => {
-    const parsed = holdingPatchSchema.parse({
+  it("rejects ticker-only patch payload without entry currency", () => {
+    const parsed = holdingPatchSchema.safeParse({
       ticker: "msft.nasd",
     });
 
-    expect(parsed).toEqual({ ticker: "MSFT.NAS" });
+    expect(parsed.success).toBe(false);
   });
 
   it("normalizes class ticker slash notation in patch payload", () => {
     const parsed = holdingPatchSchema.parse({
       ticker: "brk/b.nys",
+      entry_currency: "USD",
     });
 
-    expect(parsed).toEqual({ ticker: "BRK.B.NYS" });
+    expect(parsed).toEqual({ ticker: "BRK.B.NYS", entry_currency: "USD" });
   });
 
   it("rejects patch payload when quantity is positive and entry_price is zero", () => {

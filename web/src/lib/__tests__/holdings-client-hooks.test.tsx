@@ -582,6 +582,35 @@ describe("HoldingsClient composition", () => {
     ).not.toBeNull();
   });
 
+  it("confirms delete only once", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: {
+            items: [HOLDING],
+            hasMore: false,
+            nextCursor: null,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      findButton(container, "Delete").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(deleteHoldingAction).toHaveBeenCalledTimes(1);
+    expect(deleteHoldingAction).toHaveBeenCalledWith("AAPL.NAS");
+  });
+
   it("places Toss Sync between Add Buy and Holdings YAML in the sidebar", async () => {
     await act(async () => {
       root.render(
@@ -865,6 +894,45 @@ describe("HoldingsClient composition", () => {
       container.querySelector<HTMLSelectElement>('select[name="entryPattern"]')
         ?.value,
     ).toBe("swing_high_breakout");
+  });
+
+  it("defaults entry currency to KRW when selecting a KR recent candidate", async () => {
+    vi.mocked(globalThis.fetch as typeof fetch).mockResolvedValueOnce(
+      jsonResponse({
+        report: { key: "2026/03/report.buy.json", reportDate: "2026-03-02" },
+        candidates: [
+          {
+            ticker: "005930",
+            name: "Samsung Electronics",
+            pattern: "trend_pullback_bounce",
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(HoldingsClient, {
+          initialState: { items: [], hasMore: false, nextCursor: null },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      findButton(container, "005930").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="ticker"]')?.value,
+    ).toBe("005930");
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="entryCurrency"]')
+        ?.value,
+    ).toBe("KRW");
   });
 
   it("submits entry pattern from the holdings form", async () => {

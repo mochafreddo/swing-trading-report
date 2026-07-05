@@ -54,13 +54,13 @@ describe("resolveSelectedKeyFromUrl", () => {
     expect(result).toBe("2026/02/2026-02-27.buy.json");
   });
 
-  it("keeps the current selection when URL key is not in the available list", () => {
+  it("uses URL key even when it is outside the available list", () => {
     const result = resolveSelectedKeyFromUrl({
       previousSelectedKey: "2026/02/2026-02-28.buy.json",
       nextKeyRaw: "2026/02/2026-02-01.buy.json",
       availableKeys: ["2026/02/2026-02-28.buy.json"],
     });
 
-    expect(result).toBe("2026/02/2026-02-28.buy.json");
+    expect(result).toBe("2026/02/2026-02-01.buy.json");
   });
 });

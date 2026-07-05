@@ -10,6 +10,7 @@ import {
   isHoldingEntryPattern,
 } from "@/lib/holding-entry-pattern";
 import {
+  inferHoldingCurrencyForTicker,
   KR_TICKER_PATTERN,
   normalizeHoldingTickerForMutation,
   US_TICKER_PATTERN,
@@ -178,6 +179,36 @@ const holdingMutationTickerSchema = holdingTickerSchema.transform((ticker) =>
   normalizeHoldingTickerForMutation(ticker),
 );
 
+export function isHoldingEntryCurrencyValidForTicker(
+  ticker: string,
+  entryCurrency: string | null | undefined,
+): boolean {
+  if (!entryCurrency) {
+    return true;
+  }
+  const requiredCurrency = inferHoldingCurrencyForTicker(ticker);
+  if (!requiredCurrency) {
+    return true;
+  }
+  return entryCurrency.trim().toUpperCase() === requiredCurrency;
+}
+
+function addEntryCurrencyIssue(
+  ctx: z.RefinementCtx,
+  ticker: string,
+  entryCurrency: string | null | undefined,
+): void {
+  if (isHoldingEntryCurrencyValidForTicker(ticker, entryCurrency)) {
+    return;
+  }
+  const requiredCurrency = inferHoldingCurrencyForTicker(ticker);
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["entry_currency"],
+    message: `entry_currency must be ${requiredCurrency} for ${ticker}`,
+  });
+}
+
 const entryDateSchema = z.preprocess((value) => {
   if (value === "" || value == null) {
     return null;
@@ -242,6 +273,7 @@ export const holdingCreateSchema = z
         message: "entry_pattern requires quantity > 0",
       });
     }
+    addEntryCurrencyIssue(ctx, payload.ticker, payload.entry_currency);
   });
 
 export const holdingPatchSchema = z
@@ -281,6 +313,17 @@ export const holdingPatchSchema = z
         path: ["entry_pattern"],
         message: "entry_pattern requires quantity > 0",
       });
+    }
+    if (payload.ticker) {
+      if (payload.entry_currency == null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["entry_currency"],
+          message: "entry_currency is required when ticker changes",
+        });
+        return;
+      }
+      addEntryCurrencyIssue(ctx, payload.ticker, payload.entry_currency);
     }
   })
   .refine((payload) => Object.keys(payload).length > 0, {

@@ -350,6 +350,57 @@ describe("ReportDetail component", () => {
     expect(html).toContain("earnings event risk blocks the setup");
   });
 
+  it("renders Sell AI Brief judgments", () => {
+    const detail: ReportJson = {
+      schema: "sab.sell_ai_brief.v1",
+      type: "sell-ai-brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_sell_report: "2026-05-05.sell.json",
+      brief_state: "FINAL_JUDGMENT",
+      brief_reason: "model_judgment_ready",
+      summary: {
+        judgment_count: 1,
+      },
+      judgments: [
+        {
+          ticker: "AAPL.NAS",
+          name: "Apple",
+          sell_action: "SELL",
+          ai_stance: "AGREE",
+          confidence: "LOW",
+          deterministic_reasons: ["stop loss breached"],
+          rationale: ["model agrees with the deterministic sell signal"],
+          checklist: ["confirm size and liquidity"],
+          sources: [
+            {
+              title: "Apple risk update",
+              url: "https://example.test/aapl",
+            },
+          ],
+        },
+      ],
+      vetoed_candidates: [],
+      source_issues: [],
+      system_issues: [],
+    };
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("source_sell_report");
+    expect(html).toContain("brief_state");
+    expect(html).toContain("FINAL_JUDGMENT");
+    expect(html).toContain("Judgments (1)");
+    expect(html).toContain("AAPL.NAS");
+    expect(html).toContain("SELL");
+    expect(html).toContain("AGREE");
+    expect(html).toContain("stop loss breached");
+    expect(html).toContain("model agrees with the deterministic sell signal");
+    expect(html).toContain("confirm size and liquidity");
+    expect(html).toContain("Apple risk update");
+  });
+
   it("renders AI brief watch candidates and source provider coverage", () => {
     const detail: ReportJson = {
       schema: "sab.ai_brief.v1",

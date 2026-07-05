@@ -222,6 +222,25 @@ describe("/api/holdings/yaml route", () => {
   });
 
   it("applies replace-all import when apply=true", async () => {
+    const currentHoldings = [
+      {
+        ticker: "AAPL.NAS",
+        quantity: 2,
+        entry_price: 190,
+        entry_currency: "USD",
+        entry_date: null,
+        strategy: null,
+        entry_pattern: null,
+        notes: null,
+        tags: [],
+        stop_override: null,
+        target_override: null,
+        created_at: "2026-03-01T00:00:00Z",
+        updated_at: "2026-03-02T00:00:00Z",
+      },
+    ];
+    vi.mocked(fetchAllHoldings).mockResolvedValueOnce(currentHoldings);
+
     const response = await POST(
       makePostRequest({
         document: "holdings: []",
@@ -237,6 +256,24 @@ describe("/api/holdings/yaml route", () => {
     expect(payload.mode).toBe("apply");
     expect(payload.summary.createCount).toBe(1);
     expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(replaceAllHoldings)).toHaveBeenCalledWith(
+      [
+        {
+          ticker: "TSLA.NAS",
+          quantity: 1,
+          entry_price: 250,
+          entry_currency: "USD",
+          entry_date: null,
+          strategy: null,
+          entry_pattern: null,
+          notes: null,
+          tags: [],
+          stop_override: null,
+          target_override: null,
+        },
+      ],
+      { expectedCurrentHoldings: currentHoldings },
+    );
   });
 
   it("maps upstream Supabase failures during apply", async () => {

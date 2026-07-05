@@ -90,6 +90,34 @@ function Harness({
   );
 }
 
+function DetailHarness({
+  initialState,
+}: {
+  initialState: ReportsInitialState;
+}): React.JSX.Element {
+  const { selectedKey, detail, loadingDetail, setSelectedKey } =
+    useReportsState(initialState);
+  const detailType = typeof detail?.type === "string" ? detail.type : "none";
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "output",
+      { "data-testid": "detail-state" },
+      `${selectedKey ?? "none"}|${loadingDetail ? "loading" : "idle"}|${detailType}`,
+    ),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setSelectedKey("2026/02/2026-02-27.sell.json"),
+      },
+      "Select B",
+    ),
+  );
+}
+
 describe("useReportsState URL sync", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -114,6 +142,7 @@ describe("useReportsState URL sync", () => {
       root.unmount();
     });
     container.remove();
+    vi.restoreAllMocks();
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
@@ -164,5 +193,53 @@ describe("useReportsState URL sync", () => {
     expect(navigationMock.replace).toHaveBeenCalledWith("/reports?q=AAPL", {
       scroll: false,
     });
+  });
+
+  it("keeps a prefetched deep-link key when the loaded report list is empty", () => {
+    const selectedKey = "2026/01/2026-01-31.buy.json";
+    renderWithSearchParams(`q=AAPL&key=${encodeURIComponent(selectedKey)}`, {
+      ...EMPTY_SEARCH_STATE,
+      selectedKey,
+      detailKey: selectedKey,
+      detail: {
+        schema: "sab.report.v1",
+        type: "buy",
+      },
+    });
+
+    expect(container.textContent).toContain(selectedKey);
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+  });
+
+  it("clears previous detail while loading a different selected key", async () => {
+    navigationMock.setSearchParams(
+      `key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}`,
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(DetailHarness, { initialState: INITIAL_STATE }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(
+      "2026/02/2026-02-28.buy.json|idle|buy",
+    );
+
+    await act(async () => {
+      container
+        .querySelector("button")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(
+      "2026/02/2026-02-27.sell.json|loading|none",
+    );
   });
 });

@@ -186,7 +186,9 @@ export async function POST(request: NextRequest) {
         summary.updateCount > 0 ||
         summary.deleteCount > 0;
       if (hasChanges) {
-        const result = await replaceAllHoldings(importedHoldings);
+        const result = await replaceAllHoldings(importedHoldings, {
+          expectedCurrentHoldings: currentHoldings,
+        });
         const appliedResponse: HoldingsYamlImportResponse = {
           mode: "apply",
           summary: {

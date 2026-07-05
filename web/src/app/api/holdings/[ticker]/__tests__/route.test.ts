@@ -217,6 +217,30 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     expect(vi.mocked(updateHolding)).not.toHaveBeenCalled();
   });
 
+  it("rejects USD entry_currency for a KR patch path ticker", async () => {
+    const response = await PATCH(
+      makePatchRequest({ entry_currency: "USD" }),
+      makeContext("005930"),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid holding patch payload");
+    expect(vi.mocked(updateHolding)).not.toHaveBeenCalled();
+  });
+
+  it("rejects ticker rename without an entry_currency", async () => {
+    const response = await PATCH(
+      makePatchRequest({ ticker: "AAPL.NAS" }),
+      makeContext("005930"),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid holding patch payload");
+    expect(vi.mocked(updateHolding)).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when holding is not found", async () => {
     vi.mocked(updateHolding).mockResolvedValueOnce(null);
 
@@ -299,7 +323,11 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     });
 
     const response = await PATCH(
-      makePatchRequest({ ticker: "msft.nas", quantity: 3 }),
+      makePatchRequest({
+        ticker: "msft.nas",
+        quantity: 3,
+        entry_currency: "USD",
+      }),
       makeContext("005930"),
     );
     const payload = (await response.json()) as {
@@ -315,6 +343,7 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("005930", {
       ticker: "MSFT.NAS",
       quantity: 3,
+      entry_currency: "USD",
     });
   });
 
@@ -336,7 +365,11 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     });
 
     const response = await PATCH(
-      makePatchRequest({ ticker: "brk.b.nys", quantity: 3 }),
+      makePatchRequest({
+        ticker: "brk.b.nys",
+        quantity: 3,
+        entry_currency: "USD",
+      }),
       makeContext("BRK.B.NYS"),
     );
     const payload = (await response.json()) as {
@@ -352,6 +385,7 @@ describe("PATCH /api/holdings/[ticker] route", () => {
     expect(vi.mocked(updateHolding)).toHaveBeenCalledWith("BRK.B.NYS", {
       ticker: "BRK.B.NYS",
       quantity: 3,
+      entry_currency: "USD",
     });
   });
 

@@ -7,6 +7,7 @@ import { deleteHoldingAction, saveHoldingAction } from "@/app/actions/holdings";
 import styles from "./holdings-client.module.css";
 
 import { partitionHoldingsByActivity } from "@/lib/holding-activity";
+import { inferHoldingCurrencyForTicker } from "@/lib/holding-ticker";
 
 import { HoldingsAddBuyPanel } from "@/components/holdings/holdings-add-buy-panel";
 import { HoldingsFormPanel } from "@/components/holdings/holdings-form-panel";
@@ -52,7 +53,13 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
     cancelEdit,
   } = useHoldingsForm({ refresh, saveHolding: saveHoldingAction, setError });
   const updateTickerField = useCallback(
-    (ticker: string) => updateField("ticker", ticker),
+    (ticker: string) => {
+      updateField("ticker", ticker);
+      const inferredCurrency = inferHoldingCurrencyForTicker(ticker);
+      if (inferredCurrency) {
+        updateField("entry_currency", inferredCurrency);
+      }
+    },
     [updateField],
   );
   const tickerLookup = useTickerLookup({

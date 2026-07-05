@@ -80,6 +80,19 @@ export function parseHoldingTickerForMutation(ticker: string): string | null {
   return normalizeHoldingTickerForMutation(normalized);
 }
 
+export function inferHoldingCurrencyForTicker(
+  ticker: string,
+): "KRW" | "USD" | null {
+  const normalized = normalizeHoldingTickerForMutation(ticker);
+  if (KR_TICKER_PATTERN.test(normalized)) {
+    return "KRW";
+  }
+  if (US_TICKER_PATTERN.test(normalized)) {
+    return "USD";
+  }
+  return null;
+}
+
 export function buildHoldingTickerAliases(ticker: string): string[] {
   const canonical = normalizeHoldingTickerForMutation(ticker);
   const aliases = [canonical];

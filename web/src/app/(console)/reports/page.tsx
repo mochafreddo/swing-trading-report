@@ -46,10 +46,7 @@ export async function loadReportsInitialState(
       limit: REPORT_PAGE_LIMIT,
       searchWindow,
     });
-    const selectedKey =
-      requestedKey && list.items.some((item) => item.key === requestedKey)
-        ? requestedKey
-        : (list.items[0]?.key ?? null);
+    const selectedKey = requestedKey ?? list.items[0]?.key ?? null;
 
     let detail: ReportsInitialState["detail"] = null;
     let detailKey: string | null = null;

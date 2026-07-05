@@ -11,7 +11,10 @@ import {
   type ApiLogFields,
 } from "@/lib/api-request-log";
 import { parseJsonBody } from "@/lib/parse-json-body";
-import { holdingPatchSchema } from "@/lib/schemas";
+import {
+  holdingPatchSchema,
+  isHoldingEntryCurrencyValidForTicker,
+} from "@/lib/schemas";
 import { deleteHolding, updateHolding } from "@/lib/supabase-admin";
 
 import {
@@ -121,6 +124,30 @@ export async function PATCH(
           error: "Invalid holding patch payload",
           details: parsed.error.flatten(),
         },
+        { status: 400 },
+      ),
+      requestId,
+    );
+  }
+  const currencyTicker = parsed.data.ticker ?? ticker;
+  if (
+    !isHoldingEntryCurrencyValidForTicker(
+      currencyTicker,
+      parsed.data.entry_currency,
+    )
+  ) {
+    logRejectedHoldingMutation(
+      requestId,
+      startedAtMs,
+      method,
+      operation,
+      400,
+      "invalid_payload",
+      { ticker_count: 1 },
+    );
+    return withApiRequestId(
+      NextResponse.json(
+        { error: "Invalid holding patch payload" },
         { status: 400 },
       ),
       requestId,

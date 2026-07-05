@@ -247,6 +247,9 @@ export function ReportDetail({
   const isEntryReport = reportType === "entry";
   const isAiBriefReport =
     reportType === "ai_brief" || reportType === "ai-brief";
+  const isSellAiBriefReport =
+    reportType === "sell_ai_brief" || reportType === "sell-ai-brief";
+  const isModelBriefReport = isAiBriefReport || isSellAiBriefReport;
   const isAiBriefSkipReport =
     reportType === "ai_brief_skip" || reportType === "ai-brief-skip";
   const strategyMode = readString(detail?.strategy_mode);
@@ -259,10 +262,17 @@ export function ReportDetail({
   const skipReason = readString(detail?.skip_reason);
   const sourceBuyReport = readString(detail?.source_buy_report);
   const sourceEntryReport = readString(detail?.source_entry_report);
+  const sourceSellReport = readString(detail?.source_sell_report);
   const aiBriefMarket = readString(detail?.market);
   const modelProvider = readString(detail?.model_provider);
   const modelName = readString(detail?.model_name);
   const aiBriefState = isAiBriefReport ? resolveAiBriefState(detail) : null;
+  const sellAiBriefState = isSellAiBriefReport
+    ? readString(detail?.brief_state)
+    : null;
+  const sellAiBriefReason = isSellAiBriefReport
+    ? readString(detail?.brief_reason)
+    : null;
   const signalEvalDate = readString(detail?.signal_eval_date);
   const entrySessionDate = readString(detail?.entry_session_date);
   const signalEvalDateByMarket = asRecord(detail?.signal_eval_date_by_market);
@@ -273,6 +283,9 @@ export function ReportDetail({
   const sourceIssues = asIssueArray(detail?.source_issues);
   const aiBriefVetoRows = isAiBriefReport
     ? asRecordArray(detail?.vetoed_candidates)
+    : [];
+  const sellAiBriefRows = isSellAiBriefReport
+    ? asRecordArray(detail?.judgments)
     : [];
   const aiBriefWatchTickers = isAiBriefReport
     ? asStringArray(detail?.watch_tickers)
@@ -408,28 +421,28 @@ export function ReportDetail({
               <dt>provider</dt>
               <dd>{String(detail.provider ?? "-")}</dd>
             </div>
-            {isAiBriefReport && (
+            {isModelBriefReport && (
               <div>
                 <dt>model_provider</dt>
                 <dd>{modelProvider ?? "-"}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {isModelBriefReport && (
               <div>
                 <dt>model_name</dt>
                 <dd>{modelName ?? "-"}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {isModelBriefReport && (
               <div>
                 <dt>brief_state</dt>
-                <dd>{aiBriefState?.state ?? "-"}</dd>
+                <dd>{aiBriefState?.state ?? sellAiBriefState ?? "-"}</dd>
               </div>
             )}
-            {isAiBriefReport && (
+            {isModelBriefReport && (
               <div>
                 <dt>brief_reason</dt>
-                <dd>{aiBriefState?.reason ?? "-"}</dd>
+                <dd>{aiBriefState?.reason ?? sellAiBriefReason ?? "-"}</dd>
               </div>
             )}
             {showAiBriefWatchTickers && (
@@ -516,6 +529,12 @@ export function ReportDetail({
                 <dd>{sourceBuyReport ?? "-"}</dd>
               </div>
             )}
+            {isSellAiBriefReport && (
+              <div>
+                <dt>source_sell_report</dt>
+                <dd>{sourceSellReport ?? "-"}</dd>
+              </div>
+            )}
             {isEntryReport && (
               <div>
                 <dt>signal_eval_date</dt>
@@ -566,6 +585,12 @@ export function ReportDetail({
             <p className={styles.infoNote}>
               AI Brief는 entry 리포트의 실행가능, 차단/검토, watch 후보를
               역할별로 분리해 모델 provider로 요약한 수동 검토용 결과입니다.
+            </p>
+          )}
+          {isSellAiBriefReport && (
+            <p className={styles.infoNote}>
+              Sell AI Brief는 sell 리포트의 매도 후보를 모델 provider로 요약한
+              수동 검토용 결과입니다.
             </p>
           )}
           {isAiBriefSkipReport && (
@@ -708,6 +733,55 @@ export function ReportDetail({
                       <td data-label="Target Guide">
                         {formatGuideValue(row.target_price)}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {sellAiBriefRows.length > 0 && (
+            <div className={styles.tableWrap}>
+              <h3 className={styles.sectionTitle}>
+                Judgments ({sellAiBriefRows.length})
+              </h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Sell Action</th>
+                    <th>AI Stance</th>
+                    <th>Confidence</th>
+                    <th>Deterministic</th>
+                    <th>Rationale</th>
+                    <th>Checklist</th>
+                    <th>Sources</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sellAiBriefRows.map((row, idx) => (
+                    <tr key={`${String(row.ticker ?? "-")}-${idx}`}>
+                      <td data-label="Ticker">{String(row.ticker ?? "-")}</td>
+                      <td data-label="Sell Action">
+                        {String(row.sell_action ?? "-")}
+                      </td>
+                      <td data-label="AI Stance">
+                        {String(row.ai_stance ?? "-")}
+                      </td>
+                      <td data-label="Confidence">
+                        {String(row.confidence ?? "-")}
+                      </td>
+                      <td data-label="Deterministic">
+                        {asStringArray(row.deterministic_reasons).join(" · ") ||
+                          "-"}
+                      </td>
+                      <td data-label="Rationale">
+                        {asStringArray(row.rationale).join(" · ") || "-"}
+                      </td>
+                      <td data-label="Checklist">
+                        {asStringArray(row.checklist).join(" · ") || "-"}
+                      </td>
+                      <td data-label="Sources">{formatSources(row.sources)}</td>
                     </tr>
                   ))}
                 </tbody>

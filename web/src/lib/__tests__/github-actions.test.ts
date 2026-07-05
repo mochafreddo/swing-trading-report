@@ -177,6 +177,41 @@ describe("dispatchWorkflow", () => {
     expect(options?.method).toBe("POST");
   });
 
+  it("claims scan dispatch locks by workflow provider and universe", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    await dispatchWorkflow({
+      workflow: "scan",
+      provider: "kis",
+      universe: "KR",
+    });
+
+    expect(claimRuntimeStateLock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "run_dispatch:scan:kis:KR",
+      }),
+    );
+  });
+
+  it("claims sell dispatch locks by workflow provider", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    await dispatchWorkflow({
+      workflow: "sell",
+      provider: "pykrx",
+    });
+
+    expect(claimRuntimeStateLock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "run_dispatch:sell:pykrx",
+      }),
+    );
+  });
+
   it("throws when github returns non-204", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ message: "unprocessable" }), {

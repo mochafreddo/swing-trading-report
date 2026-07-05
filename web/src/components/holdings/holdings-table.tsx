@@ -197,15 +197,7 @@ export function HoldingsTable({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `${row.ticker}을(를) 삭제하시겠습니까?`,
-                              )
-                            ) {
-                              void onDelete(row.ticker);
-                            }
-                          }}
+                          onClick={() => void onDelete(row.ticker)}
                           className={styles.dangerButton}
                         >
                           Delete

@@ -141,7 +141,10 @@ describe("/api/holdings/[ticker] integration", () => {
     );
 
     const response = await PATCH(
-      makePatchRequest({ ticker: "msft.nas", quantity: 2 }, "aapl.nas"),
+      makePatchRequest(
+        { ticker: "msft.nas", quantity: 2, entry_currency: "USD" },
+        "aapl.nas",
+      ),
       {
         params: { ticker: "aapl.nas" },
       },
@@ -159,10 +162,12 @@ describe("/api/holdings/[ticker] integration", () => {
     const requestBody = JSON.parse(String(requestInit.body)) as {
       ticker: string;
       quantity: number;
+      entry_currency: string;
     };
     expect(requestBody).toEqual({
       ticker: "MSFT.NAS",
       quantity: 2,
+      entry_currency: "USD",
     });
   });
 
@@ -175,7 +180,10 @@ describe("/api/holdings/[ticker] integration", () => {
     );
 
     const response = await PATCH(
-      makePatchRequest({ ticker: "brk.b.nys", quantity: 2 }, "BRK.B.NYS"),
+      makePatchRequest(
+        { ticker: "brk.b.nys", quantity: 2, entry_currency: "USD" },
+        "BRK.B.NYS",
+      ),
       {
         params: { ticker: "BRK.B.NYS" },
       },
@@ -193,10 +201,12 @@ describe("/api/holdings/[ticker] integration", () => {
     const requestBody = JSON.parse(String(requestInit.body)) as {
       ticker: string;
       quantity: number;
+      entry_currency: string;
     };
     expect(requestBody).toEqual({
       ticker: "BRK.B.NYS",
       quantity: 2,
+      entry_currency: "USD",
     });
   });
 

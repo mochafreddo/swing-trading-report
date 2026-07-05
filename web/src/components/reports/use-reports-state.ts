@@ -208,6 +208,9 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [detail, setDetail] = useState<ReportJson | null>(
     () => initialState?.detail ?? null,
   );
+  const [detailKey, setDetailKey] = useState<string | null>(
+    () => initialState?.detailKey ?? null,
+  );
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -215,6 +218,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     () => initialState?.showRaw ?? searchParams.get("raw") === "1",
   );
   const [refreshToken, setRefreshToken] = useState(0);
+  const currentUrlKeyRef = useRef(initialUrlKey);
   const pendingUrlSync = useRef(
     Boolean(initialState) &&
       (initialState?.reportType !== parseReportType(searchParams.get("type")) ||
@@ -267,11 +271,11 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const nextShowRaw = searchParams.get("raw") === "1";
     const preserveWhenKeyMissing = preserveSelectionWhenUrlKeyMissing.current;
     const nextKey = nextKeyRaw?.trim() || null;
+    currentUrlKeyRef.current = nextKey;
     const hasLoadedEmptyResultSet = total === 0 && items.length === 0;
+    const hasPrefetchedUrlDetail = nextKey !== null && detailKey === nextKey;
     const hasInvalidUrlKey =
-      Boolean(nextKey) &&
-      (hasLoadedEmptyResultSet ||
-        (items.length > 0 && !items.some((item) => item.key === nextKey)));
+      Boolean(nextKey) && hasLoadedEmptyResultSet && !hasPrefetchedUrlDetail;
 
     preserveSelectionWhenUrlKeyMissing.current = false;
     pendingUrlSync.current = preserveWhenKeyMissing || hasInvalidUrlKey;
@@ -282,7 +286,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
     );
     setSelectedKeyState((prev) => {
-      if (hasLoadedEmptyResultSet && nextKey) {
+      if (hasInvalidUrlKey) {
         return null;
       }
       return resolveSelectedKeyFromUrl({
@@ -293,7 +297,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
       });
     });
     setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [items, searchParams, total]);
+  }, [detailKey, items, searchParams, total]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -359,6 +363,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
         const firstKey = typed.items[0]?.key ?? null;
         setSelectedKeyState((prev) => {
+          const explicitUrlKey = currentUrlKeyRef.current;
+          if (explicitUrlKey) {
+            return prev === explicitUrlKey ? prev : explicitUrlKey;
+          }
           if (prev && typed.items.some((item) => item.key === prev)) {
             return prev;
           }
@@ -418,6 +426,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
           return;
         }
         setDetail(typedPayload.report);
+        setDetailKey(typedPayload.key);
       } catch (detailError) {
         if (cancelled) {
           return;
@@ -428,6 +437,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
             : "Failed to load report detail";
         setError(message);
         setDetail(null);
+        setDetailKey(null);
       } finally {
         if (!cancelled) {
           setLoadingDetail(false);
@@ -442,7 +452,8 @@ export function useReportsState(initialState?: ReportsInitialState) {
     };
   }, [refreshToken, selectedKey]);
 
-  const selectedDetail = selectedKey ? detail : null;
+  const selectedDetail =
+    selectedKey && detailKey === selectedKey ? detail : null;
   const summary = useMemo(
     () => asRecord(selectedDetail?.summary),
     [selectedDetail],
