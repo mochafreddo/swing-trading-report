@@ -121,6 +121,9 @@ describe("GET /api/tickers/search", () => {
     };
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.error).toBe("Invalid query parameters");
     expect(payload.details?.fieldErrors?.q).toBeDefined();
     expect(vi.mocked(searchTickerDirectory)).not.toHaveBeenCalled();
@@ -149,6 +152,9 @@ describe("GET /api/tickers/search", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(vi.mocked(searchTickerDirectory)).toHaveBeenCalledWith({
       q: "abbv",
       limit: 5,

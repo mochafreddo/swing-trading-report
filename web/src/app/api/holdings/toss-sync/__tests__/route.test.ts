@@ -143,6 +143,9 @@ describe("/api/holdings/toss-sync route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.error).toBe("Local only");
     expect(vi.mocked(fetchDefaultTossHoldingsItems)).not.toHaveBeenCalled();
   });
@@ -192,6 +195,9 @@ describe("/api/holdings/toss-sync route", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.mode).toBe("dry-run");
     expect(payload.applyBlocked).toBe(true);
     expect(payload.summary.updateCount).toBe(1);

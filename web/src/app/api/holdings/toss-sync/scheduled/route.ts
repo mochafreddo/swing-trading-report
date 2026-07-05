@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 
 import {
   elapsedMs,
@@ -13,6 +13,7 @@ import {
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { tossHoldingsScheduledSyncRequestSchema } from "@/lib/schemas";
 import {
   buildTossHoldingsSyncDependenciesFromEnv,
@@ -72,7 +73,7 @@ function requireScheduledJobToken(request: NextRequest): NextResponse | null {
   const expected = process.env.TOSS_SYNC_JOB_TOKEN?.trim() ?? "";
   const actual = readBearerToken(request);
   if (!expected || !actual || !constantTimeEqual(actual, expected)) {
-    return NextResponse.json(
+    return jsonWithNoStore(
       { error: "Unauthorized Toss sync job" },
       { status: 401 },
     );
@@ -82,12 +83,9 @@ function requireScheduledJobToken(request: NextRequest): NextResponse | null {
 
 function localGuardResponse(error: unknown): NextResponse {
   if (error instanceof LocalRequestGuardError) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: error.status },
-    );
+    return jsonWithNoStore({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json(
+  return jsonWithNoStore(
     { error: "Local request guard failed" },
     { status: 403 },
   );
@@ -138,7 +136,7 @@ export async function POST(request: NextRequest) {
   const parsed = tossHoldingsScheduledSyncRequestSchema.safeParse(body.payload);
   if (!parsed.success) {
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid scheduled Toss holdings sync payload",
           details: parsed.error.flatten(),
@@ -157,7 +155,7 @@ export async function POST(request: NextRequest) {
       },
       deps,
     );
-    const response = NextResponse.json(result);
+    const response = jsonWithNoStore(result);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -193,7 +191,7 @@ export async function POST(request: NextRequest) {
       retryable: true,
     });
     return withApiRequestId(
-      NextResponse.json(buildScheduledErrorResult(), { status: 500 }),
+      jsonWithNoStore(buildScheduledErrorResult(), { status: 500 }),
       requestId,
     );
   }

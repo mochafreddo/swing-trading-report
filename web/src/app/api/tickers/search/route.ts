@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -10,6 +10,7 @@ import {
   withApiRequestId,
 } from "@/lib/api-request-log";
 import { toErrorMessage } from "@/lib/error-utils";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { tickerSearchQuerySchema } from "@/lib/schemas";
 import { searchTickerDirectory } from "@/lib/ticker-directory";
 
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
       duration_ms: elapsedMs(startedAtMs),
     });
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid query parameters",
           details: parsedQuery.error.flatten(),
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       q: parsedQuery.data.q,
       limit: parsedQuery.data.limit,
     });
-    const response = NextResponse.json(payload);
+    const response = jsonWithNoStore(payload);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -105,7 +106,7 @@ export async function GET(request: NextRequest) {
       limit: parsedQuery.data.limit,
     });
     return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
       requestId,
     );
   }

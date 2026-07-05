@@ -162,6 +162,9 @@ describe("/api/holdings/yaml route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(response.headers.get("content-disposition")).toContain(
       "holdings.yaml",
     );
@@ -174,6 +177,9 @@ describe("/api/holdings/yaml route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.error).toBe("Request body must be valid JSON");
   });
 
@@ -230,6 +236,9 @@ describe("/api/holdings/yaml route", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.mode).toBe("dry-run");
     expect(payload.summary.createCount).toBe(1);
     expect(vi.mocked(replaceAllHoldings)).not.toHaveBeenCalled();

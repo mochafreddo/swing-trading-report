@@ -34,6 +34,9 @@ describe("auth routes", () => {
     const response = await loginPost(request);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     await expect(response.json()).resolves.toEqual({ ok: true });
     const setCookie = response.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain(`${ADMIN_SESSION_COOKIE_NAME}=`);
@@ -59,6 +62,9 @@ describe("auth routes", () => {
     const response = await loginPost(request);
 
     expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
@@ -239,6 +245,9 @@ describe("auth routes", () => {
     const response = await loginPost(request);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     await expect(response.json()).resolves.toEqual({ ok: true });
     const setCookie = response.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain(`${ADMIN_SESSION_COOKIE_NAME}=`);

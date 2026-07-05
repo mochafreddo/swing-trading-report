@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -13,6 +13,7 @@ import {
 import { ADD_BUY_IDEMPOTENCY_MISMATCH_CODE } from "@/lib/add-buy-idempotency";
 import { isValidIdempotencyKey } from "@/lib/idempotency-key";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { holdingAddBuySchema } from "@/lib/schemas";
 import { addBuyToHolding, SupabaseApiError } from "@/lib/supabase-admin";
 
@@ -81,7 +82,7 @@ function addBuyJsonError(error: unknown): NextResponse {
     error.status === 409 &&
     error.code === ADD_BUY_IDEMPOTENCY_MISMATCH_CODE
   ) {
-    return NextResponse.json(
+    return jsonWithNoStore(
       {
         error: error.message,
         code: ADD_BUY_IDEMPOTENCY_MISMATCH_CODE,
@@ -110,7 +111,7 @@ export async function POST(
   if (!ticker) {
     logRejectedAddBuy(requestId, startedAtMs, 400, "invalid_ticker");
     return withApiRequestId(
-      NextResponse.json({ error: "Invalid ticker" }, { status: 400 }),
+      jsonWithNoStore({ error: "Invalid ticker" }, { status: 400 }),
       requestId,
     );
   }
@@ -135,7 +136,7 @@ export async function POST(
       ticker_count: 1,
     });
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid holding add-buy payload",
           details: parsed.error.flatten(),
@@ -158,7 +159,7 @@ export async function POST(
       { ticker_count: 1, idempotency_key_present: false },
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: idempotencyKeyHeader.invalid
             ? "Invalid Idempotency-Key header"
@@ -183,11 +184,11 @@ export async function POST(
         idempotency_key_present: true,
       });
       return withApiRequestId(
-        NextResponse.json({ error: "Holding not found" }, { status: 404 }),
+        jsonWithNoStore({ error: "Holding not found" }, { status: 404 }),
         requestId,
       );
     }
-    const response = NextResponse.json(updated);
+    const response = jsonWithNoStore(updated);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,

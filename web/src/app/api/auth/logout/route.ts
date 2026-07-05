@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import {
   elapsedMs,
@@ -17,6 +17,7 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
         "same_origin_guard",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
         "local_request_guard",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
@@ -88,12 +89,12 @@ export async function POST(request: NextRequest) {
       retryable: false,
     });
     return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
       requestId,
     );
   }
 
-  const response = NextResponse.json({ ok: true });
+  const response = jsonWithNoStore({ ok: true });
   response.cookies.set(
     ADMIN_SESSION_COOKIE_NAME,
     "",

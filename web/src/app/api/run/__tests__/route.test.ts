@@ -102,6 +102,9 @@ describe("POST /api/run route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(payload.error).toBe("Request body must be valid JSON");
     expect(vi.mocked(dispatchWorkflow)).not.toHaveBeenCalled();
   });
@@ -207,6 +210,9 @@ describe("POST /api/run route", () => {
       );
 
       expect(response.status).toBe(202);
+      expect(response.headers.get("cache-control")).toBe(
+        "private, no-store, max-age=0, must-revalidate",
+      );
       expect(response.headers.get("x-request-id")).toBe(
         "run-route-test-request",
       );

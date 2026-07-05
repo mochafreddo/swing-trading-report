@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -15,6 +15,7 @@ import {
   HoldingCursorError,
 } from "@/lib/holdings-pagination";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { holdingCreateSchema, holdingListQuerySchema } from "@/lib/schemas";
 import {
   createHolding,
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
       "invalid_query",
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid query parameters",
           details: parsedQuery.error.flatten(),
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest) {
       limit: parsedQuery.data.limit,
       cursor,
     });
-    const response = NextResponse.json(page);
+    const response = jsonWithNoStore(page);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -140,7 +141,7 @@ export async function GET(request: NextRequest) {
         "invalid_cursor",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
@@ -205,7 +206,7 @@ export async function POST(request: NextRequest) {
       "invalid_payload",
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid holding payload",
           details: parsed.error.flatten(),
@@ -218,7 +219,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const created = await createHolding(parsed.data);
-    const response = NextResponse.json(created, { status: 201 });
+    const response = jsonWithNoStore(created, { status: 201 });
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,

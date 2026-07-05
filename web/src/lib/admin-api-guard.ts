@@ -1,6 +1,6 @@
 import "server-only";
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import { toErrorMessage } from "@/lib/error-utils";
@@ -8,6 +8,7 @@ import {
   assertLocalRequest,
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 
 type JsonResponseInit = {
@@ -20,8 +21,7 @@ export type ApiJsonResponder = (
   init?: JsonResponseInit,
 ) => NextResponse;
 
-const defaultJsonResponder: ApiJsonResponder = (payload, init) =>
-  NextResponse.json(payload, init);
+const defaultJsonResponder: ApiJsonResponder = jsonWithNoStore;
 
 export async function requireAdminApiGuard(
   request: NextRequest,

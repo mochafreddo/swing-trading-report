@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -13,6 +13,7 @@ import {
 import { toErrorMessage } from "@/lib/error-utils";
 import { dispatchWorkflow, GitHubDispatchError } from "@/lib/github-actions";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import {
   isScanUniverseAllowed,
   PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     )?.message;
     logRejectedRunRequest(requestId, startedAtMs, 400, "invalid_payload");
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: firstMessage ?? "Invalid run payload",
           details,
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
         },
       );
       return withApiRequestId(
-        NextResponse.json(
+        jsonWithNoStore(
           {
             error: PYKRX_SCAN_UNIVERSE_ERROR_MESSAGE,
             details: {
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const dispatched = await dispatchWorkflow(dispatchInput);
-    const response = NextResponse.json(dispatched, { status: 202 });
+    const response = jsonWithNoStore(dispatched, { status: 202 });
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -188,13 +189,13 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof GitHubDispatchError) {
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
 
     return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
       requestId,
     );
   }

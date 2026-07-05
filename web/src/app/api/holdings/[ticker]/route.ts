@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -11,6 +11,7 @@ import {
   type ApiLogFields,
 } from "@/lib/api-request-log";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import {
   holdingPatchSchema,
   isHoldingEntryCurrencyValidForTicker,
@@ -88,7 +89,7 @@ export async function PATCH(
       "invalid_ticker",
     );
     return withApiRequestId(
-      NextResponse.json({ error: "Invalid ticker" }, { status: 400 }),
+      jsonWithNoStore({ error: "Invalid ticker" }, { status: 400 }),
       requestId,
     );
   }
@@ -119,7 +120,7 @@ export async function PATCH(
       { ticker_count: 1 },
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid holding patch payload",
           details: parsed.error.flatten(),
@@ -146,7 +147,7 @@ export async function PATCH(
       { ticker_count: 1 },
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         { error: "Invalid holding patch payload" },
         { status: 400 },
       ),
@@ -167,11 +168,11 @@ export async function PATCH(
         { ticker_count: 1, dependency: "supabase" },
       );
       return withApiRequestId(
-        NextResponse.json({ error: "Holding not found" }, { status: 404 }),
+        jsonWithNoStore({ error: "Holding not found" }, { status: 404 }),
         requestId,
       );
     }
-    const response = NextResponse.json(updated);
+    const response = jsonWithNoStore(updated);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -238,7 +239,7 @@ export async function DELETE(
       "invalid_ticker",
     );
     return withApiRequestId(
-      NextResponse.json({ error: "Invalid ticker" }, { status: 400 }),
+      jsonWithNoStore({ error: "Invalid ticker" }, { status: 400 }),
       requestId,
     );
   }
@@ -256,11 +257,11 @@ export async function DELETE(
         { ticker_count: 1, dependency: "supabase" },
       );
       return withApiRequestId(
-        NextResponse.json({ error: "Holding not found" }, { status: 404 }),
+        jsonWithNoStore({ error: "Holding not found" }, { status: 404 }),
         requestId,
       );
     }
-    const response = NextResponse.json({ deleted: true, ticker });
+    const response = jsonWithNoStore({ deleted: true, ticker });
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,

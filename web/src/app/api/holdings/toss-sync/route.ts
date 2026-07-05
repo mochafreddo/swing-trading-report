@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -11,6 +11,7 @@ import {
   type ApiLogFields,
 } from "@/lib/api-request-log";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { tossHoldingsSyncRequestSchema } from "@/lib/schemas";
 import {
   applyTossHoldingsSyncPreview,
@@ -76,7 +77,7 @@ function tossSyncJsonError(error: unknown): NextResponse {
     error instanceof TossInvestApiError ||
     error instanceof TossInvestConfigError
   ) {
-    return NextResponse.json(
+    return jsonWithNoStore(
       { error: error.message },
       { status: tossSyncStatusCode(error) },
     );
@@ -89,7 +90,7 @@ function tossSyncConflictResponse(
   dryRun: TossHoldingsDryRunResult,
   diffHash: string,
 ): NextResponse {
-  return NextResponse.json(
+  return jsonWithNoStore(
     {
       error,
       diffHash,
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
   if (!parsedRequest.success) {
     logRejectedTossSyncRequest(requestId, startedAtMs, 400, "invalid_payload");
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid Toss holdings sync payload",
           details: parsedRequest.error.flatten(),
@@ -190,7 +191,7 @@ export async function POST(request: NextRequest) {
       }
 
       const responsePayload = await applyTossHoldingsSyncPreview(preview);
-      const response = NextResponse.json(responsePayload);
+      const response = jsonWithNoStore(responsePayload);
       logApiInfo({
         event: "web_api_request_completed",
         request_id: requestId,
@@ -213,7 +214,7 @@ export async function POST(request: NextRequest) {
     }
 
     const responsePayload = preview.payload;
-    const response = NextResponse.json(responsePayload);
+    const response = jsonWithNoStore(responsePayload);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,

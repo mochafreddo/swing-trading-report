@@ -1,8 +1,9 @@
 import "server-only";
 
-import { NextResponse } from "next/server";
+import { type NextResponse } from "next/server";
 
 import { toErrorMessage } from "@/lib/error-utils";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { SupabaseApiError } from "@/lib/supabase-admin";
 
 export function holdingsStatusCode(error: unknown): number {
@@ -15,10 +16,7 @@ export function holdingsDependency(error: unknown): string | undefined {
 
 export function holdingsJsonError(error: unknown): NextResponse {
   if (error instanceof SupabaseApiError) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: error.status },
-    );
+    return jsonWithNoStore({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
+  return jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 });
 }

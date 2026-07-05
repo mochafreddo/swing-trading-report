@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import {
@@ -14,9 +14,11 @@ import {
   buildHoldingsYamlDocument,
   buildHoldingsYamlImportSummary,
   HoldingsYamlError,
+  MAX_HOLDINGS_YAML_DOCUMENT_BYTES,
   parseHoldingsYamlDocument,
 } from "@/lib/holdings-yaml";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { holdingYamlImportRequestSchema } from "@/lib/schemas";
 import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
 import type { HoldingsYamlImportResponse } from "@/lib/types";
@@ -31,6 +33,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ROUTE = "/api/holdings/yaml";
+const YAML_IMPORT_JSON_BODY_MAX_BYTES =
+  MAX_HOLDINGS_YAML_DOCUMENT_BYTES * 2 + 16 * 1024;
 
 function logRejectedYamlRequest(
   requestId: string,
@@ -82,7 +86,7 @@ export async function GET(request: NextRequest) {
       headers: {
         "Content-Type": "application/yaml; charset=utf-8",
         "Content-Disposition": 'attachment; filename="holdings.yaml"',
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store, max-age=0, must-revalidate",
       },
     });
     logApiInfo({
@@ -135,7 +139,9 @@ export async function POST(request: NextRequest) {
     return withApiRequestId(guardError, requestId);
   }
 
-  const body = await parseJsonBody(request);
+  const body = await parseJsonBody(request, {
+    maxBytes: YAML_IMPORT_JSON_BODY_MAX_BYTES,
+  });
   if (!body.ok) {
     logRejectedYamlRequest(
       requestId,
@@ -159,7 +165,7 @@ export async function POST(request: NextRequest) {
       "invalid_payload",
     );
     return withApiRequestId(
-      NextResponse.json(
+      jsonWithNoStore(
         {
           error: "Invalid holdings YAML import payload",
           details: parsedRequest.error.flatten(),
@@ -199,7 +205,7 @@ export async function POST(request: NextRequest) {
             unchangedCount: result.unchangedCount,
           },
         };
-        const response = NextResponse.json(appliedResponse);
+        const response = jsonWithNoStore(appliedResponse);
         logApiInfo({
           event: "web_api_request_completed",
           request_id: requestId,
@@ -224,7 +230,7 @@ export async function POST(request: NextRequest) {
       mode: parsedRequest.data.apply ? "apply" : "dry-run",
       summary,
     };
-    const response = NextResponse.json(responsePayload);
+    const response = jsonWithNoStore(responsePayload);
     logApiInfo({
       event: "web_api_request_completed",
       request_id: requestId,
@@ -253,7 +259,7 @@ export async function POST(request: NextRequest) {
         "invalid_yaml",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: 400 }),
+        jsonWithNoStore({ error: error.message }, { status: 400 }),
         requestId,
       );
     }

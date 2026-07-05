@@ -126,6 +126,21 @@ beforeEach(() => {
 });
 
 describe("GET /api/holdings route", () => {
+  it("sets private no-store cache control on successful JSON responses", async () => {
+    vi.mocked(fetchHoldingsPage).mockResolvedValueOnce({
+      items: [],
+      hasMore: false,
+      nextCursor: null,
+    });
+
+    const response = await GET(makeGetRequest());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
+  });
+
   it("maps admin auth failures with status and headers", async () => {
     const authError = new AdminAuthError("Unauthorized");
     (authError as { headers: HeadersInit }).headers = {
@@ -137,6 +152,9 @@ describe("GET /api/holdings route", () => {
     const payload = (await response.json()) as { error: string };
 
     expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
     expect(response.headers.get("x-auth-required")).toBe("1");
     expect(payload.error).toBe("Unauthorized");
   });
@@ -240,6 +258,15 @@ describe("GET /api/holdings route", () => {
 });
 
 describe("POST /api/holdings route", () => {
+  it("sets private no-store cache control on invalid JSON responses", async () => {
+    const response = await POST(makePostRequest("{"));
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0, must-revalidate",
+    );
+  });
+
   it("maps same-origin guard failures to 403", async () => {
     vi.mocked(assertSameOrigin).mockImplementationOnce(() => {
       throw new SameOriginError("Cross-site blocked");

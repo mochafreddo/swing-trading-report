@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 import {
   elapsedMs,
@@ -19,6 +19,7 @@ import {
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { jsonWithNoStore } from "@/lib/reports-response";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
         "same_origin_guard",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
         "local_request_guard",
       );
       return withApiRequestId(
-        NextResponse.json({ error: error.message }, { status: error.status }),
+        jsonWithNoStore({ error: error.message }, { status: error.status }),
         requestId,
       );
     }
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
       retryable: false,
     });
     return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
       requestId,
     );
   }
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
   if (!parsed) {
     logRejectedLogin(requestId, startedAtMs, 400, "invalid_payload");
     return withApiRequestId(
-      NextResponse.json({ error: "Invalid login payload" }, { status: 400 }),
+      jsonWithNoStore({ error: "Invalid login payload" }, { status: 400 }),
       requestId,
     );
   }
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest) {
     if (!result.ok) {
       logRejectedLogin(requestId, startedAtMs, result.status, "login_denied");
       return withApiRequestId(
-        NextResponse.json(
+        jsonWithNoStore(
           { error: result.error },
           {
             status: result.status,
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = NextResponse.json({ ok: true });
+    const response = jsonWithNoStore({ ok: true });
     response.cookies.set(
       ADMIN_SESSION_COOKIE_NAME,
       result.token,
@@ -184,7 +185,7 @@ export async function POST(request: NextRequest) {
       retryable: false,
     });
     return withApiRequestId(
-      NextResponse.json({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
       requestId,
     );
   }
