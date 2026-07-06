@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sab.scheduler.runner as scheduler_runner
+from sab.report.supabase_storage import SupabaseStorageConfig
 from sab.scheduler.generic_state import build_scheduled_state_key
 from sab.scheduler.sell_ai_brief_delivery import (
     ScheduledSellAiBriefDeliveryRequest,
@@ -306,6 +308,34 @@ def test_scheduled_sell_ai_brief_delivery_reconciles_existing_artifact_once() ->
     assert state.releases == state.claims
 
 
+def test_scheduled_sell_ai_brief_delivery_repairs_success_when_sent_marker_exists() -> (
+    None
+):
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    state.entries[_key("notification:sent")] = RuntimeStateEntry(
+        state_key=_key("notification:sent"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "completion_repaired"
+    assert result.storage_key == "2026/07/2026-07-06.sell-ai-brief.json"
+    assert notifier.sent == []
+    assert _key("success") in state.entries
+    assert state.entries[_key("success")].state_payload["storageKey"] == (
+        "2026/07/2026-07-06.sell-ai-brief.json"
+    )
+
+
 def test_scheduled_sell_ai_brief_delivery_releases_claim_on_pre_send_validation_failure() -> (
     None
 ):
@@ -503,3 +533,40 @@ def test_scheduled_sell_ai_brief_delivery_reconcile_records_attempt_before_send_
     assert upserted_keys.index(_attempt_key(attempt_id)) < upserted_keys.index(
         _key("success")
     )
+
+
+def test_default_scheduled_storage_upload_sell_ai_brief_uses_report_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_upload_report_artifact(**kwargs: object) -> str:
+        calls.append(kwargs)
+        return "2026/07/2026-07-06.sell-ai-brief.json"
+
+    monkeypatch.setattr(
+        scheduler_runner,
+        "upload_report_artifact",
+        fake_upload_report_artifact,
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+    storage = scheduler_runner.DefaultScheduledStorage(config)
+
+    result = storage.upload_sell_ai_brief(
+        "reports/2026-07-06.sell-ai-brief.json",
+        report_date="2026-07-06",
+    )
+
+    assert result == "2026/07/2026-07-06.sell-ai-brief.json"
+    assert calls == [
+        {
+            "local_path": "reports/2026-07-06.sell-ai-brief.json",
+            "run_type": "sell-ai-brief",
+            "report_date": dt.date(2026, 7, 6),
+            "config": config,
+        }
+    ]

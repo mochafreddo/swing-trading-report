@@ -179,6 +179,20 @@ class ScheduledSellAiBriefDeliveryRunner:
             _state_key("artifact", scope=scope, session_date=session_date)
         )
         if artifact_entry is not None:
+            sent_entry = self._state_store.get_entry(
+                _state_key(
+                    "notification:sent",
+                    scope=scope,
+                    session_date=session_date,
+                )
+            )
+            if sent_entry is not None:
+                return self._repair_completion_from_sent_marker(
+                    scope=scope,
+                    session_date=session_date,
+                    sent_entry=sent_entry,
+                    artifact_entry=artifact_entry,
+                )
             return self._reconcile_notification(
                 request=request,
                 scope=scope,
@@ -314,6 +328,40 @@ class ScheduledSellAiBriefDeliveryRunner:
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+
+    def _repair_completion_from_sent_marker(
+        self,
+        *,
+        scope: str,
+        session_date: str,
+        sent_entry: RuntimeStateEntry,
+        artifact_entry: RuntimeStateEntry,
+    ) -> ScheduledSellAiBriefDeliveryResult:
+        storage_key = _storage_key(sent_entry) or _storage_key(artifact_entry)
+        if storage_key is None:
+            return ScheduledSellAiBriefDeliveryResult(
+                status="notification_sent_marker_invalid",
+                session_date=session_date,
+            )
+        payload = dict(sent_entry.state_payload)
+        payload.update(
+            {
+                "scope": scope,
+                "sessionDate": session_date,
+                "storageKey": storage_key,
+            }
+        )
+        self._state_store.upsert_marker(
+            key=_state_key("success", scope=scope, session_date=session_date),
+            payload=payload,
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=self._now_fn(),
+        )
+        return ScheduledSellAiBriefDeliveryResult(
+            status="completion_repaired",
+            session_date=session_date,
+            storage_key=storage_key,
+        )
 
     def _record_attempt_marker(
         self,
