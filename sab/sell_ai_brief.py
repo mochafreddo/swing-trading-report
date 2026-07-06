@@ -6,7 +6,8 @@ import logging
 import math
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from .ai_brief_source_chain import (
@@ -60,6 +61,13 @@ from .sell_ai_brief_providers import (
 from .tickers import infer_market_from_ticker
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SellAiBriefRunResult:
+    exit_code: int
+    report_path: str | None = None
+
 
 _DEFAULT_MODEL_NAME = "fake-sell-ai-brief-v1"
 _ALLOWED_MODEL_PROVIDERS = frozenset({MODEL_PROVIDER_FAKE, MODEL_PROVIDER_OPENAI})
@@ -617,6 +625,7 @@ def run_sell_ai_brief(
     article_reader_max_excerpt_chars: int | None = None,
     report_date: str | None = None,
     upload: bool = False,
+    report_path_callback: Callable[[str], None] | None = None,
 ) -> int:
     run_id = current_run_id("sell-ai-brief")
     operation = "sell-ai-brief"
@@ -868,6 +877,8 @@ def run_sell_ai_brief(
         logger.error("Sell AI brief validation failed: %s", exc)
         return 1
     logger.info("Sell AI brief written to: %s", out_path)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
     if provider_error is not None:
         return 1
 
@@ -884,9 +895,52 @@ def run_sell_ai_brief(
     return 0
 
 
+def run_sell_ai_brief_with_result(
+    *,
+    sell_report_path: str,
+    model_provider: str | None,
+    model_name: str | None,
+    model_timeout_seconds: float | None = None,
+    source_provider: str | None = None,
+    source_report_path: str | None = None,
+    source_api_url: str | None = None,
+    source_timeout_seconds: float | None = None,
+    article_reader: str | None = None,
+    article_reader_max_urls: int | None = None,
+    article_reader_timeout_seconds: float | None = None,
+    article_reader_max_excerpt_chars: int | None = None,
+    report_date: str | None = None,
+    upload: bool = False,
+) -> SellAiBriefRunResult:
+    report_paths: list[str] = []
+    exit_code = run_sell_ai_brief(
+        sell_report_path=sell_report_path,
+        model_provider=model_provider,
+        model_name=model_name,
+        model_timeout_seconds=model_timeout_seconds,
+        source_provider=source_provider,
+        source_report_path=source_report_path,
+        source_api_url=source_api_url,
+        source_timeout_seconds=source_timeout_seconds,
+        article_reader=article_reader,
+        article_reader_max_urls=article_reader_max_urls,
+        article_reader_timeout_seconds=article_reader_timeout_seconds,
+        article_reader_max_excerpt_chars=article_reader_max_excerpt_chars,
+        report_date=report_date,
+        upload=upload,
+        report_path_callback=report_paths.append,
+    )
+    return SellAiBriefRunResult(
+        exit_code=exit_code,
+        report_path=report_paths[-1] if report_paths else None,
+    )
+
+
 __all__ = [
     "FakeSellAiBriefProvider",
     "OpenAiSellAiBriefProvider",
     "SellAiBriefProviderError",
+    "SellAiBriefRunResult",
     "run_sell_ai_brief",
+    "run_sell_ai_brief_with_result",
 ]

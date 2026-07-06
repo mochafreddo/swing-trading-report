@@ -14,11 +14,14 @@
 - 로컬 `scan`/`sell`/`entry`/`ai-brief` JSON 리포트 생성과 웹
   Reports/Holdings/Metrics는 현재 제공됩니다.
 - `scan`/`sell` GitHub Actions workflow는 manual-only `workflow_dispatch`로
-  제공됩니다. scheduled scan/sell과 schedule 전용 Telegram/Slack 요약 알림은
-  marker-aware fallback 설계 전까지 fail closed 상태입니다.
+  제공됩니다. scheduled scan과 GitHub scheduled sell은 marker-aware fallback
+  설계 전까지 fail closed 상태입니다.
 - scheduled AI Brief는 로컬 Docker primary가 담당하고,
   `.github/workflows/ai-brief.yml`은 수동 실행과 monitor/fallback 경로로
   사용합니다.
+- scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬
+  generic wrapper가 담당하며, 정상 판단 전송과 freshness-blocked 보류 알림을
+  분리합니다.
 
 ### 실험
 

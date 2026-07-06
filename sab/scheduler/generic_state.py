@@ -8,7 +8,11 @@ __all__ = ["build_scheduled_state_key"]
 _ALLOWED_PIPELINES: Final = frozenset({"scan", "sell", "ai-brief"})
 _ALLOWED_SCOPES: Final = frozenset({"KR", "US", "MIXED"})
 _ALLOWED_MULTI_SEGMENT_KINDS: Final = frozenset(
-    {("notification", "claim"), ("notification", "sent")}
+    {
+        ("notification", "blocked-sent"),
+        ("notification", "claim"),
+        ("notification", "sent"),
+    }
 )
 _UNSAFE_TOKEN_CHARS: Final = frozenset({":", "\n", "\r", "/", "\\"})
 _SAFE_TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_.-]+$")

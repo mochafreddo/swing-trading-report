@@ -17,6 +17,7 @@ import { jsonWithNoStore } from "@/lib/reports-response";
 import { tossHoldingsScheduledSyncRequestSchema } from "@/lib/schemas";
 import {
   buildTossHoldingsSyncDependenciesFromEnv,
+  recordScheduledTossFreshnessMarker,
   runScheduledTossAutoApply,
   type ScheduledTossAutoSyncResponse,
 } from "@/lib/toss/holdings-sync-service";
@@ -48,6 +49,16 @@ function buildScheduledErrorResult(
     changes: { create: [], update: [], delete: [], unchanged: [] },
     blockedRows: [],
     targetRows: [],
+  };
+}
+
+function buildMarkerFailedResult(
+  result: ScheduledTossAutoSyncResponse,
+): ScheduledTossAutoSyncResponse & { error: string } {
+  return {
+    ...result,
+    status: "marker_failed",
+    error: "Scheduled Toss freshness marker write failed",
   };
 }
 
@@ -155,6 +166,30 @@ export async function POST(request: NextRequest) {
       },
       deps,
     );
+    if (result.status === "applied" || result.status === "unchanged") {
+      try {
+        await recordScheduledTossFreshnessMarker(result, {
+          sessionDate: parsed.data.sessionDate,
+        });
+      } catch {
+        logApiError(new Error("Scheduled Toss freshness marker write failed"), {
+          event: "web_api_request_failed",
+          request_id: requestId,
+          route: ROUTE,
+          method: "POST",
+          operation: "scheduled_toss_holdings_sync",
+          status: "failed",
+          status_code: 500,
+          duration_ms: elapsedMs(startedAtMs),
+          retryable: true,
+          sync_status: "marker_failed",
+        });
+        return withApiRequestId(
+          jsonWithNoStore(buildMarkerFailedResult(result), { status: 500 }),
+          requestId,
+        );
+      }
+    }
     const response = jsonWithNoStore(result);
     logApiInfo({
       event: "web_api_request_completed",

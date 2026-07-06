@@ -103,6 +103,7 @@ fi
 web_host_port="${WEB_HOST_PORT:-55300}"
 base_url="http://127.0.0.1:${web_host_port}"
 endpoint="${base_url}/api/holdings/toss-sync/scheduled"
+session_date="${TOSS_SYNC_SESSION_DATE:-$(TZ=Asia/Seoul date +%F)}"
 
 if [[ -z "${TOSS_SYNC_JOB_TOKEN:-}" ]]; then
   printf '%s\n' "TOSS_SYNC_JOB_TOKEN must be set" >&2
@@ -144,7 +145,7 @@ header = "Content-Type: application/json"
 header = "Accept: application/json"
 header = "Origin: ${base_url}"
 header = "Authorization: Bearer ${escaped_job_token}"
-data = "{\"mode\":\"auto-apply\"}"
+data = "{\"mode\":\"auto-apply\",\"sessionDate\":\"${session_date}\"}"
 CURL_CONFIG
 )"
 curl_status=$?

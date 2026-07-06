@@ -21,6 +21,10 @@ const MOCK_RUNTIME_DEPS = { qa: "runtime-deps" };
 
 vi.mock("@/lib/toss/holdings-sync-service", () => ({
   buildTossHoldingsSyncDependenciesFromEnv: vi.fn(() => MOCK_RUNTIME_DEPS),
+  recordScheduledTossFreshnessMarker: vi.fn(async () => ({
+    stateKey: "toss-sync:success:MIXED:2026-07-06",
+    sessionDate: "2026-07-06",
+  })),
   runScheduledTossAutoApply: vi.fn(async () => ({
     mode: "auto-apply",
     status: "unchanged",
@@ -50,6 +54,7 @@ import {
 } from "@/lib/local-request-guard";
 import {
   buildTossHoldingsSyncDependenciesFromEnv,
+  recordScheduledTossFreshnessMarker,
   runScheduledTossAutoApply,
 } from "@/lib/toss/holdings-sync-service";
 
@@ -215,6 +220,48 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
       },
       MOCK_RUNTIME_DEPS,
     );
+    expect(recordScheduledTossFreshnessMarker).toHaveBeenCalledWith(payload, {
+      sessionDate: undefined,
+    });
+  });
+
+  it("passes explicit session date to the freshness marker helper", async () => {
+    const response = await POST(
+      makePostRequest(
+        { mode: "auto-apply", sessionDate: "2026-07-06" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+    const payload = (await response.json()) as { status: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe("unchanged");
+    expect(recordScheduledTossFreshnessMarker).toHaveBeenCalledWith(payload, {
+      sessionDate: "2026-07-06",
+    });
+  });
+
+  it("returns marker_failed when freshness marker write fails after sync success", async () => {
+    vi.mocked(recordScheduledTossFreshnessMarker).mockRejectedValueOnce(
+      new Error("runtime_state unavailable"),
+    );
+
+    const response = await POST(
+      makePostRequest(
+        { mode: "auto-apply" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+    const payload = (await response.json()) as {
+      status: string;
+      error: string;
+      diffHash: string;
+    };
+
+    expect(response.status).toBe(500);
+    expect(payload.status).toBe("marker_failed");
+    expect(payload.error).toBe("Scheduled Toss freshness marker write failed");
+    expect(payload.diffHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
   it("returns a stable scheduled error result when the sync service throws", async () => {

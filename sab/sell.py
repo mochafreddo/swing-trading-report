@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from . import sell_evaluation, sell_runtime
 from .config import Config, load_config
@@ -15,12 +17,22 @@ from .market_data_service import SellMarketData
 from .observability import current_run_id
 from .report.artifact_update import append_report_issues
 from .report.sell_report import SellReportRow, write_sell_report
-from .report.supabase_storage import SupabaseStorageError, maybe_upload_report_artifact
+from .report.supabase_storage import (
+    SupabaseStorageError,
+    maybe_upload_report_artifact,
+    suppress_report_uploads,
+)
 from .sell_types import _exchange_from_suffix, _SellRuntime, _split_symbol_and_suffix
 from .signals.hybrid_sell import HybridSellSettings, evaluate_sell_signals_hybrid
 from .signals.sell_rules import SellSettings, evaluate_sell_signals
 
 _INCOMPLETE_TAIL_BUFFER_BARS = 1
+
+
+@dataclass(frozen=True)
+class SellRunResult:
+    exit_code: int
+    report_path: str | None = None
 
 
 def _build_sell_runtime(
@@ -130,7 +142,12 @@ def _resolve_sell_holdings(cfg: Config) -> HoldingsData:
     return load_holdings(resolved_holdings_path)
 
 
-def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
+def run_sell(
+    *,
+    provider: str | None,
+    holdings_path: str | None = None,
+    report_path_callback: Callable[[str], None] | None = None,
+) -> int:
     logger = logging.getLogger(__name__)
     run_id = current_run_id("sell")
     logger.info(
@@ -184,6 +201,8 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     results = _evaluate_sell_runtime(runtime)
 
     out_path = _render_sell_report(runtime, results)
+    if report_path_callback is not None:
+        report_path_callback(out_path)
     logger.info(
         "Sell report written to: %s",
         out_path,
@@ -294,4 +313,30 @@ def run_sell(*, provider: str | None, holdings_path: str | None = None) -> int:
     return 0
 
 
-__all__ = ["run_sell"]
+def run_sell_with_result(
+    *,
+    provider: str | None,
+    holdings_path: str | None = None,
+    suppress_upload: bool = False,
+) -> SellRunResult:
+    report_paths: list[str] = []
+    if suppress_upload:
+        with suppress_report_uploads():
+            exit_code = run_sell(
+                provider=provider,
+                holdings_path=holdings_path,
+                report_path_callback=report_paths.append,
+            )
+    else:
+        exit_code = run_sell(
+            provider=provider,
+            holdings_path=holdings_path,
+            report_path_callback=report_paths.append,
+        )
+    return SellRunResult(
+        exit_code=exit_code,
+        report_path=report_paths[-1] if report_paths else None,
+    )
+
+
+__all__ = ["SellRunResult", "run_sell", "run_sell_with_result"]

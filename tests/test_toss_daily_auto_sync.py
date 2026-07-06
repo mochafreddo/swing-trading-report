@@ -172,6 +172,7 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
             },
             recorder,
         ),
+        extra_env={"TOSS_SYNC_SESSION_DATE": "2026-07-06"},
     )
 
     assert result.returncode == 0
@@ -181,7 +182,9 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     assert "http://127.0.0.1:55300/api/holdings/toss-sync/scheduled" in curl_config
     assert "Authorization: Bearer test-token" in curl_config
     assert "Origin: http://127.0.0.1:55300" in curl_config
-    assert '\\"mode\\":\\"auto-apply\\"' in curl_config
+    assert (
+        '\\"mode\\":\\"auto-apply\\",\\"sessionDate\\":\\"2026-07-06\\"' in curl_config
+    )
     assert "--connect-timeout" in args
     assert "--max-time" in args
     assert "--retry" in args
@@ -391,6 +394,7 @@ def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
         ("disabled", 0, 0),
         ("wipe_guard_blocked", 0, 2),
         ("delete_guard_blocked", 1, 1),
+        ("marker_failed", 1, 0),
         ("error", 0, 0),
     ],
 )

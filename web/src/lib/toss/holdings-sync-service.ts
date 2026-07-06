@@ -1,6 +1,7 @@
 import "server-only";
 
 import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
+import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
 import {
   listTickerDirectoryExactBaseCandidates,
   type TickerDirectoryExactBaseResponse,
@@ -30,6 +31,7 @@ type ScheduledTossAutoSyncStatus =
   | "blocked"
   | "wipe_guard_blocked"
   | "delete_guard_blocked"
+  | "marker_failed"
   | "error";
 
 export interface TossHoldingsSyncResponsePayload {
@@ -75,6 +77,11 @@ export interface TossHoldingsSyncDependencies {
     rows: HoldingReplaceSnapshot[],
     options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
   ) => Promise<ReplaceAllHoldingsResult>;
+}
+
+export interface ScheduledTossFreshnessMarkerResult {
+  stateKey: string;
+  sessionDate: string;
 }
 
 const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
@@ -249,6 +256,49 @@ function assertReplaceAllResultMatchesPreview(
   if (!matches) {
     throw new Error("replace_holdings_v1 result did not match preview");
   }
+}
+
+function resolveKstSessionDate(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+  return `${byType.get("year")}-${byType.get("month")}-${byType.get("day")}`;
+}
+
+export async function recordScheduledTossFreshnessMarker(
+  result: ScheduledTossAutoSyncResponse,
+  options: { sessionDate?: string; now?: Date } = {},
+): Promise<ScheduledTossFreshnessMarkerResult | null> {
+  if (result.status !== "applied" && result.status !== "unchanged") {
+    return null;
+  }
+  const now = options.now ?? new Date();
+  const sessionDate = options.sessionDate ?? resolveKstSessionDate(now);
+  const stateKey = `toss-sync:success:MIXED:${sessionDate}`;
+  const expiresAt = new Date(now.getTime() + 36 * 60 * 60 * 1000).toISOString();
+  await upsertRuntimeStateEntry(
+    stateKey,
+    {
+      scope: "MIXED",
+      sessionDate,
+      status: result.status,
+      diffHash: result.diffHash,
+      incomingCount: result.summary.incomingCount,
+      createCount: result.summary.createCount,
+      updateCount: result.summary.updateCount,
+      deleteCount: result.summary.deleteCount,
+      unchangedCount: result.summary.unchangedCount,
+      source: "scheduled-route",
+      timezone: "Asia/Seoul",
+      updatedAt: now.toISOString(),
+    },
+    expiresAt,
+  );
+  return { stateKey, sessionDate };
 }
 
 async function fetchTossTickerDirectoryCandidates(

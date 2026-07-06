@@ -84,10 +84,14 @@
 | `TOSS_INVEST_BASE_URL` | web `/api/holdings/toss-sync` | 기본 `https://openapi.tossinvest.com` |
 | `TOSS_SYNC_SOURCE`, `TOSS_SYNC_QA_FIXTURE_ENABLED` | web `/api/holdings/toss-sync/scheduled` | QA-only fixture source. 운영/live sync에서는 unset. `fixture`는 `TOSS_SYNC_QA_FIXTURE_ENABLED=1`과 local Supabase URL일 때만 허용 |
 | `TOSS_SYNC_JOB_TOKEN` | web `/api/holdings/toss-sync/scheduled`, local runner | Local scheduled Toss sync Bearer token. root `.env`에 저장해 Docker Compose web 컨테이너와 `scripts/toss_daily_auto_sync.sh`가 같은 값을 읽게 함. 커밋 금지 |
-| `TOSS_SYNC_AUTO_APPLY_ENABLED` | web `/api/holdings/toss-sync/scheduled` | `1`일 때만 scheduled auto-apply write 허용. 그 외 값은 fetch/write 없이 `disabled` 반환. scheduled write는 create/update only이며 delete diff는 `delete_guard_blocked`/`wipe_guard_blocked` |
+| `TOSS_SYNC_AUTO_APPLY_ENABLED` | web `/api/holdings/toss-sync/scheduled` | `1`일 때만 scheduled auto-apply write 허용. 그 외 값은 fetch/write 없이 `disabled` 반환. scheduled write는 create/update only이며 delete diff는 `delete_guard_blocked`/`wipe_guard_blocked`. `applied`/`unchanged` 뒤 Toss freshness marker를 기록하고, marker write 실패는 `marker_failed` |
+| `TOSS_SYNC_SESSION_DATE` | local Toss runner | 선택. KST session date override. 정상 운영에서는 unset, smoke/replay에서만 고정 |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | scheduled/Actions notification | 알림 사용 시 필요 |
 | `SLACK_WEBHOOK_URL` | scheduled/Actions notification | 선택 |
 | `SAB_SCHEDULER_ENV_FILE` | Docker scheduler env_file | 기본 `.env.scheduler.local` |
+| `SAB_SELL_SCHEDULE_MODE` | generic scheduled wrapper | `delivery` 또는 `generation`. `generation`은 Toss freshness-gated sell/Sell AI Brief 생성, `delivery`는 `SELL_AI_BRIEF_REPORT_PATH` prebuilt artifact 전달 |
+| `SELL_AI_BRIEF_REPORT_PATH` | generic scheduled wrapper delivery mode | `SAB_SELL_SCHEDULE_MODE=delivery`일 때 필수. `generation`에서는 쓰지 않음 |
+| `SAB_SESSION_DATE`, `SAB_RUNNER_ROLE`, `SAB_SCHEDULED_TICK`, `SAB_ATTEMPT_ID`, `SAB_RUN_URL` | generic scheduled wrapper / scheduler status context | 선택. session/date와 observability metadata override. 정상 launchd 실행은 기본값 사용 |
 | `OPENAI_API_KEY` | `sab ai-brief --model-provider openai` | scheduled AI Brief에서 필요 |
 | `OPENAI_AI_BRIEF_MODEL` | OpenAI primary model | CLI `--model-name`으로도 지정 가능 |
 | `OPENAI_AI_BRIEF_FALLBACK_MODEL` | OpenAI fallback model after retryable primary timeout | primary와 달라야 함 |
@@ -103,7 +107,8 @@
 | `AI_BRIEF_ARTICLE_READER_TIMEOUT_SECONDS` | AI Brief article reader timeout | 선택. 양의 finite 숫자만 허용 |
 | `AI_BRIEF_ARTICLE_READER_MAX_EXCERPT_CHARS` | AI Brief article excerpt cap | 선택. 기본 1200, 전체 본문은 저장하지 않음 |
 | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | scheduled/source provider chain | market chain > global chain > single-provider fallback. 일반 `sab ai-brief`는 명시 `--source-provider`/source path/API URL이 없을 때만 env chain 사용 |
-| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN` | Sell AI Brief source provider chain | 명시 `--source-provider`/source path/API URL이 없을 때 사용. `MIXED`가 없으면 KR 체인 뒤 US 체인을 결합하고, 없으면 global sell chain > `AI_BRIEF_SOURCE_PROVIDER_CHAIN` 순서로 fallback |
+| `OPENAI_SELL_AI_BRIEF_MODEL`, `SELL_AI_BRIEF_MODEL_TIMEOUT_SECONDS` | `sab sell-ai-brief`, scheduled sell generation | sell-specific OpenAI model/timeout override. 없으면 AI Brief model env 또는 provider 기본값으로 fallback |
+| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED`, `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN` | Sell AI Brief source provider chain | 명시 `--source-provider`/source path/API URL이 없을 때 사용. scheduled sell generation도 같은 env를 사용. `MIXED`가 없으면 KR 체인 뒤 US 체인을 결합하고, 없으면 global sell chain > `AI_BRIEF_SOURCE_PROVIDER_CHAIN` 순서로 fallback |
 | `AI_BRIEF_SOURCE_PROVIDER_KR`, `AI_BRIEF_SOURCE_PROVIDER_US`, `AI_BRIEF_SOURCE_PROVIDER` | scheduled source provider | market-specific 값 우선 |
 | `FINNHUB_API_KEY` | `finnhub` source provider | US-only |
 | `POLYGON_API_KEY` | `polygon-news` source provider | US-only |

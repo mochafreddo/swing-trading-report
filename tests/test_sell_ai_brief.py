@@ -8,7 +8,7 @@ from typing import cast
 
 import pytest
 from sab import sell_ai_brief
-from sab.sell_ai_brief import run_sell_ai_brief
+from sab.sell_ai_brief import run_sell_ai_brief, run_sell_ai_brief_with_result
 
 
 def _sell_row(
@@ -115,6 +115,30 @@ def test_run_sell_ai_brief_reviews_only_actionable_rows(
     ]
     assert payload["summary"]["actionable_count"] == 3
     assert payload["summary"]["source_issue_count"] == 3
+
+
+def test_run_sell_ai_brief_with_result_returns_written_report_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sell_report = _write_sell_report(tmp_path)
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.sell_ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+
+    result = run_sell_ai_brief_with_result(
+        sell_report_path=sell_report.as_posix(),
+        model_provider="fake",
+        model_name="fake-sell-ai-brief-v1",
+        source_provider="none",
+    )
+
+    assert result.exit_code == 0
+    assert result.report_path is not None
+    assert Path(result.report_path).is_file()
+    assert Path(result.report_path).name.endswith(".sell-ai-brief.json")
 
 
 def test_run_sell_ai_brief_skips_model_when_no_actionable_rows(

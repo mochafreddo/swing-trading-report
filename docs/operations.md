@@ -72,7 +72,8 @@ value with `[REDACTED]` before sharing it.
 | Web liveness | unauthenticated page | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` |
 | Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
-| Scheduled Sell AI Brief delivery | generic wrapper / runtime_state | `SELL_AI_BRIEF_REPORT_PATH=reports/2026-07-06.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
+| Scheduled Sell AI Brief generation | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
+| Scheduled Sell AI Brief prebuilt delivery | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/2026-07-06.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
 | Supabase reports | SQL/dashboard | `report_index`, Storage `reports` bucket |
@@ -145,18 +146,27 @@ Local log retention:
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 
-## Scheduled Sell AI Brief Delivery
+## Scheduled Sell AI Brief Generation And Delivery
 
-Scheduled Sell AI Brief delivery is a marker-aware reconciliation path for an already-built `*.sell-ai-brief.json` artifact. It does not generate a sell report and it does not generate a Sell AI Brief.
+Scheduled Sell AI Brief has two explicit modes:
+
+- Generation: `SAB_SELL_SCHEDULE_MODE=generation` checks Toss freshness, generates a fresh sell report and Sell AI Brief, evaluates quality, uploads artifacts, and sends Telegram through the delivery runner.
+- Prebuilt delivery: `SAB_SELL_SCHEDULE_MODE=delivery` plus `SELL_AI_BRIEF_REPORT_PATH=...` validates and delivers an already-built `*.sell-ai-brief.json` artifact. It does not generate a sell report and it does not run `sell-ai-brief` generation.
 
 Execution paths:
 
-- Local/CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
-- launchd generic wrapper route: `scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` when `SELL_AI_BRIEF_REPORT_PATH` is set
+- Local generation CLI: `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date YYYY-MM-DD --runner-role local-primary --scheduled-tick 0715`
+- launchd generic wrapper generation route: `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
+- Local prebuilt delivery CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
+- launchd generic wrapper delivery route: `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/YYYY-MM-DD.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
 - Manual GitHub Actions: `.github/workflows/sell.yml` remains manual opt-in generation/upload/notification and is not the scheduled path
 
 Runtime markers use the `scheduled-sell:` prefix and are keyed by `scope + session_date`:
 
+- `scheduled-sell:blocked:*`: Toss freshness blocked normal generation
+- `scheduled-sell:notification:blocked-sent:*`: freshness-blocked Telegram already sent
+- `scheduled-sell:generation:*`: generation runner produced and uploaded sell/Sell AI Brief artifacts
+- `scheduled-sell:review-required:*`: generation quality gate returned `WARN`; normal delivery happened but needs review
 - `scheduled-sell:attempt:*`: pre-lock observation marker for a delivery attempt
 - `scheduled-sell:lock:*`: main delivery lock; only the lock owner may publish canonical artifact/notification success markers
 - `scheduled-sell:artifact:*`: Storage upload plus `report_index` indexing completed for the artifact
@@ -166,16 +176,18 @@ Runtime markers use the `scheduled-sell:` prefix and are keyed by `scope + sessi
 
 Gate order:
 
-1. The upstream Sell AI Brief generation path should already have passed `scripts/eval_sell_ai_brief.py` before any scheduled delivery is attempted.
-2. The delivery runner revalidates the artifact with `validate_sell_ai_brief_artifact(...)`.
-3. Only after validation succeeds does it upload to Supabase Storage and upsert `report_index`.
-4. Only after upload/index succeeds and the `artifact` marker is recorded does it send Telegram and record `notification:sent` then `success`.
+1. Generation mode requires `toss-sync:success:MIXED:<session_date>` with status `applied` or `unchanged`. Missing, stale, or invalid freshness sends only a "매도 AI Brief 보류" alert and writes no `scheduled-sell:success`.
+2. Generation mode claims a renewable generation lock, runs `sab sell`, runs `sab sell-ai-brief`, and evaluates the artifact with `scripts/eval_sell_ai_brief.py`.
+3. Quality `FAIL` blocks Supabase upload and normal Telegram delivery. Quality `WARN` can deliver but records `review-required` and returns `completed_review_required`.
+4. Only after quality is non-`FAIL` does generation upload the sell report, then delegate the Sell AI Brief artifact to the delivery runner.
+5. The delivery runner revalidates the Sell AI Brief artifact with `validate_sell_ai_brief_artifact(...)`, uploads/indexes it, records `artifact`, sends Telegram, then records `notification:sent` and `success`.
 
 Reconciliation rules:
 
 - If `success` already exists, the runner no-ops.
 - If `artifact` exists without `success`, the runner downloads the uploaded JSON by storage key and retries notification reconciliation instead of uploading a second copy.
 - `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed` are failure statuses. `dry_run`, `success_marker_skip`, `lock_held_skip`, `completed`, `completion_repaired`, `notification_claim_held`, and `notification_reconciled` are non-fatal delivery outcomes.
+- Generation failures include `toss_freshness_missing`, `toss_freshness_stale`, `toss_freshness_invalid`, `sell_report_failed`, `sell_ai_brief_failed`, `quality_gate_failed`, and `upload_failed`. Treat freshness failures as holdings-data problems first, not model failures.
 
 ## Local Toss Daily Auto Sync
 
@@ -193,10 +205,12 @@ tail -n 20 logs/launchd/toss-daily-auto-sync.out.log
 tail -n 20 logs/launchd/toss-daily-auto-sync.err.log
 ```
 
-Only `status=applied` and `status=unchanged` are successful runner outcomes.
-`disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and
-`error` are fail-closed outcomes; inspect the web container logs and the current
-Holdings page before rerunning. Full setup and QA steps live in
+Only `status=applied` and `status=unchanged` are successful runner outcomes;
+those statuses also write `toss-sync:success:MIXED:<session_date>` for the
+scheduled sell generation freshness gate. `disabled`, `blocked`,
+`wipe_guard_blocked`, `delete_guard_blocked`, `marker_failed`, and `error` are
+fail-closed outcomes; inspect the web container logs and the current Holdings
+page before rerunning. Full setup and QA steps live in
 [deployment.md](deployment.md#local-toss-holdings-auto-sync).
 
 ## GitHub Actions
@@ -204,7 +218,7 @@ Holdings page before rerunning. Full setup and QA steps live in
 | Workflow | Normal Signal | Failure Start Point |
 | --- | --- | --- |
 | `scan.yml` | manual run uploads and indexes a report; no scheduled trigger until marker-aware local upload is implemented | KIS credentials, provider availability, upload step, report `system_issues` |
-| `sell.yml` | manual run loads Supabase holdings, generates sell/Sell AI Brief artifacts, and only sends Sell AI Brief Telegram when the manual input opts in; scheduled sell generation remains disabled | holdings query, KIS/pykrx provider, sell-ai-brief quality gate, upload step |
+| `sell.yml` | manual run loads Supabase holdings, generates sell/Sell AI Brief artifacts, and only sends Sell AI Brief Telegram when the manual input opts in; local scheduled generation uses the generic wrapper instead of GitHub schedule | holdings query, KIS/pykrx provider, sell-ai-brief quality gate, upload step |
 | `ai-brief.yml` | manual artifact passes recommendation quality gate before Supabase upload and opt-in notifications; scheduled artifact/skip marker after runtime_state guard and quality gate | context resolve, runtime_state lock, source/model provider, recommendation quality gate, gated Supabase upload step |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |
 | `ci.yml` | Python and web checks green | first failing job logs |
