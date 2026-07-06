@@ -24,13 +24,28 @@ def _key(kind: str) -> str:
     )
 
 
+def _attempt_key(attempt_id: str) -> str:
+    return build_scheduled_state_key(
+        pipeline="sell",
+        kind="attempt",
+        scope="MIXED",
+        session_date="2026-07-06",
+        runner_role="local-primary",
+        attempt_id=attempt_id,
+    )
+
+
 def _request(
-    *, dry_run: bool = False, report_path: str = "reports/2026-07-06.sell-ai-brief.json"
+    *,
+    dry_run: bool = False,
+    report_path: str = "reports/2026-07-06.sell-ai-brief.json",
+    attempt_id: str | None = None,
 ) -> ScheduledSellAiBriefDeliveryRequest:
     return ScheduledSellAiBriefDeliveryRequest(
         sell_ai_brief_report_path=report_path,
         session_date="2026-07-06",
         dry_run=dry_run,
+        attempt_id=attempt_id,
     )
 
 
@@ -225,6 +240,7 @@ class _FakeStorage:
 class _FakeNotifier:
     sent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     error_after_send: Exception | None = None
+    send_hook: Any | None = None
 
     def send_schedule(
         self,
@@ -234,6 +250,8 @@ class _FakeNotifier:
         text: str,
     ) -> None:
         assert text
+        if self.send_hook is not None:
+            self.send_hook()
         self.sent.append((storage_key, report))
         if self.error_after_send is not None:
             raise self.error_after_send
@@ -404,6 +422,24 @@ def test_scheduled_sell_ai_brief_delivery_upload_failure_blocks_markers_and_noti
     assert notifier.sent == []
 
 
+def test_scheduled_sell_ai_brief_delivery_blank_upload_key_blocks_markers_and_notification(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage(upload_key="   ")
+    notifier = _FakeNotifier()
+    report_path = _write_report(tmp_path)
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "upload_failed"
+    assert storage.uploads == [report_path]
+    assert _key("artifact") not in state.entries
+    assert _key("success") not in state.entries
+    assert notifier.sent == []
+
+
 def test_scheduled_sell_ai_brief_delivery_invalid_report_blocks_upload(
     tmp_path: Path,
 ) -> None:
@@ -434,3 +470,36 @@ def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_fails(
     assert result.status == "notification_sent_marker_failed"
     assert notifier.sent
     assert _key("notification:claim") in state.held_locks
+
+
+def test_scheduled_sell_ai_brief_delivery_reconcile_records_attempt_before_send_and_success() -> (
+    None
+):
+    report = _sell_ai_brief_report()
+    attempt_id = "reconcile-1"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={"2026/07/2026-07-06.sell-ai-brief.json": report})
+
+    def assert_attempt_exists_before_send() -> None:
+        assert _attempt_key(attempt_id) in state.entries
+        assert _key("notification:sent") not in state.entries
+        assert _key("success") not in state.entries
+
+    notifier = _FakeNotifier(send_hook=assert_attempt_exists_before_send)
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request(attempt_id=attempt_id))
+
+    upserted_keys = [key for key, _payload in state.upserted]
+    assert result.status == "notification_reconciled"
+    assert upserted_keys.index(_attempt_key(attempt_id)) < upserted_keys.index(
+        _key("notification:sent")
+    )
+    assert upserted_keys.index(_attempt_key(attempt_id)) < upserted_keys.index(
+        _key("success")
+    )

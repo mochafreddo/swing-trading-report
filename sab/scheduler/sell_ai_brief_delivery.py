@@ -200,26 +200,10 @@ class ScheduledSellAiBriefDeliveryRunner:
         session_date: str,
     ) -> ScheduledSellAiBriefDeliveryResult:
         now = self._now_fn()
-        attempt_id = (
-            request.attempt_id or f"{request.scheduled_tick}-{uuid.uuid4().hex}"
-        )
-        self._state_store.upsert_marker(
-            key=_state_key(
-                "attempt",
-                scope=scope,
-                session_date=session_date,
-                runner_role=request.runner_role,
-                attempt_id=attempt_id,
-            ),
-            payload={
-                "scope": scope,
-                "sessionDate": session_date,
-                "runnerRole": request.runner_role,
-                "scheduledTick": request.scheduled_tick,
-                "attemptId": attempt_id,
-                "runUrl": request.run_url,
-            },
-            ttl_seconds=_ATTEMPT_TTL_SECONDS,
+        attempt_id = self._record_attempt_marker(
+            request=request,
+            scope=scope,
+            session_date=session_date,
             now=now,
         )
 
@@ -265,11 +249,19 @@ class ScheduledSellAiBriefDeliveryRunner:
                     session_date=session_date,
                 )
             try:
-                storage_key = self._storage.upload_sell_ai_brief(
-                    request.sell_ai_brief_report_path,
-                    report_date=session_date,
-                )
+                storage_key = str(
+                    self._storage.upload_sell_ai_brief(
+                        request.sell_ai_brief_report_path,
+                        report_date=session_date,
+                    )
+                    or ""
+                ).strip()
             except Exception:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="upload_failed",
+                    session_date=session_date,
+                )
+            if not storage_key:
                 return ScheduledSellAiBriefDeliveryResult(
                     status="upload_failed",
                     session_date=session_date,
@@ -322,6 +314,38 @@ class ScheduledSellAiBriefDeliveryRunner:
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+
+    def _record_attempt_marker(
+        self,
+        *,
+        request: ScheduledSellAiBriefDeliveryRequest,
+        scope: str,
+        session_date: str,
+        now: dt.datetime,
+    ) -> str:
+        attempt_id = (
+            request.attempt_id or f"{request.scheduled_tick}-{uuid.uuid4().hex}"
+        )
+        self._state_store.upsert_marker(
+            key=_state_key(
+                "attempt",
+                scope=scope,
+                session_date=session_date,
+                runner_role=request.runner_role,
+                attempt_id=attempt_id,
+            ),
+            payload={
+                "scope": scope,
+                "sessionDate": session_date,
+                "runnerRole": request.runner_role,
+                "scheduledTick": request.scheduled_tick,
+                "attemptId": attempt_id,
+                "runUrl": request.run_url,
+            },
+            ttl_seconds=_ATTEMPT_TTL_SECONDS,
+            now=now,
+        )
+        return attempt_id
 
     def _owns_lock(self, lock_key: str, owner_token: str) -> bool:
         entry = self._state_store.get_entry(lock_key)
@@ -410,6 +434,12 @@ class ScheduledSellAiBriefDeliveryRunner:
                 status="artifact_marker_invalid",
                 session_date=session_date,
             )
+        attempt_id = self._record_attempt_marker(
+            request=request,
+            scope=scope,
+            session_date=session_date,
+            now=self._now_fn(),
+        )
 
         claim = self._claim_notification(
             request=request,
@@ -445,9 +475,8 @@ class ScheduledSellAiBriefDeliveryRunner:
                 "sessionDate": session_date,
                 "storageKey": storage_key,
                 "scheduledTick": request.scheduled_tick,
+                "attemptId": attempt_id,
             }
-            if request.attempt_id:
-                payload["attemptId"] = request.attempt_id
             self._state_store.upsert_marker(
                 key=_state_key(
                     "notification:sent",
