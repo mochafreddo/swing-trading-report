@@ -45,7 +45,13 @@
 | Reports visible | Web `Reports` | latest `buy`/`sell`/`entry`/`ai-brief` as expected |
 | Holdings visible | Web `Holdings` | active holdings match operator expectation |
 | Toss daily auto-sync log | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` | when enabled, latest run ends with `status=applied` or `status=unchanged` |
-| Local uncommitted secrets | `git status --short` | no secret files staged |
+| Local env files | `git diff --cached --name-only -- .env '.env.*'` and `git ls-files --others --ignored --exclude-standard -- .env '.env.*'` | first command prints nothing; second may list local ignored env files that must stay untracked |
+
+When checking local env files or logs for accidental secrets, use path/line-only
+or redacted scanner output. Do not paste raw `.env`, GitHub token, Supabase key,
+Slack webhook, Telegram token, KIS secret, Toss secret, or OpenAI key values into
+docs, tickets, chat, or CI logs. If scanner output includes a value, replace the
+value with `[REDACTED]` before sharing it.
 
 ## Weekly Checklist
 
