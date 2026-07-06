@@ -208,6 +208,8 @@ class ScheduledSellAiBriefDeliveryRunner:
                 storage_key=storage_key,
             )
 
+        send_started = False
+        delivery_completed = False
         try:
             report = self._storage.download_json(storage_key)
             validate_sell_ai_brief_artifact(report, now=self._now_fn())
@@ -216,6 +218,7 @@ class ScheduledSellAiBriefDeliveryRunner:
                 run_url=request.run_url,
                 storage_key=storage_key,
             )
+            send_started = True
             self._notifier.send_schedule(
                 report=report,
                 storage_key=storage_key,
@@ -243,13 +246,18 @@ class ScheduledSellAiBriefDeliveryRunner:
                 payload=payload,
                 ttl_seconds=_SUCCESS_TTL_SECONDS,
             )
+            delivery_completed = True
             return ScheduledSellAiBriefDeliveryResult(
                 status="notification_reconciled",
                 session_date=session_date,
                 storage_key=storage_key,
             )
         finally:
-            self._state_store.release_lock(claim.key, owner_token=claim.owner_token)
+            if not send_started or delivery_completed:
+                self._state_store.release_lock(
+                    claim.key,
+                    owner_token=claim.owner_token,
+                )
 
     def _claim_notification(
         self,

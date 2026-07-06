@@ -4,6 +4,7 @@ import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
 from sab.scheduler.generic_state import build_scheduled_state_key
 from sab.scheduler.sell_ai_brief_delivery import (
     ScheduledSellAiBriefDeliveryRequest,
@@ -125,8 +126,9 @@ def _sell_ai_brief_report() -> dict[str, Any]:
 class _FakeStateStore:
     entries: dict[str, RuntimeStateEntry] = field(default_factory=dict)
     upserted: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-    claims: list[str] = field(default_factory=list)
-    releases: list[str] = field(default_factory=list)
+    claims: list[tuple[str, str]] = field(default_factory=list)
+    releases: list[tuple[str, str]] = field(default_factory=list)
+    upsert_failures: dict[str, Exception] = field(default_factory=dict)
 
     def get_entry(self, key: str) -> RuntimeStateEntry | None:
         return self.entries.get(key)
@@ -140,6 +142,8 @@ class _FakeStateStore:
         now: dt.datetime | None = None,
     ) -> None:
         del ttl_seconds, now
+        if key in self.upsert_failures:
+            raise self.upsert_failures[key]
         self.upserted.append((key, payload))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
@@ -156,13 +160,12 @@ class _FakeStateStore:
         now: dt.datetime | None = None,
         payload: dict[str, object] | None = None,
     ) -> RuntimeStateLockClaim:
-        del owner_token, ttl_seconds, now, payload
-        self.claims.append(key)
+        del ttl_seconds, now, payload
+        self.claims.append((key, owner_token))
         return RuntimeStateLockClaim(acquired=True, expires_at="soon")
 
     def release_lock(self, key: str, *, owner_token: str) -> bool:
-        del owner_token
-        self.releases.append(key)
+        self.releases.append((key, owner_token))
         return True
 
 
@@ -178,6 +181,7 @@ class _FakeStorage:
 @dataclass
 class _FakeNotifier:
     sent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    error_after_send: Exception | None = None
 
     def send_schedule(
         self,
@@ -188,6 +192,8 @@ class _FakeNotifier:
     ) -> None:
         assert text
         self.sent.append((storage_key, report))
+        if self.error_after_send is not None:
+            raise self.error_after_send
 
 
 def test_scheduled_sell_ai_brief_delivery_dry_run_does_not_touch_state() -> None:
@@ -236,3 +242,70 @@ def test_scheduled_sell_ai_brief_delivery_reconciles_existing_artifact_once() ->
     assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
     assert _key("notification:sent") in state.entries
     assert _key("success") in state.entries
+    assert state.releases == state.claims
+
+
+def test_scheduled_sell_ai_brief_delivery_releases_claim_on_pre_send_validation_failure() -> (
+    None
+):
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={"2026/07/2026-07-06.sell-ai-brief.json": {}})
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    with pytest.raises(ValueError):
+        runner.run(_request())
+
+    assert notifier.sent == []
+    assert state.releases == state.claims
+
+
+def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_send_raises_after_send() -> (
+    None
+):
+    report = _sell_ai_brief_report()
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={"2026/07/2026-07-06.sell-ai-brief.json": report})
+    notifier = _FakeNotifier(error_after_send=RuntimeError("telegram partial send"))
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    with pytest.raises(RuntimeError, match="telegram partial send"):
+        runner.run(_request())
+
+    assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
+    assert state.releases == []
+
+
+def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_upsert_raises() -> (
+    None
+):
+    report = _sell_ai_brief_report()
+    state = _FakeStateStore(
+        upsert_failures={
+            _key("notification:sent"): RuntimeError("state write unavailable")
+        }
+    )
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={"2026/07/2026-07-06.sell-ai-brief.json": report})
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    with pytest.raises(RuntimeError, match="state write unavailable"):
+        runner.run(_request())
+
+    assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
+    assert state.releases == []
