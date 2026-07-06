@@ -616,13 +616,20 @@ class ScheduledSellAiBriefDeliveryRunner:
                 run_url=request.run_url,
                 storage_key=storage_key,
             )
-            self._extend_notification_claim(
-                claim=claim,
-                request=request,
-                scope=scope,
-                session_date=session_date,
-                storage_key=storage_key,
-            )
+            try:
+                self._extend_notification_claim(
+                    claim=claim,
+                    request=request,
+                    scope=scope,
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            except Exception:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="notification_sent_marker_failed",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
             send_started = True
             self._notifier.send_schedule(
                 report=report,

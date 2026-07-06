@@ -609,6 +609,33 @@ def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_upsert_ra
     )
 
 
+def test_scheduled_sell_ai_brief_delivery_reconcile_handles_claim_extension_failure() -> (
+    None
+):
+    report = _sell_ai_brief_report()
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore(
+        upsert_failures={
+            _key("notification:claim"): RuntimeError("claim extension unavailable")
+        }
+    )
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={storage_key: report})
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "notification_sent_marker_failed"
+    assert result.storage_key == storage_key
+    assert notifier.sent == []
+    assert state.releases == state.claims
+
+
 def test_scheduled_sell_ai_brief_delivery_uploads_then_marks_artifact_then_notifies(
     tmp_path: Path,
 ) -> None:
