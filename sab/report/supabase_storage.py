@@ -618,7 +618,12 @@ def _object_exists(
     key: str,
     session: requests.Session,
 ) -> bool:
-    response = _storage_info_request(config=config, key=key, session=session)
+    try:
+        response = _storage_info_request(config=config, key=key, session=session)
+    except requests.RequestException as exc:
+        raise SupabaseStorageError(
+            f"failed to check existing object '{key}': {exc}"
+        ) from exc
     if response.status_code == 200:
         return True
     if _is_not_found_response(status_code=response.status_code, text=response.text):
@@ -636,12 +641,17 @@ def _upload_json_payload(
     payload: bytes,
     session: requests.Session,
 ) -> None:
-    response = _storage_upload_request(
-        config=config,
-        key=key,
-        payload=payload,
-        session=session,
-    )
+    try:
+        response = _storage_upload_request(
+            config=config,
+            key=key,
+            payload=payload,
+            session=session,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseStorageError(
+            f"failed to upload report object '{key}': {exc}"
+        ) from exc
     if response.status_code in {200, 201}:
         return
     if _is_conflict_response(status_code=response.status_code, text=response.text):
@@ -658,7 +668,12 @@ def _delete_uploaded_object(
     key: str,
     session: requests.Session,
 ) -> None:
-    response = _storage_delete_request(config=config, key=key, session=session)
+    try:
+        response = _storage_delete_request(config=config, key=key, session=session)
+    except requests.RequestException as exc:
+        raise SupabaseStorageError(
+            f"failed to delete uploaded report object '{key}': {exc}"
+        ) from exc
     if response.status_code in {200, 204}:
         return
     if _is_not_found_response(status_code=response.status_code, text=response.text):

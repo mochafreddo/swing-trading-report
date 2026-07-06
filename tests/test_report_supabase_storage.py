@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -38,6 +39,7 @@ class _FakeSession:
         self.get_calls: list[dict[str, object]] = []
         self.post_calls: list[dict[str, object]] = []
         self.delete_calls: list[dict[str, object]] = []
+        self.closed = False
 
     def get(
         self, url: str, *, headers: dict[str, str], timeout: float
@@ -74,6 +76,62 @@ class _FakeSession:
         if not self._delete_responses:
             raise AssertionError("unexpected DELETE request")
         return self._delete_responses.pop(0)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeSessionWithGetException(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__(get_responses=[], post_responses=[])
+
+    def get(
+        self, url: str, *, headers: dict[str, str], timeout: float
+    ) -> _FakeResponse:
+        self.get_calls.append({"url": url, "headers": headers, "timeout": timeout})
+        raise requests.Timeout("object info request timed out")
+
+
+class _FakeSessionWithUploadException(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__(get_responses=[_FakeResponse(404)], post_responses=[])
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        data: bytes,
+        timeout: float,
+    ) -> _FakeResponse:
+        self.post_calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "data": data,
+                "timeout": timeout,
+            }
+        )
+        raise requests.Timeout("object upload request timed out")
+
+
+class _FakeSessionWithDeleteException(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__(
+            get_responses=[_FakeResponse(404)],
+            post_responses=[
+                _FakeResponse(201),
+                _FakeResponse(500, "index down"),
+                _FakeResponse(500, "index down"),
+                _FakeResponse(500, "index down"),
+            ],
+        )
+
+    def delete(
+        self, url: str, *, headers: dict[str, str], timeout: float
+    ) -> _FakeResponse:
+        self.delete_calls.append({"url": url, "headers": headers, "timeout": timeout})
+        raise requests.Timeout("delete request timed out")
 
 
 class _FakeSessionWithPostException(_FakeSession):
@@ -877,6 +935,34 @@ def test_upload_report_artifact_marks_cleanup_failed_when_rollback_delete_fails(
     assert len(session.delete_calls) == 1
 
 
+def test_upload_report_artifact_marks_cleanup_failed_when_rollback_delete_raises(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSessionWithDeleteException()
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseReportIndexError, match="rollback delete failed") as exc:
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.storage_key == "2026/02/2026-02-13.buy.json"
+    assert exc.value.cleanup_failed
+    assert "delete request timed out" in str(exc.value)
+    assert len(session.delete_calls) == 1
+
+
 def test_maybe_upload_report_artifact_skips_when_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -929,6 +1015,61 @@ def test_maybe_upload_report_artifact_skips_on_local_opt_in_upload_error(
     )
 
     assert uploaded is None
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "supabase_report_upload_failed"
+    )
+    assert getattr(record, "operation", None) == "report_upload"
+    assert getattr(record, "dependency", None) == "supabase"
+    assert getattr(record, "report_type", None) == "buy"
+    assert getattr(record, "report_date", None) == "2026-02-13"
+    assert getattr(record, "report_path", None) == report_path.as_posix()
+    assert getattr(record, "status", None) == "degraded"
+    assert getattr(record, "error_type", None) == "SupabaseStorageError"
+    assert getattr(record, "retryable", None) is True
+    assert "sb_secret_server_key" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("session_factory", "expected_get_calls", "expected_post_calls"),
+    [
+        (_FakeSessionWithGetException, 1, 0),
+        (_FakeSessionWithUploadException, 1, 1),
+    ],
+)
+def test_maybe_upload_report_artifact_skips_on_local_opt_in_storage_request_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    session_factory: Callable[[], _FakeSession],
+    expected_get_calls: int,
+    expected_post_calls: int,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("SAB_UPLOAD_REPORTS", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_server_key")
+
+    session = session_factory()
+    monkeypatch.setattr("sab.report.supabase_storage.requests.Session", lambda: session)
+
+    logger = logging.getLogger("test.supabase_upload")
+    caplog.set_level(logging.ERROR, logger=logger.name)
+
+    uploaded = maybe_upload_report_artifact(
+        artifact_path=report_path.as_posix(),
+        run_type="buy",
+        logger=logger,
+    )
+
+    assert uploaded is None
+    assert len(session.get_calls) == expected_get_calls
+    assert len(session.post_calls) == expected_post_calls
+    assert session.closed is True
     record = next(
         record
         for record in caplog.records
