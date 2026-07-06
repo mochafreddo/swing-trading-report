@@ -1986,6 +1986,52 @@ def test_make_price_lookup_rejects_kis_us_snapshot_without_freshness_marker(
 
 
 @pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
+def test_make_price_lookup_accepts_kis_us_client_snapshot_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    fake_cfg = SimpleNamespace(
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+
+    class _StampedKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {
+                "last": "101.0",
+                "curr": "USD",
+                "entry_snapshot_at": "2026-07-06T12:14:14+00:00",
+            }
+
+    monkeypatch.setattr("sab.entry.KISClient", _StampedKISClient)
+
+    price_lookup, issues = entry._make_price_lookup(
+        cfg=cast(Config, fake_cfg),
+        provider="kis",
+        mode=mode,
+        market="US",
+    )
+
+    assert issues == []
+    lookup_result = price_lookup("AAPL.NASD")
+    assert lookup_result.price == 101.0
+    assert lookup_result.status == "available"
+    assert lookup_result.source == "kis_live_snapshot"
+    assert lookup_result.issue_codes == ()
+
+
+@pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
 @pytest.mark.parametrize(
     (
         "detail",

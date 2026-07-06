@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call, patch
@@ -29,11 +30,12 @@ def _response(
     status_code: int,
     payload: dict[str, Any] | ValueError,
     text: str = "",
+    headers: dict[str, str] | None = None,
 ) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = text
-    resp.headers = {}
+    resp.headers = headers or {}
     if isinstance(payload, ValueError):
         resp.json.side_effect = payload
     else:
@@ -57,6 +59,30 @@ def _set_mock_method(target: object, name: str, **kwargs: Any) -> MagicMock:
     mock = MagicMock(**kwargs)
     setattr(target, name, mock)
     return mock
+
+
+def _assert_successful_price_detail(
+    result: dict[str, Any],
+    *,
+    expected_last: str,
+    expected_snapshot_at: str | None = None,
+) -> None:
+    assert result["last"] == expected_last
+    if expected_snapshot_at is None:
+        assert "entry_snapshot_at" not in result
+    else:
+        assert result["entry_snapshot_at"] == expected_snapshot_at
+
+
+def _assert_price_detail_without_snapshot(
+    result: dict[str, Any], *, expected: dict[str, Any]
+) -> None:
+    assert result == expected
+
+
+def _http_date(offset: dt.timedelta = dt.timedelta()) -> tuple[str, str]:
+    timestamp = (dt.datetime.now(dt.UTC) + offset).replace(microsecond=0)
+    return format_datetime(timestamp, usegmt=True), timestamp.isoformat()
 
 
 def test_ensure_token_refreshes_when_cached_token_is_stale(tmp_path: Path) -> None:
@@ -390,7 +416,7 @@ def test_overseas_price_detail_refreshes_token_on_egw00123() -> None:
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
 
-    assert result == {"last": "123.45"}
+    _assert_price_detail_without_snapshot(result, expected={"last": "123.45"})
     assert ensure_token_mock.call_count == 2
     assert seen_authorizations == ["Bearer initial-token", "Bearer refreshed-token"]
     assert mock_sleep.call_args_list == [call(1.0)]
@@ -437,7 +463,7 @@ def test_overseas_price_detail_refreshes_token_on_http_error_egw00123() -> None:
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="amzn", exchange="nasd")
 
-    assert result == {"last": "456.78"}
+    _assert_price_detail_without_snapshot(result, expected={"last": "456.78"})
     assert ensure_token_mock.call_count == 2
     assert seen_authorizations == ["Bearer initial-token", "Bearer refreshed-token"]
     assert mock_sleep.call_args_list == [call(1.0)]
@@ -474,10 +500,276 @@ def test_overseas_price_detail_retries_on_rate_limit_body_error() -> None:
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="tsla", exchange="nasd")
 
-    assert result == {"last": "999.99"}
+    _assert_price_detail_without_snapshot(result, expected={"last": "999.99"})
     assert ensure_token_mock.call_count == 1
     assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
+
+
+def test_overseas_price_detail_uses_http_date_as_live_snapshot_marker() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    response_date, expected_snapshot_at = _http_date()
+    request_mock = _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": {"last": "101.25", "curr": "USD"}},
+            headers={"Date": response_date},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    _assert_successful_price_detail(
+        result,
+        expected_last="101.25",
+        expected_snapshot_at=expected_snapshot_at,
+    )
+    assert result["curr"] == "USD"
+    assert request_mock.call_count == 1
+
+
+def test_overseas_price_detail_ignores_malformed_http_date() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": {"last": "101.25", "curr": "USD"}},
+            headers={"Date": "not an http date"},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    _assert_successful_price_detail(result, expected_last="101.25")
+    assert result["curr"] == "USD"
+
+
+def test_overseas_price_detail_ignores_stale_http_date() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    response_date, _ = _http_date(dt.timedelta(minutes=-10))
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": {"last": "101.25", "curr": "USD"}},
+            headers={"Date": response_date},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    assert result == {"last": "101.25", "curr": "USD"}
+
+
+def test_overseas_price_detail_ignores_future_http_date() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    response_date, _ = _http_date(dt.timedelta(minutes=2))
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": {"last": "101.25", "curr": "USD"}},
+            headers={"Date": response_date},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    assert result == {"last": "101.25", "curr": "USD"}
+
+
+def test_overseas_price_detail_replaces_raw_entry_snapshot_marker() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    response_date, expected_snapshot_at = _http_date()
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={
+                "rt_cd": "0",
+                "output": {
+                    "last": "101.25",
+                    "curr": "USD",
+                    "entry_snapshot_at": "stale-or-malformed",
+                },
+            },
+            headers={"Date": response_date},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    assert result == {
+        "last": "101.25",
+        "curr": "USD",
+        "entry_snapshot_at": expected_snapshot_at,
+    }
+
+
+def test_overseas_price_detail_removes_raw_entry_snapshot_without_valid_http_date() -> (
+    None
+):
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={
+                "rt_cd": "0",
+                "output": {
+                    "last": "101.25",
+                    "curr": "USD",
+                    "entry_snapshot_at": "stale-or-malformed",
+                },
+            },
+            headers={"Date": "not an http date"},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    assert result == {"last": "101.25", "curr": "USD"}
+
+
+def test_overseas_price_detail_stamps_list_output_from_http_date() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    response_date, expected_snapshot_at = _http_date()
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": [{"last": "102.50", "curr": "USD"}]},
+            headers={"Date": response_date},
+        ),
+    )
+
+    result = client.overseas_price_detail(symbol="aapl", exchange="nasd")
+
+    assert result == {
+        "last": "102.50",
+        "curr": "USD",
+        "entry_snapshot_at": expected_snapshot_at,
+    }
+
+
+def test_overseas_price_detail_keeps_empty_list_output_empty() -> None:
+    client = KISClient(
+        _build_creds(),
+        session=MagicMock(),
+        cache_dir=None,
+        max_attempts=1,
+        min_interval=0,
+    )
+
+    def _fake_ensure_token() -> None:
+        client._access_token = "Bearer stable-token"
+        client._token_expiry = _future_expiry()
+
+    _set_mock_method(client, "ensure_token", side_effect=_fake_ensure_token)
+    _set_mock_method(
+        client,
+        "_request",
+        return_value=_response(
+            status_code=200,
+            payload={"rt_cd": "0", "output": []},
+            headers={"Date": "Mon, 06 Jul 2026 12:14:14 GMT"},
+        ),
+    )
+
+    assert client.overseas_price_detail(symbol="aapl", exchange="nasd") == {}
 
 
 def test_volume_rank_refreshes_token_on_egw00123() -> None:
@@ -645,7 +937,7 @@ def test_overseas_price_detail_retries_when_response_json_is_malformed() -> None
     with patch("sab.data.kis_client.time.sleep") as mock_sleep:
         result = client.overseas_price_detail(symbol="msft", exchange="nasd")
 
-    assert result == {"last": "77.77"}
+    _assert_price_detail_without_snapshot(result, expected={"last": "77.77"})
     assert ensure_token_mock.call_count == 1
     assert request_mock.call_count == 2
     assert mock_sleep.call_args_list == [call(1.0)]
@@ -729,8 +1021,8 @@ def test_overseas_price_detail_falls_back_to_slash_class_symbol_and_memoizes() -
     first = client.overseas_price_detail(symbol="BRK.B", exchange="NYS")
     second = client.overseas_price_detail(symbol="BRK.B", exchange="NYS")
 
-    assert first == {"last": "333.33"}
-    assert second == {"last": "444.44"}
+    _assert_price_detail_without_snapshot(first, expected={"last": "333.33"})
+    _assert_price_detail_without_snapshot(second, expected={"last": "444.44"})
     assert requested_symbols == ["BRK.B", "BRK/B", "BRK/B"]
 
 
