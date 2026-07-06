@@ -143,6 +143,12 @@ def _sell_ai_brief_report() -> dict[str, Any]:
     }
 
 
+def _sell_ai_brief_report_with(**overrides: object) -> dict[str, Any]:
+    report = _sell_ai_brief_report()
+    report.update(overrides)
+    return report
+
+
 def _write_report(tmp_path: Path, report: dict[str, Any] | None = None) -> str:
     report_path = tmp_path / "2026-07-06.sell-ai-brief.json"
     report_path.write_text(
@@ -156,12 +162,15 @@ def _write_report(tmp_path: Path, report: dict[str, Any] | None = None) -> str:
 class _FakeStateStore:
     entries: dict[str, RuntimeStateEntry] = field(default_factory=dict)
     upserted: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    upsert_ttls: list[tuple[str, int]] = field(default_factory=list)
     claims: list[tuple[str, str]] = field(default_factory=list)
+    claim_ttls: list[tuple[str, int]] = field(default_factory=list)
     releases: list[tuple[str, str]] = field(default_factory=list)
     held_locks: set[str] = field(default_factory=set)
     upsert_failures: dict[str, Exception] = field(default_factory=dict)
     fail_upsert_kinds: set[str] = field(default_factory=set)
     acquire_main_lock: bool = True
+    claim_hook: Any | None = None
 
     def __post_init__(self) -> None:
         for kind in self.fail_upsert_kinds:
@@ -178,10 +187,11 @@ class _FakeStateStore:
         ttl_seconds: int,
         now: dt.datetime | None = None,
     ) -> None:
-        del ttl_seconds, now
+        del now
         if key in self.upsert_failures:
             raise self.upsert_failures[key]
         self.upserted.append((key, payload))
+        self.upsert_ttls.append((key, ttl_seconds))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
             state_payload=payload,
@@ -197,16 +207,19 @@ class _FakeStateStore:
         now: dt.datetime | None = None,
         payload: dict[str, object] | None = None,
     ) -> RuntimeStateLockClaim:
-        del ttl_seconds, now, payload
+        del now
         self.claims.append((key, owner_token))
+        self.claim_ttls.append((key, ttl_seconds))
         if key == _key("lock") and not self.acquire_main_lock:
             return RuntimeStateLockClaim(acquired=False, expires_at="soon")
         self.held_locks.add(key)
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
-            state_payload={"ownerToken": owner_token},
+            state_payload={**(payload or {}), "ownerToken": owner_token},
             expires_at="soon",
         )
+        if self.claim_hook is not None:
+            self.claim_hook(key=key, owner_token=owner_token)
         return RuntimeStateLockClaim(acquired=True, expires_at="soon")
 
     def release_lock(self, key: str, *, owner_token: str) -> bool:
@@ -243,6 +256,11 @@ class _FakeNotifier:
     sent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     error_after_send: Exception | None = None
     send_hook: Any | None = None
+    preflight_error: Exception | None = None
+
+    def require_telegram(self) -> None:
+        if self.preflight_error is not None:
+            raise self.preflight_error
 
     def send_schedule(
         self,
@@ -308,22 +326,62 @@ def test_scheduled_sell_ai_brief_delivery_reconciles_existing_artifact_once() ->
     assert state.releases == state.claims
 
 
-def test_scheduled_sell_ai_brief_delivery_repairs_success_when_sent_marker_exists() -> (
-    None
-):
+def test_scheduled_sell_ai_brief_delivery_rechecks_sent_markers_after_claim() -> None:
+    report = _sell_ai_brief_report()
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
     state = _FakeStateStore()
     state.entries[_key("artifact")] = RuntimeStateEntry(
         state_key=_key("artifact"),
-        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+
+    def complete_after_claim(*, key: str, owner_token: str) -> None:
+        del owner_token
+        if key != _key("notification:claim"):
+            return
+        state.entries[_key("notification:sent")] = RuntimeStateEntry(
+            state_key=_key("notification:sent"),
+            state_payload={"storageKey": storage_key},
+            expires_at="",
+        )
+        state.entries[_key("success")] = RuntimeStateEntry(
+            state_key=_key("success"),
+            state_payload={"storageKey": storage_key},
+            expires_at="",
+        )
+
+    state.claim_hook = complete_after_claim
+    storage = _FakeStorage(downloads={storage_key: report})
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "success_marker_skip"
+    assert result.storage_key == storage_key
+    assert notifier.sent == []
+    assert state.releases == state.claims
+
+
+def test_scheduled_sell_ai_brief_delivery_repairs_success_when_sent_marker_exists() -> (
+    None
+):
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
         expires_at="",
     )
     state.entries[_key("notification:sent")] = RuntimeStateEntry(
         state_key=_key("notification:sent"),
-        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        state_payload={"storageKey": storage_key},
         expires_at="",
     )
+    storage = _FakeStorage(downloads={storage_key: _sell_ai_brief_report()})
     notifier = _FakeNotifier()
-    runner = _runner(state=state, notifier=notifier)
+    runner = _runner(state=state, storage=storage, notifier=notifier)
 
     result = runner.run(_request())
 
@@ -334,6 +392,125 @@ def test_scheduled_sell_ai_brief_delivery_repairs_success_when_sent_marker_exist
     assert state.entries[_key("success")].state_payload["storageKey"] == (
         "2026/07/2026-07-06.sell-ai-brief.json"
     )
+
+
+def test_scheduled_sell_ai_brief_delivery_repair_rejects_mismatched_storage_keys() -> (
+    None
+):
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+        expires_at="",
+    )
+    state.entries[_key("notification:sent")] = RuntimeStateEntry(
+        state_key=_key("notification:sent"),
+        state_payload={"storageKey": "2026/07/other.sell-ai-brief.json"},
+        expires_at="",
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "notification_sent_marker_invalid"
+    assert notifier.sent == []
+    assert _key("success") not in state.entries
+
+
+def test_scheduled_sell_ai_brief_delivery_repair_rejects_report_date_mismatch() -> None:
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    state.entries[_key("notification:sent")] = RuntimeStateEntry(
+        state_key=_key("notification:sent"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(
+        downloads={storage_key: _sell_ai_brief_report_with(report_date="2026-07-05")}
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "notification_sent_marker_invalid"
+    assert notifier.sent == []
+    assert _key("success") not in state.entries
+
+
+def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_report_date_mismatch() -> (
+    None
+):
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(
+        downloads={storage_key: _sell_ai_brief_report_with(report_date="2026-07-05")}
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "artifact_marker_invalid"
+    assert notifier.sent == []
+    assert _key("notification:sent") not in state.entries
+    assert _key("success") not in state.entries
+
+
+def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_market_scope_mismatch() -> (
+    None
+):
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(
+        downloads={storage_key: _sell_ai_brief_report_with(market="KR")}
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "artifact_marker_invalid"
+    assert notifier.sent == []
+    assert _key("notification:sent") not in state.entries
+    assert _key("success") not in state.entries
+
+
+def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_unbound_storage_key() -> (
+    None
+):
+    storage_key = "2026/07/2026-07-05.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={storage_key: _sell_ai_brief_report()})
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "artifact_marker_invalid"
+    assert notifier.sent == []
+    assert storage.downloads[storage_key]
 
 
 def test_scheduled_sell_ai_brief_delivery_releases_claim_on_pre_send_validation_failure() -> (
@@ -349,11 +526,31 @@ def test_scheduled_sell_ai_brief_delivery_releases_claim_on_pre_send_validation_
     notifier = _FakeNotifier()
     runner = _runner(state=state, storage=storage, notifier=notifier)
 
-    with pytest.raises(ValueError):
+    result = runner.run(_request())
+
+    assert result.status == "artifact_marker_invalid"
+    assert notifier.sent == []
+    assert _key("notification:claim") not in [key for key, _owner in state.claims]
+
+
+def test_scheduled_sell_ai_brief_delivery_preflights_notifier_before_claim() -> None:
+    report = _sell_ai_brief_report()
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact")] = RuntimeStateEntry(
+        state_key=_key("artifact"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(downloads={storage_key: report})
+    notifier = _FakeNotifier(preflight_error=RuntimeError("telegram env missing"))
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    with pytest.raises(RuntimeError, match="telegram env missing"):
         runner.run(_request())
 
     assert notifier.sent == []
-    assert state.releases == state.claims
+    assert _key("notification:claim") not in [key for key, _owner in state.claims]
 
 
 def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_send_raises_after_send() -> (
@@ -375,6 +572,11 @@ def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_send_raises_after_sen
 
     assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
     assert state.releases == []
+    assert state.upsert_ttls[-1] == (_key("notification:claim"), 48 * 60 * 60)
+    assert (
+        state.entries[_key("notification:claim")].state_payload["ownerToken"]
+        == (state.claims[-1][1])
+    )
 
 
 def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_upsert_raises() -> (
@@ -395,11 +597,16 @@ def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_upsert_ra
     notifier = _FakeNotifier()
     runner = _runner(state=state, storage=storage, notifier=notifier)
 
-    with pytest.raises(RuntimeError, match="state write unavailable"):
-        runner.run(_request())
+    result = runner.run(_request())
 
+    assert result.status == "notification_sent_marker_failed"
     assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
     assert state.releases == []
+    assert state.upsert_ttls[-1] == (_key("notification:claim"), 48 * 60 * 60)
+    assert (
+        state.entries[_key("notification:claim")].state_payload["ownerToken"]
+        == (state.claims[-1][1])
+    )
 
 
 def test_scheduled_sell_ai_brief_delivery_uploads_then_marks_artifact_then_notifies(

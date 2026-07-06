@@ -4,7 +4,7 @@ import datetime as dt
 import json
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from ..report.notification_text import build_sell_ai_brief_telegram_report_text
@@ -17,6 +17,16 @@ _ATTEMPT_TTL_SECONDS = 48 * 60 * 60
 _MAIN_LOCK_TTL_SECONDS = 30 * 60
 _NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
 _ALLOWED_SCOPES = frozenset({"KR", "US", "MIXED"})
+FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES = frozenset(
+    {
+        "artifact_invalid",
+        "artifact_marker_invalid",
+        "lock_lost_before_upload",
+        "notification_sent_marker_invalid",
+        "notification_sent_marker_failed",
+        "upload_failed",
+    }
+)
 
 
 class _StateStore(Protocol):
@@ -118,6 +128,22 @@ def _storage_key(entry: RuntimeStateEntry | None) -> str | None:
         return None
     storage_key = str(entry.state_payload.get("storageKey") or "").strip()
     return storage_key or None
+
+
+def _storage_key_is_bound_to_session(storage_key: str, *, session_date: str) -> bool:
+    name = PurePosixPath(storage_key).name
+    return name == f"{session_date}.sell-ai-brief.json"
+
+
+def _report_is_bound_to_session(
+    report: dict[str, Any],
+    *,
+    scope: str,
+    session_date: str,
+) -> bool:
+    report_date = str(report.get("report_date") or "").strip()
+    market = str(report.get("market") or "").strip().upper()
+    return report_date == session_date and market == scope
 
 
 def _load_report_date(report_path: str) -> str:
@@ -256,6 +282,15 @@ class ScheduledSellAiBriefDeliveryRunner:
                     status="artifact_invalid",
                     session_date=session_date,
                 )
+            if not _report_is_bound_to_session(
+                report,
+                scope=scope,
+                session_date=session_date,
+            ):
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="artifact_invalid",
+                    session_date=session_date,
+                )
 
             if not self._owns_lock(lock_key, owner_token):
                 return ScheduledSellAiBriefDeliveryResult(
@@ -276,6 +311,14 @@ class ScheduledSellAiBriefDeliveryRunner:
                     session_date=session_date,
                 )
             if not storage_key:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="upload_failed",
+                    session_date=session_date,
+                )
+            if not _storage_key_is_bound_to_session(
+                storage_key,
+                session_date=session_date,
+            ):
                 return ScheduledSellAiBriefDeliveryResult(
                     status="upload_failed",
                     session_date=session_date,
@@ -338,7 +381,29 @@ class ScheduledSellAiBriefDeliveryRunner:
         artifact_entry: RuntimeStateEntry,
     ) -> ScheduledSellAiBriefDeliveryResult:
         storage_key = _storage_key(sent_entry) or _storage_key(artifact_entry)
-        if storage_key is None:
+        artifact_storage_key = _storage_key(artifact_entry)
+        sent_storage_key = _storage_key(sent_entry)
+        if (
+            storage_key is None
+            or artifact_storage_key is None
+            or sent_storage_key is None
+            or artifact_storage_key != sent_storage_key
+            or not _storage_key_is_bound_to_session(
+                storage_key,
+                session_date=session_date,
+            )
+        ):
+            return ScheduledSellAiBriefDeliveryResult(
+                status="notification_sent_marker_invalid",
+                session_date=session_date,
+            )
+        try:
+            report = self._download_bound_report(
+                storage_key,
+                scope=scope,
+                session_date=session_date,
+            )
+        except Exception:
             return ScheduledSellAiBriefDeliveryResult(
                 status="notification_sent_marker_invalid",
                 session_date=session_date,
@@ -349,6 +414,7 @@ class ScheduledSellAiBriefDeliveryRunner:
                 "scope": scope,
                 "sessionDate": session_date,
                 "storageKey": storage_key,
+                "reportDate": str(report.get("report_date") or "").strip(),
             }
         )
         self._state_store.upsert_marker(
@@ -413,6 +479,7 @@ class ScheduledSellAiBriefDeliveryRunner:
         owner_token: str,
         payload: dict[str, object],
     ) -> str:
+        self._preflight_notifier()
         claim = self._claim_notification(
             request=request,
             scope=scope,
@@ -425,6 +492,12 @@ class ScheduledSellAiBriefDeliveryRunner:
         send_started = False
         delivery_completed = False
         try:
+            completion_result = self._existing_completion_after_claim(
+                scope=scope,
+                session_date=session_date,
+            )
+            if completion_result is not None:
+                return completion_result.status
             if not self._owns_lock(lock_key, owner_token):
                 return "lock_lost_before_upload"
             text = build_sell_ai_brief_telegram_report_text(
@@ -432,6 +505,16 @@ class ScheduledSellAiBriefDeliveryRunner:
                 run_url=request.run_url,
                 storage_key=storage_key,
             )
+            try:
+                self._extend_notification_claim(
+                    claim=claim,
+                    request=request,
+                    scope=scope,
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            except Exception:
+                return "notification_sent_marker_failed"
             send_started = True
             self._notifier.send_schedule(
                 report=report,
@@ -477,10 +560,25 @@ class ScheduledSellAiBriefDeliveryRunner:
         artifact_entry: RuntimeStateEntry,
     ) -> ScheduledSellAiBriefDeliveryResult:
         storage_key = _storage_key(artifact_entry)
-        if storage_key is None:
+        if storage_key is None or not _storage_key_is_bound_to_session(
+            storage_key,
+            session_date=session_date,
+        ):
             return ScheduledSellAiBriefDeliveryResult(
                 status="artifact_marker_invalid",
                 session_date=session_date,
+            )
+        try:
+            report = self._download_bound_report(
+                storage_key,
+                scope=scope,
+                session_date=session_date,
+            )
+        except Exception:
+            return ScheduledSellAiBriefDeliveryResult(
+                status="artifact_marker_invalid",
+                session_date=session_date,
+                storage_key=storage_key,
             )
         attempt_id = self._record_attempt_marker(
             request=request,
@@ -489,6 +587,7 @@ class ScheduledSellAiBriefDeliveryRunner:
             now=self._now_fn(),
         )
 
+        self._preflight_notifier()
         claim = self._claim_notification(
             request=request,
             scope=scope,
@@ -505,11 +604,23 @@ class ScheduledSellAiBriefDeliveryRunner:
         send_started = False
         delivery_completed = False
         try:
-            report = self._storage.download_json(storage_key)
-            validate_sell_ai_brief_artifact(report, now=self._now_fn())
+            completion_result = self._existing_completion_after_claim(
+                scope=scope,
+                session_date=session_date,
+                artifact_entry=artifact_entry,
+            )
+            if completion_result is not None:
+                return completion_result
             text = build_sell_ai_brief_telegram_report_text(
                 report=report,
                 run_url=request.run_url,
+                storage_key=storage_key,
+            )
+            self._extend_notification_claim(
+                claim=claim,
+                request=request,
+                scope=scope,
+                session_date=session_date,
                 storage_key=storage_key,
             )
             send_started = True
@@ -525,15 +636,22 @@ class ScheduledSellAiBriefDeliveryRunner:
                 "scheduledTick": request.scheduled_tick,
                 "attemptId": attempt_id,
             }
-            self._state_store.upsert_marker(
-                key=_state_key(
-                    "notification:sent",
-                    scope=scope,
+            try:
+                self._state_store.upsert_marker(
+                    key=_state_key(
+                        "notification:sent",
+                        scope=scope,
+                        session_date=session_date,
+                    ),
+                    payload=payload,
+                    ttl_seconds=_SUCCESS_TTL_SECONDS,
+                )
+            except Exception:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="notification_sent_marker_failed",
                     session_date=session_date,
-                ),
-                payload=payload,
-                ttl_seconds=_SUCCESS_TTL_SECONDS,
-            )
+                    storage_key=storage_key,
+                )
             self._state_store.upsert_marker(
                 key=_state_key("success", scope=scope, session_date=session_date),
                 payload=payload,
@@ -585,8 +703,88 @@ class ScheduledSellAiBriefDeliveryRunner:
             return None
         return _NotificationClaim(key=claim_key, owner_token=owner_token)
 
+    def _preflight_notifier(self) -> None:
+        require_telegram = getattr(self._notifier, "require_telegram", None)
+        if callable(require_telegram):
+            require_telegram()
+
+    def _download_bound_report(
+        self,
+        storage_key: str,
+        *,
+        scope: str,
+        session_date: str,
+    ) -> dict[str, Any]:
+        report = self._storage.download_json(storage_key)
+        validate_sell_ai_brief_artifact(report, now=self._now_fn())
+        if not _report_is_bound_to_session(
+            report,
+            scope=scope,
+            session_date=session_date,
+        ):
+            raise ValueError("sell AI brief artifact is not bound to this session")
+        return report
+
+    def _existing_completion_after_claim(
+        self,
+        *,
+        scope: str,
+        session_date: str,
+        artifact_entry: RuntimeStateEntry | None = None,
+    ) -> ScheduledSellAiBriefDeliveryResult | None:
+        success_entry = self._state_store.get_entry(
+            _state_key("success", scope=scope, session_date=session_date)
+        )
+        if success_entry is not None:
+            return ScheduledSellAiBriefDeliveryResult(
+                status="success_marker_skip",
+                session_date=session_date,
+                storage_key=_storage_key(success_entry),
+            )
+        sent_entry = self._state_store.get_entry(
+            _state_key("notification:sent", scope=scope, session_date=session_date)
+        )
+        current_artifact_entry = artifact_entry or self._state_store.get_entry(
+            _state_key("artifact", scope=scope, session_date=session_date)
+        )
+        if sent_entry is not None and current_artifact_entry is not None:
+            return self._repair_completion_from_sent_marker(
+                scope=scope,
+                session_date=session_date,
+                sent_entry=sent_entry,
+                artifact_entry=current_artifact_entry,
+            )
+        return None
+
+    def _extend_notification_claim(
+        self,
+        *,
+        claim: _NotificationClaim,
+        request: ScheduledSellAiBriefDeliveryRequest,
+        scope: str,
+        session_date: str,
+        storage_key: str,
+    ) -> None:
+        self._state_store.upsert_marker(
+            key=claim.key,
+            payload={
+                "scope": scope,
+                "sessionDate": session_date,
+                "runnerRole": request.runner_role,
+                "scheduledTick": request.scheduled_tick,
+                "storageKey": storage_key,
+                "channel": "telegram",
+                "notificationType": "schedule",
+                "claimState": "send_started",
+                "ownerToken": claim.owner_token,
+            },
+            ttl_seconds=_SUCCESS_TTL_SECONDS,
+            now=self._now_fn(),
+        )
+
 
 __all__ = [
+    "FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES",
     "ScheduledSellAiBriefDeliveryRequest",
     "ScheduledSellAiBriefDeliveryResult",
     "ScheduledSellAiBriefDeliveryRunner",

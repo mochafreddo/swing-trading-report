@@ -161,6 +161,19 @@ def test_generic_scheduled_wrapper_argument_validation() -> None:
         assert result.returncode == 2
         assert "usage:" in result.stderr
 
+    sell_without_artifact = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "KR"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert sell_without_artifact.returncode == 2
+    assert (
+        "scheduled sell delivery requires SELL_AI_BRIEF_REPORT_PATH and scope=MIXED"
+        in sell_without_artifact.stderr
+    )
+
 
 def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief(
     tmp_path: Path,

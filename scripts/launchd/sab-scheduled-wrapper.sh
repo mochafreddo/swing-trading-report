@@ -6,6 +6,7 @@ scope=""
 
 usage() {
   printf '%s\n' "usage: $0 --pipeline ai-brief|scan|sell --scope KR|US|MIXED" >&2
+  printf '%s\n' "scheduled sell delivery requires --pipeline sell --scope MIXED and SELL_AI_BRIEF_REPORT_PATH" >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -61,5 +62,9 @@ if [[ "${pipeline}" == "sell" && "${scope}" == "MIXED" && -n "${SELL_AI_BRIEF_RE
     --run-url "${SAB_RUN_URL:-}"
 fi
 
-printf 'generic scheduled wrapper requires pipeline-specific execution for pipeline=%s scope=%s\n' "${pipeline}" "${scope}" >&2
+if [[ "${pipeline}" == "sell" ]]; then
+  printf 'scheduled sell delivery requires SELL_AI_BRIEF_REPORT_PATH and scope=MIXED; got scope=%s\n' "${scope}" >&2
+else
+  printf 'generic scheduled wrapper requires pipeline-specific execution for pipeline=%s scope=%s\n' "${pipeline}" "${scope}" >&2
+fi
 exit 2

@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | Reports | Supabase Storage `reports` + `report_index` | Web `Reports`, workflow logs |
 | Holdings | Supabase `holdings` | Web `Holdings`, SQL checks |
-| Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief checks |
+| Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief and scheduled Sell AI Brief checks |
 | Automation | GitHub Actions + local scheduler + Toss launchd runner | GitHub run logs, Docker scheduler logs, Toss launchd logs |
 | Web console | local Docker `web` service | `/login` liveness, container logs |
 | Secrets | `.env`, `.env.scheduler.local`, GitHub Secrets | Do not print values |
@@ -76,7 +76,7 @@ value with `[REDACTED]` before sharing it.
 | Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
 | Supabase reports | SQL/dashboard | `report_index`, Storage `reports` bucket |
-| Supabase locks | SQL/dashboard | `runtime_state` rows prefixed `scheduled-ai-brief:` |
+| Supabase locks | SQL/dashboard | `runtime_state` rows prefixed `scheduled-ai-brief:` or `scheduled-sell:` |
 
 ## Scheduled AI Brief
 

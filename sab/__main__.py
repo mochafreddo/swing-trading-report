@@ -14,7 +14,6 @@ from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
-from .report.notification_text import split_telegram_message_text
 from .scan import run_scan
 from .scheduler import status_file
 from .scheduler.runner import (
@@ -24,6 +23,7 @@ from .scheduler.runner import (
     run_scheduled_ai_brief,
 )
 from .scheduler.sell_ai_brief_delivery import (
+    FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES,
     ScheduledSellAiBriefDeliveryRequest,
     ScheduledSellAiBriefDeliveryRunner,
 )
@@ -32,16 +32,6 @@ from .sell import run_sell
 from .sell_ai_brief import run_sell_ai_brief
 
 _CommandHandler = Callable[[argparse.Namespace], int]
-_FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES = frozenset(
-    {
-        "artifact_invalid",
-        "artifact_marker_invalid",
-        "lock_lost_before_upload",
-        "notification_sent_marker_invalid",
-        "notification_sent_marker_failed",
-        "upload_failed",
-    }
-)
 
 
 def _bounded_probe_repetitions(value: str) -> int:
@@ -107,6 +97,9 @@ class _SellAiBriefScheduledNotifier:
     def __init__(self) -> None:
         self._notifier = DefaultScheduledNotifier()
 
+    def require_telegram(self) -> None:
+        self._notifier.require_telegram()
+
     def send_schedule(
         self,
         *,
@@ -115,9 +108,7 @@ class _SellAiBriefScheduledNotifier:
         text: str,
     ) -> None:
         del report, storage_key
-        self._notifier.require_telegram()
-        for part in split_telegram_message_text(text):
-            self._notifier._post_telegram_message(part, parse_mode="HTML")
+        self._notifier.send_telegram_html_text(text)
 
 
 def _build_log_formatter(
@@ -650,7 +641,7 @@ def run_scheduled_sell_ai_brief_delivery(
     )
     return (
         0
-        if result.status not in _FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES
+        if result.status not in FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES
         else 1
     )
 
