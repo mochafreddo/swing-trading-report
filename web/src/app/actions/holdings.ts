@@ -9,6 +9,7 @@ import {
   holdingAddBuySchema,
   holdingCreateSchema,
   holdingPatchSchema,
+  isHoldingEntryCurrencyValidForTicker,
 } from "@/lib/schemas";
 import {
   addBuyToHolding,
@@ -63,6 +64,14 @@ export async function saveHoldingAction(
 
     const parsed = holdingPatchSchema.safeParse(input.payload);
     if (!parsed.success) {
+      return { ok: false, error: "Invalid holding patch payload" };
+    }
+    if (
+      !isHoldingEntryCurrencyValidForTicker(
+        parsed.data.ticker ?? ticker,
+        parsed.data.entry_currency,
+      )
+    ) {
       return { ok: false, error: "Invalid holding patch payload" };
     }
 

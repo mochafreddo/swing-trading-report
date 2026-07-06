@@ -38,12 +38,14 @@ const INITIAL_STATE: ReportsInitialState = {
   items: [
     {
       key: "2026/02/2026-02-28.buy.json",
+      bucketId: "reports",
       type: "buy",
       reportDate: "2026-02-28",
       duplicateIndex: 0,
     },
     {
       key: "2026/02/2026-02-27.buy.json",
+      bucketId: "reports",
       type: "buy",
       reportDate: "2026-02-27",
       duplicateIndex: 0,
@@ -55,7 +57,9 @@ const INITIAL_STATE: ReportsInitialState = {
   searchWindow: 100,
   warnings: [],
   selectedKey: "2026/02/2026-02-28.buy.json",
+  selectedBucketId: "reports",
   detailKey: "2026/02/2026-02-28.buy.json",
+  detailBucketId: "reports",
   detail: {
     schema: "sab.report.v1",
     type: "buy",
@@ -72,7 +76,9 @@ const EMPTY_SEARCH_STATE: ReportsInitialState = {
   searched: 100,
   truncated: false,
   selectedKey: null,
+  selectedBucketId: null,
   detailKey: null,
+  detailBucketId: null,
   detail: null,
 };
 
@@ -164,7 +170,7 @@ describe("useReportsState URL sync", () => {
 
     expect(container.textContent).toContain(INITIAL_STATE.selectedKey ?? "");
     expect(navigationMock.replace).toHaveBeenCalledWith(
-      `/reports?key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}`,
+      `/reports?key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}&bucket=reports`,
       { scroll: false },
     );
   });
@@ -200,7 +206,9 @@ describe("useReportsState URL sync", () => {
     renderWithSearchParams(`q=AAPL&key=${encodeURIComponent(selectedKey)}`, {
       ...EMPTY_SEARCH_STATE,
       selectedKey,
+      selectedBucketId: null,
       detailKey: selectedKey,
+      detailBucketId: "reports",
       detail: {
         schema: "sab.report.v1",
         type: "buy",

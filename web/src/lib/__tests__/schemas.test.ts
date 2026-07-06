@@ -494,9 +494,20 @@ describe("report query schemas", () => {
   it("normalizes report detail refresh flag from query string", () => {
     const parsed = reportDetailQuerySchema.parse({
       key: "2026/02/2026-02-14.buy.json",
+      bucket: " custom-reports ",
       refresh: "true",
     });
 
     expect(parsed.refresh).toBe(true);
+    expect(parsed.bucket).toBe("custom-reports");
+  });
+
+  it("rejects report detail bucket names with path separators", () => {
+    const parsed = reportDetailQuerySchema.safeParse({
+      key: "2026/02/2026-02-14.buy.json",
+      bucket: "reports/private",
+    });
+
+    expect(parsed.success).toBe(false);
   });
 });

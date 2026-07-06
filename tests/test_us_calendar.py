@@ -6,8 +6,11 @@ import types
 import unittest
 import warnings
 from datetime import date
+from typing import Self
 from unittest.mock import patch
 
+import pytest
+from sab.data.trading_calendar import TradingCalendarError
 from sab.data.us_calendar import _maybe_pandas_holidays, load_us_trading_calendar
 
 
@@ -31,6 +34,33 @@ class USCalendarTests(unittest.TestCase):
             cal = load_us_trading_calendar(tmpdir)
 
         self.assertEqual(cal["20270103"], "Special closure")
+
+    def test_future_year_fails_closed_when_pmc_disabled(self) -> None:
+        class _FixedDate(date):
+            @classmethod
+            def today(cls) -> Self:
+                return cls(2026, 12, 15)
+
+        with (
+            patch("sab.data.us_calendar.date", _FixedDate),
+            patch.dict(os.environ, {"SAB_USE_PMC_CALENDAR": "0"}, clear=False),
+            pytest.raises(TradingCalendarError, match="US trading calendar"),
+        ):
+            load_us_trading_calendar(required_through_year=2027)
+
+    def test_future_year_fails_closed_when_pmc_missing(self) -> None:
+        class _FixedDate(date):
+            @classmethod
+            def today(cls) -> Self:
+                return cls(2026, 12, 15)
+
+        with (
+            patch("sab.data.us_calendar.date", _FixedDate),
+            patch.dict(os.environ, {"SAB_USE_PMC_CALENDAR": "1"}, clear=False),
+            patch.dict(sys.modules, {"pandas_market_calendars": None}),
+            pytest.raises(TradingCalendarError, match="pandas_market_calendars"),
+        ):
+            load_us_trading_calendar(required_through_year=2027)
 
     def test_pmc_discontinued_break_warning_is_suppressed(self) -> None:
         message = "['break_end', 'break_start'] are discontinued"

@@ -312,7 +312,7 @@ def _report_index_upsert_request(
     row: dict[str, object],
     session: requests.Session,
 ) -> _HttpResponseData:
-    url = f"{config.url}/rest/v1/report_index?on_conflict=report_key"
+    url = f"{config.url}/rest/v1/report_index?on_conflict=bucket_id,report_key"
     headers = {
         **_auth_headers(config),
         "content-type": "application/json",
@@ -355,6 +355,48 @@ def _decode_report_json_object(*, payload: bytes, local_path: str) -> dict[str, 
             f"report artifact '{local_path}' is not a valid JSON object"
         )
     return decoded
+
+
+def _normalize_payload_report_type(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise SupabaseStorageError("report payload report type must be a string")
+    normalized = value.strip().lower().replace("_", "-")
+    if not normalized:
+        raise SupabaseStorageError("report payload report type must not be blank")
+    return normalized
+
+
+def _validate_report_payload_metadata(
+    *,
+    report_payload: dict[str, object],
+    run_type: str,
+    report_date: dt.date,
+    local_path: str,
+) -> None:
+    expected_type = normalize_report_run_type(run_type)
+    payload_type = _normalize_payload_report_type(report_payload.get("type"))
+    if payload_type is not None and payload_type != expected_type:
+        raise SupabaseStorageError(
+            f"report artifact '{local_path}' report type '{payload_type}' "
+            f"does not match upload type '{expected_type}'"
+        )
+
+    payload_date = report_payload.get("report_date")
+    if payload_date is None:
+        payload_date = report_payload.get("date")
+    if payload_date is not None and not isinstance(payload_date, str):
+        raise SupabaseStorageError("report payload report date must be a string")
+    if isinstance(payload_date, str):
+        normalized_date = payload_date.strip()
+        if not normalized_date:
+            raise SupabaseStorageError("report payload report date must not be blank")
+        if normalized_date != report_date.isoformat():
+            raise SupabaseStorageError(
+                f"report artifact '{local_path}' report date '{normalized_date}' "
+                f"does not match upload date '{report_date.isoformat()}'"
+            )
 
 
 def _normalize_ticker(value: object) -> str | None:
@@ -461,6 +503,7 @@ def _extract_duplicate_index(storage_key: str) -> int:
 
 def _build_report_index_row(
     *,
+    bucket_id: str,
     storage_key: str,
     run_type: str,
     report_date: dt.date,
@@ -472,6 +515,7 @@ def _build_report_index_row(
     tickers = _extract_report_tickers(report_payload)
 
     return {
+        "bucket_id": bucket_id,
         "report_key": storage_key,
         "report_type": report_type,
         "report_date": report_date.isoformat(),
@@ -493,6 +537,7 @@ def _upsert_report_index(
     session: requests.Session,
 ) -> None:
     row = _build_report_index_row(
+        bucket_id=config.bucket,
         storage_key=storage_key,
         run_type=run_type,
         report_date=report_date,
@@ -635,6 +680,12 @@ def upload_report_artifact(
     payload = Path(local_path).read_bytes()
     report_payload = _decode_report_json_object(
         payload=payload,
+        local_path=local_path,
+    )
+    _validate_report_payload_metadata(
+        report_payload=report_payload,
+        run_type=run_type,
+        report_date=report_date,
         local_path=local_path,
     )
 

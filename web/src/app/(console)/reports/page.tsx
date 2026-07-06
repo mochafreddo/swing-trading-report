@@ -34,6 +34,8 @@ export async function loadReportsInitialState(
   const query = readFirstValue(params.q) ?? "";
   const appliedQuery = query.trim();
   const requestedKey = (readFirstValue(params.key) ?? "").trim() || null;
+  const requestedBucketId =
+    (readFirstValue(params.bucket) ?? "").trim() || null;
   const showRaw = readFirstValue(params.raw) === "1";
   const searchWindow = resolveReportSearchWindow(
     process.env.REPORT_SEARCH_WINDOW,
@@ -46,15 +48,31 @@ export async function loadReportsInitialState(
       limit: REPORT_PAGE_LIMIT,
       searchWindow,
     });
-    const selectedKey = requestedKey ?? list.items[0]?.key ?? null;
+    const selectedItem =
+      requestedKey && requestedBucketId
+        ? list.items.find(
+            (item) =>
+              item.key === requestedKey && item.bucketId === requestedBucketId,
+          )
+        : requestedKey
+          ? undefined
+          : list.items[0];
+    const selectedKey = requestedKey ?? selectedItem?.key ?? null;
+    const selectedBucketId = requestedKey
+      ? requestedBucketId
+      : (selectedItem?.bucketId ?? null);
 
     let detail: ReportsInitialState["detail"] = null;
     let detailKey: string | null = null;
+    let detailBucketId: string | null = null;
     if (selectedKey) {
       try {
-        const detailPayload = await readReportDetail(selectedKey);
+        const detailPayload = await readReportDetail(selectedKey, {
+          bucketId: selectedBucketId ?? undefined,
+        });
         detail = detailPayload.report;
         detailKey = detailPayload.key;
+        detailBucketId = detailPayload.bucketId;
       } catch {
         // Leave detail empty so the client can retry without failing the page.
       }
@@ -71,8 +89,10 @@ export async function loadReportsInitialState(
       searchWindow: list.searchWindow,
       warnings: list.warnings,
       selectedKey,
+      selectedBucketId,
       detail,
       detailKey,
+      detailBucketId,
       showRaw,
     };
   }

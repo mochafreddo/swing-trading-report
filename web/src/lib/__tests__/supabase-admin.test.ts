@@ -17,6 +17,7 @@ import {
   createHolding,
   deleteHolding,
   replaceAllHoldings,
+  fetchReportIndexEntry,
   releaseRuntimeStateLock,
   SupabaseApiError,
   updateHolding,
@@ -82,6 +83,7 @@ describe("fetchReportIndexPage", () => {
     expect(result.nextCursor).toBeNull();
     expect(result.items).toEqual([
       {
+        bucket_id: "reports",
         report_key: REPORT_KEY_A,
         report_type: "buy",
         report_date: "2026-02-14",
@@ -172,6 +174,7 @@ describe("fetchReportIndexPage", () => {
 
       expect(result.items).toEqual([
         {
+          bucket_id: "reports",
           report_key: key,
           report_type: type,
           report_date: "2026-05-05",
@@ -221,6 +224,7 @@ describe("fetchReportIndexPage", () => {
         report_date: "2026-02-20",
         duplicate_index: 0,
         report_key: "2026/02/2026-02-20.buy.json",
+        bucket_id: "reports",
       },
       includeTotal: false,
       lookahead: true,
@@ -233,15 +237,18 @@ describe("fetchReportIndexPage", () => {
       report_date: "2026-02-14",
       duplicate_index: 0,
       report_key: "2026/02/2026-02-14.buy.json",
+      bucket_id: "reports",
     });
 
     const [requestUrl, init] = fetchMock.mock.calls[0] ?? [];
     const url = new URL(String(requestUrl));
     expect(url.searchParams.get("limit")).toBe("2");
     expect(url.searchParams.get("report_type")).toBe("eq.buy");
+    expect(url.searchParams.get("order")).toContain("bucket_id.desc");
     expect(url.searchParams.get("or")).toContain("report_date.lt.");
     expect(url.searchParams.get("or")).toContain("duplicate_index.lt.");
     expect(url.searchParams.get("or")).toContain("report_key.lt.");
+    expect(url.searchParams.get("or")).toContain("bucket_id.lt.");
 
     const headers = init?.headers as Record<string, string>;
     expect(headers.Accept).toBe("application/json");
@@ -269,10 +276,95 @@ describe("upsertReportIndexEntry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(init?.method).toBe("POST");
+    const [requestUrl] = fetchMock.mock.calls[0] ?? [];
+    expect(String(requestUrl)).toContain("on_conflict=bucket_id,report_key");
     const body = typeof init?.body === "string" ? init.body : "";
+    expect(body).toContain('"bucket_id":"reports"');
     expect(body).toContain('"report_key":"2026/02/2026-02-14.buy.json"');
     expect(body).toContain('"tickers":["AAPL.US"]');
     expect(body).toContain('"tickers_hydrated":true');
+  });
+});
+
+describe("fetchReportIndexEntry", () => {
+  it("returns a unique report index entry with bucket identity", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reportIndexResponse(
+        [
+          {
+            bucket_id: "custom-reports",
+            report_key: REPORT_KEY_A,
+            report_type: "buy",
+            report_date: "2026-02-14",
+            duplicate_index: 0,
+            generated_at: "2026-02-14T00:00:00Z",
+            summary: null,
+            tickers: ["AAPL.US"],
+            tickers_hydrated: true,
+          },
+        ],
+        1,
+      ),
+    );
+
+    const result = await fetchReportIndexEntry(REPORT_KEY_A);
+
+    expect(result?.bucket_id).toBe("custom-reports");
+    const [requestUrl] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.searchParams.get("report_key")).toBe(`eq.${REPORT_KEY_A}`);
+    expect(url.searchParams.get("limit")).toBe("2");
+  });
+
+  it("rejects ambiguous report keys across buckets", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reportIndexResponse(
+        [
+          {
+            bucket_id: "reports",
+            report_key: REPORT_KEY_A,
+            report_type: "buy",
+            report_date: "2026-02-14",
+            duplicate_index: 0,
+          },
+          {
+            bucket_id: "custom-reports",
+            report_key: REPORT_KEY_A,
+            report_type: "buy",
+            report_date: "2026-02-14",
+            duplicate_index: 0,
+          },
+        ],
+        2,
+      ),
+    );
+
+    await expect(fetchReportIndexEntry(REPORT_KEY_A)).rejects.toMatchObject({
+      status: 409,
+    });
+  });
+
+  it("filters a report index entry by bucket when requested", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      reportIndexResponse(
+        [
+          {
+            bucket_id: "custom-reports",
+            report_key: REPORT_KEY_A,
+            report_type: "buy",
+            report_date: "2026-02-14",
+            duplicate_index: 0,
+          },
+        ],
+        1,
+      ),
+    );
+
+    await fetchReportIndexEntry(REPORT_KEY_A, "custom-reports");
+
+    const [requestUrl] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.searchParams.get("bucket_id")).toBe("eq.custom-reports");
   });
 });
 

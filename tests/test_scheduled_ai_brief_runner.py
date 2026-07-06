@@ -15,6 +15,7 @@ import sab.scheduler.runner as scheduler_runner
 from sab.config import load_config
 from sab.config_loader import ConfigLoadError
 from sab.env_loader import getenv, load_dotenv_if_available
+from sab.report.supabase_storage import SupabaseStorageConfig
 from sab.scheduler import status_file as scheduler_status_file
 from sab.scheduler.runner import (
     DefaultScheduledNotifier,
@@ -5788,3 +5789,35 @@ def test_run_scheduled_ai_brief_preserves_result_when_status_file_write_fails(
         "storage_key": "reports/x.ai-brief.json",
     }
     assert "failed to write scheduled status file: status denied" in caplog.text
+
+
+def test_default_storage_filters_report_index_repair_to_configured_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    class _Response:
+        status_code = 200
+        text = "[]"
+
+        @staticmethod
+        def json() -> list[dict[str, str]]:
+            return [{"report_key": "2026/05/2026-05-28.ai-brief.json"}]
+
+    def fake_get(url: str, **_kwargs: object) -> _Response:
+        captured["url"] = url
+        return _Response()
+
+    monkeypatch.setattr("sab.scheduler.runner.requests.get", fake_get)
+    storage = scheduler_runner.DefaultScheduledStorage(
+        SupabaseStorageConfig(
+            url="https://example.supabase.co",
+            service_role_key="service-key",
+            bucket="custom-reports",
+        )
+    )
+
+    assert storage.list_ai_brief_report_index(report_date="2026-05-28") == [
+        "2026/05/2026-05-28.ai-brief.json"
+    ]
+    assert "bucket_id=eq.custom-reports" in captured["url"]

@@ -50,6 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("SAB_ENFORCE_LOCAL_REQUEST", "1");
+  vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
   vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
   vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
 });

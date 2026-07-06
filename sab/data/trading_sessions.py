@@ -27,12 +27,20 @@ def _parse_date_key(value: str) -> dt.date | None:
         return None
 
 
-def _load_closed_dates(data_dir: str | None, market: str) -> set[dt.date]:
+def _load_closed_dates(
+    data_dir: str | None,
+    market: str,
+    *,
+    through_year: int | None = None,
+) -> set[dt.date]:
     normalized_market = _normalize_market(market)
     data_dir_value = data_dir or "data"
 
     if normalized_market == "US":
-        base_holidays = load_us_trading_calendar(data_dir_value)
+        base_holidays = load_us_trading_calendar(
+            data_dir_value,
+            required_through_year=through_year,
+        )
     else:
         base_holidays = load_kr_trading_calendar(data_dir_value)
 
@@ -61,7 +69,7 @@ def is_trading_session(
     market: str,
     data_dir: str | None = None,
 ) -> bool:
-    closed_dates = _load_closed_dates(data_dir, market)
+    closed_dates = _load_closed_dates(data_dir, market, through_year=session_date.year)
     if session_date.weekday() >= 5:
         return False
     return session_date not in closed_dates
@@ -78,7 +86,7 @@ def count_trading_sessions(
     if end_date < start_date:
         return 0
 
-    closed_dates = _load_closed_dates(data_dir, market)
+    closed_dates = _load_closed_dates(data_dir, market, through_year=end_date.year)
     cursor = start_date
     count = 0
     while cursor <= end_date:

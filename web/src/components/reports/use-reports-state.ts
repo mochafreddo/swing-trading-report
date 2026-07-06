@@ -30,7 +30,11 @@ import type {
 
 const PAGE_LIMIT = 30;
 
-type ReportDetailResponse = { key: string; report: ReportJson };
+type ReportDetailResponse = {
+  key: string;
+  bucketId: string;
+  report: ReportJson;
+};
 
 interface ReportsListRequestPathOptions {
   type: ReportsFilterType;
@@ -41,6 +45,7 @@ interface ReportsListRequestPathOptions {
 
 interface ReportDetailRequestPathOptions {
   key: string;
+  bucketId?: string | null;
   refresh?: boolean;
 }
 
@@ -84,6 +89,9 @@ export function buildReportDetailRequestPath(
   options: ReportDetailRequestPathOptions,
 ): string {
   const params = new URLSearchParams({ key: options.key });
+  if (options.bucketId) {
+    params.set("bucket", options.bucketId);
+  }
   if (options.refresh) {
     params.set("refresh", "1");
   }
@@ -94,6 +102,7 @@ interface ReportsStateQueryInput {
   reportType: ReportsFilterType;
   appliedQuery: string;
   selectedKey: string | null;
+  selectedBucketId: string | null;
   showRaw: boolean;
 }
 
@@ -107,6 +116,9 @@ function buildReportsStateQueryString(input: ReportsStateQueryInput): string {
   }
   if (input.selectedKey) {
     params.set("key", input.selectedKey);
+    if (input.selectedBucketId) {
+      params.set("bucket", input.selectedBucketId);
+    }
   }
   if (input.showRaw) {
     params.set("raw", "1");
@@ -147,15 +159,17 @@ async function fetchReportsListCached(
 
 async function fetchReportDetailCached(
   key: string,
+  bucketId: string | null,
   refresh = false,
 ): Promise<ReportDetailResponse> {
   return reportDetailCache.getOrLoad({
-    key,
+    key: `bucket=${bucketId ?? ""}&key=${key}`,
     ttlMs: REPORT_DETAIL_CACHE_TTL_MS,
     refresh,
     load: async () => {
       const path = buildReportDetailRequestPath({
         key,
+        bucketId,
         refresh,
       });
       const response = await fetch(path, {
@@ -177,6 +191,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const router = useRouter();
   const pathname = usePathname();
   const initialUrlKey = (searchParams.get("key") ?? "").trim() || null;
+  const initialUrlBucketId = (searchParams.get("bucket") ?? "").trim() || null;
   const [reportType, setReportTypeState] = useState<ReportsFilterType>(
     () => initialState?.reportType ?? parseReportType(searchParams.get("type")),
   );
@@ -205,11 +220,17 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [selectedKey, setSelectedKeyState] = useState<string | null>(() =>
     initialState ? initialState.selectedKey : searchParams.get("key"),
   );
+  const [selectedBucketId, setSelectedBucketIdState] = useState<string | null>(
+    () => (initialState ? initialState.selectedBucketId : initialUrlBucketId),
+  );
   const [detail, setDetail] = useState<ReportJson | null>(
     () => initialState?.detail ?? null,
   );
   const [detailKey, setDetailKey] = useState<string | null>(
     () => initialState?.detailKey ?? null,
+  );
+  const [detailBucketId, setDetailBucketId] = useState<string | null>(
+    () => initialState?.detailBucketId ?? null,
   );
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -219,11 +240,15 @@ export function useReportsState(initialState?: ReportsInitialState) {
   );
   const [refreshToken, setRefreshToken] = useState(0);
   const currentUrlKeyRef = useRef(initialUrlKey);
+  const currentUrlBucketIdRef = useRef(initialUrlBucketId);
+  const selectedKeyRef = useRef(selectedKey);
+  const selectedBucketIdRef = useRef(selectedBucketId);
   const pendingUrlSync = useRef(
     Boolean(initialState) &&
       (initialState?.reportType !== parseReportType(searchParams.get("type")) ||
         initialState?.appliedQuery !== (searchParams.get("q") ?? "").trim() ||
         initialState?.selectedKey !== initialUrlKey ||
+        initialState?.selectedBucketId !== initialUrlBucketId ||
         initialState?.showRaw !== (searchParams.get("raw") === "1")),
   );
   const preserveSelectionWhenUrlKeyMissing = useRef(
@@ -235,10 +260,17 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const skipInitialDetailFetchKey = useRef<string | null>(
     initialState?.detail &&
       initialState.detailKey &&
+      (initialState.selectedBucketId === null ||
+        initialState.detailBucketId === initialState.selectedBucketId) &&
       initialState.detailKey === initialState.selectedKey
       ? initialState.selectedKey
       : null,
   );
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+    selectedBucketIdRef.current = selectedBucketId;
+  });
 
   const desiredQueryString = useMemo(
     () =>
@@ -246,9 +278,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
         reportType,
         appliedQuery,
         selectedKey,
+        selectedBucketId,
         showRaw,
       }),
-    [appliedQuery, reportType, selectedKey, showRaw],
+    [appliedQuery, reportType, selectedBucketId, selectedKey, showRaw],
   );
 
   const currentQueryString = useMemo(
@@ -257,6 +290,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
         reportType: parseReportType(searchParams.get("type")),
         appliedQuery: (searchParams.get("q") ?? "").trim(),
         selectedKey: searchParams.get("key"),
+        selectedBucketId: (searchParams.get("bucket") ?? "").trim() || null,
         showRaw: searchParams.get("raw") === "1",
       }),
     [searchParams],
@@ -268,12 +302,17 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const nextQuery = searchParams.get("q") ?? "";
     const nextAppliedQuery = nextQuery.trim();
     const nextKeyRaw = searchParams.get("key");
+    const nextBucketId = (searchParams.get("bucket") ?? "").trim() || null;
     const nextShowRaw = searchParams.get("raw") === "1";
     const preserveWhenKeyMissing = preserveSelectionWhenUrlKeyMissing.current;
     const nextKey = nextKeyRaw?.trim() || null;
     currentUrlKeyRef.current = nextKey;
+    currentUrlBucketIdRef.current = nextBucketId;
     const hasLoadedEmptyResultSet = total === 0 && items.length === 0;
-    const hasPrefetchedUrlDetail = nextKey !== null && detailKey === nextKey;
+    const hasPrefetchedUrlDetail =
+      nextKey !== null &&
+      detailKey === nextKey &&
+      (nextBucketId === null || detailBucketId === nextBucketId);
     const hasInvalidUrlKey =
       Boolean(nextKey) && hasLoadedEmptyResultSet && !hasPrefetchedUrlDetail;
 
@@ -296,8 +335,29 @@ export function useReportsState(initialState?: ReportsInitialState) {
         preserveSelectionWhenKeyMissing: preserveWhenKeyMissing,
       });
     });
+    setSelectedBucketIdState((prev) => {
+      if (hasInvalidUrlKey) {
+        return null;
+      }
+      if (nextKey) {
+        if (nextBucketId) {
+          return prev === nextBucketId ? prev : nextBucketId;
+        }
+        const matchingItems = items.filter((item) => item.key === nextKey);
+        if (matchingItems.length === 1) {
+          return prev === matchingItems[0].bucketId
+            ? prev
+            : matchingItems[0].bucketId;
+        }
+        return prev === null ? prev : null;
+      }
+      if (preserveWhenKeyMissing) {
+        return prev;
+      }
+      return prev === null ? prev : null;
+    });
     setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [detailKey, items, searchParams, total]);
+  }, [detailBucketId, detailKey, items, searchParams, total]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -361,7 +421,9 @@ export function useReportsState(initialState?: ReportsInitialState) {
         setSearchWindow(typed.searchWindow);
         setWarnings(typed.warnings);
 
-        const firstKey = typed.items[0]?.key ?? null;
+        const firstItem = typed.items[0] ?? null;
+        const firstKey = firstItem?.key ?? null;
+        const firstBucketId = firstItem?.bucketId ?? null;
         setSelectedKeyState((prev) => {
           const explicitUrlKey = currentUrlKeyRef.current;
           if (explicitUrlKey) {
@@ -374,6 +436,41 @@ export function useReportsState(initialState?: ReportsInitialState) {
             pendingUrlSync.current = true;
           }
           return firstKey;
+        });
+        setSelectedBucketIdState((prev) => {
+          const explicitUrlKey = currentUrlKeyRef.current;
+          const explicitUrlBucketId = currentUrlBucketIdRef.current;
+          if (explicitUrlKey) {
+            if (explicitUrlBucketId) {
+              return prev === explicitUrlBucketId ? prev : explicitUrlBucketId;
+            }
+            const matches = typed.items.filter(
+              (item) => item.key === explicitUrlKey,
+            );
+            const bucketId = matches.length === 1 ? matches[0].bucketId : null;
+            return prev === bucketId ? prev : bucketId;
+          }
+
+          const currentSelectedKey = selectedKeyRef.current;
+          const currentSelectedBucketId = selectedBucketIdRef.current;
+          if (
+            currentSelectedKey &&
+            currentSelectedBucketId &&
+            typed.items.some(
+              (item) =>
+                item.key === currentSelectedKey &&
+                item.bucketId === currentSelectedBucketId,
+            )
+          ) {
+            return prev === currentSelectedBucketId
+              ? prev
+              : currentSelectedBucketId;
+          }
+
+          if (prev !== firstBucketId) {
+            pendingUrlSync.current = true;
+          }
+          return firstBucketId;
         });
       } catch (loadError) {
         if (cancelled) {
@@ -420,6 +517,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
       try {
         const typedPayload = await fetchReportDetailCached(
           selectedKey,
+          selectedBucketId,
           forceRefresh,
         );
         if (cancelled) {
@@ -427,6 +525,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
         }
         setDetail(typedPayload.report);
         setDetailKey(typedPayload.key);
+        setDetailBucketId(typedPayload.bucketId);
       } catch (detailError) {
         if (cancelled) {
           return;
@@ -438,6 +537,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
         setError(message);
         setDetail(null);
         setDetailKey(null);
+        setDetailBucketId(null);
       } finally {
         if (!cancelled) {
           setLoadingDetail(false);
@@ -450,10 +550,14 @@ export function useReportsState(initialState?: ReportsInitialState) {
     return () => {
       cancelled = true;
     };
-  }, [refreshToken, selectedKey]);
+  }, [refreshToken, selectedBucketId, selectedKey]);
 
   const selectedDetail =
-    selectedKey && detailKey === selectedKey ? detail : null;
+    selectedKey &&
+    detailKey === selectedKey &&
+    (selectedBucketId === null || detailBucketId === selectedBucketId)
+      ? detail
+      : null;
   const summary = useMemo(
     () => asRecord(selectedDetail?.summary),
     [selectedDetail],
@@ -498,9 +602,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
     setQueryState(value);
   }, []);
 
-  const setSelectedKey = useCallback((value: string) => {
+  const setSelectedKey = useCallback((value: string, bucketId?: string) => {
     pendingUrlSync.current = true;
     setSelectedKeyState(value);
+    setSelectedBucketIdState(bucketId ?? null);
   }, []);
 
   return {
@@ -514,6 +619,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     searchWindow,
     warnings,
     selectedKey,
+    selectedBucketId,
     detail: selectedDetail,
     loadingList,
     loadingDetail,

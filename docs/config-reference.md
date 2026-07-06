@@ -69,6 +69,7 @@
 | `SAB_LOGIN_THROTTLE_FAIL_MODE` | web login throttle | `strict` 기본, `degrade` 선택 |
 | `SAB_RUNTIME_STATE_STORE` | web runtime state | 테스트 외 기본 `supabase`, 선택 `memory` |
 | `SAB_ENFORCE_LOCAL_REQUEST` | web local request guard | `0`이면 완화 |
+| `SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS` | web local request guard | Host/Origin 기반 로컬 판정을 신뢰할 때 `1` |
 | `WEB_BIND_HOST` | direct `pnpm run dev/start` | 기본 `127.0.0.1` |
 | `SAB_ALLOW_NON_LOOPBACK_BIND` | startup bind guard | non-loopback bind 허용 시 `1` |
 | `WEB_HOST_PORT`, `WEB_DEV_HOST_PORT` | Docker Compose port publish | 기본 `55300`, `55301` |

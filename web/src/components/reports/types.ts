@@ -18,7 +18,9 @@ export interface ReportsInitialState {
   searchWindow: number;
   warnings: ReportSearchWarning[];
   selectedKey: string | null;
+  selectedBucketId: string | null;
   detail: ReportJson | null;
   detailKey: string | null;
+  detailBucketId: string | null;
   showRaw: boolean;
 }

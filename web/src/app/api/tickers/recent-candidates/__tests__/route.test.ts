@@ -132,6 +132,7 @@ describe("GET /api/tickers/recent-candidates", () => {
     vi.mocked(listRecentBuyCandidates).mockResolvedValueOnce({
       report: {
         key: "2026/02/2026-02-27.buy.json",
+        bucketId: "reports",
         reportDate: "2026-02-27",
       },
       candidates: [
@@ -152,7 +153,11 @@ describe("GET /api/tickers/recent-candidates", () => {
       makeRequest("limitReports=3&limitCandidates=20"),
     );
     const payload = (await response.json()) as {
-      report: { key: string; reportDate: string | null } | null;
+      report: {
+        key: string;
+        bucketId: string;
+        reportDate: string | null;
+      } | null;
       candidates: Array<{
         ticker: string;
         name: string | null;

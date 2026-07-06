@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from pathlib import Path
@@ -303,7 +304,7 @@ def test_upload_report_artifact_adds_suffix_when_key_exists(tmp_path: Path) -> N
     assert first_headers["content-type"] == "application/json"
     second_url = session.post_calls[1]["url"]
     assert isinstance(second_url, str)
-    assert second_url.endswith("/rest/v1/report_index?on_conflict=report_key")
+    assert second_url.endswith("/rest/v1/report_index?on_conflict=bucket_id,report_key")
 
 
 def test_upload_report_artifact_uses_base_key_when_available(tmp_path: Path) -> None:
@@ -361,6 +362,37 @@ def test_upload_report_artifact_normalizes_report_type_for_index_row(
     assert b'"report_type": "buy"' in index_payload
 
 
+def test_upload_report_artifact_indexes_configured_bucket(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text('{"schema":"sab.report.v1"}', encoding="utf-8")
+
+    session = _FakeSession(
+        get_responses=[_FakeResponse(404)],
+        post_responses=[_FakeResponse(201), _FakeResponse(201)],
+    )
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="custom-reports",
+    )
+
+    upload_report_artifact(
+        local_path=report_path.as_posix(),
+        run_type="buy",
+        report_date=date(2026, 2, 13),
+        config=config,
+        session=session,  # type: ignore[arg-type]
+    )
+
+    index_payload = session.post_calls[1]["data"]
+    assert isinstance(index_payload, bytes)
+    assert json.loads(index_payload.decode("utf-8"))[0]["bucket_id"] == (
+        "custom-reports"
+    )
+
+
 def test_upload_report_artifact_treats_400_not_found_as_missing(
     tmp_path: Path,
 ) -> None:
@@ -409,6 +441,136 @@ def test_upload_report_artifact_rejects_invalid_report_json_before_network(
     )
 
     with pytest.raises(SupabaseStorageError, match="valid JSON object"):
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.get_calls == []
+    assert session.post_calls == []
+    assert session.delete_calls == []
+
+
+def test_upload_report_artifact_rejects_mismatched_payload_type_before_network(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(
+        '{"schema":"sab.report.v1","type":"sell"}',
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(get_responses=[], post_responses=[])
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseStorageError, match="report type"):
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.get_calls == []
+    assert session.post_calls == []
+    assert session.delete_calls == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"schema":"sab.report.v1","type":42}',
+        '{"schema":"sab.report.v1","type":""}',
+    ],
+)
+def test_upload_report_artifact_rejects_invalid_payload_type_before_network(
+    tmp_path: Path,
+    payload: str,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(payload, encoding="utf-8")
+
+    session = _FakeSession(get_responses=[], post_responses=[])
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseStorageError, match="report type"):
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.get_calls == []
+    assert session.post_calls == []
+    assert session.delete_calls == []
+
+
+def test_upload_report_artifact_rejects_mismatched_payload_date_before_network(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(
+        '{"schema":"sab.report.v1","type":"buy","report_date":"2026-02-14"}',
+        encoding="utf-8",
+    )
+
+    session = _FakeSession(get_responses=[], post_responses=[])
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseStorageError, match="report date"):
+        upload_report_artifact(
+            local_path=report_path.as_posix(),
+            run_type="buy",
+            report_date=date(2026, 2, 13),
+            config=config,
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.get_calls == []
+    assert session.post_calls == []
+    assert session.delete_calls == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"schema":"sab.report.v1","type":"buy","report_date":["2026-02-13"]}',
+        '{"schema":"sab.report.v1","type":"buy","report_date":""}',
+    ],
+)
+def test_upload_report_artifact_rejects_invalid_payload_date_before_network(
+    tmp_path: Path,
+    payload: str,
+) -> None:
+    report_path = tmp_path / "2026-02-13.buy.json"
+    report_path.write_text(payload, encoding="utf-8")
+
+    session = _FakeSession(get_responses=[], post_responses=[])
+    config = SupabaseStorageConfig(
+        url="https://example.supabase.co",
+        service_role_key="service-key",
+        bucket="reports",
+    )
+
+    with pytest.raises(SupabaseStorageError, match="report date"):
         upload_report_artifact(
             local_path=report_path.as_posix(),
             run_type="buy",

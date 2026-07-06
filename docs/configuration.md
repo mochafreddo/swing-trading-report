@@ -70,6 +70,7 @@
 | `SAB_LOGIN_THROTTLE_FAIL_MODE` | no | `strict` | `strict` | web | Supabase throttle failure mode | `strict` or `degrade`. |
 | `SAB_RUNTIME_STATE_STORE` | no | `supabase` outside tests | `supabase` | web, scheduler | Runtime state backend | `memory` only for tests/local fallback. |
 | `SAB_ENFORCE_LOCAL_REQUEST` | no | enabled | `0` | web | Local request guard override | Disable only behind trusted boundary. |
+| `SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS` | no | unset | `1` | web | Trust Host/Origin headers for local request checks | Set only when the web server is bound behind loopback or a trusted outer boundary. Docker Compose sets this for loopback host publishing; direct `pnpm run dev/start` sets it for loopback binds. |
 | `WEB_BIND_HOST` | no | `127.0.0.1` direct | `127.0.0.1` | web direct run | Direct Next.js bind host | Compose uses internal `0.0.0.0` with loopback host publish. |
 | `SAB_ALLOW_NON_LOOPBACK_BIND` | no | unset | `1` | web startup guard | Allows non-loopback direct bind | Not a complete remote security model. |
 | `WEB_HOST_PORT` | no | `55300` | `55300` | Docker Compose | Host port for `web` | Published to `127.0.0.1`. |

@@ -33,8 +33,13 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function buyReportRow(reportKey: string, reportDate: string) {
+function buyReportRow(
+  reportKey: string,
+  reportDate: string,
+  bucketId = "reports",
+) {
   return {
+    bucket_id: bucketId,
     report_key: reportKey,
     report_type: "buy" as const,
     report_date: reportDate,
@@ -222,6 +227,55 @@ describe("searchTickerDirectory", () => {
       "2026/02/2026-02-27.buy.json",
     );
     expect(vi.mocked(upsertRuntimeStateEntry)).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads indexed buy reports from their bucket", async () => {
+    vi.mocked(fetchRuntimeStateEntry).mockResolvedValueOnce(null);
+    vi.mocked(fetchReportIndexPage)
+      .mockResolvedValueOnce(
+        reportIndexPage([
+          buyReportRow(
+            "2026/02/2026-02-27.buy.json",
+            "2026-02-27",
+            "custom-reports",
+          ),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        reportIndexPage([
+          buyReportRow(
+            "2026/02/2026-02-27.buy.json",
+            "2026-02-27",
+            "custom-reports",
+          ),
+        ]),
+      );
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [{ ticker: "ETN.NYS", name: "이튼" }],
+    });
+
+    const result = await searchTickerDirectory({ q: "이튼", limit: 5 });
+
+    expect(result.results).toEqual([{ ticker: "ETN.NYS", name: "이튼" }]);
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
+      "custom-reports",
+      "2026/02/2026-02-27.buy.json",
+    );
+    expect(vi.mocked(upsertRuntimeStateEntry)).toHaveBeenCalledWith(
+      "ticker_directory:v1",
+      expect.objectContaining({
+        source: expect.objectContaining({
+          buyReportKeys: ["custom-reports:2026/02/2026-02-27.buy.json"],
+        }),
+        entries: [
+          expect.objectContaining({
+            lastSeenReportBucketId: "custom-reports",
+            lastSeenReportKey: "2026/02/2026-02-27.buy.json",
+          }),
+        ],
+      }),
+      expect.any(String),
+    );
   });
 
   it("drops cached entries whose reports are outside the current source window", async () => {
@@ -424,6 +478,36 @@ describe("listRecentBuyCandidates", () => {
       { ticker: "ABBV.NYS", name: "애브비", pattern: null },
       { ticker: "ETN.NYS", name: "이튼", pattern: null },
     ]);
+  });
+
+  it("downloads recent buy candidates from their indexed bucket", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValueOnce(
+      reportIndexPage([
+        buyReportRow(
+          "2026/02/2026-02-27.buy.json",
+          "2026-02-27",
+          "custom-reports",
+        ),
+      ]),
+    );
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce({
+      candidates: [{ ticker: "ETN.NYS", name: "이튼" }],
+    });
+
+    const result = await listRecentBuyCandidates({
+      limitReports: 1,
+      limitCandidates: 5,
+    });
+
+    expect(result.report).toEqual({
+      key: "2026/02/2026-02-27.buy.json",
+      bucketId: "custom-reports",
+      reportDate: "2026-02-27",
+    });
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
+      "custom-reports",
+      "2026/02/2026-02-27.buy.json",
+    );
   });
 
   it("returns pattern metadata for recent buy candidates", async () => {

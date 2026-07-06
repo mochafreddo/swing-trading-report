@@ -48,6 +48,7 @@ describe("admin-action-auth", () => {
 
   it("passes local same-origin requests through to admin auth", async () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
 
     await expect(requireAdminActionSession()).resolves.toBeUndefined();
 

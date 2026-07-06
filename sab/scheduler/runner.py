@@ -3745,6 +3745,7 @@ class DefaultScheduledStorage:
         query = urlencode(
             {
                 "select": "report_key",
+                "bucket_id": f"eq.{self._config.bucket}",
                 "report_type": "eq.ai-brief",
                 "report_date": f"eq.{report_date}",
                 "order": "generated_at.desc,created_at.desc",

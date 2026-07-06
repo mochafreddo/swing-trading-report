@@ -79,7 +79,7 @@ describe("ReportsPage", () => {
   it("keeps rendering when the initial detail prefetch fails", async () => {
     hasValidAdminSession.mockResolvedValue(true);
     listReports.mockResolvedValueOnce({
-      items: [{ key: "report-1" }],
+      items: [{ key: "report-1", bucketId: "reports" }],
       total: 1,
       searched: 1,
       truncated: false,
@@ -93,15 +93,17 @@ describe("ReportsPage", () => {
         reportType: "all",
         query: "",
         appliedQuery: "",
-        items: [{ key: "report-1" }],
+        items: [{ key: "report-1", bucketId: "reports" }],
         total: 1,
         searched: 1,
         truncated: false,
         searchWindow: 100,
         warnings: [],
         selectedKey: "report-1",
+        selectedBucketId: "reports",
         detail: null,
         detailKey: null,
+        detailBucketId: null,
         showRaw: false,
       },
     );
@@ -110,7 +112,12 @@ describe("ReportsPage", () => {
   it("prefetches a requested report key even when it is outside the current list", async () => {
     hasValidAdminSession.mockResolvedValue(true);
     listReports.mockResolvedValueOnce({
-      items: [{ key: "2026/02/2026-02-28.buy.json" }],
+      items: [
+        {
+          key: "2026/02/2026-02-28.buy.json",
+          bucketId: "reports",
+        },
+      ],
       total: 1,
       searched: 1,
       truncated: false,
@@ -119,6 +126,7 @@ describe("ReportsPage", () => {
     });
     readReportDetail.mockResolvedValueOnce({
       key: "2026/01/2026-01-31.buy.json",
+      bucketId: "custom-reports",
       report: { type: "buy" },
     });
 
@@ -128,11 +136,52 @@ describe("ReportsPage", () => {
       ),
     ).resolves.toMatchObject({
       selectedKey: "2026/01/2026-01-31.buy.json",
+      selectedBucketId: null,
       detailKey: "2026/01/2026-01-31.buy.json",
+      detailBucketId: "custom-reports",
       detail: { type: "buy" },
     });
     expect(readReportDetail).toHaveBeenCalledWith(
       "2026/01/2026-01-31.buy.json",
+      { bucketId: undefined },
+    );
+  });
+
+  it("does not choose an arbitrary bucket for key-only deep links", async () => {
+    hasValidAdminSession.mockResolvedValue(true);
+    listReports.mockResolvedValueOnce({
+      items: [
+        {
+          key: "2026/02/2026-02-28.buy.json",
+          bucketId: "custom-reports",
+        },
+        {
+          key: "2026/02/2026-02-28.buy.json",
+          bucketId: "reports",
+        },
+      ],
+      total: 2,
+      searched: 0,
+      truncated: false,
+      searchWindow: 100,
+      warnings: [],
+    });
+    readReportDetail.mockRejectedValueOnce(new Error("ambiguous"));
+
+    const state = await loadReportsInitialState(
+      Promise.resolve({ key: "2026/02/2026-02-28.buy.json" }),
+    );
+
+    expect(state).toMatchObject({
+      selectedKey: "2026/02/2026-02-28.buy.json",
+      selectedBucketId: null,
+      detail: null,
+      detailKey: null,
+      detailBucketId: null,
+    });
+    expect(readReportDetail).toHaveBeenCalledWith(
+      "2026/02/2026-02-28.buy.json",
+      { bucketId: undefined },
     );
   });
 });

@@ -64,7 +64,11 @@ def _maybe_pandas_holidays(
     )
 
 
-def load_us_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
+def load_us_trading_calendar(
+    data_dir: str | None = None,
+    *,
+    required_through_year: int | None = None,
+) -> dict[str, str]:
     """Return mapping of YYYYMMDD -> note for known US market holidays."""
     overrides = _load_override_file(data_dir)
     merged = dict(_BUILTIN_US_HOLIDAYS)
@@ -76,9 +80,25 @@ def load_us_trading_calendar(data_dir: str | None = None) -> dict[str, str]:
         today=today,
         max_static_year=max_static_year,
     )
+    required_year_range: tuple[int, int] | None = None
+    if required_through_year is not None and required_through_year > max_static_year:
+        required_year_range = (
+            max_static_year + 1,
+            max(required_through_year, max_static_year + 5),
+        )
+        if year_range is None:
+            year_range = required_year_range
+        else:
+            year_range = (
+                min(year_range[0], required_year_range[0]),
+                max(year_range[1], required_year_range[1]),
+            )
     if year_range is not None:
         merged.update(
-            _maybe_pandas_holidays(*year_range, required=today.year > max_static_year)
+            _maybe_pandas_holidays(
+                *year_range,
+                required=bool(required_year_range) or today.year > max_static_year,
+            )
         )
 
     merged.update(overrides)

@@ -22,6 +22,7 @@ describe("metrics-data", () => {
   it("normalizes missing summary metrics as null instead of zero", () => {
     const panel = buildMetricsPanel("buy", [
       {
+        bucket_id: "reports",
         report_key: "2026/03/2026-03-28.buy.json",
         report_type: "buy",
         report_date: "2026-03-28",
@@ -35,6 +36,7 @@ describe("metrics-data", () => {
         tickers_hydrated: true,
       },
       {
+        bucket_id: "reports",
         report_key: "2026/03/2026-03-27.buy.json",
         report_type: "buy",
         report_date: "2026-03-27",
@@ -60,7 +62,7 @@ describe("metrics-data", () => {
     );
 
     expect(panel.latestReportHref).toBe(
-      "/reports?type=buy&key=2026%2F03%2F2026-03-28.buy.json",
+      "/reports?type=buy&key=2026%2F03%2F2026-03-28.buy.json&bucket=reports",
     );
     expect(coverageMetric?.latest).toBeNull();
     expect(coverageMetric?.average).toBe(0.8);
@@ -81,6 +83,7 @@ describe("metrics-data", () => {
       return {
         items: [
           {
+            bucket_id: "reports",
             report_key: `2026/03/2026-03-28.${type}.json`,
             report_type: type,
             report_date: "2026-03-28",

@@ -229,6 +229,13 @@ export const reportListQuerySchema = z.object({
 
 export const reportDetailQuerySchema = z.object({
   key: z.string().trim().min(1),
+  bucket: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[A-Za-z0-9._-]+$/)
+    .optional(),
   refresh: toBooleanRefreshFlag,
 });
 

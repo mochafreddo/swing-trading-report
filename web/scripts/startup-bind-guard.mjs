@@ -17,7 +17,7 @@ function normalizeBindHost(rawHost) {
   return trimmed;
 }
 
-function isLoopbackBindHost(host) {
+export function isLoopbackBindHost(host) {
   return LOOPBACK_HOSTS.has(host);
 }
 

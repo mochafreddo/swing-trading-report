@@ -16,11 +16,12 @@ interface ReportsListProps {
   searchWindow: number;
   warnings: ReportSearchWarning[];
   selectedKey: string | null;
+  selectedBucketId: string | null;
   loadingList: boolean;
   refreshing: boolean;
   onReportTypeChange: (value: ReportsFilterType) => void;
   onQueryChange: (value: string) => void;
-  onSelectKey: (key: string) => void;
+  onSelectKey: (key: string, bucketId?: string) => void;
   onRefresh: () => void;
 }
 
@@ -35,6 +36,7 @@ export function ReportsList({
   searchWindow,
   warnings,
   selectedKey,
+  selectedBucketId,
   loadingList,
   refreshing,
   onReportTypeChange,
@@ -133,24 +135,33 @@ export function ReportsList({
           </li>
         )}
         {!loadingList &&
-          items.map((item) => (
-            <li key={item.key}>
-              <button
-                type="button"
-                className={`${styles.itemButton} ${
-                  selectedKey === item.key ? styles.active : ""
-                }`.trim()}
-                onClick={() => onSelectKey(item.key)}
-                aria-pressed={selectedKey === item.key}
-              >
-                <span className={styles.itemPrimary}>
-                  {formatDateLabel(item)}
-                </span>
-                <span className={styles.badge}>{item.type.toUpperCase()}</span>
-                <span className={styles.itemKey}>{item.key}</span>
-              </button>
-            </li>
-          ))}
+          items.map((item) => {
+            const isSelected =
+              selectedKey === item.key && selectedBucketId === item.bucketId;
+            return (
+              <li key={`${item.bucketId}:${item.key}`}>
+                <button
+                  type="button"
+                  className={`${styles.itemButton} ${
+                    isSelected ? styles.active : ""
+                  }`.trim()}
+                  onClick={() => onSelectKey(item.key, item.bucketId)}
+                  aria-pressed={isSelected}
+                >
+                  <span className={styles.itemPrimary}>
+                    {formatDateLabel(item)}
+                  </span>
+                  <span className={styles.badge}>
+                    {item.type.toUpperCase()}
+                  </span>
+                  {item.bucketId !== "reports" && (
+                    <span className={styles.badge}>{item.bucketId}</span>
+                  )}
+                  <span className={styles.itemKey}>{item.key}</span>
+                </button>
+              </li>
+            );
+          })}
       </ul>
     </>
   );

@@ -13,7 +13,9 @@ import {
 } from "@/lib/reports-cache-config";
 import {
   downloadStorageJson,
+  fetchReportIndexEntry,
   fetchReportIndexPage,
+  SupabaseApiError,
   type ReportIndexCursor,
 } from "@/lib/supabase-admin";
 import type {
@@ -46,6 +48,7 @@ function toReportListItem(
 ): ReportListItem {
   return {
     key: row.report_key,
+    bucketId: row.bucket_id,
     type: row.report_type,
     reportDate: row.report_date,
     duplicateIndex: row.duplicate_index,
@@ -83,6 +86,7 @@ const reportListCache = createMemoryTtlLruCache<ReportsListResponse>({
 
 const reportDetailCache = createMemoryTtlLruCache<{
   key: string;
+  bucketId: string;
   report: Record<string, unknown>;
 }>({
   maxEntries: REPORT_DETAIL_CACHE_MAX_ENTRIES,
@@ -249,20 +253,30 @@ export class InvalidReportKeyError extends Error {
   }
 }
 
-async function readReportDetailUncached(key: string): Promise<{
+async function readReportDetailUncached(
+  key: string,
+  bucketId?: string,
+): Promise<{
   key: string;
+  bucketId: string;
   report: Record<string, unknown>;
 }> {
   const env = getSupabaseEnv();
-  const report = await downloadStorageJson(env.SUPABASE_REPORTS_BUCKET, key);
-  return { key, report };
+  const indexEntry = await fetchReportIndexEntry(key, bucketId);
+  if (bucketId && !indexEntry) {
+    throw new SupabaseApiError("Report not found", 404);
+  }
+  const bucket = indexEntry?.bucket_id ?? env.SUPABASE_REPORTS_BUCKET;
+  const report = await downloadStorageJson(bucket, key);
+  return { key, bucketId: bucket, report };
 }
 
 export async function readReportDetail(
   key: string,
-  options?: { refresh?: boolean },
+  options?: { refresh?: boolean; bucketId?: string },
 ): Promise<{
   key: string;
+  bucketId: string;
   report: Record<string, unknown>;
 }> {
   const parsedKey = parseReportStorageKey(key);
@@ -271,15 +285,16 @@ export async function readReportDetail(
   }
 
   const refresh = options?.refresh === true;
+  const bucketId = options?.bucketId?.trim() || undefined;
   if (!isReportsCacheEnabled()) {
-    return readReportDetailUncached(parsedKey.key);
+    return readReportDetailUncached(parsedKey.key, bucketId);
   }
 
   return reportDetailCache.getOrLoad({
-    key: parsedKey.key,
+    key: `bucket=${bucketId ?? ""}&key=${parsedKey.key}`,
     ttlMs: REPORT_DETAIL_CACHE_TTL_MS,
     refresh,
-    load: () => readReportDetailUncached(parsedKey.key),
+    load: () => readReportDetailUncached(parsedKey.key, bucketId),
   });
 }
 

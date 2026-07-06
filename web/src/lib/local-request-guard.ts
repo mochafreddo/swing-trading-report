@@ -79,10 +79,18 @@ function shouldEnforceLocalRequestGuard(): boolean {
   return process.env.SAB_ENFORCE_LOCAL_REQUEST !== "0";
 }
 
+function shouldTrustHostHeaderForLocalRequest(): boolean {
+  return process.env.SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS === "1";
+}
+
 export function isLocalRequest(request: {
   headers: Pick<Headers, "get">;
   method?: string;
 }): boolean {
+  if (!shouldTrustHostHeaderForLocalRequest()) {
+    return false;
+  }
+
   const host = extractHostname(request.headers.get("host"));
   if (!isLocalHostname(host)) {
     return false;

@@ -19,6 +19,7 @@ export type {
 } from "@/lib/supabase/runtime-state";
 export {
   downloadStorageJson,
+  fetchReportIndexEntry,
   fetchReportIndexPage,
   upsertReportIndexEntry,
 } from "@/lib/supabase/reports";

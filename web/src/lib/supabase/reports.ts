@@ -11,9 +11,10 @@ import {
 } from "@/lib/supabase/admin-client";
 
 const REPORT_INDEX_SELECT =
-  "report_key,report_type,report_date,duplicate_index,generated_at,summary,tickers,tickers_hydrated";
+  "bucket_id,report_key,report_type,report_date,duplicate_index,generated_at,summary,tickers,tickers_hydrated";
 
 export interface ReportIndexRow {
+  bucket_id: string;
   report_key: string;
   report_type: ReportType;
   report_date: string;
@@ -36,6 +37,7 @@ export interface ReportIndexCursor {
   report_date: string;
   duplicate_index: number;
   report_key: string;
+  bucket_id: string;
 }
 
 export interface FetchReportIndexPageResult {
@@ -47,6 +49,7 @@ export interface FetchReportIndexPageResult {
 }
 
 export interface ReportIndexUpsertInput {
+  bucketId?: string;
   reportKey: string;
   reportType: ReportType;
   reportDate: string;
@@ -112,6 +115,7 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
     report_date?: unknown;
     duplicate_index?: unknown;
     report_key?: unknown;
+    bucket_id?: unknown;
   };
 
   const reportDate = trimmedString(raw.report_date);
@@ -119,6 +123,7 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
     integer: true,
   });
   const reportKey = trimmedString(raw.report_key);
+  const bucketId = trimmedString(raw.bucket_id) || "reports";
 
   if (!reportDate || duplicateIndex === null || !reportKey) {
     return null;
@@ -128,13 +133,15 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
     report_date: reportDate,
     duplicate_index: duplicateIndex,
     report_key: reportKey,
+    bucket_id: bucketId,
   };
 }
 
 function buildReportIndexKeysetFilter(cursor: ReportIndexCursor): string {
   const reportDate = quotePostgrestValue(cursor.report_date);
   const reportKey = quotePostgrestValue(cursor.report_key);
-  return `(report_date.lt.${reportDate},and(report_date.eq.${reportDate},duplicate_index.lt.${cursor.duplicate_index}),and(report_date.eq.${reportDate},duplicate_index.eq.${cursor.duplicate_index},report_key.lt.${reportKey}))`;
+  const bucketId = quotePostgrestValue(cursor.bucket_id);
+  return `(report_date.lt.${reportDate},and(report_date.eq.${reportDate},duplicate_index.lt.${cursor.duplicate_index}),and(report_date.eq.${reportDate},duplicate_index.eq.${cursor.duplicate_index},report_key.lt.${reportKey}),and(report_date.eq.${reportDate},duplicate_index.eq.${cursor.duplicate_index},report_key.eq.${reportKey},bucket_id.lt.${bucketId}))`;
 }
 
 function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
@@ -149,6 +156,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     }
     const raw = entry as {
       report_key?: unknown;
+      bucket_id?: unknown;
       report_type?: unknown;
       report_date?: unknown;
       duplicate_index?: unknown;
@@ -158,6 +166,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
       tickers_hydrated?: unknown;
     };
 
+    const bucketId = trimmedString(raw.bucket_id) || "reports";
     const reportKey = trimmedString(raw.report_key);
     const reportType = isReportType(raw.report_type) ? raw.report_type : null;
     const reportDate = trimmedString(raw.report_date);
@@ -180,6 +189,7 @@ function parseReportIndexRows(payload: unknown): ReportIndexRow[] {
     const tickersHydrated = raw.tickers_hydrated === true;
 
     rows.push({
+      bucket_id: bucketId,
       report_key: reportKey,
       report_type: reportType,
       report_date: reportDate,
@@ -203,7 +213,8 @@ export async function fetchReportIndexPage(
   const lookahead = options.lookahead === true;
   const query = new URLSearchParams({
     select: REPORT_INDEX_SELECT,
-    order: "report_date.desc,duplicate_index.desc,report_key.desc",
+    order:
+      "report_date.desc,duplicate_index.desc,report_key.desc,bucket_id.desc",
     limit: String(lookahead ? pageSize + 1 : pageSize),
   });
   if (options.cursor) {
@@ -255,8 +266,10 @@ export async function upsertReportIndexEntry(
   input: ReportIndexUpsertInput,
 ): Promise<void> {
   const env = getSupabaseEnv();
-  const url = `${env.SUPABASE_URL}/rest/v1/report_index?on_conflict=report_key`;
+  const bucketId = input.bucketId?.trim() || env.SUPABASE_REPORTS_BUCKET;
+  const url = `${env.SUPABASE_URL}/rest/v1/report_index?on_conflict=bucket_id,report_key`;
   const row = {
+    bucket_id: bucketId,
     report_key: input.reportKey,
     report_type: input.reportType,
     report_date: input.reportDate,
@@ -283,6 +296,45 @@ export async function upsertReportIndexEntry(
       response.status,
     );
   }
+}
+
+export async function fetchReportIndexEntry(
+  reportKey: string,
+  bucketId?: string,
+): Promise<ReportIndexRow | null> {
+  const env = getSupabaseEnv();
+  const query = new URLSearchParams({
+    select: REPORT_INDEX_SELECT,
+    report_key: `eq.${reportKey}`,
+    limit: "2",
+  });
+  const bucket = bucketId?.trim();
+  if (bucket) {
+    query.set("bucket_id", `eq.${bucket}`);
+  }
+  const url = `${env.SUPABASE_URL}/rest/v1/report_index?${query.toString()}`;
+  const response = await fetchSupabase(url, {
+    headers: buildAuthHeaders({
+      Accept: "application/json",
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to fetch report index entry: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const rows = parseReportIndexRows((await response.json()) as unknown);
+  if (rows.length > 1) {
+    throw new SupabaseApiError(
+      `Report key '${reportKey}' exists in multiple buckets; specify bucket_id`,
+      409,
+    );
+  }
+  return rows[0] ?? null;
 }
 
 export async function downloadStorageJson(

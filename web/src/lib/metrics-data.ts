@@ -148,10 +148,17 @@ function averageMetric(values: Array<number | null>): number | null {
   );
 }
 
-function buildReportHref(type: MetricsPanelType, key?: string | null): string {
+function buildReportHref(
+  type: MetricsPanelType,
+  key?: string | null,
+  bucketId?: string | null,
+): string {
   const params = new URLSearchParams({ type });
   if (key) {
     params.set("key", key);
+    if (bucketId) {
+      params.set("bucket", bucketId);
+    }
   }
   return `/reports?${params.toString()}`;
 }
@@ -189,7 +196,11 @@ export function buildMetricsPanel(
     reportCount: rows.length,
     latestReportKey: latestRow?.report_key ?? null,
     latestGeneratedAt: latestRow?.generated_at ?? null,
-    latestReportHref: buildReportHref(type, latestRow?.report_key ?? null),
+    latestReportHref: buildReportHref(
+      type,
+      latestRow?.report_key ?? null,
+      latestRow?.bucket_id ?? null,
+    ),
     browseHref: buildReportHref(type),
     metrics,
   };

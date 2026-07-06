@@ -279,8 +279,8 @@ flowchart LR
   - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
   - `web/src/proxy.ts`는 Next.js 16 page proxy entrypoint이며 `/`, `/reports`, `/metrics`, `/holdings`, `/run`을 렌더링 전에 로그인으로 리다이렉트합니다. `web/middleware.ts`는 이 proxy가 재사용하는 구현 모듈로 유지합니다.
   - Proxy matcher는 Next build가 정적으로 분석할 수 있도록 `web/src/proxy.ts`에 literal `config.matcher`로 둡니다. `just ci-web` build 출력의 `ƒ Proxy (Middleware)`와 보호 페이지 307 smoke가 page-level auth gate 회귀 검증입니다.
-  - 로컬 요청 강제(`localhost/127.0.0.1/::1`, `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서 완화)
-  - 시작 가드는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없는 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다.
+  - 로컬 요청 강제는 기본적으로 Host/Origin 헤더를 신뢰하지 않으며, loopback bind 또는 신뢰된 외부 경계에서만 `SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS=1`로 활성화합니다. `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서는 완화됩니다.
+  - 시작 가드는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없는 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다. Docker Compose는 호스트 publish를 `127.0.0.1:PORT:3000`로 제한하고 명시적으로 Host-header 로컬 판정을 신뢰합니다.
 - 비밀키 보호
   - Supabase/GitHub 키는 서버 코드(`server-only`)에서만 사용
   - publishable key(`sb_publishable_*`)는 서버 경로에서 거부

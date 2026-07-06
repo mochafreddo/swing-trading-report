@@ -23,6 +23,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
     searchWindow,
     warnings,
     selectedKey,
+    selectedBucketId,
     detail,
     loadingList,
     loadingDetail,
@@ -55,6 +56,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
           searchWindow={searchWindow}
           warnings={warnings}
           selectedKey={selectedKey}
+          selectedBucketId={selectedBucketId}
           loadingList={loadingList}
           refreshing={loadingList || loadingDetail}
           onReportTypeChange={setReportType}

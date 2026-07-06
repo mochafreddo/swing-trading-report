@@ -10,7 +10,16 @@ vi.mock("@/lib/env.server", () => ({
 }));
 
 vi.mock("@/lib/supabase-admin", () => ({
+  SupabaseApiError: class SupabaseApiError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
   fetchReportIndexPage: vi.fn(),
+  fetchReportIndexEntry: vi.fn(),
   downloadStorageJson: vi.fn(),
 }));
 
@@ -21,6 +30,7 @@ import {
 } from "@/lib/reports-data";
 import {
   downloadStorageJson,
+  fetchReportIndexEntry,
   fetchReportIndexPage,
 } from "@/lib/supabase-admin";
 
@@ -39,6 +49,7 @@ describe("reports-data cache", () => {
     vi.mocked(fetchReportIndexPage).mockResolvedValue({
       items: [
         {
+          bucket_id: "reports",
           report_key: "2026/02/2026-02-14.buy.json",
           report_type: "buy",
           report_date: "2026-02-14",
@@ -98,6 +109,7 @@ describe("reports-data cache", () => {
   });
 
   it("caches report detail for same key", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({
       generated_at: "2026-02-14T00:00:00Z",
       tickers: ["AAPL.US"],
@@ -109,7 +121,80 @@ describe("reports-data cache", () => {
     expect(downloadStorageJson).toHaveBeenCalledTimes(1);
   });
 
+  it("downloads report detail from indexed bucket when available", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue({
+      bucket_id: "custom-reports",
+      report_key: "2026/02/2026-02-14.buy.json",
+      report_type: "buy",
+      report_date: "2026-02-14",
+      duplicate_index: 0,
+      generated_at: "2026-02-14T00:00:00Z",
+      summary: null,
+      tickers: ["AAPL.US"],
+      tickers_hydrated: true,
+    });
+    vi.mocked(downloadStorageJson).mockResolvedValue({
+      generated_at: "2026-02-14T00:00:00Z",
+      tickers: ["AAPL.US"],
+    });
+
+    await readReportDetail("2026/02/2026-02-14.buy.json");
+
+    expect(fetchReportIndexEntry).toHaveBeenCalledWith(
+      "2026/02/2026-02-14.buy.json",
+      undefined,
+    );
+    expect(downloadStorageJson).toHaveBeenCalledWith(
+      "custom-reports",
+      "2026/02/2026-02-14.buy.json",
+    );
+  });
+
+  it("downloads report detail from an explicit indexed bucket", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue({
+      bucket_id: "custom-reports",
+      report_key: "2026/02/2026-02-14.buy.json",
+      report_type: "buy",
+      report_date: "2026-02-14",
+      duplicate_index: 0,
+      generated_at: "2026-02-14T00:00:00Z",
+      summary: null,
+      tickers: ["AAPL.US"],
+      tickers_hydrated: true,
+    });
+    vi.mocked(downloadStorageJson).mockResolvedValue({
+      generated_at: "2026-02-14T00:00:00Z",
+      tickers: ["AAPL.US"],
+    });
+
+    await readReportDetail("2026/02/2026-02-14.buy.json", {
+      bucketId: "custom-reports",
+    });
+
+    expect(fetchReportIndexEntry).toHaveBeenCalledWith(
+      "2026/02/2026-02-14.buy.json",
+      "custom-reports",
+    );
+    expect(downloadStorageJson).toHaveBeenCalledWith(
+      "custom-reports",
+      "2026/02/2026-02-14.buy.json",
+    );
+  });
+
+  it("rejects explicit bucket detail when report index has no matching row", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
+
+    await expect(
+      readReportDetail("2026/02/2026-02-14.buy.json", {
+        bucketId: "private-bucket",
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    expect(downloadStorageJson).not.toHaveBeenCalled();
+  });
+
   it("accepts AI brief detail keys", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({
       schema: "sab.ai_brief.v1",
       type: "ai_brief",
@@ -126,6 +211,7 @@ describe("reports-data cache", () => {
   });
 
   it("bypasses detail cache when refresh=true", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({
       generated_at: "2026-02-14T00:00:00Z",
       tickers: ["AAPL.US"],

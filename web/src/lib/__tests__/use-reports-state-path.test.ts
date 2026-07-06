@@ -67,4 +67,15 @@ describe("reports request path builders", () => {
       "/api/reports/detail?key=2026%2F02%2F2026-02-14.buy.json&refresh=1",
     );
   });
+
+  it("adds bucket to detail path when requested", () => {
+    const path = buildReportDetailRequestPath({
+      key: "2026/02/2026-02-14.buy.json",
+      bucketId: "custom-reports",
+    });
+
+    expect(path).toBe(
+      "/api/reports/detail?key=2026%2F02%2F2026-02-14.buy.json&bucket=custom-reports",
+    );
+  });
 });

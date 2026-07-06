@@ -101,6 +101,7 @@ describe("GET /api/reports", () => {
     listMock.mockResolvedValue({
       items: [
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_14,
           report_type: "buy",
           report_date: "2026-02-14",
@@ -111,6 +112,7 @@ describe("GET /api/reports", () => {
           tickers_hydrated: true,
         },
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_13,
           report_type: "buy",
           report_date: "2026-02-13",
@@ -128,6 +130,7 @@ describe("GET /api/reports", () => {
         report_date: "2026-02-13",
         duplicate_index: 0,
         report_key: BUY_KEY_13,
+        bucket_id: "reports",
       },
     });
 
@@ -181,6 +184,7 @@ describe("GET /api/reports", () => {
     listMock.mockResolvedValue({
       items: [
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_14,
           report_type: "buy",
           report_date: "2026-02-14",
@@ -191,6 +195,7 @@ describe("GET /api/reports", () => {
           tickers_hydrated: true,
         },
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_13,
           report_type: "buy",
           report_date: "2026-02-13",
@@ -201,6 +206,7 @@ describe("GET /api/reports", () => {
           tickers_hydrated: true,
         },
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_12,
           report_type: "buy",
           report_date: "2026-02-12",
@@ -211,6 +217,7 @@ describe("GET /api/reports", () => {
           tickers_hydrated: true,
         },
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_11,
           report_type: "buy",
           report_date: "2026-02-11",
@@ -265,6 +272,7 @@ describe("GET /api/reports", () => {
     listMock.mockResolvedValue({
       items: [
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_14,
           report_type: "buy",
           report_date: "2026-02-14",
@@ -275,6 +283,7 @@ describe("GET /api/reports", () => {
           tickers_hydrated: false,
         },
         {
+          bucket_id: "reports",
           report_key: BUY_KEY_13,
           report_type: "buy",
           report_date: "2026-02-13",
@@ -308,6 +317,7 @@ describe("GET /api/reports", () => {
   it("returns partial results with warning when later search page fails", async () => {
     const listMock = vi.mocked(fetchReportIndexPage);
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      bucket_id: "reports",
       report_key: `2026/02/2026-02-${String(20 - (index % 20)).padStart(2, "0")}.buy.json`,
       report_type: "buy" as const,
       report_date: `2026-02-${String(20 - (index % 20)).padStart(2, "0")}`,
@@ -321,6 +331,7 @@ describe("GET /api/reports", () => {
       report_date: firstPage[firstPage.length - 1]!.report_date,
       duplicate_index: firstPage[firstPage.length - 1]!.duplicate_index,
       report_key: firstPage[firstPage.length - 1]!.report_key,
+      bucket_id: firstPage[firstPage.length - 1]!.bucket_id,
     };
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "110");
@@ -372,11 +383,13 @@ describe("GET /api/reports", () => {
       report_date: "2026-02-01",
       duplicate_index: 99,
       report_key: "2026/02/2026-02-01.buy.json",
+      bucket_id: "reports",
     };
     const secondCursor = {
       report_date: "2026-01-31",
       duplicate_index: 0,
       report_key: "2026/01/2026-01-31.buy.json",
+      bucket_id: "reports",
     };
 
     vi.stubEnv("REPORT_SEARCH_WINDOW", "110");
@@ -384,6 +397,7 @@ describe("GET /api/reports", () => {
       .mockResolvedValueOnce({
         items: [
           {
+            bucket_id: "reports",
             report_key: BUY_KEY_14,
             report_type: "buy",
             report_date: "2026-02-14",
@@ -402,6 +416,7 @@ describe("GET /api/reports", () => {
       .mockResolvedValueOnce({
         items: [
           {
+            bucket_id: "reports",
             report_key: BUY_KEY_13,
             report_type: "buy",
             report_date: "2026-02-13",
@@ -455,6 +470,7 @@ describe("GET /api/reports", () => {
   it("applies searchWindow and marks truncated when candidates exceed window", async () => {
     const listMock = vi.mocked(fetchReportIndexPage);
     const windowRows = Array.from({ length: 10 }, (_, index) => ({
+      bucket_id: "reports",
       report_key: `2026/02/2026-02-${String(20 - index).padStart(2, "0")}.buy.json`,
       report_type: "buy" as const,
       report_date: `2026-02-${String(20 - index).padStart(2, "0")}`,
@@ -475,6 +491,7 @@ describe("GET /api/reports", () => {
         report_date: windowRows[windowRows.length - 1]!.report_date,
         duplicate_index: windowRows[windowRows.length - 1]!.duplicate_index,
         report_key: windowRows[windowRows.length - 1]!.report_key,
+        bucket_id: windowRows[windowRows.length - 1]!.bucket_id,
       },
     });
 

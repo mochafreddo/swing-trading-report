@@ -86,6 +86,22 @@ describe("holdings actions", () => {
     });
   });
 
+  it("rejects invalid edit currency against the existing ticker", async () => {
+    await expect(
+      saveHoldingAction({
+        editingTicker: "005930",
+        payload: {
+          entry_currency: "USD",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Invalid holding patch payload",
+    });
+
+    expect(updateHolding).not.toHaveBeenCalled();
+  });
+
   it("returns not found when deleting a missing holding", async () => {
     deleteHolding.mockResolvedValue(false);
 

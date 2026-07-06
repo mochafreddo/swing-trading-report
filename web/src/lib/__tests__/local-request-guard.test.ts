@@ -18,15 +18,22 @@ afterEach(() => {
 });
 
 describe("local-request-guard", () => {
-  it("detects localhost and loopback hosts", () => {
+  it("does not infer locality from host headers without explicit trust", () => {
+    expect(isLocalRequest(makeRequest({ host: "localhost:3000" }))).toBe(false);
+  });
+
+  it("detects localhost and loopback hosts with explicit trusted-header opt-in", () => {
+    vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
+
     expect(isLocalRequest(makeRequest({ host: "localhost:3000" }))).toBe(true);
     expect(isLocalRequest(makeRequest({ host: "127.0.0.1:55300" }))).toBe(true);
     expect(isLocalRequest(makeRequest({ host: "[::1]:3000" }))).toBe(true);
     expect(isLocalRequest(makeRequest({ host: "example.com" }))).toBe(false);
   });
 
-  it("allows localhost and loopback hosts", () => {
+  it("allows localhost and loopback hosts with explicit trusted-header opt-in", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
 
     expect(() =>
       assertLocalRequest(makeRequest({ host: "localhost:3000" })),
@@ -41,6 +48,7 @@ describe("local-request-guard", () => {
 
   it("rejects forwarded host mismatch", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
 
     expect(() =>
       assertLocalRequest(
@@ -69,7 +77,7 @@ describe("local-request-guard", () => {
     ).toThrow(LocalRequestGuardError);
   });
 
-  it("allows unsafe requests when sec-fetch-site is same-origin", () => {
+  it("rejects spoofable unsafe same-origin fetch metadata by default", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     expect(() =>
@@ -82,10 +90,10 @@ describe("local-request-guard", () => {
           "POST",
         ),
       ),
-    ).not.toThrow();
+    ).toThrow(LocalRequestGuardError);
   });
 
-  it("allows unsafe requests when origin/referer is local", () => {
+  it("rejects spoofable unsafe local origin headers by default", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     expect(() =>
@@ -98,7 +106,7 @@ describe("local-request-guard", () => {
           "POST",
         ),
       ),
-    ).not.toThrow();
+    ).toThrow(LocalRequestGuardError);
 
     expect(() =>
       assertLocalRequest(
@@ -106,6 +114,35 @@ describe("local-request-guard", () => {
           {
             host: "localhost:3000",
             referer: "http://localhost:3000/holdings",
+          },
+          "POST",
+        ),
+      ),
+    ).toThrow(LocalRequestGuardError);
+  });
+
+  it("allows unsafe local header checks only with explicit trusted-header opt-in", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest(
+          {
+            host: "localhost:3000",
+            "sec-fetch-site": "same-origin",
+          },
+          "POST",
+        ),
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      assertLocalRequest(
+        makeRequest(
+          {
+            host: "localhost:3000",
+            origin: "http://localhost:3000",
           },
           "POST",
         ),

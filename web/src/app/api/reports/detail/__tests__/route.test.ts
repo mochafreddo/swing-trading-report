@@ -73,6 +73,7 @@ vi.mock("@/lib/supabase-admin", () => {
   return {
     SupabaseApiError,
     downloadStorageJson: vi.fn(),
+    fetchReportIndexEntry: vi.fn(() => Promise.resolve(null)),
   };
 });
 
@@ -83,7 +84,11 @@ import {
   LocalRequestGuardError,
 } from "@/lib/local-request-guard";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
-import { downloadStorageJson, SupabaseApiError } from "@/lib/supabase-admin";
+import {
+  downloadStorageJson,
+  fetchReportIndexEntry,
+  SupabaseApiError,
+} from "@/lib/supabase-admin";
 
 const CACHE_CONTROL_VALUE = "private, no-store, max-age=0, must-revalidate";
 
@@ -202,6 +207,50 @@ describe("GET /api/reports/detail route", () => {
     expect(response.headers.get("cache-control")).toBe(CACHE_CONTROL_VALUE);
     expect(payload.key).toBe("2026/02/2026-02-14.entry.json");
     expect(payload.report).toEqual(report);
+  });
+
+  it("downloads report detail from the requested bucket", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValueOnce({
+      bucket_id: "custom-reports",
+      report_key: "2026/02/2026-02-14.buy.json",
+      report_type: "buy",
+      report_date: "2026-02-14",
+      duplicate_index: 0,
+      generated_at: "2026-02-14T00:00:00Z",
+      summary: null,
+      tickers: ["AAPL.US"],
+      tickers_hydrated: true,
+    });
+    const report = {
+      generated_at: "2026-02-14T00:00:00Z",
+      tickers: ["AAPL.US"],
+    };
+    vi.mocked(downloadStorageJson).mockResolvedValueOnce(report);
+    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
+
+    const response = await GET(makeRequest(`key=${key}&bucket=custom-reports`));
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(fetchReportIndexEntry)).toHaveBeenCalledWith(
+      "2026/02/2026-02-14.buy.json",
+      "custom-reports",
+    );
+    expect(vi.mocked(downloadStorageJson)).toHaveBeenCalledWith(
+      "custom-reports",
+      "2026/02/2026-02-14.buy.json",
+    );
+  });
+
+  it("rejects explicit bucket detail when the index has no matching row", async () => {
+    vi.mocked(fetchReportIndexEntry).mockResolvedValueOnce(null);
+    const key = encodeURIComponent("2026/02/2026-02-14.buy.json");
+
+    const response = await GET(makeRequest(`key=${key}&bucket=private-bucket`));
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe("Report not found");
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
   });
 
   it("returns AI brief detail when key is valid", async () => {

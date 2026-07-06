@@ -21,6 +21,7 @@ export function isReportType(value: unknown): value is ReportType {
 
 export interface ReportListItem {
   key: string;
+  bucketId: string;
   type: ReportType;
   reportDate: string;
   duplicateIndex: number;

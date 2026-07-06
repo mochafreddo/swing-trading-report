@@ -7,7 +7,10 @@ import {
   resolveEffectiveBindHost,
 } from "./next-args.mjs";
 import { loadRootEnv } from "./root-env-loader.mjs";
-import { enforceStartupBindGuard } from "./startup-bind-guard.mjs";
+import {
+  enforceStartupBindGuard,
+  isLoopbackBindHost,
+} from "./startup-bind-guard.mjs";
 
 loadRootEnv();
 
@@ -48,9 +51,15 @@ const extraArgs = process.argv.slice(3);
 if (command !== "build") {
   try {
     const bindHost = resolveEffectiveBindHost(extraArgs, process.env);
-    enforceStartupBindGuard(process.env, console, {
+    const guardResult = enforceStartupBindGuard(process.env, console, {
       bindHost,
     });
+    if (
+      isLoopbackBindHost(guardResult.bindHost) &&
+      !process.env.SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS?.trim()
+    ) {
+      process.env.SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS = "1";
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
 
   const query = reportDetailQuerySchema.safeParse({
     key: request.nextUrl.searchParams.get("key") ?? undefined,
+    bucket: request.nextUrl.searchParams.get("bucket") ?? undefined,
     refresh: request.nextUrl.searchParams.get("refresh") ?? undefined,
   });
 
@@ -73,6 +74,7 @@ export async function GET(request: NextRequest) {
   try {
     const payload = await readReportDetail(query.data.key, {
       refresh: query.data.refresh,
+      bucketId: query.data.bucket,
     });
     const response = jsonWithNoStore(payload);
     logApiInfo({
@@ -86,6 +88,7 @@ export async function GET(request: NextRequest) {
       dependency: "supabase",
       duration_ms: elapsedMs(startedAtMs),
       report_key: query.data.key,
+      report_bucket: query.data.bucket,
       refresh: query.data.refresh,
     });
     return withApiRequestId(response, requestId);
@@ -101,6 +104,7 @@ export async function GET(request: NextRequest) {
         status_code: error.status,
         reason: "invalid_report_key",
         report_key: query.data.key,
+        report_bucket: query.data.bucket,
         duration_ms: elapsedMs(startedAtMs),
       });
       return withApiRequestId(
@@ -120,6 +124,7 @@ export async function GET(request: NextRequest) {
         dependency: "supabase",
         reason: "not_found",
         report_key: query.data.key,
+        report_bucket: query.data.bucket,
         duration_ms: elapsedMs(startedAtMs),
       });
       return withApiRequestId(
@@ -141,10 +146,11 @@ export async function GET(request: NextRequest) {
       duration_ms: elapsedMs(startedAtMs),
       retryable: statusCode >= 500,
       report_key: query.data.key,
+      report_bucket: query.data.bucket,
       refresh: query.data.refresh,
     });
     return withApiRequestId(
-      jsonWithNoStore({ error: toErrorMessage(error) }, { status: 500 }),
+      jsonWithNoStore({ error: toErrorMessage(error) }, { status: statusCode }),
       requestId,
     );
   }

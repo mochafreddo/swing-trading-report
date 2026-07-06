@@ -35,6 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("SAB_ENFORCE_LOCAL_REQUEST", "1");
+  vi.stubEnv("SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS", "1");
   vi.stubEnv("SUPABASE_URL", "https://example.supabase.co");
   vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
 });
@@ -82,6 +83,7 @@ describe("/api/reports integration", () => {
     expect(payload.total).toBeNull();
     expect(payload.items[0]).toEqual({
       key: "2026/02/2026-02-20.buy.json",
+      bucketId: "reports",
       type: "buy",
       reportDate: "2026-02-20",
       duplicateIndex: 0,
@@ -94,7 +96,7 @@ describe("/api/reports integration", () => {
     expect(requestUrl.pathname).toBe("/rest/v1/report_index");
     expect(requestUrl.searchParams.get("report_type")).toBe("eq.buy");
     expect(requestUrl.searchParams.get("order")).toBe(
-      "report_date.desc,duplicate_index.desc,report_key.desc",
+      "report_date.desc,duplicate_index.desc,report_key.desc,bucket_id.desc",
     );
     expect(requestUrl.searchParams.get("limit")).toBe("3");
   });
@@ -132,6 +134,7 @@ describe("/api/reports integration", () => {
     expect(response.status).toBe(200);
     expect(payload.items[0]).toEqual({
       key: "2026/02/2026-02-20.entry.json",
+      bucketId: "reports",
       type: "entry",
       reportDate: "2026-02-20",
       duplicateIndex: 0,
@@ -174,6 +177,7 @@ describe("/api/reports integration", () => {
     expect(response.status).toBe(200);
     expect(payload.items[0]).toEqual({
       key: "2026/05/2026-05-05.ai-brief.json",
+      bucketId: "reports",
       type: "ai-brief",
       reportDate: "2026-05-05",
       duplicateIndex: 0,

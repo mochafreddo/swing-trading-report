@@ -1,6 +1,5 @@
 import "server-only";
 
-import { getSupabaseEnv } from "@/lib/env.server";
 import {
   collectTickerAliases,
   extractBuyCandidatesFromRows,
@@ -26,6 +25,7 @@ const DIRECTORY_BUILD_REPORT_LIMIT = 60;
 const REPORT_PAGE_SIZE = 20;
 const REPORT_DUPLICATE_INDEX_PATTERN = /-(\d+)\.buy\.json$/;
 const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
+const DEFAULT_REPORT_BUCKET_ID = "reports";
 
 export type { TickerDirectoryCandidate } from "@/lib/ticker-directory-candidates";
 
@@ -35,6 +35,7 @@ interface TickerDirectoryEntryV1 {
   aliases: string[];
   lastSeenReportDate: string | null;
   lastSeenReportKey: string | null;
+  lastSeenReportBucketId: string;
   updatedAtMs: number;
 }
 
@@ -65,6 +66,7 @@ export interface TickerDirectorySearchResponse {
 export interface RecentBuyCandidatesResponse {
   report: {
     key: string;
+    bucketId: string;
     reportDate: string | null;
   } | null;
   candidates: RecentBuyCandidate[];
@@ -104,6 +106,7 @@ interface MutableTickerDirectoryEntry {
   aliases: Set<string>;
   lastSeenReportDate: string | null;
   lastSeenReportKey: string | null;
+  lastSeenReportBucketId: string;
   updatedAtMs: number;
 }
 
@@ -129,6 +132,29 @@ function normalizeUsBaseSymbol(value: string): string {
 function directoryUsBase(ticker: string): string | null {
   const match = EXPLICIT_US_SUFFIX_PATTERN.exec(ticker);
   return match?.[1] ?? null;
+}
+
+function normalizeBucketId(value: unknown): string {
+  return normalizeCandidateName(value) ?? DEFAULT_REPORT_BUCKET_ID;
+}
+
+function reportSourceId(bucketId: string, reportKey: string): string {
+  return `${bucketId}:${reportKey}`;
+}
+
+function reportRowSourceId(row: ReportIndexRow): string {
+  return reportSourceId(row.bucket_id, row.report_key);
+}
+
+function sourceContainsRow(
+  sourceIds: Set<string>,
+  row: ReportIndexRow,
+): boolean {
+  return (
+    sourceIds.has(reportRowSourceId(row)) ||
+    (row.bucket_id === DEFAULT_REPORT_BUCKET_ID &&
+      sourceIds.has(row.report_key))
+  );
 }
 
 function parseTickerDirectoryPayload(
@@ -178,6 +204,7 @@ function parseTickerDirectoryPayload(
       aliases?: unknown;
       lastSeenReportDate?: unknown;
       lastSeenReportKey?: unknown;
+      lastSeenReportBucketId?: unknown;
       updatedAtMs?: unknown;
     };
     const ticker = normalizeCandidateTicker(raw.ticker);
@@ -201,6 +228,7 @@ function parseTickerDirectoryPayload(
         aliases.length > 0 ? aliases : collectTickerAliases(ticker, null),
       lastSeenReportDate: normalizeCandidateName(raw.lastSeenReportDate),
       lastSeenReportKey: normalizeCandidateName(raw.lastSeenReportKey),
+      lastSeenReportBucketId: normalizeBucketId(raw.lastSeenReportBucketId),
       updatedAtMs,
     });
   }
@@ -250,6 +278,7 @@ function toMutableEntryMap(
       aliases: new Set(aliases),
       lastSeenReportDate: entry.lastSeenReportDate,
       lastSeenReportKey: entry.lastSeenReportKey,
+      lastSeenReportBucketId: entry.lastSeenReportBucketId,
       updatedAtMs: entry.updatedAtMs,
     });
   }
@@ -293,6 +322,7 @@ function mergeCandidatesFromReport(
         aliases: new Set(aliases),
         lastSeenReportDate: row.report_date,
         lastSeenReportKey: row.report_key,
+        lastSeenReportBucketId: row.bucket_id,
         updatedAtMs: nowMs,
       });
       continue;
@@ -307,6 +337,7 @@ function mergeCandidatesFromReport(
     if (shouldUpdateLastSeen(row, existing)) {
       existing.lastSeenReportDate = row.report_date;
       existing.lastSeenReportKey = row.report_key;
+      existing.lastSeenReportBucketId = row.bucket_id;
     }
     existing.updatedAtMs = nowMs;
   }
@@ -314,10 +345,15 @@ function mergeCandidatesFromReport(
 
 function pruneEntriesOutsideReportKeys(
   entries: Map<string, MutableTickerDirectoryEntry>,
-  reportKeys: Set<string>,
+  reportSourceIds: Set<string>,
 ): void {
   for (const [ticker, entry] of entries) {
-    if (!entry.lastSeenReportKey || !reportKeys.has(entry.lastSeenReportKey)) {
+    if (
+      !entry.lastSeenReportKey ||
+      !reportSourceIds.has(
+        reportSourceId(entry.lastSeenReportBucketId, entry.lastSeenReportKey),
+      )
+    ) {
       entries.delete(ticker);
     }
   }
@@ -421,13 +457,14 @@ async function loadCachedDirectory(): Promise<TickerDirectoryPayloadV1 | null> {
   return parseTickerDirectoryPayload(state.state_payload);
 }
 
-async function getLatestBuyReportKey(): Promise<string | null> {
+async function getLatestBuyReportSourceId(): Promise<string | null> {
   const page = await fetchReportIndexPage({
     type: "buy",
     limit: 1,
     includeTotal: false,
   });
-  return page.items[0]?.report_key ?? null;
+  const row = page.items[0];
+  return row ? reportRowSourceId(row) : null;
 }
 
 function shouldRefreshDirectory(
@@ -451,33 +488,34 @@ async function refreshDirectory(
   cached: TickerDirectoryPayloadV1 | null,
 ): Promise<TickerDirectoryPayloadV1> {
   const nowMs = Date.now();
-  const env = getSupabaseEnv();
   const rows = await collectRecentBuyRows(DIRECTORY_BUILD_REPORT_LIMIT);
-  const rowKeys = rows.map((row) => row.report_key);
+  const rowSourceIds = rows.map(reportRowSourceId);
   const entries = toMutableEntryMap(cached?.entries ?? []);
-  const knownKeys = new Set(cached?.source.buyReportKeys ?? []);
-  const scannedKeys = new Set(
-    rowKeys.filter((reportKey) => knownKeys.has(reportKey)),
+  const knownSourceIds = new Set(cached?.source.buyReportKeys ?? []);
+  const scannedSourceIds = new Set(
+    rows
+      .filter((row) => sourceContainsRow(knownSourceIds, row))
+      .map(reportRowSourceId),
   );
   const rowsToMerge = cached
-    ? rows.filter((row) => !knownKeys.has(row.report_key))
+    ? rows.filter((row) => !sourceContainsRow(knownSourceIds, row))
     : rows;
 
   for (const row of rowsToMerge) {
     const candidates = await tryLoadBuyReportCandidates(
-      env.SUPABASE_REPORTS_BUCKET,
+      row.bucket_id,
       row.report_key,
     );
     if (!candidates) {
       continue;
     }
     mergeCandidatesFromReport(entries, row, candidates, nowMs);
-    scannedKeys.add(row.report_key);
+    scannedSourceIds.add(reportRowSourceId(row));
   }
-  const scannedReportKeys = rowKeys.filter((reportKey) =>
-    scannedKeys.has(reportKey),
+  const scannedReportKeys = rowSourceIds.filter((reportSource) =>
+    scannedSourceIds.has(reportSource),
   );
-  pruneEntriesOutsideReportKeys(entries, new Set(rowKeys));
+  pruneEntriesOutsideReportKeys(entries, new Set(rowSourceIds));
 
   const payload: TickerDirectoryPayloadV1 = {
     version: 1,
@@ -493,6 +531,7 @@ async function refreshDirectory(
         aliases: Array.from(entry.aliases),
         lastSeenReportDate: entry.lastSeenReportDate,
         lastSeenReportKey: entry.lastSeenReportKey,
+        lastSeenReportBucketId: entry.lastSeenReportBucketId,
         updatedAtMs: entry.updatedAtMs,
       }))
       .sort((left, right) => left.ticker.localeCompare(right.ticker)),
@@ -512,7 +551,7 @@ async function loadDirectoryForSearch(): Promise<TickerDirectoryPayloadV1> {
   const cached = await loadCachedDirectory();
   let latestKey: string | null = null;
   try {
-    latestKey = await getLatestBuyReportKey();
+    latestKey = await getLatestBuyReportSourceId();
   } catch {
     latestKey = null;
   }
@@ -626,12 +665,11 @@ export async function listRecentBuyCandidates(
 ): Promise<RecentBuyCandidatesResponse> {
   const limitReports = clampInt(options.limitReports, 1, 50);
   const limitCandidates = clampInt(options.limitCandidates, 1, 100);
-  const env = getSupabaseEnv();
   const rows = await collectRecentBuyRows(limitReports);
 
   for (const row of rows) {
     const allCandidates = await tryLoadBuyReportRecentCandidates(
-      env.SUPABASE_REPORTS_BUCKET,
+      row.bucket_id,
       row.report_key,
     );
     if (!allCandidates) {
@@ -644,6 +682,7 @@ export async function listRecentBuyCandidates(
     return {
       report: {
         key: row.report_key,
+        bucketId: row.bucket_id,
         reportDate: row.report_date,
       },
       candidates,
