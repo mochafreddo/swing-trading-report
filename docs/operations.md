@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | Reports | Supabase Storage `reports` + `report_index` | Web `Reports`, workflow logs |
 | Holdings | Supabase `holdings` | Web `Holdings`, SQL checks |
-| Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief checks |
+| Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief and scheduled Sell AI Brief checks |
 | Automation | GitHub Actions + local scheduler + Toss launchd runner | GitHub run logs, Docker scheduler logs, Toss launchd logs |
 | Web console | local Docker `web` service | `/login` liveness, container logs |
 | Secrets | `.env`, `.env.scheduler.local`, GitHub Secrets | Do not print values |
@@ -72,10 +72,11 @@ value with `[REDACTED]` before sharing it.
 | Web liveness | unauthenticated page | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` |
 | Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
+| Scheduled Sell AI Brief delivery | generic wrapper / runtime_state | `SELL_AI_BRIEF_REPORT_PATH=reports/2026-07-06.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
 | Supabase reports | SQL/dashboard | `report_index`, Storage `reports` bucket |
-| Supabase locks | SQL/dashboard | `runtime_state` rows prefixed `scheduled-ai-brief:` |
+| Supabase locks | SQL/dashboard | `runtime_state` rows prefixed `scheduled-ai-brief:` or `scheduled-sell:` |
 
 ## Scheduled AI Brief
 
@@ -144,6 +145,38 @@ Local log retention:
 
 NEEDS_CONFIRMATION: 운영 환경의 최종 알림 채널, late-alert 수신자, 수동 override 승인자는 코드로 확인할 수 없습니다.
 
+## Scheduled Sell AI Brief Delivery
+
+Scheduled Sell AI Brief delivery is a marker-aware reconciliation path for an already-built `*.sell-ai-brief.json` artifact. It does not generate a sell report and it does not generate a Sell AI Brief.
+
+Execution paths:
+
+- Local/CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
+- launchd generic wrapper route: `scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` when `SELL_AI_BRIEF_REPORT_PATH` is set
+- Manual GitHub Actions: `.github/workflows/sell.yml` remains manual opt-in generation/upload/notification and is not the scheduled path
+
+Runtime markers use the `scheduled-sell:` prefix and are keyed by `scope + session_date`:
+
+- `scheduled-sell:attempt:*`: pre-lock observation marker for a delivery attempt
+- `scheduled-sell:lock:*`: main delivery lock; only the lock owner may publish canonical artifact/notification success markers
+- `scheduled-sell:artifact:*`: Storage upload plus `report_index` indexing completed for the artifact
+- `scheduled-sell:notification:claim:*`: single-owner claim for Telegram delivery/reconciliation
+- `scheduled-sell:notification:sent:*`: notification delivery finished for the uploaded artifact
+- `scheduled-sell:success:*`: upload and notification contract completed for that scope/session
+
+Gate order:
+
+1. The upstream Sell AI Brief generation path should already have passed `scripts/eval_sell_ai_brief.py` before any scheduled delivery is attempted.
+2. The delivery runner revalidates the artifact with `validate_sell_ai_brief_artifact(...)`.
+3. Only after validation succeeds does it upload to Supabase Storage and upsert `report_index`.
+4. Only after upload/index succeeds and the `artifact` marker is recorded does it send Telegram and record `notification:sent` then `success`.
+
+Reconciliation rules:
+
+- If `success` already exists, the runner no-ops.
+- If `artifact` exists without `success`, the runner downloads the uploaded JSON by storage key and retries notification reconciliation instead of uploading a second copy.
+- `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed` are failure statuses. `dry_run`, `success_marker_skip`, `lock_held_skip`, `completed`, `completion_repaired`, `notification_claim_held`, and `notification_reconciled` are non-fatal delivery outcomes.
+
 ## Local Toss Daily Auto Sync
 
 The Toss auto-sync launchd job calls the local web route
@@ -171,7 +204,7 @@ Holdings page before rerunning. Full setup and QA steps live in
 | Workflow | Normal Signal | Failure Start Point |
 | --- | --- | --- |
 | `scan.yml` | manual run uploads and indexes a report; no scheduled trigger until marker-aware local upload is implemented | KIS credentials, provider availability, upload step, report `system_issues` |
-| `sell.yml` | manual run loads Supabase holdings then uploads a sell report; no scheduled trigger until marker-aware local upload is implemented | holdings query, KIS/pykrx provider, upload step |
+| `sell.yml` | manual run loads Supabase holdings, generates sell/Sell AI Brief artifacts, and only sends Sell AI Brief Telegram when the manual input opts in; scheduled sell generation remains disabled | holdings query, KIS/pykrx provider, sell-ai-brief quality gate, upload step |
 | `ai-brief.yml` | manual artifact passes recommendation quality gate before Supabase upload and opt-in notifications; scheduled artifact/skip marker after runtime_state guard and quality gate | context resolve, runtime_state lock, source/model provider, recommendation quality gate, gated Supabase upload step |
 | `cleanup.yml` | cleanup summary counts | retention input, bucket guard, delete target counts |
 | `ci.yml` | Python and web checks green | first failing job logs |

@@ -3719,6 +3719,13 @@ class DefaultScheduledStorage:
             run_type="entry",
         )
 
+    def upload_sell_ai_brief(self, report_path: str, *, report_date: str) -> str:
+        return self._upload_report(
+            report_path,
+            report_date=report_date,
+            run_type="sell-ai-brief",
+        )
+
     def upload_ai_brief_skip(self, report_path: str, *, report_date: str) -> str:
         return self._upload_report(
             report_path,
@@ -3805,15 +3812,18 @@ class DefaultScheduledNotifier:
         if response.status_code >= 300:
             raise RuntimeError(f"Telegram send failed: HTTP {response.status_code}")
 
-    def send_schedule(self, *, report: dict[str, object], storage_key: str) -> None:
+    def send_telegram_html_text(self, text: str) -> None:
         self.require_telegram()
+        for part in split_telegram_message_text(text):
+            self._post_telegram_message(part, parse_mode="HTML")
+
+    def send_schedule(self, *, report: dict[str, object], storage_key: str) -> None:
         text = build_ai_brief_telegram_report_text(
             report=report,
             run_url=os.getenv("SAB_RUN_URL", ""),
             storage_key=storage_key,
         )
-        for part in split_telegram_message_text(text):
-            self._post_telegram_message(part, parse_mode="HTML")
+        self.send_telegram_html_text(text)
         slack_webhook_url = str(os.getenv("SLACK_WEBHOOK_URL") or "").strip()
         if slack_webhook_url:
             slack_text = build_ai_brief_slack_summary_text(

@@ -50,6 +50,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `ai-brief` | entry report의 executable/blocked/watch 후보를 AI brief로 요약 | `--entry-report`, `--market`, `--buy-report`, `--model-provider fake|openai`, `--model-name`, `--model-timeout-seconds`, `--source-provider`, `--source-report`, `--source-api-url`, `--source-timeout-seconds`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).ai-brief.json` |
 | `sell-ai-brief` | sell report의 SELL/SELL_PARTIAL/REVIEW 후보를 AI 판단/이유와 최신 source context로 요약 | `--sell-report`, `--model-provider fake|openai`, `--model-name`, `--model-timeout-seconds`, `--source-provider`, `--source-report`, `--source-api-url`, `--source-timeout-seconds`, `--article-reader none|lightpanda`, `--article-reader-max-urls`, `--article-reader-timeout-seconds`, `--article-reader-max-excerpt-chars`, `--upload`, `--report-date` | `reports/YYYY-MM-DD(-n).sell-ai-brief.json` |
 | `ai-brief-scheduled` | runtime_state guard와 marker를 사용하는 scheduled runner | `--market`, `--schedule-role`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--source-provider`, `--model-provider`, `--dry-run`, `--guard-only` | `ai-brief` 또는 `ai-brief-skip` report, runtime_state marker |
+| `sell-ai-brief-scheduled` | 기존 Sell AI Brief artifact를 validation + upload/index + notify 순서로 전달/재조정 | `--sell-ai-brief-report`, `--scope KR|US|MIXED`, `--session-date`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--dry-run` | stdout status JSON, `scheduled-sell:*` runtime_state marker, optional Storage/report_index delivery |
 | `ai-brief-latency-probe` | AI Brief primary/fallback 모델 호출 수와 반복 횟수 계획을 확인 | `--primary-model`, `--fallback-model`, `--repetitions 1..3` | stdout `planned_live_model_call_count=<n>`; upload/notification 없음 |
 
 ## Report Artifacts
@@ -104,6 +105,15 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - `source_provider_summary`, source row freshness/URL validation, optional `article_read`, and OpenAI request-local `source_refs` follow the same source safety boundary used by AI Brief.
 - `brief_state` is one of `NO_ACTION`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS`, or `MODEL_OR_SYSTEM_ISSUE`. `NO_ACTION` means there were no actionable sell rows, so no model call is attempted.
 - `scripts/eval_sell_ai_brief.py` is the offline quality gate for this artifact. It checks source sell alignment, HOLD exclusion, unsupported/cap rows, summary counts, source-backed ratio, action preservation, and automated-order language.
+- Manual `.github/workflows/sell.yml` keeps this gate in front of force upload and Telegram delivery. `send_sell_ai_brief_notifications=true` is still an opt-in manual delivery input, not a scheduled trigger.
+
+### Scheduled Sell AI Brief Delivery Notes
+
+- `sell-ai-brief-scheduled` consumes an existing `*.sell-ai-brief.json` artifact. It does not build a sell report and it does not run `sell-ai-brief` generation.
+- The runner validates the local or downloaded artifact with `validate_sell_ai_brief_artifact(...)`, then uploads it to Supabase Storage and upserts `report_index`, and only then attempts Telegram delivery.
+- Runtime coordination uses `scheduled-sell:*` markers: `attempt`, `lock`, `artifact`, `notification:claim`, `notification:sent`, and `success`.
+- If `success` already exists, the command returns a skip status. If `artifact` exists without `success`, the command reconciles notification from the uploaded storage object instead of re-uploading a second artifact.
+- Exit code is non-zero only for `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed`. Skip/reconciliation outcomes stay zero to preserve idempotent scheduler retries.
 
 ### Notification Text Contracts
 

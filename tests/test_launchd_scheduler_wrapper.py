@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
 import plistlib
 import shlex
@@ -159,6 +160,73 @@ def test_generic_scheduled_wrapper_argument_validation() -> None:
         )
         assert result.returncode == 2
         assert "usage:" in result.stderr
+
+    sell_without_artifact = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "KR"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert sell_without_artifact.returncode == 2
+    assert (
+        "scheduled sell delivery requires SELL_AI_BRIEF_REPORT_PATH and scope=MIXED"
+        in sell_without_artifact.stderr
+    )
+
+
+def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief(
+    tmp_path: Path,
+) -> None:
+    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    args_path = tmp_path / "uv-args.txt"
+
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(args_path.as_posix())}\n"
+        "exit 0\n",
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "SELL_AI_BRIEF_REPORT_PATH": "reports/2026-07-06.sell-ai-brief.json",
+    }
+
+    result = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "MIXED"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert args_path.read_text(encoding="utf-8").splitlines() == [
+        "run",
+        "python",
+        "-m",
+        "sab",
+        "sell-ai-brief-scheduled",
+        "--sell-ai-brief-report",
+        "reports/2026-07-06.sell-ai-brief.json",
+        "--scope",
+        "MIXED",
+        "--session-date",
+        dt.datetime.now(dt.UTC).strftime("%Y-%m-%d"),
+        "--runner-role",
+        "local-primary",
+        "--scheduled-tick",
+        "manual",
+        "--attempt-id",
+        "",
+        "--run-url",
+        "",
+    ]
 
 
 def test_launchd_wrapper_guards_role_before_env_and_docker_preflight() -> None:
