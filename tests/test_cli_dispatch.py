@@ -426,6 +426,88 @@ def test_dispatch_command_routes_scheduled_sell_ai_brief_options(
     ]
 
 
+def test_run_scheduled_sell_ai_brief_delivery_maps_status_to_exit_code(
+    monkeypatch,
+) -> None:
+    statuses_to_expected = {
+        "artifact_invalid": 1,
+        "artifact_marker_invalid": 1,
+        "lock_lost_before_upload": 1,
+        "notification_sent_marker_invalid": 1,
+        "notification_sent_marker_failed": 1,
+        "upload_failed": 1,
+        "dry_run": 0,
+        "success_marker_skip": 0,
+        "lock_held_skip": 0,
+        "completed": 0,
+        "completion_repaired": 0,
+        "notification_claim_held": 0,
+        "notification_reconciled": 0,
+    }
+
+    class FakeRunner:
+        def __init__(self, *, status: str) -> None:
+            self._status = status
+
+        def run(
+            self,
+            request: ScheduledSellAiBriefDeliveryRequest,
+        ) -> SimpleNamespace:
+            assert (
+                request.sell_ai_brief_report_path
+                == "reports/2026-07-06.sell-ai-brief.json"
+            )
+            return SimpleNamespace(
+                status=self._status,
+                session_date="2026-07-06",
+                storage_key="reports/2026-07-06.sell-ai-brief.json",
+            )
+
+    monkeypatch.setattr(
+        sab_main.ScheduledSellAiBriefDeliveryRunner,
+        "__init__",
+        lambda self, *, state_store, storage, notifier: None,
+    )
+    monkeypatch.setattr(
+        sab_main.ScheduledSellAiBriefDeliveryRunner,
+        "run",
+        lambda self, request: FakeRunner(status=self._status).run(request),  # type: ignore[attr-defined]
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sab_main.SupabaseRuntimeStateClient,
+        "from_env",
+        classmethod(lambda cls: object()),
+    )
+    monkeypatch.setattr(
+        sab_main.DefaultScheduledStorage,
+        "from_env",
+        classmethod(lambda cls: object()),
+    )
+    monkeypatch.setattr(
+        sab_main, "_write_scheduled_sell_ai_brief_status_file", lambda **kwargs: None
+    )
+
+    request = ScheduledSellAiBriefDeliveryRequest(
+        sell_ai_brief_report_path="reports/2026-07-06.sell-ai-brief.json"
+    )
+    for status, expected_exit in statuses_to_expected.items():
+        monkeypatch.setattr(
+            sab_main.ScheduledSellAiBriefDeliveryRunner,
+            "run",
+            lambda self, request, *, _status=status: SimpleNamespace(
+                status=_status,
+                session_date="2026-07-06",
+                storage_key="reports/2026-07-06.sell-ai-brief.json",
+            ),
+            raising=False,
+        )
+        assert (
+            sab_main.run_scheduled_sell_ai_brief_delivery(request=request)
+            == expected_exit
+        )
+
+
 def test_dispatch_command_prints_help_for_missing_command() -> None:
     parser = HelpTrackingParser()
 

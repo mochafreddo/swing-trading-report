@@ -35,7 +35,10 @@ _CommandHandler = Callable[[argparse.Namespace], int]
 _FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES = frozenset(
     {
         "artifact_invalid",
+        "artifact_marker_invalid",
+        "lock_lost_before_upload",
         "notification_sent_marker_invalid",
+        "notification_sent_marker_failed",
         "upload_failed",
     }
 )
