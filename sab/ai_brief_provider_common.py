@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+MAX_OPENAI_RESPONSE_BYTES = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class ProviderTraceMetadata:
@@ -19,6 +21,94 @@ class ProviderTraceMetadata:
 def json_hash(value: object) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def decode_openai_response_json(
+    response: object,
+    *,
+    error_type: type[Exception],
+    max_bytes: int = MAX_OPENAI_RESPONSE_BYTES,
+) -> object:
+    headers = getattr(response, "headers", None)
+    headers_get = getattr(headers, "get", None)
+    content_length = headers_get("content-length") if callable(headers_get) else None
+    if content_length is not None:
+        try:
+            declared_size = int(str(content_length).strip())
+        except ValueError:
+            declared_size = None
+        if declared_size is not None and declared_size > max_bytes:
+            _close_response(response)
+            raise error_type(f"OpenAI response body is too large (> {max_bytes} bytes)")
+
+    iter_content = getattr(response, "iter_content", None)
+    if callable(iter_content):
+        chunks: list[bytes] = []
+        total_size = 0
+        for chunk in iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+            total_size += len(chunk)
+            if total_size > max_bytes:
+                _close_response(response)
+                raise error_type(
+                    f"OpenAI response body is too large ({total_size} bytes > "
+                    f"{max_bytes} bytes)"
+                )
+            chunks.append(bytes(chunk))
+        try:
+            return json.loads(b"".join(chunks).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise error_type("OpenAI response was not valid JSON") from exc
+
+    text = str(getattr(response, "text", ""))
+    if len(text.encode("utf-8")) > max_bytes:
+        _close_response(response)
+        raise error_type(f"OpenAI response body is too large (> {max_bytes} bytes)")
+    json_loader = getattr(response, "json", None)
+    if not callable(json_loader):
+        raise error_type("OpenAI response was not valid JSON")
+    try:
+        return json_loader()
+    except ValueError as exc:
+        raise error_type("OpenAI response was not valid JSON") from exc
+
+
+def _close_response(response: object) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
+
+
+def normalize_provider_source_issues(
+    source_issues: list[dict[str, object]],
+    *,
+    allowed_tickers: set[str],
+    dropped_code: str,
+    dropped_message: str,
+) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    dropped_tickers: set[str] = set()
+    for issue in source_issues:
+        ticker = str(issue.get("ticker") or "").strip()
+        if ticker and ticker not in allowed_tickers:
+            dropped_tickers.add(ticker)
+            continue
+        if ticker:
+            issue = {**issue, "ticker": ticker}
+        normalized.append(issue)
+    if dropped_tickers:
+        normalized.append(
+            {
+                "code": dropped_code,
+                "severity": "WARN",
+                "message": dropped_message,
+                "dropped_tickers": sorted(dropped_tickers),
+            }
+        )
+    return normalized
 
 
 def parse_openai_structured_output(
@@ -191,6 +281,8 @@ __all__ = [
     "ProviderTraceMetadata",
     "SourceReferenceCatalog",
     "candidate_source_ref_lists",
+    "decode_openai_response_json",
     "json_hash",
+    "normalize_provider_source_issues",
     "parse_openai_structured_output",
 ]

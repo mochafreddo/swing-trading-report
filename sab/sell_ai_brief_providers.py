@@ -18,7 +18,9 @@ from .ai_brief_eval_common import (
 from .ai_brief_provider_common import (
     ProviderTraceMetadata,
     SourceReferenceCatalog,
+    decode_openai_response_json,
     json_hash,
+    normalize_provider_source_issues,
     parse_openai_structured_output,
 )
 from .ai_brief_provider_common import (
@@ -51,6 +53,9 @@ _MODEL_SOURCE_REF_INVALID_MESSAGE = (
 )
 _MODEL_SOURCE_REF_MISSING_MESSAGE = (
     "소스가 있는 후보에 대해 모델이 source_refs를 누락함"
+)
+_MODEL_INELIGIBLE_SOURCE_ISSUE_DROPPED_MESSAGE = (
+    "모델이 입력 후보 밖의 source issue를 반환해 해당 이슈를 제외함"
 )
 type _JsonValue = (
     None | bool | int | float | str | Sequence[_JsonValue] | Mapping[str, _JsonValue]
@@ -243,6 +248,7 @@ class OpenAiSellAiBriefProvider:
                     "Content-Type": "application/json",
                 },
                 json=request_payload,
+                stream=True,
                 timeout=self._timeout_seconds,
             )
         except requests.Timeout as exc:
@@ -263,14 +269,10 @@ class OpenAiSellAiBriefProvider:
             )
 
         try:
-            response_payload = response.json()
-        except ValueError as exc:
-            raise SellAiBriefProviderContractError(
-                "OpenAI response was not valid JSON",
-                trace_metadata=trace_metadata,
-            ) from exc
-
-        try:
+            response_payload = decode_openai_response_json(
+                response,
+                error_type=SellAiBriefProviderContractError,
+            )
             parsed = parse_openai_structured_output(
                 response_payload,
                 error_type=SellAiBriefProviderContractError,
@@ -361,7 +363,7 @@ def _build_openai_request_payload(
 def _openai_http_error_message(response: _SellAiBriefProviderResponse) -> str:
     details: list[str] = []
     try:
-        payload = response.json()
+        payload = decode_openai_response_json(response, error_type=ValueError)
     except ValueError:
         payload = None
     if isinstance(payload, Mapping):
@@ -569,9 +571,14 @@ def _normalize_openai_provider_result(
     trace_metadata: SellAiBriefProviderTraceMetadata | None = None,
 ) -> SellAiBriefProviderResult:
     candidate_by_ticker = _candidate_by_ticker(actionable_candidates)
-    source_issues = _as_provider_mapping_rows(
-        parsed.get("source_issues"),
-        field_name="source_issues",
+    source_issues = normalize_provider_source_issues(
+        _as_provider_mapping_rows(
+            parsed.get("source_issues"),
+            field_name="source_issues",
+        ),
+        allowed_tickers=set(candidate_by_ticker),
+        dropped_code="model_ineligible_source_issue_dropped",
+        dropped_message=_MODEL_INELIGIBLE_SOURCE_ISSUE_DROPPED_MESSAGE,
     )
     trusted_source_issue_tickers: set[str] = set()
     judgments: list[dict[str, object]] = []
