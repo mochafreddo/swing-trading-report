@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import requests  # type: ignore[import-untyped]
@@ -12,6 +13,8 @@ from .common import KISApiError, KISClientError, _KISClientState
 _CLASS_DOT_SYMBOL_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)\.([ABC])$")
 _CLASS_SLASH_SYMBOL_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)/([ABC])$")
 _OVERSEAS_INVALID_SYMBOL_MSG_CDS = frozenset({"SYMB0001"})
+_OVERSEAS_PRICE_DETAIL_RESPONSE_DATE_MAX_AGE = dt.timedelta(minutes=5)
+_OVERSEAS_PRICE_DETAIL_RESPONSE_DATE_MAX_FUTURE_SKEW = dt.timedelta(minutes=1)
 
 
 def _to_float_or_nan(value: Any) -> float:
@@ -21,6 +24,49 @@ def _to_float_or_nan(value: Any) -> float:
         return float(str(value).replace(",", ""))
     except ValueError:
         return float("nan")
+
+
+def _parse_recent_http_date(
+    value: str | None, *, observed_at: dt.datetime | None = None
+) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (
+        TypeError,
+        ValueError,
+        IndexError,
+        OverflowError,
+    ):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    parsed_utc = parsed.astimezone(dt.UTC)
+    observed_utc = observed_at or dt.datetime.now(dt.UTC)
+    if observed_utc.tzinfo is None:
+        observed_utc = observed_utc.replace(tzinfo=dt.UTC)
+    else:
+        observed_utc = observed_utc.astimezone(dt.UTC)
+    if parsed_utc < observed_utc - _OVERSEAS_PRICE_DETAIL_RESPONSE_DATE_MAX_AGE:
+        return None
+    if parsed_utc > observed_utc + _OVERSEAS_PRICE_DETAIL_RESPONSE_DATE_MAX_FUTURE_SKEW:
+        return None
+    return parsed_utc.isoformat()
+
+
+def _with_entry_snapshot_at_from_http_date(
+    output: dict[str, Any],
+    *,
+    response_date: str | None,
+    observed_at: dt.datetime | None = None,
+) -> dict[str, Any]:
+    stamped = dict(output)
+    stamped.pop("entry_snapshot_at", None)
+    snapshot_at = _parse_recent_http_date(response_date, observed_at=observed_at)
+    if snapshot_at is not None:
+        stamped["entry_snapshot_at"] = snapshot_at
+    return stamped
 
 
 class _KISQuoteMixin(_KISClientState):
@@ -348,9 +394,13 @@ class _KISQuoteMixin(_KISClientState):
 
             output = data.get("output")
             if isinstance(output, list):
-                return output[0] if output else {}
+                output = output[0] if output else None
             if isinstance(output, dict):
-                return output
+                return _with_entry_snapshot_at_from_http_date(
+                    output,
+                    response_date=resp.headers.get("Date"),
+                    observed_at=dt.datetime.now(dt.UTC),
+                )
             return {}
 
         # If loop exits without return, raise generic error

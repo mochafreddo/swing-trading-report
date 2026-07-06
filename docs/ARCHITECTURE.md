@@ -117,7 +117,7 @@ flowchart LR
 ### 4.3 `entry` 플로우
 
 1. 입력 buy 리포트를 읽고 후보(`candidates[]`)를 시장별로 정규화합니다.
-2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. US KIS 해외 `price-detail`은 `PRE_OPEN|INTRADAY`에서 날짜/시각 marker 없이 `last` 계열 가격을 줄 수 있어 `curr`가 있으면 `USD`일 때만 양수 가격 필드를 스냅샷으로 사용하고, KR KIS domestic `price-detail`은 `PRE_OPEN`에서 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
+2. 현재 세션 가격 스냅샷을 조회해 종목 단위 `ENTER|REVIEW|SKIP` 액션과 `gap_pct`를 계산합니다. US KIS 해외 `price-detail`은 `PRE_OPEN|INTRADAY`에서 날짜/시각/as-of marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다. KIS HTTP `Date` 헤더가 로컬 수신 시각 기준 최근/비미래 범위에서 정상 파싱될 때만 KIS client가 `entry_snapshot_at` marker를 보강하고, marker가 있는 응답에 한해 `curr`가 있으면 `USD`일 때만 양수 `last` 계열 가격 필드를 스냅샷으로 사용합니다. KR KIS domestic `price-detail`은 `PRE_OPEN`에서 날짜/시각 계열 스냅샷 marker가 없으면 ambiguous snapshot으로 보고 가격 없음으로 처리합니다.
    - `sma_ema_hybrid` 후보는 gap/trigger/risk checks를 통과한 뒤에도 `quality_state=A`일 때만 자동 `ENTER`가 됩니다. `B|C|missing`은 `REVIEW`로 fail closed 처리합니다.
 3. holdings를 읽어 활성 보유 수(`quantity > 0`)와 노출 bucket을 집계한 뒤, 설정된 포트폴리오 상한이 있으면 최종 `ENTER` 후보에만 포트폴리오 가드를 적용합니다. 전체 보유 상한은 기존 활성 보유를 포함하고, 시장별 신규 진입 상한은 이번 run에서 승인된 신규 진입만 셉니다. `portfolio.exposure_limits[]`는 currency, sector, theme, beta bucket, correlation bucket, tag bucket 기준으로 기존 활성 보유와 이번 run 승인 후보를 함께 세어 crowded bucket의 추가 진입을 막습니다.
 4. `reports/YYYY-MM-DD(.n).entry.json`을 생성합니다. 새 entry row는 기술 액션과 별개로 `implementation_ready=false`, `investment_readiness="CONTEXT_REQUIRED"`를 남깁니다. NAV/리스크 예산, 의도 포지션 규모 기준 유동성/청산 가능성, 포트폴리오 노출, source/fundamental context가 아직 별도 확인되지 않았다는 뜻입니다.
