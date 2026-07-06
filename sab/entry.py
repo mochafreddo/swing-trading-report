@@ -76,6 +76,21 @@ _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS = (
     "asof",
     "entry_snapshot_at",
 )
+_KIS_OVERSEAS_PRICE_SNAPSHOT_TIME_KEYS = (
+    # KIS overseas price-detail is accepted only when the response exposes an
+    # explicit date/time or as-of marker; marker-less last-like prices fail closed.
+    "xymd",
+    "stck_bsop_date",
+    "bsop_date",
+    "trade_date",
+    "trade_time",
+    "timestamp",
+    "local_time",
+    "quote_time",
+    "as_of",
+    "asof",
+    "entry_snapshot_at",
+)
 _KIS_OVERSEAS_ENTRY_PRICE_KEYS = (
     "last",
     "last_price",
@@ -180,6 +195,13 @@ class EntryPriceLookupResult:
 def _has_pre_open_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
     return any(
         str(detail.get(key) or "").strip() for key in _PRE_OPEN_PRICE_SNAPSHOT_TIME_KEYS
+    )
+
+
+def _has_kis_overseas_price_snapshot_time(detail: Mapping[str, Any]) -> bool:
+    return any(
+        str(detail.get(key) or "").strip()
+        for key in _KIS_OVERSEAS_PRICE_SNAPSHOT_TIME_KEYS
     )
 
 
@@ -1539,8 +1561,11 @@ def _make_price_lookup(
                 detail = kis_client.overseas_price_detail(
                     symbol=symbol, exchange=exchange
                 )
-                # KIS overseas price-detail returns live last-like prices without
-                # the date/time marker fields present in domestic snapshots.
+                if not _has_kis_overseas_price_snapshot_time(detail):
+                    return EntryPriceLookupResult.missing(
+                        "kis_live_snapshot_missing",
+                        source="kis_live_snapshot",
+                    )
                 entry_price = _extract_kis_overseas_entry_price(detail)
                 if entry_price is not None:
                     return EntryPriceLookupResult.available(

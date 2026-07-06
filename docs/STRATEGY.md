@@ -491,7 +491,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 - `sab entry`는 `entry_reference_close_raw_value`가 있을 때만 raw/live entry 가격과 gap guard를 자동 판단합니다.
   - basis가 없거나 raw reference close가 없는 candidate는 `REVIEW`로 처리합니다.
 - `PRE_OPEN|INTRADAY`의 KIS live 가격 스냅샷 해석은 시장별로 분리합니다.
-  - US `overseas price-detail` 응답은 날짜/시각 marker 없이 `last` 계열 가격만 제공할 수 있으므로, `curr`가 있으면 `USD`일 때만 양수 `last`/`last_price`/`stck_prpr`/`ovrs_nmix_prpr`/`ovrs_prpr` 값을 entry snapshot으로 사용합니다.
+  - US `overseas price-detail` 응답은 날짜/시각/as-of marker(`xymd`, `trade_date`, `trade_time`, `timestamp`, `as_of` 등)가 없으면 이전 세션 가격과 구분할 수 없으므로 `entry_price=null`로 fail closed 처리하고 `REVIEW`로 남깁니다. marker가 있을 때만 `curr`가 있으면 `USD`일 때 양수 `last`/`last_price`/`stck_prpr`/`ovrs_nmix_prpr`/`ovrs_prpr` 값을 entry snapshot으로 사용합니다.
   - KR `domestic price-detail` 응답은 날짜/시각 계열 스냅샷 marker(`stck_cntg_hour`, `xymd` 등)가 없으면 `entry_price=null`로 fail closed 처리하고 `REVIEW`로 남깁니다.
 - `gap_atr_multiplier <= 0`으로 gap guard가 의도적으로 비활성화된 run에서는, candidate에 gap guard 필드가 없어도 `sab entry`가 이를 system issue로 간주하지 않습니다.
   - `sab entry`는 source buy report의 `config_snapshot.gap_atr_multiplier`를 우선 사용해 이 판단을 재현하고, entry report에는 현재 runtime 설정과 별도로 `effective_gap_atr_multiplier` / `source_report_gap_atr_multiplier`를 기록합니다.
