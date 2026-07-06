@@ -109,10 +109,24 @@ def _safe_str(value: Any, *, default: str = "") -> str:
 
 
 def _safe_single_line(value: Any, *, default: str = "", max_chars: int = 140) -> str:
-    text = " ".join(_safe_str(value, default=default).split())
+    raw_text = _safe_str(value, default=default)
+    without_controls = "".join(
+        " " if ord(char) < 32 or ord(char) == 127 else char for char in raw_text
+    )
+    text = " ".join(without_controls.split())
     if len(text) <= max_chars:
         return text
     return f"{text[: max_chars - 3].rstrip()}..."
+
+
+def _slack_kv(
+    key: str,
+    value: Any,
+    *,
+    default: str = "",
+    max_chars: int = 360,
+) -> str:
+    return f"{key}={_safe_single_line(value, default=default, max_chars=max_chars)}"
 
 
 def _html_escape(value: Any, *, default: str = "") -> str:
@@ -557,17 +571,17 @@ def build_scan_slack_summary_text(
 
     lines = [
         "[SAB][scan][schedule]",
-        f"repo={repo}",
-        f"provider={_safe_str(provider, default='kis')}",
-        f"universe={_safe_str(universe, default='both')}",
-        f"generated_at={_generated_at(report)}",
-        f"candidate_count={candidate_count}",
-        f"issue_count={issue_count}",
+        _slack_kv("repo", repo),
+        _slack_kv("provider", provider, default="kis"),
+        _slack_kv("universe", universe, default="both"),
+        _slack_kv("generated_at", _generated_at(report)),
+        _slack_kv("candidate_count", candidate_count),
+        _slack_kv("issue_count", issue_count),
     ]
-    key = _safe_str(storage_key)
+    key = _safe_single_line(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(_slack_kv("storage_key", key))
+    lines.append(_slack_kv("run_url", run_url))
     return "\n".join(lines)
 
 
@@ -583,17 +597,17 @@ def build_sell_slack_summary_text(
 
     lines = [
         "[SAB][sell][schedule]",
-        f"repo={repo}",
-        f"provider={_safe_str(provider, default='kis')}",
-        f"generated_at={_generated_at(report)}",
-        f"evaluated_count={evaluated_count}",
-        f"issue_count={issue_count}",
-        f"action_counts={_format_action_counts(action_counts)}",
+        _slack_kv("repo", repo),
+        _slack_kv("provider", provider, default="kis"),
+        _slack_kv("generated_at", _generated_at(report)),
+        _slack_kv("evaluated_count", evaluated_count),
+        _slack_kv("issue_count", issue_count),
+        _slack_kv("action_counts", _format_action_counts(action_counts)),
     ]
-    key = _safe_str(storage_key)
+    key = _safe_single_line(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(_slack_kv("storage_key", key))
+    lines.append(_slack_kv("run_url", run_url))
     return "\n".join(lines)
 
 
@@ -609,23 +623,23 @@ def build_ai_brief_slack_summary_text(
 
     lines = [
         "[SAB][ai-brief][schedule]",
-        f"repo={repo}",
-        f"market={_safe_str(report.get('market'), default='-')}",
-        f"model_provider={_safe_str(report.get('model_provider'), default='fake')}",
-        f"model_name={_safe_str(report.get('model_name'), default='-')}",
-        f"generated_at={_generated_at(report)}",
-        f"brief_state={brief_state.state}",
-        f"brief_reason={brief_state.reason}",
-        f"preselected_count={counts.preselected_count}",
-        f"recommendation_count={counts.recommendation_count}",
-        f"vetoed_count={counts.vetoed_count}",
-        f"source_issue_count={counts.source_issue_count}",
-        f"system_issue_count={counts.system_issue_count}",
+        _slack_kv("repo", repo),
+        _slack_kv("market", report.get("market"), default="-"),
+        _slack_kv("model_provider", report.get("model_provider"), default="fake"),
+        _slack_kv("model_name", report.get("model_name"), default="-"),
+        _slack_kv("generated_at", _generated_at(report)),
+        _slack_kv("brief_state", brief_state.state),
+        _slack_kv("brief_reason", brief_state.reason),
+        _slack_kv("preselected_count", counts.preselected_count),
+        _slack_kv("recommendation_count", counts.recommendation_count),
+        _slack_kv("vetoed_count", counts.vetoed_count),
+        _slack_kv("source_issue_count", counts.source_issue_count),
+        _slack_kv("system_issue_count", counts.system_issue_count),
     ]
     if counts.watch_present:
         watch_tickers = ", ".join(counts.watch_tickers) if counts.watch_tickers else "-"
-        lines.append(f"watch_count={counts.watch_count}")
-        lines.append(f"watch_tickers={watch_tickers}")
+        lines.append(_slack_kv("watch_count", counts.watch_count))
+        lines.append(_slack_kv("watch_tickers", watch_tickers))
     if counts.role_present:
         executable_tickers = (
             ", ".join(counts.executable_tickers) if counts.executable_tickers else "-"
@@ -635,10 +649,12 @@ def build_ai_brief_slack_summary_text(
             if counts.blocked_but_valid_tickers
             else "-"
         )
-        lines.append(f"executable_count={counts.executable_count}")
-        lines.append(f"blocked_but_valid_count={counts.blocked_but_valid_count}")
-        lines.append(f"executable_tickers={executable_tickers}")
-        lines.append(f"blocked_but_valid_tickers={blocked_but_valid_tickers}")
+        lines.append(_slack_kv("executable_count", counts.executable_count))
+        lines.append(
+            _slack_kv("blocked_but_valid_count", counts.blocked_but_valid_count)
+        )
+        lines.append(_slack_kv("executable_tickers", executable_tickers))
+        lines.append(_slack_kv("blocked_but_valid_tickers", blocked_but_valid_tickers))
     source_chain_summary = _format_slack_source_chain_summary(report)
     if source_chain_summary:
         source_chain, _, source_final = source_chain_summary.partition(" final ")
@@ -646,16 +662,19 @@ def build_ai_brief_slack_summary_text(
         if source_final:
             recommendable_part, _, watch_part = source_final.partition(" watch=")
             lines.append(
-                f"source_final_recommendable={recommendable_part.removeprefix('recommendable=')}"
+                _slack_kv(
+                    "source_final_recommendable",
+                    recommendable_part.removeprefix("recommendable="),
+                )
             )
-            lines.append(f"source_final_watch={watch_part}")
+            lines.append(_slack_kv("source_final_watch", watch_part))
     source_provider_statuses = _format_slack_source_provider_statuses(report)
     if source_provider_statuses:
         lines.append(source_provider_statuses)
-    key = _safe_str(storage_key)
+    key = _safe_single_line(storage_key)
     if key:
-        lines.append(f"storage_key={key}")
-    lines.append(f"run_url={run_url}")
+        lines.append(_slack_kv("storage_key", key))
+    lines.append(_slack_kv("run_url", run_url))
     return "\n".join(lines)
 
 
@@ -863,7 +882,10 @@ def _source_provider_summary(report: dict[str, Any]) -> dict[str, Any]:
 
 def _source_provider_chain(report: dict[str, Any]) -> list[str]:
     source_provider_summary = _source_provider_summary(report)
-    chain = [_safe_str(item) for item in _as_list(source_provider_summary.get("chain"))]
+    chain = [
+        _safe_single_line(item, max_chars=80)
+        for item in _as_list(source_provider_summary.get("chain"))
+    ]
     return [provider for provider in chain if provider]
 
 
@@ -876,10 +898,10 @@ def _source_provider_status_parts(
     parts: list[str] = []
     for raw_provider in _as_list(source_provider_summary.get("providers")):
         provider = _as_dict(raw_provider)
-        name = _safe_str(provider.get("provider"))
+        name = _safe_single_line(provider.get("provider"), max_chars=80)
         if not name:
             continue
-        status = status_label(provider.get("status"))
+        status = _safe_single_line(status_label(provider.get("status")), max_chars=80)
         coverage = _format_coverage(provider.get("covered"), provider.get("total"))
         parts.append(f"{name} {status} {coverage}")
     return parts

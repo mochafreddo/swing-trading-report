@@ -17,6 +17,10 @@ from .ai_brief_eval_common import (
     parse_iso_offset_datetime,
     string_list,
 )
+from .ai_brief_provider_common import (
+    decode_openai_response_json,
+    normalize_provider_source_issues,
+)
 from .ai_brief_sources import (
     SOURCE_FUTURE_SKEW_MINUTES,
     is_ai_brief_source_future,
@@ -72,6 +76,9 @@ _MODEL_WATCH_VETO_DROPPED_MESSAGE = (
 )
 _MODEL_INELIGIBLE_VETO_DROPPED_MESSAGE = (
     "모델이 eligible_tickers 밖의 제외 후보를 반환해 해당 행을 제외함"
+)
+_MODEL_INELIGIBLE_SOURCE_ISSUE_DROPPED_MESSAGE = (
+    "모델이 입력 후보 밖의 source issue를 반환해 해당 이슈를 제외함"
 )
 _OPENAI_PROMPT_VERSION = "openai-ai-brief-v1"
 _OPENAI_OUTPUT_SCHEMA_VERSION = "openai-ai-brief-output-v1"
@@ -313,6 +320,7 @@ class OpenAiBriefProvider:
                     "Content-Type": "application/json",
                 },
                 json=request_payload,
+                stream=True,
                 timeout=self._timeout_seconds,
             )
         except requests.Timeout as exc:
@@ -333,14 +341,10 @@ class OpenAiBriefProvider:
             )
 
         try:
-            response_payload = response.json()
-        except ValueError as exc:
-            raise AiBriefProviderContractError(
-                "OpenAI response was not valid JSON",
-                trace_metadata=trace_metadata,
-            ) from exc
-
-        try:
+            response_payload = decode_openai_response_json(
+                response,
+                error_type=AiBriefProviderContractError,
+            )
             parsed = _parse_openai_structured_output(response_payload)
             result = _normalize_openai_provider_result(
                 parsed,
@@ -447,7 +451,7 @@ def _build_openai_request_payload(
 def _openai_http_error_message(response: _AiBriefProviderResponse) -> str:
     details: list[str] = []
     try:
-        payload = response.json()
+        payload = decode_openai_response_json(response, error_type=ValueError)
     except ValueError:
         payload = None
     if isinstance(payload, Mapping):
@@ -748,8 +752,13 @@ def _normalize_openai_provider_result(
     watch_candidate_by_ticker = {
         str(candidate["ticker"]): candidate for candidate in watch_candidates
     }
-    source_issues = _as_provider_mapping_rows(
-        parsed.get("source_issues"), field_name="source_issues"
+    source_issues = normalize_provider_source_issues(
+        _as_provider_mapping_rows(
+            parsed.get("source_issues"), field_name="source_issues"
+        ),
+        allowed_tickers=set(candidate_by_ticker) | set(watch_candidate_by_ticker),
+        dropped_code="model_ineligible_source_issue_dropped",
+        dropped_message=_MODEL_INELIGIBLE_SOURCE_ISSUE_DROPPED_MESSAGE,
     )
     trusted_source_issue_tickers: set[str] = set()
     raw_recommendations = _as_provider_mapping_rows(

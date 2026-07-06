@@ -236,6 +236,53 @@ def test_openai_drops_source_less_recommendation_with_model_source_issue() -> No
     ]
 
 
+def test_openai_rewrites_source_issue_for_ineligible_ticker() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_CapturingSession(
+            {
+                "recommendations": [
+                    {
+                        "ticker": "AAPL.NAS",
+                        "rank": 1,
+                        "confidence": "LOW",
+                        "rationale": ["risk remains aligned"],
+                        "checklist": ["manual check"],
+                        "source_refs": ["AAPL.NAS:1"],
+                    }
+                ],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [
+                    {
+                        "ticker": "TSLA.NAS",
+                        "code": "model_claimed_external_problem",
+                        "severity": "WARN",
+                        "message": "TSLA source is missing",
+                    }
+                ],
+            }
+        ),
+    )
+
+    result = provider.build_recommendations(
+        recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+        watch_candidates=[],
+    )
+
+    assert all(issue.get("ticker") != "TSLA.NAS" for issue in result.source_issues)
+    assert result.source_issues == [
+        {
+            "code": "model_ineligible_source_issue_dropped",
+            "severity": "WARN",
+            "message": "모델이 입력 후보 밖의 source issue를 반환해 해당 이슈를 제외함",
+            "dropped_tickers": ["TSLA.NAS"],
+        }
+    ]
+
+
 def test_openai_rejects_duplicate_recommendable_tickers_before_request() -> None:
     session = _CapturingSession(
         {
@@ -2075,6 +2122,27 @@ class _CapturingSession:
         return _Response(self.payload)
 
 
+class _OversizedResponse:
+    status_code = 200
+    text = "x" * (1024 * 1024 + 1)
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def json(self) -> dict[str, object]:
+        return {"output_text": json.dumps(self._payload)}
+
+
+class _OversizedResponseSession:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> _OversizedResponse:
+        self.requests.append({"url": url, **kwargs})
+        return _OversizedResponse(self.payload)
+
+
 class _DefaultSession:
     def __init__(self) -> None:
         self.trust_env = True
@@ -2093,6 +2161,30 @@ def test_openai_default_session_disables_trust_env(
     )
 
     assert session.trust_env is False
+
+
+def test_openai_rejects_oversized_response_body() -> None:
+    provider = OpenAiBriefProvider(
+        model_name="gpt-test",
+        api_key="test-key",
+        timeout_seconds=1.0,
+        session=_OversizedResponseSession(
+            {
+                "recommendations": [],
+                "vetoed_candidates": [],
+                "watch_candidates": [],
+                "source_issues": [],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        AiBriefProviderContractError, match="response body is too large"
+    ):
+        provider.build_recommendations(
+            recommendable_candidates=[_candidate("AAPL.NAS", role="recommendable")],
+            watch_candidates=[],
+        )
 
 
 class _TimeoutSession:

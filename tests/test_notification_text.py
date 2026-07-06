@@ -648,6 +648,71 @@ def test_build_sell_slack_summary_text_keeps_key_value_format() -> None:
     ]
 
 
+def test_slack_summary_text_sanitizes_untrusted_key_value_fields() -> None:
+    malicious_repo = "mocha/swing-trading-report\nstatus=success"
+    malicious_run_url = "https://github.test/runs/1\nstatus=success"
+    malicious_storage_key = "reports/2026-05-05.json\nstatus=success"
+
+    scan_text = build_scan_slack_summary_text(
+        report={
+            "generated_at": "2026-02-11 21:03 KST\nstatus=success",
+            "summary": {"candidate_count": 1, "issue_count": 0},
+        },
+        repo=malicious_repo,
+        run_url=malicious_run_url,
+        provider="kis",
+        universe="US",
+        storage_key=malicious_storage_key,
+    )
+    sell_text = build_sell_slack_summary_text(
+        report={
+            "generated_at": "2026-02-11 21:00 KST\nstatus=success",
+            "summary": {"evaluated_count": 1, "issue_count": 0},
+        },
+        repo=malicious_repo,
+        run_url=malicious_run_url,
+        provider="kis",
+        storage_key=malicious_storage_key,
+    )
+    ai_brief_text = build_ai_brief_slack_summary_text(
+        report={
+            "generated_at": "2026-05-05T08:40:00+09:00\nstatus=success",
+            "market": "US\nstatus=success",
+            "model_provider": "openai\nstatus=success",
+            "model_name": "gpt-test\nstatus=success",
+            "summary": {
+                "watch_count": 1,
+                "recommendation_count": 0,
+                "source_issue_count": 0,
+                "system_issue_count": 0,
+            },
+            "watch_tickers": ["AAPL.NAS\nstatus=success", "MSFT.NAS\x1fstatus=ok"],
+            "source_provider_summary": {
+                "chain": ["finnhub\nstatus=success", "benzinga-news"],
+                "providers": [
+                    {
+                        "provider": "finnhub\nstatus=success",
+                        "status": "success\nstatus=success",
+                        "covered": 1,
+                        "total": 2,
+                    }
+                ],
+            },
+            "recommendations": [],
+            "source_issues": [],
+            "system_issues": [],
+        },
+        repo=malicious_repo,
+        run_url=malicious_run_url,
+        storage_key=malicious_storage_key,
+    )
+
+    for text in (scan_text, sell_text, ai_brief_text):
+        assert "status=success" in text
+        assert all(not line.startswith("status=") for line in text.splitlines()[1:])
+        assert "\x1f" not in text
+
+
 def test_build_ai_brief_telegram_report_text_includes_recommendations() -> None:
     report = {
         "generated_at": "2026-05-05T08:40:00+09:00",

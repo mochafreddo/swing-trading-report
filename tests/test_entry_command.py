@@ -1088,7 +1088,7 @@ def test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing(
     )
 
 
-def test_run_entry_e2e_uses_kis_us_price_detail_without_datetime_marker(
+def test_run_entry_e2e_rejects_kis_us_price_detail_without_datetime_marker(
     monkeypatch, tmp_path: Path
 ) -> None:
     report_dir = tmp_path / "reports"
@@ -1144,13 +1144,21 @@ def test_run_entry_e2e_uses_kis_us_price_detail_without_datetime_marker(
         market="US",
     )
 
-    assert exit_code == 0
+    assert exit_code == 1
     payload = json.loads(
         next(report_dir.glob("*.entry.json")).read_text(encoding="utf-8")
     )
-    assert payload["entries"][0]["action"] == "ENTER"
-    assert payload["entries"][0]["entry_price"] == 101.0
-    assert payload["summary"]["missing_entry_price_count"] == 0
+    assert payload["entries"][0]["action"] == "REVIEW"
+    assert payload["entries"][0]["entry_price"] is None
+    assert payload["entries"][0]["entry_price_status"] == "missing"
+    assert payload["entries"][0]["entry_price_issue_code"] == (
+        "kis_live_snapshot_missing"
+    )
+    assert payload["summary"]["missing_entry_price_count"] == 1
+    assert payload["summary"]["missing_entry_price_by_reason"] == {
+        "kis_live_snapshot_missing": 1
+    }
+    assert "price snapshot unavailable" in payload["entries"][0]["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -1936,6 +1944,48 @@ def test_make_price_lookup_logs_kis_detail_failure(
 
 
 @pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
+def test_make_price_lookup_rejects_kis_us_snapshot_without_freshness_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    fake_cfg = SimpleNamespace(
+        data_dir=tmp_path.as_posix(),
+        kis_app_key="k",
+        kis_app_secret="s",
+        kis_base_url="https://example.test",
+        kis_min_interval_ms=None,
+    )
+
+    class _MarkerlessKISClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def overseas_price_detail(
+            self, *, symbol: str, exchange: str
+        ) -> dict[str, str]:
+            assert symbol == "AAPL"
+            assert exchange == "NAS"
+            return {"last": "101.0", "curr": "USD"}
+
+    monkeypatch.setattr("sab.entry.KISClient", _MarkerlessKISClient)
+
+    price_lookup, issues = entry._make_price_lookup(
+        cfg=cast(Config, fake_cfg),
+        provider="kis",
+        mode=mode,
+        market="US",
+    )
+
+    assert issues == []
+    lookup_result = price_lookup("AAPL.NASD")
+    assert lookup_result.price is None
+    assert lookup_result.status == "missing"
+    assert lookup_result.source == "kis_live_snapshot"
+    assert lookup_result.issue_codes == ("kis_live_snapshot_missing",)
+
+
+@pytest.mark.parametrize("mode", ["PRE_OPEN", "INTRADAY"])
 @pytest.mark.parametrize(
     (
         "detail",
@@ -1946,28 +1996,28 @@ def test_make_price_lookup_logs_kis_detail_failure(
     ),
     [
         (
-            {"last": "101.0", "curr": "EUR"},
+            {"last": "101.0", "curr": "EUR", "xymd": "20260226"},
             "currency_mismatch",
             "kis_live_snapshot_currency_mismatch",
             "EUR",
             ["last"],
         ),
         (
-            {"open": "101.0", "curr": "USD"},
+            {"open": "101.0", "curr": "USD", "xymd": "20260226"},
             "no_supported_price_field",
             "kis_live_snapshot_no_supported_price_field",
             "USD",
             [],
         ),
         (
-            {"last": "0", "curr": "USD"},
+            {"last": "0", "curr": "USD", "xymd": "20260226"},
             "invalid_price_value",
             "kis_live_snapshot_invalid_price_value",
             "USD",
             ["last"],
         ),
         (
-            {"last": 0, "curr": "USD"},
+            {"last": 0, "curr": "USD", "xymd": "20260226"},
             "invalid_price_value",
             "kis_live_snapshot_invalid_price_value",
             "USD",

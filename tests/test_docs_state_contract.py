@@ -169,6 +169,22 @@ def test_operations_keeps_scheduled_ai_brief_guidance_in_scheduled_section() -> 
     assert "scheduled 기본값" in scheduled_section
 
 
+def test_operations_secret_check_surfaces_staged_and_ignored_env_files() -> None:
+    text = _read(Path("docs/operations.md"))
+    daily_section = text.split("## Daily Checklist", 1)[1].split(
+        "## Weekly Checklist", 1
+    )[0]
+
+    assert "Local env files" in daily_section
+    assert "git status --short" not in daily_section
+    assert "git diff --cached --name-only -- .env '.env.*'" in daily_section
+    assert (
+        "git ls-files --others --ignored --exclude-standard -- .env '.env.*'"
+        in daily_section
+    )
+    assert "[REDACTED]" in daily_section
+
+
 def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     readme_text = _read(Path("README.md"))
     architecture_text = _read(Path("docs/ARCHITECTURE.md"))
