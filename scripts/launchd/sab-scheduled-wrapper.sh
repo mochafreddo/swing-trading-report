@@ -49,5 +49,17 @@ case "${scope}" in
     ;;
 esac
 
+if [[ "${pipeline}" == "sell" && "${scope}" == "MIXED" && -n "${SELL_AI_BRIEF_REPORT_PATH:-}" ]]; then
+  session_date="${SAB_SESSION_DATE:-$(date -u +%F)}"
+  exec uv run python -m sab sell-ai-brief-scheduled \
+    --sell-ai-brief-report "${SELL_AI_BRIEF_REPORT_PATH}" \
+    --scope "${scope}" \
+    --session-date "${session_date}" \
+    --runner-role "${SAB_RUNNER_ROLE:-local-primary}" \
+    --scheduled-tick "${SAB_SCHEDULED_TICK:-manual}" \
+    --attempt-id "${SAB_ATTEMPT_ID:-}" \
+    --run-url "${SAB_RUN_URL:-}"
+fi
+
 printf 'generic scheduled wrapper requires pipeline-specific execution for pipeline=%s scope=%s\n' "${pipeline}" "${scope}" >&2
 exit 2

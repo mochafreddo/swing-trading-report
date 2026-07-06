@@ -4,6 +4,9 @@ from types import SimpleNamespace
 import pytest
 import sab.__main__ as sab_main
 from sab.scheduler.runner import ScheduledAiBriefRequest
+from sab.scheduler.sell_ai_brief_delivery import (
+    ScheduledSellAiBriefDeliveryRequest,
+)
 
 
 class HelpTrackingParser(argparse.ArgumentParser):
@@ -364,6 +367,63 @@ def test_dispatch_command_routes_scheduled_ai_brief_options(monkeypatch) -> None
     request = calls[0]["request"]
     assert not hasattr(request, "fallback_model")
     assert not hasattr(request, "fallback_timeout_seconds")
+
+
+def test_dispatch_command_routes_scheduled_sell_ai_brief_options(
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run_scheduled_sell_ai_brief_delivery(
+        *,
+        request: ScheduledSellAiBriefDeliveryRequest,
+    ) -> int:
+        calls.append({"request": request})
+        return 43
+
+    monkeypatch.setattr(
+        sab_main,
+        "run_scheduled_sell_ai_brief_delivery",
+        run_scheduled_sell_ai_brief_delivery,
+        raising=False,
+    )
+
+    ns = _parse_args(
+        [
+            "sell-ai-brief-scheduled",
+            "--sell-ai-brief-report",
+            "reports/2026-07-06.sell-ai-brief.json",
+            "--scope",
+            "MIXED",
+            "--session-date",
+            "2026-07-06",
+            "--runner-role",
+            "local-primary",
+            "--scheduled-tick",
+            "manual",
+            "--attempt-id",
+            "try-1",
+            "--run-url",
+            "https://example.test/run",
+            "--dry-run",
+        ]
+    )
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 43
+    assert calls == [
+        {
+            "request": ScheduledSellAiBriefDeliveryRequest(
+                sell_ai_brief_report_path="reports/2026-07-06.sell-ai-brief.json",
+                scope="MIXED",
+                session_date="2026-07-06",
+                runner_role="local-primary",
+                scheduled_tick="manual",
+                attempt_id="try-1",
+                run_url="https://example.test/run",
+                dry_run=True,
+            )
+        }
+    ]
 
 
 def test_dispatch_command_prints_help_for_missing_command() -> None:

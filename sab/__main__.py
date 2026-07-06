@@ -7,18 +7,38 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from typing import Any
 
 from . import ai_brief_latency_probe
 from .ai_brief import run_ai_brief
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
+from .report.notification_text import split_telegram_message_text
 from .scan import run_scan
-from .scheduler.runner import ScheduledAiBriefRequest, run_scheduled_ai_brief
+from .scheduler import status_file
+from .scheduler.runner import (
+    DefaultScheduledNotifier,
+    DefaultScheduledStorage,
+    ScheduledAiBriefRequest,
+    run_scheduled_ai_brief,
+)
+from .scheduler.sell_ai_brief_delivery import (
+    ScheduledSellAiBriefDeliveryRequest,
+    ScheduledSellAiBriefDeliveryRunner,
+)
+from .scheduler.state import SupabaseRuntimeStateClient
 from .sell import run_sell
 from .sell_ai_brief import run_sell_ai_brief
 
 _CommandHandler = Callable[[argparse.Namespace], int]
+_FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES = frozenset(
+    {
+        "artifact_invalid",
+        "notification_sent_marker_invalid",
+        "upload_failed",
+    }
+)
 
 
 def _bounded_probe_repetitions(value: str) -> int:
@@ -78,6 +98,23 @@ class _JsonFormatter(logging.Formatter):
                 self.formatException(record.exc_info)
             )
         return json.dumps(payload, ensure_ascii=False)
+
+
+class _SellAiBriefScheduledNotifier:
+    def __init__(self) -> None:
+        self._notifier = DefaultScheduledNotifier()
+
+    def send_schedule(
+        self,
+        *,
+        report: dict[str, Any],
+        storage_key: str,
+        text: str,
+    ) -> None:
+        del report, storage_key
+        self._notifier.require_telegram()
+        for part in split_telegram_message_text(text):
+            self._notifier._post_telegram_message(part, parse_mode="HTML")
 
 
 def _build_log_formatter(
@@ -432,6 +469,25 @@ def _build_parser() -> argparse.ArgumentParser:
     scheduled.add_argument("--dry-run", action="store_true")
     scheduled.add_argument("--guard-only", action="store_true")
 
+    sell_scheduled = sub.add_parser(
+        "sell-ai-brief-scheduled",
+        help="Deliver a scheduled Sell AI Brief with idempotent upload and notify",
+    )
+    sell_scheduled.add_argument(
+        "--sell-ai-brief-report",
+        required=True,
+        help="Input sell AI brief report path",
+    )
+    sell_scheduled.add_argument(
+        "--scope", default="MIXED", choices=["KR", "US", "MIXED"]
+    )
+    sell_scheduled.add_argument("--session-date", default="")
+    sell_scheduled.add_argument("--runner-role", default="local-primary")
+    sell_scheduled.add_argument("--scheduled-tick", default="manual")
+    sell_scheduled.add_argument("--attempt-id", default=None)
+    sell_scheduled.add_argument("--run-url", default="")
+    sell_scheduled.add_argument("--dry-run", action="store_true")
+
     probe = sub.add_parser(
         "ai-brief-latency-probe",
         help="Plan bounded AI Brief latency measurements without upload or notification",
@@ -530,6 +586,78 @@ def _run_scheduled_ai_brief_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _scheduled_sell_ai_brief_request_from_args(
+    ns: argparse.Namespace,
+) -> ScheduledSellAiBriefDeliveryRequest:
+    return ScheduledSellAiBriefDeliveryRequest(
+        sell_ai_brief_report_path=ns.sell_ai_brief_report,
+        scope=ns.scope,
+        session_date=ns.session_date,
+        runner_role=ns.runner_role,
+        scheduled_tick=ns.scheduled_tick,
+        attempt_id=ns.attempt_id,
+        run_url=ns.run_url,
+        dry_run=ns.dry_run,
+    )
+
+
+def _write_scheduled_sell_ai_brief_status_file(
+    *, status: str, session_date: str, storage_key: str | None
+) -> None:
+    path = os.getenv("SAB_SCHEDULER_STATUS_FILE")
+    if not path:
+        return
+    try:
+        status_file.write_status_json(
+            path,
+            {
+                "status": status,
+                "session_date": session_date,
+                "storage_key": storage_key,
+            },
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "failed to write scheduled sell AI brief status file: %s", exc
+        )
+
+
+def run_scheduled_sell_ai_brief_delivery(
+    *,
+    request: ScheduledSellAiBriefDeliveryRequest,
+) -> int:
+    runner = ScheduledSellAiBriefDeliveryRunner(
+        state_store=SupabaseRuntimeStateClient.from_env(),
+        storage=DefaultScheduledStorage.from_env(),
+        notifier=_SellAiBriefScheduledNotifier(),
+    )
+    result = runner.run(request)
+    _write_scheduled_sell_ai_brief_status_file(
+        status=result.status,
+        session_date=result.session_date,
+        storage_key=result.storage_key,
+    )
+    print(
+        json.dumps(
+            {
+                "status": result.status,
+                "storage_key": result.storage_key,
+            }
+        )
+    )
+    return (
+        0
+        if result.status not in _FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES
+        else 1
+    )
+
+
+def _run_scheduled_sell_ai_brief_command(ns: argparse.Namespace) -> int:
+    return run_scheduled_sell_ai_brief_delivery(
+        request=_scheduled_sell_ai_brief_request_from_args(ns)
+    )
+
+
 def _run_ai_brief_latency_probe_command(ns: argparse.Namespace) -> int:
     return ai_brief_latency_probe.run_probe(
         primary_model=ns.primary_model,
@@ -549,6 +677,7 @@ def _dispatch_command(
         "ai-brief": _run_ai_brief_command,
         "sell-ai-brief": _run_sell_ai_brief_command,
         "ai-brief-scheduled": _run_scheduled_ai_brief_command,
+        "sell-ai-brief-scheduled": _run_scheduled_sell_ai_brief_command,
         "ai-brief-latency-probe": _run_ai_brief_latency_probe_command,
     }
     handler = handlers.get(ns.cmd)
