@@ -13,6 +13,8 @@ from .generic_state import build_scheduled_state_key
 from .state import RuntimeStateEntry, RuntimeStateLockClaim
 
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
+_ATTEMPT_TTL_SECONDS = 48 * 60 * 60
+_MAIN_LOCK_TTL_SECONDS = 30 * 60
 _NOTIFICATION_CLAIM_TTL_SECONDS = 10 * 60
 _ALLOWED_SCOPES = frozenset({"KR", "US", "MIXED"})
 
@@ -43,6 +45,8 @@ class _StateStore(Protocol):
 
 
 class _Storage(Protocol):
+    def upload_sell_ai_brief(self, report_path: str, *, report_date: str) -> str: ...
+
     def download_json(self, storage_key: str) -> dict[str, Any]: ...
 
 
@@ -126,6 +130,13 @@ def _load_report_date(report_path: str) -> str:
     return report_date
 
 
+def _load_local_report(report_path: str) -> dict[str, Any]:
+    payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("sell_ai_brief_report_path must contain a JSON object")
+    return payload
+
+
 class ScheduledSellAiBriefDeliveryRunner:
     def __init__(
         self,
@@ -175,10 +186,215 @@ class ScheduledSellAiBriefDeliveryRunner:
                 artifact_entry=artifact_entry,
             )
 
-        return ScheduledSellAiBriefDeliveryResult(
-            status="artifact_marker_missing",
+        return self._upload_and_deliver(
+            request=request,
+            scope=scope,
             session_date=session_date,
         )
+
+    def _upload_and_deliver(
+        self,
+        *,
+        request: ScheduledSellAiBriefDeliveryRequest,
+        scope: str,
+        session_date: str,
+    ) -> ScheduledSellAiBriefDeliveryResult:
+        now = self._now_fn()
+        attempt_id = (
+            request.attempt_id or f"{request.scheduled_tick}-{uuid.uuid4().hex}"
+        )
+        self._state_store.upsert_marker(
+            key=_state_key(
+                "attempt",
+                scope=scope,
+                session_date=session_date,
+                runner_role=request.runner_role,
+                attempt_id=attempt_id,
+            ),
+            payload={
+                "scope": scope,
+                "sessionDate": session_date,
+                "runnerRole": request.runner_role,
+                "scheduledTick": request.scheduled_tick,
+                "attemptId": attempt_id,
+                "runUrl": request.run_url,
+            },
+            ttl_seconds=_ATTEMPT_TTL_SECONDS,
+            now=now,
+        )
+
+        lock_key = _state_key("lock", scope=scope, session_date=session_date)
+        owner_token = f"{attempt_id}-main-{uuid.uuid4().hex}"
+        claim = self._state_store.claim_lock(
+            key=lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_MAIN_LOCK_TTL_SECONDS,
+            now=now,
+            payload={
+                "scope": scope,
+                "sessionDate": session_date,
+                "runnerRole": request.runner_role,
+                "scheduledTick": request.scheduled_tick,
+                "attemptId": attempt_id,
+            },
+        )
+        if not getattr(claim, "acquired", False):
+            return ScheduledSellAiBriefDeliveryResult(
+                status="lock_held_skip",
+                session_date=session_date,
+            )
+
+        try:
+            if not self._owns_lock(lock_key, owner_token):
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
+            try:
+                report = _load_local_report(request.sell_ai_brief_report_path)
+                validate_sell_ai_brief_artifact(report, now=now)
+            except ValueError:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="artifact_invalid",
+                    session_date=session_date,
+                )
+
+            if not self._owns_lock(lock_key, owner_token):
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                )
+            try:
+                storage_key = self._storage.upload_sell_ai_brief(
+                    request.sell_ai_brief_report_path,
+                    report_date=session_date,
+                )
+            except Exception:
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="upload_failed",
+                    session_date=session_date,
+                )
+
+            if not self._owns_lock(lock_key, owner_token):
+                return ScheduledSellAiBriefDeliveryResult(
+                    status="lock_lost_before_upload",
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+
+            payload: dict[str, object] = {
+                "scope": scope,
+                "sessionDate": session_date,
+                "reportDate": session_date,
+                "storageKey": storage_key,
+                "runnerRole": request.runner_role,
+                "scheduledTick": request.scheduled_tick,
+                "attemptId": attempt_id,
+                "runUrl": request.run_url,
+            }
+            self._state_store.upsert_marker(
+                key=_state_key("artifact", scope=scope, session_date=session_date),
+                payload=payload,
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+                now=now,
+            )
+
+            notification_status = self._send_notification(
+                request=request,
+                scope=scope,
+                session_date=session_date,
+                report=report,
+                storage_key=storage_key,
+                lock_key=lock_key,
+                owner_token=owner_token,
+                payload=payload,
+            )
+            if notification_status != "completed":
+                return ScheduledSellAiBriefDeliveryResult(
+                    status=notification_status,
+                    session_date=session_date,
+                    storage_key=storage_key,
+                )
+            return ScheduledSellAiBriefDeliveryResult(
+                status="completed",
+                session_date=session_date,
+                storage_key=storage_key,
+            )
+        finally:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
+
+    def _owns_lock(self, lock_key: str, owner_token: str) -> bool:
+        entry = self._state_store.get_entry(lock_key)
+        if entry is None:
+            return False
+        return entry.state_payload.get("ownerToken") == owner_token
+
+    def _send_notification(
+        self,
+        *,
+        request: ScheduledSellAiBriefDeliveryRequest,
+        scope: str,
+        session_date: str,
+        report: dict[str, Any],
+        storage_key: str,
+        lock_key: str,
+        owner_token: str,
+        payload: dict[str, object],
+    ) -> str:
+        claim = self._claim_notification(
+            request=request,
+            scope=scope,
+            session_date=session_date,
+            storage_key=storage_key,
+        )
+        if claim is None:
+            return "notification_claim_held"
+
+        send_started = False
+        delivery_completed = False
+        try:
+            if not self._owns_lock(lock_key, owner_token):
+                return "lock_lost_before_upload"
+            text = build_sell_ai_brief_telegram_report_text(
+                report=report,
+                run_url=request.run_url,
+                storage_key=storage_key,
+            )
+            send_started = True
+            self._notifier.send_schedule(
+                report=report,
+                storage_key=storage_key,
+                text=text,
+            )
+            if not self._owns_lock(lock_key, owner_token):
+                return "lock_lost_before_upload"
+            try:
+                self._state_store.upsert_marker(
+                    key=_state_key(
+                        "notification:sent",
+                        scope=scope,
+                        session_date=session_date,
+                    ),
+                    payload=payload,
+                    ttl_seconds=_SUCCESS_TTL_SECONDS,
+                )
+            except Exception:
+                return "notification_sent_marker_failed"
+            if not self._owns_lock(lock_key, owner_token):
+                return "lock_lost_before_upload"
+            self._state_store.upsert_marker(
+                key=_state_key("success", scope=scope, session_date=session_date),
+                payload=payload,
+                ttl_seconds=_SUCCESS_TTL_SECONDS,
+            )
+            delivery_completed = True
+            return "completed"
+        finally:
+            if not send_started or delivery_completed:
+                self._state_store.release_lock(
+                    claim.key,
+                    owner_token=claim.owner_token,
+                )
 
     def _reconcile_notification(
         self,

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,9 +24,11 @@ def _key(kind: str) -> str:
     )
 
 
-def _request(*, dry_run: bool = False) -> ScheduledSellAiBriefDeliveryRequest:
+def _request(
+    *, dry_run: bool = False, report_path: str = "reports/2026-07-06.sell-ai-brief.json"
+) -> ScheduledSellAiBriefDeliveryRequest:
     return ScheduledSellAiBriefDeliveryRequest(
-        sell_ai_brief_report_path="reports/2026-07-06.sell-ai-brief.json",
+        sell_ai_brief_report_path=report_path,
         session_date="2026-07-06",
         dry_run=dry_run,
     )
@@ -122,13 +126,29 @@ def _sell_ai_brief_report() -> dict[str, Any]:
     }
 
 
+def _write_report(tmp_path: Path, report: dict[str, Any] | None = None) -> str:
+    report_path = tmp_path / "2026-07-06.sell-ai-brief.json"
+    report_path.write_text(
+        json.dumps(report or _sell_ai_brief_report()),
+        encoding="utf-8",
+    )
+    return str(report_path)
+
+
 @dataclass
 class _FakeStateStore:
     entries: dict[str, RuntimeStateEntry] = field(default_factory=dict)
     upserted: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     claims: list[tuple[str, str]] = field(default_factory=list)
     releases: list[tuple[str, str]] = field(default_factory=list)
+    held_locks: set[str] = field(default_factory=set)
     upsert_failures: dict[str, Exception] = field(default_factory=dict)
+    fail_upsert_kinds: set[str] = field(default_factory=set)
+    acquire_main_lock: bool = True
+
+    def __post_init__(self) -> None:
+        for kind in self.fail_upsert_kinds:
+            self.upsert_failures[_key(kind)] = RuntimeError(f"{kind} write failed")
 
     def get_entry(self, key: str) -> RuntimeStateEntry | None:
         return self.entries.get(key)
@@ -162,17 +182,40 @@ class _FakeStateStore:
     ) -> RuntimeStateLockClaim:
         del ttl_seconds, now, payload
         self.claims.append((key, owner_token))
+        if key == _key("lock") and not self.acquire_main_lock:
+            return RuntimeStateLockClaim(acquired=False, expires_at="soon")
+        self.held_locks.add(key)
+        self.entries[key] = RuntimeStateEntry(
+            state_key=key,
+            state_payload={"ownerToken": owner_token},
+            expires_at="soon",
+        )
         return RuntimeStateLockClaim(acquired=True, expires_at="soon")
 
     def release_lock(self, key: str, *, owner_token: str) -> bool:
         self.releases.append((key, owner_token))
+        if (
+            self.entries.get(key)
+            and self.entries[key].state_payload.get("ownerToken") == owner_token
+        ):
+            del self.entries[key]
+        self.held_locks.discard(key)
         return True
 
 
 @dataclass
 class _FakeStorage:
     downloads: dict[str, dict[str, Any]] = field(default_factory=dict)
-    uploads: list[tuple[str, str]] = field(default_factory=list)
+    uploads: list[str] = field(default_factory=list)
+    upload_key: str = "2026/07/2026-07-06.sell-ai-brief.json"
+    upload_error: Exception | None = None
+
+    def upload_sell_ai_brief(self, report_path: str, *, report_date: str) -> str:
+        del report_date
+        self.uploads.append(report_path)
+        if self.upload_error is not None:
+            raise self.upload_error
+        return self.upload_key
 
     def download_json(self, storage_key: str) -> dict[str, Any]:
         return self.downloads[storage_key]
@@ -309,3 +352,85 @@ def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_upsert_ra
 
     assert notifier.sent == [("2026/07/2026-07-06.sell-ai-brief.json", report)]
     assert state.releases == []
+
+
+def test_scheduled_sell_ai_brief_delivery_uploads_then_marks_artifact_then_notifies(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage(upload_key="2026/07/2026-07-06.sell-ai-brief.json")
+    notifier = _FakeNotifier()
+    report_path = _write_report(tmp_path)
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "completed"
+    assert storage.uploads == [report_path]
+    assert _key("artifact") in state.entries
+    assert _key("notification:sent") in state.entries
+    assert _key("success") in state.entries
+    assert notifier.sent
+
+
+def test_scheduled_sell_ai_brief_delivery_lock_contention_skips_without_upload(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore(acquire_main_lock=False)
+    storage = _FakeStorage()
+    report_path = _write_report(tmp_path)
+    runner = _runner(state=state, storage=storage)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "lock_held_skip"
+    assert storage.uploads == []
+
+
+def test_scheduled_sell_ai_brief_delivery_upload_failure_blocks_markers_and_notification(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage(upload_error=RuntimeError("index down"))
+    notifier = _FakeNotifier()
+    report_path = _write_report(tmp_path)
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "upload_failed"
+    assert _key("artifact") not in state.entries
+    assert _key("success") not in state.entries
+    assert notifier.sent == []
+
+
+def test_scheduled_sell_ai_brief_delivery_invalid_report_blocks_upload(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore()
+    storage = _FakeStorage()
+    report_path = _write_report(
+        tmp_path,
+        {"type": "sell-ai-brief", "schema": "broken", "report_date": "2026-07-06"},
+    )
+    runner = _runner(state=state, storage=storage)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "artifact_invalid"
+    assert storage.uploads == []
+
+
+def test_scheduled_sell_ai_brief_delivery_keeps_claim_when_sent_marker_fails(
+    tmp_path: Path,
+) -> None:
+    state = _FakeStateStore(fail_upsert_kinds={"notification:sent"})
+    notifier = _FakeNotifier()
+    report_path = _write_report(tmp_path)
+    runner = _runner(state=state, notifier=notifier)
+
+    result = runner.run(_request(report_path=report_path))
+
+    assert result.status == "notification_sent_marker_failed"
+    assert notifier.sent
+    assert _key("notification:claim") in state.held_locks
