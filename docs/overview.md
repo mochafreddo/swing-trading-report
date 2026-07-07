@@ -37,9 +37,10 @@
 1. `sab scan`이 watchlist와 screener 후보를 평가해 `buy` 리포트를 생성합니다.
 2. `sab sell`이 Supabase 또는 `holdings.yaml` 기반 보유 종목을 평가해 `sell` 리포트를 생성합니다.
 3. `sab entry`가 `buy` 리포트 후보를 다음 세션 진입 관점으로 재평가해 `entry` 리포트를 생성합니다.
-4. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
-5. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
-6. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당하고, macOS `launchd` Toss runner가 local scheduled holdings sync를 호출합니다.
+4. `sab backtest`가 로컬 historical OHLCV 파일을 기존 buy/sell 전략 로직으로 replay해 `backtest` 연구 리포트를 생성합니다.
+5. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
+6. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
+7. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당하고, macOS `launchd` Toss runner가 local scheduled holdings sync를 호출합니다.
 
 ## 핵심 용어
 
@@ -48,6 +49,7 @@
 | `buy` report | scan 단계에서 만든 매수 후보 JSON |
 | `sell` report | 보유 종목 매도/점검 후보 JSON |
 | `entry` report | buy 후보의 다음 세션 진입 가능성 JSON |
+| `backtest` report | 로컬 OHLCV로 과거 구간의 신호/거래/성과를 재현한 연구 JSON |
 | `ai-brief` report | entry 후보의 AI 요약/추천 JSON |
 | `ai-brief-skip` report | scheduled runtime guard로 실행이 중단됐음을 기록하는 JSON |
 | `report_index` | 웹 목록/검색용 Supabase Postgres 테이블 |
