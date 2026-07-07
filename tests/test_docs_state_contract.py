@@ -340,6 +340,29 @@ def test_ai_brief_model_timeout_docs_cover_primary_fallback_and_total() -> None:
         assert "AI Brief model fallback" not in text
 
 
+def test_sell_ai_brief_source_chain_docs_match_scheduler_example() -> None:
+    configuration_text = _read(Path("docs/configuration.md"))
+    env_example_text = _read(Path(".env.example"))
+
+    expected_us_chain = "finnhub,benzinga-news,polygon-news"
+    expected_mixed_chain = f"naver-news,{expected_us_chain}"
+
+    assert f"# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US={expected_us_chain}" in (
+        env_example_text
+    )
+    assert f"# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED={expected_mixed_chain}" in (
+        env_example_text
+    )
+    assert (
+        f"| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | no | global sell chain, then AI Brief chain fallback | `{expected_us_chain}`"
+        in configuration_text
+    )
+    assert (
+        f"| `SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED` | no | KR+US sell chain combination, then global sell chain | `{expected_mixed_chain}`"
+        in configuration_text
+    )
+
+
 def test_index_docs_link_existing_files() -> None:
     links = [
         (doc_path, resolved)

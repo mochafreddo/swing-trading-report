@@ -147,6 +147,24 @@ def test_env_example_uses_scheduled_ai_brief_timeout_recommendations() -> None:
     assert "# AI_BRIEF_MODEL_TOTAL_TIMEOUT_SECONDS=80" not in text
 
 
+def test_env_example_documents_scheduled_sell_ai_brief_source_chain() -> None:
+    env_example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    text = env_example_path.read_text(encoding="utf-8")
+    active_keys = set(_extract_env_keys(env_example_path))
+
+    assert "# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_KR=naver-news" in text
+    assert (
+        "# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US=finnhub,benzinga-news,polygon-news"
+        in text
+    )
+    assert (
+        "# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_MIXED=naver-news,finnhub,benzinga-news,polygon-news"
+        in text
+    )
+    assert "# SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN=finnhub,benzinga-news" in text
+    assert "SELL_AI_BRIEF_SOURCE_PROVIDER_CHAIN_US" not in active_keys
+
+
 def test_env_example_conflict_check_treats_zero_yaml_values_as_present() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     config_data = load_yaml_config(str(repo_root / "config.yaml")).raw

@@ -2,6 +2,18 @@
 
 ## Active
 
+### Observe first KST scheduled Sell AI Brief generation run
+
+**What:** Inspect the first real launchd `com.mochafreddo.sab.sell-ai-brief.generation` run after the 2026-07-07 local smoke.
+
+**Why:** `US after-close scheduled Sell AI Brief` should stay deferred until the KST morning runner has produced, quality-gated, uploaded, and notified a real artifact at least once.
+
+**Context:** The 2026-07-07 smoke installed and loaded the LaunchAgent, verified dry-run/config/tests, restored the Toss freshness marker, and fixed the local sell-specific source chain config. A live run with the real portfolio was blocked by local external-data export policy, while a synthetic AAPL no-upload run verified the external source/OpenAI path. Check `logs/launchd/sell-ai-brief.generation.{out,err}.log` and `scheduled-sell:*:MIXED:<session_date>` after the next 07:25 KST tick.
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** Next weekday 07:25 KST launchd tick.
+
 ## Deferred
 
 ### HOLD/watch explanations for Sell AI Brief V2
@@ -57,6 +69,7 @@
 
 ## Completed
 
+- 2026-07-07: Documented scheduled Sell AI Brief source provider chain examples in `.env.example` and `docs/configuration.md`, and added regression checks so sell-specific US/MIXED chain examples stay aligned. This prevents local scheduler envs from configuring only `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` and leaving `sab sell-ai-brief` to resolve `none` for sell generation.
 - 2026-07-07: Added `sab backtest` as a local historical OHLCV replay runner.
   It reuses the existing buy/sell signal evaluators over date-prefix candles,
   enters on the next available open after an enterable EOD buy signal, exits on
