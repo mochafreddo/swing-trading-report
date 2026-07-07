@@ -143,7 +143,11 @@ def _report_is_bound_to_session(
 ) -> bool:
     report_date = str(report.get("report_date") or "").strip()
     market = str(report.get("market") or "").strip().upper()
-    return report_date == session_date and market == scope
+    if report_date != session_date:
+        return False
+    if scope == "MIXED":
+        return market in _ALLOWED_SCOPES
+    return market == scope
 
 
 def _load_report_date(report_path: str) -> str:

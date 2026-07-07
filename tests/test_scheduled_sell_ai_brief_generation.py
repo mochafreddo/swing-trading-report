@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from sab.scheduler.generic_state import build_scheduled_state_key
 from sab.scheduler.sell_ai_brief_delivery import (
     ScheduledSellAiBriefDeliveryRequest,
@@ -145,6 +146,7 @@ class _FakeStateStore:
     releases: list[tuple[str, str]] = field(default_factory=list)
     renewals: list[tuple[str, str]] = field(default_factory=list)
     renewal_results: list[bool] = field(default_factory=list)
+    upsert_failures: dict[str, Exception] = field(default_factory=dict)
     acquire_lock: bool = True
 
     def get_entry(self, key: str) -> RuntimeStateEntry | None:
@@ -159,6 +161,8 @@ class _FakeStateStore:
         now: dt.datetime | None = None,
     ) -> None:
         del ttl_seconds, now
+        if key in self.upsert_failures:
+            raise self.upsert_failures[key]
         self.upserted.append((key, payload))
         self.entries[key] = RuntimeStateEntry(
             state_key=key,
@@ -244,6 +248,32 @@ class _ContentionStateStore(_FakeStateStore):
         ):
             del self.entries[key]
         return True
+
+
+class _SuccessAfterGenerationLockStateStore(_FakeStateStore):
+    def claim_lock(
+        self,
+        *,
+        key: str,
+        owner_token: str,
+        ttl_seconds: int,
+        now: dt.datetime | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> RuntimeStateLockClaim:
+        claim = super().claim_lock(
+            key=key,
+            owner_token=owner_token,
+            ttl_seconds=ttl_seconds,
+            now=now,
+            payload=payload,
+        )
+        if key == _sell_key("generation-lock") and getattr(claim, "acquired", False):
+            self.entries[_sell_key("success")] = RuntimeStateEntry(
+                state_key=_sell_key("success"),
+                state_payload={"storageKey": "2026/07/2026-07-06.sell-ai-brief.json"},
+                expires_at="2026-07-08T00:00:00Z",
+            )
+        return claim
 
 
 @dataclass
@@ -335,6 +365,38 @@ def test_generation_blocked_alert_uses_claim_to_suppress_concurrent_duplicate() 
     assert len(notifier.blocked) == 1
     assert nested_notifier.blocked == []
     assert _sell_key("notification:blocked-sent") in state.entries
+
+
+def test_generation_keeps_blocked_notification_claim_when_sent_marker_write_fails() -> (
+    None
+):
+    state = _ContentionStateStore(
+        upsert_failures={
+            _sell_key("notification:blocked-sent"): RuntimeError(
+                "sent marker write failed"
+            )
+        }
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, notifier=notifier)
+
+    with pytest.raises(RuntimeError, match="sent marker write failed"):
+        runner.run(_request())
+
+    assert len(notifier.blocked) == 1
+    assert _sell_key("blocked-notification-lock") in state.entries
+    assert _sell_key("blocked-notification-lock") not in [
+        key for key, _owner in state.releases
+    ]
+
+    state.upsert_failures = {}
+    retry_notifier = _FakeNotifier()
+    retry_runner = _runner(state=state, notifier=retry_notifier)
+
+    retry_result = retry_runner.run(_request(attempt_id="attempt-2"))
+
+    assert retry_result.status == "toss_freshness_missing"
+    assert retry_notifier.blocked == []
 
 
 def test_generation_rejects_invalid_toss_freshness_without_generation() -> None:
@@ -436,6 +498,59 @@ def test_generation_success_uploads_sell_then_delegates_brief_delivery() -> None
         "2026/07/2026-07-06.sell-ai-brief.json"
     )
     assert generation_payload["qualityStatus"] == "PASS"
+
+
+def test_generation_rechecks_success_after_lock_before_running_helpers() -> None:
+    state = _SuccessAfterGenerationLockStateStore(
+        entries={
+            _toss_key(): RuntimeStateEntry(
+                state_key=_toss_key(),
+                state_payload={"status": "applied", "sessionDate": "2026-07-06"},
+                expires_at="2026-07-07T12:00:00Z",
+            )
+        }
+    )
+    storage = _FakeStorage()
+    calls: dict[str, list[object]] = {}
+    runner = _runner(state=state, storage=storage, calls=calls)
+
+    result = runner.run(_request())
+
+    assert result.status == "success_marker_skip"
+    assert result.sell_ai_brief_storage_key == ("2026/07/2026-07-06.sell-ai-brief.json")
+    assert calls == {}
+    assert storage.sell_uploads == []
+    assert _sell_key("generation") not in state.entries
+
+
+def test_generation_does_not_record_marker_for_existing_delivery_result() -> None:
+    state = _FakeStateStore(
+        entries={
+            _toss_key(): RuntimeStateEntry(
+                state_key=_toss_key(),
+                state_payload={"status": "applied", "sessionDate": "2026-07-06"},
+                expires_at="2026-07-07T12:00:00Z",
+            )
+        }
+    )
+    storage = _FakeStorage()
+    runner = _runner(
+        state=state,
+        storage=storage,
+        delivery_result=_FakeDeliveryResult(
+            status="success_marker_skip",
+            session_date="2026-07-06",
+            storage_key="2026/07/2026-07-06.sell-ai-brief.json",
+        ),
+    )
+
+    result = runner.run(_request())
+
+    assert result.status == "success_marker_skip"
+    assert result.sell_storage_key == "2026/07/2026-07-06.sell.json"
+    assert result.sell_ai_brief_storage_key == ("2026/07/2026-07-06.sell-ai-brief.json")
+    assert storage.sell_uploads == ["reports/2026-07-06.sell.json"]
+    assert _sell_key("generation") not in state.entries
 
 
 def test_generation_uses_distinct_lock_when_delegating_to_real_delivery(

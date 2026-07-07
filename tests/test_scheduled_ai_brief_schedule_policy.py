@@ -114,10 +114,21 @@ def test_launchd_plists_match_shared_schedule_policy() -> None:
         if not isinstance(intervals, list):
             raise AssertionError(f"{plist_path} StartCalendarInterval must be a list")
 
-        assert _arg_after(arguments, "--market") == dispatch.market
-        assert _arg_after(arguments, "--schedule-role") == dispatch.schedule_role
-        assert _arg_after(arguments, "--runner-role") == dispatch.runner_role
-        assert _arg_after(arguments, "--scheduled-tick") == dispatch.scheduled_tick
+        if dispatch.schedule_role == "sell-generation":
+            env_vars = payload.get("EnvironmentVariables")
+            if not isinstance(env_vars, dict):
+                raise AssertionError(
+                    f"{plist_path} EnvironmentVariables must be a mapping"
+                )
+            assert _arg_after(arguments, "--pipeline") == "sell"
+            assert _arg_after(arguments, "--scope") == dispatch.market
+            assert env_vars["SAB_SELL_SCHEDULE_MODE"] == "generation"
+            assert env_vars["SAB_SCHEDULED_TICK"] == dispatch.scheduled_tick
+        else:
+            assert _arg_after(arguments, "--market") == dispatch.market
+            assert _arg_after(arguments, "--schedule-role") == dispatch.schedule_role
+            assert _arg_after(arguments, "--runner-role") == dispatch.runner_role
+            assert _arg_after(arguments, "--scheduled-tick") == dispatch.scheduled_tick
 
         actual = sorted(
             (

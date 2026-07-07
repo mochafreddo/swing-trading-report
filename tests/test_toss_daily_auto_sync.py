@@ -283,6 +283,36 @@ def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     assert "Origin: http://127.0.0.1:55444" in curl_config
 
 
+def test_toss_daily_auto_sync_runner_rejects_unsafe_web_host_port_before_curl(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        env_file_text="TOSS_SYNC_JOB_TOKEN=test-token\nWEB_HOST_PORT=55300@evil.example\n",
+        default_web_host_port=None,
+    )
+
+    assert result.returncode == 2
+    assert "WEB_HOST_PORT must be an integer from 1 to 65535" in result.stderr
+    assert not recorder.exists()
+
+
 def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_http_request(
     tmp_path: Path,
 ) -> None:

@@ -101,6 +101,16 @@ if [[ "$(normalize_timezone "${current_timezone}")" != "$(normalize_timezone "${
 fi
 
 web_host_port="${WEB_HOST_PORT:-55300}"
+if [[ ! "${web_host_port}" =~ ^[0-9]{1,5}$ ]]; then
+  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
+  exit 2
+fi
+web_host_port_number=$((10#${web_host_port}))
+if (( web_host_port_number < 1 || web_host_port_number > 65535 )); then
+  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
+  exit 2
+fi
+web_host_port="${web_host_port_number}"
 base_url="http://127.0.0.1:${web_host_port}"
 endpoint="${base_url}/api/holdings/toss-sync/scheduled"
 session_date="${TOSS_SYNC_SESSION_DATE:-$(TZ=Asia/Seoul date +%F)}"

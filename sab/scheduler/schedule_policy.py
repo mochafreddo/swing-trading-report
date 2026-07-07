@@ -24,6 +24,8 @@ class ScheduleDispatch:
     scheduled_tick: str
     github_crons: tuple[str, ...] = ()
     launchd_plist_path: str | None = None
+    launchd_weekdays: tuple[int, ...] = _LAUNCHD_WEEKDAYS
+    launchd_kst_times: tuple[dt.time, ...] | None = None
 
 
 _ROLE_WINDOWS: dict[str, dict[str, RoleWindow]] = {
@@ -91,6 +93,17 @@ _SCHEDULE_DISPATCHES: tuple[ScheduleDispatch, ...] = (
         launchd_plist_path=(
             "scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-retry.plist"
         ),
+    ),
+    ScheduleDispatch(
+        market="MIXED",
+        schedule_role="sell-generation",
+        runner_role="local-primary",
+        scheduled_tick="0725",
+        launchd_plist_path=(
+            "scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist"
+        ),
+        launchd_weekdays=(2, 3, 4, 5, 6),
+        launchd_kst_times=(dt.time(7, 25),),
     ),
 )
 
@@ -215,6 +228,8 @@ def launchd_schedule_map() -> dict[str, ScheduleDispatch]:
 
 
 def _launchd_candidate_times(dispatch: ScheduleDispatch) -> tuple[dt.time, ...]:
+    if dispatch.launchd_kst_times is not None:
+        return dispatch.launchd_kst_times
     if dispatch.market != "US":
         raise ValueError("launchd scheduler policy currently supports US ET ticks")
     tick = _tick_time(dispatch.scheduled_tick)
@@ -237,7 +252,7 @@ def launchd_start_calendar_intervals(
             "Minute": candidate_time.minute,
         }
         for candidate_time in _launchd_candidate_times(dispatch)
-        for weekday in _LAUNCHD_WEEKDAYS
+        for weekday in dispatch.launchd_weekdays
     )
 
 

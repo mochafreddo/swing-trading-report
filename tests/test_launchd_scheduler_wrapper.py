@@ -129,7 +129,7 @@ def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -
 
 
 def test_generic_scheduled_wrapper_argument_validation() -> None:
-    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    wrapper = REPO_ROOT / "scripts/launchd/sab-scheduled-wrapper.sh"
 
     valid = subprocess.run(
         [str(wrapper), "--pipeline", "scan", "--scope", "KR"],
@@ -283,6 +283,69 @@ def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief_generation(
         "try-1",
         "--run-url",
         "https://example.test/run",
+    ]
+
+
+def test_generic_scheduled_wrapper_bootstraps_launchd_environment(
+    tmp_path: Path,
+) -> None:
+    wrapper = REPO_ROOT / "scripts/launchd/sab-scheduled-wrapper.sh"
+    fake_home = tmp_path / "home"
+    bin_dir = fake_home / ".local/share/mise/shims"
+    bin_dir.mkdir(parents=True)
+    args_path = tmp_path / "uv-args.txt"
+    pwd_path = tmp_path / "uv-pwd.txt"
+    runner_role_path = tmp_path / "uv-runner-role.txt"
+    env_file = tmp_path / ".env.scheduler.local"
+    env_file.write_text("SAB_RUNNER_ROLE=from-env-file\n", encoding="utf-8")
+
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(args_path.as_posix())}\n"
+        f"printf '%s\\n' \"$PWD\" > {shlex.quote(pwd_path.as_posix())}\n"
+        f"printf '%s\\n' \"${{SAB_RUNNER_ROLE:-}}\" > {shlex.quote(runner_role_path.as_posix())}\n"
+        "exit 0\n",
+    )
+
+    env = {
+        "HOME": str(fake_home),
+        "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+        "SAB_SELL_SCHEDULE_MODE": "generation",
+        "SAB_SESSION_DATE": "2026-07-06",
+        "SAB_SCHEDULER_ENV_FILE": str(env_file),
+    }
+
+    result = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "MIXED"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert pwd_path.read_text(encoding="utf-8").strip() == str(REPO_ROOT)
+    assert runner_role_path.read_text(encoding="utf-8").strip() == "from-env-file"
+    assert args_path.read_text(encoding="utf-8").splitlines() == [
+        "run",
+        "python",
+        "-m",
+        "sab",
+        "sell-ai-brief-generate-scheduled",
+        "--scope",
+        "MIXED",
+        "--session-date",
+        "2026-07-06",
+        "--runner-role",
+        "from-env-file",
+        "--scheduled-tick",
+        "manual",
+        "--attempt-id",
+        "",
+        "--run-url",
+        "",
     ]
 
 
@@ -645,6 +708,10 @@ def test_scheduled_sell_generation_plist_invokes_generic_wrapper() -> None:
         5,
         6,
     }
+    assert {
+        (item["Weekday"], item["Hour"], item["Minute"])
+        for item in payload["StartCalendarInterval"]
+    } == {(weekday, 7, 25) for weekday in range(2, 7)}
 
 
 def test_us_cutoff_alert_plist_runs_after_github_fallback_grace() -> None:

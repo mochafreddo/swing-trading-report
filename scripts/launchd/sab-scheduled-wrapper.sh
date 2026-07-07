@@ -1,6 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+home_dir="${HOME:-}"
+export PATH="${PATH:+${PATH}:}/opt/homebrew/bin:/usr/local/bin${home_dir:+:${home_dir}/.local/share/mise/shims:${home_dir}/.local/bin}:/usr/bin:/bin:/usr/sbin:/sbin"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+env_file="${SAB_SCHEDULER_ENV_FILE:-${repo_root}/.env.scheduler.local}"
+
+cd "${repo_root}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
+
+load_env_file() {
+  local file_path="$1"
+  if [[ ! -f "${file_path}" ]]; then
+    return 0
+  fi
+  while IFS= read -r raw_line || [[ -n "${raw_line}" ]]; do
+    local line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    if [[ -z "${line}" || "${line}" == \#* ]]; then
+      continue
+    fi
+    if [[ "${line}" == export[[:space:]]* ]]; then
+      line="${line#export }"
+    fi
+    if [[ "${line}" != *=* ]]; then
+      continue
+    fi
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    if [[ ! "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      continue
+    fi
+    value="${value%%[[:space:]]#*}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    if [[ -z "${!key+x}" ]]; then
+      export "${key}=${value}"
+    fi
+  done < "${file_path}"
+}
+
+load_env_file "${env_file}"
+
 pipeline=""
 scope=""
 

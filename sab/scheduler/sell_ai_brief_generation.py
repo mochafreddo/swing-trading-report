@@ -21,6 +21,9 @@ _ALLOWED_SCOPES = frozenset({"MIXED"})
 FAILED_SCHEDULED_SELL_AI_BRIEF_GENERATION_STATUSES = (
     frozenset(
         {
+            "toss_freshness_missing",
+            "toss_freshness_stale",
+            "toss_freshness_invalid",
             "lock_lost_before_upload",
             "sell_report_failed",
             "sell_ai_brief_failed",
@@ -210,18 +213,12 @@ class ScheduledSellAiBriefGenerationRunner:
                 session_date=session_date,
             )
 
-        success_entry = self._state_store.get_entry(
-            _state_key("success", scope=scope, session_date=session_date)
+        success_result = self._success_marker_result(
+            scope=scope,
+            session_date=session_date,
         )
-        if success_entry is not None:
-            return ScheduledSellAiBriefGenerationResult(
-                status="success_marker_skip",
-                session_date=session_date,
-                sell_ai_brief_storage_key=str(
-                    success_entry.state_payload.get("storageKey") or ""
-                )
-                or None,
-            )
+        if success_result is not None:
+            return success_result
 
         freshness_entry = self._state_store.get_entry(
             _toss_success_key(scope=scope, session_date=session_date)
@@ -297,9 +294,23 @@ class ScheduledSellAiBriefGenerationRunner:
         )
         if not getattr(claim, "acquired", False):
             return
+        send_started = False
+        sent_recorded = False
         try:
             if self._state_store.get_entry(sent_key) is not None:
                 return
+            self._state_store.upsert_marker(
+                key=lock_key,
+                payload={
+                    **payload,
+                    "notificationType": "blocked",
+                    "claimState": "send_started",
+                    "ownerToken": owner_token,
+                },
+                ttl_seconds=_BLOCKED_TTL_SECONDS,
+                now=now,
+            )
+            send_started = True
             self._notifier.send_blocked(
                 scope=scope,
                 session_date=session_date,
@@ -311,8 +322,10 @@ class ScheduledSellAiBriefGenerationRunner:
                 ttl_seconds=_BLOCKED_TTL_SECONDS,
                 now=now,
             )
+            sent_recorded = True
         finally:
-            self._state_store.release_lock(lock_key, owner_token=owner_token)
+            if not send_started or sent_recorded:
+                self._state_store.release_lock(lock_key, owner_token=owner_token)
 
     def _run_locked_generation(
         self,
@@ -350,6 +363,13 @@ class ScheduledSellAiBriefGenerationRunner:
                 session_date=session_date,
             )
         try:
+            success_result = self._success_marker_result(
+                scope=scope,
+                session_date=session_date,
+            )
+            if success_result is not None:
+                return success_result
+
             generation_request = replace(
                 request,
                 scope=scope,
@@ -403,6 +423,13 @@ class ScheduledSellAiBriefGenerationRunner:
                     session_date=session_date,
                 )
 
+            success_result = self._success_marker_result(
+                scope=scope,
+                session_date=session_date,
+            )
+            if success_result is not None:
+                return success_result
+
             if not self._renew_generation_lock(lock_key, owner_token=owner_token):
                 return ScheduledSellAiBriefGenerationResult(
                     status="lock_lost_before_upload",
@@ -427,6 +454,14 @@ class ScheduledSellAiBriefGenerationRunner:
                     session_date=session_date,
                 )
 
+            success_result = self._success_marker_result(
+                scope=scope,
+                session_date=session_date,
+                sell_storage_key=sell_storage_key,
+            )
+            if success_result is not None:
+                return success_result
+
             delivery_result = self._delivery_runner(
                 ScheduledSellAiBriefDeliveryRequest(
                     sell_ai_brief_report_path=sell_ai_brief_report_path,
@@ -439,12 +474,21 @@ class ScheduledSellAiBriefGenerationRunner:
                 )
             )
             delivery_status = str(getattr(delivery_result, "status", "") or "")
-            if delivery_status not in {
-                "completed",
+            sell_ai_brief_storage_key = str(
+                getattr(delivery_result, "storage_key", "") or ""
+            ).strip()
+            if delivery_status in {
                 "notification_reconciled",
                 "completion_repaired",
                 "success_marker_skip",
             }:
+                return ScheduledSellAiBriefGenerationResult(
+                    status=delivery_status,
+                    session_date=session_date,
+                    sell_storage_key=sell_storage_key,
+                    sell_ai_brief_storage_key=sell_ai_brief_storage_key or None,
+                )
+            if delivery_status != "completed":
                 if delivery_status == "lock_held_skip":
                     delivery_status = "delivery_lock_held"
                 elif (
@@ -458,9 +502,6 @@ class ScheduledSellAiBriefGenerationRunner:
                     session_date=session_date,
                     sell_storage_key=sell_storage_key,
                 )
-            sell_ai_brief_storage_key = str(
-                getattr(delivery_result, "storage_key", "") or ""
-            ).strip()
             generation_payload: dict[str, object] = {
                 "scope": scope,
                 "sessionDate": session_date,
@@ -499,6 +540,28 @@ class ScheduledSellAiBriefGenerationRunner:
             )
         finally:
             self._state_store.release_lock(lock_key, owner_token=owner_token)
+
+    def _success_marker_result(
+        self,
+        *,
+        scope: str,
+        session_date: str,
+        sell_storage_key: str | None = None,
+    ) -> ScheduledSellAiBriefGenerationResult | None:
+        success_entry = self._state_store.get_entry(
+            _state_key("success", scope=scope, session_date=session_date)
+        )
+        if success_entry is None:
+            return None
+        return ScheduledSellAiBriefGenerationResult(
+            status="success_marker_skip",
+            session_date=session_date,
+            sell_storage_key=sell_storage_key,
+            sell_ai_brief_storage_key=str(
+                success_entry.state_payload.get("storageKey") or ""
+            )
+            or None,
+        )
 
     def _renew_generation_lock(self, lock_key: str, *, owner_token: str) -> bool:
         return self._state_store.renew_lock(

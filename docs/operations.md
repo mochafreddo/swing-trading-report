@@ -189,7 +189,7 @@ Reconciliation rules:
 - If `success` already exists, the runner no-ops.
 - If `artifact` exists without `success`, the runner downloads the uploaded JSON by storage key and retries notification reconciliation instead of uploading a second copy.
 - `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed` are failure statuses. `dry_run`, `success_marker_skip`, `lock_held_skip`, `completed`, `completion_repaired`, `notification_claim_held`, and `notification_reconciled` are non-fatal delivery outcomes.
-- Generation failures include `toss_freshness_missing`, `toss_freshness_stale`, `toss_freshness_invalid`, `sell_report_failed`, `sell_ai_brief_failed`, `quality_gate_failed`, and `upload_failed`. Treat freshness failures as holdings-data problems first, not model failures.
+- Generation failures include `toss_freshness_missing`, `toss_freshness_stale`, `toss_freshness_invalid`, `sell_report_failed`, `sell_ai_brief_failed`, `quality_gate_failed`, and `upload_failed`. Treat freshness failures as holdings-data problems first, not model failures. If delegated delivery reports an existing completion such as `success_marker_skip`, `notification_reconciled`, or `completion_repaired`, generation exits non-fatally without writing a new `generation` marker for the current local sell report.
 
 ## Local Toss Daily Auto Sync
 
