@@ -128,6 +128,84 @@ def test_dispatch_command_routes_entry_options(monkeypatch) -> None:
     ]
 
 
+def test_dispatch_command_routes_backtest_options(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def run_backtest(**kwargs) -> int:
+        calls.append(kwargs)
+        return 31
+
+    monkeypatch.setattr(sab_main, "run_backtest", run_backtest)
+
+    ns = _parse_args(
+        [
+            "backtest",
+            "--data-file",
+            "fixtures/history.json",
+            "--tickers",
+            "AAPL.NAS,MSFT.NAS",
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-31",
+            "--strategy-mode",
+            "sma_ema_hybrid",
+            "--sell-mode",
+            "sma_ema_hybrid",
+            "--report-dir",
+            "tmp/reports",
+            "--transaction-cost-bps",
+            "7.5",
+            "--slippage-bps",
+            "2.5",
+            "--position-size-pct",
+            "0.25",
+            "--partial-exit-fraction",
+            "0.4",
+            "--intraday-exit-policy",
+            "target_first",
+            "--assumptions-file",
+            "fixtures/assumptions.json",
+            "--no-close-open-at-end",
+        ]
+    )
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 31
+    assert calls == [
+        {
+            "data_file_path": "fixtures/history.json",
+            "tickers": "AAPL.NAS,MSFT.NAS",
+            "start_date": "2026-01-02",
+            "end_date": "2026-01-31",
+            "strategy_mode": "sma_ema_hybrid",
+            "sell_mode": "sma_ema_hybrid",
+            "report_dir": "tmp/reports",
+            "transaction_cost_bps": 7.5,
+            "slippage_bps": 2.5,
+            "position_size_pct": 0.25,
+            "partial_exit_fraction": 0.4,
+            "intraday_exit_policy": "target_first",
+            "assumptions_file_path": "fixtures/assumptions.json",
+            "close_open_at_end": False,
+        }
+    ]
+
+
+def test_dispatch_command_reports_backtest_input_errors(monkeypatch, capsys) -> None:
+    def run_backtest(**kwargs) -> int:
+        del kwargs
+        raise ValueError("backtest assumptions file must contain a JSON object")
+
+    monkeypatch.setattr(sab_main, "run_backtest", run_backtest)
+
+    ns = _parse_args(["backtest", "--data-file", "fixtures/history.json"])
+
+    assert sab_main._dispatch_command(ns, argparse.ArgumentParser()) == 2
+    captured = capsys.readouterr()
+    assert "backtest error:" in captured.err
+    assert "assumptions file" in captured.err
+
+
 def test_dispatch_command_routes_ai_brief_options(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 

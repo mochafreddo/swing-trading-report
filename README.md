@@ -2,7 +2,7 @@
 
 상태: Accepted (프로젝트 진입점)
 
-KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
+KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. `backtest`는 로컬 historical OHLCV 연구 산출물입니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
 
 ## 문서 상태
 
@@ -42,6 +42,7 @@ just --list
 just scan --universe both
 just sell
 just entry
+UV_CACHE_DIR=.uv-cache uv run python -m sab backtest --data-file data/history.json --tickers AAPL.NAS --assumptions-file data/backtest-assumptions.json
 UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json
 docker compose up -d --build web
 ```
@@ -94,7 +95,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 
 ## 주요 산출물
 
-- 로컬 리포트: `reports/YYYY-MM-DD(-n).{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json`
+- 로컬 리포트: `reports/YYYY-MM-DD(-n).{buy|sell|entry|backtest|ai-brief|ai-brief-skip|sell-ai-brief}.json`
 - Supabase Storage key: `YYYY/MM/YYYY-MM-DD(-n).{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json`
 - 보유 목록 source of truth: Supabase `holdings`
 - 리포트 목록 source of truth: Supabase `report_index`

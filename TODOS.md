@@ -28,12 +28,6 @@
 **Priority:** P3
 **Depends on:** Stable KST morning scheduled Sell AI Brief generation.
 
-- 2026-06-22: Design and implement a historical swing backtest runner for
-  profitability and parameter-sensitivity research, covering data source,
-  sample period, universe, benchmark/regime alignment, survivorship assumptions,
-  EOD entry timing, stop/target approximation, transaction costs, slippage, and
-  output metrics. The 2026-06-22 replay matrix intentionally covers
-  deterministic rule semantics only.
 - 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
   console pages after admin credentials or browser cookies are available. The
   2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
@@ -63,6 +57,16 @@
 
 ## Completed
 
+- 2026-07-07: Added `sab backtest` as a local historical OHLCV replay runner.
+  It reuses the existing buy/sell signal evaluators over date-prefix candles,
+  enters on the next available open after an enterable EOD buy signal, exits on
+  sell evaluator actions, applies `SELL_PARTIAL` as a partial close, supports
+  previous-prefix daily-OHLC stop/target path policies with gap-through open
+  fills, position-size fractions, transaction costs/slippage, optional
+  end-of-period force close, validated OHLCV issues, and writes
+  `*.backtest.json` with trades, win rate, return, drawdown, holding-period,
+  gross exposure, period/symbol, assumptions, and config snapshots for
+  profitability and parameter-sensitivity research.
 - 2026-07-06: Added scheduled Sell AI Brief generation behind the local generic wrapper with explicit `SAB_SELL_SCHEDULE_MODE=generation`, Toss freshness marker gating, sell/Sell AI Brief typed report helpers, quality-gated sell upload, delegated Sell AI Brief delivery, blocked-freshness notifications, and review-required handling for Sell AI Brief eval WARN.
 - 2026-07-06: Completed marker-aware scheduled Sell AI Brief delivery for prebuilt `*.sell-ai-brief.json` artifacts via `sab sell-ai-brief-scheduled` and the launchd generic wrapper route when `SELL_AI_BRIEF_REPORT_PATH` is set, using `scheduled-sell:*` upload/index-before-notify markers and notification reconciliation. Manual `sell.yml` remains opt-in delivery only.
 - 2026-06-23: Normalized `sma_ema_hybrid` volume confirmation semantics so breakout, pullback, and reversal compare the signal candle to the preceding N-day average; added focused detector regressions and strategy documentation.

@@ -11,6 +11,7 @@ from typing import Any
 
 from . import ai_brief_latency_probe
 from .ai_brief import run_ai_brief
+from .backtest import run_backtest
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -249,6 +250,80 @@ def _build_parser() -> argparse.ArgumentParser:
         "--upload",
         action="store_true",
         help="Upload entry report to Supabase Storage/report_index",
+    )
+
+    backtest = sub.add_parser(
+        "backtest",
+        help="Replay historical OHLCV through buy/sell strategy rules",
+    )
+    backtest.add_argument(
+        "--data-file",
+        required=True,
+        help="Local JSON OHLCV file: ticker mapping, symbols mapping, or row list",
+    )
+    backtest.add_argument(
+        "--tickers",
+        default=None,
+        help="Comma-separated ticker filter; required when data file is a row list",
+    )
+    backtest.add_argument("--start-date", default=None, help="YYYY-MM-DD or YYYYMMDD")
+    backtest.add_argument("--end-date", default=None, help="YYYY-MM-DD or YYYYMMDD")
+    backtest.add_argument(
+        "--strategy-mode",
+        default=None,
+        choices=["ema_cross", "sma_ema_hybrid"],
+        help="Buy strategy mode override",
+    )
+    backtest.add_argument(
+        "--sell-mode",
+        default=None,
+        choices=["generic", "sma_ema_hybrid"],
+        help="Sell strategy mode override",
+    )
+    backtest.add_argument(
+        "--report-dir",
+        default=None,
+        help="Output report directory override",
+    )
+    backtest.add_argument(
+        "--transaction-cost-bps",
+        type=float,
+        default=0.0,
+        help="Round-trip metrics subtract this bps per side",
+    )
+    backtest.add_argument(
+        "--slippage-bps",
+        type=float,
+        default=0.0,
+        help="Apply bps slippage to entry and exit prices",
+    )
+    backtest.add_argument(
+        "--position-size-pct",
+        type=float,
+        default=1.0,
+        help="Account equity fraction allocated to each entry (0..1)",
+    )
+    backtest.add_argument(
+        "--partial-exit-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of remaining position closed by SELL_PARTIAL (0..1)",
+    )
+    backtest.add_argument(
+        "--intraday-exit-policy",
+        default="conservative",
+        choices=["none", "conservative", "stop_first", "target_first"],
+        help="Daily OHLC stop/target path approximation policy",
+    )
+    backtest.add_argument(
+        "--assumptions-file",
+        default=None,
+        help="Optional JSON object documenting data/universe/benchmark assumptions",
+    )
+    backtest.add_argument(
+        "--no-close-open-at-end",
+        action="store_true",
+        help="Leave final open positions marked open instead of force-closing",
     )
 
     ai_brief = sub.add_parser(
@@ -554,6 +629,29 @@ def _run_entry_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _run_backtest_command(ns: argparse.Namespace) -> int:
+    try:
+        return run_backtest(
+            data_file_path=ns.data_file,
+            tickers=ns.tickers,
+            start_date=ns.start_date,
+            end_date=ns.end_date,
+            strategy_mode=ns.strategy_mode,
+            sell_mode=ns.sell_mode,
+            report_dir=ns.report_dir,
+            transaction_cost_bps=ns.transaction_cost_bps,
+            slippage_bps=ns.slippage_bps,
+            position_size_pct=ns.position_size_pct,
+            partial_exit_fraction=ns.partial_exit_fraction,
+            intraday_exit_policy=ns.intraday_exit_policy,
+            assumptions_file_path=ns.assumptions_file,
+            close_open_at_end=not ns.no_close_open_at_end,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"backtest error: {sanitize_log_text(str(exc))}", file=sys.stderr)
+        return 2
+
+
 def _run_ai_brief_command(ns: argparse.Namespace) -> int:
     return run_ai_brief(
         entry_report_path=ns.entry_report,
@@ -813,6 +911,7 @@ def _dispatch_command(
         "scan": _run_scan_command,
         "sell": _run_sell_command,
         "entry": _run_entry_command,
+        "backtest": _run_backtest_command,
         "ai-brief": _run_ai_brief_command,
         "sell-ai-brief": _run_sell_ai_brief_command,
         "ai-brief-scheduled": _run_scheduled_ai_brief_command,
