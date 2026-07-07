@@ -1,5 +1,4 @@
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
+import { hasOwn } from "@/lib/object-utils";
 
 export function normalizeHoldingMutationForPersistence<T extends object>(
   input: T,

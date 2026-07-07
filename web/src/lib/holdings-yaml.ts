@@ -14,6 +14,8 @@ import {
   HoldingsReconciliationError,
   toHoldingSnapshot,
 } from "@/lib/holdings-reconciliation";
+import { isValidIsoCalendarDate } from "@/lib/iso-calendar-date";
+import { hasOwn } from "@/lib/object-utils";
 import type {
   HoldingRecord,
   HoldingReplaceSnapshot,
@@ -23,7 +25,6 @@ import type {
 
 const SUPPORTED_ENTRY_CURRENCIES = new Set(["KRW", "USD"]);
 const NUMERIC_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
-const ISO_CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 export const MAX_HOLDINGS_YAML_DOCUMENT_BYTES = 1_048_576;
 export const MAX_HOLDINGS_YAML_ROW_COUNT = 1_000;
 
@@ -41,9 +42,6 @@ interface HoldingsYamlDocumentShape {
 type RootRecord = Record<string, unknown>;
 
 export class HoldingsYamlError extends Error {}
-
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
 
 function asRecord(value: unknown): RootRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -183,35 +181,6 @@ function parseOptionalCurrency(
     );
   }
   return text;
-}
-
-function isLeapYear(year: number): boolean {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-}
-
-function isValidIsoCalendarDate(value: string): boolean {
-  const match = ISO_CALENDAR_DATE_PATTERN.exec(value);
-  if (!match) {
-    return false;
-  }
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const daysByMonth = [
-    31,
-    isLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-  return month >= 1 && month <= 12 && day >= 1 && day <= daysByMonth[month - 1];
 }
 
 function parseOptionalDate(

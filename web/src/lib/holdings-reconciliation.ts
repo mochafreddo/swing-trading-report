@@ -4,9 +4,7 @@ import type {
   HoldingSnapshot,
   HoldingsYamlImportSummary,
 } from "@/lib/types";
-
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
+import { hasOwn } from "@/lib/object-utils";
 
 export type HoldingReconciliationField =
   | "quantity"

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .env_loader import getenv
+from .utils.yaml import unique_key_safe_loader
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -14,60 +15,6 @@ except Exception:  # pragma: no cover - optional dependency
 
 class ConfigLoadError(RuntimeError):
     """Raised when config.yaml exists but cannot be loaded safely."""
-
-
-_YAML_MERGE_TAG = "tag:yaml.org,2002:merge"
-
-
-def _construct_mapping_key_for_duplicate_check(
-    loader: Any, key_node: Any, deep: bool
-) -> Any:
-    if getattr(key_node, "tag", None) == _YAML_MERGE_TAG:
-        return "<<"
-    return loader.construct_object(key_node, deep=deep)
-
-
-def _reject_duplicate_mapping_keys(loader: Any, node: Any, deep: bool) -> None:
-    seen_keys: set[Any] = set()
-    for key_node, _value_node in node.value:
-        key = _construct_mapping_key_for_duplicate_check(loader, key_node, deep)
-        try:
-            hash(key)
-        except TypeError as exc:
-            raise ConfigLoadError(f"unhashable YAML key {key!r}") from exc
-        if key in seen_keys:
-            raise ConfigLoadError(f"duplicate YAML key {key!r}")
-        seen_keys.add(key)
-
-
-def _construct_mapping_without_duplicate_keys(
-    loader: Any, node: Any, deep: bool = False
-) -> dict[Any, Any]:
-    _reject_duplicate_mapping_keys(loader, node, deep)
-    loader.flatten_mapping(node)
-    _reject_duplicate_mapping_keys(loader, node, deep)
-
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        value = loader.construct_object(value_node, deep=deep)
-        try:
-            mapping[key] = value
-        except TypeError as exc:
-            raise ConfigLoadError(f"unhashable YAML key {key!r}") from exc
-
-    return mapping
-
-
-def _unique_key_safe_loader() -> type[Any]:
-    class UniqueKeySafeLoader(yaml.SafeLoader):
-        pass
-
-    UniqueKeySafeLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-        _construct_mapping_without_duplicate_keys,
-    )
-    return UniqueKeySafeLoader
 
 
 @dataclass
@@ -98,7 +45,9 @@ def load_yaml_config(path: str | None = None) -> ConfigData:
 
     try:
         with p.open("r", encoding="utf-8") as f:
-            loaded: Any = yaml.load(f, Loader=_unique_key_safe_loader())
+            loaded: Any = yaml.load(
+                f, Loader=unique_key_safe_loader(yaml, ConfigLoadError)
+            )
     except OSError as exc:
         raise ConfigLoadError(f"Failed to read config file '{p}': {exc}") from exc
     except Exception as exc:

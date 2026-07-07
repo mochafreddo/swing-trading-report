@@ -11,6 +11,7 @@ import {
   buildHoldingsKeysetFilter,
   encodeHoldingCursor,
 } from "@/lib/holdings-pagination";
+import { hasOwn } from "@/lib/object-utils";
 import {
   buildAuthHeaders,
   fetchSupabase,
@@ -27,9 +28,6 @@ import type {
 
 const HOLDINGS_SELECT =
   "ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,created_at,updated_at";
-
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
 
 export interface FetchHoldingsPageOptions {
   limit?: number;

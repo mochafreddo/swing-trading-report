@@ -3,6 +3,7 @@ import { Fragment, useState } from "react";
 import styles from "../reports-client.module.css";
 
 import { formatSummaryKeyForDisplay } from "@/lib/report-summary-label";
+import { hasOwn } from "@/lib/object-utils";
 
 import { resolveAiBriefState } from "./ai-brief-state";
 import {
@@ -61,11 +62,7 @@ function asStringArray(value: unknown): string[] {
 }
 
 function hasOwnField(value: unknown, field: string): boolean {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.hasOwnProperty.call(value, field)
-  );
+  return value !== null && typeof value === "object" && hasOwn(value, field);
 }
 
 function formatNullableNumber(value: unknown): string {
