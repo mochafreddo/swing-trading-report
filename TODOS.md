@@ -40,6 +40,39 @@
 **Priority:** P3
 **Depends on:** Stable KST morning scheduled Sell AI Brief generation.
 
+### Metrics mobile card density pass
+
+**What:** Reduce the one-column stream of repeated metric cards on mobile after
+the 2026-07-07 `/design-review`.
+
+**Why:** Metrics preserves the correct task order, but the mobile view is still a
+long sequence of similarly weighted cards. Operators need faster scanning of
+run quality, coverage, fallback, and issue trends.
+
+**Context:** The 2026-07-07 design review fixed higher-impact Reports/Holdings
+mobile task ordering first. Revisit Metrics with grouping or denser chart
+summaries rather than adding more decorative card chrome.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** No dependency.
+
+### Investigate web CSS preload warning
+
+**What:** Investigate the repeated browser warning for an unused preloaded
+Next.js CSS chunk in the local web UI.
+
+**Why:** It did not block the 2026-07-07 design fixes, but preload warnings can
+hide real performance regressions and make browser QA noisier.
+
+**Context:** `/design-review` observed the same warning across Reports,
+Holdings, Metrics, and Run after rebuilt local Docker verification. Treat this
+as performance-polish unless it starts affecting load timing or visual flashes.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** No dependency.
+
 - 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
   console pages after admin credentials or browser cookies are available. The
   2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
