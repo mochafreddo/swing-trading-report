@@ -16,6 +16,18 @@
 **Priority:** P3
 **Depends on:** Manual Sell AI Brief V1 adoption and account/readiness context.
 
+### US after-close scheduled Sell AI Brief
+
+**What:** Add a separate US after-close scheduled Sell AI Brief generation window.
+
+**Why:** The first scheduled sell automation should stay focused on the KST morning Toss-sync ritual; US after-close timing needs its own session policy, duplicate-notification handling, and operational window.
+
+**Context:** The 2026-07-06 scheduled Sell AI Brief generation review chose to ship KST morning `MIXED` first and defer US after-close automation. Revisit after the local generation runner, freshness marker, lock renewal, quality-gate, upload, and Telegram idempotency behavior have run successfully in the morning workflow.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** Stable KST morning scheduled Sell AI Brief generation.
+
 - 2026-06-22: Design and implement a historical swing backtest runner for
   profitability and parameter-sensitivity research, covering data source,
   sample period, universe, benchmark/regime alignment, survivorship assumptions,
