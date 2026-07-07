@@ -509,10 +509,6 @@
     grid-template-columns: 1fr;
   }
 
-  .right {
-    order: -1;
-  }
-
   .sidebarPanel {
     position: static;
   }
