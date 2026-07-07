@@ -71,25 +71,6 @@ def _date_iso(value: dt.date | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _date_key(value: dt.date) -> str:
-    return value.strftime("%Y%m%d")
-
-
-def _normalize_report_date(value: Any) -> str | None:
-    return _date_iso(_parse_date(value))
-
-
-def _sort_candles(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[tuple[dt.date, dict[str, Any]]] = []
-    for row in rows:
-        date_value = _parse_date(row.get("date"))
-        if date_value is None:
-            continue
-        normalized.append((date_value, dict(row)))
-    normalized.sort(key=lambda item: item[0])
-    return [row for _, row in normalized]
-
-
 def _coerce_ohlcv_rows(rows: Sequence[Any]) -> list[dict[str, Any]]:
     coerced: list[dict[str, Any]] = []
     for row in rows:
@@ -289,6 +270,40 @@ def _candidate_is_enterable(
 def _candidate_reasons(candidate: Mapping[str, Any]) -> list[Any]:
     reasons = candidate.get("reasons")
     return list(reasons) if isinstance(reasons, list) else []
+
+
+def _evaluate_buy_signal(
+    *,
+    cfg: Config,
+    ticker: str,
+    candles: list[dict[str, Any]],
+    meta: dict[str, Any],
+    eval_settings: EvaluationSettings,
+    hybrid_eval_settings: HybridEvaluationSettings,
+    evaluate_ticker_fn: Any,
+    evaluate_ticker_hybrid_fn: Any,
+) -> Any:
+    if cfg.strategy_mode == "sma_ema_hybrid":
+        return evaluate_ticker_hybrid_fn(ticker, candles, hybrid_eval_settings, meta)
+    return evaluate_ticker_fn(ticker, candles, eval_settings, meta)
+
+
+def _evaluate_sell_signal(
+    *,
+    cfg: Config,
+    ticker: str,
+    candles: list[dict[str, Any]],
+    holding: dict[str, Any],
+    sell_settings: SellSettings,
+    hybrid_sell_settings: HybridSellSettings,
+    evaluate_sell_signals_fn: Any,
+    evaluate_sell_signals_hybrid_fn: Any,
+) -> Any:
+    if cfg.sell_mode == "sma_ema_hybrid":
+        return evaluate_sell_signals_hybrid_fn(
+            ticker, candles, holding, hybrid_sell_settings
+        )
+    return evaluate_sell_signals_fn(ticker, candles, holding, sell_settings)
 
 
 def _normalize_backtest_candles(
@@ -698,8 +713,34 @@ def _build_summary(
     return summary, equity_curve
 
 
+def _execution_assumptions(
+    run_config: BacktestRunConfig,
+    *,
+    intraday_policy: str | None = None,
+) -> dict[str, Any]:
+    resolved_policy = intraday_policy or _normalize_intraday_exit_policy(
+        run_config.intraday_exit_policy
+    )
+    return {
+        "entry_execution": "next_open",
+        "exit_execution": (
+            "signal_close" if resolved_policy == "none" else "intraday_ohlc"
+        ),
+        "position_size_pct": _bounded_fraction(
+            run_config.position_size_pct,
+            default=1.0,
+        ),
+        "partial_exit_fraction": _bounded_fraction(
+            run_config.partial_exit_fraction,
+            default=0.5,
+        ),
+        "intraday_exit_policy": resolved_policy,
+    }
+
+
 def _config_snapshot(cfg: Config, run_config: BacktestRunConfig) -> dict[str, Any]:
     intraday_policy = _normalize_intraday_exit_policy(run_config.intraday_exit_policy)
+    execution = _execution_assumptions(run_config, intraday_policy=intraday_policy)
     return {
         "strategy_mode": cfg.strategy_mode,
         "sell_mode": cfg.sell_mode,
@@ -729,22 +770,10 @@ def _config_snapshot(cfg: Config, run_config: BacktestRunConfig) -> dict[str, An
             "time_stop_profit_floor": cfg.hybrid_sell.time_stop_profit_floor,
         },
         "backtest": {
-            "entry_execution": "next_open",
-            "exit_execution": (
-                "signal_close" if intraday_policy == "none" else "intraday_ohlc"
-            ),
+            **execution,
             "force_close_open_at_end": run_config.close_open_at_end,
             "transaction_cost_bps": run_config.transaction_cost_bps,
             "slippage_bps": run_config.slippage_bps,
-            "position_size_pct": _bounded_fraction(
-                run_config.position_size_pct,
-                default=1.0,
-            ),
-            "partial_exit_fraction": _bounded_fraction(
-                run_config.partial_exit_fraction,
-                default=0.5,
-            ),
-            "intraday_exit_policy": intraday_policy,
             "initial_equity": run_config.initial_equity,
         },
     }
@@ -763,26 +792,7 @@ def _build_assumptions(
         },
         "benchmark": {"status": "not_configured"},
         "survivorship": {"status": "not_provided"},
-        "execution": {
-            "entry_execution": "next_open",
-            "exit_execution": (
-                "signal_close"
-                if _normalize_intraday_exit_policy(run_config.intraday_exit_policy)
-                == "none"
-                else "intraday_ohlc"
-            ),
-            "intraday_exit_policy": _normalize_intraday_exit_policy(
-                run_config.intraday_exit_policy
-            ),
-            "partial_exit_fraction": _bounded_fraction(
-                run_config.partial_exit_fraction,
-                default=0.5,
-            ),
-            "position_size_pct": _bounded_fraction(
-                run_config.position_size_pct,
-                default=1.0,
-            ),
-        },
+        "execution": _execution_assumptions(run_config),
     }
     for key, value in (run_config.assumptions or {}).items():
         if isinstance(value, Mapping):
@@ -910,22 +920,26 @@ def run_historical_backtest(
                 previous_sell_result = None
                 if intraday_exit_policy != "none" and idx > position.entry_index:
                     previous_prefix = candles[:idx]
-                    if cfg.sell_mode == "sma_ema_hybrid":
-                        previous_sell_result = evaluate_sell_signals_hybrid_fn(
-                            ticker, previous_prefix, holding, hybrid_sell_settings
-                        )
-                    else:
-                        previous_sell_result = evaluate_sell_signals_fn(
-                            ticker, previous_prefix, holding, sell_settings
-                        )
-                if cfg.sell_mode == "sma_ema_hybrid":
-                    sell_result = evaluate_sell_signals_hybrid_fn(
-                        ticker, prefix, holding, hybrid_sell_settings
+                    previous_sell_result = _evaluate_sell_signal(
+                        cfg=cfg,
+                        ticker=ticker,
+                        candles=previous_prefix,
+                        holding=holding,
+                        sell_settings=sell_settings,
+                        hybrid_sell_settings=hybrid_sell_settings,
+                        evaluate_sell_signals_fn=evaluate_sell_signals_fn,
+                        evaluate_sell_signals_hybrid_fn=evaluate_sell_signals_hybrid_fn,
                     )
-                else:
-                    sell_result = evaluate_sell_signals_fn(
-                        ticker, prefix, holding, sell_settings
-                    )
+                sell_result = _evaluate_sell_signal(
+                    cfg=cfg,
+                    ticker=ticker,
+                    candles=prefix,
+                    holding=holding,
+                    sell_settings=sell_settings,
+                    hybrid_sell_settings=hybrid_sell_settings,
+                    evaluate_sell_signals_fn=evaluate_sell_signals_fn,
+                    evaluate_sell_signals_hybrid_fn=evaluate_sell_signals_hybrid_fn,
+                )
                 action = str(getattr(sell_result, "action", "") or "").upper()
                 intraday_exit = (
                     _resolve_intraday_exit(
@@ -1017,12 +1031,16 @@ def run_historical_backtest(
                         mark_events.append(mark_event)
 
             if position is None and pending_candidate is None:
-                if cfg.strategy_mode == "sma_ema_hybrid":
-                    buy_result = evaluate_ticker_hybrid_fn(
-                        ticker, prefix, hybrid_eval_settings, meta
-                    )
-                else:
-                    buy_result = evaluate_ticker_fn(ticker, prefix, eval_settings, meta)
+                buy_result = _evaluate_buy_signal(
+                    cfg=cfg,
+                    ticker=ticker,
+                    candles=prefix,
+                    meta=meta,
+                    eval_settings=eval_settings,
+                    hybrid_eval_settings=hybrid_eval_settings,
+                    evaluate_ticker_fn=evaluate_ticker_fn,
+                    evaluate_ticker_hybrid_fn=evaluate_ticker_hybrid_fn,
+                )
                 raw_candidate = getattr(buy_result, "candidate", None)
                 if isinstance(raw_candidate, Mapping) and _candidate_is_enterable(
                     raw_candidate, strategy_mode=cfg.strategy_mode
@@ -1033,7 +1051,8 @@ def run_historical_backtest(
             last_date: dt.date | None = None
             last_row: dict[str, Any] | None = None
             last_idx: int | None = None
-            for idx, (candidate_date, row) in reversed(list(enumerate(dated_rows))):
+            for idx in range(len(dated_rows) - 1, -1, -1):
+                candidate_date, row = dated_rows[idx]
                 if candidate_date is None:
                     continue
                 if end is not None and candidate_date > end:
