@@ -85,11 +85,17 @@ def _evaluate_sell_runtime(runtime: _SellRuntime) -> list[SellReportRow]:
     )
 
 
-def _render_sell_report(runtime: _SellRuntime, results: list[SellReportRow]) -> str:
+def _render_sell_report(
+    runtime: _SellRuntime,
+    results: list[SellReportRow],
+    *,
+    artifact_date: str | None = None,
+) -> str:
     return sell_evaluation._write_sell_report(
         runtime,
         results,
         write_sell_report_fn=write_sell_report,
+        artifact_date=artifact_date,
     )
 
 
@@ -147,6 +153,7 @@ def run_sell(
     provider: str | None,
     holdings_path: str | None = None,
     report_path_callback: Callable[[str], None] | None = None,
+    report_date: str | None = None,
 ) -> int:
     logger = logging.getLogger(__name__)
     run_id = current_run_id("sell")
@@ -200,7 +207,7 @@ def run_sell(
     _mark_missing_sell_market_data(runtime)
     results = _evaluate_sell_runtime(runtime)
 
-    out_path = _render_sell_report(runtime, results)
+    out_path = _render_sell_report(runtime, results, artifact_date=report_date)
     if report_path_callback is not None:
         report_path_callback(out_path)
     logger.info(
@@ -318,6 +325,7 @@ def run_sell_with_result(
     provider: str | None,
     holdings_path: str | None = None,
     suppress_upload: bool = False,
+    report_date: str | None = None,
 ) -> SellRunResult:
     report_paths: list[str] = []
     if suppress_upload:
@@ -326,12 +334,14 @@ def run_sell_with_result(
                 provider=provider,
                 holdings_path=holdings_path,
                 report_path_callback=report_paths.append,
+                report_date=report_date,
             )
     else:
         exit_code = run_sell(
             provider=provider,
             holdings_path=holdings_path,
             report_path_callback=report_paths.append,
+            report_date=report_date,
         )
     return SellRunResult(
         exit_code=exit_code,

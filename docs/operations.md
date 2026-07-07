@@ -155,7 +155,7 @@ Scheduled Sell AI Brief has two explicit modes:
 
 Execution paths:
 
-- Local generation CLI: `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date YYYY-MM-DD --runner-role local-primary --scheduled-tick 0715`
+- Local generation CLI: `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date YYYY-MM-DD --runner-role local-primary --scheduled-tick 0725`
 - launchd generic wrapper generation route: `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
 - Local prebuilt delivery CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
 - launchd generic wrapper delivery route: `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/YYYY-MM-DD.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
@@ -164,7 +164,9 @@ Execution paths:
 Runtime markers use the `scheduled-sell:` prefix and are keyed by `scope + session_date`:
 
 - `scheduled-sell:blocked:*`: Toss freshness blocked normal generation
+- `scheduled-sell:blocked-notification-lock:*`: single-owner claim for freshness-blocked Telegram delivery
 - `scheduled-sell:notification:blocked-sent:*`: freshness-blocked Telegram already sent
+- `scheduled-sell:generation-lock:*`: generation runner lock; separate from the delivery lock
 - `scheduled-sell:generation:*`: generation runner produced and uploaded sell/Sell AI Brief artifacts
 - `scheduled-sell:review-required:*`: generation quality gate returned `WARN`; normal delivery happened but needs review
 - `scheduled-sell:attempt:*`: pre-lock observation marker for a delivery attempt

@@ -624,6 +624,29 @@ def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:
         assert all("Hour" in item and "Minute" in item for item in intervals)
 
 
+def test_scheduled_sell_generation_plist_invokes_generic_wrapper() -> None:
+    plist_path = Path(
+        "scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist"
+    )
+
+    payload = plistlib.loads(plist_path.read_bytes())
+    args = payload["ProgramArguments"]
+
+    assert payload["Label"] == "com.mochafreddo.sab.sell-ai-brief.generation"
+    assert "sab-scheduled-wrapper.sh" in args[0]
+    assert args[1:] == ["--pipeline", "sell", "--scope", "MIXED"]
+    assert payload["EnvironmentVariables"]["SAB_SELL_SCHEDULE_MODE"] == "generation"
+    assert payload["EnvironmentVariables"]["SAB_SCHEDULED_TICK"] == "0725"
+    assert payload["StartCalendarInterval"]
+    assert {item["Weekday"] for item in payload["StartCalendarInterval"]} == {
+        2,
+        3,
+        4,
+        5,
+        6,
+    }
+
+
 def test_us_cutoff_alert_plist_runs_after_github_fallback_grace() -> None:
     payload = plistlib.loads(
         Path(
@@ -669,8 +692,10 @@ def test_launchd_verify_script_is_non_destructive() -> None:
     text = script.read_text(encoding="utf-8")
 
     assert "plutil -lint" in text
+    assert "com.mochafreddo.sab.sell-ai-brief.generation.plist" in text
     assert "verify_ai_brief_plist_timing.py" in text
     assert "bash -n" in text
+    assert 'bash -n "scripts/launchd/sab-scheduled-wrapper.sh"' in text
     assert "docker compose" in text
     assert "launchctl print" in text
     assert "launchctl bootstrap" not in text

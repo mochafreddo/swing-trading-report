@@ -490,6 +490,13 @@ def test_dispatch_command_routes_scheduled_sell_ai_brief_generation_options(
     ]
 
 
+def test_dispatch_command_rejects_non_mixed_scheduled_sell_generation_scope() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _parse_args(["sell-ai-brief-generate-scheduled", "--scope", "KR"])
+
+    assert exc_info.value.code == 2
+
+
 def test_run_scheduled_sell_ai_brief_delivery_maps_status_to_exit_code(
     monkeypatch,
 ) -> None:
@@ -581,6 +588,12 @@ def test_run_scheduled_sell_ai_brief_generation_maps_status_to_exit_code(
         "sell_ai_brief_failed": 1,
         "quality_gate_failed": 1,
         "upload_failed": 1,
+        "artifact_invalid": 1,
+        "artifact_marker_invalid": 1,
+        "notification_sent_marker_invalid": 1,
+        "notification_sent_marker_failed": 1,
+        "delivery_failed": 1,
+        "delivery_lock_held": 1,
         "dry_run": 0,
         "success_marker_skip": 0,
         "toss_freshness_missing": 0,
@@ -630,6 +643,78 @@ def test_run_scheduled_sell_ai_brief_generation_maps_status_to_exit_code(
             sab_main.run_scheduled_sell_ai_brief_generation(request=request)
             == expected_exit
         )
+
+
+def test_scheduled_sell_ai_brief_generation_wires_session_date_to_sell_runner(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_init(self, **kwargs) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        sab_main.ScheduledSellAiBriefGenerationRunner,
+        "__init__",
+        fake_init,
+    )
+    monkeypatch.setattr(
+        sab_main.ScheduledSellAiBriefGenerationRunner,
+        "run",
+        lambda self, request: SimpleNamespace(
+            status="dry_run",
+            session_date=request.session_date,
+            sell_storage_key=None,
+            sell_ai_brief_storage_key=None,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sab_main.SupabaseRuntimeStateClient,
+        "from_env",
+        classmethod(lambda cls: object()),
+    )
+    monkeypatch.setattr(
+        sab_main.DefaultScheduledStorage,
+        "from_env",
+        classmethod(lambda cls: object()),
+    )
+    monkeypatch.setattr(
+        sab_main,
+        "_write_scheduled_sell_ai_brief_generation_status_file",
+        lambda **kwargs: None,
+        raising=False,
+    )
+    sell_calls: list[dict[str, object]] = []
+
+    def fake_run_sell_with_result(**kwargs: object) -> SimpleNamespace:
+        sell_calls.append(kwargs)
+        return SimpleNamespace(
+            exit_code=0,
+            report_path="reports/2026-07-06.sell.json",
+        )
+
+    monkeypatch.setattr(
+        sab_main,
+        "run_sell_with_result",
+        fake_run_sell_with_result,
+    )
+
+    request = ScheduledSellAiBriefGenerationRequest(session_date="2026-07-06")
+
+    assert sab_main.run_scheduled_sell_ai_brief_generation(request=request) == 0
+    sell_runner = captured["sell_runner"]
+    assert callable(sell_runner)
+    sell_runner(request)
+
+    assert sell_calls == [
+        {
+            "provider": None,
+            "holdings_path": None,
+            "suppress_upload": True,
+            "report_date": "2026-07-06",
+        }
+    ]
 
 
 def test_dispatch_command_prints_help_for_missing_command() -> None:

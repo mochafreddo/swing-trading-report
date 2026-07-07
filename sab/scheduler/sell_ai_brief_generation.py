@@ -7,21 +7,30 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .generic_state import build_scheduled_state_key
-from .sell_ai_brief_delivery import ScheduledSellAiBriefDeliveryRequest
+from .sell_ai_brief_delivery import (
+    FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES,
+    ScheduledSellAiBriefDeliveryRequest,
+)
 from .state import RuntimeStateEntry, RuntimeStateLockClaim
 
 _SUCCESS_TTL_SECONDS = 48 * 60 * 60
 _BLOCKED_TTL_SECONDS = 48 * 60 * 60
+_BLOCKED_NOTIFICATION_LOCK_TTL_SECONDS = 10 * 60
 _GENERATION_LOCK_TTL_SECONDS = 30 * 60
-_ALLOWED_SCOPES = frozenset({"KR", "US", "MIXED"})
-FAILED_SCHEDULED_SELL_AI_BRIEF_GENERATION_STATUSES = frozenset(
-    {
-        "lock_lost_before_upload",
-        "sell_report_failed",
-        "sell_ai_brief_failed",
-        "quality_gate_failed",
-        "upload_failed",
-    }
+_ALLOWED_SCOPES = frozenset({"MIXED"})
+FAILED_SCHEDULED_SELL_AI_BRIEF_GENERATION_STATUSES = (
+    frozenset(
+        {
+            "lock_lost_before_upload",
+            "sell_report_failed",
+            "sell_ai_brief_failed",
+            "quality_gate_failed",
+            "upload_failed",
+            "delivery_failed",
+            "delivery_lock_held",
+        }
+    )
+    | FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES
 )
 
 
@@ -87,7 +96,7 @@ class ScheduledSellAiBriefGenerationResult:
 def _normalize_scope(scope: str) -> str:
     normalized = str(scope or "").strip().upper()
     if normalized not in _ALLOWED_SCOPES:
-        raise ValueError("scope must be KR, US, or MIXED")
+        raise ValueError("scope must be MIXED")
     return normalized
 
 
@@ -229,6 +238,10 @@ class ScheduledSellAiBriefGenerationRunner:
                 session_date=session_date,
                 reason=freshness_block_reason,
                 now=now,
+                owner_token=(
+                    f"{request.attempt_id or request.scheduled_tick}-blocked-"
+                    f"{uuid.uuid4().hex}"
+                ),
             )
             return ScheduledSellAiBriefGenerationResult(
                 status=freshness_block_reason,
@@ -249,6 +262,7 @@ class ScheduledSellAiBriefGenerationRunner:
         session_date: str,
         reason: str,
         now: dt.datetime,
+        owner_token: str,
     ) -> None:
         payload: dict[str, object] = {
             "scope": scope,
@@ -269,17 +283,36 @@ class ScheduledSellAiBriefGenerationRunner:
         )
         if self._state_store.get_entry(sent_key) is not None:
             return
-        self._notifier.send_blocked(
+        lock_key = _state_key(
+            "blocked-notification-lock",
             scope=scope,
             session_date=session_date,
-            reason=reason,
         )
-        self._state_store.upsert_marker(
-            key=sent_key,
-            payload={**payload, "channel": "telegram"},
-            ttl_seconds=_BLOCKED_TTL_SECONDS,
+        claim = self._state_store.claim_lock(
+            key=lock_key,
+            owner_token=owner_token,
+            ttl_seconds=_BLOCKED_NOTIFICATION_LOCK_TTL_SECONDS,
             now=now,
+            payload={**payload, "notificationType": "blocked"},
         )
+        if not getattr(claim, "acquired", False):
+            return
+        try:
+            if self._state_store.get_entry(sent_key) is not None:
+                return
+            self._notifier.send_blocked(
+                scope=scope,
+                session_date=session_date,
+                reason=reason,
+            )
+            self._state_store.upsert_marker(
+                key=sent_key,
+                payload={**payload, "channel": "telegram"},
+                ttl_seconds=_BLOCKED_TTL_SECONDS,
+                now=now,
+            )
+        finally:
+            self._state_store.release_lock(lock_key, owner_token=owner_token)
 
     def _run_locked_generation(
         self,
@@ -289,7 +322,11 @@ class ScheduledSellAiBriefGenerationRunner:
         session_date: str,
         now: dt.datetime,
     ) -> ScheduledSellAiBriefGenerationResult:
-        lock_key = _state_key("lock", scope=scope, session_date=session_date)
+        lock_key = _state_key(
+            "generation-lock",
+            scope=scope,
+            session_date=session_date,
+        )
         owner_token = (
             f"{request.attempt_id or request.scheduled_tick}-generation-"
             f"{uuid.uuid4().hex}"
@@ -408,8 +445,16 @@ class ScheduledSellAiBriefGenerationRunner:
                 "completion_repaired",
                 "success_marker_skip",
             }:
+                if delivery_status == "lock_held_skip":
+                    delivery_status = "delivery_lock_held"
+                elif (
+                    not delivery_status
+                    or delivery_status
+                    not in FAILED_SCHEDULED_SELL_AI_BRIEF_DELIVERY_STATUSES
+                ):
+                    delivery_status = "delivery_failed"
                 return ScheduledSellAiBriefGenerationResult(
-                    status=delivery_status or "delivery_failed",
+                    status=delivery_status,
                     session_date=session_date,
                     sell_storage_key=sell_storage_key,
                 )

@@ -31,7 +31,7 @@
 | Python CLI | `sab/`, `pyproject.toml`, `uv.lock` | local/Actions `uv sync` + `python -m sab` | GitHub Actions and scheduler use this path. |
 | Web console | `web/`, `docker-compose.yml`, `web/Dockerfile` | Docker image + `pnpm run start` | Host publish is loopback by default. |
 | Scheduled AI Brief | `docker-compose.scheduler.yml`, `scripts/launchd/`, `sab/scheduler/` | one-shot Docker scheduler + launchd wrapper | Uses `.env.scheduler.local`. |
-| Scheduled Sell AI Brief | `scripts/launchd/sab-scheduled-wrapper.sh`, `sab/scheduler/sell_ai_brief_generation.py` | local generic wrapper + Python scheduled runner | `SAB_SELL_SCHEDULE_MODE=generation` requires fresh Toss marker; `delivery` is prebuilt-artifact only. |
+| Scheduled Sell AI Brief | `scripts/launchd/sab-scheduled-wrapper.sh`, `scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist`, `sab/scheduler/sell_ai_brief_generation.py` | local generic wrapper + Python scheduled runner | `SAB_SELL_SCHEDULE_MODE=generation` requires fresh Toss marker; `delivery` is prebuilt-artifact only. |
 | Supabase DB | `supabase/migrations/` | migration set | RLS/RPC/table contracts live here. |
 | GitHub automation | `.github/workflows/*.yml` | workflow definitions | Schedules and manual dispatch. |
 
@@ -196,7 +196,7 @@ NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 �
 
 ## Scheduled Sell AI Brief Deployment
 
-Scheduled Sell AI Brief generation is a local runner path, not a GitHub `sell.yml` schedule. It is intentionally gated on the latest scheduled Toss holdings sync marker.
+Scheduled Sell AI Brief generation is a local runner path, not a GitHub `sell.yml` schedule. It is intentionally gated on the latest scheduled Toss holdings sync marker. The committed launchd template is `scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist`, scheduled for Tue-Sat `07:25` KST after the `07:15` Toss freshness sync.
 
 Manual dry smoke:
 
@@ -213,6 +213,12 @@ Generic wrapper generation smoke:
 
 ```bash
 SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED
+```
+
+Launchd verification:
+
+```bash
+scripts/launchd/verify-sab-ai-brief.sh
 ```
 
 Prebuilt artifact delivery remains explicit and separate:

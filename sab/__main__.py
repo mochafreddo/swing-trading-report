@@ -506,9 +506,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "sell-ai-brief-generate-scheduled",
         help="Generate and deliver a scheduled Sell AI Brief with freshness guards",
     )
-    sell_generate_scheduled.add_argument(
-        "--scope", default="MIXED", choices=["KR", "US", "MIXED"]
-    )
+    sell_generate_scheduled.add_argument("--scope", default="MIXED", choices=["MIXED"])
     sell_generate_scheduled.add_argument("--session-date", default="")
     sell_generate_scheduled.add_argument("--runner-role", default="local-primary")
     sell_generate_scheduled.add_argument("--scheduled-tick", default="manual")
@@ -747,6 +745,7 @@ def run_scheduled_sell_ai_brief_generation(
             provider=generation_request.provider,
             holdings_path=None,
             suppress_upload=True,
+            report_date=generation_request.session_date or None,
         ),
         sell_ai_brief_runner=lambda generation_request, sell_report_path: (
             run_sell_ai_brief_with_result(

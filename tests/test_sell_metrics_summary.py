@@ -84,3 +84,45 @@ def test_write_sell_report_includes_market_data_summary_fields() -> None:
     assert summary_fields["data_coverage_ratio"] == pytest.approx(0.5)
     assert summary_fields["provider_fallback_count"] == 1
     assert summary_fields["provider_fallback_ratio"] == pytest.approx(0.5)
+
+
+def test_write_sell_report_prefers_explicit_artifact_date_over_eval_date() -> None:
+    runtime = _SellRuntime(
+        cfg=replace(Config(), data_provider="kis"),
+        logger=logging.getLogger("tests.sell_metrics_summary"),
+        holdings=[],
+        unique_tickers=["AAPL.NAS"],
+        ticker_currency={"AAPL.NAS": "USD"},
+    )
+    runtime.market_data = {"AAPL.NAS": [{"date": "20260705", "close": 90.0}]}
+    results = [
+        SellReportRow(
+            ticker="AAPL.NAS",
+            name="Apple",
+            quantity=1,
+            entry_price=100.0,
+            entry_date="2026-01-02",
+            last_price=90.0,
+            pnl_pct=-0.1,
+            action="SELL",
+            reasons=["test"],
+            stop_price=95.0,
+            target_price=120.0,
+            currency="USD",
+            eval_date="2026-07-05",
+        )
+    ]
+    captured: dict[str, Any] = {}
+
+    def _fake_write_sell_report(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "dummy-report.json"
+
+    _write_sell_report(
+        runtime,
+        results,
+        write_sell_report_fn=_fake_write_sell_report,
+        artifact_date="2026-07-06",
+    )
+
+    assert captured["artifact_date"] == "2026-07-06"

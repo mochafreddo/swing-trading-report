@@ -124,6 +124,24 @@ PY
   printf '%s\n' "JSON parser command failed: ${python_bin}" >&2
   exit 4
 fi
+if ! "${python_bin}" - "${session_date}" <<'PY' >/dev/null 2>&1; then
+import datetime as dt
+import re
+import sys
+
+value = sys.argv[1]
+if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+    raise SystemExit(1)
+try:
+    parsed = dt.date.fromisoformat(value)
+except ValueError:
+    raise SystemExit(1) from None
+if parsed.isoformat() != value:
+    raise SystemExit(1)
+PY
+  printf '%s\n' "TOSS_SYNC_SESSION_DATE must be a valid YYYY-MM-DD date" >&2
+  exit 2
+fi
 
 response_file="$(mktemp "${TMPDIR:-/tmp}/toss-auto-sync.XXXXXX.json")"
 trap 'rm -f "${response_file}"' EXIT

@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass, field
-from typing import cast
+from pathlib import Path
+from typing import Any, cast
 
 from sab.scheduler.generic_state import build_scheduled_state_key
-from sab.scheduler.sell_ai_brief_delivery import ScheduledSellAiBriefDeliveryRequest
+from sab.scheduler.sell_ai_brief_delivery import (
+    ScheduledSellAiBriefDeliveryRequest,
+    ScheduledSellAiBriefDeliveryRunner,
+)
 from sab.scheduler.sell_ai_brief_generation import (
     ScheduledSellAiBriefGenerationRequest,
     ScheduledSellAiBriefGenerationRunner,
 )
 from sab.scheduler.state import RuntimeStateEntry, RuntimeStateLockClaim
+
+from tests.test_scheduled_sell_ai_brief_delivery import _sell_ai_brief_report
 
 
 def _sell_key(kind: str, *, session_date: str = "2026-07-06") -> str:
@@ -207,24 +214,82 @@ class _FakeStateStore:
         return True
 
 
+class _ContentionStateStore(_FakeStateStore):
+    def claim_lock(
+        self,
+        *,
+        key: str,
+        owner_token: str,
+        ttl_seconds: int,
+        now: dt.datetime | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> RuntimeStateLockClaim:
+        existing = self.entries.get(key)
+        if existing is not None and existing.state_payload.get("ownerToken"):
+            self.claims.append((key, owner_token))
+            return RuntimeStateLockClaim(acquired=False, expires_at=existing.expires_at)
+        return super().claim_lock(
+            key=key,
+            owner_token=owner_token,
+            ttl_seconds=ttl_seconds,
+            now=now,
+            payload=payload,
+        )
+
+    def release_lock(self, key: str, *, owner_token: str) -> bool:
+        self.releases.append((key, owner_token))
+        if (
+            self.entries.get(key) is not None
+            and self.entries[key].state_payload.get("ownerToken") == owner_token
+        ):
+            del self.entries[key]
+        return True
+
+
 @dataclass
 class _FakeStorage:
     sell_uploads: list[str] = field(default_factory=list)
+    sell_upload_dates: list[str] = field(default_factory=list)
+    sell_ai_brief_uploads: list[str] = field(default_factory=list)
+    sell_ai_brief_upload_key: str = "2026/07/2026-07-06.sell-ai-brief.json"
+    downloads: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def upload_sell(self, report_path: str, *, report_date: str) -> str:
-        del report_date
         self.sell_uploads.append(report_path)
+        self.sell_upload_dates.append(report_date)
         return "2026/07/2026-07-06.sell.json"
+
+    def upload_sell_ai_brief(self, report_path: str, *, report_date: str) -> str:
+        del report_date
+        self.sell_ai_brief_uploads.append(report_path)
+        return self.sell_ai_brief_upload_key
+
+    def download_json(self, storage_key: str) -> dict[str, Any]:
+        return self.downloads[storage_key]
 
 
 @dataclass
 class _FakeNotifier:
     blocked: list[dict[str, object]] = field(default_factory=list)
+    schedule_sent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    on_blocked_send: object | None = None
 
     def send_blocked(self, *, scope: str, session_date: str, reason: str) -> None:
+        if callable(self.on_blocked_send):
+            self.on_blocked_send()
         self.blocked.append(
             {"scope": scope, "session_date": session_date, "reason": reason}
         )
+
+    def send_schedule(
+        self,
+        *,
+        report: dict[str, Any],
+        storage_key: str,
+        text: str,
+    ) -> None:
+        assert text
+        self.schedule_sent.append((storage_key, report))
 
 
 def test_generation_missing_toss_freshness_sends_blocked_alert_without_success() -> (
@@ -247,7 +312,29 @@ def test_generation_missing_toss_freshness_sends_blocked_alert_without_success()
     assert _sell_key("blocked") in state.entries
     assert _sell_key("notification:blocked-sent") in state.entries
     assert _sell_key("success") not in state.entries
-    assert state.claims == []
+    assert [claim[0] for claim in state.claims] == [
+        _sell_key("blocked-notification-lock")
+    ]
+
+
+def test_generation_blocked_alert_uses_claim_to_suppress_concurrent_duplicate() -> None:
+    state = _ContentionStateStore()
+    nested_notifier = _FakeNotifier()
+
+    def _send_nested_run() -> None:
+        nested_runner = _runner(state=state, notifier=nested_notifier)
+        nested_result = nested_runner.run(_request(attempt_id="attempt-2"))
+        assert nested_result.status == "toss_freshness_missing"
+
+    notifier = _FakeNotifier(on_blocked_send=_send_nested_run)
+    runner = _runner(state=state, notifier=notifier)
+
+    result = runner.run(_request())
+
+    assert result.status == "toss_freshness_missing"
+    assert len(notifier.blocked) == 1
+    assert nested_notifier.blocked == []
+    assert _sell_key("notification:blocked-sent") in state.entries
 
 
 def test_generation_rejects_invalid_toss_freshness_without_generation() -> None:
@@ -268,7 +355,9 @@ def test_generation_rejects_invalid_toss_freshness_without_generation() -> None:
     assert result.status == "toss_freshness_invalid"
     assert notifier.blocked[0]["reason"] == "toss_freshness_invalid"
     assert _sell_key("blocked") in state.entries
-    assert state.claims == []
+    assert [claim[0] for claim in state.claims] == [
+        _sell_key("blocked-notification-lock")
+    ]
 
 
 def test_generation_rejects_stale_toss_freshness_without_generation() -> None:
@@ -288,7 +377,9 @@ def test_generation_rejects_stale_toss_freshness_without_generation() -> None:
 
     assert result.status == "toss_freshness_stale"
     assert notifier.blocked[0]["reason"] == "toss_freshness_stale"
-    assert state.claims == []
+    assert [claim[0] for claim in state.claims] == [
+        _sell_key("blocked-notification-lock")
+    ]
 
 
 def test_generation_blocked_alert_is_sent_once_per_session() -> None:
@@ -345,6 +436,80 @@ def test_generation_success_uploads_sell_then_delegates_brief_delivery() -> None
         "2026/07/2026-07-06.sell-ai-brief.json"
     )
     assert generation_payload["qualityStatus"] == "PASS"
+
+
+def test_generation_uses_distinct_lock_when_delegating_to_real_delivery(
+    tmp_path: Path,
+) -> None:
+    brief_path = tmp_path / "2026-07-06.sell-ai-brief.json"
+    brief_path.write_text(json.dumps(_sell_ai_brief_report()), encoding="utf-8")
+    state = _ContentionStateStore(
+        entries={
+            _toss_key(): RuntimeStateEntry(
+                state_key=_toss_key(),
+                state_payload={"status": "applied", "sessionDate": "2026-07-06"},
+                expires_at="2026-07-07T12:00:00Z",
+            )
+        }
+    )
+    storage = _FakeStorage()
+    notifier = _FakeNotifier()
+    delivery_notifier = _FakeNotifier()
+
+    runner = ScheduledSellAiBriefGenerationRunner(
+        state_store=state,
+        storage=storage,
+        notifier=notifier,
+        sell_runner=lambda request: _FakeSellResult(
+            exit_code=0,
+            report_path="reports/2026-07-06.sell.json",
+        ),
+        sell_ai_brief_runner=lambda request, sell_path: _FakeBriefResult(
+            exit_code=0,
+            report_path=str(brief_path),
+        ),
+        evaluator=lambda sell_path, brief_path: _FakeEvalResult(status="PASS"),
+        delivery_runner=lambda request: ScheduledSellAiBriefDeliveryRunner(
+            state_store=state,
+            storage=storage,
+            notifier=delivery_notifier,
+            now_fn=lambda: dt.datetime(2026, 7, 6, 22, 25, tzinfo=dt.UTC),
+        ).run(request),
+        now_fn=lambda: dt.datetime(2026, 7, 6, 22, 25, tzinfo=dt.UTC),
+    )
+
+    result = runner.run(_request())
+
+    assert result.status == "completed"
+    assert storage.sell_uploads == ["reports/2026-07-06.sell.json"]
+    assert storage.sell_ai_brief_uploads == [str(brief_path)]
+    assert delivery_notifier.schedule_sent
+    assert _sell_key("success") in state.entries
+
+
+def test_generation_maps_delegated_delivery_lock_skip_to_failure_status() -> None:
+    state = _FakeStateStore(
+        entries={
+            _toss_key(): RuntimeStateEntry(
+                state_key=_toss_key(),
+                state_payload={"status": "applied", "sessionDate": "2026-07-06"},
+                expires_at="2026-07-07T12:00:00Z",
+            )
+        }
+    )
+    runner = _runner(
+        state=state,
+        delivery_result=_FakeDeliveryResult(
+            status="lock_held_skip",
+            session_date="2026-07-06",
+            storage_key=None,
+        ),
+    )
+
+    result = runner.run(_request())
+
+    assert result.status == "delivery_lock_held"
+    assert _sell_key("generation") not in state.entries
 
 
 def test_generation_resolves_empty_session_date_before_running_helpers() -> None:
@@ -484,10 +649,10 @@ def test_generation_renews_lock_across_long_pipeline_before_upload() -> None:
 
     assert result.status == "completed"
     assert [renewal[0] for renewal in state.renewals] == [
-        _sell_key("lock"),
-        _sell_key("lock"),
-        _sell_key("lock"),
-        _sell_key("lock"),
+        _sell_key("generation-lock"),
+        _sell_key("generation-lock"),
+        _sell_key("generation-lock"),
+        _sell_key("generation-lock"),
     ]
     assert storage.sell_uploads == ["reports/2026-07-06.sell.json"]
 

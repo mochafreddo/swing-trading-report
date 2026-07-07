@@ -193,6 +193,35 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     assert "test-token" not in result.stdout
 
 
+def test_toss_daily_auto_sync_runner_rejects_unsafe_session_date_before_curl(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        extra_env={"TOSS_SYNC_SESSION_DATE": '2026-07-06"bad'},
+    )
+
+    assert result.returncode == 2
+    assert "TOSS_SYNC_SESSION_DATE must be a valid YYYY-MM-DD date" in result.stderr
+    assert not recorder.exists()
+
+
 def test_toss_daily_auto_sync_runner_escapes_job_token_in_curl_config(
     tmp_path: Path,
 ) -> None:

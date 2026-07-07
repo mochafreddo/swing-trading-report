@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mochafreddo.sab.sell-ai-brief.generation</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SAB_SELL_SCHEDULE_MODE</key>
+    <string>generation</string>
+    <key>SAB_SCHEDULED_TICK</key>
+    <string>0725</string>
+  </dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/mochafreddo/GitHub/swing-trading-report/scripts/launchd/sab-scheduled-wrapper.sh</string>
+    <string>--pipeline</string>
+    <string>sell</string>
+    <string>--scope</string>
+    <string>MIXED</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/mochafreddo/GitHub/swing-trading-report/logs/launchd/sell-ai-brief.generation.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/mochafreddo/GitHub/swing-trading-report/logs/launchd/sell-ai-brief.generation.err.log</string>
+</dict>
+</plist>

@@ -391,10 +391,7 @@ export const tossHoldingsSyncRequestSchema = z.union([
 export const tossHoldingsScheduledSyncRequestSchema = z
   .object({
     mode: z.literal("auto-apply"),
-    sessionDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
+    sessionDate: isoCalendarDateSchema.optional(),
   })
   .strict();
 
