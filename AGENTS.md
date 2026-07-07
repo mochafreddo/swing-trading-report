@@ -8,13 +8,14 @@
 `swing-trading-report`: KR/US 시장용 온디맨드 스윙 트레이딩 시그널 스캐너 및 리포트 생성기. Python `sab` 패키지가 스캔을 실행해 JSON 리포트를 쓰고, 로컬 Next.js UI가 이를 열람하며, Supabase가 보유목록/리포트/실행이력을 저장하고, GitHub Actions가 스케줄 스캔 + 텔레그램/슬랙 알림을 수행. 툴체인 버전은 `mise.toml`에 고정(Python 3.14, uv, node, pnpm, just, direnv).
 
 ```
-sab/         # Python 패키지; 엔트리포인트 `python -m sab` (scan | sell | entry | ai-brief | ai-brief-scheduled | ai-brief-latency-probe)
-             #   signals/ screener/ report/ data/ scheduler/ utils/ + scan/sell/entry/ai_brief 모듈
+sab/         # Python 패키지; 엔트리포인트 `python -m sab`
+             #   scan/sell/entry/backtest/ai-brief/sell-ai-brief/scheduled/probe 서브커맨드
+             #   signals/ screener/ report/ data/ scheduler/ utils/ + scan/sell/entry/backtest/ai_brief 모듈
 web/         # 로컬 UI: Next.js 16 + React 19 + TypeScript (`docker compose up -d --build web`로 기동)
 tests/       # pytest 스위트 (~83개 테스트 파일)
 scripts/     # 유지보수/평가 스크립트 (`uv run python scripts/...`로 실행)
 docs/        # STRATEGY.md(전략 로직), ARCHITECTURE.md(컴포넌트 흐름), PRD.md, runbook.md, adr/
-reports/     # 생성 산출물: YYYY-MM-DD(-n).{buy|sell|entry|ai-brief}.json
+reports/     # 생성 산출물: YYYY-MM-DD(-n).{buy|sell|entry|backtest|ai-brief|ai-brief-skip|sell-ai-brief}.json
 config.yaml, holdings.yaml   # 런타임 설정(config.yaml은 저장소에 기본값 포함) + 보유목록(holdings.yaml은 gitignore, holdings.example.yaml에서 복사)
 ```
 
@@ -88,6 +89,7 @@ config.yaml, holdings.yaml   # 런타임 설정(config.yaml은 저장소에 기�
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab scan`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab sell`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab entry`
+- `UV_CACHE_DIR=.uv-cache uv run python -m sab backtest --data-file data/history.json --tickers AAPL.NAS`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report <path>`
 - `UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief-latency-probe --primary-model <model>`
 - `UV_CACHE_DIR=.uv-cache uv run ruff check .`

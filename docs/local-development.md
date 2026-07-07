@@ -91,6 +91,7 @@ just entry
 UV_CACHE_DIR=.uv-cache uv run python -m sab scan --universe both
 UV_CACHE_DIR=.uv-cache uv run python -m sab sell
 UV_CACHE_DIR=.uv-cache uv run python -m sab entry
+UV_CACHE_DIR=.uv-cache uv run python -m sab backtest --data-file data/history.json --tickers AAPL.NAS
 UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json
 ```
 

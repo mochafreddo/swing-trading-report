@@ -27,9 +27,33 @@ and report artifact shape.
 
 Replay fixtures are not profitability evidence. They do not estimate win rate,
 expected value, MFE/MAE, stop/target hit-rate, slippage, transaction cost, or
-survivorship effects. Those claims require a separate historical backtest runner
-with explicit data-source, universe, entry-timing, benchmark, and execution
-assumptions.
+survivorship effects.
+
+`sab backtest` is the local historical runner for that research layer. It
+reuses the same `ema_cross`/`sma_ema_hybrid` buy evaluators and
+`generic`/`sma_ema_hybrid` sell evaluators over historical candle prefixes,
+then writes a local `*.backtest.json` with the period, symbols, trades, win
+rate, return, drawdown, holding period, equity curve, issues, and config
+snapshot. Its execution assumptions are explicit: EOD buy signals enter on the
+next available valid open, `SELL` exits use the signal-day close,
+`SELL_PARTIAL` closes `--partial-exit-fraction` of the remaining position,
+daily OHLC stop/target ambiguity is controlled by `--intraday-exit-policy`
+using the previous completed sell prefix, and gap-through stop/target hits fill
+at the candle open. Position size is weighted with `--position-size-pct`, costs
+are configured with `--transaction-cost-bps`, and slippage is configured with
+`--slippage-bps`.
+
+`summary.total_return_pct` is a non-compounded closed-lot contribution metric
+(`summary.return_model=non_compounded_initial_equity_contribution`), not a
+portfolio NAV simulation. The artifact also records maximum gross exposure, and
+`summary.max_drawdown_pct` uses conservative low-price mark-to-market events for
+open positions so intratrade drawdown is visible.
+
+Backtest artifacts are still research outputs, not production execution
+instructions. Data-vendor survivorship bias, point-in-time universe
+construction, benchmark selection, and corporate-action data quality are
+recorded through the artifact `assumptions` object, optionally sourced from
+`--assumptions-file`; the runner does not infer those facts from OHLCV alone.
 
 ### 백로그
 

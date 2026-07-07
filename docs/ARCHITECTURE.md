@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry`/`backtest` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions cleanup/manual/AI Brief monitor/fallback, 로컬 one-shot Docker scheduled AI Brief 연결이 현재 제공 범위입니다. Scheduled sell은 GitHub schedule이 아니라 Toss freshness-gated local Sell AI Brief generation runner로 제공하며, scheduled scan은 marker-aware fallback 전까지 fail closed입니다.
 
 ### 실험
@@ -33,7 +33,7 @@
 
 ## 1. 시스템 목적
 
-- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, entry 결과를 로컬 `ai-brief` JSON으로 요약하며, fresh Toss holdings marker가 있을 때 scheduled Sell AI Brief를 생성합니다.
+- Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, 로컬 historical OHLCV로 `backtest` JSON 연구 리포트를 만들며, entry 결과를 로컬 `ai-brief` JSON으로 요약하고, fresh Toss holdings marker가 있을 때 scheduled Sell AI Brief를 생성합니다.
 - Next.js 웹(`web`)은 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
 - GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. scheduled AI Brief는 로컬 Docker primary가 실행하고, scheduled scan은 marker-aware fallback 전까지 fail closed입니다. Scheduled Sell AI Brief는 로컬 generic wrapper가 Toss freshness marker를 확인한 뒤 sell report와 Sell AI Brief를 생성하고, 기존 prebuilt delivery runner는 artifact 전달/재조정 전용으로 남습니다.
@@ -68,9 +68,10 @@ flowchart LR
 
 | 컴포넌트 | 역할 | 주요 코드 |
 |---|---|---|
-| CLI 엔트리 | `scan`/`sell`/`entry`/`ai-brief`/`sell-ai-brief`/`ai-brief-scheduled`/`sell-ai-brief-generate-scheduled`/`sell-ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
+| CLI 엔트리 | `scan`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief`/`ai-brief-scheduled`/`sell-ai-brief-generate-scheduled`/`sell-ai-brief-scheduled`/`ai-brief-latency-probe` 서브커맨드 라우팅 | `sab/__main__.py` |
 | Scan 오케스트레이션 | 티커 로드, 스크리너, 시세 수집, 매수 평가, 리포트 생성 | `sab/scan.py`(엔트리), `sab/scan_screener.py`, `sab/scan_evaluation.py` |
 | Sell 오케스트레이션 | 보유종목 기준 시세 수집, 매도/점검 평가, 리포트 생성 | `sab/sell.py`(엔트리), `sab/sell_evaluation.py`, `sab/sell_runtime.py` |
+| Backtest 오케스트레이션 | 로컬 historical OHLCV를 날짜 prefix로 잘라 기존 buy/sell evaluator에 재주입하고 거래/성과 JSON 생성 | `sab/backtest.py`, `sab/report/backtest_report.py` |
 | AI Brief 오케스트레이션 | entry 리포트 소비, 실행가능/차단·검토/watch/excluded 후보 분류, source provider chain context, opt-in article reader 검증, `fake`/`openai` 모델 provider 요약, 리포트 생성/업로드 | `sab/ai_brief.py`, `sab/ai_brief_candidates.py`, `sab/ai_brief_source_chain.py`, `sab/ai_brief_sources.py`, `sab/ai_brief_providers.py`, `sab/article_reader.py` |
 | Scheduled AI Brief runner | market/session/role guard, runtime_state lock/marker, 로컬 one-shot scan→entry→ai-brief 실행, notification reconciliation, GitHub monitor/fallback 공통 entrypoint | `sab/scheduler/*`(시간 정책: `schedule_policy.py`), `docker-compose.scheduler.yml`, `scripts/launchd/*`, `.github/workflows/ai-brief.yml` |
 | AI Brief source 수집 보조 | RSS/Atom/RDF 로컬 파일 또는 live HTTPS feed URL을 `http-json`/`local-json` 호환 `sources[]` payload로 변환 | `sab/ai_brief_source_collectors.py`, `scripts/collect_ai_brief_sources.py` |
@@ -125,7 +126,19 @@ flowchart LR
    - entry row는 source candidate가 제공한 의도 포지션/유동성/stop 가이드에 따라 `liquidity_exit_capacity`, `liquidity_warnings`, `downside_risk`, `portfolio_exposure_buckets`를 기록합니다. `downside_risk`는 adjusted basis stop/target 가이드를 raw entry-price 기준으로 환산한 뒤 계산하며, gap/slippage 전 참고 손실입니다.
 5. 로컬에서는 `SAB_UPLOAD_REPORTS=true` 또는 명시적 `sab entry --upload`일 때, GitHub Actions에서는 정상/비fatal entry 리포트를 Supabase Storage에 업로드하고 `report_index`를 upsert합니다. fatal missing-price 정책으로 non-zero 종료한 entry 리포트는 이미 로컬에 작성된 진단 artifact로 남으며, 수동 AI Brief workflow가 별도 GitHub artifact로 노출합니다.
 
-### 4.3.1 `ai-brief` 로컬/수동/scheduled workflow 플로우
+### 4.3.1 `backtest` 플로우
+
+1. `sab backtest --data-file <path>`가 로컬 JSON OHLCV를 읽습니다. 네트워크 provider, holdings file, Supabase Storage, `report_index`는 사용하지 않습니다.
+2. ticker별 candle을 검증한 뒤 날짜 오름차순으로 정렬하고, `--start-date`/`--end-date` 범위 안에서 날짜별 prefix를 구성합니다. 잘못된 날짜, 중복 날짜, 비양수 OHLC, 불가능한 OHLC range는 `issues[]`에 기록하고 제외합니다. Warmup용 과거 candle은 prefix에 남기되, 거래 진입은 start date 이후 signal만 허용합니다.
+3. 포지션이 없으면 `--strategy-mode`에 맞는 기존 buy evaluator(`evaluate_ticker` 또는 `evaluate_ticker_hybrid`)를 호출합니다. Hybrid candidate는 `entry_state=READY`이고 `quality_state`가 있으면 `A`일 때만 enterable로 봅니다.
+4. Enterable EOD buy signal은 같은 날 체결하지 않고 다음 사용 가능한 candle open에 진입합니다. 바로 다음 row의 open이 유효하지 않으면 signal은 유지되고, 이후 첫 valid open에 진입하거나 period end에서 issue로 남습니다. `--position-size-pct`는 새 포지션의 계좌 비중으로 저장되며, `--slippage-bps`는 진입가를 위로 조정합니다.
+5. 포지션 보유 중에는 `--sell-mode`에 맞는 기존 sell evaluator(`evaluate_sell_signals` 또는 `evaluate_sell_signals_hybrid`)를 호출합니다. 이전 completed prefix evaluator가 `stop_price`/`target_price`를 반환하면 `--intraday-exit-policy`로 같은 일봉 안의 stop/target path를 근사합니다. 이는 당일 trailing guide를 당일 저가에 소급 적용하지 않기 위한 제한입니다. `conservative`/`stop_first`는 둘 다 닿은 candle에서 stop을 먼저 선택하고, `target_first`는 target을 먼저 선택하며, `none`은 이 근사를 끕니다. Gap-through stop/target은 candle open에 체결한 것으로 기록합니다.
+6. `SELL`은 잔여 포지션 전체를 signal-day close에서 닫고, `SELL_PARTIAL`은 `--partial-exit-fraction`만 닫은 뒤 나머지 포지션을 유지합니다. Closed-lot return은 `quantity_fraction`으로 계좌 수익률에 반영됩니다.
+7. `--transaction-cost-bps`는 진입/청산 양쪽 비용으로 closed-lot 수익률에서 차감합니다. 열린 포지션은 기본적으로 period end close에서 `END_OF_BACKTEST`로 강제 청산하고, `--no-close-open-at-end`이면 `status=open`으로 남깁니다.
+8. `--assumptions-file`이 있으면 data source, point-in-time universe, benchmark, survivorship policy 같은 연구 입력 JSON을 artifact의 `assumptions`에 보존합니다. 파일이 없으면 runner는 inferred/default status를 기록해 어떤 가정이 비어 있는지 노출합니다.
+9. `reports/YYYY-MM-DD(.n).backtest.json`을 로컬에 원자적으로 씁니다. Summary는 closed lot 기준 win rate, quantity-weighted non-compounded return contribution, avg/best/worst return, low-price mark-to-market drawdown, maximum gross exposure, holding period를 기록하고, trade row, assumptions, config snapshot을 함께 보존합니다.
+
+### 4.3.2 `ai-brief` 로컬/수동/scheduled workflow 플로우
 
 1. `sab ai-brief --entry-report <path>`가 entry 리포트의 `entries[]`를 읽습니다.
 2. `sab/ai_brief_candidates.py`가 각 row를 `executable`, `blocked_but_valid`, `watch_only`, `excluded`로 분류합니다. Base gate(`entry_state=READY`, `entry_price_status=available`)를 통과한 `ENTER`는 executable이고, 포트폴리오 상한 `SKIP`과 tight-stop risk-alignment `REVIEW`는 blocked-but-valid입니다. `entry_price_status`가 없는 legacy row는 유효한 `entry_price`가 있을 때만 available로 취급합니다. Hybrid trigger guard `SKIP`은 watch-only이며, 나머지는 excluded입니다.
@@ -163,7 +176,7 @@ flowchart LR
 13. Scheduled AI Brief primary는 macOS `launchd`가 host wrapper를 실행하고, wrapper가 role window guard 통과 후 one-shot Docker scheduler를 실행하는 구조입니다. Runner는 `runtime_state`에 `attempt`, `lock`, `artifact`, `skip-artifact`, `entry-failure-artifact`, `notification:claim`, `notification:sent`, `success`, `late-alert:*` marker를 기록해 같은 시장/session date 리포트와 알림을 dedupe합니다. `attempt`는 pre-lock 관측 marker이고, artifact/skip/entry-failure/notification/success/late-alert sent marker는 main lock이 필요한 경로에서 소유권을 재확인한 뒤에만 기록합니다. Pipeline runner가 runtime guard에서 중단되면 정상 AI Brief 판단과 섞지 않고 `*.ai-brief-skip.json` artifact(`skip_state=RUNTIME_GUARD_SKIPPED`)를 Storage/`report_index`에 기록합니다. Scheduled AI Brief 품질 게이트가 실패하면 AI Brief Storage upload, artifact marker, success marker, notification reconciliation을 수행하지 않고 pipeline failure로 기록됩니다. OpenAI provider normalization은 eligible ticker set 밖의 잘못된 veto row를 WARN `source_issues[]`로 격리하며, preselected 후보가 있는데 유효한 recommendation/veto가 모두 없으면 recommendation 품질 게이트는 계속 실패합니다. launchd wrapper는 `pipeline_failed`처럼 인식 가능한 구조화 scheduler failure status에는 `scheduler_container_failed`를 보내지 않고, 이 alert를 app status가 없는 host/container 실행 실패에만 남깁니다. `scheduler_stdout_capture_failed`는 wrapper의 stdout capture setup 또는 tee 실패에만 사용해 wrapper 진단과 scheduler 실행 status를 분리합니다. Scheduled entry 실패 진단은 `DefaultScheduledPipeline`의 typed entry-step failure만 late-alert marker reason `scheduled_entry_failed`로 분리하고, 안전한 기본 `reports/...*.entry.json`은 main lock 소유권과 중복 marker를 확인한 뒤 `entry` artifact로 Storage/`report_index`에 업로드합니다. 업로드 후 marker/late-alert 전에도 main lock 소유권을 다시 확인해 오래된 runner가 성공한 fallback 뒤에 실패 상태를 게시하지 못하게 하고, lock을 잃으면 이미 업로드된 객체의 storage key만 반환하며 canonical runtime marker는 쓰지 않습니다. 소유권이 유지될 때만 `entryReportStorageKey`를 late-alert/state에 남깁니다. DefaultScheduledPipeline이 unsafe path를 만든 경우에는 `unsafe` sentinel을 남기며 업로드하지 않습니다. 외부/원시 wrapper의 문자열 메시지는 scheduled entry 실패로 분류하지 않고, 로그에서만 맥락을 유지하되 unsafe raw path를 `entry_report_path=unsafe`로 축약합니다.
 14. GitHub Actions schedule은 US canary 기간에 `early-monitor`, `github-fallback`, `cutoff-alert`만 수행합니다. `resolve_context` job이 dependency-free boundary로 checkout 후 stdlib-only `sab/scheduler/schedule_policy.py`를 import해 cron mapping과 role window 정책으로 market/session_date/schedule_role/runner_role을 산출하고, scheduled job concurrency는 `market + session_date + schedule_role` 기준으로 묶되 cancel은 하지 않습니다. `github-fallback`은 같은 runtime_state lock/artifact marker를 사용하므로 로컬 primary와 동시 실행되어도 새 report 생성은 한 runner만 진행합니다. GitHub queue delay로 `github-fallback`이 명목 08:55 <= t < 09:25 ET window 이후 시작되면 09:29 ET 전까지만 bounded grace로 role guard를 통과시키며, PRE_OPEN/runtime_state guard는 그대로 적용합니다.
 
-### 4.3.2 `sell-ai-brief` 로컬/manual/scheduled 생성 + 전달 플로우
+### 4.3.3 `sell-ai-brief` 로컬/manual/scheduled 생성 + 전달 플로우
 
 1. `sab sell-ai-brief --sell-report <path>`가 sell 리포트의 `evaluated[]`를 읽습니다.
 2. `sab/sell_ai_brief_candidates.py`가 원본 action을 기준으로 후보를 분류합니다. `SELL`, `SELL_PARTIAL`, `REVIEW`만 모델 판단 대상이고, `HOLD`는 `excluded_hold_candidates[]`에만 보존합니다. unsupported action과 ticker 누락 row는 `unsupported_action_candidates[]` 및 `system_issues[]`로 격리합니다.
