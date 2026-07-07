@@ -31,6 +31,7 @@
 | Python CLI | `sab/`, `pyproject.toml`, `uv.lock` | local/Actions `uv sync` + `python -m sab` | GitHub Actions and scheduler use this path. |
 | Web console | `web/`, `docker-compose.yml`, `web/Dockerfile` | Docker image + `pnpm run start` | Host publish is loopback by default. |
 | Scheduled AI Brief | `docker-compose.scheduler.yml`, `scripts/launchd/`, `sab/scheduler/` | one-shot Docker scheduler + launchd wrapper | Uses `.env.scheduler.local`. |
+| Scheduled Sell AI Brief | `scripts/launchd/sab-scheduled-wrapper.sh`, `scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist`, `sab/scheduler/sell_ai_brief_generation.py` | local generic wrapper + Python scheduled runner | `SAB_SELL_SCHEDULE_MODE=generation` requires fresh Toss marker; `delivery` is prebuilt-artifact only. |
 | Supabase DB | `supabase/migrations/` | migration set | RLS/RPC/table contracts live here. |
 | GitHub automation | `.github/workflows/*.yml` | workflow definitions | Schedules and manual dispatch. |
 
@@ -164,7 +165,7 @@ Workflow files are deployed by committing to the repository default branch.
 | --- | --- | --- |
 | `.github/workflows/ci.yml` | push/PR/manual | Ruff, Mypy, Pytest, web lint/typecheck/test/build |
 | `.github/workflows/scan.yml` | manual | manual buy report scan/upload/notify; no scheduled trigger until marker-aware local upload is implemented |
-| `.github/workflows/sell.yml` | manual | manual holdings snapshot + sell report/upload/notify; no scheduled trigger until marker-aware local upload is implemented |
+| `.github/workflows/sell.yml` | manual | manual holdings snapshot + sell report/upload/notify; local scheduled sell generation runs through the generic wrapper instead of GitHub schedule |
 | `.github/workflows/ai-brief.yml` | weekday schedule + manual | manual AI Brief, local-primary monitor, GitHub fallback, cutoff alert |
 | `.github/workflows/cleanup.yml` | daily schedule + manual | Storage/report_index retention cleanup |
 | `.github/workflows/audit.yml` | weekly + manual | workflow/security audit |
@@ -193,6 +194,48 @@ The scheduler reads `${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}`. Keep that
 
 NEEDS_CONFIRMATION: 설치된 launchd plist label, load/unload 명령, 운영 사용자의 LaunchAgents 경로는 코드만으로 확정하지 않습니다. `scripts/launchd/`와 로컬 환경을 함께 확인해야 합니다.
 
+## Scheduled Sell AI Brief Deployment
+
+Scheduled Sell AI Brief generation is a local runner path, not a GitHub `sell.yml` schedule. It is intentionally gated on the latest scheduled Toss holdings sync marker. The committed launchd template is `scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist`, scheduled for Tue-Sat `07:25` KST after the `07:15` Toss freshness sync.
+
+Manual dry smoke:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python -m sab sell-ai-brief-generate-scheduled \
+  --scope MIXED \
+  --session-date "$(TZ=Asia/Seoul date +%F)" \
+  --runner-role local-primary \
+  --scheduled-tick manual \
+  --dry-run
+```
+
+Generic wrapper live generation run:
+
+This is not a smoke test. The wrapper does not forward `--dry-run`; when the
+freshness marker is valid, it can generate reports, upload artifacts, and send
+Telegram through the delivery runner. Use the manual dry smoke above for
+non-side-effect verification.
+
+```bash
+SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED
+```
+
+Launchd verification:
+
+```bash
+scripts/launchd/verify-sab-ai-brief.sh
+```
+
+Prebuilt artifact delivery remains explicit and separate:
+
+```bash
+SAB_SELL_SCHEDULE_MODE=delivery \
+SELL_AI_BRIEF_REPORT_PATH=reports/YYYY-MM-DD.sell-ai-brief.json \
+scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED
+```
+
+Generation succeeds only when `runtime_state` has `toss-sync:success:MIXED:<session_date>` from the scheduled Toss route with status `applied` or `unchanged`. If the marker is missing, stale, or invalid, the runner sends a freshness-blocked Telegram and does not create a normal Sell AI Brief success marker.
+
 ## Local Toss Holdings Auto Sync
 
 The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist` shortly before scheduled signal judgment and AI feedback paths:
@@ -200,7 +243,7 @@ The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.t
 | Purpose | KST launchd time | Why |
 | --- | --- | --- |
 | Pre-scan holdings refresh | Tue-Sat `06:55` | Preserves the intended pre-scan timing; `scan.yml` is currently manual-only until scheduled scan rollout. |
-| Pre-sell holdings refresh | Tue-Sat `07:15` | Preserves the intended pre-sell timing; `sell.yml` is currently manual-only until scheduled sell rollout. |
+| Pre-sell holdings refresh | Tue-Sat `07:15` | Writes the freshness marker required by local scheduled Sell AI Brief generation; `sell.yml` remains manual-only. |
 | Pre-US AI Brief primary refresh | Mon-Fri `21:05` and `22:05` | Covers EDT/EST local-primary candidates before `08:10 ET`. |
 | Pre-US AI Brief retry refresh | Mon-Fri `21:40` and `22:40` | Covers EDT/EST local-retry candidates before `08:45 ET`. |
 
@@ -212,7 +255,7 @@ Manual smoke:
 scripts/toss_daily_auto_sync.sh
 ```
 
-`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the pre-signal sync contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, and `error` exit non-zero and do not write holdings. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
+`scripts/toss_daily_auto_sync.sh` sends a local `POST` request to `/api/holdings/toss-sync/scheduled` with `{ "mode": "auto-apply", "sessionDate": "YYYY-MM-DD" }` and `Authorization: Bearer <TOSS_SYNC_JOB_TOKEN>`. It derives `sessionDate` from KST unless `TOSS_SYNC_SESSION_DATE` is set for a smoke/replay run. It passes the bearer header through curl stdin config rather than process argv, preflights the JSON parser before the write request, and uses bounded curl timeouts/retries. Before posting, it fails closed unless the detected host timezone matches `TOSS_SYNC_EXPECTED_TZ` (default `Asia/Seoul`; `KST` is accepted as the same zone), so the launchd host itself must stay on `Asia/Seoul` for the pre-signal sync contract to be valid. Before `TOSS_SYNC_AUTO_APPLY_ENABLED=1` is set, the route returns `disabled` and the runner exits non-zero. After enabling, only `applied` and `unchanged` exit zero and write `toss-sync:success:MIXED:<sessionDate>` for scheduled sell generation. `disabled`, `blocked`, `wipe_guard_blocked`, `delete_guard_blocked`, `marker_failed`, and `error` exit non-zero and do not create a usable freshness marker. Scheduled auto-sync is create/update only; destructive deletes require manual reviewed Toss Sync apply in the web UI.
 
 Full local QA, including authenticated holdings access and a valid scheduled job token path:
 
@@ -232,6 +275,7 @@ just qa-toss-sync
 | GitHub Actions | revert workflow commit | Manual workflow runs already started cannot be unsent. |
 | Supabase migration | restore from backup or forward-fix migration | NEEDS_CONFIRMATION: destructive rollback policy. |
 | Scheduled AI Brief | unload/disable launchd job or stop scheduler container | Confirm runtime_state markers before rerun. |
+| Scheduled Sell AI Brief | unset/avoid `SAB_SELL_SCHEDULE_MODE=generation` or disable the corresponding launchd invocation | Confirm `toss-sync:success:*` and `scheduled-sell:*` markers before rerun. |
 
 ## Post-Deployment Verification
 

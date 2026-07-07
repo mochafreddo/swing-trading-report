@@ -172,6 +172,7 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
             },
             recorder,
         ),
+        extra_env={"TOSS_SYNC_SESSION_DATE": "2026-07-06"},
     )
 
     assert result.returncode == 0
@@ -181,13 +182,44 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     assert "http://127.0.0.1:55300/api/holdings/toss-sync/scheduled" in curl_config
     assert "Authorization: Bearer test-token" in curl_config
     assert "Origin: http://127.0.0.1:55300" in curl_config
-    assert '\\"mode\\":\\"auto-apply\\"' in curl_config
+    assert (
+        '\\"mode\\":\\"auto-apply\\",\\"sessionDate\\":\\"2026-07-06\\"' in curl_config
+    )
     assert "--connect-timeout" in args
     assert "--max-time" in args
     assert "--retry" in args
     assert "--retry-all-errors" in args
     assert "http=200 status=applied" in result.stdout
     assert "test-token" not in result.stdout
+
+
+def test_toss_daily_auto_sync_runner_rejects_unsafe_session_date_before_curl(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        extra_env={"TOSS_SYNC_SESSION_DATE": '2026-07-06"bad'},
+    )
+
+    assert result.returncode == 2
+    assert "TOSS_SYNC_SESSION_DATE must be a valid YYYY-MM-DD date" in result.stderr
+    assert not recorder.exists()
 
 
 def test_toss_daily_auto_sync_runner_escapes_job_token_in_curl_config(
@@ -249,6 +281,36 @@ def test_toss_daily_auto_sync_runner_uses_web_host_port_from_env_file(
     curl_config = _curl_stdin_recorder(recorder).read_text(encoding="utf-8")
     assert "http://127.0.0.1:55444/api/holdings/toss-sync/scheduled" in curl_config
     assert "Origin: http://127.0.0.1:55444" in curl_config
+
+
+def test_toss_daily_auto_sync_runner_rejects_unsafe_web_host_port_before_curl(
+    tmp_path: Path,
+) -> None:
+    recorder = tmp_path / "curl.args"
+    result = _run_runner(
+        tmp_path,
+        curl_script=_curl_response(
+            {
+                "mode": "auto-apply",
+                "status": "applied",
+                "summary": {
+                    "incomingCount": 0,
+                    "createCount": 0,
+                    "updateCount": 0,
+                    "deleteCount": 0,
+                    "unchangedCount": 0,
+                },
+                "blockedRows": [],
+            },
+            recorder,
+        ),
+        env_file_text="TOSS_SYNC_JOB_TOKEN=test-token\nWEB_HOST_PORT=55300@evil.example\n",
+        default_web_host_port=None,
+    )
+
+    assert result.returncode == 2
+    assert "WEB_HOST_PORT must be an integer from 1 to 65535" in result.stderr
+    assert not recorder.exists()
 
 
 def test_toss_daily_auto_sync_runner_changes_to_repo_root_before_http_request(
@@ -391,6 +453,7 @@ def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
         ("disabled", 0, 0),
         ("wipe_guard_blocked", 0, 2),
         ("delete_guard_blocked", 1, 1),
+        ("marker_failed", 1, 0),
         ("error", 0, 0),
     ],
 )

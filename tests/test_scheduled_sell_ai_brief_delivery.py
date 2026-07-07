@@ -17,11 +17,11 @@ from sab.scheduler.sell_ai_brief_delivery import (
 from sab.scheduler.state import RuntimeStateEntry, RuntimeStateLockClaim
 
 
-def _key(kind: str) -> str:
+def _key(kind: str, *, scope: str = "MIXED") -> str:
     return build_scheduled_state_key(
         pipeline="sell",
         kind=kind,
-        scope="MIXED",
+        scope=scope,
         session_date="2026-07-06",
     )
 
@@ -42,9 +42,11 @@ def _request(
     dry_run: bool = False,
     report_path: str = "reports/2026-07-06.sell-ai-brief.json",
     attempt_id: str | None = None,
+    scope: str = "MIXED",
 ) -> ScheduledSellAiBriefDeliveryRequest:
     return ScheduledSellAiBriefDeliveryRequest(
         sell_ai_brief_report_path=report_path,
+        scope=scope,
         session_date="2026-07-06",
         dry_run=dry_run,
         attempt_id=attempt_id,
@@ -468,7 +470,7 @@ def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_report_date_mismatch
     assert _key("success") not in state.entries
 
 
-def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_market_scope_mismatch() -> (
+def test_scheduled_sell_ai_brief_delivery_mixed_scope_accepts_single_market_report() -> (
     None
 ):
     storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
@@ -486,10 +488,34 @@ def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_market_scope_mismatc
 
     result = runner.run(_request())
 
+    assert result.status == "notification_reconciled"
+    assert notifier.sent == [(storage_key, _sell_ai_brief_report_with(market="KR"))]
+    assert _key("notification:sent") in state.entries
+    assert _key("success") in state.entries
+
+
+def test_scheduled_sell_ai_brief_delivery_single_scope_rejects_other_market_report() -> (
+    None
+):
+    storage_key = "2026/07/2026-07-06.sell-ai-brief.json"
+    state = _FakeStateStore()
+    state.entries[_key("artifact", scope="US")] = RuntimeStateEntry(
+        state_key=_key("artifact", scope="US"),
+        state_payload={"storageKey": storage_key},
+        expires_at="",
+    )
+    storage = _FakeStorage(
+        downloads={storage_key: _sell_ai_brief_report_with(market="KR")}
+    )
+    notifier = _FakeNotifier()
+    runner = _runner(state=state, storage=storage, notifier=notifier)
+
+    result = runner.run(_request(scope="US"))
+
     assert result.status == "artifact_marker_invalid"
     assert notifier.sent == []
-    assert _key("notification:sent") not in state.entries
-    assert _key("success") not in state.entries
+    assert _key("notification:sent", scope="US") not in state.entries
+    assert _key("success", scope="US") not in state.entries
 
 
 def test_scheduled_sell_ai_brief_delivery_reconcile_rejects_unbound_storage_key() -> (

@@ -129,7 +129,7 @@ def test_generic_scheduled_wrapper_exists_without_replacing_ai_brief_wrapper() -
 
 
 def test_generic_scheduled_wrapper_argument_validation() -> None:
-    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    wrapper = REPO_ROOT / "scripts/launchd/sab-scheduled-wrapper.sh"
 
     valid = subprocess.run(
         [str(wrapper), "--pipeline", "scan", "--scope", "KR"],
@@ -170,7 +170,7 @@ def test_generic_scheduled_wrapper_argument_validation() -> None:
     )
     assert sell_without_artifact.returncode == 2
     assert (
-        "scheduled sell delivery requires SELL_AI_BRIEF_REPORT_PATH and scope=MIXED"
+        "scheduled sell requires SAB_SELL_SCHEDULE_MODE=delivery|generation"
         in sell_without_artifact.stderr
     )
 
@@ -193,6 +193,7 @@ def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief(
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "SAB_SELL_SCHEDULE_MODE": "delivery",
         "SELL_AI_BRIEF_REPORT_PATH": "reports/2026-07-06.sell-ai-brief.json",
     }
 
@@ -220,6 +221,125 @@ def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief(
         dt.datetime.now(dt.UTC).strftime("%Y-%m-%d"),
         "--runner-role",
         "local-primary",
+        "--scheduled-tick",
+        "manual",
+        "--attempt-id",
+        "",
+        "--run-url",
+        "",
+    ]
+
+
+def test_generic_scheduled_wrapper_routes_scheduled_sell_ai_brief_generation(
+    tmp_path: Path,
+) -> None:
+    wrapper = Path("scripts/launchd/sab-scheduled-wrapper.sh")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    args_path = tmp_path / "uv-args.txt"
+
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(args_path.as_posix())}\n"
+        "exit 0\n",
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "SAB_SELL_SCHEDULE_MODE": "generation",
+        "SAB_SESSION_DATE": "2026-07-06",
+        "SAB_SCHEDULED_TICK": "0725",
+        "SAB_ATTEMPT_ID": "try-1",
+        "SAB_RUN_URL": "https://example.test/run",
+    }
+
+    result = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "MIXED"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert args_path.read_text(encoding="utf-8").splitlines() == [
+        "run",
+        "python",
+        "-m",
+        "sab",
+        "sell-ai-brief-generate-scheduled",
+        "--scope",
+        "MIXED",
+        "--session-date",
+        "2026-07-06",
+        "--runner-role",
+        "local-primary",
+        "--scheduled-tick",
+        "0725",
+        "--attempt-id",
+        "try-1",
+        "--run-url",
+        "https://example.test/run",
+    ]
+
+
+def test_generic_scheduled_wrapper_bootstraps_launchd_environment(
+    tmp_path: Path,
+) -> None:
+    wrapper = REPO_ROOT / "scripts/launchd/sab-scheduled-wrapper.sh"
+    fake_home = tmp_path / "home"
+    bin_dir = fake_home / ".local/share/mise/shims"
+    bin_dir.mkdir(parents=True)
+    args_path = tmp_path / "uv-args.txt"
+    pwd_path = tmp_path / "uv-pwd.txt"
+    runner_role_path = tmp_path / "uv-runner-role.txt"
+    env_file = tmp_path / ".env.scheduler.local"
+    env_file.write_text("SAB_RUNNER_ROLE=from-env-file\n", encoding="utf-8")
+
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(args_path.as_posix())}\n"
+        f"printf '%s\\n' \"$PWD\" > {shlex.quote(pwd_path.as_posix())}\n"
+        f"printf '%s\\n' \"${{SAB_RUNNER_ROLE:-}}\" > {shlex.quote(runner_role_path.as_posix())}\n"
+        "exit 0\n",
+    )
+
+    env = {
+        "HOME": str(fake_home),
+        "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+        "SAB_SELL_SCHEDULE_MODE": "generation",
+        "SAB_SESSION_DATE": "2026-07-06",
+        "SAB_SCHEDULER_ENV_FILE": str(env_file),
+    }
+
+    result = subprocess.run(
+        [str(wrapper), "--pipeline", "sell", "--scope", "MIXED"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert pwd_path.read_text(encoding="utf-8").strip() == str(REPO_ROOT)
+    assert runner_role_path.read_text(encoding="utf-8").strip() == "from-env-file"
+    assert args_path.read_text(encoding="utf-8").splitlines() == [
+        "run",
+        "python",
+        "-m",
+        "sab",
+        "sell-ai-brief-generate-scheduled",
+        "--scope",
+        "MIXED",
+        "--session-date",
+        "2026-07-06",
+        "--runner-role",
+        "from-env-file",
         "--scheduled-tick",
         "manual",
         "--attempt-id",
@@ -567,6 +687,33 @@ def test_launchd_plist_templates_keep_one_schedule_role_per_job() -> None:
         assert all("Hour" in item and "Minute" in item for item in intervals)
 
 
+def test_scheduled_sell_generation_plist_invokes_generic_wrapper() -> None:
+    plist_path = Path(
+        "scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist"
+    )
+
+    payload = plistlib.loads(plist_path.read_bytes())
+    args = payload["ProgramArguments"]
+
+    assert payload["Label"] == "com.mochafreddo.sab.sell-ai-brief.generation"
+    assert "sab-scheduled-wrapper.sh" in args[0]
+    assert args[1:] == ["--pipeline", "sell", "--scope", "MIXED"]
+    assert payload["EnvironmentVariables"]["SAB_SELL_SCHEDULE_MODE"] == "generation"
+    assert payload["EnvironmentVariables"]["SAB_SCHEDULED_TICK"] == "0725"
+    assert payload["StartCalendarInterval"]
+    assert {item["Weekday"] for item in payload["StartCalendarInterval"]} == {
+        2,
+        3,
+        4,
+        5,
+        6,
+    }
+    assert {
+        (item["Weekday"], item["Hour"], item["Minute"])
+        for item in payload["StartCalendarInterval"]
+    } == {(weekday, 7, 25) for weekday in range(2, 7)}
+
+
 def test_us_cutoff_alert_plist_runs_after_github_fallback_grace() -> None:
     payload = plistlib.loads(
         Path(
@@ -612,8 +759,10 @@ def test_launchd_verify_script_is_non_destructive() -> None:
     text = script.read_text(encoding="utf-8")
 
     assert "plutil -lint" in text
+    assert "com.mochafreddo.sab.sell-ai-brief.generation.plist" in text
     assert "verify_ai_brief_plist_timing.py" in text
     assert "bash -n" in text
+    assert 'bash -n "scripts/launchd/sab-scheduled-wrapper.sh"' in text
     assert "docker compose" in text
     assert "launchctl print" in text
     assert "launchctl bootstrap" not in text

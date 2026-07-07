@@ -391,6 +391,7 @@ export const tossHoldingsSyncRequestSchema = z.union([
 export const tossHoldingsScheduledSyncRequestSchema = z
   .object({
     mode: z.literal("auto-apply"),
+    sessionDate: isoCalendarDateSchema.optional(),
   })
   .strict();
 

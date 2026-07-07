@@ -93,6 +93,11 @@ detect_current_timezone() {
   date +%Z
 }
 
+fail_invalid_web_host_port() {
+  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
+  exit 2
+}
+
 expected_timezone="${TOSS_SYNC_EXPECTED_TZ:-Asia/Seoul}"
 current_timezone="$(detect_current_timezone)"
 if [[ "$(normalize_timezone "${current_timezone}")" != "$(normalize_timezone "${expected_timezone}")" ]]; then
@@ -101,8 +106,17 @@ if [[ "$(normalize_timezone "${current_timezone}")" != "$(normalize_timezone "${
 fi
 
 web_host_port="${WEB_HOST_PORT:-55300}"
+if [[ ! "${web_host_port}" =~ ^[0-9]{1,5}$ ]]; then
+  fail_invalid_web_host_port
+fi
+web_host_port_number=$((10#${web_host_port}))
+if (( web_host_port_number < 1 || web_host_port_number > 65535 )); then
+  fail_invalid_web_host_port
+fi
+web_host_port="${web_host_port_number}"
 base_url="http://127.0.0.1:${web_host_port}"
 endpoint="${base_url}/api/holdings/toss-sync/scheduled"
+session_date="${TOSS_SYNC_SESSION_DATE:-$(TZ=Asia/Seoul date +%F)}"
 
 if [[ -z "${TOSS_SYNC_JOB_TOKEN:-}" ]]; then
   printf '%s\n' "TOSS_SYNC_JOB_TOKEN must be set" >&2
@@ -122,6 +136,24 @@ import json
 PY
   printf '%s\n' "JSON parser command failed: ${python_bin}" >&2
   exit 4
+fi
+if ! "${python_bin}" - "${session_date}" <<'PY' >/dev/null 2>&1; then
+import datetime as dt
+import re
+import sys
+
+value = sys.argv[1]
+if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+    raise SystemExit(1)
+try:
+    parsed = dt.date.fromisoformat(value)
+except ValueError:
+    raise SystemExit(1) from None
+if parsed.isoformat() != value:
+    raise SystemExit(1)
+PY
+  printf '%s\n' "TOSS_SYNC_SESSION_DATE must be a valid YYYY-MM-DD date" >&2
+  exit 2
 fi
 
 response_file="$(mktemp "${TMPDIR:-/tmp}/toss-auto-sync.XXXXXX.json")"
@@ -144,7 +176,7 @@ header = "Content-Type: application/json"
 header = "Accept: application/json"
 header = "Origin: ${base_url}"
 header = "Authorization: Bearer ${escaped_job_token}"
-data = "{\"mode\":\"auto-apply\"}"
+data = "{\"mode\":\"auto-apply\",\"sessionDate\":\"${session_date}\"}"
 CURL_CONFIG
 )"
 curl_status=$?

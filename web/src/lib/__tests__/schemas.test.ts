@@ -467,6 +467,15 @@ describe("tossHoldingsScheduledSyncRequestSchema", () => {
 
     expect(parsed.success).toBe(false);
   });
+
+  it("rejects scheduled auto-apply payload with impossible session date", () => {
+    const parsed = tossHoldingsScheduledSyncRequestSchema.safeParse({
+      mode: "auto-apply",
+      sessionDate: "2026-99-99",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
 });
 
 describe("report query schemas", () => {

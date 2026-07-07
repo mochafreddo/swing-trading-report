@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/supabase/runtime-state", () => ({
+  upsertRuntimeStateEntry: vi.fn(),
+}));
+
 import {
   applyTossHoldingsSyncPreview,
   buildTossHoldingsSyncDependenciesFromEnv,
   buildTossHoldingsSyncPreview,
+  recordScheduledTossFreshnessMarker,
   runScheduledTossAutoApply,
+  type ScheduledTossAutoSyncResponse,
   type TossHoldingsSyncDependencies,
 } from "@/lib/toss/holdings-sync-service";
+import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
 import type { HoldingRecord } from "@/lib/types";
 
 function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
@@ -54,6 +61,7 @@ function deps(
 describe("toss holdings sync service", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.clearAllMocks();
   });
 
   it("builds a preview and applies create update delete changes", async () => {
@@ -361,6 +369,108 @@ describe("toss holdings sync service", () => {
     expect(result.status).toBe("unchanged");
     expect(result.summary.incomingCount).toBe(0);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+  });
+
+  it("records a scheduled Toss freshness marker with key payload and TTL", async () => {
+    const now = new Date("2026-07-06T22:15:00.000Z");
+    const result = {
+      mode: "auto-apply",
+      status: "applied",
+      summary: {
+        incomingCount: 3,
+        createCount: 1,
+        updateCount: 1,
+        deleteCount: 0,
+        unchangedCount: 1,
+        createTickers: ["005930"],
+        updateTickers: ["AAPL.NAS"],
+        deleteTickers: [],
+      },
+      diffHash: "hash-1",
+      applyBlocked: false,
+      changes: { create: [], update: [], delete: [], unchanged: [] },
+      blockedRows: [],
+      targetRows: [],
+    } satisfies ScheduledTossAutoSyncResponse;
+
+    await expect(
+      recordScheduledTossFreshnessMarker(result, {
+        sessionDate: "2026-07-06",
+        now,
+      }),
+    ).resolves.toEqual({
+      stateKey: "toss-sync:success:MIXED:2026-07-06",
+      sessionDate: "2026-07-06",
+    });
+
+    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
+      "toss-sync:success:MIXED:2026-07-06",
+      {
+        scope: "MIXED",
+        sessionDate: "2026-07-06",
+        status: "applied",
+        diffHash: "hash-1",
+        incomingCount: 3,
+        createCount: 1,
+        updateCount: 1,
+        deleteCount: 0,
+        unchangedCount: 1,
+        source: "scheduled-route",
+        timezone: "Asia/Seoul",
+        updatedAt: "2026-07-06T22:15:00.000Z",
+      },
+      "2026-07-08T10:15:00.000Z",
+    );
+  });
+
+  it("uses the KST date fallback and skips non-success statuses for freshness markers", async () => {
+    const now = new Date("2026-07-06T16:00:00.000Z");
+    const unchanged = {
+      mode: "auto-apply",
+      status: "unchanged",
+      summary: {
+        incomingCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        deleteCount: 0,
+        unchangedCount: 0,
+        createTickers: [],
+        updateTickers: [],
+        deleteTickers: [],
+      },
+      diffHash: "hash-empty",
+      applyBlocked: false,
+      changes: { create: [], update: [], delete: [], unchanged: [] },
+      blockedRows: [],
+      targetRows: [],
+    } satisfies ScheduledTossAutoSyncResponse;
+
+    await expect(
+      recordScheduledTossFreshnessMarker(unchanged, { now }),
+    ).resolves.toEqual({
+      stateKey: "toss-sync:success:MIXED:2026-07-07",
+      sessionDate: "2026-07-07",
+    });
+
+    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
+      "toss-sync:success:MIXED:2026-07-07",
+      expect.objectContaining({
+        sessionDate: "2026-07-07",
+        status: "unchanged",
+      }),
+      "2026-07-08T04:00:00.000Z",
+    );
+    vi.mocked(upsertRuntimeStateEntry).mockClear();
+
+    await expect(
+      recordScheduledTossFreshnessMarker({
+        ...unchanged,
+        status: "blocked",
+        applyBlocked: true,
+      }),
+    ).resolves.toBeNull();
+
+    expect(upsertRuntimeStateEntry).not.toHaveBeenCalled();
   });
 
   it("builds runtime dependencies that read QA holdings from a fixture file", async () => {

@@ -3719,6 +3719,13 @@ class DefaultScheduledStorage:
             run_type="entry",
         )
 
+    def upload_sell(self, report_path: str, *, report_date: str) -> str:
+        return self._upload_report(
+            report_path,
+            report_date=report_date,
+            run_type="sell",
+        )
+
     def upload_sell_ai_brief(self, report_path: str, *, report_date: str) -> str:
         return self._upload_report(
             report_path,

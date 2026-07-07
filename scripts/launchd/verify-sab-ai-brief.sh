@@ -10,6 +10,7 @@ plists=(
   "scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-primary.plist"
   "scripts/launchd/com.mochafreddo.sab.ai-brief.us.local-retry.plist"
   "scripts/launchd/com.mochafreddo.sab.ai-brief.us.cutoff-alert.plist"
+  "scripts/launchd/com.mochafreddo.sab.sell-ai-brief.generation.plist"
 )
 
 printf '%s\n' "checking launchd plist syntax"
@@ -22,6 +23,7 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --no-sync python \
 
 printf '%s\n' "checking wrapper shell syntax"
 bash -n "scripts/launchd/sab-ai-brief-wrapper.sh"
+bash -n "scripts/launchd/sab-scheduled-wrapper.sh"
 
 env_file="${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}"
 if [[ -r "${env_file}" ]]; then

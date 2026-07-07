@@ -202,12 +202,12 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
         "### 4.3 `entry` 플로우", 1
     )[0]
 
-    assert "scheduled scan/sell은 marker-aware fallback 전까지 fail closed" in (
-        readme_text
-    )
-    assert "scheduled scan/sell은 marker-aware fallback 전까지 fail closed" in (
+    assert "Scheduled scan은 marker-aware fallback 전까지 fail closed" in readme_text
+    assert "scheduled Sell AI Brief generation은 Toss freshness marker" in (readme_text)
+    assert "scheduled scan은 marker-aware fallback 전까지 fail closed" in (
         architecture_text
     )
+    assert "Scheduled Sell AI Brief는 로컬 generic wrapper" in architecture_text
     assert "GitHub Actions는 정기 scan/sell/cleanup" not in readme_text
     assert "GitHub Actions는 `scan`/`sell`/`cleanup` 스케줄" not in (architecture_text)
     assert "GitHub Actions에서는 필수" not in scan_flow
@@ -227,6 +227,7 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
         current_prd_section
     )
     assert "`scan`/`sell` GitHub Actions workflow는 manual-only" in prd_text
+    assert "scheduled Sell AI Brief generation은 Toss freshness marker" in prd_text
     assert (
         "`scan`/`sell` 자동 실행은 **GitHub Actions `schedule`** 로 수행한다."
         not in (automation_adr_text)
@@ -234,12 +235,17 @@ def test_docs_reflect_scan_sell_schedule_fail_closed_boundary() -> None:
     assert "`scan`/`sell` GitHub Actions workflow는 현재 manual-only" in (
         automation_adr_text
     )
+    assert "로컬 scheduled Sell AI Brief generation" in automation_adr_text
     assert (
         "`scan`/`sell` 및 비시간 민감 자동화는 별도 결정 전까지 ADR-0005를 따릅니다."
         not in (local_scheduler_adr_text)
     )
-    assert "`scan`/`sell` scheduled workflow는 현재 제공하지 않습니다." in (
+    assert "Toss freshness-gated scheduled Sell AI Brief generation" in (
         local_scheduler_adr_text
+    )
+    assert (
+        "Scheduled scan workflow와 GitHub scheduled sell workflow는 현재 제공하지 않습니다."
+        in (local_scheduler_adr_text)
     )
 
 
@@ -252,7 +258,10 @@ def test_deployment_docs_match_current_action_triggers() -> None:
     assert "scheduled `scan.yml` candidate" not in deployment_text
     assert "scheduled `sell.yml` candidate" not in deployment_text
     assert "`scan.yml` is currently manual-only" in deployment_text
-    assert "`sell.yml` is currently manual-only" in deployment_text
+    assert "`sell.yml` remains manual-only" in deployment_text
+    assert "Scheduled Sell AI Brief generation is a local runner path" in (
+        deployment_text
+    )
 
 
 def test_toss_sync_docs_do_not_reference_removed_confirmation_text_contract() -> None:

@@ -314,6 +314,7 @@ def _write_sell_report(
     results: list[Any],
     *,
     write_sell_report_fn: Any,
+    artifact_date: str | None = None,
 ) -> str:
     markets = sorted(
         {
@@ -383,14 +384,15 @@ def _write_sell_report(
         eval_index_policy="choose_eval_index:v1",
         config_snapshot=config_snapshot,
     )
-    artifact_dates = sorted(
-        {
-            str(result.eval_date).strip()
-            for result in results
-            if getattr(result, "eval_date", None)
-        }
-    )
-    artifact_date = artifact_dates[-1] if artifact_dates else None
+    if artifact_date is None:
+        artifact_dates = sorted(
+            {
+                str(result.eval_date).strip()
+                for result in results
+                if getattr(result, "eval_date", None)
+            }
+        )
+        artifact_date = artifact_dates[-1] if artifact_dates else None
     summary_fields = build_market_data_summary(
         requested_count=len(runtime.unique_tickers),
         covered_count=len(runtime.market_data),

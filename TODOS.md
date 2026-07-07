@@ -51,6 +51,7 @@
 
 ## Completed
 
+- 2026-07-06: Added scheduled Sell AI Brief generation behind the local generic wrapper with explicit `SAB_SELL_SCHEDULE_MODE=generation`, Toss freshness marker gating, sell/Sell AI Brief typed report helpers, quality-gated sell upload, delegated Sell AI Brief delivery, blocked-freshness notifications, and review-required handling for Sell AI Brief eval WARN.
 - 2026-07-06: Completed marker-aware scheduled Sell AI Brief delivery for prebuilt `*.sell-ai-brief.json` artifacts via `sab sell-ai-brief-scheduled` and the launchd generic wrapper route when `SELL_AI_BRIEF_REPORT_PATH` is set, using `scheduled-sell:*` upload/index-before-notify markers and notification reconciliation. Manual `sell.yml` remains opt-in delivery only.
 - 2026-06-23: Normalized `sma_ema_hybrid` volume confirmation semantics so breakout, pullback, and reversal compare the signal candle to the preceding N-day average; added focused detector regressions and strategy documentation.
 - 2026-06-23: Added env/YAML-conflict-bound `PORTFOLIO_MAX_NEW_ENTRIES_KR` and `PORTFOLIO_MAX_NEW_ENTRIES_US` overrides for `portfolio.max_new_entries_per_market.KR/US`, while documenting the safer `config.local.yaml` workflow when committed YAML already owns the caps. `portfolio.exposure_limits[]` remains YAML-only.
