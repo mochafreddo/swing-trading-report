@@ -209,7 +209,12 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab sell-ai-brief-generate-scheduled \
   --dry-run
 ```
 
-Generic wrapper generation smoke:
+Generic wrapper live generation run:
+
+This is not a smoke test. The wrapper does not forward `--dry-run`; when the
+freshness marker is valid, it can generate reports, upload artifacts, and send
+Telegram through the delivery runner. Use the manual dry smoke above for
+non-side-effect verification.
 
 ```bash
 SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED

@@ -118,7 +118,8 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 - The runner validates the local or downloaded artifact with `validate_sell_ai_brief_artifact(...)`, then uploads it to Supabase Storage and upserts `report_index`, and only then attempts Telegram delivery.
 - Runtime coordination uses `scheduled-sell:*` markers: `blocked`, `blocked-notification-lock`, `notification:blocked-sent`, `generation-lock`, `generation`, `review-required`, plus delivery `attempt`, `lock`, `artifact`, `notification:claim`, `notification:sent`, and `success`.
 - If `success` already exists, the command returns a skip status. If `artifact` exists without `success`, the command reconciles notification from the uploaded storage object instead of re-uploading a second artifact.
-- Exit code is non-zero only for `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed`. Skip/reconciliation outcomes stay zero to preserve idempotent scheduler retries.
+- `sell-ai-brief-generate-scheduled` exits non-zero for freshness failures, generation/evaluation/upload failures, and delegated delivery failures. Dry-run, lock-held skip, existing delivery completion, and `completed`/`completed_review_required` outcomes stay zero.
+- `sell-ai-brief-scheduled` delivery exits non-zero only for `artifact_invalid`, `artifact_marker_invalid`, `lock_lost_before_upload`, `notification_sent_marker_invalid`, `notification_sent_marker_failed`, and `upload_failed`. Skip/reconciliation outcomes stay zero to preserve idempotent scheduler retries.
 
 ### Notification Text Contracts
 

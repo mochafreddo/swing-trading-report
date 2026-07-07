@@ -72,7 +72,8 @@ value with `[REDACTED]` before sharing it.
 | Web liveness | unauthenticated page | `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/login` |
 | Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
-| Scheduled Sell AI Brief generation | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
+| Scheduled Sell AI Brief generation dry smoke | CLI parse / no side effects | `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date "$(TZ=Asia/Seoul date +%F)" --runner-role local-primary --scheduled-tick manual --dry-run` |
+| Scheduled Sell AI Brief generation live run | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Scheduled Sell AI Brief prebuilt delivery | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/2026-07-06.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
 | GitHub Actions | latest runs | `gh run list --limit 20` |
@@ -156,7 +157,7 @@ Scheduled Sell AI Brief has two explicit modes:
 Execution paths:
 
 - Local generation CLI: `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date YYYY-MM-DD --runner-role local-primary --scheduled-tick 0725`
-- launchd generic wrapper generation route: `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
+- launchd generic wrapper generation route: `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` (live run; not a smoke test)
 - Local prebuilt delivery CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
 - launchd generic wrapper delivery route: `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/YYYY-MM-DD.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
 - Manual GitHub Actions: `.github/workflows/sell.yml` remains manual opt-in generation/upload/notification and is not the scheduled path
