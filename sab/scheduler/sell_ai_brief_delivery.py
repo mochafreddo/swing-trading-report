@@ -151,10 +151,7 @@ def _report_is_bound_to_session(
 
 
 def _load_report_date(report_path: str) -> str:
-    payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("sell_ai_brief_report_path must contain a JSON object")
-    report_date = str(payload.get("report_date") or "").strip()
+    report_date = str(_load_local_report(report_path).get("report_date") or "").strip()
     if not report_date:
         raise ValueError("sell AI brief report_date is required")
     return report_date

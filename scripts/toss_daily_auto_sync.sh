@@ -93,6 +93,11 @@ detect_current_timezone() {
   date +%Z
 }
 
+fail_invalid_web_host_port() {
+  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
+  exit 2
+}
+
 expected_timezone="${TOSS_SYNC_EXPECTED_TZ:-Asia/Seoul}"
 current_timezone="$(detect_current_timezone)"
 if [[ "$(normalize_timezone "${current_timezone}")" != "$(normalize_timezone "${expected_timezone}")" ]]; then
@@ -102,13 +107,11 @@ fi
 
 web_host_port="${WEB_HOST_PORT:-55300}"
 if [[ ! "${web_host_port}" =~ ^[0-9]{1,5}$ ]]; then
-  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
-  exit 2
+  fail_invalid_web_host_port
 fi
 web_host_port_number=$((10#${web_host_port}))
 if (( web_host_port_number < 1 || web_host_port_number > 65535 )); then
-  printf '%s\n' "WEB_HOST_PORT must be an integer from 1 to 65535" >&2
-  exit 2
+  fail_invalid_web_host_port
 fi
 web_host_port="${web_host_port_number}"
 base_url="http://127.0.0.1:${web_host_port}"
