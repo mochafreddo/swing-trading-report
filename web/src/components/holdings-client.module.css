@@ -10,6 +10,10 @@
   align-content: start;
 }
 
+.primaryPanel {
+  min-width: 0;
+}
+
 .form {
   margin-top: var(--space-3);
   display: grid;
@@ -430,6 +434,14 @@
 @media (max-width: 1100px) {
   .wrapper {
     grid-template-columns: 1fr;
+  }
+
+  .primaryPanel {
+    order: -1;
+  }
+
+  .sidebar {
+    order: 1;
   }
 
   .tableWrap table,

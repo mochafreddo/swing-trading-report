@@ -56,7 +56,7 @@ export function HoldingsTable({
   onLoadMore,
 }: HoldingsTableProps) {
   return (
-    <section className="panel" aria-busy={loading}>
+    <section className={`panel ${styles.primaryPanel}`} aria-busy={loading}>
       <div className={styles.headerRow}>
         <div>
           <h2 className="panelTitle">Holdings</h2>
