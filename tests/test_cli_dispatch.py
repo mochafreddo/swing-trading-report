@@ -1,4 +1,5 @@
 import argparse
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -715,6 +716,62 @@ def test_scheduled_sell_ai_brief_generation_wires_session_date_to_sell_runner(
             "report_date": "2026-07-06",
         }
     ]
+
+
+def test_scheduled_sell_ai_brief_generation_status_file_shape(
+    monkeypatch,
+) -> None:
+    writes: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", "status.json")
+    monkeypatch.setattr(
+        sab_main.status_file,
+        "write_status_json",
+        lambda path, payload: writes.append((path, payload)),
+    )
+
+    sab_main._write_scheduled_sell_ai_brief_generation_status_file(
+        status="completed",
+        session_date="2026-07-06",
+        sell_storage_key="2026/07/2026-07-06.sell.json",
+        sell_ai_brief_storage_key="2026/07/2026-07-06.sell-ai-brief.json",
+    )
+
+    assert writes == [
+        (
+            "status.json",
+            {
+                "status": "completed",
+                "session_date": "2026-07-06",
+                "sell_storage_key": "2026/07/2026-07-06.sell.json",
+                "sell_ai_brief_storage_key": ("2026/07/2026-07-06.sell-ai-brief.json"),
+            },
+        )
+    ]
+
+
+def test_scheduled_sell_ai_brief_generation_status_file_failure_warns(
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setenv("SAB_SCHEDULER_STATUS_FILE", "status.json")
+
+    def fail_write(path: str, payload: dict[str, object]) -> None:
+        del path, payload
+        raise OSError("disk full")
+
+    monkeypatch.setattr(sab_main.status_file, "write_status_json", fail_write)
+
+    with caplog.at_level(logging.WARNING):
+        sab_main._write_scheduled_sell_ai_brief_generation_status_file(
+            status="upload_failed",
+            session_date="2026-07-06",
+            sell_storage_key=None,
+            sell_ai_brief_storage_key=None,
+        )
+
+    assert "failed to write scheduled sell AI brief generation status file" in (
+        caplog.text
+    )
 
 
 def test_dispatch_command_prints_help_for_missing_command() -> None:
