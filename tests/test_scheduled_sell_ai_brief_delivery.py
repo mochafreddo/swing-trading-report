@@ -92,6 +92,7 @@ def _sell_ai_brief_report() -> dict[str, Any]:
             "actionable_count": 1,
             "preselected_count": 1,
             "judgment_count": 1,
+            "broker_state_review_count": 0,
             "excluded_hold_count": 1,
             "unsupported_action_count": 1,
             "vetoed_count": 0,
@@ -117,6 +118,7 @@ def _sell_ai_brief_report() -> dict[str, Any]:
                 "reason": "sell report action was HOLD",
             }
         ],
+        "broker_state_review_candidates": [],
         "unsupported_action_candidates": [
             {
                 "ticker": "BAD.NAS",

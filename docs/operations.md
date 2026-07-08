@@ -214,10 +214,13 @@ tail -n 20 logs/launchd/toss-daily-auto-sync.err.log
 
 Only `status=applied` and `status=unchanged` are successful runner outcomes;
 those statuses also write `toss-sync:success:MIXED:<session_date>` for the
-scheduled sell generation freshness gate. `disabled`, `blocked`,
-`wipe_guard_blocked`, `delete_guard_blocked`, `marker_failed`, and `error` are
-fail-closed outcomes; inspect the web container logs and the current Holdings
-page before rerunning. Full setup and QA steps live in
+scheduled sell generation freshness gate. `applied` with quarantine evidence
+is fresh enough for generation because preserved holdings become Sell `REVIEW`
+rows. If those rows reappear in a later Toss snapshot, scheduled sync restores
+them to `confirmed` and clears the missing-broker evidence. `disabled`,
+`blocked`, `wipe_guard_blocked`, `marker_failed`, and `error` are fail-closed
+outcomes; inspect the web container logs and the current Holdings page before
+rerunning. Full setup and QA steps live in
 [deployment.md](deployment.md#local-toss-holdings-auto-sync).
 
 ## GitHub Actions

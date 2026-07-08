@@ -32,6 +32,7 @@ export type {
 } from "@/lib/supabase/reports";
 export {
   addBuyToHolding,
+  applyScheduledTossQuarantine,
   createHolding,
   deleteHolding,
   fetchAllHoldings,
@@ -40,6 +41,8 @@ export {
   updateHolding,
 } from "@/lib/supabase/holdings";
 export type {
+  ApplyScheduledTossQuarantineInput,
+  ApplyScheduledTossQuarantineResult,
   FetchHoldingsPageOptions,
   FetchHoldingsPageResult,
   HoldingAddBuyInput,

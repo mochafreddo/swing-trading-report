@@ -25,6 +25,7 @@ vi.mock("@/lib/toss/holdings-sync-service", () => ({
     stateKey: "toss-sync:success:MIXED:2026-07-06",
     sessionDate: "2026-07-06",
   })),
+  resolveKstSessionDate: vi.fn(() => "2026-07-06"),
   runScheduledTossAutoApply: vi.fn(async () => ({
     mode: "auto-apply",
     status: "unchanged",
@@ -44,6 +45,8 @@ vi.mock("@/lib/toss/holdings-sync-service", () => ({
     changes: { create: [], update: [], delete: [], unchanged: [] },
     blockedRows: [],
     targetRows: [],
+    quarantinedCount: 0,
+    quarantinedTickers: [],
   })),
 }));
 
@@ -170,6 +173,8 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
       changes: { create: [], update: [], delete: [], unchanged: [] },
       blockedRows: [],
       targetRows: [],
+      quarantinedCount: 0,
+      quarantinedTickers: [],
     });
 
     const response = await POST(
@@ -189,6 +194,7 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(runScheduledTossAutoApply).toHaveBeenCalledWith(
       {
         autoApplyEnabled: false,
+        sessionDate: "2026-07-06",
       },
       MOCK_RUNTIME_DEPS,
     );
@@ -217,11 +223,12 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(runScheduledTossAutoApply).toHaveBeenCalledWith(
       {
         autoApplyEnabled: true,
+        sessionDate: "2026-07-06",
       },
       MOCK_RUNTIME_DEPS,
     );
     expect(recordScheduledTossFreshnessMarker).toHaveBeenCalledWith(payload, {
-      sessionDate: undefined,
+      sessionDate: "2026-07-06",
     });
   });
 
@@ -283,6 +290,8 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
       applyBlocked: boolean;
       blockedRows: unknown[];
       targetRows: unknown[];
+      quarantinedCount: number;
+      quarantinedTickers: string[];
       summary: {
         incomingCount: number;
         createCount: number;
@@ -321,6 +330,8 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
       changes: { create: [], update: [], delete: [], unchanged: [] },
       blockedRows: [],
       targetRows: [],
+      quarantinedCount: 0,
+      quarantinedTickers: [],
     });
   });
 

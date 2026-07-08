@@ -55,6 +55,11 @@ _HOLDINGS_FIELDS = (
     "tags",
     "stop_override",
     "target_override",
+    "broker_state",
+    "broker_missing_first_seen_date",
+    "broker_missing_last_seen_date",
+    "broker_missing_count",
+    "broker_missing_diff_hash",
 )
 _OPTIONAL_FIELDS = tuple(field for field in _HOLDINGS_FIELDS if field != "ticker")
 
@@ -89,6 +94,9 @@ def _normalize_rows(payload: object) -> list[dict[str, object]]:
         if not ticker or not _active_quantity(raw.get("quantity")):
             continue
         item: dict[str, object] = {"ticker": ticker}
+        broker_state = str(raw.get("broker_state") or "confirmed").strip()
+        if not broker_state:
+            broker_state = "confirmed"
         for field_name in _OPTIONAL_FIELDS:
             if field_name == "entry_pattern":
                 if field_name not in raw:
@@ -96,6 +104,12 @@ def _normalize_rows(payload: object) -> list[dict[str, object]]:
                         "Supabase holdings response omitted entry_pattern"
                     )
                 item[field_name] = raw.get(field_name)
+                continue
+            if field_name == "broker_state":
+                if broker_state != "confirmed":
+                    item[field_name] = broker_state
+                continue
+            if field_name.startswith("broker_missing_") and broker_state == "confirmed":
                 continue
             value = raw.get(field_name)
             if value is not None:

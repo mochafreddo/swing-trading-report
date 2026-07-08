@@ -1,6 +1,10 @@
 import "server-only";
 
-import { fetchAllHoldings, replaceAllHoldings } from "@/lib/supabase-admin";
+import {
+  applyScheduledTossQuarantine,
+  fetchAllHoldings,
+  replaceAllHoldings,
+} from "@/lib/supabase-admin";
 import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
 import {
   listTickerDirectoryExactBaseCandidates,
@@ -30,7 +34,6 @@ type ScheduledTossAutoSyncStatus =
   | "disabled"
   | "blocked"
   | "wipe_guard_blocked"
-  | "delete_guard_blocked"
   | "marker_failed"
   | "error";
 
@@ -50,6 +53,8 @@ export interface ScheduledTossAutoSyncResponse extends Omit<
 > {
   mode: "auto-apply";
   status: ScheduledTossAutoSyncStatus;
+  quarantinedCount: number;
+  quarantinedTickers: string[];
 }
 
 export interface TossHoldingsSyncPreview {
@@ -77,6 +82,18 @@ export interface TossHoldingsSyncDependencies {
     rows: HoldingReplaceSnapshot[],
     options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
   ) => Promise<ReplaceAllHoldingsResult>;
+  applyScheduledTossQuarantine: (input: {
+    targetRows: HoldingReplaceSnapshot[];
+    quarantineTickers: string[];
+    expectedCurrentHoldings: readonly HoldingRecord[];
+    sessionDate: string;
+    diffHash: string;
+  }) => Promise<{
+    insertedCount: number;
+    updatedCount: number;
+    quarantinedCount: number;
+    unchangedCount: number;
+  }>;
 }
 
 export interface ScheduledTossFreshnessMarkerResult {
@@ -89,6 +106,7 @@ const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
   fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
   listTickerDirectoryExactBaseCandidates,
   replaceAllHoldings,
+  applyScheduledTossQuarantine,
 };
 
 class TossHoldingsFixtureError extends Error {
@@ -258,7 +276,7 @@ function assertReplaceAllResultMatchesPreview(
   }
 }
 
-function resolveKstSessionDate(now: Date): string {
+export function resolveKstSessionDate(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
     year: "numeric",
@@ -292,6 +310,8 @@ export async function recordScheduledTossFreshnessMarker(
       updateCount: result.summary.updateCount,
       deleteCount: result.summary.deleteCount,
       unchangedCount: result.summary.unchangedCount,
+      quarantinedCount: result.quarantinedCount,
+      quarantinedTickers: result.quarantinedTickers,
       source: "scheduled-route",
       timezone: "Asia/Seoul",
       updatedAt: now.toISOString(),
@@ -387,7 +407,7 @@ export async function applyTossHoldingsSyncPreview(
 }
 
 export async function runScheduledTossAutoApply(
-  options: { autoApplyEnabled: boolean },
+  options: { autoApplyEnabled: boolean; sessionDate?: string },
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
 ): Promise<ScheduledTossAutoSyncResponse> {
   if (!options.autoApplyEnabled) {
@@ -409,12 +429,18 @@ export async function runScheduledTossAutoApply(
       changes: { create: [], update: [], delete: [], unchanged: [] },
       blockedRows: [],
       targetRows: [],
+      quarantinedCount: 0,
+      quarantinedTickers: [],
     };
   }
 
+  const sessionDate = options.sessionDate ?? resolveKstSessionDate();
   const preview = await buildTossHoldingsSyncPreview(deps, {
     tickerDirectoryLookupFailureMode: "throw",
   });
+  const quarantinedTickers = preview.dryRun.reconciliation.changes.delete.map(
+    (row) => row.ticker,
+  );
   const base = {
     mode: "auto-apply" as const,
     diffHash: preview.diffHash,
@@ -423,6 +449,8 @@ export async function runScheduledTossAutoApply(
     changes: preview.dryRun.reconciliation.changes,
     blockedRows: preview.dryRun.blockedRows,
     targetRows: preview.dryRun.targetRows,
+    quarantinedCount: 0,
+    quarantinedTickers,
   };
 
   if (preview.dryRun.applyBlocked) {
@@ -436,7 +464,19 @@ export async function runScheduledTossAutoApply(
     return { ...base, status: "wipe_guard_blocked" };
   }
   if (preview.dryRun.reconciliation.summary.deleteCount > 0) {
-    return { ...base, status: "delete_guard_blocked" };
+    const result = await deps.applyScheduledTossQuarantine({
+      targetRows: preview.dryRun.targetRows,
+      quarantineTickers: quarantinedTickers,
+      expectedCurrentHoldings: preview.currentHoldings,
+      sessionDate,
+      diffHash: preview.diffHash,
+    });
+    return {
+      ...base,
+      status: "applied",
+      quarantinedCount: result.quarantinedCount,
+      quarantinedTickers,
+    };
   }
   if (!preview.hasChanges) {
     return { ...base, status: "unchanged" };
@@ -447,5 +487,7 @@ export async function runScheduledTossAutoApply(
     ...applied,
     mode: "auto-apply",
     status: "applied",
+    quarantinedCount: 0,
+    quarantinedTickers: [],
   };
 }

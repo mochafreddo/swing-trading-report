@@ -10,6 +10,7 @@ import {
 
 import {
   addBuyToHolding,
+  applyScheduledTossQuarantine,
   claimRuntimeStateLock,
   downloadStorageJson,
   fetchReportIndexPage,
@@ -517,6 +518,11 @@ function holdingRow(
     quantity: number;
     entry_price: number;
     entry_pattern: string | null;
+    broker_state: "confirmed" | "not_seen_in_toss";
+    broker_missing_first_seen_date: string | null;
+    broker_missing_last_seen_date: string | null;
+    broker_missing_count: number;
+    broker_missing_diff_hash: string | null;
   }> = {},
 ) {
   return {
@@ -531,6 +537,13 @@ function holdingRow(
     tags: [],
     stop_override: null,
     target_override: null,
+    broker_state: overrides.broker_state ?? "confirmed",
+    broker_missing_first_seen_date:
+      overrides.broker_missing_first_seen_date ?? null,
+    broker_missing_last_seen_date:
+      overrides.broker_missing_last_seen_date ?? null,
+    broker_missing_count: overrides.broker_missing_count ?? 0,
+    broker_missing_diff_hash: overrides.broker_missing_diff_hash ?? null,
     created_at: "2026-02-24T00:00:00Z",
     updated_at: "2026-02-24T00:00:00Z",
   };
@@ -564,6 +577,7 @@ describe("fetchAllHoldings", () => {
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
     expect(firstUrl.searchParams.get("select")).toContain("entry_pattern");
+    expect(firstUrl.searchParams.get("select")).toContain("broker_state");
     expect(firstUrl.searchParams.get("offset")).toBe("0");
     expect(secondUrl.searchParams.get("offset")).toBe("500");
   });
@@ -831,6 +845,11 @@ describe("replaceAllHoldings", () => {
             tags: ["watch"],
             stop_override: 160,
             target_override: 220,
+            broker_state: "confirmed",
+            broker_missing_first_seen_date: null,
+            broker_missing_last_seen_date: null,
+            broker_missing_count: 0,
+            broker_missing_diff_hash: null,
           },
         ],
       }),
@@ -946,6 +965,170 @@ describe("replaceAllHoldings", () => {
       details: "holdings_snapshot_conflict",
       message:
         "Failed to replace holdings: holdings snapshot changed before replace",
+    } satisfies Partial<SupabaseApiError>);
+  });
+});
+
+describe("applyScheduledTossQuarantine", () => {
+  it("calls scheduled quarantine RPC with expected snapshot and evidence inputs", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            inserted_count: 1,
+            updated_count: 2,
+            quarantined_count: 1,
+            unchanged_count: 3,
+          },
+        ]),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await applyScheduledTossQuarantine({
+      targetRows: [
+        {
+          ticker: "AAPL.NAS",
+          quantity: 2,
+          entry_price: 190,
+          entry_currency: "USD",
+          entry_date: null,
+          strategy: null,
+          entry_pattern: null,
+          notes: null,
+          tags: [],
+          stop_override: null,
+          target_override: null,
+        },
+      ],
+      quarantineTickers: ["TSLA.NAS"],
+      expectedCurrentHoldings: [
+        holdingRow({
+          ticker: "AAPL.NAS",
+          quantity: 1,
+          entry_price: 180,
+        }),
+        holdingRow({
+          ticker: "TSLA.NAS",
+          quantity: 1,
+          entry_price: 200,
+          broker_state: "not_seen_in_toss",
+          broker_missing_first_seen_date: "2026-07-07",
+          broker_missing_last_seen_date: "2026-07-07",
+          broker_missing_count: 1,
+          broker_missing_diff_hash: "previous-diff",
+        }),
+      ],
+      sessionDate: "2026-07-08",
+      diffHash: "diff-current",
+    });
+
+    expect(result).toEqual({
+      insertedCount: 1,
+      updatedCount: 2,
+      quarantinedCount: 1,
+      unchangedCount: 3,
+    });
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const url = new URL(String(requestUrl));
+    expect(url.pathname).toBe(
+      "/rest/v1/rpc/apply_scheduled_toss_quarantine_v1",
+    );
+    expect(requestInit?.method).toBe("POST");
+    expect(requestInit?.body).toBe(
+      JSON.stringify({
+        p_holdings: [
+          {
+            ticker: "AAPL.NAS",
+            quantity: 2,
+            entry_price: 190,
+            entry_currency: "USD",
+            entry_date: null,
+            strategy: null,
+            entry_pattern: null,
+            notes: null,
+            tags: [],
+            stop_override: null,
+            target_override: null,
+          },
+        ],
+        p_quarantine_tickers: ["TSLA.NAS"],
+        p_expected_holdings: [
+          {
+            ticker: "AAPL.NAS",
+            quantity: 1,
+            entry_price: 180,
+            entry_currency: null,
+            entry_date: null,
+            strategy: null,
+            entry_pattern: null,
+            notes: null,
+            tags: [],
+            stop_override: null,
+            target_override: null,
+            broker_state: "confirmed",
+            broker_missing_first_seen_date: null,
+            broker_missing_last_seen_date: null,
+            broker_missing_count: 0,
+            broker_missing_diff_hash: null,
+          },
+          {
+            ticker: "TSLA.NAS",
+            quantity: 1,
+            entry_price: 200,
+            entry_currency: null,
+            entry_date: null,
+            strategy: null,
+            entry_pattern: null,
+            notes: null,
+            tags: [],
+            stop_override: null,
+            target_override: null,
+            broker_state: "not_seen_in_toss",
+            broker_missing_first_seen_date: "2026-07-07",
+            broker_missing_last_seen_date: "2026-07-07",
+            broker_missing_count: 1,
+            broker_missing_diff_hash: "previous-diff",
+          },
+        ],
+        p_session_date: "2026-07-08",
+        p_diff_hash: "diff-current",
+      }),
+    );
+  });
+
+  it("maps scheduled quarantine snapshot conflicts to SupabaseApiError(409)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "40001",
+          details: "holdings_snapshot_conflict",
+          message: "holdings snapshot changed before quarantine",
+        }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(
+      applyScheduledTossQuarantine({
+        targetRows: [],
+        quarantineTickers: [],
+        expectedCurrentHoldings: [],
+        sessionDate: "2026-07-08",
+        diffHash: "diff-current",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      upstreamCode: "40001",
+      details: "holdings_snapshot_conflict",
+      message:
+        "Failed to apply scheduled Toss quarantine: holdings snapshot changed before quarantine",
     } satisfies Partial<SupabaseApiError>);
   });
 });

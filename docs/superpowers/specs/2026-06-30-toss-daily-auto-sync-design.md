@@ -155,8 +155,11 @@ The scheduled result should include a machine-readable status:
 - `disabled`
 - `blocked`
 - `wipe_guard_blocked`
-- `delete_guard_blocked`
 - `error`
+
+2026-07-08 update: non-empty delete diffs are now preserved as durable
+`broker_state=not_seen_in_toss` quarantine rows and return `applied` with
+quarantine counts. Only full-wipe shaped empty Toss snapshots remain blocked.
 
 ## API and Service Shape
 
@@ -220,8 +223,7 @@ Responsibilities:
 - call the scheduled endpoint with the bearer header passed through curl stdin
   config rather than process argv,
 - use bounded curl timeouts/retries,
-- exit non-zero for `disabled`, `blocked`, `wipe_guard_blocked`,
-  `delete_guard_blocked`, and `error`,
+- exit non-zero for `disabled`, `blocked`, `wipe_guard_blocked`, and `error`,
 - print only bounded summaries without secrets or raw Toss payloads.
 
 The script can be run by launchd on macOS. A later release can add a Docker
@@ -288,7 +290,8 @@ Unit/service coverage:
 - auto apply writes create/update diffs when preview has changes and no blocked
   rows or delete diffs.
 - blocked rows skip `replaceAllHoldings`.
-- delete diffs from a non-empty Toss snapshot trigger `delete_guard_blocked`.
+- delete diffs from a non-empty Toss snapshot preserve existing holdings as
+  `broker_state=not_seen_in_toss` quarantine rows and still return `applied`.
 - empty Toss snapshot plus existing Supabase holdings triggers
   `wipe_guard_blocked`, including inactive holdings.
 - empty Toss snapshot plus no Supabase holdings returns unchanged and writes

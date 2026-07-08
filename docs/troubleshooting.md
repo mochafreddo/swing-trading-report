@@ -385,8 +385,8 @@ NEEDS_CONFIRMATION: notification owner, late-alert policy, and rerun approval.
 - `TOSS_SYNC_AUTO_APPLY_ENABLED` is unset, so the scheduled route returns `disabled`.
 - The host timezone is not `Asia/Seoul` or `KST`.
 - The web container is down or using stale env after `.env` changed.
-- The scheduled diff is blocked, would wipe holdings, or contains deletes that
-  require manual reviewed apply in the web UI.
+- The scheduled diff is blocked, would wipe holdings, or failed to write its
+  freshness marker.
 
 ### Checks
 
@@ -398,8 +398,10 @@ docker compose logs web
 ```
 
 Expected successful runner statuses are `status=applied` or `status=unchanged`.
+`status=applied` may include `quarantined=<count>` when existing holdings were
+not seen in a non-empty Toss snapshot and were preserved for manual review.
 `status=disabled`, `status=blocked`, `status=wipe_guard_blocked`,
-`status=delete_guard_blocked`, and `status=error` are fail-closed outcomes.
+`status=marker_failed`, and `status=error` are fail-closed outcomes.
 
 ### Resolution
 

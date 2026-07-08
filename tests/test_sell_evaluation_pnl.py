@@ -396,6 +396,45 @@ def test_evaluate_holdings_emits_review_row_when_market_data_missing() -> None:
     assert "AAPL.NASD: No market data available for sell evaluation" in runtime.failures
 
 
+def test_evaluate_holdings_marks_not_seen_in_toss_as_broker_state_review() -> None:
+    runtime = _make_runtime(entry_price=100.0)
+    runtime.holdings[0].broker_state = "not_seen_in_toss"
+    runtime.holdings[0].broker_missing_first_seen_date = "2026-07-08"
+    runtime.holdings[0].broker_missing_last_seen_date = "2026-07-08"
+    runtime.holdings[0].broker_missing_count = 1
+    runtime.holdings[0].broker_missing_diff_hash = "diff-quarantine"
+    runtime.market_data = {}
+
+    def _evaluate(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        raise AssertionError("broker-state review must not call sell evaluation")
+
+    rows = _evaluate_holdings(
+        runtime,
+        SellSettingsCls=SimpleNamespace,
+        HybridSellSettingsCls=SimpleNamespace,
+        evaluate_sell_signals_fn=_evaluate,
+        evaluate_sell_signals_hybrid_fn=_evaluate,
+        SellReportRowCls=SellReportRow,
+        split_symbol_and_suffix_fn=lambda ticker: (ticker, "NASD"),
+        exchange_from_suffix_fn=lambda _suffix: "NAS",
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.ticker == "AAPL.NASD"
+    assert row.action == "REVIEW"
+    assert row.reasons == ["Holding not seen in latest Toss snapshot"]
+    assert row.flags == ["broker_state_review"]
+    assert row.last_price is None
+    assert row.pnl_pct is None
+    assert row.broker_state == "not_seen_in_toss"
+    assert row.broker_missing_first_seen_date == "2026-07-08"
+    assert row.broker_missing_last_seen_date == "2026-07-08"
+    assert row.broker_missing_count == 1
+    assert row.broker_missing_diff_hash == "diff-quarantine"
+    assert runtime.failures == []
+
+
 def test_evaluate_holdings_isolates_unexpected_ticker_exceptions() -> None:
     runtime = _make_runtime(entry_price=100.0)
     runtime.holdings.append(

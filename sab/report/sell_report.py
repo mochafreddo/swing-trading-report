@@ -35,6 +35,11 @@ class SellReportRow:
     flags: list[str] | None = None
     days_in_trade_sessions: int | None = None
     time_stop_triggered: bool = False
+    broker_state: str | None = None
+    broker_missing_first_seen_date: str | None = None
+    broker_missing_last_seen_date: str | None = None
+    broker_missing_count: int | None = None
+    broker_missing_diff_hash: str | None = None
 
 
 def _build_rules_payload(

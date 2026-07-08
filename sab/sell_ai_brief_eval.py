@@ -50,6 +50,7 @@ class _SellContext:
     expected_actionable_tickers: list[str]
     expected_preselected_tickers: list[str]
     expected_action_by_ticker: dict[str, str]
+    expected_broker_state_review_candidates: list[tuple[str, str]]
     expected_excluded_hold_candidates: list[tuple[str, str]]
     expected_unsupported_candidates: list[tuple[str, str]]
     expected_cap_excluded_candidates: list[tuple[str, str]]
@@ -197,6 +198,9 @@ def _load_sell_context(
         expected_action_by_ticker={
             row.ticker: row.sell_action for row in expected_preselected
         },
+        expected_broker_state_review_candidates=[
+            (row.ticker, row.sell_action) for row in classification.broker_state_review
+        ],
         expected_excluded_hold_candidates=[
             (row.ticker, row.sell_action) for row in classification.excluded_hold
         ],
@@ -231,6 +235,15 @@ def _alignment_issues(
             field_name="excluded_hold_candidates",
             actual_candidates=_mapping_rows(report.get("excluded_hold_candidates")),
             expected_candidates=context.expected_excluded_hold_candidates,
+        )
+    )
+    issues.extend(
+        _candidate_alignment_issues(
+            field_name="broker_state_review_candidates",
+            actual_candidates=_mapping_rows(
+                report.get("broker_state_review_candidates")
+            ),
+            expected_candidates=context.expected_broker_state_review_candidates,
         )
     )
     issues.extend(

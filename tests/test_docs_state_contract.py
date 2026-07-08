@@ -297,8 +297,8 @@ def test_toss_scheduled_sync_docs_reflect_auto_apply_guardrails() -> None:
 
     api_text = _read(Path("docs/api.md"))
     assert "applyBlocked" in api_text
-    assert "delete_guard_blocked" in api_text
-    assert "create/update only" in api_text
+    assert "quarantinedCount" in api_text
+    assert "broker_state=not_seen_in_toss" in api_text
 
     deployment_text = _read(Path("docs/deployment.md"))
     assert "root `.env`" in deployment_text

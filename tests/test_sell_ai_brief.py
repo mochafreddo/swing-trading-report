@@ -117,6 +117,99 @@ def test_run_sell_ai_brief_reviews_only_actionable_rows(
     assert payload["summary"]["source_issue_count"] == 3
 
 
+def test_run_sell_ai_brief_excludes_broker_state_reviews_from_model_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sell_report = _write_sell_report(
+        tmp_path,
+        evaluated=[
+            _sell_row("AAPL.NAS", action="SELL"),
+            {
+                **_sell_row(
+                    "META.NAS",
+                    action="REVIEW",
+                    reasons=["Holding not seen in latest Toss snapshot"],
+                ),
+                "broker_state": "not_seen_in_toss",
+                "broker_missing_first_seen_date": "2026-07-08",
+                "broker_missing_last_seen_date": "2026-07-08",
+                "broker_missing_count": 1,
+                "broker_missing_diff_hash": "diff-quarantine",
+            },
+        ],
+    )
+    report_dir = tmp_path / "reports"
+    monkeypatch.setattr(
+        "sab.sell_ai_brief.load_config",
+        lambda: SimpleNamespace(report_dir=report_dir.as_posix()),
+    )
+    captured_candidates: list[dict[str, object]] = []
+
+    class _CapturingProvider:
+        def build_judgments(
+            self,
+            *,
+            actionable_candidates: list[dict[str, object]],
+        ) -> object:
+            captured_candidates.extend(actionable_candidates)
+            return sell_ai_brief.SellAiBriefProviderResult(
+                judgments=[
+                    {
+                        "ticker": "AAPL.NAS",
+                        "sell_action": "SELL",
+                        "ai_stance": "AGREE",
+                        "confidence": "LOW",
+                        "deterministic_reasons": ["stop loss breached"],
+                        "rationale": ["테스트 provider 판단입니다."],
+                        "checklist": ["원본 sell report를 수동 확인합니다."],
+                        "sources": [],
+                        "as_of": "2026-05-05T08:40:00+00:00",
+                    }
+                ],
+                vetoed_candidates=[],
+                source_issues=[
+                    {
+                        "ticker": "AAPL.NAS",
+                        "code": "test_provider_no_external_sources",
+                        "severity": "WARN",
+                        "message": "테스트 provider는 외부 소스를 조회하지 않습니다.",
+                    }
+                ],
+                trace_metadata=None,
+            )
+
+    monkeypatch.setattr(
+        "sab.sell_ai_brief._build_provider",
+        lambda **_kwargs: _CapturingProvider(),
+    )
+
+    exit_code = run_sell_ai_brief(
+        sell_report_path=sell_report.as_posix(),
+        model_provider="fake",
+        model_name="fake-sell-ai-brief-v1",
+        source_provider="none",
+    )
+
+    assert exit_code == 0
+    assert [row["ticker"] for row in captured_candidates] == ["AAPL.NAS"]
+    payload = json.loads(next(report_dir.glob("*.sell-ai-brief.json")).read_text())
+    assert payload["actionable_tickers"] == ["AAPL.NAS"]
+    assert payload["summary"]["broker_state_review_count"] == 1
+    assert payload["broker_state_review_candidates"] == [
+        {
+            "ticker": "META.NAS",
+            "sell_action": "REVIEW",
+            "reason": "holding not seen in latest Toss snapshot",
+            "broker_state": "not_seen_in_toss",
+            "broker_missing_first_seen_date": "2026-07-08",
+            "broker_missing_last_seen_date": "2026-07-08",
+            "broker_missing_count": 1,
+            "broker_missing_diff_hash": "diff-quarantine",
+        }
+    ]
+
+
 def test_run_sell_ai_brief_with_result_returns_written_report_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

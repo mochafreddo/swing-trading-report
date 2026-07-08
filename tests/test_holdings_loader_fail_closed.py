@@ -438,6 +438,92 @@ def test_load_holdings_accepts_zero_optional_numeric_overrides(tmp_path) -> None
     assert loaded.holdings[0].target_override == 0
 
 
+def test_load_holdings_preserves_broker_quarantine_evidence(tmp_path) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        (
+            "holdings:\n"
+            "  - ticker: META.NAS\n"
+            "    quantity: 1\n"
+            "    entry_price: 450\n"
+            "    entry_currency: USD\n"
+            "    broker_state: not_seen_in_toss\n"
+            "    broker_missing_first_seen_date: 2026-07-08\n"
+            "    broker_missing_last_seen_date: 2026-07-08\n"
+            "    broker_missing_count: 1\n"
+            "    broker_missing_diff_hash: diff-quarantine\n"
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_holdings(str(path))
+
+    assert len(loaded.holdings) == 1
+    holding = loaded.holdings[0]
+    assert holding.broker_state == "not_seen_in_toss"
+    assert holding.broker_missing_first_seen_date == "2026-07-08"
+    assert holding.broker_missing_last_seen_date == "2026-07-08"
+    assert holding.broker_missing_count == 1
+    assert holding.broker_missing_diff_hash == "diff-quarantine"
+
+
+@pytest.mark.parametrize(
+    "broker_yaml",
+    [
+        "    broker_state: missing\n",
+        (
+            "    broker_state: confirmed\n"
+            "    broker_missing_first_seen_date: 2026-07-08\n"
+        ),
+        (
+            "    broker_state: not_seen_in_toss\n"
+            "    broker_missing_first_seen_date: 2026-07-08\n"
+            "    broker_missing_last_seen_date: 2026-07-08\n"
+            "    broker_missing_count: 0\n"
+            "    broker_missing_diff_hash: diff-quarantine\n"
+        ),
+        (
+            "    broker_state: not_seen_in_toss\n"
+            "    broker_missing_first_seen_date: 2026-07-08\n"
+            "    broker_missing_last_seen_date: 2026-07-08\n"
+            "    broker_missing_count: 1.5\n"
+            "    broker_missing_diff_hash: diff-quarantine\n"
+        ),
+        (
+            "    broker_state: not_seen_in_toss\n"
+            "    broker_missing_first_seen_date: 2026-07-09\n"
+            "    broker_missing_last_seen_date: 2026-07-08\n"
+            "    broker_missing_count: 1\n"
+            "    broker_missing_diff_hash: diff-quarantine\n"
+        ),
+    ],
+)
+def test_load_holdings_rejects_invalid_broker_quarantine_state(
+    tmp_path,
+    broker_yaml: str,
+) -> None:
+    path = tmp_path / "holdings.yaml"
+    path.write_text(
+        (
+            "holdings:\n"
+            "  - ticker: META.NAS\n"
+            "    quantity: 1\n"
+            "    entry_price: 450\n"
+            "    entry_currency: USD\n"
+            f"{broker_yaml}"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HoldingsLoadError) as exc_info:
+        load_holdings(str(path))
+
+    message = str(exc_info.value)
+    assert "index 0" in message
+    assert "ticker='META.NAS'" in message
+    assert "broker_" in message or "broker state" in message
+
+
 def test_load_holdings_raises_when_us_ticker_missing_entry_currency(tmp_path) -> None:
     path = tmp_path / "holdings.yaml"
     path.write_text(

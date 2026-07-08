@@ -70,6 +70,12 @@ vi.mock("@/lib/supabase-admin", () => {
       deletedCount: 0,
       unchangedCount: 0,
     })),
+    applyScheduledTossQuarantine: vi.fn(async () => ({
+      insertedCount: 0,
+      updatedCount: 0,
+      quarantinedCount: 0,
+      unchangedCount: 0,
+    })),
   };
 });
 

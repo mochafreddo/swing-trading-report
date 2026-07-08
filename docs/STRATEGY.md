@@ -420,6 +420,7 @@ UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `re
 Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/target 가이드를 제공합니다.
 
 - 평가 대상은 `quantity > 0`인 활성 보유분으로 한정합니다(`quantity <= 0`은 평가에서 제외).
+- holdings row가 `broker_state=not_seen_in_toss`이면 시장 데이터 평가를 건너뛰고 `REVIEW`로 표시합니다. 이 row는 Toss의 non-empty snapshot에서 보이지 않았다는 broker-state quarantine이며, `broker_missing_first_seen_date`, `broker_missing_last_seen_date`, `broker_missing_count`, `broker_missing_diff_hash` 증거를 함께 보존합니다.
 - `entry_date`가 평가 캔들 날짜보다 미래이면 time stop 계산을 건너뛰고 `REVIEW`로 올립니다.
   - 의도: holdings 날짜/평가일 불일치를 정상 0세션 보유로 해석하지 않고 수동 확인을 요구합니다.
 
@@ -603,14 +604,14 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 ### 7.2.1 Sell AI Brief report (sell 후속 판단)
 
 - `sab sell-ai-brief`는 새 매도 신호 생성기가 아니라 `sab sell` 결과의 후속 설명/판단 레이어입니다.
-- 입력은 `*.sell.json`이며, 모델 판단 대상은 원본 `action`이 `SELL`, `SELL_PARTIAL`, `REVIEW`인 row로 제한합니다. `HOLD`는 `excluded_hold_candidates[]`에 남기고 모델 입력과 최종 판단에서 제외합니다.
+- 입력은 `*.sell.json`이며, 모델 판단 대상은 원본 `action`이 `SELL`, `SELL_PARTIAL`, non-broker-state `REVIEW`인 row로 제한합니다. `HOLD`는 `excluded_hold_candidates[]`에 남기고, `broker_state=not_seen_in_toss` row는 `broker_state_review_candidates[]`에 missing-broker evidence와 함께 남긴 뒤 모델 입력과 최종 판단에서 제외합니다.
 - 모델 ranking 입력은 sell report 순서 기준 최대 5개(`actionable_tickers[]`)로 제한하며, 초과분은 `cap_excluded_candidates[]`에 남깁니다. 지원하지 않는 action, ticker 누락, 잘못된 ticker row는 `unsupported_action_candidates[]`와 `system_issues[]`로 격리합니다.
 - 최종 `judgments[]`는 원본 `sell_action`을 보존해야 합니다. 모델은 ticker를 추가하거나, `HOLD`를 판단으로 승격하거나, `SELL`/`SELL_PARTIAL`/`REVIEW`를 다른 action으로 바꿀 수 없습니다.
 - 모델은 `ai_stance`, `confidence`, `rationale`, `checklist[]`, `sources[]`로 판단과 이유를 설명합니다. 최신 기사/source가 부족하거나 접근/검증 문제가 있으면 자신감 있는 최종 판단이 아니라 weak-news/manual-review 상태로 낮춥니다.
 - OpenAI provider는 request-local `source_refs[]`만 선택하고, 최종 artifact는 로컬 코드가 canonical `sources[]`로 복원한 값만 저장합니다. 모델이 source title/url/published time을 새로 쓰는 것은 허용하지 않습니다.
-- `summary`는 `evaluated_count`, `actionable_count`, `preselected_count`, `judgment_count`, `excluded_hold_count`, `unsupported_action_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`를 기록해 HOLD 제외, cap, 모델 판단, 이슈를 분리 검증합니다.
+- `summary`는 `evaluated_count`, `actionable_count`, `preselected_count`, `judgment_count`, `broker_state_review_count`, `excluded_hold_count`, `unsupported_action_count`, `vetoed_count`, `cap_excluded_count`, `source_issue_count`, `system_issue_count`를 기록해 broker-state review, HOLD 제외, cap, 모델 판단, 이슈를 분리 검증합니다.
 - `brief_state`는 `NO_ACTION`, `FINAL_JUDGMENT`, `NEEDS_REVIEW_WEAK_NEWS`, `MODEL_OR_SYSTEM_ISSUE` 중 하나입니다. `NO_ACTION`이면 모델 호출을 시도하지 않고, actionable 후보가 있는데 judgment/veto가 모두 없거나 시스템 문제가 있으면 최종 판단으로 표시하지 않습니다.
-- `scripts/eval_sell_ai_brief.py`는 source sell report와 Sell AI Brief artifact의 정합성을 평가합니다. Actionable/HOLD/unsupported/cap 후보 정합성, summary count, 원본 action 보존, source-backed ratio, 자동 주문/체결 문구 금지를 확인하며, 새 매도 신호를 생성하지 않습니다.
+- `scripts/eval_sell_ai_brief.py`는 source sell report와 Sell AI Brief artifact의 정합성을 평가합니다. Actionable/broker-state review/HOLD/unsupported/cap 후보 정합성, summary count, 원본 action 보존, source-backed ratio, 자동 주문/체결 문구 금지를 확인하며, 새 매도 신호를 생성하지 않습니다.
 - Sell AI Brief Telegram 본문은 판단과 이유를 보여주는 HTML rich text입니다. 표시되는 `sell_action`은 원본 sell action이며 자동 주문, 자동 체결, 브로커 실행을 뜻하지 않습니다.
 
 ## 8. 운영/재현성 권장 사항

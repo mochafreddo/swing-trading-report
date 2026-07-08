@@ -206,15 +206,20 @@ if raw.strip():
 status = str(payload.get("status") or "error")
 summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
 blocked = payload.get("blockedRows") if isinstance(payload.get("blockedRows"), list) else []
+quarantined = payload.get("quarantinedTickers") if isinstance(payload.get("quarantinedTickers"), list) else []
+quarantined_count = payload.get("quarantinedCount")
+if not isinstance(quarantined_count, int):
+    quarantined_count = len(quarantined)
 print(
     "http={http_status} status={status} incoming={incoming} create={create} update={update} "
-    "delete={delete} unchanged={unchanged} blocked={blocked}".format(
+    "delete={delete} quarantined={quarantined} unchanged={unchanged} blocked={blocked}".format(
         http_status=http_status,
         status=status,
         incoming=summary.get("incomingCount", 0),
         create=summary.get("createCount", 0),
         update=summary.get("updateCount", 0),
         delete=summary.get("deleteCount", 0),
+        quarantined=quarantined_count,
         unchanged=summary.get("unchangedCount", 0),
         blocked=len(blocked),
     )

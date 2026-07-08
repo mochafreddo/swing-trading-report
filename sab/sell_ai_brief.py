@@ -450,11 +450,22 @@ def _build_model_candidate(classified: SellAiBriefCandidate) -> dict[str, object
 
 
 def _build_excluded_candidate(classified: SellAiBriefCandidate) -> dict[str, object]:
-    return {
+    row = classified.row
+    payload: dict[str, object] = {
         "ticker": classified.ticker,
         "sell_action": classified.sell_action,
         "reason": classified.reason,
     }
+    for field_name in (
+        "broker_state",
+        "broker_missing_first_seen_date",
+        "broker_missing_last_seen_date",
+        "broker_missing_count",
+        "broker_missing_diff_hash",
+    ):
+        if field_name in row:
+            payload[field_name] = row.get(field_name)
+    return payload
 
 
 def _build_cap_excluded_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
@@ -584,6 +595,7 @@ def _build_summary(
     actionable_count: int,
     preselected_count: int,
     judgment_count: int,
+    broker_state_review_count: int,
     excluded_hold_count: int,
     unsupported_action_count: int,
     vetoed_count: int,
@@ -597,6 +609,7 @@ def _build_summary(
         "actionable_count": actionable_count,
         "preselected_count": preselected_count,
         "judgment_count": judgment_count,
+        "broker_state_review_count": broker_state_review_count,
         "excluded_hold_count": excluded_hold_count,
         "unsupported_action_count": unsupported_action_count,
         "vetoed_count": vetoed_count,
@@ -710,6 +723,10 @@ def run_sell_ai_brief(
     excluded_hold_candidates = [
         _build_excluded_candidate(classified)
         for classified in classified_rows.excluded_hold
+    ]
+    broker_state_review_candidates = [
+        _build_excluded_candidate(classified)
+        for classified in classified_rows.broker_state_review
     ]
     unsupported_action_candidates = [
         _build_excluded_candidate(classified)
@@ -841,6 +858,7 @@ def run_sell_ai_brief(
             actionable_count=len(actionable_candidates),
             preselected_count=len(preselected_candidates),
             judgment_count=len(judgments),
+            broker_state_review_count=len(broker_state_review_candidates),
             excluded_hold_count=len(excluded_hold_candidates),
             unsupported_action_count=len(unsupported_action_candidates),
             vetoed_count=len(vetoed_candidates),
@@ -854,6 +872,7 @@ def run_sell_ai_brief(
             str(candidate["ticker"]) for candidate in preselected_candidates
         ],
         "actionable_candidates": preselected_candidates,
+        "broker_state_review_candidates": broker_state_review_candidates,
         "excluded_hold_candidates": excluded_hold_candidates,
         "unsupported_action_candidates": unsupported_action_candidates,
         "cap_excluded_candidates": cap_excluded_candidates,

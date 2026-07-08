@@ -119,6 +119,46 @@ def _evaluate_holdings(
 
     for holding in runtime.holdings:
         ticker = holding.ticker
+        broker_state = str(getattr(holding, "broker_state", "") or "").strip()
+        broker_metadata = {
+            "broker_state": broker_state or None,
+            "broker_missing_first_seen_date": getattr(
+                holding, "broker_missing_first_seen_date", None
+            ),
+            "broker_missing_last_seen_date": getattr(
+                holding, "broker_missing_last_seen_date", None
+            ),
+            "broker_missing_count": getattr(holding, "broker_missing_count", None),
+            "broker_missing_diff_hash": getattr(
+                holding, "broker_missing_diff_hash", None
+            ),
+        }
+        if broker_state == "not_seen_in_toss":
+            results.append(
+                SellReportRowCls(
+                    ticker=ticker,
+                    name=ticker,
+                    quantity=holding.quantity,
+                    entry_price=holding.entry_price or None,
+                    entry_date=holding.entry_date,
+                    last_price=None,
+                    pnl_pct=None,
+                    action="REVIEW",
+                    reasons=["Holding not seen in latest Toss snapshot"],
+                    stop_price=None,
+                    target_price=None,
+                    notes=holding.notes,
+                    currency=(
+                        holding.entry_currency or runtime.ticker_currency.get(ticker)
+                    ),
+                    eval_date=None,
+                    flags=["broker_state_review"],
+                    days_in_trade_sessions=None,
+                    time_stop_triggered=False,
+                    **broker_metadata,
+                )
+            )
+            continue
         entry_price = holding.entry_price or None
         if entry_price is not None and (
             isinstance(entry_price, float) and math.isnan(entry_price)

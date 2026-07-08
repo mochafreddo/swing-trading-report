@@ -169,6 +169,8 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
                     "unchangedCount": 0,
                 },
                 "blockedRows": [],
+                "quarantinedCount": 1,
+                "quarantinedTickers": ["TSLA.NAS"],
             },
             recorder,
         ),
@@ -190,6 +192,10 @@ def test_toss_daily_auto_sync_runner_posts_local_origin_without_token_in_argv(
     assert "--retry" in args
     assert "--retry-all-errors" in args
     assert "http=200 status=applied" in result.stdout
+    assert (
+        "incoming=2 create=0 update=1 delete=1 quarantined=1 unchanged=0 blocked=0"
+        in result.stdout
+    )
     assert "test-token" not in result.stdout
 
 
@@ -378,7 +384,8 @@ def test_toss_daily_auto_sync_runner_bootstraps_path_for_launchd_environment(
     assert result.returncode == 0
     assert "http=200 status=applied" in result.stdout
     assert (
-        "incoming=3 create=1 update=1 delete=0 unchanged=1 blocked=0" in result.stdout
+        "incoming=3 create=1 update=1 delete=0 quarantined=0 unchanged=1 blocked=0"
+        in result.stdout
     )
     assert "test-token" not in result.stdout
     args = recorder.read_text(encoding="utf-8")
@@ -452,7 +459,6 @@ def test_toss_daily_auto_sync_runner_fails_closed_on_timezone_mismatch(
     [
         ("disabled", 0, 0),
         ("wipe_guard_blocked", 0, 2),
-        ("delete_guard_blocked", 1, 1),
         ("marker_failed", 1, 0),
         ("error", 0, 0),
     ],
@@ -539,7 +545,7 @@ def test_toss_daily_auto_sync_runner_prints_bounded_summary_for_http_error_json(
     assert result.returncode != 0
     assert (
         "http=500 status=error incoming=0 create=0 update=0 delete=0 "
-        "unchanged=0 blocked=0"
+        "quarantined=0 unchanged=0 blocked=0"
     ) in result.stdout
 
 

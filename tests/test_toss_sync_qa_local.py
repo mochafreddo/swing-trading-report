@@ -9,7 +9,7 @@ DEFAULT_HOLDINGS_RESPONSE = (
     '{"items":[{"ticker":"005930","quantity":2,"entry_price":70000},'
     '{"ticker":"AAPL.NAS","quantity":1,"entry_price":190}],"nextCursor":null}'
 )
-DEFAULT_RUNNER_STDOUT = "http=200 status=applied incoming=2 create=0 update=2 delete=0 unchanged=0 blocked=0"
+DEFAULT_RUNNER_STDOUT = "http=200 status=applied incoming=2 create=0 update=2 delete=0 quarantined=0 unchanged=0 blocked=0"
 LOCAL_QA_ENV = {
     "SUPABASE_URL": "http://127.0.0.1:54321",
     "SUPABASE_SECRET_KEY": "secret",
@@ -159,7 +159,7 @@ def test_toss_sync_qa_local_requires_the_seeded_diff_to_apply(
         env_file_text=_env_file_text(),
         runner_stdout=(
             "http=200 status=unchanged incoming=2 create=0 update=0 "
-            "delete=0 unchanged=2 blocked=0"
+            "delete=0 quarantined=0 unchanged=2 blocked=0"
         ),
     )
 

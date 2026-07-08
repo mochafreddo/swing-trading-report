@@ -51,6 +51,11 @@ def test_export_active_holdings_snapshot_writes_entry_holdings_yaml(
                     "tags": ["core"],
                     "stop_override": None,
                     "target_override": 130,
+                    "broker_state": "confirmed",
+                    "broker_missing_first_seen_date": None,
+                    "broker_missing_last_seen_date": None,
+                    "broker_missing_count": 0,
+                    "broker_missing_diff_hash": None,
                 },
                 {
                     "ticker": "000660",
@@ -76,6 +81,7 @@ def test_export_active_holdings_snapshot_writes_entry_holdings_yaml(
     assert "quantity=gt.0" in str(session.get_calls[0]["url"])
     assert "select=ticker%2Cquantity%2Centry_price" in str(session.get_calls[0]["url"])
     assert "entry_pattern" in str(session.get_calls[0]["url"])
+    assert "broker_state" in str(session.get_calls[0]["url"])
     payload = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert payload == {
         "holdings": [
@@ -125,6 +131,53 @@ def test_export_active_holdings_snapshot_preserves_null_entry_pattern(
     assert count == 1
     payload = yaml.safe_load(output.read_text(encoding="utf-8"))
     assert payload["holdings"][0]["entry_pattern"] is None
+
+
+def test_export_active_holdings_snapshot_preserves_broker_quarantine_evidence(
+    tmp_path: Path,
+) -> None:
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            [
+                {
+                    "ticker": "META.NAS",
+                    "quantity": 1,
+                    "entry_price": 450,
+                    "entry_pattern": None,
+                    "broker_state": "not_seen_in_toss",
+                    "broker_missing_first_seen_date": "2026-07-08",
+                    "broker_missing_last_seen_date": "2026-07-08",
+                    "broker_missing_count": 1,
+                    "broker_missing_diff_hash": "diff-quarantine",
+                },
+            ],
+        )
+    )
+    output = tmp_path / "holdings.generated.yaml"
+
+    count = export_active_holdings_snapshot(
+        output_path=output,
+        config=SupabaseHoldingsExportConfig(
+            url="https://example.supabase.co",
+            service_role_key="sb_secret",
+        ),
+        session=session,
+    )
+
+    assert count == 1
+    payload = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert payload["holdings"][0] == {
+        "ticker": "META.NAS",
+        "quantity": 1,
+        "entry_price": 450,
+        "entry_pattern": None,
+        "broker_state": "not_seen_in_toss",
+        "broker_missing_first_seen_date": "2026-07-08",
+        "broker_missing_last_seen_date": "2026-07-08",
+        "broker_missing_count": 1,
+        "broker_missing_diff_hash": "diff-quarantine",
+    }
 
 
 def test_export_active_holdings_snapshot_fails_when_entry_pattern_omitted(

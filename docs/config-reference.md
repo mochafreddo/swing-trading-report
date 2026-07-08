@@ -84,7 +84,7 @@
 | `TOSS_INVEST_BASE_URL` | web `/api/holdings/toss-sync` | 기본 `https://openapi.tossinvest.com` |
 | `TOSS_SYNC_SOURCE`, `TOSS_SYNC_QA_FIXTURE_ENABLED` | web `/api/holdings/toss-sync/scheduled` | QA-only fixture source. 운영/live sync에서는 unset. `fixture`는 `TOSS_SYNC_QA_FIXTURE_ENABLED=1`과 local Supabase URL일 때만 허용 |
 | `TOSS_SYNC_JOB_TOKEN` | web `/api/holdings/toss-sync/scheduled`, local runner | Local scheduled Toss sync Bearer token. root `.env`에 저장해 Docker Compose web 컨테이너와 `scripts/toss_daily_auto_sync.sh`가 같은 값을 읽게 함. 커밋 금지 |
-| `TOSS_SYNC_AUTO_APPLY_ENABLED` | web `/api/holdings/toss-sync/scheduled` | `1`일 때만 scheduled auto-apply write 허용. 그 외 값은 fetch/write 없이 `disabled` 반환. scheduled write는 create/update only이며 delete diff는 `delete_guard_blocked`/`wipe_guard_blocked`. `applied`/`unchanged` 뒤 Toss freshness marker를 기록하고, marker write 실패는 `marker_failed` |
+| `TOSS_SYNC_AUTO_APPLY_ENABLED` | web `/api/holdings/toss-sync/scheduled` | `1`일 때만 scheduled auto-apply write 허용. 그 외 값은 fetch/write 없이 `disabled` 반환. non-empty delete diff는 holdings row를 삭제하지 않고 `broker_state=not_seen_in_toss`로 격리하며, 빈 snapshot wipe는 `wipe_guard_blocked`. `applied`/`unchanged` 뒤 Toss freshness marker를 기록하고, marker write 실패는 `marker_failed` |
 | `TOSS_SYNC_SESSION_DATE` | local Toss runner | 선택. KST session date override. 정상 운영에서는 unset, smoke/replay에서만 고정 |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | scheduled/Actions notification | 알림 사용 시 필요 |
 | `SLACK_WEBHOOK_URL` | scheduled/Actions notification | 선택 |
