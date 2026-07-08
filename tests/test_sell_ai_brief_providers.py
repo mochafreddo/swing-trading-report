@@ -91,6 +91,7 @@ def test_fake_provider_rejects_hold_candidate() -> None:
 
 
 def test_openai_payload_uses_source_refs_and_sell_action_schema() -> None:
+    candidate = _candidate("AAPL.NAS", sell_action="SELL")
     session = _CapturingSession(
         {
             "judgments": [
@@ -115,9 +116,7 @@ def test_openai_payload_uses_source_refs_and_sell_action_schema() -> None:
         session=session,
     )
 
-    result = provider.build_judgments(
-        actionable_candidates=[_candidate("AAPL.NAS", sell_action="SELL")]
-    )
+    result = provider.build_judgments(actionable_candidates=[candidate])
 
     request = session.requests[0]["json"]
     assert isinstance(request, dict)
@@ -125,7 +124,7 @@ def test_openai_payload_uses_source_refs_and_sell_action_schema() -> None:
     model_candidate = user_payload["actionable_candidates"][0]
     assert model_candidate["sources"][0]["source_id"] == "AAPL.NAS:1"
     assert result.judgments[0]["source_refs"] == ["AAPL.NAS:1"]
-    assert result.judgments[0]["sources"] == [_source("AAPL.NAS")]
+    assert result.judgments[0]["sources"] == candidate["sources"]
 
     schema = request["text"]["format"]["schema"]
     judgment_props = schema["properties"]["judgments"]["items"]["properties"]
