@@ -21,13 +21,14 @@ import {
 } from "@/lib/supabase/admin-client";
 import type {
   HoldingCursor,
+  HoldingBrokerState,
   HoldingMutationInput,
   HoldingRecord,
   HoldingReplaceSnapshot,
 } from "@/lib/types";
 
 const HOLDINGS_SELECT =
-  "ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,created_at,updated_at";
+  "ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override,broker_state,broker_missing_first_seen_date,broker_missing_last_seen_date,broker_missing_count,broker_missing_diff_hash,created_at,updated_at";
 
 export interface FetchHoldingsPageOptions {
   limit?: number;
@@ -55,6 +56,21 @@ export interface ReplaceAllHoldingsResult {
 
 export interface ReplaceAllHoldingsOptions {
   expectedCurrentHoldings?: readonly HoldingRecord[];
+}
+
+export interface ApplyScheduledTossQuarantineInput {
+  targetRows: HoldingReplaceSnapshot[];
+  quarantineTickers: string[];
+  expectedCurrentHoldings: readonly HoldingRecord[];
+  sessionDate: string;
+  diffHash: string;
+}
+
+export interface ApplyScheduledTossQuarantineResult {
+  insertedCount: number;
+  updatedCount: number;
+  quarantinedCount: number;
+  unchangedCount: number;
 }
 
 export async function fetchHoldingsPage(
@@ -224,7 +240,7 @@ function serializeHoldingReplaceRow(row: HoldingReplaceSnapshot) {
 }
 
 function serializeExpectedHolding(row: HoldingRecord) {
-  return normalizeHoldingMutationForPersistence({
+  const payload = normalizeHoldingMutationForPersistence({
     ticker: row.ticker,
     quantity: row.quantity,
     entry_price: row.entry_price,
@@ -242,6 +258,76 @@ function serializeExpectedHolding(row: HoldingRecord) {
     entry_price: number;
     tags: string[];
   });
+  return {
+    ...payload,
+    broker_state: row.broker_state ?? "confirmed",
+    broker_missing_first_seen_date: row.broker_missing_first_seen_date ?? null,
+    broker_missing_last_seen_date: row.broker_missing_last_seen_date ?? null,
+    broker_missing_count: row.broker_missing_count ?? 0,
+    broker_missing_diff_hash: row.broker_missing_diff_hash ?? null,
+  } satisfies ReturnType<typeof normalizeHoldingMutationForPersistence> & {
+    broker_state: HoldingBrokerState;
+    broker_missing_first_seen_date: string | null;
+    broker_missing_last_seen_date: string | null;
+    broker_missing_count: number;
+    broker_missing_diff_hash: string | null;
+  };
+}
+
+function parseScheduledTossQuarantineResult(
+  payload: unknown,
+): ApplyScheduledTossQuarantineResult | null {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return null;
+  }
+
+  const raw = payload[0] as
+    | {
+        inserted_count?: unknown;
+        updated_count?: unknown;
+        quarantined_count?: unknown;
+        unchanged_count?: unknown;
+      }
+    | undefined;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const insertedCount =
+    typeof raw.inserted_count === "number" &&
+    Number.isFinite(raw.inserted_count)
+      ? raw.inserted_count
+      : null;
+  const updatedCount =
+    typeof raw.updated_count === "number" && Number.isFinite(raw.updated_count)
+      ? raw.updated_count
+      : null;
+  const quarantinedCount =
+    typeof raw.quarantined_count === "number" &&
+    Number.isFinite(raw.quarantined_count)
+      ? raw.quarantined_count
+      : null;
+  const unchangedCount =
+    typeof raw.unchanged_count === "number" &&
+    Number.isFinite(raw.unchanged_count)
+      ? raw.unchanged_count
+      : null;
+
+  if (
+    insertedCount === null ||
+    updatedCount === null ||
+    quarantinedCount === null ||
+    unchangedCount === null
+  ) {
+    return null;
+  }
+
+  return {
+    insertedCount,
+    updatedCount,
+    quarantinedCount,
+    unchangedCount,
+  };
 }
 
 export async function replaceAllHoldings(
@@ -291,6 +377,56 @@ export async function replaceAllHoldings(
   if (!parsed) {
     throw new SupabaseApiError(
       "Supabase did not return a valid replace_holdings_v1 result",
+      500,
+    );
+  }
+
+  return parsed;
+}
+
+export async function applyScheduledTossQuarantine(
+  input: ApplyScheduledTossQuarantineInput,
+): Promise<ApplyScheduledTossQuarantineResult> {
+  const env = getSupabaseEnv();
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/apply_scheduled_toss_quarantine_v1`;
+  const response = await fetchSupabase(url, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
+    body: JSON.stringify({
+      p_holdings: input.targetRows.map(serializeHoldingReplaceRow),
+      p_quarantine_tickers: input.quarantineTickers,
+      p_expected_holdings: input.expectedCurrentHoldings.map(
+        serializeExpectedHolding,
+      ),
+      p_session_date: input.sessionDate,
+      p_diff_hash: input.diffHash,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const parsedError = await parseErrorPayload(response);
+    const isSnapshotConflict =
+      parsedError.code === "40001" ||
+      parsedError.details === "holdings_snapshot_conflict";
+    throw new SupabaseApiError(
+      `Failed to apply scheduled Toss quarantine: ${parsedError.message}`,
+      isSnapshotConflict ? 409 : response.status,
+      {
+        upstreamCode: parsedError.code,
+        details: parsedError.details,
+        hint: parsedError.hint,
+      },
+    );
+  }
+
+  const parsed = parseScheduledTossQuarantineResult(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      "Supabase did not return a valid apply_scheduled_toss_quarantine_v1 result",
       500,
     );
   }

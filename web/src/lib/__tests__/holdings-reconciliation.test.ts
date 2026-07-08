@@ -22,6 +22,13 @@ function snapshot(
     tags: overrides.tags ?? [],
     stop_override: overrides.stop_override ?? null,
     target_override: overrides.target_override ?? null,
+    broker_state: overrides.broker_state ?? "confirmed",
+    broker_missing_first_seen_date:
+      overrides.broker_missing_first_seen_date ?? null,
+    broker_missing_last_seen_date:
+      overrides.broker_missing_last_seen_date ?? null,
+    broker_missing_count: overrides.broker_missing_count ?? 0,
+    broker_missing_diff_hash: overrides.broker_missing_diff_hash ?? null,
   };
 }
 
@@ -114,6 +121,47 @@ describe("holdings reconciliation", () => {
     ]);
     expect(result.changes.unchanged).toEqual([
       expect.objectContaining({ ticker: "005930" }),
+    ]);
+  });
+
+  it("treats broker quarantine evidence as a restorable update", () => {
+    const current = [
+      record({
+        ticker: "TSLA.NAS",
+        quantity: 1,
+        entry_price: 250,
+        entry_currency: "USD",
+        broker_state: "not_seen_in_toss",
+        broker_missing_first_seen_date: "2026-07-07",
+        broker_missing_last_seen_date: "2026-07-07",
+        broker_missing_count: 1,
+        broker_missing_diff_hash: "sha256:missing",
+      }),
+    ];
+    const target = [
+      snapshot({
+        ticker: "TSLA.NAS",
+        quantity: 1,
+        entry_price: 250,
+        entry_currency: "USD",
+      }),
+    ];
+
+    const result = buildHoldingsReconciliation(current, target);
+
+    expect(result.summary.updateCount).toBe(1);
+    expect(result.summary.unchangedCount).toBe(0);
+    expect(result.changes.update).toEqual([
+      expect.objectContaining({
+        ticker: "TSLA.NAS",
+        changedFields: [
+          "broker_state",
+          "broker_missing_first_seen_date",
+          "broker_missing_last_seen_date",
+          "broker_missing_count",
+          "broker_missing_diff_hash",
+        ],
+      }),
     ]);
   });
 });

@@ -18,6 +18,8 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
+_BROKER_STATES = frozenset({"confirmed", "not_seen_in_toss"})
+
 
 class HoldingsLoadError(RuntimeError):
     """Raised when holdings file exists but cannot be loaded safely."""
@@ -36,6 +38,11 @@ class Holding:
     stop_override: float | None = None
     target_override: float | None = None
     entry_pattern: str | None = None
+    broker_state: str | None = None
+    broker_missing_first_seen_date: str | None = None
+    broker_missing_last_seen_date: str | None = None
+    broker_missing_count: int | None = None
+    broker_missing_diff_hash: str | None = None
 
 
 @dataclass
@@ -441,6 +448,36 @@ def _parse_optional_non_negative_float(
     )
 
 
+def _parse_optional_non_negative_int(
+    p: Path,
+    *,
+    item: dict[str, Any],
+    field_name: str,
+    item_index: int,
+    ticker: str,
+) -> int | None:
+    raw_value = item.get(field_name)
+    if raw_value is None:
+        return None
+    parsed = _parse_float_or_raise(
+        p,
+        value=raw_value,
+        field_name=field_name,
+        item_index=item_index,
+        ticker=ticker,
+        min_value=0,
+    )
+    if not parsed.is_integer():
+        raise _invalid_holdings_value(
+            p,
+            f"expected a whole number, got {raw_value!r}.",
+            field_name=field_name,
+            item_index=item_index,
+            ticker=ticker,
+        )
+    return int(parsed)
+
+
 def _parse_entry_date(value: Any) -> str | None:
     if value is None:
         return None
@@ -571,6 +608,85 @@ def _parse_holding(
             ticker=ticker,
         )
 
+    broker_state = (
+        _parse_optional_text_field(
+            p,
+            value=item.get("broker_state"),
+            field_name="broker_state",
+            item_index=item_index,
+            ticker=ticker,
+            allowed_values=_BROKER_STATES,
+        )
+        or "confirmed"
+    )
+    broker_missing_first_seen_date = _parse_entry_date(
+        item.get("broker_missing_first_seen_date")
+    )
+    broker_missing_last_seen_date = _parse_entry_date(
+        item.get("broker_missing_last_seen_date")
+    )
+    broker_missing_count = _parse_optional_non_negative_int(
+        p,
+        item=item,
+        field_name="broker_missing_count",
+        item_index=item_index,
+        ticker=ticker,
+    )
+    broker_missing_diff_hash = _parse_optional_text_field(
+        p,
+        value=item.get("broker_missing_diff_hash"),
+        field_name="broker_missing_diff_hash",
+        item_index=item_index,
+        ticker=ticker,
+        max_length=128,
+    )
+    has_broker_missing_evidence = any(
+        value is not None
+        for value in (
+            broker_missing_first_seen_date,
+            broker_missing_last_seen_date,
+            broker_missing_count,
+            broker_missing_diff_hash,
+        )
+    )
+    if broker_state == "confirmed" and has_broker_missing_evidence:
+        raise _invalid_holdings_value(
+            p,
+            "confirmed holdings cannot carry broker missing evidence.",
+            field_name="broker_state",
+            item_index=item_index,
+            ticker=ticker,
+        )
+    if broker_state == "not_seen_in_toss" and (
+        broker_missing_first_seen_date is None
+        or broker_missing_last_seen_date is None
+        or broker_missing_count is None
+        or broker_missing_count <= 0
+        or broker_missing_diff_hash is None
+    ):
+        raise _invalid_holdings_value(
+            p,
+            "not_seen_in_toss holdings require first/last seen dates, "
+            "positive broker_missing_count, and broker_missing_diff_hash.",
+            field_name="broker_state",
+            item_index=item_index,
+            ticker=ticker,
+        )
+    if (
+        broker_state == "not_seen_in_toss"
+        and broker_missing_first_seen_date is not None
+        and broker_missing_last_seen_date is not None
+        and broker_missing_last_seen_date < broker_missing_first_seen_date
+    ):
+        raise _invalid_holdings_value(
+            p,
+            "broker_missing_last_seen_date must be on or after "
+            "broker_missing_first_seen_date.",
+            field_name="broker_missing_last_seen_date",
+            item_index=item_index,
+            ticker=ticker,
+        )
+
     return Holding(
         ticker=ticker,
         quantity=quantity,
@@ -595,6 +711,11 @@ def _parse_holding(
             ticker=ticker,
         ),
         entry_pattern=entry_pattern,
+        broker_state=broker_state,
+        broker_missing_first_seen_date=broker_missing_first_seen_date,
+        broker_missing_last_seen_date=broker_missing_last_seen_date,
+        broker_missing_count=broker_missing_count,
+        broker_missing_diff_hash=broker_missing_diff_hash,
     )
 
 

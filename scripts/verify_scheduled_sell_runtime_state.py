@@ -188,6 +188,23 @@ def _line_for_entry(key: str, entry: RuntimeStateEntry | None) -> str:
     return f"{key} present{suffix}"
 
 
+def _line_for_toss_entry(key: str, entry: RuntimeStateEntry | None) -> str:
+    line = _line_for_entry(key, entry)
+    if entry is None:
+        return line
+    payload = entry.state_payload
+    quarantined_count = payload.get("quarantinedCount")
+    quarantined_tickers = payload.get("quarantinedTickers")
+    if not isinstance(quarantined_count, int):
+        quarantined_count = (
+            len(quarantined_tickers) if isinstance(quarantined_tickers, list) else 0
+        )
+    if quarantined_count <= 0:
+        return line
+    tickers = ",".join(str(ticker) for ticker in quarantined_tickers or [])
+    return f"{line} quarantined={quarantined_count} quarantined_tickers={tickers}"
+
+
 def run_verification(
     client: RuntimeStateReadClient,
     *,
@@ -226,7 +243,7 @@ def run_verification(
         f"supabase_env_match={_format_match(env_match)}",
         file=output,
     )
-    print(_line_for_entry(toss_marker_key, toss_entry), file=output)
+    print(_line_for_toss_entry(toss_marker_key, toss_entry), file=output)
     freshness_block_reason = _freshness_block_reason(
         toss_entry,
         scope=normalized_scope,

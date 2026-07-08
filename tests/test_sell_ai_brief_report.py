@@ -51,6 +51,7 @@ def _artifact() -> dict[str, object]:
             "actionable_count": 1,
             "preselected_count": 1,
             "judgment_count": 1,
+            "broker_state_review_count": 0,
             "excluded_hold_count": 1,
             "unsupported_action_count": 1,
             "vetoed_count": 0,
@@ -76,6 +77,7 @@ def _artifact() -> dict[str, object]:
                 "reason": "sell report action was HOLD",
             }
         ],
+        "broker_state_review_candidates": [],
         "unsupported_action_candidates": [
             {
                 "ticker": "BAD.NAS",
@@ -262,6 +264,7 @@ def test_write_infers_no_action_state_for_hold_only_report(tmp_path: Path) -> No
         "actionable_count": 0,
         "preselected_count": 0,
         "judgment_count": 0,
+        "broker_state_review_count": 0,
         "excluded_hold_count": 1,
         "unsupported_action_count": 0,
         "vetoed_count": 0,
@@ -279,6 +282,7 @@ def test_write_infers_no_action_state_for_hold_only_report(tmp_path: Path) -> No
             "reason": "sell report action was HOLD",
         }
     ]
+    artifact["broker_state_review_candidates"] = []
     artifact["unsupported_action_candidates"] = []
     artifact["judgments"] = []
 

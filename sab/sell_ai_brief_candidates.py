@@ -4,7 +4,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-SellAiBriefCandidateRole = Literal["actionable", "excluded_hold", "unsupported"]
+SellAiBriefCandidateRole = Literal[
+    "actionable", "broker_state_review", "excluded_hold", "unsupported"
+]
 
 _ACTIONABLE_SELL_ACTIONS = frozenset({"SELL", "SELL_PARTIAL", "REVIEW"})
 
@@ -22,6 +24,7 @@ class SellAiBriefCandidate:
 @dataclass(frozen=True)
 class SellAiBriefClassification:
     actionable: list[SellAiBriefCandidate]
+    broker_state_review: list[SellAiBriefCandidate]
     excluded_hold: list[SellAiBriefCandidate]
     unsupported: list[SellAiBriefCandidate]
     system_issues: list[dict[str, object]]
@@ -58,6 +61,20 @@ def classify_sell_ai_brief_row(
                 "severity": "WARN",
                 "message": reason,
             },
+        )
+
+    broker_state = str(row.get("broker_state") or "").strip()
+    if broker_state == "not_seen_in_toss":
+        return (
+            SellAiBriefCandidate(
+                ticker=ticker,
+                sell_action=sell_action,
+                role="broker_state_review",
+                reason="holding not seen in latest Toss snapshot",
+                deterministic_reasons=deterministic_reasons,
+                row=row,
+            ),
+            None,
         )
 
     if sell_action in _ACTIONABLE_SELL_ACTIONS:
@@ -109,6 +126,7 @@ def classify_sell_ai_brief_rows(
     rows: Iterable[Mapping[str, object]],
 ) -> SellAiBriefClassification:
     actionable: list[SellAiBriefCandidate] = []
+    broker_state_review: list[SellAiBriefCandidate] = []
     excluded_hold: list[SellAiBriefCandidate] = []
     unsupported: list[SellAiBriefCandidate] = []
     system_issues: list[dict[str, object]] = []
@@ -116,6 +134,8 @@ def classify_sell_ai_brief_rows(
         classified, issue = classify_sell_ai_brief_row(row)
         if classified.role == "actionable":
             actionable.append(classified)
+        elif classified.role == "broker_state_review":
+            broker_state_review.append(classified)
         elif classified.role == "excluded_hold":
             excluded_hold.append(classified)
         else:
@@ -124,6 +144,7 @@ def classify_sell_ai_brief_rows(
             system_issues.append(issue)
     return SellAiBriefClassification(
         actionable=actionable,
+        broker_state_review=broker_state_review,
         excluded_hold=excluded_hold,
         unsupported=unsupported,
         system_issues=system_issues,

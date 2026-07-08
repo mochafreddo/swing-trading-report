@@ -83,6 +83,8 @@ def test_reports_success_when_freshness_and_success_markers_exist() -> None:
                     "scope": "MIXED",
                     "sessionDate": "2026-07-08",
                     "status": "applied",
+                    "quarantinedCount": 1,
+                    "quarantinedTickers": ["META.NAS"],
                 },
             ),
             "scheduled-sell:success:MIXED:2026-07-08": _entry(
@@ -111,6 +113,7 @@ def test_reports_success_when_freshness_and_success_markers_exist() -> None:
     assert exit_code == 0
     assert "readiness=ready" in text
     assert "toss-sync:success:MIXED:2026-07-08 present status=applied" in text
+    assert "quarantined=1 quarantined_tickers=META.NAS" in text
     assert "scheduled-sell:success:MIXED:2026-07-08 present" in text
     assert "supabase_env_match=true" in text
     assert "scheduled-sell:success:MIXED:2026-07-08" in client.fetched_keys

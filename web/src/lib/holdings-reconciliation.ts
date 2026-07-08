@@ -16,7 +16,12 @@ export type HoldingReconciliationField =
   | "notes"
   | "tags"
   | "stop_override"
-  | "target_override";
+  | "target_override"
+  | "broker_state"
+  | "broker_missing_first_seen_date"
+  | "broker_missing_last_seen_date"
+  | "broker_missing_count"
+  | "broker_missing_diff_hash";
 
 interface HoldingCreateChange {
   ticker: string;
@@ -76,6 +81,12 @@ export function toHoldingSnapshot(
     tags: [...record.tags],
     stop_override: record.stop_override ?? null,
     target_override: record.target_override ?? null,
+    broker_state: record.broker_state ?? "confirmed",
+    broker_missing_first_seen_date:
+      record.broker_missing_first_seen_date ?? null,
+    broker_missing_last_seen_date: record.broker_missing_last_seen_date ?? null,
+    broker_missing_count: record.broker_missing_count ?? 0,
+    broker_missing_diff_hash: record.broker_missing_diff_hash ?? null,
   };
 }
 
@@ -119,6 +130,35 @@ function changedFields(
   }
   if (current.target_override !== incoming.target_override) {
     fields.push("target_override");
+  }
+  if (
+    (current.broker_state ?? "confirmed") !==
+    (incoming.broker_state ?? "confirmed")
+  ) {
+    fields.push("broker_state");
+  }
+  if (
+    (current.broker_missing_first_seen_date ?? null) !==
+    (incoming.broker_missing_first_seen_date ?? null)
+  ) {
+    fields.push("broker_missing_first_seen_date");
+  }
+  if (
+    (current.broker_missing_last_seen_date ?? null) !==
+    (incoming.broker_missing_last_seen_date ?? null)
+  ) {
+    fields.push("broker_missing_last_seen_date");
+  }
+  if (
+    (current.broker_missing_count ?? 0) !== (incoming.broker_missing_count ?? 0)
+  ) {
+    fields.push("broker_missing_count");
+  }
+  if (
+    (current.broker_missing_diff_hash ?? null) !==
+    (incoming.broker_missing_diff_hash ?? null)
+  ) {
+    fields.push("broker_missing_diff_hash");
   }
   return fields;
 }

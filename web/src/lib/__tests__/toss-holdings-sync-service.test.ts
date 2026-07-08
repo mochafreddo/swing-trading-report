@@ -29,6 +29,13 @@ function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
     tags: overrides.tags ?? [],
     stop_override: overrides.stop_override ?? null,
     target_override: overrides.target_override ?? null,
+    broker_state: overrides.broker_state ?? "confirmed",
+    broker_missing_first_seen_date:
+      overrides.broker_missing_first_seen_date ?? null,
+    broker_missing_last_seen_date:
+      overrides.broker_missing_last_seen_date ?? null,
+    broker_missing_count: overrides.broker_missing_count ?? 0,
+    broker_missing_diff_hash: overrides.broker_missing_diff_hash ?? null,
     created_at: overrides.created_at ?? "2026-06-30T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-06-30T00:00:00Z",
   } satisfies HoldingRecord;
@@ -52,6 +59,12 @@ function deps(
       insertedCount: 0,
       updatedCount: 0,
       deletedCount: 0,
+      unchangedCount: 0,
+    })),
+    applyScheduledTossQuarantine: vi.fn(async (input) => ({
+      insertedCount: 0,
+      updatedCount: 0,
+      quarantinedCount: input.quarantineTickers.length,
       unchangedCount: 0,
     })),
     ...overrides,
@@ -166,6 +179,7 @@ describe("toss holdings sync service", () => {
     expect(result.status).toBe("disabled");
     expect(testDeps.fetchAllHoldings).not.toHaveBeenCalled();
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("scheduled auto apply skips blocked previews without writing", async () => {
@@ -192,6 +206,7 @@ describe("toss holdings sync service", () => {
       expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
     ]);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("dry-run preview degrades to blocked rows when ticker-directory lookup fails", async () => {
@@ -238,6 +253,7 @@ describe("toss holdings sync service", () => {
       runScheduledTossAutoApply({ autoApplyEnabled: true }, testDeps),
     ).rejects.toThrow("ticker directory unavailable");
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("scheduled auto apply blocks an empty Toss snapshot from wiping active holdings", async () => {
@@ -256,6 +272,7 @@ describe("toss holdings sync service", () => {
     expect(result.status).toBe("wipe_guard_blocked");
     expect(result.summary.deleteCount).toBe(1);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("scheduled auto apply blocks an empty Toss snapshot from deleting inactive holdings", async () => {
@@ -274,9 +291,10 @@ describe("toss holdings sync service", () => {
     expect(result.status).toBe("wipe_guard_blocked");
     expect(result.summary.deleteCount).toBe(1);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
-  it("scheduled auto apply blocks delete diffs from non-empty Toss snapshots", async () => {
+  it("scheduled auto apply quarantines delete diffs from non-empty Toss snapshots", async () => {
     const testDeps = deps({
       fetchAllHoldings: vi.fn(async () => [
         holding({
@@ -304,16 +322,28 @@ describe("toss holdings sync service", () => {
     });
 
     const result = await runScheduledTossAutoApply(
-      { autoApplyEnabled: true },
+      { autoApplyEnabled: true, sessionDate: "2026-07-08" },
       testDeps,
     );
 
-    expect(result.status).toBe("delete_guard_blocked");
+    expect(result.status).toBe("applied");
     expect(result.summary.deleteCount).toBe(1);
+    expect(result.quarantinedCount).toBe(1);
+    expect(result.quarantinedTickers).toEqual(["TSLA.NAS"]);
     expect(result.changes.delete).toEqual([
       expect.objectContaining({ ticker: "TSLA.NAS" }),
     ]);
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).toHaveBeenCalledWith({
+      targetRows: [expect.objectContaining({ ticker: "AAPL.NAS" })],
+      quarantineTickers: ["TSLA.NAS"],
+      expectedCurrentHoldings: expect.arrayContaining([
+        expect.objectContaining({ ticker: "AAPL.NAS" }),
+        expect.objectContaining({ ticker: "TSLA.NAS" }),
+      ]),
+      sessionDate: "2026-07-08",
+      diffHash: result.diffHash,
+    });
   });
 
   it("scheduled auto apply writes with a current-holdings compare-and-swap snapshot", async () => {
@@ -355,6 +385,65 @@ describe("toss holdings sync service", () => {
     );
   });
 
+  it("scheduled auto apply restores broker state when a quarantined holding reappears", async () => {
+    const currentHoldings = [
+      holding({
+        ticker: "TSLA.NAS",
+        quantity: 1,
+        entry_price: 250,
+        entry_currency: "USD",
+        broker_state: "not_seen_in_toss",
+        broker_missing_first_seen_date: "2026-07-07",
+        broker_missing_last_seen_date: "2026-07-07",
+        broker_missing_count: 1,
+        broker_missing_diff_hash: "sha256:missing",
+      }),
+    ];
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => currentHoldings),
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "TSLA",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "250",
+        },
+      ]),
+      replaceAllHoldings: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+      })),
+    });
+
+    const result = await runScheduledTossAutoApply(
+      { autoApplyEnabled: true },
+      testDeps,
+    );
+
+    expect(result.status).toBe("applied");
+    expect(result.summary.updateCount).toBe(1);
+    expect(result.changes.update).toEqual([
+      expect.objectContaining({
+        ticker: "TSLA.NAS",
+        changedFields: [
+          "broker_state",
+          "broker_missing_first_seen_date",
+          "broker_missing_last_seen_date",
+          "broker_missing_count",
+          "broker_missing_diff_hash",
+        ],
+      }),
+    ]);
+    expect(testDeps.replaceAllHoldings).toHaveBeenCalledWith(
+      [expect.objectContaining({ ticker: "TSLA.NAS" })],
+      { expectedCurrentHoldings: currentHoldings },
+    );
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
+  });
+
   it("scheduled auto apply treats empty Toss and empty active holdings as unchanged", async () => {
     const testDeps = deps({
       fetchAllHoldings: vi.fn(async () => []),
@@ -391,6 +480,8 @@ describe("toss holdings sync service", () => {
       changes: { create: [], update: [], delete: [], unchanged: [] },
       blockedRows: [],
       targetRows: [],
+      quarantinedCount: 1,
+      quarantinedTickers: ["TSLA.NAS"],
     } satisfies ScheduledTossAutoSyncResponse;
 
     await expect(
@@ -415,6 +506,8 @@ describe("toss holdings sync service", () => {
         updateCount: 1,
         deleteCount: 0,
         unchangedCount: 1,
+        quarantinedCount: 1,
+        quarantinedTickers: ["TSLA.NAS"],
         source: "scheduled-route",
         timezone: "Asia/Seoul",
         updatedAt: "2026-07-06T22:15:00.000Z",
@@ -443,6 +536,8 @@ describe("toss holdings sync service", () => {
       changes: { create: [], update: [], delete: [], unchanged: [] },
       blockedRows: [],
       targetRows: [],
+      quarantinedCount: 0,
+      quarantinedTickers: [],
     } satisfies ScheduledTossAutoSyncResponse;
 
     await expect(

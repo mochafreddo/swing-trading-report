@@ -44,7 +44,17 @@ export interface ReportsListResponse {
   warnings: ReportSearchWarning[];
 }
 
-export interface HoldingRecord {
+export type HoldingBrokerState = "confirmed" | "not_seen_in_toss";
+
+export interface HoldingBrokerStateSnapshot {
+  broker_state?: HoldingBrokerState | null;
+  broker_missing_first_seen_date?: string | null;
+  broker_missing_last_seen_date?: string | null;
+  broker_missing_count?: number | null;
+  broker_missing_diff_hash?: string | null;
+}
+
+export interface HoldingRecord extends HoldingBrokerStateSnapshot {
   ticker: string;
   quantity: number;
   entry_price: number;

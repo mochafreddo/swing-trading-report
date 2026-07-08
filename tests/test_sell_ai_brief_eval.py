@@ -44,6 +44,14 @@ def _sell_report() -> dict[str, Any]:
             _sell_row("AAPL.NAS", action="SELL"),
             _sell_row("MSFT.NAS", action="SELL_PARTIAL"),
             _sell_row("TSLA.NAS", action="REVIEW"),
+            {
+                **_sell_row("META.NAS", action="REVIEW"),
+                "broker_state": "not_seen_in_toss",
+                "broker_missing_first_seen_date": "2026-07-08",
+                "broker_missing_last_seen_date": "2026-07-08",
+                "broker_missing_count": 1,
+                "broker_missing_diff_hash": "diff-quarantine",
+            },
             _sell_row("NVDA.NAS", action="HOLD"),
             _sell_row("BAD.NAS", action="TRIM"),
         ],
@@ -89,10 +97,11 @@ def _sell_ai_brief_report() -> dict[str, Any]:
         "brief_state": "FINAL_JUDGMENT",
         "brief_reason": "model_judgment_ready",
         "summary": {
-            "evaluated_count": 5,
+            "evaluated_count": 6,
             "actionable_count": 3,
             "preselected_count": 3,
             "judgment_count": 3,
+            "broker_state_review_count": 1,
             "excluded_hold_count": 1,
             "unsupported_action_count": 1,
             "vetoed_count": 0,
@@ -123,6 +132,18 @@ def _sell_ai_brief_report() -> dict[str, Any]:
                 "ticker": "NVDA.NAS",
                 "sell_action": "HOLD",
                 "reason": "sell report action was HOLD",
+            }
+        ],
+        "broker_state_review_candidates": [
+            {
+                "ticker": "META.NAS",
+                "sell_action": "REVIEW",
+                "reason": "holding not seen in latest Toss snapshot",
+                "broker_state": "not_seen_in_toss",
+                "broker_missing_first_seen_date": "2026-07-08",
+                "broker_missing_last_seen_date": "2026-07-08",
+                "broker_missing_count": 1,
+                "broker_missing_diff_hash": "diff-quarantine",
             }
         ],
         "unsupported_action_candidates": [
@@ -283,6 +304,29 @@ def test_sell_ai_brief_eval_fails_when_actionable_tickers_do_not_match_source(
 
     assert result.status == "FAIL"
     assert "actionable_tickers_mismatch" in _issue_codes(result)
+
+
+def test_sell_ai_brief_eval_fails_when_broker_state_candidates_do_not_match_source(
+    tmp_path: Path,
+) -> None:
+    payload = _sell_ai_brief_report()
+    payload["broker_state_review_candidates"] = []
+    payload["summary"]["broker_state_review_count"] = 0
+    sell_report_path = _write_payload(tmp_path, "sell.us.json", _sell_report())
+    sell_ai_brief_path = _write_payload(
+        tmp_path,
+        "broker-state-misclassified.json",
+        payload,
+    )
+
+    result = evaluate_sell_ai_brief_report(
+        sell_report_path=sell_report_path,
+        sell_ai_brief_report_path=sell_ai_brief_path,
+        now=EVAL_NOW,
+    )
+
+    assert result.status == "FAIL"
+    assert "broker_state_review_candidates_mismatch" in _issue_codes(result)
 
 
 def test_sell_ai_brief_eval_cli_returns_nonzero_on_failure(

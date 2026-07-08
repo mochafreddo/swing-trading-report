@@ -519,6 +519,12 @@ def _validate_summary_counts(
                 field_name="excluded_hold_candidates",
             )
         ),
+        "broker_state_review_count": len(
+            _require_list(
+                payload.get("broker_state_review_candidates"),
+                field_name="broker_state_review_candidates",
+            )
+        ),
         "unsupported_action_count": len(
             _require_list(
                 payload.get("unsupported_action_candidates"),
@@ -555,6 +561,7 @@ def _validate_summary_counts(
     evaluated_count = _summary_int(summary, "evaluated_count")
     minimum_evaluated = (
         expected["actionable_count"]
+        + expected["broker_state_review_count"]
         + expected["excluded_hold_count"]
         + expected["unsupported_action_count"]
     )
@@ -649,6 +656,11 @@ def validate_sell_ai_brief_artifact(
     ] != _ticker_list(payload, "actionable_tickers"):
         raise SellAiBriefValidationError("tickers must match actionable_tickers")
     _validate_excluded_hold_candidates(payload)
+    _validate_simple_candidate_list(
+        payload,
+        "broker_state_review_candidates",
+        allowed_actions=set(_ACTIONABLE_SELL_ACTIONS),
+    )
     _validate_simple_candidate_list(
         payload,
         "unsupported_action_candidates",

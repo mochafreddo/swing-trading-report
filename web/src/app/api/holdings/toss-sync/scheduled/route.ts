@@ -18,6 +18,7 @@ import { tossHoldingsScheduledSyncRequestSchema } from "@/lib/schemas";
 import {
   buildTossHoldingsSyncDependenciesFromEnv,
   recordScheduledTossFreshnessMarker,
+  resolveKstSessionDate,
   runScheduledTossAutoApply,
   type ScheduledTossAutoSyncResponse,
 } from "@/lib/toss/holdings-sync-service";
@@ -49,6 +50,8 @@ function buildScheduledErrorResult(
     changes: { create: [], update: [], delete: [], unchanged: [] },
     blockedRows: [],
     targetRows: [],
+    quarantinedCount: 0,
+    quarantinedTickers: [],
   };
 }
 
@@ -160,16 +163,18 @@ export async function POST(request: NextRequest) {
 
   try {
     const deps = buildTossHoldingsSyncDependenciesFromEnv();
+    const sessionDate = parsed.data.sessionDate ?? resolveKstSessionDate();
     const result = await runScheduledTossAutoApply(
       {
         autoApplyEnabled: process.env.TOSS_SYNC_AUTO_APPLY_ENABLED === "1",
+        sessionDate,
       },
       deps,
     );
     if (result.status === "applied" || result.status === "unchanged") {
       try {
         await recordScheduledTossFreshnessMarker(result, {
-          sessionDate: parsed.data.sessionDate,
+          sessionDate,
         });
       } catch {
         logApiError(new Error("Scheduled Toss freshness marker write failed"), {
@@ -210,6 +215,7 @@ export async function POST(request: NextRequest) {
       create_count: result.summary.createCount,
       update_count: result.summary.updateCount,
       delete_count: result.summary.deleteCount,
+      quarantined_count: result.quarantinedCount,
       unchanged_count: result.summary.unchangedCount,
     });
     return withApiRequestId(response, requestId);
