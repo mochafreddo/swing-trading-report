@@ -830,6 +830,14 @@ describe("HoldingsClient composition", () => {
         'input[name="tossConfirmation"]',
       ),
     ).toBeNull();
+    const diffHashInput = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Toss dry-run diffHash"]',
+    );
+    expect(diffHashInput).not.toBeNull();
+    expect(diffHashInput?.readOnly).toBe(true);
+    expect(diffHashInput?.value).toBe(
+      "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    );
 
     const applyButton = findButton(container, "Apply Toss Snapshot");
     expect(applyButton.disabled).toBe(false);

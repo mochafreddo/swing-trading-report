@@ -335,6 +335,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+.diffHashBlock {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.diffHashInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 78%, var(--panel));
+  color: var(--ink);
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diffHashInput:focus-visible {
+  border-color: var(--line-focus);
+  outline: none;
+}
+
 .summaryListTitle {
   margin: 0;
   font-size: 0.8rem;

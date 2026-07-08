@@ -174,6 +174,7 @@ export function HoldingsClient({ initialState }: HoldingsClientProps) {
           applying={tossSync.applying}
           error={tossSync.error}
           success={tossSync.success}
+          diffHash={tossSync.diffHash}
           summary={tossSync.summary}
           changes={tossSync.changes}
           blockedRows={tossSync.blockedRows}

@@ -19,6 +19,7 @@ interface TossSyncPanelProps {
   applying: boolean;
   error: string | null;
   success: string | null;
+  diffHash: string | null;
   summary: TossHoldingsDryRunResponse["summary"] | null;
   changes: TossHoldingsDryRunResponse["changes"] | null;
   blockedRows: TossHoldingsBlockedRow[];
@@ -194,6 +195,7 @@ export function TossSyncPanel({
   applying,
   error,
   success,
+  diffHash,
   summary,
   changes,
   blockedRows,
@@ -272,6 +274,19 @@ export function TossSyncPanel({
               <p className={styles.summaryValue}>{summary.unchangedCount}</p>
             </div>
           </div>
+
+          {diffHash && (
+            <label className={styles.diffHashBlock}>
+              <span className={styles.summaryLabel}>Diff Hash</span>
+              <input
+                aria-label="Toss dry-run diffHash"
+                className={styles.diffHashInput}
+                readOnly
+                value={diffHash}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </label>
+          )}
 
           <DisclosureGroup
             title="Blocked"
