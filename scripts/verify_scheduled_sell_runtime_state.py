@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from sab.scheduler.sell_ai_brief_generation import (  # noqa: E402
+    _freshness_block_reason,
+)
 from sab.scheduler.state import (  # noqa: E402
     RuntimeStateConfig,
     RuntimeStateEntry,
@@ -23,9 +26,7 @@ from sab.scheduler.state import (  # noqa: E402
 DEFAULT_SCHEDULER_ENV_FILE = Path(".env.scheduler.local")
 DEFAULT_WEB_ENV_FILE = Path(".env")
 DEFAULT_SCOPE = "MIXED"
-DEFAULT_SCHEDULED_LIMIT = 100
 KST = dt.timezone(dt.timedelta(hours=9), name="KST")
-READY_TOSS_STATUSES = {"applied", "unchanged"}
 SCHEDULED_MARKER_KINDS = (
     "blocked",
     "notification:blocked-sent",
@@ -38,10 +39,6 @@ SCHEDULED_MARKER_KINDS = (
 
 class RuntimeStateReadClient(Protocol):
     def get_entry(self, key: str) -> RuntimeStateEntry | None: ...
-
-    def list_entries(
-        self, *, prefix: str, limit: int = 20
-    ) -> list[RuntimeStateEntry]: ...
 
 
 def _strip_env_value(value: str) -> str:
@@ -151,6 +148,15 @@ def _format_match(value: bool | None) -> str:
     return "true" if value else "false"
 
 
+def _redact_secrets(message: str, env: Mapping[str, str]) -> str:
+    redacted = str(message or "")
+    for key_name in ("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"):
+        secret = str(env.get(key_name) or "").strip()
+        if secret:
+            redacted = redacted.replace(secret, "[REDACTED]")
+    return redacted
+
+
 def build_client_from_env(env: Mapping[str, str]) -> SupabaseRuntimeStateClient:
     url = _supabase_url(env)
     key = str(
@@ -166,13 +172,6 @@ def build_client_from_env(env: Mapping[str, str]) -> SupabaseRuntimeStateClient:
             "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be server-side"
         )
     return SupabaseRuntimeStateClient(RuntimeStateConfig(url=url, service_role_key=key))
-
-
-def _status(entry: RuntimeStateEntry | None) -> str:
-    if entry is None:
-        return "<missing>"
-    status = entry.state_payload.get("status")
-    return str(status or "<missing>")
 
 
 def _line_for_entry(key: str, entry: RuntimeStateEntry | None) -> str:
@@ -192,28 +191,23 @@ def run_verification(
     web_env: Mapping[str, str],
     output: TextIO = sys.stdout,
     error: TextIO = sys.stderr,
-    scheduled_limit: int = DEFAULT_SCHEDULED_LIMIT,
+    now: dt.datetime | None = None,
 ) -> int:
-    del error
     normalized_scope = _normalize_scope(scope)
     toss_marker_key = _toss_key(scope=normalized_scope, session_date=session_date)
-    toss_entry = client.get_entry(toss_marker_key)
-    scheduled_entries = {
-        entry.state_key: entry
-        for entry in client.list_entries(
-            prefix="scheduled-sell:",
-            limit=max(1, int(scheduled_limit)),
-        )
-    }
-
-    expected_entries = {
-        _state_key(
-            kind, scope=normalized_scope, session_date=session_date
-        ): scheduled_entries.get(
-            _state_key(kind, scope=normalized_scope, session_date=session_date)
-        )
+    expected_keys = [
+        _state_key(kind, scope=normalized_scope, session_date=session_date)
         for kind in SCHEDULED_MARKER_KINDS
-    }
+    ]
+    try:
+        toss_entry = client.get_entry(toss_marker_key)
+        expected_entries = {key: client.get_entry(key) for key in expected_keys}
+    except Exception as exc:
+        print(
+            f"runtime_state query failed: {_redact_secrets(str(exc), scheduler_env)}",
+            file=error,
+        )
+        return 2
 
     env_match = _supabase_env_match(scheduler_env, web_env)
     print(f"session_date={session_date} scope={normalized_scope}", file=output)
@@ -225,10 +219,18 @@ def run_verification(
         file=output,
     )
     print(_line_for_entry(toss_marker_key, toss_entry), file=output)
+    freshness_block_reason = _freshness_block_reason(
+        toss_entry,
+        scope=normalized_scope,
+        session_date=session_date,
+        now=now or dt.datetime.now(dt.UTC),
+    )
+    if freshness_block_reason is not None:
+        print(f"toss_freshness={freshness_block_reason}", file=output)
     for key, entry in expected_entries.items():
         print(_line_for_entry(key, entry), file=output)
 
-    toss_ready = toss_entry is not None and _status(toss_entry) in READY_TOSS_STATUSES
+    toss_ready = freshness_block_reason is None
     success_ready = (
         expected_entries[
             _state_key("success", scope=normalized_scope, session_date=session_date)
@@ -282,12 +284,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_WEB_ENV_FILE,
         help="Web/local env file used for Supabase URL drift comparison",
     )
-    parser.add_argument(
-        "--scheduled-limit",
-        type=int,
-        default=DEFAULT_SCHEDULED_LIMIT,
-        help="Maximum scheduled-sell runtime_state rows to inspect",
-    )
     return parser
 
 
@@ -308,7 +304,6 @@ def main(argv: list[str] | None = None) -> int:
             scope=ns.scope,
             scheduler_env=scheduler_env,
             web_env=web_env,
-            scheduled_limit=ns.scheduled_limit,
         )
     except (SchedulerStateError, ValueError) as exc:
         print(
