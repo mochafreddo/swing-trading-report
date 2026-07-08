@@ -40,7 +40,7 @@ def _parse_proof() -> _ProofParser:
 
 
 def test_secondary_evidence_disclosure_uses_accessible_button() -> None:
-    # Regression: ISSUE-001 — secondary evidence disclosure was not exposed as a button.
+    # Regression: ISSUE-001 - secondary evidence disclosure was not exposed as a button.
     # Found by /qa on 2026-07-08
     # Report: .gstack/qa-reports/qa-report-file-2026-07-08.md
     parser = _parse_proof()

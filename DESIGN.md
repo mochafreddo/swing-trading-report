@@ -201,7 +201,7 @@ Accessibility rules:
 - Every interactive element is keyboard reachable in visible task order.
 - Each page has one `h1`; panel headings do not skip levels.
 - Focus indicators remain visible on light surfaces.
-- Disclosure rows expose `aria-expanded`.
+- Disclosure controls expose synchronized `aria-expanded` and `aria-controls`.
 - Loading/result updates use polite live regions when content changes without
   navigation.
 - Status badges include text labels in the DOM; color and icon are supporting
@@ -383,8 +383,6 @@ Status derivation rules:
 - Tables are first-class. Use compact headers, tabular right-aligned numeric
   columns, status/source columns, controlled wrapping, and disclosure for
   secondary evidence.
-- Secondary evidence disclosure controls must be real buttons with
-  `aria-expanded` and `aria-controls` synchronized to the visible panel state.
 
 ## Interaction State Coverage
 
