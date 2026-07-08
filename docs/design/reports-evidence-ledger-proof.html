@@ -433,6 +433,7 @@
     .disclosure-toggle {
       display: inline-flex;
       align-items: center;
+      gap: 8px;
       justify-self: start;
       min-height: 44px;
       padding: 0 10px;
@@ -445,8 +446,14 @@
       list-style: none;
     }
 
-    .disclosure-toggle::-webkit-details-marker {
-      display: none;
+    .disclosure-toggle::before {
+      content: "+";
+      width: 12px;
+      color: var(--ink-muted);
+    }
+
+    .disclosure-toggle[aria-expanded="true"]::before {
+      content: "-";
     }
 
     .secondary-evidence {
@@ -458,6 +465,10 @@
       background: var(--surface-subtle);
       color: var(--ink-soft);
       font-size: 13px;
+    }
+
+    .secondary-evidence[hidden] {
+      display: none;
     }
 
     .footer {
@@ -768,15 +779,21 @@
                 <span class="cell-title">Next action</span>
                 <p class="cell-body">Open secondary evidence, then verify source-backed reason before acting.</p>
               </div>
-              <details class="row-disclosure" open>
-                <summary class="disclosure-toggle" aria-expanded="true" aria-controls="bravo-secondary">
+              <div class="row-disclosure">
+                <button
+                  class="disclosure-toggle"
+                  type="button"
+                  aria-expanded="true"
+                  aria-controls="bravo-secondary"
+                  data-disclosure-toggle
+                >
                   Secondary evidence
-                </summary>
+                </button>
                 <div class="secondary-evidence" id="bravo-secondary">
                   <span><strong>Missing field:</strong> deterministic rule reason from the source row.</span>
                   <span><strong>Recovery:</strong> inspect raw report data or regenerate after source repair.</span>
                 </div>
-              </details>
+              </div>
             </article>
 
             <article class="evidence-row" aria-label="STALE candidate">
@@ -880,5 +897,19 @@
       </div>
     </main>
   </div>
+  <script>
+    document.querySelectorAll("[data-disclosure-toggle]").forEach((button) => {
+      const targetId = button.getAttribute("aria-controls");
+      const target = targetId ? document.getElementById(targetId) : null;
+
+      button.addEventListener("click", () => {
+        const expanded = button.getAttribute("aria-expanded") === "true";
+        button.setAttribute("aria-expanded", String(!expanded));
+        if (target) {
+          target.hidden = expanded;
+        }
+      });
+    });
+  </script>
 </body>
 </html>

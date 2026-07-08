@@ -383,6 +383,8 @@ Status derivation rules:
 - Tables are first-class. Use compact headers, tabular right-aligned numeric
   columns, status/source columns, controlled wrapping, and disclosure for
   secondary evidence.
+- Secondary evidence disclosure controls must be real buttons with
+  `aria-expanded` and `aria-controls` synchronized to the visible panel state.
 
 ## Interaction State Coverage
 
