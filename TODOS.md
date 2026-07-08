@@ -4,15 +4,15 @@
 
 ### Observe first KST scheduled Sell AI Brief generation run
 
-**What:** Inspect the first real launchd `com.mochafreddo.sab.sell-ai-brief.generation` run after the 2026-07-07 local smoke.
+**What:** Recover and inspect the first real launchd `com.mochafreddo.sab.sell-ai-brief.generation` success run after the 2026-07-08 `toss_freshness_missing` blocked result.
 
 **Why:** `US after-close scheduled Sell AI Brief` should stay deferred until the KST morning runner has produced, quality-gated, uploaded, and notified a real artifact at least once.
 
-**Context:** The 2026-07-07 smoke installed and loaded the LaunchAgent, verified dry-run/config/tests, restored the Toss freshness marker, and fixed the local sell-specific source chain config. A live run with the real portfolio was blocked by local external-data export policy, while a synthetic AAPL no-upload run verified the external source/OpenAI path. Check `logs/launchd/sell-ai-brief.generation.{out,err}.log` and `scheduled-sell:*:MIXED:<session_date>` after the next 07:25 KST tick.
+**Context:** The 2026-07-07 smoke installed and loaded the LaunchAgent, verified dry-run/config/tests, restored the Toss freshness marker, and fixed the local sell-specific source chain config. A live run with the real portfolio was blocked by local external-data export policy, while a synthetic AAPL no-upload run verified the external source/OpenAI path. The first observed 2026-07-08 KST run correctly failed closed: Toss auto-sync returned `status=blocked incoming=5 create=2 update=0 delete=4 unchanged=3 blocked=4`, so Sell AI Brief generation returned `toss_freshness_missing` and sent only the blocked Telegram. Before closing this TODO, resolve the four blocked Toss rows, classify the four delete candidates, verify the scheduler runtime_state source of truth, and capture visible `diffHash` evidence from the Toss Sync dry-run/apply flow. Check `logs/launchd/sell-ai-brief.generation.{out,err}.log`, `logs/launchd/toss-daily-auto-sync.out.log`, `toss-sync:success:MIXED:<session_date>`, and `scheduled-sell:*:MIXED:<session_date>` after the next 07:25 KST tick.
 
 **Effort:** S
 **Priority:** P1
-**Depends on:** Next weekday 07:25 KST launchd tick.
+**Depends on:** Resolve Toss blocked rows and delete diff review; run `scripts/verify_scheduled_sell_runtime_state.py` against the target session; capture Toss Sync `diffHash` from the operator UI; then observe the next weekday 07:25 KST launchd tick.
 
 ## Deferred
 

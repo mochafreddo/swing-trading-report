@@ -73,6 +73,7 @@ value with `[REDACTED]` before sharing it.
 | Web page auth gate | unauthenticated protected page | `curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports` |
 | Scheduler one-shot | container logs | `docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --dry-run` |
 | Scheduled Sell AI Brief generation dry smoke | CLI parse / no side effects | `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date "$(TZ=Asia/Seoul date +%F)" --runner-role local-primary --scheduled-tick manual --dry-run` |
+| Scheduled Sell AI Brief runtime_state readiness | Toss freshness + sell markers | `UV_CACHE_DIR=.uv-cache uv run python scripts/verify_scheduled_sell_runtime_state.py --session-date "$(TZ=Asia/Seoul date +%F)"` |
 | Scheduled Sell AI Brief generation live run | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Scheduled Sell AI Brief prebuilt delivery | generic wrapper / runtime_state | `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/2026-07-06.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` |
 | Toss daily auto-sync | launchd logs | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` and `tail -n 20 logs/launchd/toss-daily-auto-sync.err.log` |
@@ -157,6 +158,7 @@ Scheduled Sell AI Brief has two explicit modes:
 Execution paths:
 
 - Local generation CLI: `uv run python -m sab sell-ai-brief-generate-scheduled --scope MIXED --session-date YYYY-MM-DD --runner-role local-primary --scheduled-tick 0725`
+- Runtime_state readiness check: `UV_CACHE_DIR=.uv-cache uv run python scripts/verify_scheduled_sell_runtime_state.py --session-date YYYY-MM-DD`
 - launchd generic wrapper generation route: `SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED` (live run; not a smoke test)
 - Local prebuilt delivery CLI: `uv run python -m sab sell-ai-brief-scheduled --sell-ai-brief-report reports/YYYY-MM-DD.sell-ai-brief.json --scope MIXED`
 - launchd generic wrapper delivery route: `SAB_SELL_SCHEDULE_MODE=delivery SELL_AI_BRIEF_REPORT_PATH=reports/YYYY-MM-DD.sell-ai-brief.json scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED`
@@ -184,6 +186,8 @@ Gate order:
 3. Quality `FAIL` blocks Supabase upload and normal Telegram delivery. Quality `WARN` can deliver but records `review-required` and returns `completed_review_required`.
 4. Only after quality is non-`FAIL` does generation upload the sell report, then delegate the Sell AI Brief artifact to the delivery runner.
 5. The delivery runner revalidates the Sell AI Brief artifact with `validate_sell_ai_brief_artifact(...)`, uploads/indexes it, records `artifact`, sends Telegram, then records `notification:sent` and `success`.
+
+Use `scripts/verify_scheduled_sell_runtime_state.py` before closing a blocked or repaired run. It reads scheduler credentials from `${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}`, compares the scheduler Supabase URL with the web env URL, prints redacted `toss-sync:success:MIXED:<session_date>` and `scheduled-sell:*` marker status, exits `0` only when both Toss freshness and final `scheduled-sell:success` exist, exits `1` for queried-but-not-ready/blocked states, and exits `2` for configuration or runtime_state query failures.
 
 Reconciliation rules:
 

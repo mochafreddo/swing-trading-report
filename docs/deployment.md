@@ -236,6 +236,15 @@ scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED
 
 Generation succeeds only when `runtime_state` has `toss-sync:success:MIXED:<session_date>` from the scheduled Toss route with status `applied` or `unchanged`. If the marker is missing, stale, or invalid, the runner sends a freshness-blocked Telegram and does not create a normal Sell AI Brief success marker.
 
+Before treating a blocked run as resolved, verify the marker source of truth:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/verify_scheduled_sell_runtime_state.py \
+  --session-date "$(TZ=Asia/Seoul date +%F)"
+```
+
+The verifier reads scheduled runner credentials from `${SAB_SCHEDULER_ENV_FILE:-.env.scheduler.local}` and compares its Supabase URL with the web env file. Exit `0` means both Toss freshness and `scheduled-sell:success` are present; exit `1` means runtime_state was queried but the run is still blocked or incomplete; exit `2` means config/query access failed.
+
 ## Local Toss Holdings Auto Sync
 
 The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.toss-daily-auto-sync.plist` shortly before scheduled signal judgment and AI feedback paths:
