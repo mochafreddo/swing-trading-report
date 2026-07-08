@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reports Evidence Ledger Proof</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --surface: #ffffff;
+      --surface-subtle: #f3f5f8;
+      --line: #d8dee8;
+      --line-strong: #b8c1cf;
+      --ink: #101828;
+      --ink-soft: #344054;
+      --ink-muted: #667085;
+      --accent: #2563eb;
+      --evidence: #0f766e;
+      --ok: #15803d;
+      --warn: #b45309;
+      --danger: #b42318;
+      --blocked-bg: #fff7ed;
+      --review-bg: #fffbeb;
+      --success-bg: #ecfdf3;
+      --info-bg: #eff6ff;
+      --radius-control: 6px;
+      --radius-panel: 8px;
+      --shadow-panel: 0 1px 2px rgba(16, 24, 40, 0.06);
+      --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .shell {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 62px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand-mark {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid #99a8bd;
+      border-radius: var(--radius-control);
+      background: var(--surface-subtle);
+      color: var(--evidence);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .top-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .nav {
+      display: flex;
+      gap: 4px;
+      padding: 10px 24px 0;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-control);
+      color: var(--ink-soft);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .nav a[aria-current="page"] {
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: var(--shadow-panel);
+    }
+
+    .page {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 18px 24px 28px;
+    }
+
+    .page-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: start;
+      padding: 12px 0 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      margin: 6px 0 0;
+      color: var(--ink-soft);
+      max-width: 760px;
+    }
+
+    .selected-status {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .button {
+      min-height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-control);
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .button.primary {
+      border-color: #1d4ed8;
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 324px minmax(0, 1fr);
+      grid-template-areas:
+        "selector summary"
+        "selector ledger";
+      gap: 18px;
+      align-items: start;
+    }
+
+    .selector-panel {
+      grid-area: selector;
+    }
+
+    .summary-panel {
+      grid-area: summary;
+    }
+
+    .ledger-panel {
+      grid-area: ledger;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      box-shadow: var(--shadow-panel);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+
+    .panel-subtitle {
+      margin: 3px 0 0;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .selector-tools {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-subtle);
+    }
+
+    .search {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      padding: 0 10px;
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .report-list {
+      display: grid;
+    }
+
+    .report-item {
+      display: grid;
+      gap: 8px;
+      padding: 14px 16px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      color: inherit;
+      text-align: left;
+      width: 100%;
+    }
+
+    .report-item.selected {
+      background: var(--info-bg);
+      border-left: 3px solid var(--accent);
+      padding-left: 13px;
+    }
+
+    .report-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .report-title {
+      font-weight: 750;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 2px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--surface-subtle);
+      color: var(--ink-soft);
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .ready {
+      border-color: #a7d7b8;
+      background: var(--success-bg);
+      color: var(--ok);
+    }
+
+    .review,
+    .stale,
+    .weak {
+      border-color: #f1cf8b;
+      background: var(--review-bg);
+      color: var(--warn);
+    }
+
+    .blocked {
+      border-color: #fed7aa;
+      background: var(--blocked-bg);
+      color: var(--danger);
+    }
+
+    .detail {
+      display: grid;
+      gap: 14px;
+    }
+
+    .trust-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .trust-cell {
+      padding: 14px 16px;
+      border-right: 1px solid var(--line);
+      min-width: 0;
+    }
+
+    .trust-cell:last-child {
+      border-right: 0;
+    }
+
+    .label {
+      color: var(--ink-muted);
+      display: block;
+      font-size: 12px;
+      font-weight: 760;
+      margin-bottom: 4px;
+    }
+
+    .value {
+      font-weight: 760;
+    }
+
+    .mono {
+      font-variant-numeric: tabular-nums;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .evidence-list {
+      display: grid;
+    }
+
+    .evidence-row {
+      display: grid;
+      grid-template-columns: 96px minmax(150px, 1.1fr) minmax(130px, 1fr) minmax(130px, 0.9fr) minmax(110px, 0.75fr) minmax(120px, 0.75fr);
+      gap: 12px;
+      padding: 16px;
+      border-top: 1px solid var(--line);
+      align-items: start;
+    }
+
+    .evidence-row:first-child {
+      border-top: 0;
+    }
+
+    .ticker {
+      font-weight: 800;
+      font-size: 17px;
+    }
+
+    .name {
+      color: var(--ink-muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .cell-title {
+      display: block;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 760;
+      margin-bottom: 5px;
+    }
+
+    .cell-body {
+      color: var(--ink-soft);
+      font-size: 14px;
+    }
+
+    .cell-body strong {
+      color: var(--ink);
+    }
+
+    .fallback {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .row-disclosure {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .disclosure-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-self: start;
+      min-height: 44px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-control);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-weight: 650;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .disclosure-toggle::-webkit-details-marker {
+      display: none;
+    }
+
+    .secondary-evidence {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: var(--surface-subtle);
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-subtle);
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .footer-action {
+      min-height: 44px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-control);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .note {
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: #fcfcfd;
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1260px) and (min-width: 961px) {
+      .evidence-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .identity {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .topbar,
+      .nav,
+      .page {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .page-header {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "selector"
+          "summary"
+          "ledger";
+      }
+
+      .trust-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .trust-cell:nth-child(2) {
+        border-right: 0;
+      }
+
+      .trust-cell:nth-child(n + 3) {
+        border-top: 1px solid var(--line);
+      }
+
+      .evidence-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .identity {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+        padding-top: 12px;
+        padding-bottom: 12px;
+      }
+
+      .top-meta {
+        justify-content: flex-start;
+      }
+
+      .nav {
+        overflow-x: auto;
+        padding-top: 8px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .trust-strip,
+      .evidence-row {
+        grid-template-columns: 1fr;
+      }
+
+      .trust-cell {
+        border-right: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .trust-cell:first-child {
+        border-top: 0;
+      }
+
+      .button {
+        width: 100%;
+        min-height: 44px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">EL</span>
+        <span>Swing Trading Report</span>
+      </div>
+      <div class="top-meta" aria-label="Workspace metadata">
+        <span>Asia/Seoul morning review</span>
+        <span class="mono">Generated 2026-07-08 07:25</span>
+        <span>synthetic proof data</span>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="#" aria-current="page">Reports</a>
+      <a href="#">Holdings</a>
+      <a href="#">Metrics</a>
+      <a href="#">Run</a>
+    </nav>
+
+    <main class="page">
+      <div class="page-header">
+        <div>
+          <h1 id="page-title">Reports</h1>
+          <p class="lede">
+            Verify the selected report before acting: trust state, source coverage,
+            rule basis, AI interpretation, freshness, blocker, and next action.
+          </p>
+          <div class="selected-status" aria-label="Selected report status">
+            <span class="badge weak">WEAK_SOURCE</span>
+            <span>MIXED AI Brief</span>
+            <span class="mono">session 2026-07-08</span>
+            <span class="mono">generated_at 07:25 KST</span>
+          </div>
+        </div>
+        <div class="actions" aria-label="Report actions">
+          <button class="button primary">Refresh evidence</button>
+        </div>
+      </div>
+
+      <div class="workspace" aria-label="Reports workspace">
+        <aside class="panel selector-panel" aria-labelledby="selector-title">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title" id="selector-title">Report selector</h2>
+              <p class="panel-subtitle">Newest useful artifact first</p>
+            </div>
+            <span class="badge">3 reports</span>
+          </div>
+          <div class="selector-tools">
+            <label class="label" for="report-search">Filter by type or date</label>
+            <input class="search" id="report-search" value="2026-07-08 mixed">
+          </div>
+          <div class="report-list">
+            <button class="report-item selected" aria-pressed="true">
+              <span class="report-main">
+                <span>
+                  <span class="report-title">MIXED AI Brief</span>
+                  <span class="meta-row"><span>7 candidates</span><span class="mono">2026-07-08</span></span>
+                </span>
+                <span class="badge weak">WEAK_SOURCE</span>
+              </span>
+              <span class="meta-row"><span>coverage 6/7</span><span>sent to Telegram</span></span>
+            </button>
+            <button class="report-item" aria-pressed="false">
+              <span class="report-main">
+                <span>
+                  <span class="report-title">Sell review</span>
+                  <span class="meta-row"><span>4 holdings</span><span class="mono">2026-07-07</span></span>
+                </span>
+                <span class="badge stale">STALE</span>
+              </span>
+              <span class="meta-row"><span>freshness 40h</span><span>review before acting</span></span>
+            </button>
+            <button class="report-item" aria-pressed="false">
+              <span class="report-main">
+                <span>
+                  <span class="report-title">Entry candidates</span>
+                  <span class="meta-row"><span>3 candidates</span><span class="mono">2026-07-08</span></span>
+                </span>
+                <span class="badge weak">WEAK_SOURCE</span>
+              </span>
+              <span class="meta-row"><span>source coverage 1/3</span><span>AI evidence incomplete</span></span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="panel summary-panel" aria-labelledby="summary-title">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title" id="summary-title">Evidence summary</h2>
+              <p class="panel-subtitle">Selected report trust details</p>
+            </div>
+          </div>
+
+          <div class="trust-strip" aria-label="Selected report trust state">
+            <div class="trust-cell">
+              <span class="label">Source coverage</span>
+              <span class="value">6 of 7 covered</span>
+            </div>
+            <div class="trust-cell">
+              <span class="label">Rule vs AI</span>
+              <span class="value">Rule basis preserved</span>
+            </div>
+            <div class="trust-cell">
+              <span class="label">freshness</span>
+              <span class="value">Generated 14m ago</span>
+            </div>
+            <div class="trust-cell">
+              <span class="label">Blockers</span>
+              <span class="value">1 weak source, 1 review</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel detail ledger-panel" aria-labelledby="detail-title">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title" id="detail-title">Detail evidence ledger</h2>
+              <p class="panel-subtitle">Candidate rows keep rule basis, AI interpretation, freshness, risk, and next action adjacent.</p>
+            </div>
+          </div>
+
+          <div class="evidence-list">
+            <article class="evidence-row" aria-label="READY candidate">
+              <div class="identity">
+                <div class="ticker">ALPHA</div>
+                <div class="name">Synthetic Semiconductors</div>
+                <span class="badge ready">READY</span>
+              </div>
+              <div>
+                <span class="cell-title">Judgment + rule basis</span>
+                <p class="cell-body"><strong>Watch for entry.</strong> Breakout quality A, volume confirmation present, risk alignment acceptable.</p>
+              </div>
+              <div>
+                <span class="cell-title">AI interpretation</span>
+                <p class="cell-body">AI agrees setup is coherent, but calls for manual price confirmation before order planning.</p>
+              </div>
+              <div>
+                <span class="cell-title">freshness / source coverage</span>
+                <p class="cell-body">Quote fresh at 07:20 KST. source coverage 3/3.</p>
+              </div>
+              <div>
+                <span class="cell-title">Risk / blocker</span>
+                <p class="cell-body">No hard blocker. Stop distance and liquidity still determine sizing.</p>
+              </div>
+              <div>
+                <span class="cell-title">Next action</span>
+                <p class="cell-body">Confirm price before order planning.</p>
+              </div>
+            </article>
+
+            <article class="evidence-row" aria-label="REVIEW candidate">
+              <div class="identity">
+                <div class="ticker">BRAVO</div>
+                <div class="name">Synthetic Robotics</div>
+                <span class="badge review">REVIEW</span>
+                <span class="badge weak">WEAK_SOURCE</span>
+              </div>
+              <div>
+                <span class="cell-title">Judgment + rule basis</span>
+                <p class="cell-body"><strong>Valid but incomplete.</strong> <span class="fallback">Rule reason missing</span> from source row.</p>
+              </div>
+              <div>
+                <span class="cell-title">AI interpretation</span>
+                <p class="cell-body">AI flags earnings headline risk and asks for source-backed confirmation.</p>
+              </div>
+              <div>
+                <span class="cell-title">freshness / source coverage</span>
+                <p class="cell-body">Market data fresh. source coverage 2/3.</p>
+              </div>
+              <div>
+                <span class="cell-title">Risk / blocker</span>
+                <p class="cell-body">Missing deterministic reason and earnings headline risk require review.</p>
+              </div>
+              <div>
+                <span class="cell-title">Next action</span>
+                <p class="cell-body">Open secondary evidence, then verify source-backed reason before acting.</p>
+              </div>
+              <details class="row-disclosure" open>
+                <summary class="disclosure-toggle" aria-expanded="true" aria-controls="bravo-secondary">
+                  Secondary evidence
+                </summary>
+                <div class="secondary-evidence" id="bravo-secondary">
+                  <span><strong>Missing field:</strong> deterministic rule reason from the source row.</span>
+                  <span><strong>Recovery:</strong> inspect raw report data or regenerate after source repair.</span>
+                </div>
+              </details>
+            </article>
+
+            <article class="evidence-row" aria-label="STALE candidate">
+              <div class="identity">
+                <div class="ticker">CANTO</div>
+                <div class="name">Synthetic Cloud</div>
+                <span class="badge stale">STALE</span>
+              </div>
+              <div>
+                <span class="cell-title">Judgment + rule basis</span>
+                <p class="cell-body"><strong>Hold watch.</strong> Prior signal remains visible but no longer normal-trust.</p>
+              </div>
+              <div>
+                <span class="cell-title">AI interpretation</span>
+                <p class="cell-body"><span class="fallback">AI evidence incomplete</span>; provider summary unavailable.</p>
+              </div>
+              <div>
+                <span class="cell-title">freshness / source coverage</span>
+                <p class="cell-body"><span class="fallback">freshness stale</span>; report age is 41h.</p>
+              </div>
+              <div>
+                <span class="cell-title">Risk / blocker</span>
+                <p class="cell-body">Report is beyond the normal trust window.</p>
+              </div>
+              <div>
+                <span class="cell-title">Next action</span>
+                <p class="cell-body">Refresh report before comparing price or sources.</p>
+              </div>
+            </article>
+
+            <article class="evidence-row" aria-label="WEAK_SOURCE candidate">
+              <div class="identity">
+                <div class="ticker">DELTA</div>
+                <div class="name">Synthetic Biotech</div>
+                <span class="badge weak">WEAK_SOURCE</span>
+              </div>
+              <div>
+                <span class="cell-title">Judgment + rule basis</span>
+                <p class="cell-body"><strong>Review only.</strong> Breakout pattern present, quality B.</p>
+              </div>
+              <div>
+                <span class="cell-title">AI interpretation</span>
+                <p class="cell-body">AI caveat: news set is thin and may not cover trial timing.</p>
+              </div>
+              <div>
+                <span class="cell-title">freshness / source coverage</span>
+                <p class="cell-body"><span class="fallback">source coverage unavailable</span> for two provider fields.</p>
+              </div>
+              <div>
+                <span class="cell-title">Risk / blocker</span>
+                <p class="cell-body">Source coverage is unavailable for two provider fields.</p>
+              </div>
+              <div>
+                <span class="cell-title">Next action</span>
+                <p class="cell-body">Do nothing until source coverage is restored.</p>
+              </div>
+            </article>
+
+            <article class="evidence-row" aria-label="BLOCKED candidate">
+              <div class="identity">
+                <div class="ticker">ECHO</div>
+                <div class="name">Synthetic Energy</div>
+                <span class="badge blocked">BLOCKED</span>
+              </div>
+              <div>
+                <span class="cell-title">Judgment + rule basis</span>
+                <p class="cell-body"><strong>Action blocked.</strong> Toss freshness marker is missing.</p>
+              </div>
+              <div>
+                <span class="cell-title">AI interpretation</span>
+                <p class="cell-body">AI summary preserved for audit, but cannot override blocked state.</p>
+              </div>
+              <div>
+                <span class="cell-title">freshness / source coverage</span>
+                <p class="cell-body">Holdings freshness unavailable; source coverage 3/3.</p>
+              </div>
+              <div>
+                <span class="cell-title">Risk / blocker</span>
+                <p class="cell-body">Holdings freshness marker is missing, so action remains blocked.</p>
+              </div>
+              <div>
+                <span class="cell-title">Next action</span>
+                <p class="cell-body">Run holdings sync dry-run, then regenerate report.</p>
+              </div>
+            </article>
+          </div>
+
+          <p class="note">
+            Raw JSON is preserved as an audit/debug escape hatch. Normal reading
+            starts with evidence rows and explicit fallback copy.
+          </p>
+
+          <footer class="footer">
+            <span>source file: synthetic/2026-07-08.mixed.ai-brief.json</span>
+            <span>generated_at: <span class="mono">2026-07-08T07:25:00+09:00</span></span>
+            <span>stale rule: daily reports over 36h require review</span>
+            <button class="footer-action" type="button">Open raw JSON</button>
+            <span>no external resources</span>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

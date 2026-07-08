@@ -33,12 +33,13 @@
 | 2 | [Overview](overview.md) | 목적, 도메인 용어, 운영 흐름 |
 | 3 | [Local Development](local-development.md) | 설치, 로컬 실행, 테스트, lint/build |
 | 4 | [Configuration](configuration.md) | 환경변수와 config 파일 역할 |
-| 5 | [Architecture](ARCHITECTURE.md) | 컴포넌트와 데이터 흐름 |
-| 6 | [API](api.md) | CLI와 웹 API route 계약 |
-| 7 | [Deployment](deployment.md) | Docker/GitHub Actions/Supabase 배포 |
-| 8 | [Operations](operations.md) | 정기 운영, 로그, 헬스체크 |
-| 9 | [Troubleshooting](troubleshooting.md) | 증상별 장애 대응 |
-| 10 | [Contributing](contributing.md) | 커밋, PR, 검증 규칙 |
+| 5 | [Design System](../DESIGN.md) | 콘솔 UI/interaction/visual contract |
+| 6 | [Architecture](ARCHITECTURE.md) | 컴포넌트와 데이터 흐름 |
+| 7 | [API](api.md) | CLI와 웹 API route 계약 |
+| 8 | [Deployment](deployment.md) | Docker/GitHub Actions/Supabase 배포 |
+| 9 | [Operations](operations.md) | 정기 운영, 로그, 헬스체크 |
+| 10 | [Troubleshooting](troubleshooting.md) | 증상별 장애 대응 |
+| 11 | [Contributing](contributing.md) | 커밋, PR, 검증 규칙 |
 
 기존 `docs/runbook.md` 링크로 들어온 경우에는 [Runbook](runbook.md)을 호환 진입점으로 사용합니다. 새 운영 절차의 source of truth는 [Operations](operations.md), [Deployment](deployment.md), [Troubleshooting](troubleshooting.md)입니다.
 
@@ -47,6 +48,7 @@
 - [Overview](overview.md)
 - [Local Development](local-development.md)
 - [Configuration](configuration.md)
+- [Design System](../DESIGN.md)
 - [Architecture](ARCHITECTURE.md)
 - [API](api.md)
 - [Deployment](deployment.md)

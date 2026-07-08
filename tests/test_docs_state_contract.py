@@ -15,6 +15,7 @@ ARTIFACT_DOC_GLOBS = ("docs/governance/*.json",)
 
 DOC_STATE_SECTION_DOCS = (
     Path("README.md"),
+    Path("DESIGN.md"),
     Path("docs/README.md"),
     Path("docs/overview.md"),
     Path("docs/local-development.md"),
@@ -58,7 +59,7 @@ def _read(path: Path) -> str:
 
 
 def _iter_status_docs() -> list[Path]:
-    docs = [Path("README.md")]
+    docs = [Path("README.md"), Path("DESIGN.md")]
     docs.extend(
         sorted(
             path.relative_to(REPO_ROOT) for path in (REPO_ROOT / "docs").rglob("*.md")
@@ -372,6 +373,14 @@ def test_index_docs_link_existing_files() -> None:
     assert links, "no local links found across index docs"
     for doc_path, resolved in links:
         assert resolved.exists(), f"{doc_path} links missing file: {resolved}"
+
+
+def test_design_system_canonical_reports_proof_exists() -> None:
+    design_text = _read(Path("DESIGN.md"))
+    proof_path = Path("docs/design/reports-evidence-ledger-proof.html")
+
+    assert str(proof_path) in design_text
+    assert (REPO_ROOT / proof_path).is_file()
 
 
 def test_artifact_globs_are_centrally_declared() -> None:

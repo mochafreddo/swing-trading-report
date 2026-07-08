@@ -40,6 +40,24 @@
 **Priority:** P3
 **Depends on:** Stable KST morning scheduled Sell AI Brief generation.
 
+### Align app-console typography with Evidence Ledger V1
+
+**What:** Keep `Inter` as the V1 app-console font, alias display usage toward
+body typography, and remove hero-scale display treatment from authenticated
+console pages.
+
+**Why:** The V1 design system prioritizes scan speed and trust over expressive
+display typography, and `web/src/lib/__tests__/font-build-contract.test.ts`
+currently locks the local font variable contract.
+
+**Context:** The 2026-07-07 Evidence Ledger design review decided not to add a
+new type pairing in V1. Future display typography can be revisited after the
+light-first shell, Reports proof, and component vocabulary are stable.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** App shell/token implementation slice for Evidence Ledger V1.
+
 ### Metrics mobile card density pass
 
 **What:** Reduce the one-column stream of repeated metric cards on mobile after
@@ -78,16 +96,6 @@ as performance-polish unless it starts affecting load timing or visual flashes.
   2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
   holdings, metrics, and run, but authenticated Supabase-backed page states
   still need visual audit with real credentials or browser auth state.
-- 2026-06-20: Plan a focused typography pass for the web UI. `Inter` remains
-  the primary body font because `web/src/lib/__tests__/font-build-contract.test.ts`
-  currently locks the existing local font variables; a future pass should pick a
-  more distinctive operations-console type pairing and update that contract
-  deliberately.
-- 2026-06-19: Create a repo-wide `DESIGN.md` with `/design-consultation` after
-  Toss holdings sync is implemented or as a separate design-system cleanup.
-  The Toss Sync plan now documents the existing Holdings UI vocabulary locally,
-  but future UI work should not need to rediscover panel, spacing, responsive,
-  and state rules from code each time.
 - 2026-06-19: Add redacted Toss holdings snapshot upload only after the first
   local-only Toss sync lands and real Toss fixture redaction tests prove that
   account identifiers, bearer tokens, and sensitive raw response fields cannot
@@ -102,6 +110,7 @@ as performance-polish unless it starts affecting load timing or visual flashes.
 
 ## Completed
 
+- 2026-07-08: Added repo-root `DESIGN.md` as the Evidence Ledger UI/interaction/visual source of truth, linked it from `docs/README.md`, and added the synthetic self-contained Reports proof mock at `docs/design/reports-evidence-ledger-proof.html`. The first implementation slice intentionally avoided `web/src/**`; app shell/tokens and Reports React refactors remain follow-up PRs.
 - 2026-07-07: Documented scheduled Sell AI Brief source provider chain examples in `.env.example` and `docs/configuration.md`, and added regression checks so sell-specific US/MIXED chain examples stay aligned. This prevents local scheduler envs from configuring only `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` and leaving `sab sell-ai-brief` to resolve `none` for sell generation.
 - 2026-07-07: Added `sab backtest` as a local historical OHLCV replay runner.
   It reuses the existing buy/sell signal evaluators over date-prefix candles,
