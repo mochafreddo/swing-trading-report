@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from sab.scheduler.generic_state import build_scheduled_state_key  # noqa: E402
 from sab.scheduler.sell_ai_brief_generation import (  # noqa: E402
     _freshness_block_reason,
 )
@@ -98,7 +99,12 @@ def resolve_kst_session_date(now: dt.datetime | None = None) -> str:
 
 
 def _state_key(kind: str, *, scope: str, session_date: str) -> str:
-    return f"scheduled-sell:{kind}:{scope}:{session_date}"
+    return build_scheduled_state_key(
+        pipeline="sell",
+        kind=kind,
+        scope=scope,
+        session_date=session_date,
+    )
 
 
 def _toss_key(*, scope: str, session_date: str) -> str:
@@ -195,13 +201,15 @@ def run_verification(
 ) -> int:
     normalized_scope = _normalize_scope(scope)
     toss_marker_key = _toss_key(scope=normalized_scope, session_date=session_date)
-    expected_keys = [
-        _state_key(kind, scope=normalized_scope, session_date=session_date)
+    scheduled_keys = {
+        kind: _state_key(kind, scope=normalized_scope, session_date=session_date)
         for kind in SCHEDULED_MARKER_KINDS
-    ]
+    }
     try:
         toss_entry = client.get_entry(toss_marker_key)
-        expected_entries = {key: client.get_entry(key) for key in expected_keys}
+        scheduled_entries = {
+            key: client.get_entry(key) for key in scheduled_keys.values()
+        }
     except Exception as exc:
         print(
             f"runtime_state query failed: {_redact_secrets(str(exc), scheduler_env)}",
@@ -227,22 +235,12 @@ def run_verification(
     )
     if freshness_block_reason is not None:
         print(f"toss_freshness={freshness_block_reason}", file=output)
-    for key, entry in expected_entries.items():
+    for key, entry in scheduled_entries.items():
         print(_line_for_entry(key, entry), file=output)
 
     toss_ready = freshness_block_reason is None
-    success_ready = (
-        expected_entries[
-            _state_key("success", scope=normalized_scope, session_date=session_date)
-        ]
-        is not None
-    )
-    blocked = (
-        expected_entries[
-            _state_key("blocked", scope=normalized_scope, session_date=session_date)
-        ]
-        is not None
-    )
+    success_ready = scheduled_entries[scheduled_keys["success"]] is not None
+    blocked = scheduled_entries[scheduled_keys["blocked"]] is not None
 
     if toss_ready and success_ready:
         print("readiness=ready", file=output)
