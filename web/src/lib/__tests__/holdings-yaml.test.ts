@@ -15,7 +15,7 @@ import type {
 function snapshot(
   overrides: Partial<HoldingSnapshot> & Pick<HoldingSnapshot, "ticker">,
 ): HoldingSnapshot {
-  return {
+  const row: HoldingSnapshot = {
     ticker: overrides.ticker,
     quantity: overrides.quantity ?? 1,
     entry_price: overrides.entry_price ?? 100,
@@ -28,6 +28,23 @@ function snapshot(
     stop_override: overrides.stop_override ?? null,
     target_override: overrides.target_override ?? null,
   };
+  if (overrides.broker_state !== undefined) {
+    row.broker_state = overrides.broker_state;
+  }
+  if (overrides.broker_missing_first_seen_date !== undefined) {
+    row.broker_missing_first_seen_date =
+      overrides.broker_missing_first_seen_date;
+  }
+  if (overrides.broker_missing_last_seen_date !== undefined) {
+    row.broker_missing_last_seen_date = overrides.broker_missing_last_seen_date;
+  }
+  if (overrides.broker_missing_count !== undefined) {
+    row.broker_missing_count = overrides.broker_missing_count;
+  }
+  if (overrides.broker_missing_diff_hash !== undefined) {
+    row.broker_missing_diff_hash = overrides.broker_missing_diff_hash;
+  }
+  return row;
 }
 
 function record(
@@ -115,6 +132,43 @@ describe("holdings-yaml", () => {
       Object.prototype.hasOwnProperty.call(parsed[0], "entry_pattern"),
     ).toBe(true);
     expect(parsed[0]?.entry_pattern).toBeNull();
+  });
+
+  it("round-trips broker quarantine evidence", () => {
+    const document = buildHoldingsYamlDocument([
+      snapshot({
+        ticker: "META.NAS",
+        entry_currency: "USD",
+        broker_state: "not_seen_in_toss",
+        broker_missing_first_seen_date: "2026-07-08",
+        broker_missing_last_seen_date: "2026-07-09",
+        broker_missing_count: 2,
+        broker_missing_diff_hash: "diff-quarantine",
+      }),
+    ]);
+
+    expect(document).toContain("broker_state: not_seen_in_toss");
+    expect(document).toContain("broker_missing_count: 2");
+    expect(parseHoldingsYamlDocument(document)).toEqual([
+      {
+        ticker: "META.NAS",
+        quantity: 1,
+        entry_price: 100,
+        entry_currency: "USD",
+        entry_date: null,
+        strategy: null,
+        notes: null,
+        tags: [],
+        stop_override: null,
+        target_override: null,
+        entry_pattern: null,
+        broker_state: "not_seen_in_toss",
+        broker_missing_first_seen_date: "2026-07-08",
+        broker_missing_last_seen_date: "2026-07-09",
+        broker_missing_count: 2,
+        broker_missing_diff_hash: "diff-quarantine",
+      },
+    ]);
   });
 
   it("applies settings defaults and ticker normalization on import", () => {
@@ -253,6 +307,36 @@ holdings:
     entry_pattern: swing_high_breakout
 `),
     ).toThrow(/entry_pattern.*inactive/);
+  });
+
+  it("rejects broker quarantine rows without complete evidence", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+    broker_state: not_seen_in_toss
+    broker_missing_first_seen_date: 2026-07-08
+    broker_missing_count: 1
+    broker_missing_diff_hash: diff-quarantine
+`),
+    ).toThrow(/broker_state=not_seen_in_toss requires broker missing evidence/);
+  });
+
+  it("rejects broker missing evidence on confirmed rows", () => {
+    expect(() =>
+      parseHoldingsYamlDocument(`
+holdings:
+  - ticker: AAPL.NAS
+    quantity: 1
+    entry_price: 100
+    entry_currency: USD
+    broker_state: confirmed
+    broker_missing_count: 1
+`),
+    ).toThrow(/broker missing evidence requires broker_state=not_seen_in_toss/);
   });
 
   it("builds a replace-all diff summary", () => {

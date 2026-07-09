@@ -132,11 +132,16 @@ def export_active_holdings_snapshot(
         }
     )
     active_session = session or requests.Session()
-    response = active_session.get(
-        f"{config.url}/rest/v1/holdings?{query}",
-        headers=_headers(config),
-        timeout=config.timeout_seconds,
-    )
+    try:
+        response = active_session.get(
+            f"{config.url}/rest/v1/holdings?{query}",
+            headers=_headers(config),
+            timeout=config.timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseHoldingsExportError(
+            f"failed to fetch active holdings: {exc}"
+        ) from exc
     if response.status_code != 200:
         text = str(getattr(response, "text", "") or "").strip()
         raise SupabaseHoldingsExportError(

@@ -129,14 +129,12 @@ def test_sell_workflow_loads_holdings_from_supabase_before_run_sell() -> None:
     holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
     run_script = str(holdings_step.get("run") or "")
     assert "holdings.generated.yaml" in run_script
-    assert "entry_pattern" in run_script
-    assert (
-        "select=ticker,quantity,entry_price,entry_currency,entry_date,"
-        "strategy,entry_pattern,notes,tags,stop_override,target_override" in run_script
-    )
-    assert '"entry_pattern",' in run_script
-    assert 'key == "entry_pattern"' in run_script
-    assert "Supabase holdings response omitted entry_pattern" in run_script
+    assert "uv run python" in run_script
+    assert "from sab.scheduler.holdings import" in run_script
+    assert "SupabaseHoldingsExportConfig.from_env()" in run_script
+    assert "export_active_holdings_snapshot(" in run_script
+    assert "curl -fsS" not in run_script
+    assert "holdings.supabase.json" not in run_script
     assert (
         'echo "holdings_file=holdings.generated.yaml" >> "${GITHUB_OUTPUT}"'
         in run_script
@@ -160,27 +158,23 @@ def test_sell_workflow_load_holdings_accepts_service_role_key_fallback() -> None
         env.get("SUPABASE_SERVICE_ROLE_KEY")
         == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
     )
-    assert 'supabase_key="${SUPABASE_SECRET_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"' in (
-        run_script
-    )
-    assert "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set" in run_script
+    assert "SupabaseHoldingsExportConfig.from_env()" in run_script
 
 
-def test_ai_brief_workflow_manual_holdings_export_includes_entry_pattern() -> None:
+def test_ai_brief_workflow_manual_holdings_export_uses_shared_exporter() -> None:
     workflow = _load_workflow(".github/workflows/ai-brief.yml")
     steps = workflow["jobs"]["ai_brief"]["steps"]
 
     holdings_step = _find_step_by_name(steps, "Load holdings from Supabase")
     run_script = str(holdings_step.get("run") or "")
 
-    assert "entry_pattern" in run_script
-    assert (
-        "select=ticker,quantity,entry_price,entry_currency,entry_date,"
-        "strategy,entry_pattern,notes,tags,stop_override,target_override" in run_script
-    )
-    assert '"entry_pattern",' in run_script
-    assert 'key == "entry_pattern"' in run_script
-    assert "Supabase holdings response omitted entry_pattern" in run_script
+    assert 'Path("holdings.yaml")' in run_script
+    assert "uv run python" in run_script
+    assert "from sab.scheduler.holdings import" in run_script
+    assert "SupabaseHoldingsExportConfig.from_env()" in run_script
+    assert "export_active_holdings_snapshot(" in run_script
+    assert "curl -fsS" not in run_script
+    assert "holdings.supabase.json" not in run_script
 
 
 def test_ai_brief_workflow_manual_holdings_export_accepts_service_role_key_fallback() -> (
@@ -198,7 +192,4 @@ def test_ai_brief_workflow_manual_holdings_export_accepts_service_role_key_fallb
         env.get("SUPABASE_SERVICE_ROLE_KEY")
         == "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
     )
-    assert 'supabase_key="${SUPABASE_SECRET_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"' in (
-        run_script
-    )
-    assert "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set" in run_script
+    assert "SupabaseHoldingsExportConfig.from_env()" in run_script

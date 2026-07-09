@@ -107,6 +107,7 @@ def test_reports_success_when_freshness_and_success_markers_exist() -> None:
         web_env={"SUPABASE_URL": "https://scheduler-project.supabase.co"},
         output=output,
         error=error,
+        now=dt.datetime(2026, 7, 8, 1, 0, tzinfo=dt.UTC),
     )
 
     text = output.getvalue()
@@ -159,6 +160,7 @@ def test_uses_exact_scheduled_marker_lookup_when_prefix_page_omits_target() -> N
         web_env={"SUPABASE_URL": "http://127.0.0.1:54321"},
         output=output,
         error=io.StringIO(),
+        now=dt.datetime(2026, 7, 8, 1, 0, tzinfo=dt.UTC),
     )
 
     assert exit_code == 0
