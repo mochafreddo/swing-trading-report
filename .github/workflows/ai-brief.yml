@@ -883,69 +883,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          supabase_key="${SUPABASE_SECRET_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"
-          if [[ -z "${supabase_key}" ]]; then
-            echo "SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY must be set." >&2
-            exit 1
-          fi
-          if [[ "${supabase_key}" == sb_publishable_* ]]; then
-            echo "Publishable key is not allowed for server-side workflow jobs." >&2
-            exit 1
-          fi
-
-          base_url="${SUPABASE_URL%/}"
-          query="select=ticker,quantity,entry_price,entry_currency,entry_date,strategy,entry_pattern,notes,tags,stop_override,target_override&quantity=gt.0&order=ticker.asc"
-
-          curl -fsS "${base_url}/rest/v1/holdings?${query}" \
-            -H "apikey: ${supabase_key}" \
-            -H "Authorization: Bearer ${supabase_key}" \
-            -H "Accept: application/json" \
-            > holdings.supabase.json
-
-          python - <<'PY'
-          import json
+          uv run python - <<'PY'
           from pathlib import Path
 
-          raw = json.loads(Path("holdings.supabase.json").read_text(encoding="utf-8"))
-          if not isinstance(raw, list):
-              raise SystemExit("Supabase holdings response must be a JSON array")
-
-          payload: dict[str, list[dict[str, object]]] = {"holdings": []}
-          keys = (
-              "quantity",
-              "entry_price",
-              "entry_currency",
-              "entry_date",
-              "strategy",
-              "entry_pattern",
-              "notes",
-              "tags",
-              "stop_override",
-              "target_override",
+          from sab.scheduler.holdings import (
+              SupabaseHoldingsExportConfig,
+              export_active_holdings_snapshot,
           )
 
-          for row in raw:
-              if not isinstance(row, dict):
-                  continue
-              ticker = str(row.get("ticker") or "").strip()
-              if not ticker:
-                  continue
-              item: dict[str, object] = {"ticker": ticker}
-              for key in keys:
-                  if key == "entry_pattern":
-                      if key not in row:
-                          raise SystemExit("Supabase holdings response omitted entry_pattern")
-                      item[key] = row.get(key)
-                      continue
-                  value = row.get(key)
-                  if value is None:
-                      continue
-                  item[key] = value
-              payload["holdings"].append(item)
-
           out_path = Path("holdings.yaml")
-          out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-          print(f"Prepared {len(payload['holdings'])} holdings to {out_path}")
+          count = export_active_holdings_snapshot(
+              output_path=out_path,
+              config=SupabaseHoldingsExportConfig.from_env(),
+          )
+          print(f"Prepared {count} holdings to {out_path}")
           PY
 
       - name: Run entry

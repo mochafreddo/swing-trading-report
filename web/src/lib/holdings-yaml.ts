@@ -117,6 +117,23 @@ function parseOptionalNonNegativeNumber(
   return parseNonNegativeNumber(value, fieldName, context);
 }
 
+function parseOptionalNonNegativeInteger(
+  value: unknown,
+  fieldName: string,
+  context: string,
+): number | null {
+  const parsed = parseOptionalNonNegativeNumber(value, fieldName, context);
+  if (parsed == null) {
+    return null;
+  }
+  if (!Number.isInteger(parsed)) {
+    throw new HoldingsYamlError(
+      `${context}: '${fieldName}' must be an integer >= 0.`,
+    );
+  }
+  return parsed;
+}
+
 function parseOptionalText(value: unknown): string | null {
   if (value == null) {
     return null;
@@ -126,6 +143,28 @@ function parseOptionalText(value: unknown): string | null {
     return null;
   }
   return text;
+}
+
+function parseBrokerState(
+  value: unknown,
+  fieldName: string,
+  context: string,
+): "confirmed" | "not_seen_in_toss" {
+  if (value == null) {
+    return "confirmed";
+  }
+  if (typeof value !== "string") {
+    throw new HoldingsYamlError(
+      `${context}: '${fieldName}' must be confirmed or not_seen_in_toss.`,
+    );
+  }
+  const text = value.trim();
+  if (text === "confirmed" || text === "not_seen_in_toss") {
+    return text;
+  }
+  throw new HoldingsYamlError(
+    `${context}: '${fieldName}' must be confirmed or not_seen_in_toss.`,
+  );
 }
 
 function parseOptionalEntryPattern(
@@ -304,6 +343,23 @@ function buildYamlRow(snapshot: HoldingSnapshot): RootRecord {
   if (snapshot.target_override != null) {
     row.target_override = snapshot.target_override;
   }
+  if (snapshot.broker_state === "not_seen_in_toss") {
+    row.broker_state = "not_seen_in_toss";
+    if (snapshot.broker_missing_first_seen_date) {
+      row.broker_missing_first_seen_date =
+        snapshot.broker_missing_first_seen_date;
+    }
+    if (snapshot.broker_missing_last_seen_date) {
+      row.broker_missing_last_seen_date =
+        snapshot.broker_missing_last_seen_date;
+    }
+    if (snapshot.broker_missing_count != null) {
+      row.broker_missing_count = snapshot.broker_missing_count;
+    }
+    if (snapshot.broker_missing_diff_hash) {
+      row.broker_missing_diff_hash = snapshot.broker_missing_diff_hash;
+    }
+  }
 
   return row;
 }
@@ -460,6 +516,62 @@ export function parseHoldingsYamlDocument(
         `${context}: entry_pattern for inactive holdings must be null.`,
       );
     }
+    const brokerState = parseBrokerState(
+      row.broker_state,
+      "broker_state",
+      context,
+    );
+    const brokerMissingFirstSeenDate = parseOptionalDate(
+      row.broker_missing_first_seen_date,
+      "broker_missing_first_seen_date",
+      context,
+    );
+    const brokerMissingLastSeenDate = parseOptionalDate(
+      row.broker_missing_last_seen_date,
+      "broker_missing_last_seen_date",
+      context,
+    );
+    const brokerMissingCount = parseOptionalNonNegativeInteger(
+      row.broker_missing_count,
+      "broker_missing_count",
+      context,
+    );
+    const brokerMissingDiffHash = parseOptionalText(
+      row.broker_missing_diff_hash,
+    );
+    const hasBrokerMissingEvidence =
+      brokerMissingFirstSeenDate != null ||
+      brokerMissingLastSeenDate != null ||
+      brokerMissingDiffHash != null ||
+      (brokerMissingCount != null && brokerMissingCount !== 0);
+    if (quantity === 0 && brokerState !== "confirmed") {
+      throw new HoldingsYamlError(
+        `${context}: broker_state for inactive holdings must be confirmed.`,
+      );
+    }
+    if (brokerState === "confirmed" && hasBrokerMissingEvidence) {
+      throw new HoldingsYamlError(
+        `${context}: broker missing evidence requires broker_state=not_seen_in_toss.`,
+      );
+    }
+    if (brokerState === "not_seen_in_toss") {
+      if (
+        !brokerMissingFirstSeenDate ||
+        !brokerMissingLastSeenDate ||
+        !brokerMissingDiffHash ||
+        brokerMissingCount == null ||
+        brokerMissingCount <= 0
+      ) {
+        throw new HoldingsYamlError(
+          `${context}: broker_state=not_seen_in_toss requires broker missing evidence.`,
+        );
+      }
+      if (brokerMissingFirstSeenDate > brokerMissingLastSeenDate) {
+        throw new HoldingsYamlError(
+          `${context}: broker_missing_first_seen_date must be <= broker_missing_last_seen_date.`,
+        );
+      }
+    }
 
     const snapshot: HoldingReplaceSnapshot = {
       ticker,
@@ -483,6 +595,19 @@ export function parseHoldingsYamlDocument(
     };
     if (ownsEntryPattern) {
       snapshot.entry_pattern = entryPattern ?? null;
+    }
+    if (brokerState === "not_seen_in_toss") {
+      snapshot.broker_state = brokerState;
+      snapshot.broker_missing_first_seen_date = brokerMissingFirstSeenDate;
+      snapshot.broker_missing_last_seen_date = brokerMissingLastSeenDate;
+      snapshot.broker_missing_count = brokerMissingCount;
+      snapshot.broker_missing_diff_hash = brokerMissingDiffHash;
+    } else if (hasOwn(row, "broker_state")) {
+      snapshot.broker_state = "confirmed";
+      snapshot.broker_missing_first_seen_date = null;
+      snapshot.broker_missing_last_seen_date = null;
+      snapshot.broker_missing_count = 0;
+      snapshot.broker_missing_diff_hash = null;
     }
     return snapshot;
   });

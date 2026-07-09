@@ -182,7 +182,7 @@ Runtime markers use the `scheduled-sell:` prefix and are keyed by `scope + sessi
 Gate order:
 
 1. Generation mode requires `toss-sync:success:MIXED:<session_date>` with status `applied` or `unchanged`. Missing, stale, or invalid freshness sends only a "매도 AI Brief 보류" alert and writes no `scheduled-sell:success`.
-2. Generation mode claims a renewable generation lock, runs `sab sell`, runs `sab sell-ai-brief`, and evaluates the artifact with `scripts/eval_sell_ai_brief.py`.
+2. Generation mode claims a renewable generation lock, exports the current Supabase active holdings snapshot to `data/scheduler/holdings.MIXED.<session_date>.yaml`, runs `sab sell --holdings <snapshot>`, runs `sab sell-ai-brief`, and evaluates the artifact with `scripts/eval_sell_ai_brief.py`.
 3. Quality `FAIL` blocks Supabase upload and normal Telegram delivery. Quality `WARN` can deliver but records `review-required` and returns `completed_review_required`.
 4. Only after quality is non-`FAIL` does generation upload the sell report, then delegate the Sell AI Brief artifact to the delivery runner.
 5. The delivery runner revalidates the Sell AI Brief artifact with `validate_sell_ai_brief_artifact(...)`, uploads/indexes it, records `artifact`, sends Telegram, then records `notification:sent` and `success`.
@@ -216,7 +216,8 @@ Only `status=applied` and `status=unchanged` are successful runner outcomes;
 those statuses also write `toss-sync:success:MIXED:<session_date>` for the
 scheduled sell generation freshness gate. `applied` with quarantine evidence
 is fresh enough for generation because preserved holdings become Sell `REVIEW`
-rows. If those rows reappear in a later Toss snapshot, scheduled sync restores
+rows through the Supabase-exported holdings snapshot passed into `sab sell`.
+If those rows reappear in a later Toss snapshot, scheduled sync restores
 them to `confirmed` and clears the missing-broker evidence. `disabled`,
 `blocked`, `wipe_guard_blocked`, `marker_failed`, and `error` are fail-closed
 outcomes; inspect the web container logs and the current Holdings page before

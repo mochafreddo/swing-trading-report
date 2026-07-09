@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import ai_brief_latency_probe
@@ -17,6 +18,11 @@ from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
 from .scan import run_scan
 from .scheduler import status_file
+from .scheduler.holdings import (
+    SupabaseHoldingsExportConfig,
+    SupabaseHoldingsExportError,
+    export_active_holdings_snapshot,
+)
 from .scheduler.runner import (
     DefaultScheduledNotifier,
     DefaultScheduledStorage,
@@ -34,7 +40,7 @@ from .scheduler.sell_ai_brief_generation import (
     ScheduledSellAiBriefGenerationRunner,
 )
 from .scheduler.state import SupabaseRuntimeStateClient
-from .sell import run_sell, run_sell_with_result
+from .sell import SellRunResult, run_sell, run_sell_with_result
 from .sell_ai_brief import run_sell_ai_brief, run_sell_ai_brief_with_result
 from .sell_ai_brief_eval import evaluate_sell_ai_brief_report
 
@@ -831,6 +837,64 @@ def _run_scheduled_sell_ai_brief_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _scheduled_sell_holdings_snapshot_path(
+    *, request: ScheduledSellAiBriefGenerationRequest
+) -> Path:
+    scope = str(request.scope or "MIXED").strip().upper() or "MIXED"
+    safe_scope = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "_" for char in scope
+    )
+    session_date = str(request.session_date or "").strip()
+    if not session_date:
+        raise SupabaseHoldingsExportError(
+            "scheduled sell holdings export requires session_date"
+        )
+    return Path("data") / "scheduler" / f"holdings.{safe_scope}.{session_date}.yaml"
+
+
+def _run_scheduled_sell_with_supabase_holdings(
+    generation_request: ScheduledSellAiBriefGenerationRequest,
+) -> SellRunResult:
+    try:
+        holdings_path = _scheduled_sell_holdings_snapshot_path(
+            request=generation_request
+        )
+        holding_count = export_active_holdings_snapshot(
+            output_path=holdings_path,
+            config=SupabaseHoldingsExportConfig.from_env(),
+        )
+    except SupabaseHoldingsExportError as exc:
+        logging.getLogger(__name__).error(
+            "Scheduled sell holdings export failed",
+            extra={
+                "event": "scheduled_sell_holdings_export_failed",
+                "operation": "scheduled_sell_ai_brief_generation",
+                "scope": generation_request.scope,
+                "session_date": generation_request.session_date,
+                "error": str(exc),
+            },
+        )
+        return SellRunResult(exit_code=1, report_path=None)
+
+    logging.getLogger(__name__).info(
+        "Scheduled sell holdings snapshot exported",
+        extra={
+            "event": "scheduled_sell_holdings_exported",
+            "operation": "scheduled_sell_ai_brief_generation",
+            "scope": generation_request.scope,
+            "session_date": generation_request.session_date,
+            "holdings_path": holdings_path.as_posix(),
+            "holding_count": holding_count,
+        },
+    )
+    return run_sell_with_result(
+        provider=generation_request.provider,
+        holdings_path=holdings_path.as_posix(),
+        suppress_upload=True,
+        report_date=generation_request.session_date or None,
+    )
+
+
 def run_scheduled_sell_ai_brief_generation(
     *,
     request: ScheduledSellAiBriefGenerationRequest,
@@ -839,12 +903,7 @@ def run_scheduled_sell_ai_brief_generation(
         state_store=SupabaseRuntimeStateClient.from_env(),
         storage=DefaultScheduledStorage.from_env(),
         notifier=_SellAiBriefGenerationNotifier(),
-        sell_runner=lambda generation_request: run_sell_with_result(
-            provider=generation_request.provider,
-            holdings_path=None,
-            suppress_upload=True,
-            report_date=generation_request.session_date or None,
-        ),
+        sell_runner=_run_scheduled_sell_with_supabase_holdings,
         sell_ai_brief_runner=lambda generation_request, sell_report_path: (
             run_sell_ai_brief_with_result(
                 sell_report_path=sell_report_path,

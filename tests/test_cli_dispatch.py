@@ -765,6 +765,7 @@ def test_scheduled_sell_ai_brief_generation_wires_session_date_to_sell_runner(
         raising=False,
     )
     sell_calls: list[dict[str, object]] = []
+    export_calls: list[dict[str, object]] = []
 
     def fake_run_sell_with_result(**kwargs: object) -> SimpleNamespace:
         sell_calls.append(kwargs)
@@ -773,6 +774,20 @@ def test_scheduled_sell_ai_brief_generation_wires_session_date_to_sell_runner(
             report_path="reports/2026-07-06.sell.json",
         )
 
+    def fake_export_active_holdings_snapshot(**kwargs: object) -> int:
+        export_calls.append(kwargs)
+        return 2
+
+    monkeypatch.setattr(
+        sab_main.SupabaseHoldingsExportConfig,
+        "from_env",
+        classmethod(lambda cls: "supabase-export-config"),
+    )
+    monkeypatch.setattr(
+        sab_main,
+        "export_active_holdings_snapshot",
+        fake_export_active_holdings_snapshot,
+    )
     monkeypatch.setattr(
         sab_main,
         "run_sell_with_result",
@@ -786,14 +801,50 @@ def test_scheduled_sell_ai_brief_generation_wires_session_date_to_sell_runner(
     assert callable(sell_runner)
     sell_runner(request)
 
+    assert len(export_calls) == 1
+    assert (
+        str(export_calls[0]["output_path"])
+        == "data/scheduler/holdings.MIXED.2026-07-06.yaml"
+    )
+    assert export_calls[0]["config"] == "supabase-export-config"
     assert sell_calls == [
         {
             "provider": None,
-            "holdings_path": None,
+            "holdings_path": "data/scheduler/holdings.MIXED.2026-07-06.yaml",
             "suppress_upload": True,
             "report_date": "2026-07-06",
         }
     ]
+
+
+def test_scheduled_sell_ai_brief_generation_fails_closed_on_holdings_export_error(
+    monkeypatch,
+) -> None:
+    sell_calls: list[dict[str, object]] = []
+
+    def fail_export(**kwargs: object) -> int:
+        del kwargs
+        raise sab_main.SupabaseHoldingsExportError("network unavailable")
+
+    def fake_run_sell_with_result(**kwargs: object) -> SimpleNamespace:
+        sell_calls.append(kwargs)
+        return SimpleNamespace(exit_code=0, report_path="reports/sell.json")
+
+    monkeypatch.setattr(
+        sab_main.SupabaseHoldingsExportConfig,
+        "from_env",
+        classmethod(lambda cls: "supabase-export-config"),
+    )
+    monkeypatch.setattr(sab_main, "export_active_holdings_snapshot", fail_export)
+    monkeypatch.setattr(sab_main, "run_sell_with_result", fake_run_sell_with_result)
+
+    result = sab_main._run_scheduled_sell_with_supabase_holdings(
+        ScheduledSellAiBriefGenerationRequest(session_date="2026-07-06")
+    )
+
+    assert result.exit_code == 1
+    assert result.report_path is None
+    assert sell_calls == []
 
 
 def test_scheduled_sell_ai_brief_generation_status_file_shape(
