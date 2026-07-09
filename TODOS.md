@@ -8,13 +8,54 @@
 
 **Why:** `US after-close scheduled Sell AI Brief` should stay deferred until the KST morning runner has produced, quality-gated, uploaded, and notified a real artifact at least once.
 
-**Context:** The 2026-07-07 smoke installed and loaded the LaunchAgent, verified dry-run/config/tests, restored the Toss freshness marker, and fixed the local sell-specific source chain config. A live run with the real portfolio was blocked by local external-data export policy, while a synthetic AAPL no-upload run verified the external source/OpenAI path. The first observed 2026-07-08 KST run correctly failed closed: Toss auto-sync returned `status=blocked incoming=5 create=2 update=0 delete=4 unchanged=3 blocked=4`, so Sell AI Brief generation returned `toss_freshness_missing` and sent only the blocked Telegram. Root cause: scheduled Toss sync treated every missing holding as a destructive delete candidate and therefore did not write `toss-sync:success:MIXED:<session_date>`. The fix path is to resolve/auto-map blocked Toss rows, preserve non-empty delete diffs as durable `broker_state=not_seen_in_toss` quarantine evidence instead of deleting, then let Sell generation surface those holdings as `REVIEW` while excluding them from Sell AI Brief model ranking. Before closing this TODO, deploy the quarantine path, verify the scheduler runtime_state source of truth, and observe a real weekday 07:25 KST launchd tick that writes `toss-sync:success:MIXED:<session_date>` plus `scheduled-sell:success:MIXED:<session_date>` or a quality-gated review-required result. Check `logs/launchd/sell-ai-brief.generation.{out,err}.log`, `logs/launchd/toss-daily-auto-sync.out.log`, `toss-sync:success:MIXED:<session_date>`, and `scheduled-sell:*:MIXED:<session_date>`.
+**Context:** The 2026-07-07 smoke installed and loaded the LaunchAgent, verified dry-run/config/tests, restored the Toss freshness marker, and fixed the local sell-specific source chain config. A live run with the real portfolio was blocked by local external-data export policy, while a synthetic AAPL no-upload run verified the external source/OpenAI path. The first observed 2026-07-08 KST run correctly failed closed: Toss auto-sync returned `status=blocked incoming=5 create=2 update=0 delete=4 unchanged=3 blocked=4`, so Sell AI Brief generation returned `toss_freshness_missing` and sent only the blocked Telegram. Root cause 1 was scheduled Toss sync treating every missing holding as a destructive delete candidate and therefore not writing `toss-sync:success:MIXED:<session_date>`; PR #210 fixed that by preserving non-empty delete diffs as durable `broker_state=not_seen_in_toss` quarantine evidence. Root cause 2 was scheduled Sell AI Brief generation gating on Supabase Toss freshness while still reading local/config holdings; PR #211 fixed that by exporting the current Supabase active holdings snapshot and passing it to `sab sell --holdings`, and by making manual workflow exports reuse the same holdings exporter. Before closing this TODO, observe a real weekday 07:25 KST launchd tick that writes `toss-sync:success:MIXED:<session_date>` plus `scheduled-sell:success:MIXED:<session_date>` or a quality-gated review-required result. Check `logs/launchd/sell-ai-brief.generation.{out,err}.log`, `logs/launchd/toss-daily-auto-sync.out.log`, `toss-sync:success:MIXED:<session_date>`, and `scheduled-sell:*:MIXED:<session_date>`.
 
 **Effort:** S
 **Priority:** P1
-**Depends on:** Deploy scheduled Toss quarantine; resolve any remaining Toss blocked rows; run `scripts/verify_scheduled_sell_runtime_state.py` against the target session; then observe the next weekday 07:25 KST launchd tick.
+**Depends on:** PR #210/#211 deployed; resolve any remaining Toss blocked rows; run `scripts/verify_scheduled_sell_runtime_state.py` against the target session; then observe the next weekday 07:25 KST launchd tick.
 
 ## Deferred
+
+### Type runtime_state domain and payload boundaries
+
+**What:** Split high-value `runtime_state` domains into typed tables/RPCs, or
+add explicit `state_domain`/`state_kind` columns, CHECK constraints,
+domain-specific writers, shared key builders, and contract tests for all
+runtime_state writes.
+
+**Why:** Scheduler markers, Toss freshness, dispatch locks, login throttling,
+and caches currently share one untyped `state_key text primary key` plus JSONB
+payload table. A wrong prefix, TTL, or payload shape can silently break
+freshness, duplicate detection, run dispatch, or notification reconciliation.
+
+**Context:** Product review `ARCH-003` found that `runtime_state` has become a
+cross-domain coordination bus without typed boundaries. PR #210/#211 fixed the
+immediate scheduled Toss/Sell freshness failure, but the broader coordination
+surface still depends on string-key discipline and scattered payload contracts.
+
+**Effort:** M-L
+**Priority:** P2
+**Depends on:** Stable first KST scheduled Sell AI Brief generation observation.
+
+### Harden scheduled Sell AI Brief generation retry boundaries
+
+**What:** Add continuous generation-lock renewal across long scheduled Sell AI
+Brief runs and record intermediate upload markers so retries can recover after
+a partial sell report upload or delegated delivery failure without duplicate or
+ambiguous artifacts.
+
+**Why:** Long KIS/model/source/delivery work can approach lock TTL boundaries,
+and a retry after partial upload should not create a second sell report for the
+same session.
+
+**Context:** Reliability review found pre-existing generation resilience debt
+outside the PR #210/#211 fix path: generation renews around phases rather than
+continuously, and sell report upload does not have a separate recoverable marker
+before delegated Sell AI Brief delivery finishes.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** Stable first KST scheduled Sell AI Brief generation observation.
 
 ### HOLD/watch explanations for Sell AI Brief V2
 
@@ -110,6 +151,12 @@ as performance-polish unless it starts affecting load timing or visual flashes.
 
 ## Completed
 
+- 2026-07-09: Fixed scheduled Sell AI Brief generation so Toss freshness and
+  sell input share the same Supabase source of truth. PR #211 exports the
+  current Supabase active holdings snapshot to `data/scheduler/` before
+  `sab sell`, fails closed instead of falling back to local `holdings.yaml`,
+  makes manual sell/ai-brief workflows reuse the shared holdings exporter, and
+  preserves broker quarantine evidence through web holdings YAML import/export.
 - 2026-07-08: Reworked scheduled Toss auto-sync so non-empty delete diffs no longer block freshness or delete holdings. Missing broker rows are preserved with `broker_state=not_seen_in_toss`, first/last missing dates, count, and diff hash evidence; scheduled markers include quarantine counts; Sell reports emit those holdings as `REVIEW`; Sell AI Brief keeps them out of model-ranked candidates while preserving a `broker_state_review_candidates` audit list.
 - 2026-07-08: Added repo-root `DESIGN.md` as the Evidence Ledger UI/interaction/visual source of truth, linked it from `docs/README.md`, and added the synthetic self-contained Reports proof mock at `docs/design/reports-evidence-ledger-proof.html`. The first implementation slice intentionally avoided `web/src/**`; app shell/tokens and Reports React refactors remain follow-up PRs.
 - 2026-07-07: Documented scheduled Sell AI Brief source provider chain examples in `.env.example` and `docs/configuration.md`, and added regression checks so sell-specific US/MIXED chain examples stay aligned. This prevents local scheduler envs from configuring only `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` and leaving `sab sell-ai-brief` to resolve `none` for sell generation.
