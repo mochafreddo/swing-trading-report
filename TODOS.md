@@ -57,6 +57,44 @@ before delegated Sell AI Brief delivery finishes.
 **Priority:** P2
 **Depends on:** Stable first KST scheduled Sell AI Brief generation observation.
 
+### Consolidate AI Brief provider shared helpers
+
+**What:** Finish consolidating duplicated AI Brief provider helper logic across
+the general AI Brief and Sell AI Brief provider paths.
+
+**Why:** Provider parsing, validation, source-summary, and model-call helper
+logic is only partially shared. Keeping parallel implementations raises the
+chance that future provider behavior, validation, or telemetry fixes land in one
+path but not the other.
+
+**Context:** Code-quality review `CQ-001` found that the newer shared helpers
+are not fully adopted by `sab/ai_brief_providers.py` and the sell-specific
+provider path. This is not a PR #210/#211 release blocker, but it is worth
+tracking before the provider surface grows again.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** Stable Sell AI Brief V1 behavior and no active provider outage.
+
+### Split scheduled AI Brief orchestration hotspots
+
+**What:** Continue extracting focused components from the scheduled AI Brief and
+scheduled Sell AI Brief orchestration runners, especially around phase
+execution, marker reconciliation, upload/delivery handoff, and failure handling.
+
+**Why:** Large orchestration runners make lock/marker/idempotency bugs harder to
+review and increase the risk that future scheduling changes mix unrelated
+concerns.
+
+**Context:** Code-quality review `CQ-002` found that scheduled AI Brief
+orchestration remains concentrated in large runner modules despite prior
+incremental refactors. Keep this as deferred maintenance after the first KST
+scheduled Sell AI Brief generation has proven stable.
+
+**Effort:** M-L
+**Priority:** P3
+**Depends on:** Stable first KST scheduled Sell AI Brief generation observation.
+
 ### HOLD/watch explanations for Sell AI Brief V2
 
 **What:** Decide whether `HOLD` rows should enter a V2 Sell AI Brief `hold_watch` or drilldown-only role.
