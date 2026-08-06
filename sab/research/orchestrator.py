@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Literal, Protocol
 
-from sab.decision_board.instruments import InstrumentRefV0, InstrumentRegistryError
+from sab.decision_board.instruments import (
+    InstrumentRefV0,
+    copy_trusted_instrument_ref_v0,
+)
 
 from .contracts import (
     MAX_ARTICLE_ATTEMPTS,
     ResearchInputV0,
+    ResearchSourcePolicyV0,
     SearchRequestV0,
     SourceCandidateV0,
     build_search_request_v0,
@@ -28,9 +33,19 @@ from .source_safety import (
     ArticleArtifactV0,
     ArticlePreflightError,
     ArticleSafetyError,
+    create_article_artifact_v0,
+    validate_and_copy_article_artifact_v0,
 )
 
 MAX_PROVIDER_CONCURRENCY = 2
+
+
+class SearchProviderOperationalError(RuntimeError):
+    """An expected per-instrument provider failure."""
+
+
+class SearchProviderTimeoutError(SearchProviderOperationalError):
+    """An expected per-instrument provider timeout."""
 
 
 class SearchProviderV0(Protocol):
@@ -43,19 +58,117 @@ class SearchProviderV0(Protocol):
 
 
 class ArticleVerifierV0(Protocol):
-    def preflight(self) -> None: ...
+    def preflight(self, policy: ResearchSourcePolicyV0) -> None: ...
 
     async def verify(
         self,
         source: SourceCandidateV0,
         *,
         deadline: Deadline,
+        policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0: ...
 
 
-@dataclass(frozen=True, slots=True)
+class ResearchIssueCodeV0(StrEnum):
+    ARTICLE_ATTEMPT_LIMIT = "ARTICLE_ATTEMPT_LIMIT"
+    ARTICLE_EMPTY = "ARTICLE_EMPTY"
+    ARTICLE_ENCODING_INVALID = "ARTICLE_ENCODING_INVALID"
+    ARTICLE_TEXT_TOO_LARGE = "ARTICLE_TEXT_TOO_LARGE"
+    ARTICLE_TIMEOUT = "ARTICLE_TIMEOUT"
+    CONTENT_ENCODING_UNSAFE = "CONTENT_ENCODING_UNSAFE"
+    CONTENT_TYPE_UNSAFE = "CONTENT_TYPE_UNSAFE"
+    DEADLINE_INVARIANT = "DEADLINE_INVARIANT"
+    DNS_INVALID = "DNS_INVALID"
+    DNS_NOT_PUBLIC = "DNS_NOT_PUBLIC"
+    DNS_TIMEOUT = "DNS_TIMEOUT"
+    FETCH_RESPONSE_INVALID = "FETCH_RESPONSE_INVALID"
+    FETCH_TIMEOUT = "FETCH_TIMEOUT"
+    HTTP_STATUS_UNUSABLE = "HTTP_STATUS_UNUSABLE"
+    NO_SOURCE_CANDIDATES = "NO_SOURCE_CANDIDATES"
+    NO_VERIFIED_ARTICLE = "NO_VERIFIED_ARTICLE"
+    PROVIDER_FAILED = "PROVIDER_FAILED"
+    PROVIDER_RESULT_MALFORMED = "PROVIDER_RESULT_MALFORMED"
+    PROVIDER_TIMEOUT = "PROVIDER_TIMEOUT"
+    REDIRECT_INVALID = "REDIRECT_INVALID"
+    REDIRECT_LIMIT = "REDIRECT_LIMIT"
+    REDIRECT_UNSAFE = "REDIRECT_UNSAFE"
+    RESEARCH_INPUT_INVALID = "RESEARCH_INPUT_INVALID"
+    RESEARCH_INVARIANT = "RESEARCH_INVARIANT"
+    RESPONSE_TOO_LARGE = "RESPONSE_TOO_LARGE"
+    SOURCE_INVALID = "SOURCE_INVALID"
+    SOURCE_URL_UNSAFE = "SOURCE_URL_UNSAFE"
+    VERIFIER_CONFIG_UNSAFE = "VERIFIER_CONFIG_UNSAFE"
+    VERIFIER_UNAVAILABLE = "VERIFIER_UNAVAILABLE"
+
+
+_ISSUE_MESSAGES = {
+    code: {
+        ResearchIssueCodeV0.RESEARCH_INPUT_INVALID: "Research input is invalid.",
+        ResearchIssueCodeV0.RESEARCH_INVARIANT: "Research internal invariant failed.",
+        ResearchIssueCodeV0.DEADLINE_INVARIANT: "Research deadline invariant failed.",
+        ResearchIssueCodeV0.VERIFIER_CONFIG_UNSAFE: "Article verifier configuration is unsafe.",
+        ResearchIssueCodeV0.VERIFIER_UNAVAILABLE: "Article verifier is unavailable.",
+        ResearchIssueCodeV0.PROVIDER_TIMEOUT: "Search provider timed out.",
+        ResearchIssueCodeV0.PROVIDER_FAILED: "Search provider failed.",
+        ResearchIssueCodeV0.PROVIDER_RESULT_MALFORMED: "Search provider result is malformed.",
+        ResearchIssueCodeV0.NO_SOURCE_CANDIDATES: "No source candidates were returned.",
+        ResearchIssueCodeV0.ARTICLE_ATTEMPT_LIMIT: "Article attempt limit was reached.",
+        ResearchIssueCodeV0.ARTICLE_TIMEOUT: "Article verification timed out.",
+        ResearchIssueCodeV0.NO_VERIFIED_ARTICLE: "No safely retrieved article is available.",
+    }.get(code, "Public article retrieval failed safely.")
+    for code in ResearchIssueCodeV0
+}
+
+_ARTICLE_SAFETY_ISSUE_CODES = frozenset(
+    {
+        ResearchIssueCodeV0.ARTICLE_EMPTY,
+        ResearchIssueCodeV0.ARTICLE_ENCODING_INVALID,
+        ResearchIssueCodeV0.ARTICLE_TEXT_TOO_LARGE,
+        ResearchIssueCodeV0.CONTENT_ENCODING_UNSAFE,
+        ResearchIssueCodeV0.CONTENT_TYPE_UNSAFE,
+        ResearchIssueCodeV0.DNS_INVALID,
+        ResearchIssueCodeV0.DNS_NOT_PUBLIC,
+        ResearchIssueCodeV0.DNS_TIMEOUT,
+        ResearchIssueCodeV0.FETCH_RESPONSE_INVALID,
+        ResearchIssueCodeV0.FETCH_TIMEOUT,
+        ResearchIssueCodeV0.HTTP_STATUS_UNUSABLE,
+        ResearchIssueCodeV0.REDIRECT_INVALID,
+        ResearchIssueCodeV0.REDIRECT_LIMIT,
+        ResearchIssueCodeV0.REDIRECT_UNSAFE,
+        ResearchIssueCodeV0.RESPONSE_TOO_LARGE,
+        ResearchIssueCodeV0.SOURCE_INVALID,
+        ResearchIssueCodeV0.SOURCE_URL_UNSAFE,
+    }
+)
+_PREFLIGHT_ISSUE_CODES = frozenset(
+    {
+        ResearchIssueCodeV0.VERIFIER_CONFIG_UNSAFE,
+        ResearchIssueCodeV0.VERIFIER_UNAVAILABLE,
+    }
+)
+_SUCCESS_ISSUE_CODES = _ARTICLE_SAFETY_ISSUE_CODES | {
+    ResearchIssueCodeV0.ARTICLE_ATTEMPT_LIMIT
+}
+_NO_USABLE_SOURCE_ISSUE_CODES = _SUCCESS_ISSUE_CODES | {
+    ResearchIssueCodeV0.NO_SOURCE_CANDIDATES,
+    ResearchIssueCodeV0.NO_VERIFIED_ARTICLE,
+}
+_TIMED_OUT_ISSUE_CODES = _SUCCESS_ISSUE_CODES | {
+    ResearchIssueCodeV0.ARTICLE_TIMEOUT,
+    ResearchIssueCodeV0.PROVIDER_TIMEOUT,
+}
+_FAILED_ISSUE_CODES = frozenset(
+    {
+        ResearchIssueCodeV0.DEADLINE_INVARIANT,
+        ResearchIssueCodeV0.RESEARCH_INPUT_INVALID,
+        ResearchIssueCodeV0.RESEARCH_INVARIANT,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class ResearchIssueV0:
-    code: str
+    code: ResearchIssueCodeV0
     message: str
 
 
@@ -72,7 +185,7 @@ class ResearchItemSucceededV0:
             raise ValueError("successful research requires at least one article")
         if not all(type(article) is ArticleArtifactV0 for article in self.articles):
             raise TypeError("successful research requires exact article artifacts")
-        _require_exact_issues(self.issues)
+        _require_issues(self.issues, allowed=_SUCCESS_ISSUE_CODES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +196,11 @@ class ResearchItemNoUsableSourceV0:
 
     def __post_init__(self) -> None:
         _require_exact_instrument(self.instrument)
-        _require_nonempty_issues(self.issues)
+        _require_issues(
+            self.issues,
+            allowed=_NO_USABLE_SOURCE_ISSUE_CODES,
+            nonempty=True,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +211,11 @@ class ResearchItemTimedOutV0:
 
     def __post_init__(self) -> None:
         _require_exact_instrument(self.instrument)
-        _require_nonempty_issues(self.issues)
+        _require_issues(
+            self.issues,
+            allowed=_TIMED_OUT_ISSUE_CODES,
+            nonempty=True,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +228,11 @@ class ResearchItemMalformedV0:
 
     def __post_init__(self) -> None:
         _require_exact_instrument(self.instrument)
-        _require_nonempty_issues(self.issues)
+        _require_issues(
+            self.issues,
+            allowed=frozenset({ResearchIssueCodeV0.PROVIDER_RESULT_MALFORMED}),
+            nonempty=True,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +243,11 @@ class ResearchItemProviderFailedV0:
 
     def __post_init__(self) -> None:
         _require_exact_instrument(self.instrument)
-        _require_nonempty_issues(self.issues)
+        _require_issues(
+            self.issues,
+            allowed=frozenset({ResearchIssueCodeV0.PROVIDER_FAILED}),
+            nonempty=True,
+        )
 
 
 type ResearchItemResultV0 = (
@@ -156,8 +285,7 @@ class ResearchSharedBlockedV0:
     status: Literal["BLOCKED"] = field(default="BLOCKED", init=False)
 
     def __post_init__(self) -> None:
-        if type(self.issue) is not ResearchIssueV0:
-            raise TypeError("blocked research requires one typed issue")
+        _require_issues((self.issue,), allowed=_PREFLIGHT_ISSUE_CODES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +294,7 @@ class ResearchInputFailedV0:
     status: Literal["FAILED"] = field(default="FAILED", init=False)
 
     def __post_init__(self) -> None:
-        if type(self.issue) is not ResearchIssueV0:
-            raise TypeError("failed research requires one typed issue")
+        _require_issues((self.issue,), allowed=_FAILED_ISSUE_CODES)
 
 
 type ResearchRunResultV0 = (
@@ -213,35 +340,32 @@ class EvidenceResearcherV0:
                 self._budget_seconds,
                 monotonic=self._monotonic,
             )
-        except DeadlineInvariantError:
-            return _deadline_invariant_failure()
-
-        try:
-            self._verifier.preflight()
-        except ArticlePreflightError as exc:
-            return ResearchSharedBlockedV0(
-                issue=_issue(exc.code, "The shared article verifier is unavailable.")
-            )
-        except Exception:
-            return ResearchSharedBlockedV0(
-                issue=_issue(
-                    "VERIFIER_UNAVAILABLE",
-                    "The shared article verifier is unavailable.",
-                )
-            )
-
-        try:
+            self._verifier.preflight(research_input.source_policy)
             search_outcomes = await self._search_all(research_input, deadline)
-            return await self._verify_all(search_outcomes, deadline)
+            return await self._verify_all(
+                search_outcomes,
+                deadline,
+                policy=research_input.source_policy,
+            )
+        except ArticlePreflightError as exc:
+            try:
+                issue_code = ResearchIssueCodeV0(exc.code)
+                if issue_code not in _PREFLIGHT_ISSUE_CODES:
+                    return _research_invariant_failure()
+                issue = _issue(issue_code, "")
+            except ValueError:
+                return _research_invariant_failure()
+            return ResearchSharedBlockedV0(issue=issue)
+        except DeadlineExpiredError:
+            return ResearchCompletedV0(
+                items=tuple(
+                    _timed_out(instrument) for instrument in research_input.instruments
+                )
+            )
         except DeadlineInvariantError:
             return _deadline_invariant_failure()
         except Exception:
-            return ResearchInputFailedV0(
-                issue=_issue(
-                    "RESEARCH_INVARIANT",
-                    "Research stopped because an internal invariant failed.",
-                )
-            )
+            return _research_invariant_failure()
 
     async def _search_all(
         self,
@@ -303,11 +427,11 @@ class EvidenceResearcherV0:
                 request = build_search_request_v0(research_input, instrument)
                 payload = await self._provider.search(request, deadline=deadline)
                 deadline.remaining()
-        except DeadlineExpiredError, TimeoutError:
+        except DeadlineExpiredError, SearchProviderTimeoutError:
             return _timed_out(instrument)
         except DeadlineInvariantError:
             raise
-        except Exception:
+        except SearchProviderOperationalError:
             return ResearchItemProviderFailedV0(
                 instrument=instrument,
                 issues=(
@@ -348,6 +472,8 @@ class EvidenceResearcherV0:
         self,
         search_outcomes: tuple[_SearchOutcome, ...],
         deadline: Deadline,
+        *,
+        policy: ResearchSourcePolicyV0,
     ) -> ResearchCompletedV0:
         articles: list[list[ArticleArtifactV0]] = [[] for _outcome in search_outcomes]
         issues: list[list[ResearchIssueV0]] = [[] for _outcome in search_outcomes]
@@ -384,7 +510,11 @@ class EvidenceResearcherV0:
         for attributions in scheduled.values():
             primary_source = attributions[0][1]
             try:
-                artifact = await self._verify_one(primary_source, deadline=deadline)
+                artifact = await self._verify_one(
+                    primary_source,
+                    deadline=deadline,
+                    policy=policy,
+                )
             except DeadlineExpiredError:
                 deadline_exhausted = True
                 for item_index, _source in attributions:
@@ -396,27 +526,31 @@ class EvidenceResearcherV0:
                     )
                 break
             except ArticleSafetyError as exc:
+                try:
+                    issue_code = ResearchIssueCodeV0(exc.code)
+                except ValueError as error:
+                    raise ValueError("article safety issue code is invalid") from error
+                if issue_code not in _ARTICLE_SAFETY_ISSUE_CODES:
+                    raise ValueError("article safety issue code is invalid") from exc
                 for item_index, _source in attributions:
                     issues[item_index].append(
                         _issue(
-                            exc.code,
+                            issue_code,
                             "The public article could not be retrieved safely.",
                         )
                     )
                 continue
             except DeadlineInvariantError:
                 raise
-            except Exception:
-                for item_index, _source in attributions:
-                    issues[item_index].append(
-                        _issue(
-                            "ARTICLE_VERIFICATION_FAILED",
-                            "Article verification failed without a usable artifact.",
-                        )
-                    )
-                continue
             for item_index, attributed_source in attributions:
-                articles[item_index].append(replace(artifact, source=attributed_source))
+                articles[item_index].append(
+                    create_article_artifact_v0(
+                        source=attributed_source,
+                        final_url=artifact.final_url,
+                        normalized_text=artifact.normalized_text,
+                        policy=policy,
+                    )
+                )
 
         if deadline_exhausted:
             for item_index, _outcome in successful:
@@ -470,8 +604,11 @@ class EvidenceResearcherV0:
         source: SourceCandidateV0,
         *,
         deadline: Deadline,
+        policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0:
-        task = asyncio.create_task(self._verifier.verify(source, deadline=deadline))
+        task = asyncio.create_task(
+            self._verifier.verify(source, deadline=deadline, policy=policy)
+        )
         try:
             timeout = deadline.child_timeout()
             _done, pending = await asyncio.wait({task}, timeout=timeout)
@@ -481,12 +618,11 @@ class EvidenceResearcherV0:
                 raise DeadlineExpiredError("article verification timed out")
             artifact = task.result()
             deadline.remaining()
-            if type(artifact) is not ArticleArtifactV0:
-                raise ArticleSafetyError(
-                    "ARTICLE_ARTIFACT_INVALID",
-                    "article verifier returned an invalid artifact",
-                )
-            return artifact
+            return validate_and_copy_article_artifact_v0(
+                artifact,
+                expected_source=source,
+                policy=policy,
+            )
         finally:
             if not task.done():
                 task.cancel()
@@ -514,36 +650,47 @@ def _deadline_invariant_failure() -> ResearchInputFailedV0:
     )
 
 
-def _issue(code: str, message: str) -> ResearchIssueV0:
-    return ResearchIssueV0(code=code, message=message)
+def _research_invariant_failure() -> ResearchInputFailedV0:
+    return ResearchInputFailedV0(
+        issue=_issue(
+            "RESEARCH_INVARIANT",
+            "Research stopped because an internal invariant failed.",
+        )
+    )
+
+
+def _issue(code: str | ResearchIssueCodeV0, message: str) -> ResearchIssueV0:
+    del message
+    try:
+        issue_code = ResearchIssueCodeV0(code)
+    except ValueError as exc:
+        raise ValueError("research issue code is not allowlisted") from exc
+    issue = object.__new__(ResearchIssueV0)
+    object.__setattr__(issue, "code", issue_code)
+    object.__setattr__(issue, "message", _ISSUE_MESSAGES[issue_code])
+    return issue
 
 
 def _require_exact_instrument(value: object) -> None:
-    if type(value) is not InstrumentRefV0:
-        raise TypeError("research result requires exact InstrumentRefV0")
-    try:
-        InstrumentRefV0(
-            market=value.market,
-            canonical_ticker=value.canonical_ticker,
-            exchange=value.exchange,
-            company_name=value.company_name,
-            identity_source=value.identity_source,
-            identity_version=value.identity_version,
-        )
-    except (AttributeError, InstrumentRegistryError, TypeError) as exc:
-        raise TypeError("research result requires valid InstrumentRefV0") from exc
+    if copy_trusted_instrument_ref_v0(value) is None:
+        raise TypeError("research result requires exact valid InstrumentRefV0")
 
 
-def _require_exact_issues(value: object) -> None:
+def _require_issues(
+    value: object,
+    *,
+    allowed: frozenset[ResearchIssueCodeV0],
+    nonempty: bool = False,
+) -> None:
     if type(value) is not tuple or not all(
-        type(issue) is ResearchIssueV0 for issue in value
+        type(issue) is ResearchIssueV0
+        and type(issue.code) is ResearchIssueCodeV0
+        and issue.code in allowed
+        and issue.message == _ISSUE_MESSAGES[issue.code]
+        for issue in value
     ):
-        raise TypeError("research result requires exact typed issues")
-
-
-def _require_nonempty_issues(value: tuple[ResearchIssueV0, ...]) -> None:
-    _require_exact_issues(value)
-    if not value:
+        raise TypeError("research result requires exact allowed typed issues")
+    if nonempty and not value:
         raise ValueError("research failure variants require at least one issue")
 
 
@@ -553,6 +700,7 @@ __all__ = [
     "EvidenceResearcherV0",
     "ResearchCompletedV0",
     "ResearchInputFailedV0",
+    "ResearchIssueCodeV0",
     "ResearchIssueV0",
     "ResearchItemMalformedV0",
     "ResearchItemNoUsableSourceV0",
@@ -562,5 +710,7 @@ __all__ = [
     "ResearchItemTimedOutV0",
     "ResearchRunResultV0",
     "ResearchSharedBlockedV0",
+    "SearchProviderOperationalError",
+    "SearchProviderTimeoutError",
     "SearchProviderV0",
 ]

@@ -166,14 +166,21 @@ fetch attempt를 8회로 제한합니다. canonical URL은 전역 dedupe하되 �
 attribution은 유지합니다. URL은 HTTP(S) standard port와 qualified public hostname만
 허용하고 credentials/fragment/local·private·reserved address를 거부합니다. DNS answer
 하나라도 public IP가 아니면 전체 answer를 거부하며 모든 same-origin redirect에서 URL과
-DNS를 다시 검증합니다. response byte, redirect, content type/encoding, normalized text
-길이를 제한하고, 성공 artifact에는 exact normalized article text와 `sha256:` content
-hash만 기록합니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
+DNS를 다시 검증합니다. invocation의 `ResearchSourcePolicyV0`는 preflight와 모든 verify
+호출에 전달하며, adapter가 설정한 redirect/byte/text/operation-timeout hard maximum보다
+느슨하면 provider 호출 전에 차단합니다. response byte, redirect, content type/encoding,
+normalized text 길이를 제한하고, 성공 artifact에는 exact normalized article text와
+`sha256:` content hash만 기록합니다. verifier 반환 artifact는 exact type, source binding,
+safe final URL, normalized text, length, hash를 orchestrator에서 다시 검증해 trusted copy로
+만듭니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
 
 invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을
 만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을
 사용합니다. clock 역행은 typed `FAILED`, shared verifier preflight 실패는 provider 호출
 전 `BLOCKED`, provider timeout/malformed/empty는 peer와 격리된 item variant입니다.
+예상된 provider/verifier 예외와 각 result variant의 issue code는 고정 allowlist로
+제한하며, 예상하지 않은 예외나 잘못된 boundary code는 public detail을 노출하지 않는
+typed `FAILED`로 닫힙니다.
 deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다.
 result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 

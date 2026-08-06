@@ -14,8 +14,8 @@ from sab.scheduler.holdings import BrokerSnapshotV0
 from .instruments import (
     InstrumentRefV0,
     VersionedInstrumentRegistryV0,
-    _copy_trusted_instrument_ref_v0,
     _normalize_us_market_v0,
+    copy_trusted_instrument_ref_v0,
     normalize_identity_key_v0,
     normalize_public_text_v0,
     normalize_us_venue_v0,
@@ -49,7 +49,7 @@ class ApprovedSwingRefV0:
     instrument: InstrumentRefV0
 
     def __post_init__(self) -> None:
-        trusted = _copy_trusted_instrument_ref_v0(self.instrument)
+        trusted = copy_trusted_instrument_ref_v0(self.instrument)
         if trusted is None:
             raise TypeError("ApprovedSwingRefV0 requires exact InstrumentRefV0")
         object.__setattr__(self, "instrument", trusted)
@@ -86,7 +86,7 @@ class EntryIdentityApprovedV0:
     status: Literal["APPROVED"] = dataclass_field(default="APPROVED", init=False)
 
     def __post_init__(self) -> None:
-        trusted = _copy_trusted_instrument_ref_v0(self.instrument)
+        trusted = copy_trusted_instrument_ref_v0(self.instrument)
         if trusted is None:
             raise TypeError("EntryIdentityApprovedV0 requires exact InstrumentRefV0")
         object.__setattr__(self, "instrument", trusted)
@@ -196,9 +196,9 @@ def project_research_instruments_v0(
         if type(result) is SwingApprovedV0:
             if type(result.approved_ref) is not ApprovedSwingRefV0:
                 raise TypeError("research projection requires trusted InstrumentRefV0")
-            instrument = _copy_trusted_instrument_ref_v0(result.approved_ref.instrument)
+            instrument = copy_trusted_instrument_ref_v0(result.approved_ref.instrument)
         elif type(result) is EntryIdentityApprovedV0:
-            instrument = _copy_trusted_instrument_ref_v0(result.instrument)
+            instrument = copy_trusted_instrument_ref_v0(result.instrument)
         elif type(result) in {SwingReviewV0, EntryIdentityReviewV0}:
             instrument = None
         else:
@@ -315,7 +315,7 @@ def _resolve_trusted_instrument_v0(
         resolved = resolver(lookup_value)
     except Exception:
         return None
-    return _copy_trusted_instrument_ref_v0(resolved)
+    return copy_trusted_instrument_ref_v0(resolved)
 
 
 def _candidate_conflicts(

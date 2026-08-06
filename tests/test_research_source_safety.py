@@ -10,7 +10,11 @@ from sab.research.contracts import (
     SourceCandidateV0,
     SourcePurposeV0,
 )
-from sab.research.deadline import Deadline
+from sab.research.deadline import (
+    Deadline,
+    DeadlineExpiredError,
+    DeadlineInvariantError,
+)
 from sab.research.source_safety import (
     ArticleFetchResponseV0,
     ArticleSafetyError,
@@ -125,6 +129,7 @@ def test_mixed_public_and_private_dns_answers_fail_closed_before_fetch() -> None
             verifier.verify(
                 _source(),
                 deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
             )
         )
 
@@ -156,6 +161,7 @@ def test_redirects_revalidate_target_and_never_leave_original_origin() -> None:
             verifier.verify(
                 _source(),
                 deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
             )
         )
 
@@ -185,7 +191,9 @@ def test_safe_redirect_uses_shrinking_timeouts_and_returns_normalized_hash() -> 
     verifier = SafeArticleVerifierV0(resolver=resolver, fetcher=fetcher)
     deadline = Deadline.start(12.0, monotonic=clock)
 
-    artifact = asyncio.run(verifier.verify(_source(), deadline=deadline))
+    artifact = asyncio.run(
+        verifier.verify(_source(), deadline=deadline, policy=verifier.policy)
+    )
 
     assert artifact.final_url == "https://evidence.example/article"
     assert artifact.normalized_text == "Aurora synthetic article body."
@@ -234,6 +242,7 @@ def test_article_response_bounds_fail_closed(
             verifier.verify(
                 _source(),
                 deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
             )
         )
 
@@ -249,7 +258,11 @@ def test_non_ip_dns_answer_and_oversized_normalized_text_are_rejected() -> None:
     )
     with pytest.raises(ArticleSafetyError) as exc_info:
         asyncio.run(
-            verifier.verify(_source(), deadline=Deadline.start(45.0, monotonic=clock))
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
+            )
         )
     assert exc_info.value.code == "DNS_INVALID"
 
@@ -264,6 +277,171 @@ def test_non_ip_dns_answer_and_oversized_normalized_text_are_rejected() -> None:
     )
     with pytest.raises(ArticleSafetyError) as exc_info:
         asyncio.run(
-            verifier.verify(_source(), deadline=Deadline.start(45.0, monotonic=clock))
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
+            )
         )
     assert exc_info.value.code == "ARTICLE_TEXT_TOO_LARGE"
+
+
+@pytest.mark.parametrize("failure_site", ["dns", "fetch"])
+def test_operation_timeout_preserves_exhausted_global_deadline(
+    failure_site: str,
+) -> None:
+    clock = _FakeClock()
+
+    class Resolver:
+        async def resolve(
+            self, hostname: str, port: int, *, timeout: float
+        ) -> tuple[str, ...]:
+            del hostname, port
+            if failure_site == "dns":
+                clock.now += timeout
+                raise TimeoutError
+            return ("93.184.216.34",)
+
+    class Fetcher:
+        async def fetch(
+            self,
+            url: str,
+            addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ) -> ArticleFetchResponseV0:
+            del url, addresses, max_bytes
+            clock.now += timeout
+            raise TimeoutError
+
+    verifier = SafeArticleVerifierV0(resolver=Resolver(), fetcher=Fetcher())
+    with pytest.raises(DeadlineExpiredError):
+        asyncio.run(
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(0.01, monotonic=clock),
+                policy=verifier.policy,
+            )
+        )
+
+
+def test_clock_rollback_during_timeout_handling_is_an_invariant_failure() -> None:
+    clock = _FakeClock()
+
+    class Resolver:
+        async def resolve(
+            self, hostname: str, port: int, *, timeout: float
+        ) -> tuple[str, ...]:
+            del hostname, port, timeout
+            clock.now -= 1.0
+            raise TimeoutError
+
+    class Fetcher:
+        async def fetch(
+            self,
+            url: str,
+            addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ) -> ArticleFetchResponseV0:
+            del url, addresses, timeout, max_bytes
+            raise AssertionError("fetch must not start")
+
+    verifier = SafeArticleVerifierV0(resolver=Resolver(), fetcher=Fetcher())
+    with pytest.raises(DeadlineInvariantError):
+        asyncio.run(
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
+            )
+        )
+
+
+def test_dns_addresses_are_canonicalized_before_pinned_fetch() -> None:
+    clock = _FakeClock()
+    captured: list[tuple[str, ...]] = []
+
+    class Resolver:
+        async def resolve(
+            self, hostname: str, port: int, *, timeout: float
+        ) -> tuple[str, ...]:
+            del hostname, port, timeout
+            return (
+                "2606:2800:0220:0001:0248:1893:25C8:1946",
+                "93.184.216.34",
+            )
+
+    class Fetcher:
+        async def fetch(
+            self,
+            url: str,
+            addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ) -> ArticleFetchResponseV0:
+            del url, timeout, max_bytes
+            captured.append(addresses)
+            return _response(content_type="text/plain", body=b"Synthetic article")
+
+    verifier = SafeArticleVerifierV0(resolver=Resolver(), fetcher=Fetcher())
+    asyncio.run(
+        verifier.verify(
+            _source(),
+            deadline=Deadline.start(45.0, monotonic=clock),
+            policy=verifier.policy,
+        )
+    )
+
+    assert captured == [("2606:2800:220:1:248:1893:25c8:1946", "93.184.216.34")]
+
+
+def test_scoped_ipv6_dns_answer_is_rejected_before_fetch() -> None:
+    clock = _FakeClock()
+    fetcher = _FakeFetcher(clock, {})
+    verifier = SafeArticleVerifierV0(
+        resolver=_FakeResolver(
+            clock,
+            {"evidence.example": ("2606:4700:4700::1111%en0",)},
+        ),
+        fetcher=fetcher,
+    )
+
+    with pytest.raises(ArticleSafetyError) as exc_info:
+        asyncio.run(
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
+            )
+        )
+
+    assert exc_info.value.code == "DNS_INVALID"
+    assert fetcher.calls == []
+
+
+def test_ambiguous_noncanonical_ipv4_dns_answer_is_rejected() -> None:
+    clock = _FakeClock()
+    fetcher = _FakeFetcher(clock, {})
+    verifier = SafeArticleVerifierV0(
+        resolver=_FakeResolver(
+            clock,
+            {"evidence.example": ("093.184.216.034",)},
+        ),
+        fetcher=fetcher,
+    )
+
+    with pytest.raises(ArticleSafetyError) as exc_info:
+        asyncio.run(
+            verifier.verify(
+                _source(),
+                deadline=Deadline.start(45.0, monotonic=clock),
+                policy=verifier.policy,
+            )
+        )
+
+    assert exc_info.value.code == "DNS_INVALID"
+    assert fetcher.calls == []

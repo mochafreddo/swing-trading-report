@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ from enum import StrEnum
 
 from sab.decision_board.instruments import (
     InstrumentRefV0,
-    InstrumentRegistryError,
+    copy_trusted_instrument_ref_v0,
     normalize_public_text_v0,
 )
 
@@ -37,6 +38,9 @@ _SOURCE_FIELDS = {
     "published_at",
     "purpose",
 }
+_RFC3339_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\Z"
+)
 
 
 class ResearchQuestionV0(StrEnum):
@@ -110,7 +114,7 @@ class ResearchInputV0:
         trusted: list[InstrumentRefV0] = []
         keys: set[tuple[str, ...]] = set()
         for instrument in self.instruments:
-            copied = _copy_exact_instrument(instrument)
+            copied = copy_trusted_instrument_ref_v0(instrument)
             if copied is None:
                 raise TypeError("research requires exact InstrumentRefV0 values")
             key = tuple(copied.to_public_dict().values())
@@ -136,7 +140,7 @@ class SearchRequestV0:
     freshness_hours: int
 
     def __post_init__(self) -> None:
-        copied = _copy_exact_instrument(self.instrument)
+        copied = copy_trusted_instrument_ref_v0(self.instrument)
         if copied is None:
             raise TypeError("search request requires exact InstrumentRefV0")
         if (
@@ -187,7 +191,7 @@ def build_search_request_v0(
 ) -> SearchRequestV0:
     if type(research_input) is not ResearchInputV0:
         raise TypeError("search request requires exact ResearchInputV0")
-    copied = _copy_exact_instrument(instrument)
+    copied = copy_trusted_instrument_ref_v0(instrument)
     if copied is None or copied not in research_input.instruments:
         raise TypeError(
             "search request instrument must be trusted by the research input"
@@ -204,7 +208,7 @@ def parse_search_response_v0(
     *,
     expected_instrument: InstrumentRefV0,
 ) -> tuple[SourceCandidateV0, ...]:
-    expected = _copy_exact_instrument(expected_instrument)
+    expected = copy_trusted_instrument_ref_v0(expected_instrument)
     if expected is None:
         raise TypeError("expected instrument must be exact InstrumentRefV0")
     if not isinstance(payload, Mapping) or set(payload) != _SEARCH_RESPONSE_FIELDS:
@@ -218,6 +222,8 @@ def parse_search_response_v0(
     if len(rows) > MAX_SOURCES_PER_INSTRUMENT:
         raise ValueError("search response exceeds the per-instrument source limit")
     sources = tuple(_parse_source_row(row, expected) for row in rows)
+    if len({source.canonical_url for source in sources}) != len(sources):
+        raise ValueError("search source contains a duplicate canonical URL")
     return tuple(sorted(sources, key=_source_sort_key))
 
 
@@ -262,6 +268,8 @@ def _optional_timestamp(value: object) -> datetime | None:
         return None
     if not isinstance(value, str):
         raise ValueError("published_at must be an RFC 3339 string or null")
+    if _RFC3339_TIMESTAMP.fullmatch(value) is None:
+        raise ValueError("published_at must be a strict RFC 3339 timestamp")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -283,22 +291,6 @@ def _source_sort_key(source: SourceCandidateV0) -> tuple[object, ...]:
         source.canonical_url.encode("utf-8"),
         source.title.encode("utf-8"),
     )
-
-
-def _copy_exact_instrument(value: object) -> InstrumentRefV0 | None:
-    if type(value) is not InstrumentRefV0:
-        return None
-    try:
-        return InstrumentRefV0(
-            market=value.market,
-            canonical_ticker=value.canonical_ticker,
-            exchange=value.exchange,
-            company_name=value.company_name,
-            identity_source=value.identity_source,
-            identity_version=value.identity_version,
-        )
-    except AttributeError, InstrumentRegistryError, TypeError:
-        return None
 
 
 __all__ = [

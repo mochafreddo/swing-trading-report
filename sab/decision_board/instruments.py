@@ -92,7 +92,7 @@ class InstrumentRefV0:
         }
 
 
-def _copy_trusted_instrument_ref_v0(value: object) -> InstrumentRefV0 | None:
+def copy_trusted_instrument_ref_v0(value: object) -> InstrumentRefV0 | None:
     """Revalidate and copy one exact concrete public identity value."""
 
     if type(value) is not InstrumentRefV0:
@@ -355,6 +355,7 @@ __all__ = [
     "InstrumentRefV0",
     "InstrumentRegistryError",
     "VersionedInstrumentRegistryV0",
+    "copy_trusted_instrument_ref_v0",
     "normalize_identity_key_v0",
     "normalize_public_text_v0",
     "normalize_us_venue_v0",

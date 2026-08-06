@@ -16,18 +16,24 @@ from sab.research.orchestrator import (
     EvidenceResearcherV0,
     ResearchCompletedV0,
     ResearchInputFailedV0,
+    ResearchIssueV0,
     ResearchItemMalformedV0,
     ResearchItemNoUsableSourceV0,
+    ResearchItemProviderFailedV0,
     ResearchItemSucceededV0,
     ResearchItemTimedOutV0,
     ResearchSharedBlockedV0,
+    SearchProviderOperationalError,
+    SearchProviderTimeoutError,
     SearchProviderV0,
 )
 from sab.research.source_safety import (
     ArticleArtifactV0,
     ArticleFetchResponseV0,
     ArticlePreflightError,
+    ArticleSafetyError,
     SafeArticleVerifierV0,
+    create_article_artifact_v0,
 )
 
 
@@ -102,19 +108,24 @@ class _RecordingVerifier:
         self.blocked = blocked
         self.calls: list[tuple[SourceCandidateV0, Deadline]] = []
 
-    def preflight(self) -> None:
+    def preflight(self, policy: ResearchSourcePolicyV0) -> None:
+        del policy
         if self.blocked:
             raise ArticlePreflightError("VERIFIER_UNAVAILABLE", "synthetic")
 
     async def verify(
-        self, source: SourceCandidateV0, *, deadline: Deadline
+        self,
+        source: SourceCandidateV0,
+        *,
+        deadline: Deadline,
+        policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0:
         self.calls.append((source, deadline))
-        return ArticleArtifactV0(
+        return create_article_artifact_v0(
             source=source,
             final_url=source.canonical_url,
             normalized_text=f"Synthetic body for {source.canonical_ticker}",
-            content_hash=f"sha256:{'0' * 64}",
+            policy=policy,
         )
 
 
@@ -216,8 +227,8 @@ def test_shared_preflight_blocks_before_any_provider_work() -> None:
     assert provider.calls == []
 
 
-def test_timeout_malformed_and_empty_provider_items_are_isolated_from_peer() -> None:
-    research_input = _research_input(4)
+def test_expected_provider_item_failures_are_isolated_from_peer() -> None:
+    research_input = _research_input(5)
 
     class IsolatingProvider(_ConcurrentProvider):
         async def search(self, request: object, *, deadline: Deadline) -> object:
@@ -225,12 +236,14 @@ def test_timeout_malformed_and_empty_provider_items_are_isolated_from_peer() -> 
             ticker = public["instrument"]["canonical_ticker"]  # type: ignore[index]
             self.calls.append((public, deadline))
             if ticker == "SYN0.NAS":
-                raise TimeoutError
+                raise SearchProviderTimeoutError
             if ticker == "SYN1.NAS":
                 return {"schema": "malformed"}
             if ticker == "SYN2.NAS":
                 return _payload(_instrument(2), [])
-            return _payload(_instrument(3))
+            if ticker == "SYN3.NAS":
+                raise SearchProviderOperationalError
+            return _payload(_instrument(4))
 
     provider = IsolatingProvider({})
 
@@ -243,6 +256,7 @@ def test_timeout_malformed_and_empty_provider_items_are_isolated_from_peer() -> 
         ResearchItemTimedOutV0,
         ResearchItemMalformedV0,
         ResearchItemNoUsableSourceV0,
+        ResearchItemProviderFailedV0,
         ResearchItemSucceededV0,
     ]
 
@@ -452,3 +466,242 @@ def test_one_45_second_deadline_spans_search_backoff_dns_redirect_and_fetch() ->
     assert fetcher.timeouts == [14.0, 11.0]
     assert clock.now == 136.0
     assert provider.deadlines[0].expires_at == 145.0
+
+
+def test_invocation_zero_redirect_policy_is_enforced_by_shared_verifier() -> None:
+    class Resolver:
+        async def resolve(
+            self, hostname: str, port: int, *, timeout: float
+        ) -> tuple[str, ...]:
+            del hostname, port, timeout
+            return ("93.184.216.34",)
+
+    class RedirectingFetcher:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def fetch(
+            self,
+            url: str,
+            addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ) -> ArticleFetchResponseV0:
+            del addresses, timeout, max_bytes
+            self.calls.append(url)
+            if url.endswith("/primary"):
+                return ArticleFetchResponseV0(
+                    status_code=302,
+                    content_type="text/plain",
+                    content_encoding=None,
+                    body=b"",
+                    location="/final",
+                )
+            return ArticleFetchResponseV0(
+                status_code=200,
+                content_type="text/plain",
+                content_encoding=None,
+                body=b"Synthetic article",
+                location=None,
+            )
+
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=ResearchSourcePolicyV0(max_redirects=0),
+    )
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+    fetcher = RedirectingFetcher()
+
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            provider,
+            SafeArticleVerifierV0(resolver=Resolver(), fetcher=fetcher),
+        ).research(research_input)
+    )
+
+    assert type(result) is ResearchCompletedV0
+    assert type(result.items[0]) is ResearchItemNoUsableSourceV0
+    assert result.items[0].issues[0].code == "REDIRECT_LIMIT"
+    assert fetcher.calls == ["https://evidence.example/SYN0.NAS/primary"]
+
+
+def test_invocation_looser_than_verifier_hard_limit_blocks_before_provider() -> None:
+    class Resolver:
+        async def resolve(
+            self, hostname: str, port: int, *, timeout: float
+        ) -> tuple[str, ...]:
+            del hostname, port, timeout
+            return ("93.184.216.34",)
+
+    class Fetcher:
+        async def fetch(
+            self,
+            url: str,
+            addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ) -> ArticleFetchResponseV0:
+            del url, addresses, timeout, max_bytes
+            raise AssertionError("provider must not start")
+
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=ResearchSourcePolicyV0(max_redirects=3),
+    )
+    provider = _ConcurrentProvider({})
+    verifier = SafeArticleVerifierV0(
+        resolver=Resolver(),
+        fetcher=Fetcher(),
+        policy=ResearchSourcePolicyV0(max_redirects=0),
+    )
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, verifier).research(research_input)
+    )
+
+    assert type(result) is ResearchSharedBlockedV0
+    assert result.issue.code == "VERIFIER_CONFIG_UNSAFE"
+    assert provider.calls == []
+
+
+@pytest.mark.parametrize(
+    "failure_site",
+    [
+        "preflight",
+        "preflight_wrong_code",
+        "provider",
+        "verify",
+        "verify_wrong_code",
+        "clock",
+    ],
+)
+def test_unexpected_operational_boundary_failures_become_typed_failed(
+    failure_site: str,
+) -> None:
+    research_input = _research_input(1)
+
+    class Provider(_ConcurrentProvider):
+        async def search(self, request: object, *, deadline: Deadline) -> object:
+            if failure_site == "provider":
+                raise RuntimeError("PRIVATE-RUNTIME-SENTINEL")
+            return await super().search(request, deadline=deadline)
+
+    class Verifier(_RecordingVerifier):
+        def preflight(self, policy: ResearchSourcePolicyV0) -> None:
+            if failure_site == "preflight":
+                raise AssertionError("PRIVATE-PREFLIGHT-SENTINEL")
+            if failure_site == "preflight_wrong_code":
+                raise ArticlePreflightError("DNS_TIMEOUT", "PRIVATE-PREFLIGHT-SENTINEL")
+            super().preflight(policy)
+
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            if failure_site == "verify":
+                raise RuntimeError("PRIVATE-VERIFY-SENTINEL")
+            if failure_site == "verify_wrong_code":
+                raise ArticleSafetyError(
+                    "VERIFIER_UNAVAILABLE", "PRIVATE-VERIFY-SENTINEL"
+                )
+            return await super().verify(source, deadline=deadline, policy=policy)
+
+    provider = Provider({"SYN0.NAS": _payload(_instrument(0))})
+
+    def clock() -> float:
+        if failure_site == "clock":
+            raise RuntimeError("PRIVATE-CLOCK-SENTINEL")
+        return 10.0
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, Verifier(), monotonic=clock).research(
+            research_input
+        )
+    )
+
+    assert type(result) is ResearchInputFailedV0
+    assert result.status == "FAILED"
+    assert result.issue.code == "RESEARCH_INVARIANT"
+    assert "PRIVATE-" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    "artifact_case",
+    ["file_url", "bad_hash", "control", "oversize", "forged_source", "subclass"],
+)
+def test_untrusted_verifier_artifacts_never_become_success(
+    artifact_case: str,
+) -> None:
+    private_sentinel = "PRIVATE-ARTIFACT-SENTINEL"
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=ResearchSourcePolicyV0(max_article_text_chars=32),
+    )
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+
+    class ForgedArtifact(ArticleArtifactV0):
+        private_metadata = private_sentinel
+
+    class Verifier(_RecordingVerifier):
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            del deadline, policy
+            artifact_source = source
+            final_url = source.canonical_url
+            text = "Synthetic trusted body"
+            content_hash = "sha256:22354f5ec53c9893dcf407910b5bc6bf3f5ef40af998bf7facfdf2536bace6c9"
+            if artifact_case == "file_url":
+                final_url = "file:///tmp/private"
+            elif artifact_case == "bad_hash":
+                content_hash = f"sha256:{'0' * 64}"
+            elif artifact_case == "control":
+                text = f"Synthetic\x00{private_sentinel}"
+            elif artifact_case == "oversize":
+                text = private_sentinel * 4
+            elif artifact_case == "forged_source":
+                artifact_source = SourceCandidateV0(
+                    canonical_ticker=source.canonical_ticker,
+                    title=private_sentinel,
+                    canonical_url=source.canonical_url,
+                    publisher=source.publisher,
+                    published_at=source.published_at,
+                    purpose=source.purpose,
+                )
+            artifact_type = (
+                ForgedArtifact if artifact_case == "subclass" else ArticleArtifactV0
+            )
+            artifact = object.__new__(artifact_type)
+            object.__setattr__(artifact, "source", artifact_source)
+            object.__setattr__(artifact, "final_url", final_url)
+            object.__setattr__(artifact, "normalized_text", text)
+            object.__setattr__(artifact, "content_hash", content_hash)
+            return artifact
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, Verifier()).research(research_input)
+    )
+
+    assert type(result) is ResearchInputFailedV0
+    assert result.issue.code == "RESEARCH_INVARIANT"
+    assert private_sentinel not in repr(result)
+
+
+def test_arbitrary_issue_code_and_message_cannot_be_constructed() -> None:
+    with pytest.raises(TypeError):
+        ResearchIssueV0(  # type: ignore[call-arg]
+            code="ARBITRARY_STATUS",
+            message="PRIVATE-ISSUE-SENTINEL",
+        )

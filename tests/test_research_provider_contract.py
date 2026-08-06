@@ -42,6 +42,31 @@ def test_recorded_provider_fixture_is_strict_and_deterministically_ordered() -> 
     ]
 
 
+def test_same_instrument_duplicate_canonical_url_is_malformed() -> None:
+    payload = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    payload["sources"][1]["url"] = payload["sources"][0]["url"]  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="duplicate canonical URL"):
+        parse_search_response_v0(payload, expected_instrument=_instrument())
+
+
+@pytest.mark.parametrize(
+    "published_at",
+    [
+        "2026-08-07 01:00:00Z",
+        "2026-08-07t01:00:00z",
+        "2026-08-07T01:00:00+00:00:30",
+        "2026-02-30T01:00:00Z",
+    ],
+)
+def test_published_at_requires_strict_real_rfc3339(published_at: str) -> None:
+    payload = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    payload["sources"][0]["published_at"] = published_at  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="RFC 3339"):
+        parse_search_response_v0(payload, expected_instrument=_instrument())
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

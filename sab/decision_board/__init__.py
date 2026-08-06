@@ -25,6 +25,7 @@ from .instruments import (
     InstrumentRefV0,
     InstrumentRegistryError,
     VersionedInstrumentRegistryV0,
+    copy_trusted_instrument_ref_v0,
 )
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "VersionedInstrumentRegistryV0",
     "approve_swing_snapshot_v0",
     "canonical_json_bytes",
+    "copy_trusted_instrument_ref_v0",
     "decision_payload_hash",
     "load_decision_board_report",
     "project_research_instruments_v0",

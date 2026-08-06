@@ -21,6 +21,7 @@ from sab.decision_board.instruments import (
     InstrumentRefV0,
     InstrumentRegistryError,
     VersionedInstrumentRegistryV0,
+    copy_trusted_instrument_ref_v0,
 )
 from sab.scheduler.holdings import (
     BrokerSnapshotError,
@@ -241,6 +242,21 @@ def test_resolved_identity_preserves_authoritative_source_and_version() -> None:
         "identity_version": "fixture-2026-08-06",
     }
     assert type(first) is InstrumentRefV0
+
+
+def test_shared_trusted_instrument_copy_rejects_subclass_and_returns_fresh_value() -> (
+    None
+):
+    instrument = _registry().resolve("AUR.NAS")
+    assert instrument is not None
+
+    copied = copy_trusted_instrument_ref_v0(instrument)
+    fake = _InstrumentRefWithPrivateOverride(**instrument.to_public_dict())
+
+    assert copied == instrument
+    assert copied is not instrument
+    assert type(copied) is InstrumentRefV0
+    assert copy_trusted_instrument_ref_v0(fake) is None
 
 
 def test_gate_copies_exact_registry_result_into_trusted_instrument() -> None:
