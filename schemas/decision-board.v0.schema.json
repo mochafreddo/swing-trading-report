@@ -1,0 +1,632 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swing-trading-report.local/schemas/decision-board.v0.schema.json",
+  "title": "Decision Board V0 publishable report",
+  "$ref": "#/$defs/DecisionBoardEnvelopeV0",
+  "$defs": {
+    "HashV0": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "TimestampV0": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "RunKindV0": {
+      "enum": ["ENTRY", "HOLDING"]
+    },
+    "IssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "InstrumentRefV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "canonical_ticker",
+        "exchange",
+        "company_name",
+        "identity_source",
+        "identity_version"
+      ],
+      "properties": {
+        "market": {
+          "const": "US"
+        },
+        "canonical_ticker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exchange": {
+          "type": "string",
+          "minLength": 1
+        },
+        "company_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "BrokerSnapshotV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "revision",
+        "captured_at",
+        "fresh_until",
+        "digest",
+        "approved_holdings"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "captured_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "fresh_until": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "digest": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "approved_holdings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InstrumentRefV0"
+          }
+        }
+      }
+    },
+    "SupportingLocationV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "start", "end"],
+      "properties": {
+        "kind": {
+          "const": "TEXT_OFFSETS"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ClaimValidationV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "instrument",
+        "source_url",
+        "publisher",
+        "published_at",
+        "article_content_hash",
+        "supporting_span",
+        "supporting_location",
+        "verifier_version",
+        "entailment"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "published_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "article_content_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "supporting_span": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supporting_location": {
+          "$ref": "#/$defs/SupportingLocationV0"
+        },
+        "verifier_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entailment": {
+          "enum": ["SUPPORTED", "CONTRADICTED", "UNCLEAR"]
+        }
+      }
+    },
+    "SourceHashV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "hash"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      }
+    },
+    "DeterministicFactV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fact_id",
+        "instrument",
+        "field",
+        "value",
+        "observed_at",
+        "source_hash"
+      ],
+      "properties": {
+        "fact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "source_hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      }
+    },
+    "DecisionInputV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sealed_at",
+        "run_kind",
+        "input_hash",
+        "source_hashes",
+        "instruments",
+        "deterministic_facts",
+        "validated_claims"
+      ],
+      "properties": {
+        "sealed_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "input_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "source_hashes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceHashV0"
+          }
+        },
+        "instruments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InstrumentRefV0"
+          }
+        },
+        "deterministic_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeterministicFactV0"
+          }
+        },
+        "validated_claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClaimValidationV0"
+          }
+        }
+      }
+    },
+    "EvidenceRefV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "entailment"],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entailment": {
+          "const": "SUPPORTED"
+        }
+      }
+    },
+    "DecisionItemV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument", "status", "issues", "evidence"],
+      "properties": {
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "status": {
+          "enum": ["DECIDED", "REVIEW"]
+        },
+        "action": {
+          "enum": ["BUY", "AVOID", "HOLD", "SELL"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueV0"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV0"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "DECIDED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["action"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "REVIEW"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "issues": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": ["action"]
+            }
+          }
+        }
+      ]
+    },
+    "DecisionPayloadV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_kind", "sealed_input_hash", "items"],
+      "properties": {
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "sealed_input_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DecisionItemV0"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "ENTRY"
+              }
+            },
+            "required": ["run_kind"]
+          },
+          "then": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": ["BUY", "AVOID"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "HOLDING"
+              }
+            },
+            "required": ["run_kind"]
+          },
+          "then": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": ["HOLD", "SELL"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DecisionBoardEnvelopeV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "created_at",
+        "run_kind",
+        "status",
+        "issues"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "decision-board.v0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "status": {
+          "enum": ["PUBLISHED", "BLOCKED"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueV0"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "decision_payload": {
+          "$ref": "#/$defs/DecisionPayloadV0"
+        },
+        "decision_payload_hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      },
+      "$comment": "The payload hash is the sha256 digest of canonical DecisionPayloadV0 bytes; consumers enforce digest equality after structural validation.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "PUBLISHED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["decision_payload", "decision_payload_hash"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "BLOCKED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "issues": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["decision_payload"]
+                },
+                {
+                  "required": ["decision_payload_hash"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "ENTRY"
+              }
+            },
+            "required": ["run_kind", "decision_payload"]
+          },
+          "then": {
+            "properties": {
+              "decision_payload": {
+                "properties": {
+                  "run_kind": {
+                    "const": "ENTRY"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "HOLDING"
+              }
+            },
+            "required": ["run_kind", "decision_payload"]
+          },
+          "then": {
+            "properties": {
+              "decision_payload": {
+                "properties": {
+                  "run_kind": {
+                    "const": "HOLDING"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RunJournalV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "run_kind",
+        "status",
+        "expected_at",
+        "started_at",
+        "terminal_at",
+        "issues"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "decision-board.v0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "status": {
+          "enum": [
+            "STARTED",
+            "PUBLISHED",
+            "BLOCKED",
+            "FAILED",
+            "MISSED_EXPECTED",
+            "STALE_INCOMPLETE"
+          ]
+        },
+        "expected_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimestampV0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimestampV0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimestampV0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueV0"
+          }
+        }
+      }
+    }
+  }
+}

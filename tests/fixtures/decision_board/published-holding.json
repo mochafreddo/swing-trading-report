@@ -1,0 +1,72 @@
+{
+  "schema_version": "decision-board.v0",
+  "run_id": "holding-2026-08-06T020000Z",
+  "created_at": "2026-08-06T02:00:04Z",
+  "run_kind": "HOLDING",
+  "status": "PUBLISHED",
+  "issues": [],
+  "decision_payload": {
+    "run_kind": "HOLDING",
+    "sealed_input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "items": [
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "DOV.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Dovetail Energy",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "HOLD",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-dovetail-guidance",
+            "entailment": "SUPPORTED"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "ELM.NYS",
+          "exchange": "NYSE",
+          "company_name": "Elm River Foods",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "SELL",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-elm-recall",
+            "entailment": "SUPPORTED"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "FRN.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Fern Networks",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "REVIEW",
+        "issues": [
+          {
+            "code": "SOURCE_CONFLICT",
+            "message": "Synthetic public sources disagree.",
+            "path": ["validated_claims"]
+          }
+        ],
+        "evidence": []
+      }
+    ]
+  },
+  "decision_payload_hash": "sha256:3ca19513dd7b987e242e90b958f3cb5db0c6977f46289b152090f2a214f9d59e"
+}
