@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
@@ -54,7 +55,81 @@ class SupabaseHoldingsExportConfig:
         return cls(url=url, service_role_key=key)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, eq=False)
+class BrokerHoldingV0(Mapping[str, object]):
+    ticker: str
+    quantity: str
+    entry_price: str
+    entry_currency: str | None
+    entry_date: str | None
+    strategy: str | None
+    entry_pattern: str | None
+    notes: str | None
+    tags: tuple[str, ...]
+    stop_override: str | None
+    target_override: str | None
+    broker_state: str
+    broker_missing_first_seen_date: str | None
+    broker_missing_last_seen_date: str | None
+    broker_missing_count: int
+    broker_missing_diff_hash: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a fresh compatibility projection of the normalized holding."""
+
+        return {
+            "ticker": self.ticker,
+            "quantity": self.quantity,
+            "entry_price": self.entry_price,
+            "entry_currency": self.entry_currency,
+            "entry_date": self.entry_date,
+            "strategy": self.strategy,
+            "entry_pattern": self.entry_pattern,
+            "notes": self.notes,
+            "tags": list(self.tags),
+            "stop_override": self.stop_override,
+            "target_override": self.target_override,
+            "broker_state": self.broker_state,
+            "broker_missing_first_seen_date": self.broker_missing_first_seen_date,
+            "broker_missing_last_seen_date": self.broker_missing_last_seen_date,
+            "broker_missing_count": self.broker_missing_count,
+            "broker_missing_diff_hash": self.broker_missing_diff_hash,
+        }
+
+    def __getitem__(self, key: str) -> object:
+        try:
+            return self.to_dict()[key]
+        except KeyError:
+            raise KeyError(key) from None
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_HOLDINGS_FIELDS)
+
+    def __len__(self) -> int:
+        return len(_HOLDINGS_FIELDS)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, BrokerHoldingV0):
+            return self.to_dict() == other.to_dict()
+        if isinstance(other, Mapping):
+            return self.to_dict() == dict(other)
+        return NotImplemented
+
+
+@dataclass(frozen=True, slots=True)
+class BrokerSnapshotMarkerV0:
+    scope: str
+    session_date: str
+    status: str
+    snapshot_digest: str
+    snapshot_revision: int
+    sealed_at: datetime
+
+
+_BROKER_SNAPSHOT_VALIDATION_TOKEN = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class BrokerSnapshotV0:
     state_key: str
     session_date: str
@@ -63,8 +138,103 @@ class BrokerSnapshotV0:
     sealed_at: datetime
     holdings_digest: str
     revision: int
-    marker: dict[str, object]
-    holdings: tuple[dict[str, object], ...]
+    marker: BrokerSnapshotMarkerV0
+    holdings: tuple[BrokerHoldingV0, ...]
+    _validation_token: object = dataclass_field(repr=False, compare=False)
+
+    def __new__(cls, *_args: object, **_kwargs: object) -> BrokerSnapshotV0:
+        raise TypeError("BrokerSnapshotV0 must be created by the validated factory")
+
+    @classmethod
+    def _from_validated(
+        cls,
+        *,
+        state_key: str,
+        session_date: str,
+        status: str,
+        fresh_until: datetime,
+        sealed_at: datetime,
+        holdings_digest: str,
+        revision: int,
+        marker: BrokerSnapshotMarkerV0,
+        holdings: tuple[BrokerHoldingV0, ...],
+    ) -> BrokerSnapshotV0:
+        snapshot = object.__new__(cls)
+        object.__setattr__(snapshot, "state_key", state_key)
+        object.__setattr__(snapshot, "session_date", session_date)
+        object.__setattr__(snapshot, "status", status)
+        object.__setattr__(snapshot, "fresh_until", fresh_until)
+        object.__setattr__(snapshot, "sealed_at", sealed_at)
+        object.__setattr__(snapshot, "holdings_digest", holdings_digest)
+        object.__setattr__(snapshot, "revision", revision)
+        object.__setattr__(snapshot, "marker", marker)
+        object.__setattr__(snapshot, "holdings", holdings)
+        object.__setattr__(
+            snapshot, "_validation_token", _BROKER_SNAPSHOT_VALIDATION_TOKEN
+        )
+        return snapshot
+
+    def approval_issue_code(self, *, now: datetime) -> str | None:
+        """Recheck approval invariants, including private-factory misuse."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        if self._validation_token is not _BROKER_SNAPSHOT_VALIDATION_TOKEN:
+            return "SNAPSHOT_NOT_VALIDATED"
+        if (
+            not isinstance(self.fresh_until, datetime)
+            or self.fresh_until.tzinfo is None
+            or self.fresh_until.utcoffset() is None
+            or not isinstance(self.sealed_at, datetime)
+            or self.sealed_at.tzinfo is None
+            or self.sealed_at.utcoffset() is None
+        ):
+            return "SNAPSHOT_SEAL_INVALID"
+        if self.fresh_until <= now.astimezone(UTC):
+            return "SNAPSHOT_EXPIRED"
+        if (
+            self.status not in {"applied", "unchanged"}
+            or isinstance(self.revision, bool)
+            or not isinstance(self.revision, int)
+            or self.revision <= 0
+            or not isinstance(self.holdings_digest, str)
+            or len(self.holdings_digest) != len(_HASH_PREFIX) + 64
+            or not self.holdings_digest.startswith(_HASH_PREFIX)
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.holdings_digest[len(_HASH_PREFIX) :]
+            )
+            or self.sealed_at >= self.fresh_until
+            or not isinstance(self.marker, BrokerSnapshotMarkerV0)
+            or self.state_key != f"toss-sync:success:MIXED:{self.session_date}"
+            or self.marker.scope != "MIXED"
+            or self.marker.session_date != self.session_date
+            or self.marker.status != self.status
+            or self.marker.snapshot_digest != self.holdings_digest
+            or self.marker.snapshot_revision != self.revision
+            or self.marker.sealed_at != self.sealed_at
+        ):
+            return "SNAPSHOT_SEAL_INVALID"
+        try:
+            if (
+                _normalize_snapshot_date(self.session_date, "session_date")
+                != self.session_date
+                or not isinstance(self.holdings, tuple)
+                or any(
+                    not isinstance(holding, BrokerHoldingV0)
+                    for holding in self.holdings
+                )
+            ):
+                return "SNAPSHOT_SEAL_INVALID"
+            holding_dicts = [holding.to_dict() for holding in self.holdings]
+            if (
+                _normalize_broker_holdings_v0(holding_dicts) != self.holdings
+                or broker_holdings_digest_v0(holding_dicts) != self.holdings_digest
+            ):
+                return "SNAPSHOT_SEAL_INVALID"
+        except BrokerSnapshotError, TypeError, ValueError, UnicodeError:
+            return "SNAPSHOT_SEAL_INVALID"
+        return None
 
 
 _HOLDINGS_FIELDS = (
@@ -96,6 +266,14 @@ _BROKER_SNAPSHOT_KEYS = {
     "revision",
     "marker",
     "holdings",
+}
+_BROKER_SNAPSHOT_MARKER_KEYS = {
+    "scope",
+    "sessionDate",
+    "status",
+    "snapshotDigest",
+    "snapshotRevision",
+    "sealedAt",
 }
 _BROKER_DIGEST_PREFIX = b"broker-holdings-v0;"
 _BROKER_SCALAR_FIELDS_BEFORE_TAGS = (
@@ -206,7 +384,9 @@ def _normalize_snapshot_tags(value: object) -> list[str]:
     return sorted(tags, key=lambda tag: tag.encode("utf-8"))
 
 
-def _normalize_broker_holding_v0(raw: object) -> dict[str, object]:
+def _normalize_broker_holding_v0(raw: object) -> BrokerHoldingV0:
+    if isinstance(raw, BrokerHoldingV0):
+        raw = raw.to_dict()
     if not isinstance(raw, dict) or set(raw) != set(_HOLDINGS_FIELDS):
         raise _snapshot_error(
             "PAYLOAD_INVALID",
@@ -237,54 +417,54 @@ def _normalize_broker_holding_v0(raw: object) -> dict[str, object]:
         uppercase=True,
     )
     assert ticker is not None
-    return {
-        "ticker": ticker,
-        "quantity": _normalize_snapshot_decimal(raw["quantity"], "quantity", 6),
-        "entry_price": _normalize_snapshot_decimal(
-            raw["entry_price"], "entry_price", 4
-        ),
-        "entry_currency": _normalize_snapshot_text(
+    quantity = _normalize_snapshot_decimal(raw["quantity"], "quantity", 6)
+    entry_price = _normalize_snapshot_decimal(raw["entry_price"], "entry_price", 4)
+    assert quantity is not None
+    assert entry_price is not None
+    return BrokerHoldingV0(
+        ticker=ticker,
+        quantity=quantity,
+        entry_price=entry_price,
+        entry_currency=_normalize_snapshot_text(
             raw["entry_currency"], "entry_currency", uppercase=True
         ),
-        "entry_date": _normalize_snapshot_date(raw["entry_date"], "entry_date"),
-        "strategy": _normalize_snapshot_text(raw["strategy"], "strategy"),
-        "entry_pattern": _normalize_snapshot_text(
-            raw["entry_pattern"], "entry_pattern"
-        ),
-        "notes": _normalize_snapshot_text(raw["notes"], "notes"),
-        "tags": _normalize_snapshot_tags(raw["tags"]),
-        "stop_override": _normalize_snapshot_decimal(
+        entry_date=_normalize_snapshot_date(raw["entry_date"], "entry_date"),
+        strategy=_normalize_snapshot_text(raw["strategy"], "strategy"),
+        entry_pattern=_normalize_snapshot_text(raw["entry_pattern"], "entry_pattern"),
+        notes=_normalize_snapshot_text(raw["notes"], "notes"),
+        tags=tuple(_normalize_snapshot_tags(raw["tags"])),
+        stop_override=_normalize_snapshot_decimal(
             raw["stop_override"], "stop_override", 4, nullable=True
         ),
-        "target_override": _normalize_snapshot_decimal(
+        target_override=_normalize_snapshot_decimal(
             raw["target_override"], "target_override", 4, nullable=True
         ),
-        "broker_state": broker_state,
-        "broker_missing_first_seen_date": _normalize_snapshot_date(
+        broker_state=broker_state,
+        broker_missing_first_seen_date=_normalize_snapshot_date(
             raw["broker_missing_first_seen_date"],
             "broker_missing_first_seen_date",
         ),
-        "broker_missing_last_seen_date": _normalize_snapshot_date(
+        broker_missing_last_seen_date=_normalize_snapshot_date(
             raw["broker_missing_last_seen_date"],
             "broker_missing_last_seen_date",
         ),
-        "broker_missing_count": missing_count,
-        "broker_missing_diff_hash": _normalize_snapshot_text(
+        broker_missing_count=missing_count,
+        broker_missing_diff_hash=_normalize_snapshot_text(
             raw["broker_missing_diff_hash"], "broker_missing_diff_hash"
         ),
-    }
+    )
 
 
 def _normalize_broker_holdings_v0(
     rows: object,
-) -> tuple[dict[str, object], ...]:
+) -> tuple[BrokerHoldingV0, ...]:
     if not isinstance(rows, list):
         raise _snapshot_error("PAYLOAD_INVALID", "holdings must be a list")
     normalized = sorted(
         (_normalize_broker_holding_v0(row) for row in rows),
-        key=lambda row: str(row["ticker"]).encode("utf-8"),
+        key=lambda row: row.ticker.encode("utf-8"),
     )
-    tickers = [str(row["ticker"]) for row in normalized]
+    tickers = [row.ticker for row in normalized]
     if len(tickers) != len(set(tickers)):
         raise _snapshot_error(
             "PAYLOAD_INVALID", "holdings contain duplicate canonical tickers"
@@ -402,7 +582,7 @@ def _parse_broker_snapshot_v0(
             "PAYLOAD_INVALID", "BrokerSnapshotV0 holdings_digest is invalid"
         )
     marker = raw["marker"]
-    if not isinstance(marker, dict):
+    if not isinstance(marker, dict) or set(marker) != _BROKER_SNAPSHOT_MARKER_KEYS:
         raise _snapshot_error(
             "MARKER_INVALID", "BrokerSnapshotV0 marker payload is missing"
         )
@@ -428,7 +608,7 @@ def _parse_broker_snapshot_v0(
         raise _snapshot_error(
             "DIGEST_MISMATCH", "BrokerSnapshotV0 holdings digest does not match rows"
         )
-    return BrokerSnapshotV0(
+    return BrokerSnapshotV0._from_validated(
         state_key=state_key,
         session_date=session_date,
         status=status,
@@ -436,8 +616,42 @@ def _parse_broker_snapshot_v0(
         sealed_at=sealed_at,
         holdings_digest=digest,
         revision=revision,
-        marker=dict(marker),
+        marker=BrokerSnapshotMarkerV0(
+            scope="MIXED",
+            session_date=session_date,
+            status=status,
+            snapshot_digest=digest,
+            snapshot_revision=revision,
+            sealed_at=sealed_at,
+        ),
         holdings=normalized_rows,
+    )
+
+
+def validate_broker_snapshot_v0(
+    payload: object,
+    *,
+    now: datetime,
+    expected_session_date: str,
+    minimum_revision: int | None = None,
+) -> BrokerSnapshotV0:
+    """Validate an RPC-shaped value into a deeply immutable BrokerSnapshotV0."""
+
+    normalized_expected_session = _normalize_snapshot_date(
+        expected_session_date,
+        "expected_session_date",
+    )
+    if normalized_expected_session is None:
+        raise _snapshot_error(
+            "SESSION_MISMATCH", "expected_session_date must be an ISO date"
+        )
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return _parse_broker_snapshot_v0(
+        payload,
+        now=now,
+        minimum_revision=minimum_revision,
+        expected_session_date=normalized_expected_session,
     )
 
 
@@ -451,14 +665,6 @@ def fetch_broker_snapshot_v0(
 ) -> BrokerSnapshotV0:
     """Read and verify one sealed marker and holdings set through one RPC call."""
 
-    normalized_expected_session = _normalize_snapshot_date(
-        expected_session_date,
-        "expected_session_date",
-    )
-    if normalized_expected_session is None:
-        raise _snapshot_error(
-            "SESSION_MISMATCH", "expected_session_date must be an ISO date"
-        )
     active_session = session or requests.Session()
     try:
         response = active_session.post(
@@ -483,13 +689,11 @@ def fetch_broker_snapshot_v0(
             "PAYLOAD_INVALID", "get_broker_snapshot_v0 returned invalid JSON"
         ) from exc
     current_time = now or datetime.now(UTC)
-    if current_time.tzinfo is None or current_time.utcoffset() is None:
-        raise ValueError("now must be timezone-aware")
-    return _parse_broker_snapshot_v0(
+    return validate_broker_snapshot_v0(
         payload,
         now=current_time,
         minimum_revision=minimum_revision,
-        expected_session_date=normalized_expected_session,
+        expected_session_date=expected_session_date,
     )
 
 
@@ -607,7 +811,9 @@ def temporary_holdings_file(path: Path) -> Iterator[None]:
 
 
 __all__ = [
+    "BrokerHoldingV0",
     "BrokerSnapshotError",
+    "BrokerSnapshotMarkerV0",
     "BrokerSnapshotV0",
     "SupabaseHoldingsExportConfig",
     "SupabaseHoldingsExportError",
@@ -615,4 +821,5 @@ __all__ = [
     "export_active_holdings_snapshot",
     "fetch_broker_snapshot_v0",
     "temporary_holdings_file",
+    "validate_broker_snapshot_v0",
 ]

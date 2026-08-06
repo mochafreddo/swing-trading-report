@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime
 from inspect import Parameter, signature
 from typing import Any
 
 import pytest
 import requests
+from sab.scheduler import holdings as holdings_module
 from sab.scheduler.holdings import (
     BrokerSnapshotError,
     BrokerSnapshotV0,
     SupabaseHoldingsExportConfig,
     broker_holdings_digest_v0,
     fetch_broker_snapshot_v0,
+    validate_broker_snapshot_v0,
 )
 
 _NOW = datetime(2026, 8, 6, 3, 0, tzinfo=UTC)
@@ -187,10 +190,74 @@ def test_fetch_broker_snapshot_accepts_one_valid_sealed_rpc_response() -> None:
 
     assert snapshot.revision == 7
     assert snapshot.holdings_digest == payload[0]["holdings_digest"]
-    assert snapshot.holdings == (_row(),)
+    assert [holding.to_dict() for holding in snapshot.holdings] == [_row()]
     assert session.post_calls[0]["url"].endswith("/rest/v1/rpc/get_broker_snapshot_v0")
     assert session.post_calls[0]["json"] == {}
     assert session.get_calls == []
+
+
+def test_broker_snapshot_requires_validating_factory() -> None:
+    assert callable(getattr(holdings_module, "validate_broker_snapshot_v0", None))
+
+
+def test_broker_snapshot_rejects_direct_arbitrary_construction() -> None:
+    with pytest.raises(TypeError, match="validated factory"):
+        BrokerSnapshotV0(
+            state_key="toss-sync:success:MIXED:2026-08-06",
+            session_date="2026-08-06",
+            status="blocked",
+            fresh_until=datetime(2026, 8, 7, 15, 0, tzinfo=UTC),
+            sealed_at=_NOW,
+            holdings_digest=_DIGEST,
+            revision=0,
+            marker={"private": "forged"},
+            holdings=(_row(account_id="private"),),
+        )
+
+
+def test_fetched_broker_snapshot_is_deeply_immutable() -> None:
+    snapshot = _fetch(_FakeSession(_FakeResponse(200, _payload())))
+
+    with pytest.raises((FrozenInstanceError, TypeError, AttributeError)):
+        snapshot.holdings[0]["strategy"] = "CORE"  # type: ignore[index]
+    with pytest.raises((FrozenInstanceError, TypeError, AttributeError)):
+        snapshot.holdings[0].tags += ("PRIVATE-MUTATION",)  # type: ignore[misc]
+    with pytest.raises((FrozenInstanceError, TypeError, AttributeError)):
+        snapshot.marker.status = "blocked"  # type: ignore[misc]
+
+
+def test_validating_factory_revalidates_typed_holding_values() -> None:
+    valid = _fetch(_FakeSession(_FakeResponse(200, _payload())))
+    forged = replace(valid.holdings[0], quantity="-1.000000")
+    forged_digest = (
+        "sha256:9c0b23b944774939037013758b21796711b39e2cd798faa24d6dbb71e6a59555"
+    )
+    payload = _payload(rows=[forged], digest=forged_digest)  # type: ignore[list-item]
+
+    with pytest.raises(BrokerSnapshotError) as exc_info:
+        validate_broker_snapshot_v0(
+            payload,
+            now=_NOW,
+            expected_session_date="2026-08-06",
+        )
+
+    assert exc_info.value.code == "PAYLOAD_INVALID"
+
+
+def test_validating_factory_rejects_extra_marker_fields() -> None:
+    payload = _payload()
+    marker = payload[0]["marker"]
+    assert isinstance(marker, dict)
+    marker["unexpected"] = "private"
+
+    with pytest.raises(BrokerSnapshotError) as exc_info:
+        validate_broker_snapshot_v0(
+            payload,
+            now=_NOW,
+            expected_session_date="2026-08-06",
+        )
+
+    assert exc_info.value.code == "MARKER_INVALID"
 
 
 def test_fetch_broker_snapshot_requires_expected_session_date() -> None:

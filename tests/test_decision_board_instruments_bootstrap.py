@@ -30,3 +30,7 @@ def test_instrument_gate_docs_define_fail_closed_boundary() -> None:
     assert "VersionedInstrumentRegistryV0" in architecture
     assert "ticker suffix" in architecture
     assert "private" in architecture
+    assert "deep-immutable" in architecture
+    assert "caller-injected `now`" in architecture
+    assert "NFC" in architecture
+    assert "ASCII-only" in holdings_docs

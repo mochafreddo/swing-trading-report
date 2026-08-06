@@ -85,10 +85,12 @@ settings:
 
 Decision Board의 US HOLDING shadow 입력은 수동 YAML 기본값이 아니라 검증된
 `BrokerSnapshotV0` 행의 `strategy`만 사용합니다. ASCII 공백 제거와 대소문자
-정규화 뒤 값이 정확히 `SWING`이고, `quantity > 0`이며
+정규화 뒤 값 자체가 ASCII-only이고 정확히 `SWING`이며, `quantity > 0`이고
 `broker_state=confirmed`인 행만 identity gate로 전달됩니다. strategy가 없거나
 `swing_breakout`, `long_swing`, `CORE`, `LONG_TERM`처럼 정확히 일치하지 않으면
 `REVIEW_STRATEGY_NOT_APPROVED`가 되고 방향성 HOLD/SELL 입력이 되지 않습니다.
+Unicode case folding으로 비슷해 보이는 문자, fullwidth 문자, zero-width/bidi format
+문자를 포함한 값도 `SWING`으로 간주하지 않습니다.
 `settings.default_strategy`, tags, notes는 이 승인을 대신할 수 없습니다.
 
 승인 결과에는 공개 종목 identity만 남고 quantity, entry price, P/L, notes, tags,

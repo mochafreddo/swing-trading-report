@@ -102,15 +102,31 @@ RPC와 private helper는 `service-role-only`이자 `SECURITY INVOKER`로
 유지하며 브라우저에는 비밀 키를 노출하지 않습니다. 이 경계는 `advice-only`로
 주문 생성·수정·취소 기능을 포함하지 않습니다.
 
+Python consumer에서는 `validate_broker_snapshot_v0`가 유일한 공개 생성 경계입니다.
+`BrokerSnapshotV0` 직접 생성은 차단하고, holding과 marker를 각각
+`BrokerHoldingV0`, `BrokerSnapshotMarkerV0`로 바꾼 deep-immutable snapshot만
+반환합니다. HOLDING gate는 caller-injected `now`로 freshness를 다시 계산하며,
+seal status, digest, revision, session date와 canonical field set을 함께 재검증합니다.
+따라서 최초 검증 뒤의 시간 경과, 위조된 private factory 결과, 중첩 payload 변경도
+승인으로 전파되지 않습니다.
+
 ### 3.2 InstrumentRefV0와 SWING/ENTRY identity gate
 
 Decision Board shadow slice의 identity 전파 경로는
 `BrokerSnapshotV0 -> approve_swing_snapshot_v0 -> ApprovedSwingRefV0 -> public research`
 입니다. `VersionedInstrumentRegistryV0`는 호출자가 제공한 공개 레코드와 immutable
 source/version만 보유하며, canonical ticker와 명시적으로 등록된 alias만 해석합니다.
-ticker suffix를 보고 종목 identity나 거래소를 추측하지 않습니다. duplicate
+거래소 family는 중앙 normalizer에서 `NASDAQ`/`NYSE`/`AMEX`로 정규화하고,
+registry의 `InstrumentRefV0.exchange`를 권위 값으로 사용합니다. ticker suffix는
+충돌을 찾는 hint일 뿐 종목 identity나 거래소를 추측하는 근거가 아닙니다. duplicate
 canonical ticker, ambiguous alias, source/version 누락은 registry 생성 단계에서
 실패하고, 미해결 또는 입력/registry 충돌은 개별 행의 typed REVIEW로 닫힙니다.
+
+canonical ticker, alias, exchange, source/version 같은 identity key는 ASCII-only
+문법을 사용합니다. 회사명과 표시용 공개 텍스트는 NFC 정규화 뒤 control/format,
+surrogate, Unicode noncharacter를 거부합니다. 승인과 REVIEW는 frozen sum type이며,
+각 variant에는 자기 상태의 payload만 있어 반대 상태 payload나 임의 status를 만들 수
+없습니다.
 
 HOLDING gate는 검증된 `BrokerSnapshotV0`만 producer로 받고, 정확히 정규화된
 `SWING`이면서 active/confirmed인 행만 승인합니다. 각 행은 독립적으로 평가되어 한

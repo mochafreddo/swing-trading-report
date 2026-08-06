@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Literal
-from unicodedata import category
 
 from sab.scheduler.holdings import BrokerSnapshotV0
 
-from .instruments import InstrumentRefV0, VersionedInstrumentRegistryV0
+from .instruments import (
+    InstrumentRefV0,
+    VersionedInstrumentRegistryV0,
+    normalize_identity_key_v0,
+    normalize_public_text_v0,
+    normalize_us_venue_v0,
+    ticker_venue_hint_v0,
+)
 
 _ASCII_WHITESPACE = " \t\n\r\f\v"
 _ENTRY_PUBLIC_FIELDS = {
@@ -40,32 +48,52 @@ class ApprovedSwingRefV0:
 
 
 @dataclass(frozen=True, slots=True)
-class SwingApprovalResultV0:
-    status: Literal["APPROVED", "REVIEW"]
-    approved_ref: ApprovedSwingRefV0 | None
-    issues: tuple[IdentityGateIssueV0, ...]
-
-    def __post_init__(self) -> None:
-        approved = self.status == "APPROVED"
-        if approved != (self.approved_ref is not None) or approved == bool(self.issues):
-            raise ValueError("invalid SwingApprovalResultV0 discriminator")
+class SwingApprovedV0:
+    approved_ref: ApprovedSwingRefV0
+    status: Literal["APPROVED"] = dataclass_field(default="APPROVED", init=False)
 
 
 @dataclass(frozen=True, slots=True)
-class EntryIdentityResultV0:
-    status: Literal["APPROVED", "REVIEW"]
-    instrument: InstrumentRefV0 | None
+class SwingReviewV0:
     issues: tuple[IdentityGateIssueV0, ...]
+    status: Literal["REVIEW"] = dataclass_field(default="REVIEW", init=False)
 
     def __post_init__(self) -> None:
-        approved = self.status == "APPROVED"
-        if approved != (self.instrument is not None) or approved == bool(self.issues):
-            raise ValueError("invalid EntryIdentityResultV0 discriminator")
+        if not self.issues or not all(
+            isinstance(issue, IdentityGateIssueV0) for issue in self.issues
+        ):
+            raise ValueError("SwingReviewV0 requires typed issues")
+
+
+type SwingApprovalResultV0 = SwingApprovedV0 | SwingReviewV0
+
+
+@dataclass(frozen=True, slots=True)
+class EntryIdentityApprovedV0:
+    instrument: InstrumentRefV0
+    status: Literal["APPROVED"] = dataclass_field(default="APPROVED", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class EntryIdentityReviewV0:
+    issues: tuple[IdentityGateIssueV0, ...]
+    status: Literal["REVIEW"] = dataclass_field(default="REVIEW", init=False)
+
+    def __post_init__(self) -> None:
+        if not self.issues or not all(
+            isinstance(issue, IdentityGateIssueV0) for issue in self.issues
+        ):
+            raise ValueError("EntryIdentityReviewV0 requires typed issues")
+
+
+type EntryIdentityResultV0 = EntryIdentityApprovedV0 | EntryIdentityReviewV0
 
 
 def approve_swing_snapshot_v0(
     snapshot: BrokerSnapshotV0,
     registry: VersionedInstrumentRegistryV0,
+    *,
+    now: datetime,
 ) -> tuple[SwingApprovalResultV0, ...]:
     """Approve exact active SWING rows from an already validated broker DTO."""
 
@@ -73,8 +101,20 @@ def approve_swing_snapshot_v0(
         raise TypeError("snapshot must be a validated BrokerSnapshotV0")
     ordered_holdings = sorted(
         snapshot.holdings,
-        key=lambda row: _public_lookup_key(row.get("ticker")),
+        key=lambda row: _public_lookup_key(row.ticker),
     )
+    if snapshot.approval_issue_code(now=now) is not None:
+        return tuple(
+            SwingReviewV0(
+                issues=(
+                    IdentityGateIssueV0(
+                        code="REVIEW_SNAPSHOT_NOT_APPROVED",
+                        message="Broker snapshot seal is not approved at evaluation time.",
+                    ),
+                ),
+            )
+            for _holding in ordered_holdings
+        )
     return tuple(_approve_holding(row, registry) for row in ordered_holdings)
 
 
@@ -89,13 +129,23 @@ def resolve_entry_identity_v0(
             "REVIEW_IDENTITY_INPUT_INVALID",
             "ENTRY identity input must contain public identity fields only.",
         )
-    if "ticker" not in candidate or not _valid_public_text(candidate["ticker"]):
+    if (
+        "ticker" not in candidate
+        or normalize_identity_key_v0(candidate["ticker"]) is None
+    ):
         return _entry_review(
             "REVIEW_IDENTITY_INPUT_INVALID",
             "ENTRY identity input requires one public ticker lookup key.",
         )
     for field in set(candidate) - {"ticker"}:
-        if not _valid_public_text(candidate[field]):
+        value = candidate[field]
+        if field == "canonical_ticker":
+            valid = normalize_identity_key_v0(value) is not None
+        elif field == "exchange":
+            valid = normalize_us_venue_v0(value) is not None
+        else:
+            valid = normalize_public_text_v0(value) is not None
+        if not valid:
             return _entry_review(
                 "REVIEW_IDENTITY_INPUT_INVALID",
                 "ENTRY identity hints must be nonblank public strings.",
@@ -112,7 +162,7 @@ def resolve_entry_identity_v0(
             "REVIEW_IDENTITY_CONFLICT",
             "ENTRY identity conflicts with the sealed registry binding.",
         )
-    return EntryIdentityResultV0(status="APPROVED", instrument=instrument, issues=())
+    return EntryIdentityApprovedV0(instrument=instrument)
 
 
 def project_research_instruments_v0(
@@ -123,14 +173,12 @@ def project_research_instruments_v0(
     instruments: dict[tuple[str, ...], InstrumentRefV0] = {}
     for result in results:
         instrument: InstrumentRefV0 | None
-        if isinstance(result, SwingApprovalResultV0):
-            instrument = (
-                result.approved_ref.instrument
-                if result.approved_ref is not None
-                else None
-            )
-        elif isinstance(result, EntryIdentityResultV0):
+        if isinstance(result, SwingApprovedV0):
+            instrument = result.approved_ref.instrument
+        elif isinstance(result, EntryIdentityApprovedV0):
             instrument = result.instrument
+        elif isinstance(result, (SwingReviewV0, EntryIdentityReviewV0)):
+            instrument = None
         else:
             raise TypeError("research projection requires typed identity gate results")
         if instrument is None:
@@ -187,19 +235,20 @@ def _approve_holding(
             )
         )
     if issues:
-        return SwingApprovalResultV0(
-            status="REVIEW", approved_ref=None, issues=tuple(issues)
-        )
+        return SwingReviewV0(issues=tuple(issues))
     assert instrument is not None
-    return SwingApprovalResultV0(
-        status="APPROVED",
+    return SwingApprovedV0(
         approved_ref=ApprovedSwingRefV0(instrument=instrument),
-        issues=(),
     )
 
 
 def _is_exact_swing(value: object) -> bool:
-    return isinstance(value, str) and value.strip(_ASCII_WHITESPACE).upper() == "SWING"
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip(_ASCII_WHITESPACE)
+    return (
+        normalized.isascii() and normalized.isalpha() and normalized.upper() == "SWING"
+    )
 
 
 def _is_active_confirmed_holding(holding: Mapping[str, object]) -> bool:
@@ -217,9 +266,7 @@ def _is_active_confirmed_holding(holding: Mapping[str, object]) -> bool:
 
 
 def _entry_review(code: str, message: str) -> EntryIdentityResultV0:
-    return EntryIdentityResultV0(
-        status="REVIEW",
-        instrument=None,
+    return EntryIdentityReviewV0(
         issues=(IdentityGateIssueV0(code=code, message=message),),
     )
 
@@ -240,35 +287,24 @@ def _candidate_conflicts(
             continue
         candidate_value = candidate[field]
         assert isinstance(candidate_value, str)
-        normalized = candidate_value.strip()
-        if field in {"market", "canonical_ticker", "exchange"}:
-            normalized = normalized.upper()
+        if field == "exchange":
+            normalized_venue = normalize_us_venue_v0(candidate_value)
+            if normalized_venue != instrument.exchange:
+                return True
+            continue
+        if field == "canonical_ticker":
+            normalized = normalize_identity_key_v0(candidate_value)
+        else:
+            normalized = normalize_public_text_v0(candidate_value)
+            if field == "market" and normalized is not None:
+                normalized = normalized.upper()
         if normalized != expected_value:
             return True
 
     ticker = candidate["ticker"]
     assert isinstance(ticker, str)
-    candidate_family = _ticker_exchange_family(ticker)
-    canonical_family = _ticker_exchange_family(instrument.canonical_ticker)
-    return (
-        candidate_family is not None
-        and canonical_family is not None
-        and candidate_family != canonical_family
-    )
-
-
-def _ticker_exchange_family(ticker: str) -> str | None:
-    if "." not in ticker:
-        return None
-    suffix = ticker.strip().upper().rsplit(".", 1)[1]
-    return {
-        "NAS": "NASDAQ",
-        "NASDAQ": "NASDAQ",
-        "NYS": "NYSE",
-        "NYSE": "NYSE",
-        "AMS": "AMEX",
-        "AMEX": "AMEX",
-    }.get(suffix)
+    candidate_venue = ticker_venue_hint_v0(ticker)
+    return candidate_venue is not None and candidate_venue != instrument.exchange
 
 
 def _holding_identity_conflicts(
@@ -277,34 +313,26 @@ def _holding_identity_conflicts(
     ticker = holding.get("ticker")
     if not isinstance(ticker, str):
         return False
-    holding_family = _ticker_exchange_family(ticker)
-    canonical_family = _ticker_exchange_family(instrument.canonical_ticker)
-    return (
-        holding_family is not None
-        and canonical_family is not None
-        and holding_family != canonical_family
-    )
-
-
-def _valid_public_text(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and bool(value.strip())
-        and not any(category(character) == "Cc" for character in value)
-    )
+    holding_venue = ticker_venue_hint_v0(ticker)
+    return holding_venue is not None and holding_venue != instrument.exchange
 
 
 def _public_lookup_key(value: object) -> bytes:
-    if not isinstance(value, str):
+    normalized = normalize_identity_key_v0(value)
+    if normalized is None:
         return b""
-    return value.strip(_ASCII_WHITESPACE).upper().encode("utf-8")
+    return normalized.encode("ascii")
 
 
 __all__ = [
     "ApprovedSwingRefV0",
+    "EntryIdentityApprovedV0",
     "EntryIdentityResultV0",
+    "EntryIdentityReviewV0",
     "IdentityGateIssueV0",
     "SwingApprovalResultV0",
+    "SwingApprovedV0",
+    "SwingReviewV0",
     "approve_swing_snapshot_v0",
     "project_research_instruments_v0",
     "resolve_entry_identity_v0",

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
-from unicodedata import category
+from unicodedata import category, normalize
 
 _RECORD_FIELDS = {
     "market",
@@ -15,7 +16,18 @@ _RECORD_FIELDS = {
     "aliases",
 }
 _REQUIRED_RECORD_FIELDS = _RECORD_FIELDS - {"aliases"}
-_ASCII_WHITESPACE = " \t\n\r\f\v"
+_ASCII_IDENTITY_KEY = re.compile(r"[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*\Z")
+_US_VENUE_FAMILIES = {
+    "NAS": "NASDAQ",
+    "NASDAQ": "NASDAQ",
+    "XNAS": "NASDAQ",
+    "NYS": "NYSE",
+    "NYSE": "NYSE",
+    "XNYS": "NYSE",
+    "AMS": "AMEX",
+    "AMEX": "AMEX",
+    "XASE": "AMEX",
+}
 
 
 class InstrumentRegistryError(ValueError):
@@ -43,10 +55,14 @@ class InstrumentRefV0:
             raise InstrumentRegistryError(
                 "INVALID_MARKET", "V0 instrument market must be US"
             )
-        canonical_ticker = _required_text(
+        canonical_ticker = _required_identity_key(
             self.canonical_ticker, field="canonical_ticker"
-        ).upper()
-        exchange = _required_text(self.exchange, field="exchange").upper()
+        )
+        exchange = normalize_us_venue_v0(self.exchange)
+        if exchange is None:
+            raise InstrumentRegistryError(
+                "INVALID_EXCHANGE", "V0 instrument exchange is unsupported"
+            )
         _validate_registry_identity_consistency(canonical_ticker, exchange)
         object.__setattr__(self, "market", market)
         object.__setattr__(self, "canonical_ticker", canonical_ticker)
@@ -191,10 +207,14 @@ def _parse_record(raw: object) -> tuple[_RegistryBinding, tuple[str, ...]]:
     market = _required_text(raw["market"], field="market").upper()
     if market != "US":
         raise InstrumentRegistryError("INVALID_MARKET", "V0 registry market must be US")
-    canonical_ticker = _required_text(
+    canonical_ticker = _required_identity_key(
         raw["canonical_ticker"], field="canonical_ticker"
-    ).upper()
-    exchange = _required_text(raw["exchange"], field="exchange").upper()
+    )
+    exchange = normalize_us_venue_v0(raw["exchange"])
+    if exchange is None:
+        raise InstrumentRegistryError(
+            "INVALID_EXCHANGE", "V0 registry exchange is unsupported"
+        )
     company_name = _required_text(raw["company_name"], field="company_name")
     _validate_registry_identity_consistency(canonical_ticker, exchange)
 
@@ -203,7 +223,7 @@ def _parse_record(raw: object) -> tuple[_RegistryBinding, tuple[str, ...]]:
         raise InstrumentRegistryError("INVALID_RECORD", "aliases must be an array")
     aliases: list[str] = []
     for alias in raw_aliases:
-        normalized = _required_text(alias, field="alias").upper()
+        normalized = _required_identity_key(alias, field="alias")
         if normalized in aliases:
             raise InstrumentRegistryError(
                 "DUPLICATE_ALIAS", "aliases must not contain duplicate keys"
@@ -221,75 +241,98 @@ def _parse_record(raw: object) -> tuple[_RegistryBinding, tuple[str, ...]]:
 
 
 def _required_text(value: object, *, field: str) -> str:
-    if not isinstance(value, str):
+    normalized = normalize_public_text_v0(value)
+    if normalized is None:
         raise InstrumentRegistryError(
-            "INVALID_IDENTITY", f"{field} must be a nonblank string"
+            "INVALID_IDENTITY", f"{field} must be valid NFC public text"
         )
-    if _has_control_character(value):
+    return normalized
+
+
+def _required_identity_key(value: object, *, field: str) -> str:
+    normalized = normalize_identity_key_v0(value)
+    if normalized is None:
         raise InstrumentRegistryError(
-            "INVALID_IDENTITY", f"{field} must be a nonblank public string"
-        )
-    normalized = value.strip()
-    if not normalized:
-        raise InstrumentRegistryError(
-            "INVALID_IDENTITY", f"{field} must be a nonblank public string"
+            "INVALID_IDENTITY", f"{field} must match the ASCII identity grammar"
         )
     return normalized
 
 
 def _lookup_text(value: object) -> str | None:
-    if not isinstance(value, str) or _has_control_character(value):
-        return None
-    normalized = value.strip(_ASCII_WHITESPACE)
-    if not normalized:
-        return None
-    return normalized.upper()
+    return normalize_identity_key_v0(value)
 
 
-def _has_control_character(value: str) -> bool:
-    return any(category(character) == "Cc" for character in value)
+def normalize_public_text_v0(value: object) -> str | None:
+    """Normalize public Unicode text to NFC and reject unsafe code points."""
+
+    if not isinstance(value, str):
+        return None
+    normalized = normalize("NFC", value)
+    if any(_is_forbidden_public_character(character) for character in normalized):
+        return None
+    normalized = normalized.strip()
+    return normalized or None
+
+
+def normalize_identity_key_v0(value: object) -> str | None:
+    """Normalize a ticker/alias under the explicit ASCII identity grammar."""
+
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip(" ")
+    if not normalized or not normalized.isascii():
+        return None
+    normalized = normalized.upper()
+    return normalized if _ASCII_IDENTITY_KEY.fullmatch(normalized) else None
+
+
+def _is_forbidden_public_character(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        category(character) in {"Cc", "Cf", "Cs"}
+        or 0xFDD0 <= codepoint <= 0xFDEF
+        or codepoint & 0xFFFF in {0xFFFE, 0xFFFF}
+    )
 
 
 def _validate_registry_identity_consistency(
     canonical_ticker: str, exchange: str
 ) -> None:
-    ticker_family = _ticker_exchange_family(canonical_ticker)
-    exchange_family = _exchange_family(exchange)
-    if (
-        ticker_family is not None
-        and exchange_family is not None
-        and ticker_family != exchange_family
-    ):
+    ticker_venue = ticker_venue_hint_v0(canonical_ticker)
+    if ticker_venue is not None and ticker_venue != exchange:
         raise InstrumentRegistryError(
             "IDENTITY_CONFLICT",
             "canonical ticker and exchange identify different venues",
         )
 
 
-def _ticker_exchange_family(ticker: str) -> str | None:
-    if "." not in ticker:
+def normalize_us_venue_v0(value: object) -> str | None:
+    """Normalize one explicit supported US venue identifier."""
+
+    if not isinstance(value, str) or any(
+        category(character) in {"Cc", "Cf", "Cs"} for character in value
+    ):
         return None
-    return _exchange_family(ticker.rsplit(".", 1)[1])
+    normalized = value.strip(" ")
+    if not normalized or not normalized.isascii() or not normalized.isalpha():
+        return None
+    return _US_VENUE_FAMILIES.get(normalized.upper())
 
 
-def _exchange_family(exchange: str) -> str | None:
-    normalized = exchange.strip().upper()
-    families = {
-        "NAS": "NASDAQ",
-        "NASDAQ": "NASDAQ",
-        "XNAS": "NASDAQ",
-        "NYS": "NYSE",
-        "NYSE": "NYSE",
-        "XNYS": "NYSE",
-        "AMS": "AMEX",
-        "AMEX": "AMEX",
-        "XASE": "AMEX",
-    }
-    return families.get(normalized)
+def ticker_venue_hint_v0(value: object) -> str | None:
+    """Read a supported suffix as a conflict hint, never as binding identity."""
+
+    if not isinstance(value, str) or "." not in value:
+        return None
+    return normalize_us_venue_v0(value.rsplit(".", 1)[1])
 
 
 __all__ = [
     "InstrumentRefV0",
     "InstrumentRegistryError",
     "VersionedInstrumentRegistryV0",
+    "normalize_identity_key_v0",
+    "normalize_public_text_v0",
+    "normalize_us_venue_v0",
+    "ticker_venue_hint_v0",
 ]
