@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DecisionBoardIntegrityError,
+  DecisionBoardJsonValueError,
   canonicalDecisionPayloadBytesV0,
   claimValidationV0Schema,
   decisionPayloadHashV0,
@@ -29,6 +30,7 @@ const loadFixture = (name: string): unknown =>
 type MutablePublishedReport = {
   status: string;
   issues: unknown[];
+  metadata?: unknown;
   decision_payload: {
     items: Array<{
       action?: string;
@@ -40,6 +42,31 @@ type MutablePublishedReport = {
 
 const loadPublishedFixture = (): MutablePublishedReport =>
   loadFixture("published-entry.json") as MutablePublishedReport;
+
+const validClaim = () => {
+  const fixture = loadPublishedFixture();
+  const instrument = (
+    fixture.decision_payload.items[0] as unknown as {
+      instrument: Record<string, unknown>;
+    }
+  ).instrument;
+  return {
+    claim_id: "claim-synthetic",
+    instrument,
+    source_url: "https://example.com/synthetic-claim",
+    publisher: "Synthetic Publisher",
+    published_at: "2026-08-06T00:30:00Z",
+    article_content_hash: `sha256:${"d".repeat(64)}`,
+    supporting_span: "Synthetic exact supporting text.",
+    supporting_location: {
+      kind: "TEXT_OFFSETS",
+      start: 20,
+      end: 20,
+    },
+    verifier_version: "fixture-verifier-v0",
+    entailment: "SUPPORTED",
+  };
+};
 
 describe("Decision Board V0 schema", () => {
   it.each(["published-entry.json", "published-holding.json", "blocked.json"])(
@@ -88,6 +115,49 @@ describe("Decision Board V0 schema", () => {
     );
   });
 
+  it("rejects cycles with typed path errors in canonical and verified boundaries", async () => {
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    const fixture = loadPublishedFixture();
+    fixture.metadata = cycle;
+
+    expect(() => canonicalDecisionPayloadBytesV0(cycle as never)).toThrowError(
+      DecisionBoardJsonValueError,
+    );
+    expect(() => canonicalDecisionPayloadBytesV0(cycle as never)).toThrow(
+      /\$\.self.*cycle/,
+    );
+    await expect(parseVerifiedDecisionBoardReport(fixture)).rejects.toThrow(
+      DecisionBoardJsonValueError,
+    );
+    const result = await safeParseVerifiedDecisionBoardReport(fixture);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(DecisionBoardJsonValueError);
+    }
+  });
+
+  it.each([
+    {
+      name: "string value",
+      invalid: { text: "\ud800" },
+    },
+    {
+      name: "object key",
+      invalid: { ["\udfff"]: "text" },
+    },
+  ])("rejects unpaired surrogate in $name", async ({ invalid }) => {
+    const fixture = loadPublishedFixture();
+    fixture.metadata = invalid;
+
+    expect(() =>
+      canonicalDecisionPayloadBytesV0(invalid as never),
+    ).toThrowError(DecisionBoardJsonValueError);
+    await expect(parseVerifiedDecisionBoardReport(fixture)).rejects.toThrow(
+      DecisionBoardJsonValueError,
+    );
+  });
+
   it("rejects the shared conditional-invariant fixture", () => {
     const result = safeParseDecisionBoardReportStructure(
       loadFixture("invalid-review-action.json"),
@@ -122,18 +192,11 @@ describe("Decision Board V0 schema", () => {
     expect(decisionBoardEnvelopeV0Schema.safeParse(nested).success).toBe(false);
   });
 
-  it("rejects naive timestamps and malformed hashes", () => {
+  it("rejects malformed hashes", () => {
     const fixture = loadFixture("published-entry.json") as Record<
       string,
       unknown
     >;
-
-    expect(
-      decisionBoardEnvelopeV0Schema.safeParse({
-        ...fixture,
-        created_at: "2026-08-06T01:00:05",
-      }).success,
-    ).toBe(false);
 
     const malformed = structuredClone(fixture) as {
       decision_payload_hash: string;
@@ -144,40 +207,24 @@ describe("Decision Board V0 schema", () => {
     );
   });
 
-  it("rejects an impossible ISO calendar date", () => {
+  it.each([
+    { name: "naive", timestamp: "2026-08-06T01:00:05" },
+    { name: "impossible date", timestamp: "2026-02-30T01:00:05Z" },
+  ])("rejects $name timestamp mutation", ({ timestamp }) => {
     const fixture = loadPublishedFixture();
 
     expect(
       decisionBoardEnvelopeV0Schema.safeParse({
         ...fixture,
-        created_at: "2026-02-30T01:00:05Z",
+        created_at: timestamp,
       }).success,
     ).toBe(false);
   });
 
   it("rejects evidence locations whose end precedes start", () => {
-    const fixture = loadPublishedFixture();
-    const instrument = (
-      fixture.decision_payload.items[0] as unknown as {
-        instrument: Record<string, unknown>;
-      }
-    ).instrument;
-    const result = claimValidationV0Schema.safeParse({
-      claim_id: "claim-invalid-offsets",
-      instrument,
-      source_url: "https://example.com/synthetic-claim",
-      publisher: "Synthetic Publisher",
-      published_at: "2026-08-06T00:30:00Z",
-      article_content_hash: `sha256:${"d".repeat(64)}`,
-      supporting_span: "Synthetic exact supporting text.",
-      supporting_location: {
-        kind: "TEXT_OFFSETS",
-        start: 20,
-        end: 19,
-      },
-      verifier_version: "fixture-verifier-v0",
-      entailment: "SUPPORTED",
-    });
+    const claim = validClaim();
+    claim.supporting_location.end = 19;
+    const result = claimValidationV0Schema.safeParse(claim);
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -187,6 +234,16 @@ describe("Decision Board V0 schema", () => {
         ]),
       );
     }
+  });
+
+  it.each([
+    { name: "non-HTTP scheme", sourceUrl: "mailto:research@example.com" },
+    { name: "space in host", sourceUrl: "https://bad host.example/path" },
+  ])("rejects source URL mutation: $name", ({ sourceUrl }) => {
+    const claim = validClaim();
+    claim.source_url = sourceUrl;
+
+    expect(claimValidationV0Schema.safeParse(claim).success).toBe(false);
   });
 
   it.each([

@@ -39,6 +39,58 @@ def _schema_validator() -> Any:
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
+def _definition_validator(definition: str) -> Any:
+    from jsonschema import (  # type: ignore[import-untyped]
+        Draft202012Validator,
+        FormatChecker,
+    )
+
+    schema = _load_json(SCHEMA_PATH)
+    return Draft202012Validator(
+        {
+            "$schema": schema["$schema"],
+            "$defs": schema["$defs"],
+            "$ref": f"#/$defs/{definition}",
+        },
+        format_checker=FormatChecker(),
+    )
+
+
+def _valid_claim() -> dict[str, Any]:
+    instrument = _load_json(FIXTURE_DIR / "published-entry.json")["decision_payload"][
+        "items"
+    ][0]["instrument"]
+    return {
+        "claim_id": "claim-synthetic",
+        "instrument": instrument,
+        "source_url": "https://example.com/synthetic-claim",
+        "publisher": "Synthetic Publisher",
+        "published_at": "2026-08-06T00:30:00Z",
+        "article_content_hash": (
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ),
+        "supporting_span": "Synthetic exact supporting text.",
+        "supporting_location": {
+            "kind": "TEXT_OFFSETS",
+            "start": 20,
+            "end": 20,
+        },
+        "verifier_version": "fixture-verifier-v0",
+        "entailment": "SUPPORTED",
+    }
+
+
+def test_jsonschema_format_checker_registers_required_formats() -> None:
+    from jsonschema import FormatChecker  # type: ignore[import-untyped]
+
+    checker = FormatChecker()
+
+    assert "date-time" in checker.checkers
+    assert "uri" in checker.checkers
+    assert not checker.conforms("2026-02-30T01:00:05Z", "date-time")
+    assert not checker.conforms("https://bad host.example/path", "uri")
+
+
 @pytest.mark.parametrize("fixture_name", VALID_FIXTURES)
 def test_golden_reports_pass_json_schema_and_python(fixture_name: str) -> None:
     path = FIXTURE_DIR / fixture_name
@@ -134,6 +186,37 @@ def test_canonical_json_rejects_values_that_json_dumps_would_coerce(
         canonical_json_bytes(invalid_json_value)
 
 
+def test_cycles_are_typed_contract_errors_with_paths() -> None:
+    cycle: dict[str, Any] = {}
+    cycle["self"] = cycle
+    report = _load_json(FIXTURE_DIR / "blocked.json")
+    report["metadata"] = cycle
+
+    with pytest.raises(ContractError, match=r"\$\.metadata\.self.*cycle"):
+        validate_decision_board_report(report)
+    with pytest.raises(ContractError, match=r"\$\.self.*cycle"):
+        canonical_json_bytes(cycle)
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        pytest.param({"text": "\ud800"}, id="string-value"),
+        pytest.param({"\udfff": "text"}, id="object-key"),
+    ],
+)
+def test_unpaired_surrogates_are_typed_contract_errors(
+    invalid_value: dict[str, str],
+) -> None:
+    report = _load_json(FIXTURE_DIR / "blocked.json")
+    report["metadata"] = invalid_value
+
+    with pytest.raises(ContractError, match="Unicode scalar"):
+        validate_decision_board_report(report)
+    with pytest.raises(ContractError, match="Unicode scalar"):
+        canonical_json_bytes(invalid_value)
+
+
 def _mutate_blocked_with_payload(report: dict[str, Any]) -> None:
     report["status"] = "BLOCKED"
     report["issues"] = [{"code": "BLOCKED", "message": "Synthetic block."}]
@@ -183,16 +266,39 @@ def test_mutation_corpus_is_rejected_at_the_applicable_contract_boundary(
         validate_decision_board_report(report)
 
 
-def test_contracts_reject_unknown_fields_and_naive_timestamps() -> None:
+def test_contracts_reject_unknown_fields() -> None:
     report = _load_json(FIXTURE_DIR / "blocked.json")
     report["unexpected"] = True
     with pytest.raises(ContractError, match=r"\$\.unexpected"):
         validate_decision_board_report(report)
 
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        pytest.param("2026-08-06T03:00:03", id="naive"),
+        pytest.param("2026-02-30T03:00:03Z", id="impossible-calendar-date"),
+    ],
+)
+def test_invalid_timestamp_mutations_fail_schema_and_consumers(timestamp: str) -> None:
     report = _load_json(FIXTURE_DIR / "blocked.json")
-    report["created_at"] = "2026-08-06T03:00:03"
+    report["created_at"] = timestamp
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
     with pytest.raises(ContractError, match=r"\$\.created_at"):
         validate_decision_board_report(report)
+
+
+def test_timestamp_pattern_rejects_naive_values_without_format_checker() -> None:
+    from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+
+    schema = _load_json(SCHEMA_PATH)
+    report = _load_json(FIXTURE_DIR / "blocked.json")
+    report["created_at"] = "2026-08-06T03:00:03"
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(report)
 
 
 def test_empty_published_universe_is_valid() -> None:
@@ -222,33 +328,32 @@ def test_schema_exposes_all_normative_v0_contracts() -> None:
 
 
 def test_evidence_location_end_cannot_precede_start() -> None:
-    instrument = _load_json(FIXTURE_DIR / "published-entry.json")["decision_payload"][
-        "items"
-    ][0]["instrument"]
-    claim = {
-        "claim_id": "claim-invalid-offsets",
-        "instrument": instrument,
-        "source_url": "https://example.com/synthetic-claim",
-        "publisher": "Synthetic Publisher",
-        "published_at": "2026-08-06T00:30:00Z",
-        "article_content_hash": (
-            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-        ),
-        "supporting_span": "Synthetic exact supporting text.",
-        "supporting_location": {
-            "kind": "TEXT_OFFSETS",
-            "start": 20,
-            "end": 19,
-        },
-        "verifier_version": "fixture-verifier-v0",
-        "entailment": "SUPPORTED",
-    }
+    claim = _valid_claim()
+    claim["claim_id"] = "claim-invalid-offsets"
+    claim["supporting_location"]["end"] = 19
 
     with pytest.raises(ContractError, match=r"\$\.supporting_location\.end"):
         validate_claim_validation(claim)
 
     claim["supporting_location"]["end"] = 20
     assert validate_claim_validation(claim) == claim
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        pytest.param("mailto:research@example.com", id="non-http-scheme"),
+        pytest.param("https://bad host.example/path", id="space-in-host"),
+    ],
+)
+def test_source_url_mutations_fail_schema_and_consumers(source_url: str) -> None:
+    claim = _valid_claim()
+    claim["source_url"] = source_url
+
+    with pytest.raises(ValidationError):
+        _definition_validator("ClaimValidationV0").validate(claim)
+    with pytest.raises(ContractError, match=r"\$\.source_url"):
+        validate_claim_validation(claim)
 
 
 def test_schema_documents_evidence_offset_consumer_invariant() -> None:

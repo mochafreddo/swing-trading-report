@@ -34,8 +34,8 @@ class ContractError(ValueError):
 def canonical_json_bytes(value: Any) -> bytes:
     """Serialize a JSON value using the Decision Board canonical byte format."""
 
-    _strict_json_value(value, "$")
     try:
+        _strict_json_value(value, "$")
         encoded = json.dumps(
             value,
             ensure_ascii=False,
@@ -43,9 +43,11 @@ def canonical_json_bytes(value: Any) -> bytes:
             separators=(",", ":"),
             allow_nan=False,
         )
-    except (TypeError, ValueError) as exc:
+        return encoded.encode("utf-8")
+    except ContractError:
+        raise
+    except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
         raise ContractError("$", f"value is not canonical JSON: {exc}") from exc
-    return encoded.encode("utf-8")
 
 
 def decision_payload_hash(payload: Any) -> str:
@@ -289,25 +291,55 @@ def _reject_json_constant(constant: str) -> None:
     raise ValueError(f"non-finite JSON constant is forbidden: {constant}")
 
 
-def _strict_json_value(value: Any, path: str) -> None:
+def _strict_json_value(
+    value: Any,
+    path: str,
+    active_containers: set[int] | None = None,
+) -> None:
+    if active_containers is None:
+        active_containers = set()
     value_type = type(value)
-    if value is None or value_type in {str, bool, int}:
+    if value is None or value_type in {bool, int}:
+        return
+    if value_type is str:
+        _unicode_scalar_string(value, path)
         return
     if value_type is float:
         if math.isfinite(value):
             return
         raise ContractError(path, "non-finite numbers are not strict JSON values")
-    if value_type is list:
-        for index, item in enumerate(value):
-            _strict_json_value(item, f"{path}[{index}]")
-        return
-    if value_type is dict:
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ContractError(path, "object keys must be strings in strict JSON")
-            _strict_json_value(item, f"{path}.{key}")
-        return
+    if value_type in {list, dict}:
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ContractError(path, "cycle detected in JSON container")
+        active_containers.add(container_id)
+        try:
+            if value_type is list:
+                for index, item in enumerate(value):
+                    _strict_json_value(
+                        item,
+                        f"{path}[{index}]",
+                        active_containers,
+                    )
+                return
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise ContractError(
+                        path, "object keys must be strings in strict JSON"
+                    )
+                _unicode_scalar_string(key, path)
+                _strict_json_value(item, f"{path}.{key}", active_containers)
+            return
+        finally:
+            active_containers.remove(container_id)
     raise ContractError(path, f"{value_type.__name__} is not a strict JSON value")
+
+
+def _unicode_scalar_string(value: str, path: str) -> None:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ContractError(path, "must contain only Unicode scalar values") from exc
 
 
 def _object(value: Any, path: str) -> dict[str, Any]:
@@ -345,9 +377,20 @@ def _integer(value: Any, path: str, *, minimum: int) -> int:
 
 def _url(value: Any, path: str) -> str:
     text = _non_empty_string(value, path)
-    parsed = urlsplit(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if re.search(r"[\s\x00-\x1f\x7f]", text):
+        raise ContractError(path, "must not contain whitespace or control characters")
+    try:
+        parsed = urlsplit(text)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise ContractError(path, "must be a valid absolute HTTP(S) URL") from exc
+    if parsed.scheme.lower() not in {"http", "https"} or not hostname:
         raise ContractError(path, "must be an absolute HTTP(S) URL")
+    try:
+        hostname.encode("idna")
+    except UnicodeError as exc:
+        raise ContractError(path, "must contain a valid host") from exc
     return text
 
 

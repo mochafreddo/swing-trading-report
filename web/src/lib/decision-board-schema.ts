@@ -2,6 +2,23 @@ import { z } from "zod";
 
 const hashV0Schema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const timestampV0Schema = z.iso.datetime({ offset: true });
+const sourceUrlV0Schema = z.url().refine(
+  (value) => {
+    if (/[\s\u0000-\u001f\u007f]/u.test(value)) {
+      return false;
+    }
+    try {
+      const parsed = new URL(value);
+      return (
+        (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+        parsed.hostname.length > 0
+      );
+    } catch {
+      return false;
+    }
+  },
+  { message: "Must be a valid absolute HTTP(S) URL" },
+);
 
 export const decisionBoardIssueV0Schema = z
   .object({
@@ -50,7 +67,7 @@ export const claimValidationV0Schema = z
   .object({
     claim_id: z.string().min(1),
     instrument: instrumentRefV0Schema,
-    source_url: z.url(),
+    source_url: sourceUrlV0Schema,
     publisher: z.string().min(1),
     published_at: timestampV0Schema,
     article_content_hash: hashV0Schema,
@@ -215,6 +232,95 @@ export const parseDecisionBoardReportStructure = (
 export const safeParseDecisionBoardReportStructure = (value: unknown) =>
   decisionBoardEnvelopeV0Schema.safeParse(value);
 
+export class DecisionBoardJsonValueError extends TypeError {
+  constructor(
+    readonly path: string,
+    message: string,
+  ) {
+    super(`${path}: ${message}`);
+    this.name = "DecisionBoardJsonValueError";
+  }
+}
+
+const assertUnicodeScalarString = (value: string, path: string): void => {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+      throw new DecisionBoardJsonValueError(
+        path,
+        "must contain only Unicode scalar values",
+      );
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new DecisionBoardJsonValueError(
+        path,
+        "must contain only Unicode scalar values",
+      );
+    }
+  }
+};
+
+const assertStrictJsonValue = (
+  value: unknown,
+  path = "$",
+  activeContainers = new Set<object>(),
+): void => {
+  if (value === null || typeof value === "boolean") {
+    return;
+  }
+  if (typeof value === "string") {
+    assertUnicodeScalarString(value, path);
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new DecisionBoardJsonValueError(
+        path,
+        "non-finite numbers are not strict JSON values",
+      );
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new DecisionBoardJsonValueError(
+      path,
+      `${typeof value} is not a strict JSON value`,
+    );
+  }
+  if (activeContainers.has(value)) {
+    throw new DecisionBoardJsonValueError(
+      path,
+      "cycle detected in JSON container",
+    );
+  }
+  activeContainers.add(value);
+  try {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) =>
+        assertStrictJsonValue(item, `${path}[${index}]`, activeContainers),
+      );
+      return;
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      throw new DecisionBoardJsonValueError(
+        path,
+        "symbol keys are not strict JSON object keys",
+      );
+    }
+    Object.entries(value).forEach(([key, item]) => {
+      assertUnicodeScalarString(key, path);
+      assertStrictJsonValue(item, `${path}.${key}`, activeContainers);
+    });
+  } finally {
+    activeContainers.delete(value);
+  }
+};
+
 const canonicalJson = (value: unknown): string => {
   if (
     value === null ||
@@ -244,11 +350,15 @@ const canonicalJson = (value: unknown): string => {
 
 export const canonicalDecisionPayloadBytesV0 = (
   payload: DecisionPayloadV0,
-): Uint8Array<ArrayBuffer> => new TextEncoder().encode(canonicalJson(payload));
+): Uint8Array<ArrayBuffer> => {
+  assertStrictJsonValue(payload);
+  return new TextEncoder().encode(canonicalJson(payload));
+};
 
 export const decisionPayloadHashV0 = async (
   payload: unknown,
 ): Promise<string> => {
+  assertStrictJsonValue(payload);
   const parsedPayload = decisionPayloadV0Schema.parse(payload);
   const digest = await globalThis.crypto.subtle.digest(
     "SHA-256",
@@ -274,6 +384,7 @@ export class DecisionBoardIntegrityError extends Error {
 export const parseVerifiedDecisionBoardReport = async (
   value: unknown,
 ): Promise<DecisionBoardEnvelopeV0> => {
+  assertStrictJsonValue(value);
   const report = parseDecisionBoardReportStructure(value);
   if (report.status === "PUBLISHED") {
     const actualHash = await decisionPayloadHashV0(report.decision_payload);
@@ -289,12 +400,24 @@ export const parseVerifiedDecisionBoardReport = async (
 
 export type VerifiedDecisionBoardParseResult =
   | { success: true; data: DecisionBoardEnvelopeV0 }
-  | { success: false; error: z.ZodError | DecisionBoardIntegrityError };
+  | {
+      success: false;
+      error:
+        z.ZodError | DecisionBoardIntegrityError | DecisionBoardJsonValueError;
+    };
 
 /** Non-throwing integrity-verifying report boundary for UI consumers. */
 export const safeParseVerifiedDecisionBoardReport = async (
   value: unknown,
 ): Promise<VerifiedDecisionBoardParseResult> => {
+  try {
+    assertStrictJsonValue(value);
+  } catch (error) {
+    if (error instanceof DecisionBoardJsonValueError) {
+      return { success: false, error };
+    }
+    throw error;
+  }
   const structuralResult = safeParseDecisionBoardReportStructure(value);
   if (!structuralResult.success) {
     return structuralResult;
