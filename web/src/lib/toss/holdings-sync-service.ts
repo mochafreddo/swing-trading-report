@@ -5,7 +5,13 @@ import {
   fetchAllHoldings,
   replaceAllHoldings,
 } from "@/lib/supabase-admin";
-import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
+import { getSupabaseEnv } from "@/lib/env.server";
+import {
+  buildAuthHeaders,
+  fetchSupabase,
+  parseError,
+  SupabaseApiError,
+} from "@/lib/supabase/admin-client";
 import {
   listTickerDirectoryExactBaseCandidates,
   type TickerDirectoryExactBaseResponse,
@@ -99,6 +105,9 @@ export interface TossHoldingsSyncDependencies {
 export interface ScheduledTossFreshnessMarkerResult {
   stateKey: string;
   sessionDate: string;
+  holdingsDigest: string;
+  revision: number;
+  sealedAt: string;
 }
 
 const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
@@ -298,27 +307,84 @@ export async function recordScheduledTossFreshnessMarker(
   const sessionDate = options.sessionDate ?? resolveKstSessionDate(now);
   const stateKey = `toss-sync:success:MIXED:${sessionDate}`;
   const expiresAt = new Date(now.getTime() + 36 * 60 * 60 * 1000).toISOString();
-  await upsertRuntimeStateEntry(
-    stateKey,
+  const markerPayload = {
+    scope: "MIXED",
+    sessionDate,
+    status: result.status,
+    diffHash: result.diffHash,
+    incomingCount: result.summary.incomingCount,
+    createCount: result.summary.createCount,
+    updateCount: result.summary.updateCount,
+    deleteCount: result.summary.deleteCount,
+    unchangedCount: result.summary.unchangedCount,
+    quarantinedCount: result.quarantinedCount,
+    quarantinedTickers: result.quarantinedTickers,
+    source: "scheduled-route",
+    timezone: "Asia/Seoul",
+    updatedAt: now.toISOString(),
+  };
+  const env = getSupabaseEnv();
+  const response = await fetchSupabase(
+    `${env.SUPABASE_URL}/rest/v1/rpc/seal_broker_snapshot_v0`,
     {
-      scope: "MIXED",
-      sessionDate,
-      status: result.status,
-      diffHash: result.diffHash,
-      incomingCount: result.summary.incomingCount,
-      createCount: result.summary.createCount,
-      updateCount: result.summary.updateCount,
-      deleteCount: result.summary.deleteCount,
-      unchangedCount: result.summary.unchangedCount,
-      quarantinedCount: result.quarantinedCount,
-      quarantinedTickers: result.quarantinedTickers,
-      source: "scheduled-route",
-      timezone: "Asia/Seoul",
-      updatedAt: now.toISOString(),
+      method: "POST",
+      headers: buildAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      body: JSON.stringify({
+        p_state_key: stateKey,
+        p_session_date: sessionDate,
+        p_status: result.status,
+        p_expires_at: expiresAt,
+        p_marker_payload: markerPayload,
+      }),
+      cache: "no-store",
     },
-    expiresAt,
   );
-  return { stateKey, sessionDate };
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to seal BrokerSnapshotV0: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!Array.isArray(payload) || payload.length !== 1) {
+    throw new SupabaseApiError(
+      "seal_broker_snapshot_v0 returned ambiguous cardinality",
+      500,
+    );
+  }
+  const sealed = asRecord(payload[0]);
+  const holdingsDigest = sealed?.holdings_digest;
+  const revision = sealed?.revision;
+  const sealedAt = sealed?.sealed_at;
+  if (
+    sealed?.state_key !== stateKey ||
+    sealed?.session_date !== sessionDate ||
+    sealed?.status !== result.status ||
+    typeof holdingsDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/.test(holdingsDigest) ||
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision <= 0 ||
+    typeof sealedAt !== "string" ||
+    !Number.isFinite(Date.parse(sealedAt))
+  ) {
+    throw new SupabaseApiError(
+      "seal_broker_snapshot_v0 returned an invalid result",
+      500,
+    );
+  }
+
+  return {
+    stateKey,
+    sessionDate,
+    holdingsDigest,
+    revision,
+    sealedAt: new Date(sealedAt).toISOString(),
+  };
 }
 
 async function fetchTossTickerDirectoryCandidates(

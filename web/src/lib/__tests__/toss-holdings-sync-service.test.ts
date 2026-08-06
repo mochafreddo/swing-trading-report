@@ -4,6 +4,31 @@ vi.mock("@/lib/supabase/runtime-state", () => ({
   upsertRuntimeStateEntry: vi.fn(),
 }));
 
+vi.mock("@/lib/env.server", () => ({
+  getSupabaseEnv: vi.fn(() => ({
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_API_KEY: "sb_secret_test",
+  })),
+}));
+
+vi.mock("@/lib/supabase/admin-client", () => ({
+  buildAuthHeaders: vi.fn((headers) => ({
+    apikey: "sb_secret_test",
+    Authorization: "Bearer sb_secret_test",
+    ...headers,
+  })),
+  fetchSupabase: vi.fn(),
+  parseError: vi.fn(async () => "upstream error"),
+  SupabaseApiError: class SupabaseApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+    }
+  },
+}));
+
 import {
   applyTossHoldingsSyncPreview,
   buildTossHoldingsSyncDependenciesFromEnv,
@@ -14,6 +39,7 @@ import {
   type TossHoldingsSyncDependencies,
 } from "@/lib/toss/holdings-sync-service";
 import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
+import { fetchSupabase } from "@/lib/supabase/admin-client";
 import type { HoldingRecord } from "@/lib/types";
 
 function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
@@ -484,6 +510,23 @@ describe("toss holdings sync service", () => {
       quarantinedTickers: ["TSLA.NAS"],
     } satisfies ScheduledTossAutoSyncResponse;
 
+    vi.mocked(fetchSupabase).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            state_key: "toss-sync:success:MIXED:2026-07-06",
+            session_date: "2026-07-06",
+            status: "applied",
+            fresh_until: "2026-07-08T10:15:00.000Z",
+            sealed_at: "2026-07-06T22:15:01.000Z",
+            holdings_digest: `sha256:${"a".repeat(64)}`,
+            revision: 7,
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
+
     await expect(
       recordScheduledTossFreshnessMarker(result, {
         sessionDate: "2026-07-06",
@@ -492,28 +535,21 @@ describe("toss holdings sync service", () => {
     ).resolves.toEqual({
       stateKey: "toss-sync:success:MIXED:2026-07-06",
       sessionDate: "2026-07-06",
+      holdingsDigest: `sha256:${"a".repeat(64)}`,
+      revision: 7,
+      sealedAt: "2026-07-06T22:15:01.000Z",
     });
 
-    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
-      "toss-sync:success:MIXED:2026-07-06",
-      {
-        scope: "MIXED",
-        sessionDate: "2026-07-06",
-        status: "applied",
-        diffHash: "hash-1",
-        incomingCount: 3,
-        createCount: 1,
-        updateCount: 1,
-        deleteCount: 0,
-        unchangedCount: 1,
-        quarantinedCount: 1,
-        quarantinedTickers: ["TSLA.NAS"],
-        source: "scheduled-route",
-        timezone: "Asia/Seoul",
-        updatedAt: "2026-07-06T22:15:00.000Z",
-      },
-      "2026-07-08T10:15:00.000Z",
+    expect(fetchSupabase).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/seal_broker_snapshot_v0",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining(
+          '"p_state_key":"toss-sync:success:MIXED:2026-07-06"',
+        ),
+      }),
     );
+    expect(upsertRuntimeStateEntry).not.toHaveBeenCalled();
   });
 
   it("uses the KST date fallback and skips non-success statuses for freshness markers", async () => {
@@ -540,22 +576,35 @@ describe("toss holdings sync service", () => {
       quarantinedTickers: [],
     } satisfies ScheduledTossAutoSyncResponse;
 
+    vi.mocked(fetchSupabase).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            state_key: "toss-sync:success:MIXED:2026-07-07",
+            session_date: "2026-07-07",
+            status: "unchanged",
+            fresh_until: "2026-07-08T04:00:00.000Z",
+            sealed_at: "2026-07-06T16:00:01.000Z",
+            holdings_digest: `sha256:${"b".repeat(64)}`,
+            revision: 8,
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
+
     await expect(
       recordScheduledTossFreshnessMarker(unchanged, { now }),
     ).resolves.toEqual({
       stateKey: "toss-sync:success:MIXED:2026-07-07",
       sessionDate: "2026-07-07",
+      holdingsDigest: `sha256:${"b".repeat(64)}`,
+      revision: 8,
+      sealedAt: "2026-07-06T16:00:01.000Z",
     });
 
-    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
-      "toss-sync:success:MIXED:2026-07-07",
-      expect.objectContaining({
-        sessionDate: "2026-07-07",
-        status: "unchanged",
-      }),
-      "2026-07-08T04:00:00.000Z",
-    );
-    vi.mocked(upsertRuntimeStateEntry).mockClear();
+    expect(fetchSupabase).toHaveBeenCalledTimes(1);
+    vi.mocked(fetchSupabase).mockClear();
 
     await expect(
       recordScheduledTossFreshnessMarker({
@@ -565,6 +614,7 @@ describe("toss holdings sync service", () => {
       }),
     ).resolves.toBeNull();
 
+    expect(fetchSupabase).not.toHaveBeenCalled();
     expect(upsertRuntimeStateEntry).not.toHaveBeenCalled();
   });
 
