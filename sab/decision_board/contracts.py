@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 SCHEMA_VERSION = "decision-board.v0"
 _HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -32,6 +34,7 @@ class ContractError(ValueError):
 def canonical_json_bytes(value: Any) -> bytes:
     """Serialize a JSON value using the Decision Board canonical byte format."""
 
+    _strict_json_value(value, "$")
     try:
         encoded = json.dumps(
             value,
@@ -57,8 +60,11 @@ def load_decision_board_report(path: str | Path) -> dict[str, Any]:
 
     report_path = Path(path)
     try:
-        value = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            report_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
         raise ContractError("$", f"could not load report: {exc}") from exc
     return validate_decision_board_report(value)
 
@@ -66,6 +72,7 @@ def load_decision_board_report(path: str | Path) -> dict[str, Any]:
 def validate_decision_board_report(value: Any) -> dict[str, Any]:
     """Validate and return a DecisionBoardEnvelopeV0 without coercion."""
 
+    _strict_json_value(value, "$")
     report = _object(value, "$")
     _strict_keys(
         report,
@@ -113,6 +120,45 @@ def validate_decision_board_report(value: Any) -> dict[str, Any]:
             "$.decision_payload_hash", "does not match the canonical decision payload"
         )
     return report
+
+
+def validate_claim_validation(value: Any) -> dict[str, Any]:
+    """Validate and return one ClaimValidationV0 without coercion."""
+
+    _strict_json_value(value, "$")
+    claim = _object(value, "$")
+    _strict_keys(
+        claim,
+        "$",
+        required={
+            "claim_id",
+            "instrument",
+            "source_url",
+            "publisher",
+            "published_at",
+            "article_content_hash",
+            "supporting_span",
+            "supporting_location",
+            "verifier_version",
+            "entailment",
+        },
+        optional=set(),
+    )
+    _non_empty_string(claim["claim_id"], "$.claim_id")
+    _instrument(claim["instrument"], "$.instrument")
+    _url(claim["source_url"], "$.source_url")
+    _non_empty_string(claim["publisher"], "$.publisher")
+    _timestamp(claim["published_at"], "$.published_at")
+    _hash(claim["article_content_hash"], "$.article_content_hash")
+    _non_empty_string(claim["supporting_span"], "$.supporting_span")
+    _supporting_location(claim["supporting_location"], "$.supporting_location")
+    _non_empty_string(claim["verifier_version"], "$.verifier_version")
+    _enum(
+        claim["entailment"],
+        "$.entailment",
+        {"SUPPORTED", "CONTRADICTED", "UNCLEAR"},
+    )
+    return claim
 
 
 def _decision_payload(value: Any, path: str) -> dict[str, Any]:
@@ -187,6 +233,21 @@ def _evidence_reference(value: Any, path: str) -> None:
     _literal(reference["entailment"], f"{path}.entailment", "SUPPORTED")
 
 
+def _supporting_location(value: Any, path: str) -> None:
+    location = _object(value, path)
+    _strict_keys(
+        location,
+        path,
+        required={"kind", "start", "end"},
+        optional=set(),
+    )
+    _literal(location["kind"], f"{path}.kind", "TEXT_OFFSETS")
+    start = _integer(location["start"], f"{path}.start", minimum=0)
+    end = _integer(location["end"], f"{path}.end", minimum=1)
+    if end < start:
+        raise ContractError(f"{path}.end", "must be greater than or equal to start")
+
+
 def _issues(value: Any, path: str) -> list[Any]:
     issues = _array(value, path)
     for index, value_item in enumerate(issues):
@@ -224,6 +285,31 @@ def _strict_keys(
         raise ContractError(f"{path}.{field}", "unknown field")
 
 
+def _reject_json_constant(constant: str) -> None:
+    raise ValueError(f"non-finite JSON constant is forbidden: {constant}")
+
+
+def _strict_json_value(value: Any, path: str) -> None:
+    value_type = type(value)
+    if value is None or value_type in {str, bool, int}:
+        return
+    if value_type is float:
+        if math.isfinite(value):
+            return
+        raise ContractError(path, "non-finite numbers are not strict JSON values")
+    if value_type is list:
+        for index, item in enumerate(value):
+            _strict_json_value(item, f"{path}[{index}]")
+        return
+    if value_type is dict:
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ContractError(path, "object keys must be strings in strict JSON")
+            _strict_json_value(item, f"{path}.{key}")
+        return
+    raise ContractError(path, f"{value_type.__name__} is not a strict JSON value")
+
+
 def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError(path, "must be an object")
@@ -246,6 +332,22 @@ def _non_empty_string(value: Any, path: str) -> str:
     text = _string(value, path)
     if not text:
         raise ContractError(path, "must not be empty")
+    return text
+
+
+def _integer(value: Any, path: str, *, minimum: int) -> int:
+    if type(value) is not int:
+        raise ContractError(path, "must be an integer")
+    if value < minimum:
+        raise ContractError(path, f"must be greater than or equal to {minimum}")
+    return value
+
+
+def _url(value: Any, path: str) -> str:
+    text = _non_empty_string(value, path)
+    parsed = urlsplit(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ContractError(path, "must be an absolute HTTP(S) URL")
     return text
 
 

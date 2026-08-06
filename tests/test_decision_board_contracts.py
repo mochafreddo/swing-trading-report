@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from sab.decision_board.contracts import (
     canonical_json_bytes,
     decision_payload_hash,
     load_decision_board_report,
+    validate_claim_validation,
     validate_decision_board_report,
 )
 
@@ -86,6 +88,101 @@ def test_payload_hash_mismatch_is_rejected_with_a_useful_path() -> None:
         validate_decision_board_report(report)
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_loader_rejects_non_finite_json_constants(
+    tmp_path: Path, constant: str
+) -> None:
+    report_path = tmp_path / "non-finite.json"
+    report_path.write_text(
+        f'{{"schema_version":"decision-board.v0","metadata":{{"value":{constant}}}}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="non-finite JSON constant"):
+        load_decision_board_report(report_path)
+
+
+@pytest.mark.parametrize(
+    "invalid_json_value",
+    [
+        pytest.param(("tuple",), id="tuple"),
+        pytest.param({1: "non-string key"}, id="non-string-key"),
+        pytest.param(math.nan, id="nan"),
+    ],
+)
+def test_direct_validator_rejects_non_json_metadata_values(
+    invalid_json_value: object,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "blocked.json")
+    report["metadata"] = {"nested": invalid_json_value}
+
+    with pytest.raises(ContractError, match=r"\$\.metadata"):
+        validate_decision_board_report(report)
+
+
+@pytest.mark.parametrize(
+    "invalid_json_value",
+    [
+        pytest.param(("tuple",), id="tuple"),
+        pytest.param({1: "non-string key"}, id="non-string-key"),
+    ],
+)
+def test_canonical_json_rejects_values_that_json_dumps_would_coerce(
+    invalid_json_value: object,
+) -> None:
+    with pytest.raises(ContractError, match="strict JSON"):
+        canonical_json_bytes(invalid_json_value)
+
+
+def _mutate_blocked_with_payload(report: dict[str, Any]) -> None:
+    report["status"] = "BLOCKED"
+    report["issues"] = [{"code": "BLOCKED", "message": "Synthetic block."}]
+
+
+def _mutate_decided_without_action(report: dict[str, Any]) -> None:
+    del report["decision_payload"]["items"][0]["action"]
+
+
+def _mutate_cross_kind_action(report: dict[str, Any]) -> None:
+    report["decision_payload"]["items"][0]["action"] = "HOLD"
+
+
+def _mutate_unsupported_evidence(report: dict[str, Any]) -> None:
+    report["decision_payload"]["items"][0]["evidence"][0]["entailment"] = "UNCLEAR"
+
+
+def _mutate_stale_payload_hash(report: dict[str, Any]) -> None:
+    report["decision_payload"]["items"][0]["action"] = "AVOID"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "schema_accepts"),
+    [
+        pytest.param(_mutate_blocked_with_payload, False, id="blocked-with-payload"),
+        pytest.param(
+            _mutate_decided_without_action, False, id="decided-without-action"
+        ),
+        pytest.param(_mutate_cross_kind_action, False, id="cross-kind-action"),
+        pytest.param(_mutate_unsupported_evidence, False, id="unsupported-evidence"),
+        pytest.param(_mutate_stale_payload_hash, True, id="stale-payload-hash"),
+    ],
+)
+def test_mutation_corpus_is_rejected_at_the_applicable_contract_boundary(
+    mutation: Any,
+    schema_accepts: bool,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    mutation(report)
+
+    if schema_accepts:
+        _schema_validator().validate(report)
+    else:
+        with pytest.raises(ValidationError):
+            _schema_validator().validate(report)
+    with pytest.raises(ContractError):
+        validate_decision_board_report(report)
+
+
 def test_contracts_reject_unknown_fields_and_naive_timestamps() -> None:
     report = _load_json(FIXTURE_DIR / "blocked.json")
     report["unexpected"] = True
@@ -122,6 +219,42 @@ def test_schema_exposes_all_normative_v0_contracts() -> None:
         "DecisionBoardEnvelopeV0",
         "RunJournalV0",
     } <= schema["$defs"].keys()
+
+
+def test_evidence_location_end_cannot_precede_start() -> None:
+    instrument = _load_json(FIXTURE_DIR / "published-entry.json")["decision_payload"][
+        "items"
+    ][0]["instrument"]
+    claim = {
+        "claim_id": "claim-invalid-offsets",
+        "instrument": instrument,
+        "source_url": "https://example.com/synthetic-claim",
+        "publisher": "Synthetic Publisher",
+        "published_at": "2026-08-06T00:30:00Z",
+        "article_content_hash": (
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ),
+        "supporting_span": "Synthetic exact supporting text.",
+        "supporting_location": {
+            "kind": "TEXT_OFFSETS",
+            "start": 20,
+            "end": 19,
+        },
+        "verifier_version": "fixture-verifier-v0",
+        "entailment": "SUPPORTED",
+    }
+
+    with pytest.raises(ContractError, match=r"\$\.supporting_location\.end"):
+        validate_claim_validation(claim)
+
+    claim["supporting_location"]["end"] = 20
+    assert validate_claim_validation(claim) == claim
+
+
+def test_schema_documents_evidence_offset_consumer_invariant() -> None:
+    schema = _load_json(SCHEMA_PATH)
+
+    assert "end >= start" in schema["$defs"]["SupportingLocationV0"]["$comment"]
 
 
 def test_run_journal_allows_failed_without_directional_payload() -> None:

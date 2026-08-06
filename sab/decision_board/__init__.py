@@ -5,6 +5,7 @@ from .contracts import (
     canonical_json_bytes,
     decision_payload_hash,
     load_decision_board_report,
+    validate_claim_validation,
     validate_decision_board_report,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "canonical_json_bytes",
     "decision_payload_hash",
     "load_decision_board_report",
+    "validate_claim_validation",
     "validate_decision_board_report",
 ]

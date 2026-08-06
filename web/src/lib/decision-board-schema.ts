@@ -1,12 +1,7 @@
 import { z } from "zod";
 
 const hashV0Schema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
-const timestampV0Schema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/)
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: "Must be a valid timezone-aware ISO-8601 timestamp",
-  });
+const timestampV0Schema = z.iso.datetime({ offset: true });
 
 export const decisionBoardIssueV0Schema = z
   .object({
@@ -39,6 +34,18 @@ export const brokerSnapshotV0Schema = z
   })
   .strict();
 
+export const supportingLocationV0Schema = z
+  .object({
+    kind: z.literal("TEXT_OFFSETS"),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+  })
+  .strict()
+  .refine((location) => location.end >= location.start, {
+    path: ["end"],
+    message: "end must be greater than or equal to start",
+  });
+
 export const claimValidationV0Schema = z
   .object({
     claim_id: z.string().min(1),
@@ -48,13 +55,7 @@ export const claimValidationV0Schema = z
     published_at: timestampV0Schema,
     article_content_hash: hashV0Schema,
     supporting_span: z.string().min(1),
-    supporting_location: z
-      .object({
-        kind: z.literal("TEXT_OFFSETS"),
-        start: z.number().int().nonnegative(),
-        end: z.number().int().positive(),
-      })
-      .strict(),
+    supporting_location: supportingLocationV0Schema,
     verifier_version: z.string().min(1),
     entailment: z.enum(["SUPPORTED", "CONTRADICTED", "UNCLEAR"]),
   })
@@ -205,9 +206,108 @@ export type DecisionBoardEnvelopeV0 = z.infer<
   typeof decisionBoardEnvelopeV0Schema
 >;
 
-export const parseDecisionBoardReport = (
+/** Structural validation only; this synchronous boundary does not verify the payload digest. */
+export const parseDecisionBoardReportStructure = (
   value: unknown,
 ): DecisionBoardEnvelopeV0 => decisionBoardEnvelopeV0Schema.parse(value);
 
-export const safeParseDecisionBoardReport = (value: unknown) =>
+/** Structural validation only; use the async verified parser for report consumption. */
+export const safeParseDecisionBoardReportStructure = (value: unknown) =>
   decisionBoardEnvelopeV0Schema.safeParse(value);
+
+const canonicalJson = (value: unknown): string => {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError("Canonical JSON does not support non-finite numbers");
+    }
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const objectValue = value as Record<string, unknown>;
+    return `{${Object.keys(objectValue)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(objectValue[key])}`)
+      .join(",")}}`;
+  }
+  throw new TypeError(`Canonical JSON does not support ${typeof value}`);
+};
+
+export const canonicalDecisionPayloadBytesV0 = (
+  payload: DecisionPayloadV0,
+): Uint8Array<ArrayBuffer> => new TextEncoder().encode(canonicalJson(payload));
+
+export const decisionPayloadHashV0 = async (
+  payload: unknown,
+): Promise<string> => {
+  const parsedPayload = decisionPayloadV0Schema.parse(payload);
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    canonicalDecisionPayloadBytesV0(parsedPayload),
+  );
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `sha256:${hex}`;
+};
+
+export class DecisionBoardIntegrityError extends Error {
+  constructor(
+    readonly expectedHash: string,
+    readonly actualHash: string,
+  ) {
+    super("Decision Board payload hash does not match its canonical payload");
+    this.name = "DecisionBoardIntegrityError";
+  }
+}
+
+/** Integrity-verifying report boundary for UI and other report consumers. */
+export const parseVerifiedDecisionBoardReport = async (
+  value: unknown,
+): Promise<DecisionBoardEnvelopeV0> => {
+  const report = parseDecisionBoardReportStructure(value);
+  if (report.status === "PUBLISHED") {
+    const actualHash = await decisionPayloadHashV0(report.decision_payload);
+    if (actualHash !== report.decision_payload_hash) {
+      throw new DecisionBoardIntegrityError(
+        report.decision_payload_hash,
+        actualHash,
+      );
+    }
+  }
+  return report;
+};
+
+export type VerifiedDecisionBoardParseResult =
+  | { success: true; data: DecisionBoardEnvelopeV0 }
+  | { success: false; error: z.ZodError | DecisionBoardIntegrityError };
+
+/** Non-throwing integrity-verifying report boundary for UI consumers. */
+export const safeParseVerifiedDecisionBoardReport = async (
+  value: unknown,
+): Promise<VerifiedDecisionBoardParseResult> => {
+  const structuralResult = safeParseDecisionBoardReportStructure(value);
+  if (!structuralResult.success) {
+    return structuralResult;
+  }
+  try {
+    return {
+      success: true,
+      data: await parseVerifiedDecisionBoardReport(structuralResult.data),
+    };
+  } catch (error) {
+    if (error instanceof DecisionBoardIntegrityError) {
+      return { success: false, error };
+    }
+    throw error;
+  }
+};
