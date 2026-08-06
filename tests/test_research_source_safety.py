@@ -18,9 +18,12 @@ from sab.research.deadline import (
     DeadlineInvariantError,
 )
 from sab.research.source_safety import (
+    ArticleArtifactValidationError,
     ArticleFetchResponseV0,
     ArticleSafetyError,
     SafeArticleVerifierV0,
+    create_article_artifact_v0,
+    validate_and_copy_article_artifact_v0,
 )
 from sab.research.urls import canonicalize_public_article_url_v0
 
@@ -317,6 +320,45 @@ def test_verifier_hard_policy_is_an_internal_copy_not_a_caller_alias() -> None:
         verifier.preflight(ResearchSourcePolicyV0(max_redirects=1))
 
     assert exc_info.value.code == "VERIFIER_CONFIG_UNSAFE"
+
+
+def test_artifact_validation_detects_in_place_source_mutation() -> None:
+    private_sentinel = "PRIVATE-ARTIFACT-SOURCE-SENTINEL"
+    policy = ResearchSourcePolicyV0()
+    artifact = create_article_artifact_v0(
+        source=_source(),
+        final_url="https://evidence.example/start",
+        normalized_text="Synthetic trusted text",
+        policy=policy,
+    )
+    object.__setattr__(artifact.source, "title", private_sentinel)
+
+    with pytest.raises(ArticleArtifactValidationError) as exc_info:
+        validate_and_copy_article_artifact_v0(
+            artifact,
+            expected_source=artifact.source,
+            policy=policy,
+        )
+
+    assert private_sentinel not in str(exc_info.value)
+
+
+def test_artifact_validation_rejects_missing_integrity_seal() -> None:
+    policy = ResearchSourcePolicyV0()
+    artifact = create_article_artifact_v0(
+        source=_source(),
+        final_url="https://evidence.example/start",
+        normalized_text="Synthetic trusted text",
+        policy=policy,
+    )
+    object.__setattr__(artifact, "_integrity_seal", None)
+
+    with pytest.raises(ArticleArtifactValidationError):
+        validate_and_copy_article_artifact_v0(
+            artifact,
+            expected_source=artifact.source,
+            policy=policy,
+        )
 
 
 @pytest.mark.parametrize("failure_site", ["dns", "fetch"])

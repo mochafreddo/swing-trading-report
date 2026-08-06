@@ -33,6 +33,7 @@ from .deadline import (
 )
 from .source_safety import (
     ArticleArtifactV0,
+    ArticleArtifactValidationError,
     ArticlePreflightError,
     ArticleSafetyError,
     create_article_artifact_v0,
@@ -149,7 +150,8 @@ _PREFLIGHT_ISSUE_CODES = frozenset(
     }
 )
 _SUCCESS_ISSUE_CODES = _ARTICLE_SAFETY_ISSUE_CODES | {
-    ResearchIssueCodeV0.ARTICLE_ATTEMPT_LIMIT
+    ResearchIssueCodeV0.ARTICLE_ATTEMPT_LIMIT,
+    ResearchIssueCodeV0.ARTICLE_TIMEOUT,
 }
 _NO_USABLE_SOURCE_ISSUE_CODES = _SUCCESS_ISSUE_CODES | {
     ResearchIssueCodeV0.NO_SOURCE_CANDIDATES,
@@ -174,31 +176,65 @@ class ResearchIssueV0:
     message: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ResearchItemSucceededV0:
     instrument: InstrumentRefV0
     articles: tuple[ArticleArtifactV0, ...]
     issues: tuple[ResearchIssueV0, ...] = ()
     status: Literal["SUCCEEDED"] = field(default="SUCCEEDED", init=False)
 
-    def __post_init__(self) -> None:
-        trusted_instrument = _require_exact_instrument(self.instrument)
-        if not self.articles:
-            raise ValueError("successful research requires at least one article")
-        if not all(type(article) is ArticleArtifactV0 for article in self.articles):
-            raise TypeError("successful research requires exact article artifacts")
+    def __new__(cls) -> ResearchItemSucceededV0:
+        del cls
+        raise TypeError("successful research results require the trusted factory")
+
+
+def _create_research_item_succeeded_v0(
+    *,
+    instrument: InstrumentRefV0,
+    articles: tuple[ArticleArtifactV0, ...],
+    policy: ResearchSourcePolicyV0,
+    issues: tuple[ResearchIssueV0, ...] = (),
+) -> ResearchItemSucceededV0:
+    """Create one success result from policy-bound trusted artifact copies."""
+
+    trusted_instrument = _require_exact_instrument(instrument)
+    trusted_policy = _copy_required_policy(policy)
+    if type(articles) is not tuple or not articles:
+        raise TypeError("successful research artifacts must be a non-empty exact tuple")
+    trusted_articles: list[ArticleArtifactV0] = []
+    for article in articles:
+        if type(article) is not ArticleArtifactV0:
+            raise TypeError("successful research artifact is invalid")
         try:
-            for article in self.articles:
-                validate_and_copy_source_candidate_v0(
-                    article.source,
-                    expected_instrument=trusted_instrument,
+            trusted_source = validate_and_copy_source_candidate_v0(
+                article.source,
+                expected_instrument=trusted_instrument,
+            )
+            trusted_articles.append(
+                validate_and_copy_article_artifact_v0(
+                    article,
+                    expected_source=trusted_source,
+                    policy=trusted_policy,
                 )
-        except (AttributeError, TypeError, ValueError) as exc:
-            raise TypeError(
-                "successful research article source is not bound to its instrument"
-            ) from exc
-        object.__setattr__(self, "instrument", trusted_instrument)
-        _require_issues(self.issues, allowed=_SUCCESS_ISSUE_CODES)
+            )
+        except (
+            ArticleArtifactValidationError,
+            AttributeError,
+            TypeError,
+            ValueError,
+        ):
+            raise TypeError("successful research artifact is invalid") from None
+    try:
+        _require_issues(issues, allowed=_SUCCESS_ISSUE_CODES)
+    except TypeError, ValueError:
+        raise TypeError("successful research issues are invalid") from None
+    trusted_issues = tuple(_issue(issue.code) for issue in issues)
+    result = object.__new__(ResearchItemSucceededV0)
+    object.__setattr__(result, "instrument", trusted_instrument)
+    object.__setattr__(result, "articles", tuple(trusted_articles))
+    object.__setattr__(result, "issues", trusted_issues)
+    object.__setattr__(result, "status", "SUCCEEDED")
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,8 +561,22 @@ class EvidenceResearcherV0:
                     continue
                 scheduled[source.canonical_url] = [(item_index, source)]
 
-        deadline_exhausted = False
-        for attributions in scheduled.values():
+        scheduled_batches = tuple(scheduled.values())
+
+        def mark_remaining_article_timeouts(start_index: int) -> None:
+            affected_items = {
+                item_index
+                for remaining_attributions in scheduled_batches[start_index:]
+                for item_index, _source in remaining_attributions
+            }
+            for item_index in sorted(affected_items):
+                if not any(
+                    issue.code == ResearchIssueCodeV0.ARTICLE_TIMEOUT
+                    for issue in issues[item_index]
+                ):
+                    issues[item_index].append(_issue("ARTICLE_TIMEOUT"))
+
+        for batch_index, attributions in enumerate(scheduled_batches):
             primary_source = attributions[0][1]
             try:
                 artifact = await self._verify_one(
@@ -535,12 +585,14 @@ class EvidenceResearcherV0:
                     policy=policy,
                 )
             except DeadlineExpiredError:
-                deadline_exhausted = True
-                for item_index, _source in attributions:
-                    issues[item_index].append(_issue("ARTICLE_TIMEOUT"))
+                mark_remaining_article_timeouts(batch_index)
                 break
             except ArticleSafetyError as exc:
-                deadline.remaining()
+                try:
+                    deadline.remaining()
+                except DeadlineExpiredError:
+                    mark_remaining_article_timeouts(batch_index)
+                    break
                 try:
                     issue_code = ResearchIssueCodeV0(exc.code)
                 except ValueError as error:
@@ -562,13 +614,6 @@ class EvidenceResearcherV0:
                     )
                 )
 
-        if deadline_exhausted:
-            for item_index, _outcome in successful:
-                if not articles[item_index] and not any(
-                    issue.code == "ARTICLE_TIMEOUT" for issue in issues[item_index]
-                ):
-                    issues[item_index].append(_issue("ARTICLE_TIMEOUT"))
-
         results: list[ResearchItemResultV0] = []
         for index, search_outcome in enumerate(search_outcomes):
             if not isinstance(search_outcome, _SearchSucceeded):
@@ -576,10 +621,11 @@ class EvidenceResearcherV0:
                 continue
             if articles[index]:
                 results.append(
-                    ResearchItemSucceededV0(
+                    _create_research_item_succeeded_v0(
                         instrument=search_outcome.instrument,
                         articles=tuple(articles[index]),
                         issues=tuple(issues[index]),
+                        policy=policy,
                     )
                 )
             elif any(issue.code == "ARTICLE_TIMEOUT" for issue in issues[index]):

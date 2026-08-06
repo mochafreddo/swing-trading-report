@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ from .contracts import (
 )
 from .deadline import Deadline
 from .urls import canonicalize_public_article_url_v0
+
+_CREATE_ARTIFACT_SEAL = object()
 
 
 class ArticleSafetyError(RuntimeError):
@@ -69,6 +72,7 @@ class ArticleArtifactV0:
     final_url: str
     normalized_text: str
     content_hash: str
+    _integrity_seal: str = field(repr=False, compare=False)
 
 
 def create_article_artifact_v0(
@@ -86,6 +90,7 @@ def create_article_artifact_v0(
         final_url=final_url,
         normalized_text=normalized_text,
         content_hash=None,
+        integrity_seal=_CREATE_ARTIFACT_SEAL,
         policy=policy,
     )
 
@@ -107,6 +112,7 @@ def validate_and_copy_article_artifact_v0(
             final_url=value.final_url,
             normalized_text=value.normalized_text,
             content_hash=value.content_hash,
+            integrity_seal=value._integrity_seal,
             policy=policy,
         )
     except AttributeError as exc:
@@ -120,6 +126,7 @@ def _validated_article_artifact_v0(
     final_url: object,
     normalized_text: object,
     content_hash: object | None,
+    integrity_seal: object | None,
     policy: object,
 ) -> ArticleArtifactV0:
     if type(expected_source) is not SourceCandidateV0:
@@ -177,12 +184,58 @@ def _validated_article_artifact_v0(
         type(content_hash) is not str or content_hash != expected_hash
     ):
         raise ArticleArtifactValidationError("artifact content hash is invalid")
+    expected_seal = _article_integrity_seal(
+        source=trusted_source,
+        final_url=canonical_final_url,
+        normalized_text=normalized_text,
+        content_hash=expected_hash,
+    )
+    if integrity_seal is not _CREATE_ARTIFACT_SEAL and (
+        type(integrity_seal) is not str or integrity_seal != expected_seal
+    ):
+        raise ArticleArtifactValidationError("artifact integrity seal is invalid")
     artifact = object.__new__(ArticleArtifactV0)
     object.__setattr__(artifact, "source", trusted_source)
     object.__setattr__(artifact, "final_url", canonical_final_url)
     object.__setattr__(artifact, "normalized_text", normalized_text)
     object.__setattr__(artifact, "content_hash", expected_hash)
+    object.__setattr__(artifact, "_integrity_seal", expected_seal)
     return artifact
+
+
+def _article_integrity_seal(
+    *,
+    source: SourceCandidateV0,
+    final_url: str,
+    normalized_text: str,
+    content_hash: str,
+) -> str:
+    published_at = (
+        source.published_at.isoformat().replace("+00:00", "Z")
+        if source.published_at is not None
+        else None
+    )
+    payload = {
+        "source": {
+            "instrument": source.instrument.to_public_dict(),
+            "canonical_ticker": source.canonical_ticker,
+            "title": source.title,
+            "canonical_url": source.canonical_url,
+            "publisher": source.publisher,
+            "published_at": published_at,
+            "purpose": source.purpose.value,
+        },
+        "final_url": final_url,
+        "normalized_text": normalized_text,
+        "content_hash": content_hash,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
 class PublicDnsResolverV0(Protocol):

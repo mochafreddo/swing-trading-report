@@ -180,7 +180,10 @@ DNS를 다시 검증합니다. invocation의 `ResearchSourcePolicyV0`는 preflig
 normalized text 길이를 제한하고, 성공 artifact에는 exact normalized article text와
 `sha256:` content hash만 기록합니다. verifier 반환 artifact는 exact type, source binding,
 safe final URL, normalized text, length, hash를 orchestrator에서 다시 검증해 trusted copy로
-만듭니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
+만듭니다. artifact factory는 source/URL/text/hash 전체의 internal integrity seal도 생성해
+factory 이후의 in-place mutation을 재검증에서 거부합니다. `SUCCEEDED` item도 public
+constructor를 닫고 invocation policy로 각 artifact를 다시 검증하는 internal factory만
+생성할 수 있습니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
 
 invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을
 만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을
@@ -194,6 +197,10 @@ typed operational exception을 분류하기 전에도 deadline을 다시 확인�
 item은 supplemental issue가 있더라도 `ARTICLE_TIMEOUT` 또는 `PROVIDER_TIMEOUT`을 최소
 하나 포함해야 합니다.
 deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다.
+article verification 중 deadline이 만료되면 이미 완료된 peer와 같은 종목의 기존
+artifact는 보존하고, 현재 및 이후 schedule attribution에만 `ARTICLE_TIMEOUT`을 붙여
+새 verify를 중단합니다. 따라서 artifact가 있는 item은 timeout issue를 포함한
+`SUCCEEDED`, artifact가 없는 영향 item은 `TIMED_OUT`으로 finalization됩니다.
 result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 
 현재 이 owner에는 production provider adapter, Decision Board runner/compiler 연결,

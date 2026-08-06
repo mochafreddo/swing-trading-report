@@ -4,6 +4,8 @@ import asyncio
 import json
 
 import pytest
+import sab.research as research_package
+import sab.research.orchestrator as research_orchestrator
 from sab.decision_board.instruments import InstrumentRefV0
 from sab.research.contracts import (
     ResearchInputV0,
@@ -327,8 +329,12 @@ def test_result_variants_cannot_carry_arbitrary_or_contradictory_status() -> Non
             articles=(),
             status="NO_NEWS",
         )
-    with pytest.raises(ValueError, match="at least one article"):
-        ResearchItemSucceededV0(instrument=instrument, articles=())
+    with pytest.raises(TypeError, match="artifact"):
+        research_orchestrator._create_research_item_succeeded_v0(
+            instrument=instrument,
+            articles=(),
+            policy=ResearchSourcePolicyV0(),
+        )
 
     assert not hasattr(SearchProviderV0, "create_order")
     assert not hasattr(SearchProviderV0, "modify_order")
@@ -838,10 +844,11 @@ def test_success_result_rejects_article_bound_to_another_instrument(
     wrong_identity = InstrumentRefV0(
         **{**item.instrument.to_public_dict(), **identity_overrides}
     )
-    with pytest.raises((TypeError, ValueError), match=r"bound|binding"):
-        ResearchItemSucceededV0(
+    with pytest.raises((TypeError, ValueError), match="artifact"):
+        research_orchestrator._create_research_item_succeeded_v0(
             instrument=wrong_identity,
             articles=item.articles,
+            policy=research_input.source_policy,
         )
 
 
@@ -852,7 +859,7 @@ def test_success_result_rejects_article_bound_to_another_instrument(
         ("preflight", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
         ("provider_operational", "expire", ResearchCompletedV0, "PROVIDER_TIMEOUT"),
         ("provider_timeout", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
-        ("article", "expire", ResearchCompletedV0, "PROVIDER_TIMEOUT"),
+        ("article", "expire", ResearchCompletedV0, "ARTICLE_TIMEOUT"),
         ("article", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
     ],
 )
@@ -947,3 +954,257 @@ def test_timed_out_result_requires_a_timeout_issue() -> None:
             instrument=no_source.instrument,
             issues=no_source.issues,
         )
+
+
+def test_success_result_public_constructor_is_closed() -> None:
+    research_input = _research_input(1)
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+
+    with pytest.raises(TypeError):
+        ResearchItemSucceededV0(  # type: ignore[call-arg]
+            instrument=item.instrument,
+            articles=item.articles,
+        )
+    with pytest.raises(TypeError):
+        ResearchItemSucceededV0()
+    assert not hasattr(research_package, "create_research_item_succeeded_v0")
+    assert not hasattr(research_orchestrator, "create_research_item_succeeded_v0")
+
+
+@pytest.mark.parametrize(
+    "artifact_case",
+    ["file_url", "bad_hash", "private_text", "source", "subclass"],
+)
+def test_success_factory_rejects_mutated_or_subclass_artifact(
+    artifact_case: str,
+) -> None:
+    private_sentinel = "PRIVATE-SUCCESS-SENTINEL"
+    policy = ResearchSourcePolicyV0()
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=policy,
+    )
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    artifact = item.articles[0]
+
+    if artifact_case == "file_url":
+        object.__setattr__(artifact, "final_url", "file:///tmp/private")
+    elif artifact_case == "bad_hash":
+        object.__setattr__(artifact, "content_hash", f"sha256:{'0' * 64}")
+    elif artifact_case == "private_text":
+        object.__setattr__(artifact, "normalized_text", private_sentinel)
+    elif artifact_case == "source":
+        object.__setattr__(artifact.source, "title", private_sentinel)
+    else:
+
+        class ArtifactWithPrivateState(ArticleArtifactV0):
+            private_value = private_sentinel
+
+        forged = object.__new__(ArtifactWithPrivateState)
+        for field_name in ArticleArtifactV0.__slots__:
+            object.__setattr__(forged, field_name, getattr(artifact, field_name))
+        artifact = forged
+
+    factory = getattr(
+        research_orchestrator,
+        "_create_research_item_succeeded_v0",
+        None,
+    )
+    assert callable(factory)
+    with pytest.raises((TypeError, ValueError), match="artifact") as exc_info:
+        factory(
+            instrument=item.instrument,
+            articles=(artifact,),
+            issues=(),
+            policy=policy,
+        )
+    assert private_sentinel not in str(exc_info.value)
+
+
+def test_success_factory_copies_exact_artifact_tuple_and_rejects_tuple_subclass() -> (
+    None
+):
+    policy = ResearchSourcePolicyV0()
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=policy,
+    )
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    supplied = item.articles
+    factory = getattr(
+        research_orchestrator,
+        "_create_research_item_succeeded_v0",
+        None,
+    )
+    assert callable(factory)
+
+    copied = factory(
+        instrument=item.instrument,
+        articles=supplied,
+        issues=(),
+        policy=policy,
+    )
+
+    assert type(copied) is ResearchItemSucceededV0
+    assert copied.articles is not supplied
+    assert copied.articles[0] is not supplied[0]
+
+    class ArtifactTuple(tuple[ArticleArtifactV0]):
+        pass
+
+    with pytest.raises(TypeError, match="artifact"):
+        factory(
+            instrument=item.instrument,
+            articles=ArtifactTuple(supplied),
+            issues=(),
+            policy=policy,
+        )
+
+
+def test_verify_deadline_preserves_completed_peer_and_stops_remaining_sources() -> None:
+    class Clock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = Clock()
+    research_input = _research_input(3)
+    provider = _ConcurrentProvider(
+        {
+            instrument.canonical_ticker: _payload(instrument)
+            for instrument in research_input.instruments
+        }
+    )
+
+    class DeadlineVerifier(_RecordingVerifier):
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            self.calls.append((source, deadline))
+            if source.canonical_ticker == "SYN0.NAS":
+                clock.now = 40.0
+                return create_article_artifact_v0(
+                    source=source,
+                    final_url=source.canonical_url,
+                    normalized_text="Synthetic completed peer",
+                    policy=policy,
+                )
+            if source.canonical_ticker == "SYN1.NAS":
+                clock.now = 46.0
+                raise ArticleSafetyError("ARTICLE_EMPTY", "synthetic")
+            raise AssertionError("queued source must not start")
+
+    verifier = DeadlineVerifier()
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, verifier, monotonic=clock).research(
+            research_input
+        )
+    )
+
+    assert type(result) is ResearchCompletedV0
+    assert [type(item) for item in result.items] == [
+        ResearchItemSucceededV0,
+        ResearchItemTimedOutV0,
+        ResearchItemTimedOutV0,
+    ]
+    assert [issue.code for issue in result.items[0].issues] == []
+    assert [issue.code for issue in result.items[1].issues] == ["ARTICLE_TIMEOUT"]
+    assert [issue.code for issue in result.items[2].issues] == ["ARTICLE_TIMEOUT"]
+    assert [call[0].canonical_ticker for call in verifier.calls] == [
+        "SYN0.NAS",
+        "SYN1.NAS",
+    ]
+
+
+def test_verify_deadline_preserves_same_instrument_partial_success() -> None:
+    class Clock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = Clock()
+    instrument = _instrument(0)
+    research_input = ResearchInputV0(
+        instruments=(instrument,),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+    )
+    provider = _ConcurrentProvider(
+        {
+            instrument.canonical_ticker: _payload(
+                instrument,
+                [
+                    _row(instrument, suffix="primary"),
+                    _row(instrument, suffix="opposing", purpose="OPPOSING"),
+                    _row(instrument, suffix="queued", purpose="ACTION_CHANGING"),
+                ],
+            )
+        }
+    )
+
+    class DeadlineVerifier(_RecordingVerifier):
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            self.calls.append((source, deadline))
+            if source.canonical_url.endswith("/primary"):
+                clock.now = 40.0
+                return create_article_artifact_v0(
+                    source=source,
+                    final_url=source.canonical_url,
+                    normalized_text="Synthetic partial success",
+                    policy=policy,
+                )
+            if source.canonical_url.endswith("/opposing"):
+                clock.now = 46.0
+                raise ArticleSafetyError("ARTICLE_EMPTY", "synthetic")
+            raise AssertionError("queued source must not start")
+
+    verifier = DeadlineVerifier()
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, verifier, monotonic=clock).research(
+            research_input
+        )
+    )
+
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    assert len(item.articles) == 1
+    assert [issue.code for issue in item.issues] == ["ARTICLE_TIMEOUT"]
+    assert len(verifier.calls) == 2
