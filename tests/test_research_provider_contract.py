@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,12 @@ from sab.research.contracts import (
     ResearchQuestionV0,
     ResearchSourcePolicyV0,
     SearchRequestV0,
+    SourceCandidateV0,
+    SourceCandidateValidationError,
     SourcePurposeV0,
     build_search_request_v0,
     parse_search_response_v0,
+    validate_and_copy_source_candidate_v0,
 )
 
 _FIXTURE = Path("tests/fixtures/research/search.aurora.json")
@@ -133,6 +137,102 @@ def test_research_input_and_provider_request_are_exact_public_only_values() -> N
     assert "quantity" not in serialized
     assert "entry_price" not in serialized
     assert "account_id" not in serialized
+
+
+def test_research_input_copies_and_revalidates_source_policy() -> None:
+    caller_policy = ResearchSourcePolicyV0(
+        max_redirects=0,
+        max_article_text_chars=16,
+    )
+
+    research_input = ResearchInputV0(
+        instruments=(_instrument(),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=caller_policy,
+    )
+
+    assert research_input.source_policy == caller_policy
+    assert research_input.source_policy is not caller_policy
+
+    object.__setattr__(caller_policy, "max_redirects", 5)
+    object.__setattr__(caller_policy, "max_article_text_chars", 200_000)
+
+    assert research_input.source_policy.max_redirects == 0
+    assert research_input.source_policy.max_article_text_chars == 16
+
+
+def test_source_candidate_constructor_is_factory_owned() -> None:
+    with pytest.raises(TypeError):
+        SourceCandidateV0(  # type: ignore[call-arg]
+            canonical_ticker="AUR.NAS",
+            title="Synthetic evidence",
+            canonical_url="https://evidence.example/article",
+            publisher="Synthetic Wire",
+            published_at=None,
+            purpose=SourcePurposeV0.PRIMARY,
+        )
+
+
+def test_parsed_source_carries_exact_instrument_binding() -> None:
+    instrument = _instrument()
+    payload = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+
+    source = parse_search_response_v0(
+        payload,
+        expected_instrument=instrument,
+    )[0]
+
+    assert source.instrument == instrument
+    assert source.instrument is not instrument
+
+
+def test_source_candidate_subclass_cannot_cross_trusted_copy_boundary() -> None:
+    instrument = _instrument()
+    source = parse_search_response_v0(
+        json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        expected_instrument=instrument,
+    )[0]
+
+    class SourceWithPrivateState(SourceCandidateV0):
+        private_value = _PRIVATE_SENTINEL
+
+    forged = object.__new__(SourceWithPrivateState)
+    for field_name in (
+        "instrument",
+        "canonical_ticker",
+        "title",
+        "canonical_url",
+        "publisher",
+        "published_at",
+        "purpose",
+    ):
+        object.__setattr__(forged, field_name, getattr(source, field_name))
+
+    with pytest.raises(SourceCandidateValidationError):
+        validate_and_copy_source_candidate_v0(
+            forged,
+            expected_instrument=instrument,
+        )
+
+
+def test_source_candidate_copy_requires_canonical_utc_timestamp() -> None:
+    instrument = _instrument()
+    source = parse_search_response_v0(
+        json.loads(_FIXTURE.read_text(encoding="utf-8")),
+        expected_instrument=instrument,
+    )[0]
+    assert source.published_at is not None
+    object.__setattr__(
+        source,
+        "published_at",
+        source.published_at.astimezone(timezone(timedelta(hours=9))),
+    )
+
+    with pytest.raises(SourceCandidateValidationError):
+        validate_and_copy_source_candidate_v0(
+            source,
+            expected_instrument=instrument,
+        )
 
 
 def test_fake_subclass_and_private_unknown_input_cannot_cross_research_boundary() -> (

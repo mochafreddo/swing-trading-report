@@ -6,7 +6,11 @@ from .contracts import (
     ResearchSourcePolicyV0,
     SearchRequestV0,
     SourceCandidateV0,
+    SourceCandidateValidationError,
     SourcePurposeV0,
+    copy_research_source_policy_v0,
+    create_source_candidate_v0,
+    validate_and_copy_source_candidate_v0,
 )
 from .deadline import Deadline
 from .orchestrator import (
@@ -67,7 +71,11 @@ __all__ = [
     "SearchProviderV0",
     "SearchRequestV0",
     "SourceCandidateV0",
+    "SourceCandidateValidationError",
     "SourcePurposeV0",
+    "copy_research_source_policy_v0",
     "create_article_artifact_v0",
+    "create_source_candidate_v0",
     "validate_and_copy_article_artifact_v0",
+    "validate_and_copy_source_candidate_v0",
 ]

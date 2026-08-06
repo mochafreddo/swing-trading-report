@@ -10,6 +10,7 @@ from sab.research.contracts import (
     ResearchQuestionV0,
     ResearchSourcePolicyV0,
     SourceCandidateV0,
+    create_source_candidate_v0,
 )
 from sab.research.deadline import Deadline
 from sab.research.orchestrator import (
@@ -672,8 +673,8 @@ def test_untrusted_verifier_artifacts_never_become_success(
             elif artifact_case == "oversize":
                 text = private_sentinel * 4
             elif artifact_case == "forged_source":
-                artifact_source = SourceCandidateV0(
-                    canonical_ticker=source.canonical_ticker,
+                artifact_source = create_source_candidate_v0(
+                    instrument=source.instrument,
                     title=private_sentinel,
                     canonical_url=source.canonical_url,
                     publisher=source.publisher,
@@ -704,4 +705,245 @@ def test_arbitrary_issue_code_and_message_cannot_be_constructed() -> None:
         ResearchIssueV0(  # type: ignore[call-arg]
             code="ARBITRARY_STATUS",
             message="PRIVATE-ISSUE-SENTINEL",
+        )
+
+
+def test_invocation_policy_children_cannot_mutate_internal_baseline() -> None:
+    preflight_policies: list[ResearchSourcePolicyV0] = []
+    verify_policies: list[ResearchSourcePolicyV0] = []
+    research_input = ResearchInputV0(
+        instruments=(_instrument(0),),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        source_policy=ResearchSourcePolicyV0(max_article_text_chars=16),
+    )
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+
+    class MutatingVerifier(_RecordingVerifier):
+        def preflight(self, policy: ResearchSourcePolicyV0) -> None:
+            preflight_policies.append(policy)
+            object.__setattr__(policy, "max_article_text_chars", 200_000)
+
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            del deadline
+            verify_policies.append(policy)
+            object.__setattr__(policy, "max_article_text_chars", 200_000)
+            return create_article_artifact_v0(
+                source=source,
+                final_url=source.canonical_url,
+                normalized_text="Synthetic text longer than sixteen characters",
+                policy=policy,
+            )
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, MutatingVerifier()).research(research_input)
+    )
+
+    assert type(result) is ResearchInputFailedV0
+    assert result.issue.code == "RESEARCH_INVARIANT"
+    assert research_input.source_policy.max_article_text_chars == 16
+    assert preflight_policies[0] is not verify_policies[0]
+    assert preflight_policies[0] is not research_input.source_policy
+    assert verify_policies[0] is not research_input.source_policy
+
+
+def test_mutated_input_policy_is_revalidated_at_invocation_start() -> None:
+    research_input = _research_input(1)
+    object.__setattr__(research_input.source_policy, "max_redirects", 999)
+    provider = _ConcurrentProvider({})
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, _RecordingVerifier()).research(research_input)
+    )
+
+    assert type(result) is ResearchInputFailedV0
+    assert result.issue.code == "RESEARCH_INPUT_INVALID"
+    assert provider.calls == []
+
+
+@pytest.mark.parametrize("mutated_field", ["title", "canonical_ticker"])
+def test_verifier_source_mutation_cannot_change_internal_binding(
+    mutated_field: str,
+) -> None:
+    private_sentinel = "PRIVATE-SOURCE-SENTINEL"
+    research_input = _research_input(1)
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+
+    class MutatingVerifier(_RecordingVerifier):
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            del deadline
+            object.__setattr__(source, mutated_field, private_sentinel)
+            return create_article_artifact_v0(
+                source=source,
+                final_url=source.canonical_url,
+                normalized_text="Synthetic body",
+                policy=policy,
+            )
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, MutatingVerifier()).research(research_input)
+    )
+
+    assert type(result) is ResearchInputFailedV0
+    assert result.issue.code == "RESEARCH_INVARIANT"
+    assert private_sentinel not in repr(result)
+
+
+def test_verifier_and_success_result_do_not_share_source_identity() -> None:
+    research_input = _research_input(1)
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+    verifier = _RecordingVerifier()
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, verifier).research(research_input)
+    )
+
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    assert item.articles[0].source is not verifier.calls[0][0]
+
+
+@pytest.mark.parametrize(
+    "identity_overrides",
+    [
+        {"canonical_ticker": "SYN0.NYS", "exchange": "NYSE"},
+        {"identity_source": "other-directory"},
+        {"identity_version": "fixture-other"},
+    ],
+)
+def test_success_result_rejects_article_bound_to_another_instrument(
+    identity_overrides: dict[str, str],
+) -> None:
+    research_input = _research_input(1)
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, _RecordingVerifier()).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+
+    wrong_identity = InstrumentRefV0(
+        **{**item.instrument.to_public_dict(), **identity_overrides}
+    )
+    with pytest.raises((TypeError, ValueError), match=r"bound|binding"):
+        ResearchItemSucceededV0(
+            instrument=wrong_identity,
+            articles=item.articles,
+        )
+
+
+@pytest.mark.parametrize(
+    ("failure_phase", "clock_change", "expected_type", "expected_code"),
+    [
+        ("preflight", "expire", ResearchCompletedV0, "PROVIDER_TIMEOUT"),
+        ("preflight", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
+        ("provider_operational", "expire", ResearchCompletedV0, "PROVIDER_TIMEOUT"),
+        ("provider_timeout", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
+        ("article", "expire", ResearchCompletedV0, "PROVIDER_TIMEOUT"),
+        ("article", "rollback", ResearchInputFailedV0, "DEADLINE_INVARIANT"),
+    ],
+)
+def test_deadline_state_precedes_typed_operational_classification(
+    failure_phase: str,
+    clock_change: str,
+    expected_type: type[object],
+    expected_code: str,
+) -> None:
+    class Clock:
+        now = 10.0
+
+        def __call__(self) -> float:
+            return self.now
+
+        def change(self) -> None:
+            self.now = 60.0 if clock_change == "expire" else 9.0
+
+    clock = Clock()
+    research_input = _research_input(1)
+
+    class Provider(_ConcurrentProvider):
+        async def search(self, request: object, *, deadline: Deadline) -> object:
+            if failure_phase.startswith("provider"):
+                clock.change()
+                if failure_phase == "provider_timeout":
+                    raise SearchProviderTimeoutError
+                raise SearchProviderOperationalError
+            return await super().search(request, deadline=deadline)
+
+    class Verifier(_RecordingVerifier):
+        def preflight(self, policy: ResearchSourcePolicyV0) -> None:
+            del policy
+            if failure_phase == "preflight":
+                clock.change()
+                raise ArticlePreflightError("VERIFIER_UNAVAILABLE", "synthetic")
+
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            if failure_phase == "article":
+                clock.change()
+                raise ArticleSafetyError("ARTICLE_EMPTY", "synthetic")
+            return await super().verify(source, deadline=deadline, policy=policy)
+
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            Provider({"SYN0.NAS": _payload(_instrument(0))}),
+            Verifier(),
+            monotonic=clock,
+        ).research(research_input)
+    )
+
+    assert type(result) is expected_type
+    if type(result) is ResearchCompletedV0:
+        item = result.items[0]
+        assert type(item) is ResearchItemTimedOutV0
+        assert item.issues[0].code == expected_code
+    else:
+        assert type(result) is ResearchInputFailedV0
+        assert result.issue.code == expected_code
+
+
+def test_timed_out_result_requires_a_timeout_issue() -> None:
+    research_input = _research_input(1)
+    provider = _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))})
+
+    class EmptyVerifier(_RecordingVerifier):
+        async def verify(
+            self,
+            source: SourceCandidateV0,
+            *,
+            deadline: Deadline,
+            policy: ResearchSourcePolicyV0,
+        ) -> ArticleArtifactV0:
+            del source, deadline, policy
+            raise ArticleSafetyError("ARTICLE_EMPTY", "synthetic")
+
+    result = asyncio.run(
+        EvidenceResearcherV0(provider, EmptyVerifier()).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    no_source = result.items[0]
+    assert type(no_source) is ResearchItemNoUsableSourceV0
+
+    with pytest.raises(ValueError, match="timeout issue"):
+        ResearchItemTimedOutV0(
+            instrument=no_source.instrument,
+            issues=no_source.issues,
         )

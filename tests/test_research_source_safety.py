@@ -5,10 +5,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from sab.decision_board.instruments import InstrumentRefV0
 from sab.research.contracts import (
     ResearchSourcePolicyV0,
     SourceCandidateV0,
     SourcePurposeV0,
+    create_source_candidate_v0,
 )
 from sab.research.deadline import (
     Deadline,
@@ -73,8 +75,15 @@ class _FakeFetcher:
 
 
 def _source(url: str = "https://evidence.example/start") -> SourceCandidateV0:
-    return SourceCandidateV0(
-        canonical_ticker="AUR.NAS",
+    return create_source_candidate_v0(
+        instrument=InstrumentRefV0(
+            market="US",
+            canonical_ticker="AUR.NAS",
+            exchange="NASDAQ",
+            company_name="Aurora Synthetic Systems",
+            identity_source="synthetic-directory",
+            identity_version="fixture-2026-08-07",
+        ),
         title="Synthetic evidence",
         canonical_url=url,
         publisher="Synthetic Wire",
@@ -284,6 +293,30 @@ def test_non_ip_dns_answer_and_oversized_normalized_text_are_rejected() -> None:
             )
         )
     assert exc_info.value.code == "ARTICLE_TEXT_TOO_LARGE"
+
+
+def test_verifier_hard_policy_is_an_internal_copy_not_a_caller_alias() -> None:
+    clock = _FakeClock()
+    caller_policy = ResearchSourcePolicyV0(
+        max_redirects=0,
+        max_article_text_chars=16,
+    )
+    verifier = SafeArticleVerifierV0(
+        resolver=_FakeResolver(clock, {"evidence.example": ("93.184.216.34",)}),
+        fetcher=_FakeFetcher(clock, {}),
+        policy=caller_policy,
+    )
+
+    assert verifier.policy == caller_policy
+    assert verifier.policy is not caller_policy
+
+    object.__setattr__(caller_policy, "max_redirects", 5)
+    object.__setattr__(verifier.policy, "max_redirects", 5)
+
+    with pytest.raises(ArticleSafetyError) as exc_info:
+        verifier.preflight(ResearchSourcePolicyV0(max_redirects=1))
+
+    assert exc_info.value.code == "VERIFIER_CONFIG_UNSAFE"
 
 
 @pytest.mark.parametrize("failure_site", ["dns", "fetch"])

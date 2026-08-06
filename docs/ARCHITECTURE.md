@@ -161,6 +161,14 @@ public freshness/source policy뿐입니다. 각 종목은 injectable `SearchProv
 strategy, Toss/Supabase secret이나 arbitrary caller metadata를 입력 또는 provider
 request에 포함하지 않습니다.
 
+입력 생성과 invocation 시작은 source policy를 field-by-field 재검증한 별도 copy로
+고정합니다. preflight와 각 verify 호출에도 서로 다른 child copy만 전달하며, artifact
+검증은 adapter가 접근하지 못한 invocation baseline을 사용합니다. source candidate도
+factory-owned exact value이며 canonical URL, purpose, timestamp와 전체 `InstrumentRefV0`
+binding을 함께 보유합니다. provider parsing 뒤 baseline copy를 만들고 verifier에는 다시
+별도 copy를 전달하므로 `object.__setattr__`을 포함한 adapter-side alias mutation은 결과로
+전파되지 않습니다.
+
 article verification은 source priority의 round-robin 순서로 스케줄하고 invocation 전체
 fetch attempt를 8회로 제한합니다. canonical URL은 전역 dedupe하되 동일 source의 종목별
 attribution은 유지합니다. URL은 HTTP(S) standard port와 qualified public hostname만
@@ -181,6 +189,10 @@ invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0�
 예상된 provider/verifier 예외와 각 result variant의 issue code는 고정 allowlist로
 제한하며, 예상하지 않은 예외나 잘못된 boundary code는 public detail을 노출하지 않는
 typed `FAILED`로 닫힙니다.
+typed operational exception을 분류하기 전에도 deadline을 다시 확인해 만료는
+`TIMED_OUT`, clock rollback은 `FAILED/DEADLINE_INVARIANT`가 우선합니다. `TIMED_OUT`
+item은 supplemental issue가 있더라도 `ARTICLE_TIMEOUT` 또는 `PROVIDER_TIMEOUT`을 최소
+하나 포함해야 합니다.
 deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다.
 result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 

@@ -14,7 +14,12 @@ from urllib.parse import urljoin, urlsplit
 
 from sab import ai_brief_url_safety
 
-from .contracts import ResearchSourcePolicyV0, SourceCandidateV0
+from .contracts import (
+    ResearchSourcePolicyV0,
+    SourceCandidateV0,
+    copy_research_source_policy_v0,
+    validate_and_copy_source_candidate_v0,
+)
 from .deadline import Deadline
 from .urls import canonicalize_public_article_url_v0
 
@@ -117,22 +122,35 @@ def _validated_article_artifact_v0(
     content_hash: object | None,
     policy: object,
 ) -> ArticleArtifactV0:
-    if (
-        type(source) is not SourceCandidateV0
-        or type(expected_source) is not SourceCandidateV0
-    ):
+    if type(expected_source) is not SourceCandidateV0:
         raise ArticleArtifactValidationError("artifact source must be exact V0 source")
-    if source != expected_source:
+    try:
+        trusted_expected_source = validate_and_copy_source_candidate_v0(
+            expected_source,
+            expected_instrument=expected_source.instrument,
+        )
+        trusted_source = validate_and_copy_source_candidate_v0(
+            source,
+            expected_instrument=trusted_expected_source.instrument,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ArticleArtifactValidationError(
+            "artifact source must be exact V0 source"
+        ) from exc
+    if trusted_source != trusted_expected_source:
         raise ArticleArtifactValidationError(
             "artifact source does not match its request"
         )
-    if type(policy) is not ResearchSourcePolicyV0:
+    trusted_policy = copy_research_source_policy_v0(policy)
+    if trusted_policy is None:
         raise ArticleArtifactValidationError("artifact policy must be exact V0 policy")
     if not isinstance(final_url, str):
         raise ArticleArtifactValidationError("artifact final URL must be text")
     try:
         canonical_final_url = canonicalize_public_article_url_v0(final_url)
-        canonical_source_url = canonicalize_public_article_url_v0(source.canonical_url)
+        canonical_source_url = canonicalize_public_article_url_v0(
+            trusted_source.canonical_url
+        )
     except ValueError as exc:
         raise ArticleArtifactValidationError("artifact URL is unsafe") from exc
     if canonical_final_url != final_url or _origin(canonical_final_url) != _origin(
@@ -147,7 +165,10 @@ def _validated_article_artifact_v0(
         raise ArticleArtifactValidationError("artifact text contains unsafe characters")
     if re.sub(r"\s+", " ", normalized_text).strip() != normalized_text:
         raise ArticleArtifactValidationError("artifact text is not normalized")
-    if not normalized_text or len(normalized_text) > policy.max_article_text_chars:
+    if (
+        not normalized_text
+        or len(normalized_text) > trusted_policy.max_article_text_chars
+    ):
         raise ArticleArtifactValidationError("artifact text exceeds its safe bound")
     expected_hash = (
         f"sha256:{hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()}"
@@ -157,7 +178,7 @@ def _validated_article_artifact_v0(
     ):
         raise ArticleArtifactValidationError("artifact content hash is invalid")
     artifact = object.__new__(ArticleArtifactV0)
-    object.__setattr__(artifact, "source", source)
+    object.__setattr__(artifact, "source", trusted_source)
     object.__setattr__(artifact, "final_url", canonical_final_url)
     object.__setattr__(artifact, "normalized_text", normalized_text)
     object.__setattr__(artifact, "content_hash", expected_hash)
@@ -190,20 +211,36 @@ class SafeArticleVerifierV0:
     resolver: PublicDnsResolverV0
     fetcher: ArticleFetcherV0
     policy: ResearchSourcePolicyV0 = field(default_factory=ResearchSourcePolicyV0)
+    _hard_policy: ResearchSourcePolicyV0 = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        hard_policy = copy_research_source_policy_v0(self.policy)
+        if hard_policy is None:
+            raise TypeError("article verifier policy must be exact and valid")
+        public_policy = copy_research_source_policy_v0(hard_policy)
+        if public_policy is None:  # pragma: no cover - constructor above proves this
+            raise TypeError("article verifier policy could not be copied")
+        object.__setattr__(self, "policy", public_policy)
+        object.__setattr__(self, "_hard_policy", hard_policy)
 
     def preflight(self, policy: ResearchSourcePolicyV0) -> None:
-        if (
-            type(self.policy) is not ResearchSourcePolicyV0
-            or type(policy) is not ResearchSourcePolicyV0
-        ):
+        invocation_policy = copy_research_source_policy_v0(policy)
+        if invocation_policy is None:
             raise ArticlePreflightError(
                 "VERIFIER_CONFIG_UNSAFE", "article verifier policy is invalid"
             )
         if (
-            policy.max_redirects > self.policy.max_redirects
-            or policy.max_response_bytes > self.policy.max_response_bytes
-            or policy.max_article_text_chars > self.policy.max_article_text_chars
-            or policy.operation_timeout_seconds > self.policy.operation_timeout_seconds
+            invocation_policy.max_redirects > self._hard_policy.max_redirects
+            or invocation_policy.max_response_bytes
+            > self._hard_policy.max_response_bytes
+            or invocation_policy.max_article_text_chars
+            > self._hard_policy.max_article_text_chars
+            or invocation_policy.operation_timeout_seconds
+            > self._hard_policy.operation_timeout_seconds
         ):
             raise ArticlePreflightError(
                 "VERIFIER_CONFIG_UNSAFE",
@@ -223,22 +260,36 @@ class SafeArticleVerifierV0:
         deadline: Deadline,
         policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0:
-        self.preflight(policy)
-        if type(source) is not SourceCandidateV0:
+        invocation_policy = copy_research_source_policy_v0(policy)
+        if invocation_policy is None:
+            raise ArticleSafetyError(
+                "SOURCE_INVALID", "article source policy must be an exact V0 value"
+            )
+        self.preflight(invocation_policy)
+        try:
+            trusted_source = validate_and_copy_source_candidate_v0(
+                source,
+                expected_instrument=source.instrument,
+            )
+        except AttributeError, TypeError, ValueError:
             raise ArticleSafetyError(
                 "SOURCE_INVALID", "article source must be an exact V0 candidate"
-            )
+            ) from None
         try:
-            current_url = canonicalize_public_article_url_v0(source.canonical_url)
+            current_url = canonicalize_public_article_url_v0(
+                trusted_source.canonical_url
+            )
         except ValueError as exc:
             raise ArticleSafetyError("SOURCE_URL_UNSAFE", str(exc)) from None
         original_origin = _origin(current_url)
 
-        for redirect_count in range(policy.max_redirects + 1):
+        for redirect_count in range(invocation_policy.max_redirects + 1):
             parsed = urlsplit(current_url)
             hostname = parsed.hostname or ""
             port = 443 if parsed.scheme == "https" else 80
-            timeout = deadline.child_timeout(policy.operation_timeout_seconds)
+            timeout = deadline.child_timeout(
+                invocation_policy.operation_timeout_seconds
+            )
             try:
                 raw_addresses = await self.resolver.resolve(
                     hostname,
@@ -252,13 +303,15 @@ class SafeArticleVerifierV0:
                 ) from exc
             addresses = _validate_public_addresses(raw_addresses)
 
-            timeout = deadline.child_timeout(policy.operation_timeout_seconds)
+            timeout = deadline.child_timeout(
+                invocation_policy.operation_timeout_seconds
+            )
             try:
                 response = await self.fetcher.fetch(
                     current_url,
                     addresses,
                     timeout=timeout,
-                    max_bytes=policy.max_response_bytes,
+                    max_bytes=invocation_policy.max_response_bytes,
                 )
             except TimeoutError as exc:
                 deadline.remaining()
@@ -272,7 +325,7 @@ class SafeArticleVerifierV0:
                 )
 
             if 300 <= response.status_code < 400:
-                if redirect_count >= policy.max_redirects:
+                if redirect_count >= invocation_policy.max_redirects:
                     raise ArticleSafetyError(
                         "REDIRECT_LIMIT", "article redirect limit was exceeded"
                     )
@@ -286,12 +339,15 @@ class SafeArticleVerifierV0:
                 raise ArticleSafetyError(
                     "HTTP_STATUS_UNUSABLE", "article response was not successful"
                 )
-            normalized_text = _decode_article_response(response, policy=policy)
+            normalized_text = _decode_article_response(
+                response,
+                policy=invocation_policy,
+            )
             return create_article_artifact_v0(
-                source=source,
+                source=trusted_source,
                 final_url=current_url,
                 normalized_text=normalized_text,
-                policy=policy,
+                policy=invocation_policy,
             )
         raise ArticleSafetyError(
             "REDIRECT_LIMIT", "article redirect limit was exceeded"

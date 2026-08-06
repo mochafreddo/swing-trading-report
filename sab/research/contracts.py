@@ -98,6 +98,25 @@ class ResearchSourcePolicyV0:
             raise ValueError("operation_timeout_seconds is outside the safe range")
 
 
+def copy_research_source_policy_v0(
+    value: object,
+) -> ResearchSourcePolicyV0 | None:
+    """Revalidate and copy one exact concrete source-policy value."""
+
+    if type(value) is not ResearchSourcePolicyV0:
+        return None
+    try:
+        return ResearchSourcePolicyV0(
+            freshness_hours=value.freshness_hours,
+            max_redirects=value.max_redirects,
+            max_response_bytes=value.max_response_bytes,
+            max_article_text_chars=value.max_article_text_chars,
+            operation_timeout_seconds=value.operation_timeout_seconds,
+        )
+    except AttributeError, TypeError, ValueError:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchInputV0:
     instruments: tuple[InstrumentRefV0, ...]
@@ -128,9 +147,11 @@ class ResearchInputV0:
             raise TypeError("research questions must use the allowlisted V0 type")
         if len(set(self.questions)) != len(self.questions):
             raise ValueError("research questions must be unique")
-        if type(self.source_policy) is not ResearchSourcePolicyV0:
+        source_policy = copy_research_source_policy_v0(self.source_policy)
+        if source_policy is None:
             raise TypeError("research source policy must be exact V0 policy")
         object.__setattr__(self, "instruments", tuple(trusted))
+        object.__setattr__(self, "source_policy", source_policy)
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,14 +196,93 @@ class SearchRequestV0:
         }
 
 
-@dataclass(frozen=True, slots=True)
+class SourceCandidateValidationError(ValueError):
+    """A source candidate did not preserve its trusted instrument binding."""
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class SourceCandidateV0:
+    instrument: InstrumentRefV0
     canonical_ticker: str
     title: str
     canonical_url: str
     publisher: str
     published_at: datetime | None
     purpose: SourcePurposeV0
+
+
+def create_source_candidate_v0(
+    *,
+    instrument: InstrumentRefV0,
+    title: str,
+    canonical_url: str,
+    publisher: str,
+    published_at: datetime | None,
+    purpose: SourcePurposeV0,
+) -> SourceCandidateV0:
+    """Create one canonical source value bound to a trusted instrument copy."""
+
+    trusted_instrument = copy_trusted_instrument_ref_v0(instrument)
+    if trusted_instrument is None:
+        raise SourceCandidateValidationError(
+            "source candidate requires an exact trusted instrument"
+        )
+    normalized_title = _required_public_text(title, field_name="source title")
+    normalized_publisher = _required_public_text(publisher, field_name="publisher")
+    if type(purpose) is not SourcePurposeV0:
+        raise SourceCandidateValidationError("source purpose is unsupported")
+    normalized_timestamp = _copy_source_timestamp(published_at)
+    try:
+        normalized_url = canonicalize_public_article_url_v0(canonical_url)
+    except (TypeError, ValueError) as exc:
+        raise SourceCandidateValidationError("source URL is unsafe") from exc
+    source = object.__new__(SourceCandidateV0)
+    object.__setattr__(source, "instrument", trusted_instrument)
+    object.__setattr__(source, "canonical_ticker", trusted_instrument.canonical_ticker)
+    object.__setattr__(source, "title", normalized_title)
+    object.__setattr__(source, "canonical_url", normalized_url)
+    object.__setattr__(source, "publisher", normalized_publisher)
+    object.__setattr__(source, "published_at", normalized_timestamp)
+    object.__setattr__(source, "purpose", purpose)
+    return source
+
+
+def validate_and_copy_source_candidate_v0(
+    value: object,
+    *,
+    expected_instrument: InstrumentRefV0,
+) -> SourceCandidateV0:
+    """Revalidate every source field and its complete instrument binding."""
+
+    trusted_instrument = copy_trusted_instrument_ref_v0(expected_instrument)
+    if trusted_instrument is None or type(value) is not SourceCandidateV0:
+        raise SourceCandidateValidationError(
+            "source candidate requires exact trusted values"
+        )
+    if value.published_at is not None and (
+        type(value.published_at) is not datetime or value.published_at.tzinfo is not UTC
+    ):
+        raise SourceCandidateValidationError(
+            "source candidate published_at is not canonical UTC"
+        )
+    try:
+        copied = create_source_candidate_v0(
+            instrument=value.instrument,
+            title=value.title,
+            canonical_url=value.canonical_url,
+            publisher=value.publisher,
+            published_at=value.published_at,
+            purpose=value.purpose,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SourceCandidateValidationError(
+            "source candidate fields are invalid"
+        ) from exc
+    if copied != value or copied.instrument != trusted_instrument:
+        raise SourceCandidateValidationError(
+            "source candidate is not bound to the expected instrument"
+        )
+    return copied
 
 
 def build_search_request_v0(
@@ -246,8 +346,8 @@ def _parse_source_row(value: object, expected: InstrumentRefV0) -> SourceCandida
     except (TypeError, ValueError) as exc:
         raise ValueError("source purpose is unsupported") from exc
     published_at = _optional_timestamp(value["published_at"])
-    return SourceCandidateV0(
-        canonical_ticker=expected.canonical_ticker,
+    return create_source_candidate_v0(
+        instrument=expected,
         title=title,
         canonical_url=canonicalize_public_article_url_v0(value["url"]),
         publisher=publisher,
@@ -279,6 +379,16 @@ def _optional_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _copy_source_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
+        raise SourceCandidateValidationError(
+            "source published_at must be an aware datetime or null"
+        )
+    return value.astimezone(UTC)
+
+
 def _source_sort_key(source: SourceCandidateV0) -> tuple[object, ...]:
     published_sort = (
         -source.published_at.timestamp()
@@ -302,7 +412,11 @@ __all__ = [
     "ResearchSourcePolicyV0",
     "SearchRequestV0",
     "SourceCandidateV0",
+    "SourceCandidateValidationError",
     "SourcePurposeV0",
     "build_search_request_v0",
+    "copy_research_source_policy_v0",
+    "create_source_candidate_v0",
     "parse_search_response_v0",
+    "validate_and_copy_source_candidate_v0",
 ]
