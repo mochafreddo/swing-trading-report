@@ -1,0 +1,29 @@
+{
+  "schema": "sab.research.search.v0",
+  "instrument": {
+    "market": "US",
+    "canonical_ticker": "AUR.NAS",
+    "exchange": "NASDAQ",
+    "company_name": "Aurora Synthetic Systems",
+    "identity_source": "synthetic-directory",
+    "identity_version": "fixture-2026-08-07"
+  },
+  "sources": [
+    {
+      "canonical_ticker": "AUR.NAS",
+      "title": "Synthetic counterpoint",
+      "url": "https://evidence.example/aurora-counter",
+      "publisher": "Synthetic Wire",
+      "published_at": "2026-08-07T01:00:00Z",
+      "purpose": "OPPOSING"
+    },
+    {
+      "canonical_ticker": "AUR.NAS",
+      "title": "Synthetic primary filing note",
+      "url": "https://evidence.example/aurora-primary",
+      "publisher": "Synthetic Exchange",
+      "published_at": "2026-08-07T02:00:00+00:00",
+      "purpose": "PRIMARY"
+    }
+  ]
+}

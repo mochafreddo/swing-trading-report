@@ -150,6 +150,39 @@ HOLDING/ENTRY shadow gate 활성화, research/compiler consumer 연결 순입니
 BrokerSnapshot producer와 schema를 유지합니다. registry가 없거나 오래되었을 때
 ticker-only fallback을 켜는 롤백은 허용하지 않으며, REVIEW 상태를 유지합니다.
 
+### 3.3 EvidenceResearcherV0 bounded research boundary
+
+`sab/research/`는 Decision Board V0의 독립된 shadow research owner입니다. 입력은
+exact concrete `InstrumentRefV0` 최대 5개, allowlisted public question enum,
+public freshness/source policy뿐입니다. 각 종목은 injectable `SearchProviderV0`를
+정확히 한 번 호출하며 provider 동시성은 2입니다. provider response는 exact schema,
+종목 binding, typed purpose(`PRIMARY`/`OPPOSING`/`ACTION_CHANGING`)를 검증하고 종목당
+최대 3개 source만 허용합니다. account ID, quantity, entry price, P/L, notes, tags,
+strategy, Toss/Supabase secret이나 arbitrary caller metadata를 입력 또는 provider
+request에 포함하지 않습니다.
+
+article verification은 source priority의 round-robin 순서로 스케줄하고 invocation 전체
+fetch attempt를 8회로 제한합니다. canonical URL은 전역 dedupe하되 동일 source의 종목별
+attribution은 유지합니다. URL은 HTTP(S) standard port와 qualified public hostname만
+허용하고 credentials/fragment/local·private·reserved address를 거부합니다. DNS answer
+하나라도 public IP가 아니면 전체 answer를 거부하며 모든 same-origin redirect에서 URL과
+DNS를 다시 검증합니다. response byte, redirect, content type/encoding, normalized text
+길이를 제한하고, 성공 artifact에는 exact normalized article text와 `sha256:` content
+hash만 기록합니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
+
+invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을
+만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을
+사용합니다. clock 역행은 typed `FAILED`, shared verifier preflight 실패는 provider 호출
+전 `BLOCKED`, provider timeout/malformed/empty는 peer와 격리된 item variant입니다.
+deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다.
+result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
+
+현재 이 owner에는 production provider adapter, Decision Board runner/compiler 연결,
+OpenAI/Toss/order call이 없습니다. rollout은 T3 identity gate 확인 후 provider/verifier
+adapter를 shadow runner에 주입하고, 이후 Task 5 claim validation consumer를 연결하는
+순서입니다. 롤백은 이 shadow consumer 연결만 제거하며 기존 AI Brief source policy와
+top-five behavior는 유지합니다.
+
 ## 4. 핵심 플로우
 
 ### 4.1 `scan` 플로우
