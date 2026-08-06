@@ -1,5 +1,14 @@
 create extension if not exists pgcrypto with schema extensions;
 
+drop function if exists public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb);
+drop function if exists public.collect_broker_holdings_v0();
+
+create schema if not exists broker_snapshot_private;
+revoke all on schema broker_snapshot_private from public;
+revoke all on schema broker_snapshot_private from anon;
+revoke all on schema broker_snapshot_private from authenticated;
+grant usage on schema broker_snapshot_private to service_role;
+
 create table public.broker_snapshot_v0 (
   singleton boolean primary key default true check (singleton),
   state_key text not null,
@@ -29,7 +38,35 @@ grant select, insert, update on table public.broker_snapshot_v0 to service_role;
 -- The digest input is a UTF-8 length-prefixed stream. Each row begins with R;
 -- scalar null is N, scalar text is S<byte-length>:<bytes>, and a tags array is
 -- A<count>: followed by the same scalar encoding for each normalized tag.
-create or replace function public.collect_broker_holdings_v0()
+create or replace function broker_snapshot_private.constant_time_text_equal_v0(
+  p_left text,
+  p_right text
+)
+returns boolean
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $$
+declare
+  v_difference integer := 0;
+begin
+  if p_left is null or p_right is null
+      or octet_length(p_left) <> octet_length(p_right) then
+    return false;
+  end if;
+  for v_index in 1..octet_length(p_left)
+  loop
+    v_difference := v_difference | (
+      get_byte(convert_to(p_left, 'UTF8'), v_index - 1)
+      # get_byte(convert_to(p_right, 'UTF8'), v_index - 1)
+    );
+  end loop;
+  return v_difference = 0;
+end;
+$$;
+
+create or replace function broker_snapshot_private.collect_broker_holdings_v0()
 returns table (
   holdings jsonb,
   holdings_digest text
@@ -53,8 +90,8 @@ begin
   for holding in
     select
       upper(trim(source.ticker)) as ticker,
-      to_char(round(source.quantity::numeric, 6), 'FM99999999999990.000000') as quantity,
-      to_char(round(source.entry_price::numeric, 4), 'FM99999999999990.0000') as entry_price,
+      round(source.quantity, 6)::text as quantity,
+      round(source.entry_price, 4)::text as entry_price,
       nullif(upper(trim(coalesce(source.entry_currency, ''))), '') as entry_currency,
       source.entry_date::text as entry_date,
       nullif(trim(coalesce(source.strategy, '')), '') as strategy,
@@ -68,11 +105,11 @@ begin
       ) as tags,
       case
         when source.stop_override is null then null
-        else to_char(round(source.stop_override::numeric, 4), 'FM99999999999990.0000')
+        else round(source.stop_override, 4)::text
       end as stop_override,
       case
         when source.target_override is null then null
-        else to_char(round(source.target_override::numeric, 4), 'FM99999999999990.0000')
+        else round(source.target_override, 4)::text
       end as target_override,
       lower(trim(source.broker_state)) as broker_state,
       source.broker_missing_first_seen_date::text as broker_missing_first_seen_date,
@@ -169,7 +206,8 @@ create or replace function public.seal_broker_snapshot_v0(
   p_session_date date,
   p_status text,
   p_expires_at timestamptz,
-  p_marker_payload jsonb
+  p_marker_payload jsonb,
+  p_expected_post_state_digest text
 )
 returns table (
   state_key text,
@@ -189,6 +227,7 @@ declare
   v_snapshot public.broker_snapshot_v0%rowtype;
   v_marker jsonb;
   v_sealed_at timestamptz := clock_timestamp();
+  v_existing_session_date date;
 begin
   if p_status not in ('applied', 'unchanged') then
     raise exception 'BrokerSnapshotV0 requires a confirmed successful sync status';
@@ -203,13 +242,41 @@ begin
   if p_marker_payload is null or jsonb_typeof(p_marker_payload) <> 'object' then
     raise exception 'BrokerSnapshotV0 marker payload must be an object';
   end if;
+  if p_expected_post_state_digest is null
+      or p_expected_post_state_digest !~ '^sha256:[0-9a-f]{64}$' then
+    raise exception 'BrokerSnapshotV0 expected post-state digest is invalid';
+  end if;
 
   lock table public.holdings in share mode;
   lock table public.broker_snapshot_v0 in exclusive mode;
 
+  -- Same-session retries are allowed and advance revision. Older sessions are
+  -- rejected even if a replay supplies a new future TTL.
+  select snapshot.session_date
+  into v_existing_session_date
+  from public.broker_snapshot_v0 as snapshot
+  where snapshot.singleton;
+
+  if found and p_session_date < v_existing_session_date then
+    raise exception using
+      errcode = '40001',
+      message = 'BrokerSnapshotV0 session regression',
+      detail = 'broker_snapshot_session_regression';
+  end if;
+
   select *
   into strict v_collection
-  from public.collect_broker_holdings_v0();
+  from broker_snapshot_private.collect_broker_holdings_v0();
+
+  if not broker_snapshot_private.constant_time_text_equal_v0(
+    p_expected_post_state_digest,
+    v_collection.holdings_digest
+  ) then
+    raise exception using
+      errcode = '40001',
+      message = 'BrokerSnapshotV0 post-state digest mismatch',
+      detail = 'broker_snapshot_post_state_conflict';
+  end if;
 
   insert into public.broker_snapshot_v0 (
     singleton,
@@ -314,7 +381,7 @@ begin
 
   select *
   into strict v_collection
-  from public.collect_broker_holdings_v0();
+  from broker_snapshot_private.collect_broker_holdings_v0();
 
   state_key := v_snapshot.state_key;
   session_date := v_snapshot.session_date::text;
@@ -329,15 +396,20 @@ begin
 end;
 $$;
 
-revoke all on function public.collect_broker_holdings_v0() from public;
-revoke all on function public.collect_broker_holdings_v0() from anon;
-revoke all on function public.collect_broker_holdings_v0() from authenticated;
-grant execute on function public.collect_broker_holdings_v0() to service_role;
+revoke all on function broker_snapshot_private.constant_time_text_equal_v0(text, text) from public;
+revoke all on function broker_snapshot_private.constant_time_text_equal_v0(text, text) from anon;
+revoke all on function broker_snapshot_private.constant_time_text_equal_v0(text, text) from authenticated;
+grant execute on function broker_snapshot_private.constant_time_text_equal_v0(text, text) to service_role;
 
-revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb) from public;
-revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb) from anon;
-revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb) from authenticated;
-grant execute on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb) to service_role;
+revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from public;
+revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from anon;
+revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from authenticated;
+grant execute on function broker_snapshot_private.collect_broker_holdings_v0() to service_role;
+
+revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) from public;
+revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) from anon;
+revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) from authenticated;
+grant execute on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) to service_role;
 
 revoke all on function public.get_broker_snapshot_v0() from public;
 revoke all on function public.get_broker_snapshot_v0() from anon;

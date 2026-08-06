@@ -274,6 +274,19 @@ just qa-toss-sync
 
 `just qa-toss-sync` runs `scripts/qa_toss_sync_local.sh`. It refuses to start unless `SUPABASE_URL` is local (`127.0.0.1`, `localhost`, `[::1]`, or `host.docker.internal`) unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_SUPABASE=1` is explicitly set; it also refuses non-loopback `TOSS_SYNC_QA_BASE_URL` unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_BASE_URL=1` is set. For Dockerized web, loopback Supabase URLs are translated to `host.docker.internal` so the container can reach the host-published local Supabase API. The script rebuilds the web container with `TOSS_SYNC_SOURCE=fixture`, `TOSS_SYNC_QA_FIXTURE_ENABLED=1`, and `TOSS_SYNC_AUTO_APPLY_ENABLED=1`; logs in with the local admin credentials from `.env`; exports the current holdings YAML; seeds a two-row QA holdings set; requires the scheduled sync runner to return `status=applied`; verifies `005930` and `AAPL.NAS` quantities/prices; restores the original holdings YAML; removes local auth/cookie temp files; and recreates the web container with fixture mode unset on exit. This is the preferred QA path when browser/API tests must cover authenticated UI entry and valid-token auto-apply without touching live Toss or remote holdings data.
 
+### BrokerSnapshotV0 rollout and rollback
+
+배포 순서는 반드시 `migration -> Web producer -> Python consumer`입니다.
+migration 뒤 첫 성공한 scheduled Toss sync 전까지는 `initial unsealed` 상태이며,
+Python consumer는 snapshot 부재를 fail-closed 처리해야 합니다. Web을 migration보다
+먼저 배포하면 seal RPC가 없으므로 성공 sync도 `marker_failed`가 됩니다.
+
+이 RPC는 `service-role-only`, `SECURITY INVOKER`, `advice-only` 경계입니다.
+브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. rollback은
+먼저 Python consumer, 다음 Web producer 순서로 되돌립니다. 적용된 migration의
+table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않고 `forward-fix`
+migration을 우선합니다.
+
 ## Rollback
 
 | Surface | Rollback Action | Notes |

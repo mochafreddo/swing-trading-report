@@ -341,6 +341,7 @@ def _parse_broker_snapshot_v0(
     *,
     now: datetime,
     minimum_revision: int | None,
+    expected_session_date: str,
 ) -> BrokerSnapshotV0:
     if not isinstance(payload, list) or len(payload) != 1:
         raise _snapshot_error(
@@ -365,6 +366,11 @@ def _parse_broker_snapshot_v0(
             "BrokerSnapshotV0 revision is not positive and monotonic",
         )
     session_date = _normalize_snapshot_date(raw["session_date"], "session_date")
+    if session_date != expected_session_date:
+        raise _snapshot_error(
+            "SESSION_MISMATCH",
+            "BrokerSnapshotV0 session_date does not match the required session",
+        )
     status = _normalize_snapshot_text(raw["status"], "status", nullable=False)
     state_key = _normalize_snapshot_text(raw["state_key"], "state_key", nullable=False)
     if (
@@ -438,12 +444,21 @@ def _parse_broker_snapshot_v0(
 def fetch_broker_snapshot_v0(
     *,
     config: SupabaseHoldingsExportConfig,
+    expected_session_date: str,
     session: Any | None = None,
     now: datetime | None = None,
     minimum_revision: int | None = None,
 ) -> BrokerSnapshotV0:
     """Read and verify one sealed marker and holdings set through one RPC call."""
 
+    normalized_expected_session = _normalize_snapshot_date(
+        expected_session_date,
+        "expected_session_date",
+    )
+    if normalized_expected_session is None:
+        raise _snapshot_error(
+            "SESSION_MISMATCH", "expected_session_date must be an ISO date"
+        )
     active_session = session or requests.Session()
     try:
         response = active_session.post(
@@ -474,6 +489,7 @@ def fetch_broker_snapshot_v0(
         payload,
         now=current_time,
         minimum_revision=minimum_revision,
+        expected_session_date=normalized_expected_session,
     )
 
 

@@ -27,11 +27,28 @@ def test_broker_snapshot_migration_seals_persisted_rows_and_revision_atomically(
     assert "sealed_at timestamptz not null" in sql
     assert "create or replace function public.seal_broker_snapshot_v0" in sql
     assert "lock table public.holdings in share mode" in sql
+    assert "p_expected_post_state_digest text" in sql
+    assert (
+        "drop function if exists public.seal_broker_snapshot_v0("
+        "text, date, text, timestamptz, jsonb)" in sql
+    )
+    assert "broker_snapshot_private.constant_time_text_equal_v0" in sql
+    assert "brokersnapshotv0 post-state digest mismatch" in sql
     assert "revision = public.broker_snapshot_v0.revision + 1" in sql
     assert "insert into public.runtime_state" in sql
     assert "on conflict on constraint runtime_state_pkey do update" in sql
     assert "snapshotdigest" in sql
     assert "snapshotrevision" in sql
+
+
+def test_broker_snapshot_rejects_regressed_session_but_allows_same_session_retry() -> (
+    None
+):
+    sql = _normalized_sql()
+
+    assert "p_session_date < v_existing_session_date" in sql
+    assert "brokersnapshotv0 session regression" in sql
+    assert "p_session_date = v_existing_session_date" not in sql
 
 
 def test_broker_snapshot_read_rpc_returns_one_sealed_marker_and_row_set() -> None:
@@ -58,14 +75,27 @@ def test_broker_snapshot_rpc_is_explicitly_service_role_only_and_rls_preserving(
     assert "revoke all on table public.broker_snapshot_v0 from anon" in sql
     assert "revoke all on table public.broker_snapshot_v0 from authenticated" in sql
     for function in (
-        "collect_broker_holdings_v0()",
-        "seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb)",
+        "seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text)",
         "get_broker_snapshot_v0()",
     ):
         assert f"revoke all on function public.{function} from public" in sql
         assert f"revoke all on function public.{function} from anon" in sql
         assert f"revoke all on function public.{function} from authenticated" in sql
         assert f"grant execute on function public.{function} to service_role" in sql
+
+    assert "create schema if not exists broker_snapshot_private" in sql
+    assert "revoke all on schema broker_snapshot_private from public" in sql
+    assert "grant usage on schema broker_snapshot_private to service_role" in sql
+    assert (
+        "create or replace function broker_snapshot_private.collect_broker_holdings_v0()"
+        in sql
+    )
+    assert "create or replace function public.collect_broker_holdings_v0()" not in sql
+    assert "drop function if exists public.collect_broker_holdings_v0()" in sql
+    assert (
+        "grant execute on function "
+        "broker_snapshot_private.collect_broker_holdings_v0() to service_role" in sql
+    )
 
 
 def test_broker_snapshot_canonical_projection_excludes_volatile_columns_and_orders_rows() -> (
@@ -95,10 +125,11 @@ def test_broker_snapshot_canonical_projection_excludes_volatile_columns_and_orde
     assert 'order by upper(trim(source.ticker)) collate "c"' in sql
     assert "where trim(tag.value) <> ''" in sql
     assert 'order by trim(tag.value) collate "c"' in sql
-    assert "round(source.quantity::numeric, 6)" in sql
-    assert "round(source.entry_price::numeric, 4)" in sql
-    assert "round(source.stop_override::numeric, 4)" in sql
-    assert "round(source.target_override::numeric, 4)" in sql
+    assert "round(source.quantity, 6)::text" in sql
+    assert "round(source.entry_price, 4)::text" in sql
+    assert "round(source.stop_override, 4)::text" in sql
+    assert "round(source.target_override, 4)::text" in sql
+    assert "to_char(" not in sql
     assert "broker-holdings-v0;" in sql
     assert "convert_to('r', 'utf8')" in sql
     assert "convert_to('n', 'utf8')" in sql
@@ -131,3 +162,16 @@ def test_broker_snapshot_migration_adds_no_order_or_browser_secret_boundary() ->
         "console.log(env.supabase.secret",
     ):
         assert forbidden not in changed_sources
+
+
+def test_broker_snapshot_rollout_and_initial_state_are_durably_documented() -> None:
+    architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+    deployment = Path("docs/deployment.md").read_text(encoding="utf-8")
+    combined = f"{architecture}\n{deployment}"
+
+    assert "BrokerSnapshotV0" in architecture
+    assert "migration -> Web producer -> Python consumer" in combined
+    assert "initial unsealed" in combined
+    assert "service-role-only" in combined
+    assert "advice-only" in combined
+    assert "forward-fix" in combined

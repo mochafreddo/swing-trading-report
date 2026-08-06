@@ -18,6 +18,7 @@ import {
 } from "@/lib/ticker-directory";
 import { fetchDefaultTossHoldingsItems } from "@/lib/toss/client";
 import {
+  buildBrokerHoldingsDigestV0,
   buildTossHoldingsDiffHash,
   buildTossHoldingsDryRun,
   type TossHoldingsDryRunResult,
@@ -28,6 +29,7 @@ import qaTossHoldingsFixture from "../../../fixtures/toss-holdings.qa.json";
 import type {
   HoldingRecord,
   HoldingReplaceSnapshot,
+  HoldingSnapshot,
   HoldingsYamlImportSummary,
 } from "@/lib/types";
 import type { ReplaceAllHoldingsResult } from "@/lib/supabase/holdings";
@@ -61,6 +63,7 @@ export interface ScheduledTossAutoSyncResponse extends Omit<
   status: ScheduledTossAutoSyncStatus;
   quarantinedCount: number;
   quarantinedTickers: string[];
+  expectedPostStateDigest?: string;
 }
 
 export interface TossHoldingsSyncPreview {
@@ -303,6 +306,11 @@ export async function recordScheduledTossFreshnessMarker(
   if (result.status !== "applied" && result.status !== "unchanged") {
     return null;
   }
+  if (!/^sha256:[0-9a-f]{64}$/.test(result.expectedPostStateDigest ?? "")) {
+    throw new Error(
+      "Scheduled Toss sync expected post-state digest is missing",
+    );
+  }
   const now = options.now ?? new Date();
   const sessionDate = options.sessionDate ?? resolveKstSessionDate(now);
   const stateKey = `toss-sync:success:MIXED:${sessionDate}`;
@@ -338,6 +346,7 @@ export async function recordScheduledTossFreshnessMarker(
         p_status: result.status,
         p_expires_at: expiresAt,
         p_marker_payload: markerPayload,
+        p_expected_post_state_digest: result.expectedPostStateDigest,
       }),
       cache: "no-store",
     },
@@ -385,6 +394,69 @@ export async function recordScheduledTossFreshnessMarker(
     revision,
     sealedAt: new Date(sealedAt).toISOString(),
   };
+}
+
+function confirmedPostStateRow(row: HoldingReplaceSnapshot): HoldingSnapshot {
+  return {
+    ...row,
+    entry_pattern: row.entry_pattern ?? null,
+    broker_state: "confirmed",
+    broker_missing_first_seen_date: null,
+    broker_missing_last_seen_date: null,
+    broker_missing_count: 0,
+    broker_missing_diff_hash: null,
+  };
+}
+
+function quarantinedPostStateRow(
+  row: HoldingRecord,
+  sessionDate: string,
+  diffHash: string,
+): HoldingSnapshot {
+  const alreadyMissing = row.broker_state === "not_seen_in_toss";
+  const alreadyCountedForSession =
+    alreadyMissing && row.broker_missing_last_seen_date === sessionDate;
+  return {
+    ticker: row.ticker,
+    quantity: row.quantity,
+    entry_price: row.entry_price,
+    entry_currency: row.entry_currency,
+    entry_date: row.entry_date,
+    strategy: row.strategy,
+    entry_pattern: row.entry_pattern,
+    notes: row.notes,
+    tags: [...row.tags],
+    stop_override: row.stop_override,
+    target_override: row.target_override,
+    broker_state: "not_seen_in_toss",
+    broker_missing_first_seen_date: alreadyMissing
+      ? (row.broker_missing_first_seen_date ?? sessionDate)
+      : sessionDate,
+    broker_missing_last_seen_date: sessionDate,
+    broker_missing_count: alreadyCountedForSession
+      ? (row.broker_missing_count ?? 0)
+      : alreadyMissing
+        ? (row.broker_missing_count ?? 0) + 1
+        : 1,
+    broker_missing_diff_hash: diffHash,
+  };
+}
+
+function buildExpectedScheduledPostStateDigest(
+  preview: TossHoldingsSyncPreview,
+  sessionDate: string,
+  quarantineTickers: readonly string[],
+): string {
+  const quarantineSet = new Set(quarantineTickers);
+  const rows = preview.dryRun.targetRows.map(confirmedPostStateRow);
+  for (const current of preview.currentHoldings) {
+    if (quarantineSet.has(current.ticker)) {
+      rows.push(
+        quarantinedPostStateRow(current, sessionDate, preview.diffHash),
+      );
+    }
+  }
+  return buildBrokerHoldingsDigestV0(rows);
 }
 
 async function fetchTossTickerDirectoryCandidates(
@@ -529,6 +601,11 @@ export async function runScheduledTossAutoApply(
   ) {
     return { ...base, status: "wipe_guard_blocked" };
   }
+  const expectedPostStateDigest = buildExpectedScheduledPostStateDigest(
+    preview,
+    sessionDate,
+    quarantinedTickers,
+  );
   if (preview.dryRun.reconciliation.summary.deleteCount > 0) {
     const result = await deps.applyScheduledTossQuarantine({
       targetRows: preview.dryRun.targetRows,
@@ -542,10 +619,11 @@ export async function runScheduledTossAutoApply(
       status: "applied",
       quarantinedCount: result.quarantinedCount,
       quarantinedTickers,
+      expectedPostStateDigest,
     };
   }
   if (!preview.hasChanges) {
-    return { ...base, status: "unchanged" };
+    return { ...base, status: "unchanged", expectedPostStateDigest };
   }
 
   const applied = await applyTossHoldingsSyncPreview(preview, deps);
@@ -555,5 +633,6 @@ export async function runScheduledTossAutoApply(
     status: "applied",
     quarantinedCount: 0,
     quarantinedTickers: [],
+    expectedPostStateDigest,
   };
 }

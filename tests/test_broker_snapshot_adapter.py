@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from inspect import Parameter, signature
 from typing import Any
 
 import pytest
@@ -135,6 +136,7 @@ def _fetch(
         session=session,
         now=_NOW,
         minimum_revision=minimum_revision,
+        expected_session_date="2026-08-06",
     )
 
 
@@ -189,6 +191,33 @@ def test_fetch_broker_snapshot_accepts_one_valid_sealed_rpc_response() -> None:
     assert session.post_calls[0]["url"].endswith("/rest/v1/rpc/get_broker_snapshot_v0")
     assert session.post_calls[0]["json"] == {}
     assert session.get_calls == []
+
+
+def test_fetch_broker_snapshot_requires_expected_session_date() -> None:
+    parameter = signature(fetch_broker_snapshot_v0).parameters["expected_session_date"]
+
+    assert parameter.default is Parameter.empty
+
+
+def test_fetch_broker_snapshot_rejects_old_session_even_with_fresh_ttl() -> None:
+    payload = _payload(
+        marker={
+            "scope": "MIXED",
+            "sessionDate": "2026-08-05",
+            "status": "applied",
+            "snapshotDigest": _digest([_row()]),
+            "snapshotRevision": 7,
+            "sealedAt": "2026-08-06T02:59:00Z",
+        },
+    )
+    payload[0]["session_date"] = "2026-08-05"
+    payload[0]["state_key"] = "toss-sync:success:MIXED:2026-08-05"
+    session = _FakeSession(_FakeResponse(200, payload))
+
+    with pytest.raises(BrokerSnapshotError) as exc_info:
+        _fetch(session)
+
+    assert exc_info.value.code == "SESSION_MISMATCH"
 
 
 def test_fetch_broker_snapshot_rejects_digest_mismatch() -> None:
