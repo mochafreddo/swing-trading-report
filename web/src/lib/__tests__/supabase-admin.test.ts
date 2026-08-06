@@ -11,13 +11,16 @@ import {
 import {
   addBuyToHolding,
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
   claimRuntimeStateLock,
   downloadStorageJson,
   fetchReportIndexPage,
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   createHolding,
   deleteHolding,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
   fetchReportIndexEntry,
   releaseRuntimeStateLock,
   SupabaseApiError,
@@ -979,6 +982,7 @@ describe("applyScheduledTossQuarantine", () => {
             updated_count: 2,
             quarantined_count: 1,
             unchanged_count: 3,
+            post_state_digest: `sha256:${"b".repeat(64)}`,
           },
         ]),
         {
@@ -1031,11 +1035,12 @@ describe("applyScheduledTossQuarantine", () => {
       updatedCount: 2,
       quarantinedCount: 1,
       unchangedCount: 3,
+      postStateDigest: `sha256:${"b".repeat(64)}`,
     });
     const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
     const url = new URL(String(requestUrl));
     expect(url.pathname).toBe(
-      "/rest/v1/rpc/apply_scheduled_toss_quarantine_v1",
+      "/rest/v1/rpc/apply_broker_holdings_quarantine_v0",
     );
     expect(requestInit?.method).toBe("POST");
     expect(requestInit?.body).toBe(
@@ -1130,6 +1135,110 @@ describe("applyScheduledTossQuarantine", () => {
       message:
         "Failed to apply scheduled Toss quarantine: holdings snapshot changed before quarantine",
     } satisfies Partial<SupabaseApiError>);
+  });
+});
+
+describe("BrokerSnapshotV0 DB digest boundary", () => {
+  it("returns the DB mutation digest without reconstructing numeric values in JS", async () => {
+    const digest = `sha256:${"e".repeat(64)}`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            inserted_count: 1,
+            updated_count: 0,
+            deleted_count: 0,
+            unchanged_count: 0,
+            post_state_digest: digest,
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const result = await replaceAllHoldingsAndCaptureBrokerDigest(
+      [
+        {
+          ticker: "AAPL.NAS",
+          quantity: 1,
+          entry_price: 100,
+          entry_currency: "USD",
+          entry_date: null,
+          strategy: null,
+          entry_pattern: null,
+          notes: null,
+          tags: [],
+          stop_override: null,
+          target_override: null,
+        },
+      ],
+      { expectedCurrentHoldings: [] },
+    );
+
+    expect(result.postStateDigest).toBe(digest);
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
+      "/rest/v1/rpc/apply_broker_holdings_replace_v0",
+    );
+  });
+
+  it("preserves the exact DB token for numeric domain maximum rows", async () => {
+    const digest = `sha256:${"f".repeat(64)}`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            holdings: [
+              {
+                ticker: "MAX.NAS",
+                quantity: "99999999999999.999999",
+                entry_price: "9999999999999999.9999",
+                entry_currency: "USD",
+                entry_date: null,
+                strategy: null,
+                entry_pattern: null,
+                notes: null,
+                tags: [],
+                stop_override: "9999999999999999.9999",
+                target_override: "9999999999999999.9999",
+                broker_state: "confirmed",
+                broker_missing_first_seen_date: null,
+                broker_missing_last_seen_date: null,
+                broker_missing_count: 0,
+                broker_missing_diff_hash: null,
+              },
+            ],
+            holdings_digest: digest,
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const state = await fetchBrokerHoldingsState();
+
+    expect(state.holdingsDigest).toBe(digest);
+    expect(state.holdings).toHaveLength(1);
+  });
+
+  it("passes the initial exact DB token to unchanged capture CAS", async () => {
+    const initialDigest = `sha256:${"1".repeat(64)}`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify([{ holdings_digest: initialDigest }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(captureBrokerHoldingsDigest(initialDigest)).resolves.toBe(
+      initialDigest,
+    );
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(new URL(String(requestUrl)).pathname).toBe(
+      "/rest/v1/rpc/capture_broker_holdings_digest_v0",
+    );
+    expect(requestInit?.body).toBe(
+      JSON.stringify({ p_expected_pre_state_digest: initialDigest }),
+    );
   });
 });
 

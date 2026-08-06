@@ -40,8 +40,12 @@ import {
 } from "@/lib/toss/holdings-sync-service";
 import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
 import { fetchSupabase } from "@/lib/supabase/admin-client";
-import { buildBrokerHoldingsDigestV0 } from "@/lib/toss/holdings-sync";
 import type { HoldingRecord } from "@/lib/types";
+
+const REPLACE_DIGEST = `sha256:${"a".repeat(64)}`;
+const QUARANTINE_DIGEST = `sha256:${"b".repeat(64)}`;
+const UNCHANGED_DIGEST = `sha256:${"c".repeat(64)}`;
+const INITIAL_DIGEST = `sha256:${"d".repeat(64)}`;
 
 function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
   return {
@@ -71,8 +75,13 @@ function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
 function deps(
   overrides: Partial<TossHoldingsSyncDependencies> = {},
 ): TossHoldingsSyncDependencies {
+  const fetchAllHoldings = overrides.fetchAllHoldings ?? vi.fn(async () => []);
   return {
-    fetchAllHoldings: vi.fn(async () => []),
+    fetchAllHoldings,
+    fetchBrokerHoldingsState: vi.fn(async () => ({
+      holdings: await fetchAllHoldings(),
+      holdingsDigest: INITIAL_DIGEST,
+    })),
     fetchTossHoldingsItems: vi.fn(async () => []),
     listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
       candidates: [],
@@ -88,12 +97,21 @@ function deps(
       deletedCount: 0,
       unchangedCount: 0,
     })),
+    replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+      insertedCount: 0,
+      updatedCount: 0,
+      deletedCount: 0,
+      unchangedCount: 0,
+      postStateDigest: REPLACE_DIGEST,
+    })),
     applyScheduledTossQuarantine: vi.fn(async (input) => ({
       insertedCount: 0,
       updatedCount: 0,
       quarantinedCount: input.quarantineTickers.length,
       unchangedCount: 0,
+      postStateDigest: QUARANTINE_DIGEST,
     })),
+    captureBrokerHoldingsDigest: vi.fn(async () => UNCHANGED_DIGEST),
     ...overrides,
   };
 }
@@ -102,20 +120,6 @@ describe("toss holdings sync service", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
-  });
-
-  it("matches the BrokerSnapshotV0 Python digest golden vector", () => {
-    expect(
-      buildBrokerHoldingsDigestV0([
-        holding({
-          ticker: "005930",
-          quantity: 2,
-          entry_price: 70000,
-        }),
-      ]),
-    ).toBe(
-      "sha256:e93e9ca8858256a0d8a8dd325aa3b6afbe68f618e0a4b841b255803dfbff62c7",
-    );
   });
 
   it("builds a preview and applies create update delete changes", async () => {
@@ -368,7 +372,7 @@ describe("toss holdings sync service", () => {
     );
 
     expect(result.status).toBe("applied");
-    expect(result.expectedPostStateDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(result.expectedPostStateDigest).toBe(QUARANTINE_DIGEST);
     expect(result.summary.deleteCount).toBe(1);
     expect(result.quarantinedCount).toBe(1);
     expect(result.quarantinedTickers).toEqual(["TSLA.NAS"]);
@@ -413,6 +417,13 @@ describe("toss holdings sync service", () => {
         deletedCount: 0,
         unchangedCount: 0,
       })),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
     });
 
     const result = await runScheduledTossAutoApply(
@@ -421,10 +432,10 @@ describe("toss holdings sync service", () => {
     );
 
     expect(result.status).toBe("applied");
-    expect(result.expectedPostStateDigest).toBe(
-      "sha256:e93e9ca8858256a0d8a8dd325aa3b6afbe68f618e0a4b841b255803dfbff62c7",
-    );
-    expect(testDeps.replaceAllHoldings).toHaveBeenCalledWith(
+    expect(result.expectedPostStateDigest).toBe(REPLACE_DIGEST);
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith(
       [expect.objectContaining({ ticker: "005930", quantity: 2 })],
       { expectedCurrentHoldings: currentHoldings },
     );
@@ -461,6 +472,13 @@ describe("toss holdings sync service", () => {
         deletedCount: 0,
         unchangedCount: 0,
       })),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
     });
 
     const result = await runScheduledTossAutoApply(
@@ -482,10 +500,11 @@ describe("toss holdings sync service", () => {
         ],
       }),
     ]);
-    expect(testDeps.replaceAllHoldings).toHaveBeenCalledWith(
-      [expect.objectContaining({ ticker: "TSLA.NAS" })],
-      { expectedCurrentHoldings: currentHoldings },
-    );
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith([expect.objectContaining({ ticker: "TSLA.NAS" })], {
+      expectedCurrentHoldings: currentHoldings,
+    });
     expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
@@ -502,10 +521,133 @@ describe("toss holdings sync service", () => {
 
     expect(result.status).toBe("unchanged");
     expect(result.summary.incomingCount).toBe(0);
-    expect(result.expectedPostStateDigest).toBe(
-      "sha256:42168b485730a2016e9d1234bf3530dbedfc0a997f8536ef7defe41b27607226",
+    expect(result.expectedPostStateDigest).toBe(UNCHANGED_DIGEST);
+    expect(testDeps.captureBrokerHoldingsDigest).toHaveBeenCalledWith(
+      INITIAL_DIGEST,
     );
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when holdings change between scheduled preview and unchanged capture", async () => {
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => []),
+      fetchTossHoldingsItems: vi.fn(async () => []),
+      captureBrokerHoldingsDigest: vi.fn(async () => {
+        throw new Error("broker holdings pre-state conflict");
+      }),
+    });
+
+    await expect(
+      runScheduledTossAutoApply(
+        { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+        testDeps,
+      ),
+    ).rejects.toThrow("pre-state conflict");
+    expect(testDeps.captureBrokerHoldingsDigest).toHaveBeenCalledWith(
+      INITIAL_DIGEST,
+    );
+  });
+
+  it("uses the DB mutation digest when an active normal holding becomes zero", async () => {
+    const currentHoldings = [
+      holding({
+        ticker: "005930",
+        quantity: 1,
+        entry_price: 70000,
+        entry_pattern: "trend_pullback_bounce",
+      }),
+    ];
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => currentHoldings),
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "005930",
+          marketCountry: "KR",
+          currency: "KRW",
+          quantity: "0",
+          averagePurchasePrice: "70000",
+        },
+      ]),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
+    });
+
+    const result = await runScheduledTossAutoApply(
+      { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+      testDeps,
+    );
+
+    expect(result.expectedPostStateDigest).toBe(REPLACE_DIGEST);
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith(
+      [expect.objectContaining({ ticker: "005930", quantity: 0 })],
+      { expectedCurrentHoldings: currentHoldings },
+    );
+  });
+
+  it("uses the DB quarantine digest when an active target holding becomes zero", async () => {
+    const currentHoldings = [
+      holding({
+        ticker: "005930",
+        quantity: 1,
+        entry_price: 70000,
+        entry_pattern: "trend_pullback_bounce",
+      }),
+      holding({ ticker: "035420", quantity: 1, entry_price: 200000 }),
+    ];
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => currentHoldings),
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "005930",
+          marketCountry: "KR",
+          currency: "KRW",
+          quantity: "0",
+          averagePurchasePrice: "70000",
+        },
+      ]),
+    });
+
+    const result = await runScheduledTossAutoApply(
+      { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+      testDeps,
+    );
+
+    expect(result.expectedPostStateDigest).toBe(QUARANTINE_DIGEST);
+    expect(testDeps.applyScheduledTossQuarantine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetRows: [
+          expect.objectContaining({ ticker: "005930", quantity: 0 }),
+        ],
+        quarantineTickers: ["035420"],
+      }),
+    );
+  });
+
+  it("rejects a future KST session before reading or mutating holdings", async () => {
+    const testDeps = deps();
+
+    await expect(
+      runScheduledTossAutoApply(
+        {
+          autoApplyEnabled: true,
+          sessionDate: "2099-01-01",
+          now: new Date("2026-08-06T00:00:00Z"),
+        },
+        testDeps,
+      ),
+    ).rejects.toThrow("future KST session");
+    expect(testDeps.fetchAllHoldings).not.toHaveBeenCalled();
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("records a scheduled Toss freshness marker with key payload and TTL", async () => {

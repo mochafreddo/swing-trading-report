@@ -2,8 +2,11 @@ import "server-only";
 
 import {
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
 } from "@/lib/supabase-admin";
 import { getSupabaseEnv } from "@/lib/env.server";
 import {
@@ -18,7 +21,6 @@ import {
 } from "@/lib/ticker-directory";
 import { fetchDefaultTossHoldingsItems } from "@/lib/toss/client";
 import {
-  buildBrokerHoldingsDigestV0,
   buildTossHoldingsDiffHash,
   buildTossHoldingsDryRun,
   type TossHoldingsDryRunResult,
@@ -29,10 +31,13 @@ import qaTossHoldingsFixture from "../../../fixtures/toss-holdings.qa.json";
 import type {
   HoldingRecord,
   HoldingReplaceSnapshot,
-  HoldingSnapshot,
   HoldingsYamlImportSummary,
 } from "@/lib/types";
-import type { ReplaceAllHoldingsResult } from "@/lib/supabase/holdings";
+import type {
+  BrokerHoldingsMutationResult,
+  BrokerHoldingsState,
+  ReplaceAllHoldingsResult,
+} from "@/lib/supabase/holdings";
 
 type TossHoldingsSyncMode = "dry-run" | "apply";
 
@@ -75,14 +80,17 @@ export interface TossHoldingsSyncPreview {
   hasChanges: boolean;
   hasCurrentHoldings: boolean;
   payload: TossHoldingsSyncResponsePayload;
+  initialHoldingsDigest: string | null;
 }
 
 export interface TossHoldingsSyncPreviewOptions {
   tickerDirectoryLookupFailureMode?: "ignore" | "throw";
+  brokerSnapshotBoundary?: boolean;
 }
 
 export interface TossHoldingsSyncDependencies {
   fetchAllHoldings: () => Promise<HoldingRecord[]>;
+  fetchBrokerHoldingsState: () => Promise<BrokerHoldingsState>;
   fetchTossHoldingsItems: () => Promise<TossHoldingsItem[]>;
   listTickerDirectoryExactBaseCandidates: (
     symbols: readonly string[],
@@ -91,6 +99,10 @@ export interface TossHoldingsSyncDependencies {
     rows: HoldingReplaceSnapshot[],
     options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
   ) => Promise<ReplaceAllHoldingsResult>;
+  replaceAllHoldingsAndCaptureBrokerDigest: (
+    rows: HoldingReplaceSnapshot[],
+    options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
+  ) => Promise<BrokerHoldingsMutationResult>;
   applyScheduledTossQuarantine: (input: {
     targetRows: HoldingReplaceSnapshot[];
     quarantineTickers: string[];
@@ -102,7 +114,11 @@ export interface TossHoldingsSyncDependencies {
     updatedCount: number;
     quarantinedCount: number;
     unchangedCount: number;
+    postStateDigest: string;
   }>;
+  captureBrokerHoldingsDigest: (
+    expectedPreStateDigest: string,
+  ) => Promise<string>;
 }
 
 export interface ScheduledTossFreshnessMarkerResult {
@@ -115,10 +131,13 @@ export interface ScheduledTossFreshnessMarkerResult {
 
 const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
   listTickerDirectoryExactBaseCandidates,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
 };
 
 class TossHoldingsFixtureError extends Error {
@@ -396,69 +415,6 @@ export async function recordScheduledTossFreshnessMarker(
   };
 }
 
-function confirmedPostStateRow(row: HoldingReplaceSnapshot): HoldingSnapshot {
-  return {
-    ...row,
-    entry_pattern: row.entry_pattern ?? null,
-    broker_state: "confirmed",
-    broker_missing_first_seen_date: null,
-    broker_missing_last_seen_date: null,
-    broker_missing_count: 0,
-    broker_missing_diff_hash: null,
-  };
-}
-
-function quarantinedPostStateRow(
-  row: HoldingRecord,
-  sessionDate: string,
-  diffHash: string,
-): HoldingSnapshot {
-  const alreadyMissing = row.broker_state === "not_seen_in_toss";
-  const alreadyCountedForSession =
-    alreadyMissing && row.broker_missing_last_seen_date === sessionDate;
-  return {
-    ticker: row.ticker,
-    quantity: row.quantity,
-    entry_price: row.entry_price,
-    entry_currency: row.entry_currency,
-    entry_date: row.entry_date,
-    strategy: row.strategy,
-    entry_pattern: row.entry_pattern,
-    notes: row.notes,
-    tags: [...row.tags],
-    stop_override: row.stop_override,
-    target_override: row.target_override,
-    broker_state: "not_seen_in_toss",
-    broker_missing_first_seen_date: alreadyMissing
-      ? (row.broker_missing_first_seen_date ?? sessionDate)
-      : sessionDate,
-    broker_missing_last_seen_date: sessionDate,
-    broker_missing_count: alreadyCountedForSession
-      ? (row.broker_missing_count ?? 0)
-      : alreadyMissing
-        ? (row.broker_missing_count ?? 0) + 1
-        : 1,
-    broker_missing_diff_hash: diffHash,
-  };
-}
-
-function buildExpectedScheduledPostStateDigest(
-  preview: TossHoldingsSyncPreview,
-  sessionDate: string,
-  quarantineTickers: readonly string[],
-): string {
-  const quarantineSet = new Set(quarantineTickers);
-  const rows = preview.dryRun.targetRows.map(confirmedPostStateRow);
-  for (const current of preview.currentHoldings) {
-    if (quarantineSet.has(current.ticker)) {
-      rows.push(
-        quarantinedPostStateRow(current, sessionDate, preview.diffHash),
-      );
-    }
-  }
-  return buildBrokerHoldingsDigestV0(rows);
-}
-
 async function fetchTossTickerDirectoryCandidates(
   items: readonly TossHoldingsItem[],
   deps: Pick<
@@ -494,10 +450,16 @@ export async function buildTossHoldingsSyncPreview(
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
   options: TossHoldingsSyncPreviewOptions = {},
 ): Promise<TossHoldingsSyncPreview> {
-  const [currentHoldings, tossItems] = await Promise.all([
-    deps.fetchAllHoldings(),
+  const [holdingsState, tossItems] = await Promise.all([
+    options.brokerSnapshotBoundary
+      ? deps.fetchBrokerHoldingsState()
+      : deps.fetchAllHoldings().then((holdings) => ({
+          holdings,
+          holdingsDigest: null,
+        })),
     deps.fetchTossHoldingsItems(),
   ]);
+  const currentHoldings = holdingsState.holdings;
   const tickerDirectoryCandidates = await fetchTossTickerDirectoryCandidates(
     tossItems,
     deps,
@@ -520,6 +482,7 @@ export async function buildTossHoldingsSyncPreview(
     hasChanges: hasChanges(dryRun.reconciliation.summary),
     hasCurrentHoldings: currentHoldings.length > 0,
     payload,
+    initialHoldingsDigest: holdingsState.holdingsDigest,
   };
 }
 
@@ -545,7 +508,7 @@ export async function applyTossHoldingsSyncPreview(
 }
 
 export async function runScheduledTossAutoApply(
-  options: { autoApplyEnabled: boolean; sessionDate?: string },
+  options: { autoApplyEnabled: boolean; sessionDate?: string; now?: Date },
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
 ): Promise<ScheduledTossAutoSyncResponse> {
   if (!options.autoApplyEnabled) {
@@ -572,9 +535,14 @@ export async function runScheduledTossAutoApply(
     };
   }
 
-  const sessionDate = options.sessionDate ?? resolveKstSessionDate();
+  const currentSessionDate = resolveKstSessionDate(options.now);
+  const sessionDate = options.sessionDate ?? currentSessionDate;
+  if (sessionDate > currentSessionDate) {
+    throw new Error("Scheduled Toss sync cannot use a future KST session");
+  }
   const preview = await buildTossHoldingsSyncPreview(deps, {
     tickerDirectoryLookupFailureMode: "throw",
+    brokerSnapshotBoundary: true,
   });
   const quarantinedTickers = preview.dryRun.reconciliation.changes.delete.map(
     (row) => row.ticker,
@@ -601,11 +569,6 @@ export async function runScheduledTossAutoApply(
   ) {
     return { ...base, status: "wipe_guard_blocked" };
   }
-  const expectedPostStateDigest = buildExpectedScheduledPostStateDigest(
-    preview,
-    sessionDate,
-    quarantinedTickers,
-  );
   if (preview.dryRun.reconciliation.summary.deleteCount > 0) {
     const result = await deps.applyScheduledTossQuarantine({
       targetRows: preview.dryRun.targetRows,
@@ -619,20 +582,33 @@ export async function runScheduledTossAutoApply(
       status: "applied",
       quarantinedCount: result.quarantinedCount,
       quarantinedTickers,
-      expectedPostStateDigest,
+      expectedPostStateDigest: result.postStateDigest,
     };
   }
   if (!preview.hasChanges) {
+    if (!preview.initialHoldingsDigest) {
+      throw new Error("Scheduled Toss sync initial DB digest is missing");
+    }
+    const expectedPostStateDigest = await deps.captureBrokerHoldingsDigest(
+      preview.initialHoldingsDigest,
+    );
     return { ...base, status: "unchanged", expectedPostStateDigest };
   }
 
-  const applied = await applyTossHoldingsSyncPreview(preview, deps);
+  const applied = await deps.replaceAllHoldingsAndCaptureBrokerDigest(
+    preview.dryRun.targetRows,
+    { expectedCurrentHoldings: preview.currentHoldings },
+  );
+  assertReplaceAllResultMatchesPreview(
+    applied,
+    preview.dryRun.reconciliation.summary,
+  );
   return {
-    ...applied,
-    mode: "auto-apply",
+    ...preview.payload,
+    mode: "auto-apply" as const,
     status: "applied",
     quarantinedCount: 0,
     quarantinedTickers: [],
-    expectedPostStateDigest,
+    expectedPostStateDigest: applied.postStateDigest,
   };
 }

@@ -2,6 +2,10 @@ create extension if not exists pgcrypto with schema extensions;
 
 drop function if exists public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb);
 drop function if exists public.collect_broker_holdings_v0();
+drop function if exists public.apply_broker_holdings_replace_v0(jsonb, jsonb);
+drop function if exists public.apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text);
+drop function if exists public.get_broker_holdings_state_v0();
+drop function if exists public.capture_broker_holdings_digest_v0(text);
 
 create schema if not exists broker_snapshot_private;
 revoke all on schema broker_snapshot_private from public;
@@ -201,6 +205,140 @@ begin
 end;
 $$;
 
+create or replace function public.get_broker_holdings_state_v0()
+returns table (
+  holdings jsonb,
+  holdings_digest text
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select collected.holdings, collected.holdings_digest
+  from broker_snapshot_private.collect_broker_holdings_v0() as collected;
+$$;
+
+create or replace function public.capture_broker_holdings_digest_v0(
+  p_expected_pre_state_digest text
+)
+returns table (
+  holdings_digest text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_collection record;
+begin
+  if p_expected_pre_state_digest is null
+      or p_expected_pre_state_digest !~ '^sha256:[0-9a-f]{64}$' then
+    raise exception 'Broker holdings expected pre-state digest is invalid';
+  end if;
+
+  lock table public.holdings in share mode;
+
+  select *
+  into strict v_collection
+  from broker_snapshot_private.collect_broker_holdings_v0();
+
+  if not broker_snapshot_private.constant_time_text_equal_v0(
+    p_expected_pre_state_digest,
+    v_collection.holdings_digest
+  ) then
+    raise exception using
+      errcode = '40001',
+      message = 'Broker holdings pre-state conflict',
+      detail = 'broker_holdings_pre_state_conflict';
+  end if;
+
+  holdings_digest := v_collection.holdings_digest;
+  return next;
+end;
+$$;
+
+create or replace function public.apply_broker_holdings_replace_v0(
+  p_holdings jsonb default '[]'::jsonb,
+  p_expected_holdings jsonb default null
+)
+returns table (
+  inserted_count integer,
+  updated_count integer,
+  deleted_count integer,
+  unchanged_count integer,
+  post_state_digest text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_apply record;
+  v_collection record;
+begin
+  select *
+  into strict v_apply
+  from public.replace_holdings_v1(p_holdings, p_expected_holdings);
+
+  select *
+  into strict v_collection
+  from broker_snapshot_private.collect_broker_holdings_v0();
+
+  inserted_count := v_apply.inserted_count;
+  updated_count := v_apply.updated_count;
+  deleted_count := v_apply.deleted_count;
+  unchanged_count := v_apply.unchanged_count;
+  post_state_digest := v_collection.holdings_digest;
+  return next;
+end;
+$$;
+
+create or replace function public.apply_broker_holdings_quarantine_v0(
+  p_holdings jsonb default '[]'::jsonb,
+  p_quarantine_tickers text[] default '{}'::text[],
+  p_expected_holdings jsonb default null,
+  p_session_date date default current_date,
+  p_diff_hash text default null
+)
+returns table (
+  inserted_count integer,
+  updated_count integer,
+  quarantined_count integer,
+  unchanged_count integer,
+  post_state_digest text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_apply record;
+  v_collection record;
+begin
+  select *
+  into strict v_apply
+  from public.apply_scheduled_toss_quarantine_v1(
+    p_holdings,
+    p_quarantine_tickers,
+    p_expected_holdings,
+    p_session_date,
+    p_diff_hash
+  );
+
+  select *
+  into strict v_collection
+  from broker_snapshot_private.collect_broker_holdings_v0();
+
+  inserted_count := v_apply.inserted_count;
+  updated_count := v_apply.updated_count;
+  quarantined_count := v_apply.quarantined_count;
+  unchanged_count := v_apply.unchanged_count;
+  post_state_digest := v_collection.holdings_digest;
+  return next;
+end;
+$$;
+
 create or replace function public.seal_broker_snapshot_v0(
   p_state_key text,
   p_session_date date,
@@ -245,6 +383,12 @@ begin
   if p_expected_post_state_digest is null
       or p_expected_post_state_digest !~ '^sha256:[0-9a-f]{64}$' then
     raise exception 'BrokerSnapshotV0 expected post-state digest is invalid';
+  end if;
+  if p_session_date > (clock_timestamp() at time zone 'Asia/Seoul')::date then
+    raise exception using
+      errcode = '40001',
+      message = 'BrokerSnapshotV0 future session',
+      detail = 'broker_snapshot_future_session';
   end if;
 
   lock table public.holdings in share mode;
@@ -405,6 +549,26 @@ revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from
 revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from anon;
 revoke all on function broker_snapshot_private.collect_broker_holdings_v0() from authenticated;
 grant execute on function broker_snapshot_private.collect_broker_holdings_v0() to service_role;
+
+revoke all on function public.apply_broker_holdings_replace_v0(jsonb, jsonb) from public;
+revoke all on function public.apply_broker_holdings_replace_v0(jsonb, jsonb) from anon;
+revoke all on function public.apply_broker_holdings_replace_v0(jsonb, jsonb) from authenticated;
+grant execute on function public.apply_broker_holdings_replace_v0(jsonb, jsonb) to service_role;
+
+revoke all on function public.apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text) from public;
+revoke all on function public.apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text) from anon;
+revoke all on function public.apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text) from authenticated;
+grant execute on function public.apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text) to service_role;
+
+revoke all on function public.get_broker_holdings_state_v0() from public;
+revoke all on function public.get_broker_holdings_state_v0() from anon;
+revoke all on function public.get_broker_holdings_state_v0() from authenticated;
+grant execute on function public.get_broker_holdings_state_v0() to service_role;
+
+revoke all on function public.capture_broker_holdings_digest_v0(text) from public;
+revoke all on function public.capture_broker_holdings_digest_v0(text) from anon;
+revoke all on function public.capture_broker_holdings_digest_v0(text) from authenticated;
+grant execute on function public.capture_broker_holdings_digest_v0(text) to service_role;
 
 revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) from public;
 revoke all on function public.seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text) from anon;

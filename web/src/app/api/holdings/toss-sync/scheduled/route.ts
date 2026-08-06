@@ -161,9 +161,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const currentSessionDate = resolveKstSessionDate();
+  const sessionDate = parsed.data.sessionDate ?? currentSessionDate;
+  if (sessionDate > currentSessionDate) {
+    return withApiRequestId(
+      jsonWithNoStore(
+        { error: "Future Toss sync session is not allowed" },
+        { status: 400 },
+      ),
+      requestId,
+    );
+  }
+
   try {
     const deps = buildTossHoldingsSyncDependenciesFromEnv();
-    const sessionDate = parsed.data.sessionDate ?? resolveKstSessionDate();
     const result = await runScheduledTossAutoApply(
       {
         autoApplyEnabled: process.env.TOSS_SYNC_AUTO_APPLY_ENABLED === "1",

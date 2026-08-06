@@ -277,15 +277,17 @@ just qa-toss-sync
 ### BrokerSnapshotV0 rollout and rollback
 
 배포 순서는 반드시 `migration -> Web producer -> Python consumer`입니다.
+migration 적용 전에는 scheduled sync 중지 후 진행 중인 producer가 없는지 확인합니다.
 migration 뒤 첫 성공한 scheduled Toss sync 전까지는 `initial unsealed` 상태이며,
 Python consumer는 snapshot 부재를 fail-closed 처리해야 합니다. Web을 migration보다
 먼저 배포하면 seal RPC가 없으므로 성공 sync도 `marker_failed`가 됩니다.
 
 이 RPC는 `service-role-only`, `SECURITY INVOKER`, `advice-only` 경계입니다.
-브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. rollback은
-먼저 Python consumer, 다음 Web producer 순서로 되돌립니다. 적용된 migration의
-table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않고 `forward-fix`
-migration을 우선합니다.
+브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. migration 적용
+전 코드 rollback만 Python consumer, Web producer 순서로 되돌립니다. 적용된 migration의
+table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않습니다. 새 DB RPC가
+적용된 뒤에는 구 Web rollback 금지입니다. producer 중지 후 새 producer와
+호환되는 `forward-fix` migration을 적용하고 검증이 끝난 뒤 scheduled sync를 재개합니다.
 
 ## Rollback
 

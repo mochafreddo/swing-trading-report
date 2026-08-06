@@ -49,6 +49,24 @@ def test_broker_snapshot_rejects_regressed_session_but_allows_same_session_retry
     assert "p_session_date < v_existing_session_date" in sql
     assert "brokersnapshotv0 session regression" in sql
     assert "p_session_date = v_existing_session_date" not in sql
+    assert "p_session_date > (clock_timestamp() at time zone 'asia/seoul')::date" in sql
+    assert "brokersnapshotv0 future session" in sql
+
+
+def test_broker_snapshot_mutation_wrappers_return_db_authoritative_digest() -> None:
+    sql = _normalized_sql()
+
+    assert "create or replace function public.apply_broker_holdings_replace_v0" in sql
+    assert (
+        "create or replace function public.apply_broker_holdings_quarantine_v0" in sql
+    )
+    assert "create or replace function public.get_broker_holdings_state_v0" in sql
+    assert "create or replace function public.capture_broker_holdings_digest_v0" in sql
+    assert "from public.replace_holdings_v1(" in sql
+    assert "from public.apply_scheduled_toss_quarantine_v1(" in sql
+    assert "post_state_digest := v_collection.holdings_digest" in sql
+    assert "p_expected_pre_state_digest" in sql
+    assert "broker holdings pre-state conflict" in sql
 
 
 def test_broker_snapshot_read_rpc_returns_one_sealed_marker_and_row_set() -> None:
@@ -75,6 +93,10 @@ def test_broker_snapshot_rpc_is_explicitly_service_role_only_and_rls_preserving(
     assert "revoke all on table public.broker_snapshot_v0 from anon" in sql
     assert "revoke all on table public.broker_snapshot_v0 from authenticated" in sql
     for function in (
+        "apply_broker_holdings_replace_v0(jsonb, jsonb)",
+        "apply_broker_holdings_quarantine_v0(jsonb, text[], jsonb, date, text)",
+        "get_broker_holdings_state_v0()",
+        "capture_broker_holdings_digest_v0(text)",
         "seal_broker_snapshot_v0(text, date, text, timestamptz, jsonb, text)",
         "get_broker_snapshot_v0()",
     ):
@@ -164,6 +186,17 @@ def test_broker_snapshot_migration_adds_no_order_or_browser_secret_boundary() ->
         assert forbidden not in changed_sources
 
 
+def test_web_producer_does_not_reconstruct_authoritative_digest_from_numbers() -> None:
+    sync_source = Path("web/src/lib/toss/holdings-sync.ts").read_text(encoding="utf-8")
+    service_source = Path("web/src/lib/toss/holdings-sync-service.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "buildBrokerHoldingsDigestV0" not in sync_source
+    assert "buildBrokerHoldingsDigestV0" not in service_source
+    assert "toFixed(" not in sync_source
+
+
 def test_broker_snapshot_rollout_and_initial_state_are_durably_documented() -> None:
     architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
     deployment = Path("docs/deployment.md").read_text(encoding="utf-8")
@@ -175,3 +208,6 @@ def test_broker_snapshot_rollout_and_initial_state_are_durably_documented() -> N
     assert "service-role-only" in combined
     assert "advice-only" in combined
     assert "forward-fix" in combined
+    assert "scheduled sync 중지" in combined
+    assert "구 Web rollback 금지" in combined
+    assert "producer 중지" in combined
