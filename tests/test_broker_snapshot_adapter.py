@@ -56,6 +56,7 @@ def _payload(
     revision: object = 7,
     marker: object | None = None,
     fresh_until: str = "2026-08-07T15:00:00Z",
+    sealed_at: str = "2026-08-06T02:59:00Z",
 ) -> list[dict[str, object]]:
     normalized_rows = rows if rows is not None else [_row()]
     computed_digest = digest or _digest(normalized_rows)
@@ -65,7 +66,7 @@ def _payload(
             "session_date": "2026-08-06",
             "status": "applied",
             "fresh_until": fresh_until,
-            "sealed_at": "2026-08-06T02:59:00Z",
+            "sealed_at": sealed_at,
             "holdings_digest": computed_digest,
             "revision": revision,
             "marker": marker
@@ -76,7 +77,7 @@ def _payload(
                 "status": "applied",
                 "snapshotDigest": computed_digest,
                 "snapshotRevision": revision,
-                "sealedAt": "2026-08-06T02:59:00Z",
+                "sealedAt": sealed_at,
             },
             "holdings": normalized_rows,
         }
@@ -196,6 +197,40 @@ def test_fetch_broker_snapshot_accepts_one_valid_sealed_rpc_response() -> None:
     assert session.get_calls == []
 
 
+def test_validating_factory_rejects_seal_after_capture_time() -> None:
+    payload = _payload(sealed_at="2026-08-06T03:00:00.000001Z")
+
+    with pytest.raises(BrokerSnapshotError) as exc_info:
+        validate_broker_snapshot_v0(
+            payload,
+            now=_NOW,
+            expected_session_date="2026-08-06",
+        )
+
+    assert exc_info.value.code == "MARKER_INVALID"
+
+
+def test_validating_factory_accepts_seal_at_capture_time() -> None:
+    snapshot = validate_broker_snapshot_v0(
+        _payload(sealed_at="2026-08-06T03:00:00Z"),
+        now=_NOW,
+        expected_session_date="2026-08-06",
+    )
+
+    assert snapshot.sealed_at == _NOW
+
+
+def test_validating_factory_rejects_freshness_equal_to_capture_time() -> None:
+    with pytest.raises(BrokerSnapshotError) as exc_info:
+        validate_broker_snapshot_v0(
+            _payload(fresh_until="2026-08-06T03:00:00Z"),
+            now=_NOW,
+            expected_session_date="2026-08-06",
+        )
+
+    assert exc_info.value.code == "MARKER_EXPIRED"
+
+
 def test_broker_snapshot_requires_validating_factory() -> None:
     assert callable(getattr(holdings_module, "validate_broker_snapshot_v0", None))
 
@@ -258,6 +293,36 @@ def test_validating_factory_rejects_extra_marker_fields() -> None:
         )
 
     assert exc_info.value.code == "MARKER_INVALID"
+
+
+def test_validating_factory_accepts_known_task2_freshness_marker_metadata() -> None:
+    payload = _payload()
+    marker = payload[0]["marker"]
+    assert isinstance(marker, dict)
+    marker.update(
+        {
+            "diffHash": "synthetic-diff",
+            "incomingCount": 1,
+            "createCount": 0,
+            "updateCount": 0,
+            "deleteCount": 0,
+            "unchangedCount": 1,
+            "quarantinedCount": 0,
+            "quarantinedTickers": [],
+            "source": "scheduled-route",
+            "timezone": "Asia/Seoul",
+            "updatedAt": "2026-08-06T02:58:59Z",
+        }
+    )
+
+    snapshot = validate_broker_snapshot_v0(
+        payload,
+        now=_NOW,
+        expected_session_date="2026-08-06",
+    )
+
+    assert snapshot.marker.snapshot_revision == 7
+    assert not hasattr(snapshot.marker, "diffHash")
 
 
 def test_fetch_broker_snapshot_requires_expected_session_date() -> None:

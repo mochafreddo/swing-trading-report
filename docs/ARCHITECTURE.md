@@ -109,6 +109,8 @@ Python consumer에서는 `validate_broker_snapshot_v0`가 유일한 공개 생�
 seal status, digest, revision, session date와 canonical field set을 함께 재검증합니다.
 따라서 최초 검증 뒤의 시간 경과, 위조된 private factory 결과, 중첩 payload 변경도
 승인으로 전파되지 않습니다.
+시간 경계는 DB가 생성한 seal 의미와 맞춰 `sealed_at <= now < fresh_until`을
+강제하며 별도 clock-skew 허용값은 두지 않습니다.
 
 ### 3.2 InstrumentRefV0와 SWING/ENTRY identity gate
 
@@ -122,11 +124,17 @@ registry의 `InstrumentRefV0.exchange`를 권위 값으로 사용합니다. tick
 canonical ticker, ambiguous alias, source/version 누락은 registry 생성 단계에서
 실패하고, 미해결 또는 입력/registry 충돌은 개별 행의 typed REVIEW로 닫힙니다.
 
-canonical ticker, alias, exchange, source/version 같은 identity key는 ASCII-only
-문법을 사용합니다. 회사명과 표시용 공개 텍스트는 NFC 정규화 뒤 control/format,
-surrogate, Unicode noncharacter를 거부합니다. 승인과 REVIEW는 frozen sum type이며,
+market, canonical ticker, alias, exchange는 ASCII-only 문법을 사용합니다.
+company name, identity source/version은 NFC 공개 텍스트로 정규화한 뒤
+control/format, surrogate, Unicode noncharacter를 거부합니다. 승인과 REVIEW는
+frozen sum type이며,
 각 variant에는 자기 상태의 payload만 있어 반대 상태 payload나 임의 status를 만들 수
 없습니다.
+
+registry resolver 결과와 approved constructor는 exact concrete `InstrumentRefV0`를
+다시 검증해 trusted frozen copy를 만들며 subclass/duck-typed 객체를 거부합니다.
+research projection은 polymorphic method를 호출하지 않고 shared schema의 여섯 public
+field를 직접 allowlist합니다.
 
 HOLDING gate는 검증된 `BrokerSnapshotV0`만 producer로 받고, 정확히 정규화된
 `SWING`이면서 active/confirmed인 행만 승인합니다. 각 행은 독립적으로 평가되어 한

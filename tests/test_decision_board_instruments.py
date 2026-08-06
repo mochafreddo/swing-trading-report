@@ -31,6 +31,30 @@ from sab.scheduler.holdings import (
 )
 
 _NOW = datetime(2026, 8, 6, 3, 0, tzinfo=UTC)
+_PRIVATE_ACCOUNT_SENTINEL = "PRIVATE-ACCOUNT-IDENTITY-9917"
+
+
+class _InstrumentRefWithPrivateOverride(InstrumentRefV0):
+    account_id = _PRIVATE_ACCOUNT_SENTINEL
+    projection_called = False
+
+    def to_public_dict(self) -> dict[str, str]:
+        type(self).projection_called = True
+        return {**super().to_public_dict(), "account_id": self.account_id}
+
+
+class _FakeRegistryV0:
+    account_id = _PRIVATE_ACCOUNT_SENTINEL
+
+    def __init__(self, resolved: object) -> None:
+        self.resolved = resolved
+
+    def resolve(self, _lookup_value: object) -> object:
+        return self.resolved
+
+
+class _FakeEntryApprovedV0(inputs_module.EntryIdentityApprovedV0):
+    account_id = _PRIVATE_ACCOUNT_SENTINEL
 
 
 def _record(**overrides: object) -> dict[str, object]:
@@ -83,10 +107,12 @@ def _holding(**overrides: object) -> dict[str, object]:
 def _snapshot(
     *holdings: dict[str, object],
     fresh_until: datetime | None = None,
+    sealed_at: datetime | None = None,
+    validation_now: datetime = _NOW,
 ) -> BrokerSnapshotV0:
     rows = list(holdings or (_holding(),))
     digest = broker_holdings_digest_v0(rows)
-    sealed_at = _NOW - timedelta(minutes=1)
+    seal_time = sealed_at or (_NOW - timedelta(minutes=1))
     expiry = fresh_until or (_NOW + timedelta(minutes=10))
     return validate_broker_snapshot_v0(
         [
@@ -95,7 +121,7 @@ def _snapshot(
                 "session_date": "2026-08-06",
                 "status": "applied",
                 "fresh_until": expiry.isoformat(),
-                "sealed_at": sealed_at.isoformat(),
+                "sealed_at": seal_time.isoformat(),
                 "holdings_digest": digest,
                 "revision": 7,
                 "marker": {
@@ -104,12 +130,12 @@ def _snapshot(
                     "status": "applied",
                     "snapshotDigest": digest,
                     "snapshotRevision": 7,
-                    "sealedAt": sealed_at.isoformat(),
+                    "sealedAt": seal_time.isoformat(),
                 },
                 "holdings": rows,
             }
         ],
-        now=_NOW,
+        now=validation_now,
         expected_session_date="2026-08-06",
     )
 
@@ -214,6 +240,59 @@ def test_resolved_identity_preserves_authoritative_source_and_version() -> None:
         "identity_source": "synthetic-directory",
         "identity_version": "fixture-2026-08-06",
     }
+    assert type(first) is InstrumentRefV0
+
+
+def test_gate_copies_exact_registry_result_into_trusted_instrument() -> None:
+    supplied = InstrumentRefV0(
+        market="US",
+        canonical_ticker="AUR.NAS",
+        exchange="NASDAQ",
+        company_name="Aurora Synthetic Systems",
+        identity_source="synthetic-directory",
+        identity_version="fixture-2026-08-06",
+    )
+    registry = _FakeRegistryV0(supplied)
+
+    result = resolve_entry_identity_v0(
+        {"ticker": "AUR.NAS"},
+        registry,  # type: ignore[arg-type]
+    )
+
+    assert result.status == "APPROVED"
+    assert type(result.instrument) is InstrumentRefV0
+    assert result.instrument is not supplied
+    assert _PRIVATE_ACCOUNT_SENTINEL not in json.dumps(asdict(result))
+
+
+def test_gates_reject_polymorphic_registry_result_without_private_leak() -> None:
+    forged = _InstrumentRefWithPrivateOverride(
+        market="US",
+        canonical_ticker="AUR.NAS",
+        exchange="NASDAQ",
+        company_name="Aurora Synthetic Systems",
+        identity_source="synthetic-directory",
+        identity_version="fixture-2026-08-06",
+    )
+    registry = _FakeRegistryV0(forged)
+
+    entry = resolve_entry_identity_v0(
+        {"ticker": "AUR.NAS"},
+        registry,  # type: ignore[arg-type]
+    )
+    holding = approve_swing_snapshot_v0(
+        _snapshot(),
+        registry,  # type: ignore[arg-type]
+        now=_NOW,
+    )[0]
+
+    serialized = json.dumps(
+        {"entry": asdict(entry), "holding": asdict(holding)},
+        sort_keys=True,
+    )
+    assert entry.status == "REVIEW"
+    assert holding.status == "REVIEW"
+    assert _PRIVATE_ACCOUNT_SENTINEL not in serialized
 
 
 @pytest.mark.parametrize(
@@ -288,6 +367,20 @@ def test_registry_identity_keys_require_explicit_ascii_grammar(
 ) -> None:
     with pytest.raises(InstrumentRegistryError):
         _registry(_record(**{field: value}))
+
+
+@pytest.mark.parametrize(
+    "market",
+    [
+        pytest.param("u\N{LATIN SMALL LETTER LONG S}", id="long-s"),
+        pytest.param("\N{FULLWIDTH LATIN CAPITAL LETTER U}S", id="fullwidth"),
+        pytest.param("U\N{ZERO WIDTH SPACE}S", id="zero-width"),
+        pytest.param("U\N{RIGHT-TO-LEFT OVERRIDE}S", id="bidi"),
+    ],
+)
+def test_registry_market_requires_exact_ascii_us(market: str) -> None:
+    with pytest.raises(InstrumentRegistryError, match="INVALID_MARKET"):
+        _registry(_record(market=market))
 
 
 @pytest.mark.parametrize(
@@ -377,6 +470,22 @@ def test_instrument_ref_rejects_invalid_direct_construction() -> None:
             identity_source="synthetic-directory",
             identity_version="fixture-v1",
         )
+
+
+def test_approved_constructors_reject_polymorphic_instrument_refs() -> None:
+    forged = _InstrumentRefWithPrivateOverride(
+        market="US",
+        canonical_ticker="AUR.NAS",
+        exchange="NASDAQ",
+        company_name="Aurora Synthetic Systems",
+        identity_source="synthetic-directory",
+        identity_version="fixture-v1",
+    )
+
+    with pytest.raises(TypeError, match="exact InstrumentRefV0"):
+        inputs_module.ApprovedSwingRefV0(instrument=forged)
+    with pytest.raises(TypeError, match="exact InstrumentRefV0"):
+        inputs_module.EntryIdentityApprovedV0(instrument=forged)
 
 
 def test_explicit_alias_resolves_but_unregistered_suffix_guess_does_not() -> None:
@@ -543,6 +652,25 @@ def test_entry_gate_resolves_public_identity_only() -> None:
     assert not hasattr(result, "issues")
 
 
+@pytest.mark.parametrize(
+    "market",
+    [
+        pytest.param("u\N{LATIN SMALL LETTER LONG S}", id="long-s"),
+        pytest.param("\N{FULLWIDTH LATIN CAPITAL LETTER U}S", id="fullwidth"),
+        pytest.param("U\N{ZERO WIDTH SPACE}S", id="zero-width"),
+        pytest.param("U\N{RIGHT-TO-LEFT OVERRIDE}S", id="bidi"),
+    ],
+)
+def test_entry_market_confusables_are_invalid_public_input(market: str) -> None:
+    result = resolve_entry_identity_v0(
+        {"ticker": "AUR.NAS", "market": market},
+        _registry(),
+    )
+
+    assert result.status == "REVIEW"
+    assert [issue.code for issue in result.issues] == ["REVIEW_IDENTITY_INPUT_INVALID"]
+
+
 def test_research_projection_matches_shared_instrument_ref_contract() -> None:
     schema = json.loads(
         Path("schemas/decision-board.v0.schema.json").read_text(encoding="utf-8")
@@ -560,6 +688,44 @@ def test_research_projection_matches_shared_instrument_ref_contract() -> None:
 
     assert len(projection) == 1
     validator.validate(projection[0])
+    expected_fields = set(schema["$defs"]["InstrumentRefV0"]["properties"])
+    assert set(projection[0]) == expected_fields
+    assert projection[0] == {
+        "market": "US",
+        "canonical_ticker": "AUR.NAS",
+        "exchange": "NASDAQ",
+        "company_name": "Aurora Synthetic Systems",
+        "identity_source": "synthetic-directory",
+        "identity_version": "fixture-2026-08-06",
+    }
+
+
+def test_projection_rejects_forged_polymorphic_ref_without_calling_override() -> None:
+    forged = _InstrumentRefWithPrivateOverride(
+        market="US",
+        canonical_ticker="AUR.NAS",
+        exchange="NASDAQ",
+        company_name="Aurora Synthetic Systems",
+        identity_source="synthetic-directory",
+        identity_version="fixture-v1",
+    )
+    result = object.__new__(inputs_module.EntryIdentityApprovedV0)
+    object.__setattr__(result, "instrument", forged)
+    _InstrumentRefWithPrivateOverride.projection_called = False
+
+    with pytest.raises(TypeError, match="trusted InstrumentRefV0"):
+        project_research_instruments_v0((result,))
+
+    assert not _InstrumentRefWithPrivateOverride.projection_called
+
+
+def test_projection_rejects_polymorphic_approved_variant() -> None:
+    instrument = _registry().resolve("AUR.NAS")
+    assert instrument is not None
+    result = _FakeEntryApprovedV0(instrument=instrument)
+
+    with pytest.raises(TypeError, match="typed identity gate results"):
+        project_research_instruments_v0((result,))
 
 
 @pytest.mark.parametrize(
@@ -638,6 +804,37 @@ def test_gate_reviews_snapshot_that_expired_after_adapter_validation() -> None:
 
     assert result.status == "REVIEW"
     assert not hasattr(result, "approved_ref")
+    assert [issue.code for issue in result.issues] == ["REVIEW_SNAPSHOT_NOT_APPROVED"]
+
+
+def test_gate_reviews_snapshot_sealed_after_evaluation_time() -> None:
+    future_seal = _NOW + timedelta(seconds=1)
+    snapshot = _snapshot(sealed_at=future_seal, validation_now=future_seal)
+
+    result = approve_swing_snapshot_v0(snapshot, _registry(), now=_NOW)[0]
+
+    assert result.status == "REVIEW"
+    assert [issue.code for issue in result.issues] == ["REVIEW_SNAPSHOT_NOT_APPROVED"]
+
+
+def test_gate_accepts_snapshot_sealed_at_evaluation_time() -> None:
+    snapshot = _snapshot(sealed_at=_NOW)
+
+    result = approve_swing_snapshot_v0(snapshot, _registry(), now=_NOW)[0]
+
+    assert result.status == "APPROVED"
+
+
+def test_gate_reviews_freshness_equal_to_evaluation_time() -> None:
+    snapshot = _snapshot(fresh_until=_NOW + timedelta(seconds=1))
+
+    result = approve_swing_snapshot_v0(
+        snapshot,
+        _registry(),
+        now=_NOW + timedelta(seconds=1),
+    )[0]
+
+    assert result.status == "REVIEW"
     assert [issue.code for issue in result.issues] == ["REVIEW_SNAPSHOT_NOT_APPROVED"]
 
 

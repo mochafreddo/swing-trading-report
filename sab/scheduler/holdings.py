@@ -179,6 +179,7 @@ class BrokerSnapshotV0:
 
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
+        evaluation_time = now.astimezone(UTC)
         if self._validation_token is not _BROKER_SNAPSHOT_VALIDATION_TOKEN:
             return "SNAPSHOT_NOT_VALIDATED"
         if (
@@ -190,7 +191,7 @@ class BrokerSnapshotV0:
             or self.sealed_at.utcoffset() is None
         ):
             return "SNAPSHOT_SEAL_INVALID"
-        if self.fresh_until <= now.astimezone(UTC):
+        if self.fresh_until <= evaluation_time:
             return "SNAPSHOT_EXPIRED"
         if (
             self.status not in {"applied", "unchanged"}
@@ -204,6 +205,7 @@ class BrokerSnapshotV0:
                 character not in "0123456789abcdef"
                 for character in self.holdings_digest[len(_HASH_PREFIX) :]
             )
+            or self.sealed_at > evaluation_time
             or self.sealed_at >= self.fresh_until
             or not isinstance(self.marker, BrokerSnapshotMarkerV0)
             or self.state_key != f"toss-sync:success:MIXED:{self.session_date}"
@@ -267,13 +269,26 @@ _BROKER_SNAPSHOT_KEYS = {
     "marker",
     "holdings",
 }
-_BROKER_SNAPSHOT_MARKER_KEYS = {
+_BROKER_SNAPSHOT_MARKER_CORE_KEYS = {
     "scope",
     "sessionDate",
     "status",
     "snapshotDigest",
     "snapshotRevision",
     "sealedAt",
+}
+_BROKER_SNAPSHOT_MARKER_KEYS = _BROKER_SNAPSHOT_MARKER_CORE_KEYS | {
+    "diffHash",
+    "incomingCount",
+    "createCount",
+    "updateCount",
+    "deleteCount",
+    "unchangedCount",
+    "quarantinedCount",
+    "quarantinedTickers",
+    "source",
+    "timezone",
+    "updatedAt",
 }
 _BROKER_DIGEST_PREFIX = b"broker-holdings-v0;"
 _BROKER_SCALAR_FIELDS_BEFORE_TAGS = (
@@ -564,11 +579,13 @@ def _parse_broker_snapshot_v0(
 
     fresh_until = _parse_snapshot_timestamp(raw["fresh_until"], "fresh_until")
     sealed_at = _parse_snapshot_timestamp(raw["sealed_at"], "sealed_at")
-    if fresh_until <= now.astimezone(UTC):
+    capture_time = now.astimezone(UTC)
+    if fresh_until <= capture_time:
         raise _snapshot_error("MARKER_EXPIRED", "BrokerSnapshotV0 marker has expired")
-    if sealed_at >= fresh_until:
+    if sealed_at > capture_time or sealed_at >= fresh_until:
         raise _snapshot_error(
-            "MARKER_INVALID", "BrokerSnapshotV0 sealed_at must precede fresh_until"
+            "MARKER_INVALID",
+            "BrokerSnapshotV0 must satisfy sealed_at <= now < fresh_until",
         )
 
     digest = raw["holdings_digest"]
@@ -582,7 +599,11 @@ def _parse_broker_snapshot_v0(
             "PAYLOAD_INVALID", "BrokerSnapshotV0 holdings_digest is invalid"
         )
     marker = raw["marker"]
-    if not isinstance(marker, dict) or set(marker) != _BROKER_SNAPSHOT_MARKER_KEYS:
+    if (
+        not isinstance(marker, dict)
+        or not set(marker) >= _BROKER_SNAPSHOT_MARKER_CORE_KEYS
+        or set(marker) - _BROKER_SNAPSHOT_MARKER_KEYS
+    ):
         raise _snapshot_error(
             "MARKER_INVALID", "BrokerSnapshotV0 marker payload is missing"
         )

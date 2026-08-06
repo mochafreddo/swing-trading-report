@@ -14,6 +14,8 @@ from sab.scheduler.holdings import BrokerSnapshotV0
 from .instruments import (
     InstrumentRefV0,
     VersionedInstrumentRegistryV0,
+    _copy_trusted_instrument_ref_v0,
+    _normalize_us_market_v0,
     normalize_identity_key_v0,
     normalize_public_text_v0,
     normalize_us_venue_v0,
@@ -46,11 +48,21 @@ class ApprovedSwingRefV0:
 
     instrument: InstrumentRefV0
 
+    def __post_init__(self) -> None:
+        trusted = _copy_trusted_instrument_ref_v0(self.instrument)
+        if trusted is None:
+            raise TypeError("ApprovedSwingRefV0 requires exact InstrumentRefV0")
+        object.__setattr__(self, "instrument", trusted)
+
 
 @dataclass(frozen=True, slots=True)
 class SwingApprovedV0:
     approved_ref: ApprovedSwingRefV0
     status: Literal["APPROVED"] = dataclass_field(default="APPROVED", init=False)
+
+    def __post_init__(self) -> None:
+        if type(self.approved_ref) is not ApprovedSwingRefV0:
+            raise TypeError("SwingApprovedV0 requires exact ApprovedSwingRefV0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +84,12 @@ type SwingApprovalResultV0 = SwingApprovedV0 | SwingReviewV0
 class EntryIdentityApprovedV0:
     instrument: InstrumentRefV0
     status: Literal["APPROVED"] = dataclass_field(default="APPROVED", init=False)
+
+    def __post_init__(self) -> None:
+        trusted = _copy_trusted_instrument_ref_v0(self.instrument)
+        if trusted is None:
+            raise TypeError("EntryIdentityApprovedV0 requires exact InstrumentRefV0")
+        object.__setattr__(self, "instrument", trusted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +161,8 @@ def resolve_entry_identity_v0(
             valid = normalize_identity_key_v0(value) is not None
         elif field == "exchange":
             valid = normalize_us_venue_v0(value) is not None
+        elif field == "market":
+            valid = _normalize_us_market_v0(value) is not None
         else:
             valid = normalize_public_text_v0(value) is not None
         if not valid:
@@ -151,7 +171,7 @@ def resolve_entry_identity_v0(
                 "ENTRY identity hints must be nonblank public strings.",
             )
 
-    instrument = registry.resolve(candidate["ticker"])
+    instrument = _resolve_trusted_instrument_v0(registry, candidate["ticker"])
     if instrument is None:
         return _entry_review(
             "REVIEW_IDENTITY_UNRESOLVED",
@@ -173,14 +193,21 @@ def project_research_instruments_v0(
     instruments: dict[tuple[str, ...], InstrumentRefV0] = {}
     for result in results:
         instrument: InstrumentRefV0 | None
-        if isinstance(result, SwingApprovedV0):
-            instrument = result.approved_ref.instrument
-        elif isinstance(result, EntryIdentityApprovedV0):
-            instrument = result.instrument
-        elif isinstance(result, (SwingReviewV0, EntryIdentityReviewV0)):
+        if type(result) is SwingApprovedV0:
+            if type(result.approved_ref) is not ApprovedSwingRefV0:
+                raise TypeError("research projection requires trusted InstrumentRefV0")
+            instrument = _copy_trusted_instrument_ref_v0(result.approved_ref.instrument)
+        elif type(result) is EntryIdentityApprovedV0:
+            instrument = _copy_trusted_instrument_ref_v0(result.instrument)
+        elif type(result) in {SwingReviewV0, EntryIdentityReviewV0}:
             instrument = None
         else:
             raise TypeError("research projection requires typed identity gate results")
+        if (
+            type(result) in {SwingApprovedV0, EntryIdentityApprovedV0}
+            and instrument is None
+        ):
+            raise TypeError("research projection requires trusted InstrumentRefV0")
         if instrument is None:
             continue
         key = (
@@ -193,7 +220,14 @@ def project_research_instruments_v0(
         )
         instruments[key] = instrument
     return tuple(
-        instruments[key].to_public_dict()
+        {
+            "market": instruments[key].market,
+            "canonical_ticker": instruments[key].canonical_ticker,
+            "exchange": instruments[key].exchange,
+            "company_name": instruments[key].company_name,
+            "identity_source": instruments[key].identity_source,
+            "identity_version": instruments[key].identity_version,
+        }
         for key in sorted(
             instruments, key=lambda item: tuple(v.encode("utf-8") for v in item)
         )
@@ -219,7 +253,7 @@ def _approve_holding(
                 message="Holding strategy is not exact normalized SWING.",
             )
         )
-    instrument = registry.resolve(holding.get("ticker"))
+    instrument = _resolve_trusted_instrument_v0(registry, holding.get("ticker"))
     if instrument is None:
         issues.append(
             IdentityGateIssueV0(
@@ -271,6 +305,19 @@ def _entry_review(code: str, message: str) -> EntryIdentityResultV0:
     )
 
 
+def _resolve_trusted_instrument_v0(
+    registry: object, lookup_value: object
+) -> InstrumentRefV0 | None:
+    resolver = getattr(registry, "resolve", None)
+    if not callable(resolver):
+        return None
+    try:
+        resolved = resolver(lookup_value)
+    except Exception:
+        return None
+    return _copy_trusted_instrument_ref_v0(resolved)
+
+
 def _candidate_conflicts(
     candidate: Mapping[str, object], instrument: InstrumentRefV0
 ) -> bool:
@@ -294,10 +341,10 @@ def _candidate_conflicts(
             continue
         if field == "canonical_ticker":
             normalized = normalize_identity_key_v0(candidate_value)
+        elif field == "market":
+            normalized = _normalize_us_market_v0(candidate_value)
         else:
             normalized = normalize_public_text_v0(candidate_value)
-            if field == "market" and normalized is not None:
-                normalized = normalized.upper()
         if normalized != expected_value:
             return True
 

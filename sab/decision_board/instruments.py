@@ -50,11 +50,7 @@ class InstrumentRefV0:
     identity_version: str
 
     def __post_init__(self) -> None:
-        market = _required_text(self.market, field="market").upper()
-        if market != "US":
-            raise InstrumentRegistryError(
-                "INVALID_MARKET", "V0 instrument market must be US"
-            )
+        market = _required_us_market_v0(self.market)
         canonical_ticker = _required_identity_key(
             self.canonical_ticker, field="canonical_ticker"
         )
@@ -94,6 +90,24 @@ class InstrumentRefV0:
             "identity_source": self.identity_source,
             "identity_version": self.identity_version,
         }
+
+
+def _copy_trusted_instrument_ref_v0(value: object) -> InstrumentRefV0 | None:
+    """Revalidate and copy one exact concrete public identity value."""
+
+    if type(value) is not InstrumentRefV0:
+        return None
+    try:
+        return InstrumentRefV0(
+            market=value.market,
+            canonical_ticker=value.canonical_ticker,
+            exchange=value.exchange,
+            company_name=value.company_name,
+            identity_source=value.identity_source,
+            identity_version=value.identity_version,
+        )
+    except AttributeError, InstrumentRegistryError, TypeError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,9 +218,7 @@ def _parse_record(raw: object) -> tuple[_RegistryBinding, tuple[str, ...]]:
             "INVALID_RECORD", "registry record has an invalid public field set"
         )
 
-    market = _required_text(raw["market"], field="market").upper()
-    if market != "US":
-        raise InstrumentRegistryError("INVALID_MARKET", "V0 registry market must be US")
+    market = _required_us_market_v0(raw["market"])
     canonical_ticker = _required_identity_key(
         raw["canonical_ticker"], field="canonical_ticker"
     )
@@ -256,6 +268,18 @@ def _required_identity_key(value: object, *, field: str) -> str:
             "INVALID_IDENTITY", f"{field} must match the ASCII identity grammar"
         )
     return normalized
+
+
+def _required_us_market_v0(value: object) -> str:
+    normalized = normalize_identity_key_v0(value)
+    if normalized != "US":
+        raise InstrumentRegistryError("INVALID_MARKET", "V0 market must be ASCII US")
+    return normalized
+
+
+def _normalize_us_market_v0(value: object) -> str | None:
+    normalized = normalize_identity_key_v0(value)
+    return normalized if normalized == "US" else None
 
 
 def _lookup_text(value: object) -> str | None:
