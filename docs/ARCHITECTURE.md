@@ -102,6 +102,30 @@ RPC와 private helper는 `service-role-only`이자 `SECURITY INVOKER`로
 유지하며 브라우저에는 비밀 키를 노출하지 않습니다. 이 경계는 `advice-only`로
 주문 생성·수정·취소 기능을 포함하지 않습니다.
 
+### 3.2 InstrumentRefV0와 SWING/ENTRY identity gate
+
+Decision Board shadow slice의 identity 전파 경로는
+`BrokerSnapshotV0 -> approve_swing_snapshot_v0 -> ApprovedSwingRefV0 -> public research`
+입니다. `VersionedInstrumentRegistryV0`는 호출자가 제공한 공개 레코드와 immutable
+source/version만 보유하며, canonical ticker와 명시적으로 등록된 alias만 해석합니다.
+ticker suffix를 보고 종목 identity나 거래소를 추측하지 않습니다. duplicate
+canonical ticker, ambiguous alias, source/version 누락은 registry 생성 단계에서
+실패하고, 미해결 또는 입력/registry 충돌은 개별 행의 typed REVIEW로 닫힙니다.
+
+HOLDING gate는 검증된 `BrokerSnapshotV0`만 producer로 받고, 정확히 정규화된
+`SWING`이면서 active/confirmed인 행만 승인합니다. 각 행은 독립적으로 평가되어 한
+행의 REVIEW가 다른 승인 행을 막지 않습니다. `ApprovedSwingRefV0`, issue, research
+projection에는 `InstrumentRefV0` 외에 quantity, entry price, P/L, notes, tags,
+account ID, raw private holding payload를 포함하지 않습니다. ENTRY gate는 별도
+public-only mapping을 받아 unknown/private field를 즉시 REVIEW 처리합니다.
+
+배포 순서는 BrokerSnapshotV0 consumer 확인, versioned registry adapter 주입,
+HOLDING/ENTRY shadow gate 활성화, research/compiler consumer 연결 순입니다. V0 gate는
+네트워크, Toss, 주문 endpoint를 갖지 않으며 registry adapter와 후속 consumer는 이
+순서 밖의 별도 작업입니다. 롤백 시에는 shadow consumer 연결만 제거하고 기존
+BrokerSnapshot producer와 schema를 유지합니다. registry가 없거나 오래되었을 때
+ticker-only fallback을 켜는 롤백은 허용하지 않으며, REVIEW 상태를 유지합니다.
+
 ## 4. 핵심 플로우
 
 ### 4.1 `scan` 플로우

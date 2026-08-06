@@ -8,12 +8,36 @@ from .contracts import (
     validate_claim_validation,
     validate_decision_board_report,
 )
+from .inputs import (
+    ApprovedSwingRefV0,
+    EntryIdentityResultV0,
+    IdentityGateIssueV0,
+    SwingApprovalResultV0,
+    approve_swing_snapshot_v0,
+    project_research_instruments_v0,
+    resolve_entry_identity_v0,
+)
+from .instruments import (
+    InstrumentRefV0,
+    InstrumentRegistryError,
+    VersionedInstrumentRegistryV0,
+)
 
 __all__ = [
+    "ApprovedSwingRefV0",
     "ContractError",
+    "EntryIdentityResultV0",
+    "IdentityGateIssueV0",
+    "InstrumentRefV0",
+    "InstrumentRegistryError",
+    "SwingApprovalResultV0",
+    "VersionedInstrumentRegistryV0",
+    "approve_swing_snapshot_v0",
     "canonical_json_bytes",
     "decision_payload_hash",
     "load_decision_board_report",
+    "project_research_instruments_v0",
+    "resolve_entry_identity_v0",
     "validate_claim_validation",
     "validate_decision_board_report",
 ]

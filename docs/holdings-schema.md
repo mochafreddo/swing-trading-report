@@ -81,6 +81,21 @@ settings:
 - `default_tags`: 태그 미지정 시 초기값으로 사용
 - 웹 UI export는 `settings`를 쓰지 않고 row별 명시 값만 기록합니다. `settings` 블록은 수동 작성/import와 로컬 CLI 입력에서 계속 지원됩니다.
 
+### Decision Board V0 SWING 승인 경계
+
+Decision Board의 US HOLDING shadow 입력은 수동 YAML 기본값이 아니라 검증된
+`BrokerSnapshotV0` 행의 `strategy`만 사용합니다. ASCII 공백 제거와 대소문자
+정규화 뒤 값이 정확히 `SWING`이고, `quantity > 0`이며
+`broker_state=confirmed`인 행만 identity gate로 전달됩니다. strategy가 없거나
+`swing_breakout`, `long_swing`, `CORE`, `LONG_TERM`처럼 정확히 일치하지 않으면
+`REVIEW_STRATEGY_NOT_APPROVED`가 되고 방향성 HOLD/SELL 입력이 되지 않습니다.
+`settings.default_strategy`, tags, notes는 이 승인을 대신할 수 없습니다.
+
+승인 결과에는 공개 종목 identity만 남고 quantity, entry price, P/L, notes, tags,
+account 정보와 원본 holding payload는 research 입력에 포함되지 않습니다. identity는
+호출자가 주입한 명시적 versioned registry에서만 결정하며, 미등록 ticker나 모호한
+거래소 표기는 REVIEW로 닫힙니다.
+
 ### 포트폴리오 노출 태그
 
 - `sab entry`는 활성 holdings의 `tags`에서 `sector:`, `theme:`, `beta:`/`beta_bucket:`, `correlation:`/`correlation_bucket:` prefix를 읽어 포트폴리오 노출 bucket으로 계산합니다.
