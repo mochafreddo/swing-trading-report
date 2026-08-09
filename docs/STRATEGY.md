@@ -467,7 +467,12 @@ item/identity 또는 deterministic input gap `REVIEW`, action-eligible material 
 `SELL`은 supportive/adverse evidence, timeout, conflict, `NOT_SELECTED_CAP`이
 `HOLD`/`REVIEW`로 낮출 수 없습니다. research selection은 priority/order로 최대 5개만
 고르는 별도 순수 정책이고, 여섯 번째 이후 holding도 compiler universe에는 남아 정확히
-한 번 평가됩니다.
+한 번 평가됩니다. selection result는 선택 당시 전체 holding universe의 immutable policy
+snapshot에 process-local로 결속되고 `compile_holding`의 필수 입력입니다. compiler는
+selection과 다른 subset/누락/중복 universe를 거부하고, unselected holding에
+`NOT_SELECTED_CAP`을 직접 적용합니다. 모든 compiler enum은 문자열 equality가 아니라
+canonical enum member identity까지 확인하므로 raw/fresh-equal 문자열 mutation은 action
+precedence를 바꿀 수 없습니다.
 
 ### Decision Board V0 claim evidence policy (shadow)
 

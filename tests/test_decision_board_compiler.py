@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from sab.decision_board.claims import (
@@ -98,6 +99,20 @@ def _item(payload: dict[str, object]) -> dict[str, object]:
     assert isinstance(items, list) and len(items) == 1
     assert isinstance(items[0], dict)
     return items[0]
+
+
+def _compile_holding(
+    items: tuple[HoldingCompilerItemV0, ...], *, max_research_items: int = 5
+) -> dict[str, Any]:
+    selection = select_holding_research_v0(
+        items,
+        max_research_items=max_research_items,
+    )
+    return DecisionCompilerV0.compile_holding(
+        items,
+        selection=selection,
+        sealed_input_hash=SEALED_HASH,
+    )
 
 
 @pytest.mark.parametrize(
@@ -237,9 +252,8 @@ def test_holding_truth_table(
     expected_code: str | None,
 ) -> None:
     item = _item(
-        DecisionCompilerV0.compile_holding(
+        _compile_holding(
             (_holding(**overrides),),  # type: ignore[arg-type]
-            sealed_input_hash=SEALED_HASH,
         )
     )
     assert item["status"] == expected_status
@@ -252,14 +266,13 @@ def test_holding_truth_table(
 
 def test_hard_exit_with_stale_deterministic_input_is_review() -> None:
     item = _item(
-        DecisionCompilerV0.compile_holding(
+        _compile_holding(
             (
                 _holding(
                     hard_exit_state=HardExitStateV0.HARD_STOP,
                     candle_state=DependencyStateV0.STALE,
                 ),
             ),
-            sealed_input_hash=SEALED_HASH,
         )
     )
     assert item["status"] == "REVIEW"
@@ -408,7 +421,7 @@ def test_collision_precedence_and_hard_sell_non_override() -> None:
         ResearchStateV0.CONFLICTED,
     ):
         holding = _item(
-            DecisionCompilerV0.compile_holding(
+            _compile_holding(
                 (
                     _holding(
                         hard_exit_state=HardExitStateV0.HARD_STOP,
@@ -416,14 +429,13 @@ def test_collision_precedence_and_hard_sell_non_override() -> None:
                         evidence=(adverse,),
                     ),
                 ),
-                sealed_input_hash=SEALED_HASH,
             )
         )
         assert holding["action"] == "SELL"
 
     supportive = _evidence(kind=CompilerEvidenceKindV0.SUPPORTIVE)
     hard_sell = _item(
-        DecisionCompilerV0.compile_holding(
+        _compile_holding(
             (
                 _holding(
                     item_state=ApprovalStateV0.REVIEW,
@@ -432,7 +444,6 @@ def test_collision_precedence_and_hard_sell_non_override() -> None:
                     evidence=(supportive,),
                 ),
             ),
-            sealed_input_hash=SEALED_HASH,
         )
     )
     assert hard_sell["action"] == "SELL"
@@ -458,9 +469,8 @@ def test_identity_review_precedes_entry_non_candidate_omission() -> None:
 
 def test_material_adverse_holding_is_review_and_item_failures_are_isolated() -> None:
     adverse = _evidence()
-    payload = DecisionCompilerV0.compile_holding(
+    payload = _compile_holding(
         (_holding(2), _holding(1, evidence=(adverse,))),
-        sealed_input_hash=SEALED_HASH,
     )
     items = payload["items"]
     assert [item["instrument"]["canonical_ticker"] for item in items] == [
@@ -471,7 +481,15 @@ def test_material_adverse_holding_is_review_and_item_failures_are_isolated() -> 
 
 
 def test_research_cap_is_separate_and_sixth_hard_sell_is_compiled() -> None:
-    holdings = tuple(_holding(index) for index in range(1, 7))
+    holdings = tuple(
+        _holding(
+            index,
+            hard_exit_state=(
+                HardExitStateV0.HARD_STOP if index == 6 else HardExitStateV0.NONE
+            ),
+        )
+        for index in range(1, 7)
+    )
     selection = select_holding_research_v0(holdings, max_research_items=5)
     assert selection.selected_item_ids == tuple(
         f"holding-SYN{index}.NAS" for index in range(1, 6)
@@ -482,20 +500,8 @@ def test_research_cap_is_separate_and_sixth_hard_sell_is_compiled() -> None:
     )
 
     compiled = DecisionCompilerV0.compile_holding(
-        tuple(
-            _holding(
-                index,
-                hard_exit_state=(
-                    HardExitStateV0.HARD_STOP if index == 6 else HardExitStateV0.NONE
-                ),
-                research_state=(
-                    ResearchStateV0.NOT_SELECTED_CAP
-                    if index == 6
-                    else ResearchStateV0.CLEAR
-                ),
-            )
-            for index in range(1, 7)
-        ),
+        holdings,
+        selection=selection,
         sealed_input_hash=SEALED_HASH,
     )
     assert len(compiled["items"]) == 6
@@ -711,3 +717,194 @@ def test_privacy_and_no_side_effect_projection(monkeypatch: pytest.MonkeyPatch) 
     rendered = json.dumps(payload, ensure_ascii=False)
     assert PRIVATE_SENTINEL not in rendered
     assert set(payload) == {"run_kind", "sealed_input_hash", "items"}
+
+
+class _EqualStateText(str):
+    pass
+
+
+def _equal_enum_mutation(value: object, mutation: str) -> object:
+    raw_value = value.value  # type: ignore[attr-defined]
+    if mutation == "raw-string":
+        return raw_value
+    if mutation == "string-subclass":
+        return _EqualStateText(raw_value)
+    return str.__new__(type(value), raw_value)  # type: ignore[type-var]
+
+
+@pytest.mark.parametrize(
+    ("field", "original"),
+    [
+        ("item_state", ApprovalStateV0.REVIEW),
+        ("identity_state", ApprovalStateV0.REVIEW),
+        ("signal_state", EntrySignalStateV0.MISSING),
+        ("mandate_state", DependencyStateV0.STALE),
+        ("price_state", DependencyStateV0.AMBIGUOUS),
+        ("exposure_state", ExposureStateV0.FAIL),
+        ("research_state", ResearchStateV0.TIMEOUT),
+    ],
+)
+@pytest.mark.parametrize(
+    "mutation", ["raw-string", "string-subclass", "fresh-equal-enum"]
+)
+def test_entry_rejects_equal_but_noncanonical_state_mutation(
+    field: str, original: object, mutation: str
+) -> None:
+    item = _entry(**{field: original})  # type: ignore[arg-type]
+    object.__setattr__(item, field, _equal_enum_mutation(original, mutation))
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_entry((item,), sealed_input_hash=SEALED_HASH)
+
+
+@pytest.mark.parametrize(
+    ("field", "original"),
+    [
+        ("item_state", ApprovalStateV0.REVIEW),
+        ("identity_state", ApprovalStateV0.REVIEW),
+        ("hard_exit_state", HardExitStateV0.NONE),
+        ("broker_state", DependencyStateV0.STALE),
+        ("candle_state", DependencyStateV0.AMBIGUOUS),
+        ("rule_state", DependencyStateV0.CONFLICTED),
+        ("research_state", ResearchStateV0.TIMEOUT),
+    ],
+)
+@pytest.mark.parametrize(
+    "mutation", ["raw-string", "string-subclass", "fresh-equal-enum"]
+)
+def test_holding_rejects_equal_but_noncanonical_state_mutation(
+    field: str, original: object, mutation: str
+) -> None:
+    item = _holding(**{field: original})  # type: ignore[arg-type]
+    object.__setattr__(item, field, _equal_enum_mutation(original, mutation))
+
+    with pytest.raises(CompilerInputError):
+        _compile_holding((item,))
+
+
+@pytest.mark.parametrize(
+    "mutation", ["raw-string", "string-subclass", "fresh-equal-enum"]
+)
+def test_evidence_rejects_equal_but_noncanonical_kind_mutation(mutation: str) -> None:
+    evidence = _evidence()
+    object.__setattr__(
+        evidence,
+        "kind",
+        _equal_enum_mutation(CompilerEvidenceKindV0.MATERIAL_ADVERSE, mutation),
+    )
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_entry(
+            (_entry(evidence=(evidence,)),), sealed_input_hash=SEALED_HASH
+        )
+
+
+def test_factory_rejects_fresh_equal_exact_enum() -> None:
+    fresh = str.__new__(ApprovalStateV0, ApprovalStateV0.REVIEW.value)
+
+    with pytest.raises(TypeError):
+        _entry(item_state=fresh)
+
+
+def test_holding_selection_cannot_authorize_a_compiler_subset() -> None:
+    holdings = tuple(_holding(index) for index in range(1, 7))
+    selection = select_holding_research_v0(holdings, max_research_items=5)
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            holdings[:5],
+            selection=selection,
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+def test_holding_selection_result_mutation_is_rejected() -> None:
+    holdings = tuple(_holding(index) for index in range(1, 3))
+    selection = select_holding_research_v0(holdings, max_research_items=2)
+    object.__setattr__(
+        selection,
+        "selected_item_ids",
+        tuple(reversed(selection.selected_item_ids)),
+    )
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            holdings,
+            selection=selection,
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["raw-string", "string-subclass", "fresh-equal-enum"]
+)
+def test_holding_selection_rejects_noncanonical_state_mutation(mutation: str) -> None:
+    holdings = (_holding(),)
+    selection = select_holding_research_v0(holdings, max_research_items=0)
+    item_id, state = selection.states[0]
+    object.__setattr__(
+        selection,
+        "states",
+        ((item_id, _equal_enum_mutation(state, mutation)),),
+    )
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            holdings,
+            selection=selection,
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+def test_holding_selection_rejects_raw_result_and_changed_universe() -> None:
+    holdings = (_holding(1), _holding(2))
+    selection = select_holding_research_v0(holdings, max_research_items=1)
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            (_holding(1), _holding(2, broker_state=DependencyStateV0.STALE)),
+            selection=selection,
+            sealed_input_hash=SEALED_HASH,
+        )
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            holdings,
+            selection=object.__new__(type(selection)),
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+def test_holding_selection_binding_is_permutation_stable() -> None:
+    holdings = (_holding(2), _holding(1))
+    selection = select_holding_research_v0(holdings, max_research_items=1)
+
+    first = DecisionCompilerV0.compile_holding(
+        holdings,
+        selection=selection,
+        sealed_input_hash=SEALED_HASH,
+    )
+    replay = DecisionCompilerV0.compile_holding(
+        tuple(reversed(holdings)),
+        selection=selection,
+        sealed_input_hash=SEALED_HASH,
+    )
+
+    assert first == replay
+    assert first["items"][1]["status"] == "REVIEW"
+
+
+def test_selected_research_outcome_can_update_without_changing_universe() -> None:
+    initial = (_holding(1), _holding(2))
+    selection = select_holding_research_v0(initial, max_research_items=1)
+    final = (
+        _holding(1, research_state=ResearchStateV0.TIMEOUT),
+        _holding(2),
+    )
+
+    payload = DecisionCompilerV0.compile_holding(
+        final,
+        selection=selection,
+        sealed_input_hash=SEALED_HASH,
+    )
+
+    assert [item["status"] for item in payload["items"]] == ["REVIEW", "REVIEW"]

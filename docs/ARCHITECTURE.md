@@ -284,6 +284,10 @@ nested evidence identity를 기록합니다. compile 시 exact type/identity/sna
 검사하므로 post-factory mutation, alias 교체, subclass, `object.__new__` raw allocation은
 authority가 아닙니다. account ID, quantity, entry price, P/L, notes, tags, raw broker row,
 arbitrary metadata나 rationale text는 이 projection에 없습니다.
+모든 compiler-owned `StrEnum` field는 문자열 equality가 아니라 exact concrete enum
+type과 canonical member singleton identity를 함께 확인합니다. 따라서 같은 문자열인 raw
+`str`, `str` subclass, `str.__new__`로 만든 fresh-equal enum, `object.__setattr__` mutation은
+issuance snapshot과 값이 같아 보여도 precedence 입력이 될 수 없습니다.
 
 ENTRY는 미승인 item/identity를 먼저 REVIEW하고, READY/ENTER가 아닌 확정 non-candidate는
 omit합니다. 필수 deterministic state gap은 REVIEW, 독립 exposure fail은 AVOID입니다.
@@ -295,9 +299,16 @@ current broker/candle/rule이 뒷받침한 hard stop/confirmed exit SELL을 latt
 낮아지지 않습니다.
 
 `select_holding_research_v0`는 caller의 bounded priority/order를 UTF-8 byte ordering으로
-정렬해 0..5개만 선택하고 나머지를 typed `NOT_SELECTED_CAP`으로 표시할 뿐 compile 입력을
-자르지 않습니다. compiler도 item identity와 full instrument identity 중복을 fail closed하고,
-item/issue/evidence를 명시적 UTF-8 rule로 정렬·dedupe합니다. T5 validation dict나 generic
+정렬해 0..5개만 선택하고 나머지를 typed `NOT_SELECTED_CAP`으로 표시합니다. 반환 결과는
+factory-owned process-local issuance이며 selection 당시 전체 holding universe의 item ID,
+instrument, approval, hard-exit, broker/candle/rule, priority/order snapshot에 결속됩니다.
+`compile_holding`은 이 exact unchanged selection을 필수로 받고 현재 전체 universe를 같은
+snapshot에 대조하므로 selected 5개 subset, 누락, 중복, 다른 universe는 publish할 수
+없습니다. input permutation은 canonical item identity 정렬 뒤 같은 universe로 인정합니다.
+selected item은 research/evidence outcome만 갱신할 수 있고, unselected item의 effective
+research state는 compiler가 `NOT_SELECTED_CAP`으로 강제합니다. compiler도 item identity와
+full instrument identity 중복을 fail closed하고, item/issue/evidence를 명시적 UTF-8 rule로
+정렬·dedupe합니다. T5 validation dict나 generic
 schema 통과 여부는 action authority가 아니며, 원래 request/article/source/policy와 exact
 issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검증한 unchanged
 action-changing `SUPPORTED`만 `{claim_id, entailment: SUPPORTED}` evidence가 됩니다.

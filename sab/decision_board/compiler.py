@@ -286,13 +286,30 @@ class DecisionCompilerV0:
 
     @staticmethod
     def compile_holding(
-        items: Iterable[HoldingCompilerItemV0], *, sealed_input_hash: str
+        items: Iterable[HoldingCompilerItemV0],
+        *,
+        selection: object,
+        sealed_input_hash: str,
     ) -> dict[str, Any]:
         validated = _validated_items(items, holding=True)
-        output: list[dict[str, Any]] = []
+        from .policy import _validate_holding_research_selection_v0
+
+        holding_items: list[HoldingCompilerItemV0] = []
         for item in validated:
             assert type(item) is HoldingCompilerItemV0
-            output.append(_compile_holding_item(item))
+            holding_items.append(item)
+        research_states = _validate_holding_research_selection_v0(
+            selection,
+            items=holding_items,
+        )
+        output: list[dict[str, Any]] = []
+        for item in holding_items:
+            output.append(
+                _compile_holding_item(
+                    item,
+                    research_state=research_states[item.item_id],
+                )
+            )
         return _validated_payload("HOLDING", sealed_input_hash, output)
 
 
@@ -319,7 +336,9 @@ def _compile_entry_item(item: EntryCompilerItemV0) -> dict[str, Any] | None:
     return _decided_item(item.instrument, "BUY", evidence)
 
 
-def _compile_holding_item(item: HoldingCompilerItemV0) -> dict[str, Any]:
+def _compile_holding_item(
+    item: HoldingCompilerItemV0, *, research_state: ResearchStateV0
+) -> dict[str, Any]:
     evidence, material_adverse = _eligible_evidence(item.evidence, item.instrument)
     deterministic_current = all(
         state is DependencyStateV0.CURRENT
@@ -338,7 +357,7 @@ def _compile_holding_item(item: HoldingCompilerItemV0) -> dict[str, Any]:
             [_issue("REVIEW_MATERIAL_ADVERSE")],
             evidence,
         )
-    research_issue = _research_issue(item.research_state)
+    research_issue = _research_issue(research_state)
     if research_issue is not None:
         return _review_item(item.instrument, [research_issue], evidence)
     return _decided_item(item.instrument, "HOLD", evidence)
@@ -405,6 +424,13 @@ def _validated_holding_snapshot(value: object) -> _HoldingSnapshot | None:
     if record is None or record[0]() is not value or current != record[1]:
         return None
     return current
+
+
+def _holding_selection_snapshot(value: object) -> tuple[object, ...] | None:
+    snapshot = _validated_holding_snapshot(value)
+    if snapshot is None:
+        return None
+    return (*snapshot[:8], snapshot[9], snapshot[10])
 
 
 def _eligible_evidence(
@@ -569,8 +595,12 @@ def _validate_common_factory_values(
 
 
 def _require_exact_enum(value: object, enum_type: type[StrEnum], name: str) -> None:
-    if type(value) is not enum_type:
+    if not _is_canonical_enum_member(value, enum_type):
         raise TypeError(f"{name} must be an exact compiler enum")
+
+
+def _is_canonical_enum_member(value: object, enum_type: type[StrEnum]) -> bool:
+    return type(value) is enum_type and any(value is member for member in enum_type)
 
 
 def _instrument_snapshot(value: object) -> _InstrumentSnapshot:
@@ -591,6 +621,8 @@ def _evidence_snapshot(value: object) -> _EvidenceSnapshot | None:
     if type(value) is not CompilerEvidenceV0:
         return None
     try:
+        if not _is_canonical_enum_member(value.kind, CompilerEvidenceKindV0):
+            return None
         return (
             value.kind,
             id(value.validation),
@@ -605,6 +637,18 @@ def _evidence_snapshot(value: object) -> _EvidenceSnapshot | None:
 
 def _entry_snapshot(value: EntryCompilerItemV0) -> _EntrySnapshot:
     try:
+        if not all(
+            (
+                _is_canonical_enum_member(value.item_state, ApprovalStateV0),
+                _is_canonical_enum_member(value.identity_state, ApprovalStateV0),
+                _is_canonical_enum_member(value.signal_state, EntrySignalStateV0),
+                _is_canonical_enum_member(value.mandate_state, DependencyStateV0),
+                _is_canonical_enum_member(value.price_state, DependencyStateV0),
+                _is_canonical_enum_member(value.exposure_state, ExposureStateV0),
+                _is_canonical_enum_member(value.research_state, ResearchStateV0),
+            )
+        ):
+            return ()
         return (
             value.item_id,
             _instrument_snapshot(value.instrument),
@@ -623,6 +667,18 @@ def _entry_snapshot(value: EntryCompilerItemV0) -> _EntrySnapshot:
 
 def _holding_snapshot(value: HoldingCompilerItemV0) -> _HoldingSnapshot:
     try:
+        if not all(
+            (
+                _is_canonical_enum_member(value.item_state, ApprovalStateV0),
+                _is_canonical_enum_member(value.identity_state, ApprovalStateV0),
+                _is_canonical_enum_member(value.hard_exit_state, HardExitStateV0),
+                _is_canonical_enum_member(value.broker_state, DependencyStateV0),
+                _is_canonical_enum_member(value.candle_state, DependencyStateV0),
+                _is_canonical_enum_member(value.rule_state, DependencyStateV0),
+                _is_canonical_enum_member(value.research_state, ResearchStateV0),
+            )
+        ):
+            return ()
         return (
             value.item_id,
             _instrument_snapshot(value.instrument),
