@@ -230,6 +230,8 @@ type ClaimValidationResultV0 = (
 @dataclass(frozen=True, slots=True)
 class _ClaimIssuanceRecordV0:
     reference: weakref.ReferenceType[ClaimValidationV0]
+    issued_instrument: InstrumentRefV0
+    issued_location: SupportingLocationV0
     validation_snapshot: _ValidationSnapshotV0
     validation_serialization: bytes
     request_snapshot: _RequestSnapshotV0
@@ -678,6 +680,8 @@ def _allocate_validation_v0(
     reference = weakref.ref(validation, discard)
     _SEALED_VALIDATIONS[validation_id] = _ClaimIssuanceRecordV0(
         reference=reference,
+        issued_instrument=validation.instrument,
+        issued_location=validation.supporting_location,
         validation_snapshot=validation_snapshot,
         validation_serialization=validation_serialization,
         request_snapshot=request_snapshot,
@@ -745,6 +749,16 @@ def _validation_matches_issuance_v0(
     value: object,
     record: _ClaimIssuanceRecordV0,
 ) -> bool:
+    if type(value) is not ClaimValidationV0:
+        return False
+    try:
+        if (
+            value.instrument is not record.issued_instrument
+            or value.supporting_location is not record.issued_location
+        ):
+            return False
+    except AttributeError:
+        return False
     snapshot = _claim_validation_snapshot_v0(value)
     if snapshot is None or snapshot != record.validation_snapshot:
         return False

@@ -23,6 +23,7 @@ from sab.decision_board.claims import (
     ClaimValidationV0,
     ClaimVerifierTimeoutError,
     EntailmentV0,
+    SupportingLocationV0,
     is_action_change_eligible_v0,
     validate_claim_v0,
 )
@@ -871,6 +872,97 @@ def test_registry_identity_check_rejects_wrong_record_at_same_lookup_key() -> No
             second.validation.to_public_dict()
     finally:
         claim_module._SEALED_VALIDATIONS[second_key] = second_record
+
+
+def test_gate_rejects_equal_raw_supporting_location_substitution() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    request = _request(source.instrument)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=request,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    issued = result.validation.supporting_location
+    replacement = object.__new__(SupportingLocationV0)
+    object.__setattr__(replacement, "kind", issued.kind)
+    object.__setattr__(replacement, "start", issued.start)
+    object.__setattr__(replacement, "end", issued.end)
+    object.__setattr__(result.validation, "supporting_location", replacement)
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=request,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_serializer_rejects_equal_raw_supporting_location_substitution() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+    issued = result.validation.supporting_location
+    replacement = object.__new__(SupportingLocationV0)
+    object.__setattr__(replacement, "kind", issued.kind)
+    object.__setattr__(replacement, "start", issued.start)
+    object.__setattr__(replacement, "end", issued.end)
+    object.__setattr__(result.validation, "supporting_location", replacement)
+
+    with pytest.raises(ValueError, match="unchanged issued value"):
+        result.validation.to_public_dict()
+
+
+def test_gate_rejects_source_derived_equal_instrument_substitution() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    request = _request(source.instrument)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=request,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    replacement = InstrumentRefV0(**article.source.instrument.to_public_dict())
+    assert replacement == result.validation.instrument
+    assert replacement is not result.validation.instrument
+    object.__setattr__(result.validation, "instrument", replacement)
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=request,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_serializer_rejects_equal_instrument_substitution() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+    replacement = InstrumentRefV0(**result.validation.instrument.to_public_dict())
+    assert replacement == result.validation.instrument
+    assert replacement is not result.validation.instrument
+    object.__setattr__(result.validation, "instrument", replacement)
+
+    with pytest.raises(ValueError, match="unchanged issued value"):
+        result.validation.to_public_dict()
+
+
+def test_issuance_record_owns_exact_nested_validation_objects() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+    record = claim_module._SEALED_VALIDATIONS[id(result.validation)]
+
+    assert record.issued_instrument is result.validation.instrument
+    assert record.issued_location is result.validation.supporting_location
 
 
 def test_serialization_is_direct_allowlist_and_matches_task1_contract_and_schema() -> (

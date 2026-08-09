@@ -452,7 +452,7 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 
 - 한 validation은 공개 claim 하나와 검증된 공개 기사 하나만 다룹니다.
 - entailment는 `SUPPORTED`, `CONTRADICTED`, `UNCLEAR` 중 하나이며 세 상태 모두 normalized article text 안의 exact nonempty `[start, end)` 근거 span이 필요합니다.
-- directional action 변경 자격은 발급 당시 원래 claim이 `action_changing=true`이고 validation 및 request/article/source/policy가 immutable issuance snapshot과 deep revalidation을 통과한 unchanged `SUPPORTED`일 때만 생깁니다.
+- directional action 변경 자격은 발급 당시 원래 claim이 `action_changing=true`이고 validation의 exact issued instrument/location identity 및 validation/request/article/source/policy의 immutable issuance snapshot과 deep revalidation을 통과한 unchanged `SUPPORTED`일 때만 생깁니다.
 - `CONTRADICTED`와 `UNCLEAR`는 review 자료이며 action 변경을 승인하지 않습니다. context-only `SUPPORTED`도 action 변경을 승인하지 않습니다.
 - 이 정책은 advice-only shadow 경계입니다. 현재 action compiler나 주문 생성·수정·취소 경로를 추가하지 않습니다.
 
