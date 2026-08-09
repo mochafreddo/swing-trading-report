@@ -435,7 +435,7 @@ run envelope aggregation, persistence/index, Web, network/model adapter, Toss/or
 1. `/api/reports`는 `report_index`에서 목록을 조회합니다.
 2. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
 3. 서버(`web/src/lib/reports-data.ts`)는 in-memory TTL/LRU 캐시를 사용합니다.
-   - 목록: `type/q/limit/searchWindow` 키 기준 단기 TTL(검색 없음 5초, 검색 10초)
+   - 목록: `type/runKind/q/limit/searchWindow` 키 기준 단기 TTL(검색 없음 5초, 검색 10초). `runKind`는 `decision-board`에서만 `ENTRY|HOLDING`을 허용합니다.
    - 상세: `report_key` 기준 장기 TTL(1시간)
 4. 클라이언트(`ReportsClient`)는 목록/상세 요청에 in-flight dedupe + 세션 메모리 캐시를 적용합니다.
 5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
@@ -445,6 +445,7 @@ run envelope aggregation, persistence/index, Web, network/model adapter, Toss/or
 9. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열, `liquidity_exit_capacity`/`liquidity_warnings` 기반 Exit Capacity 열, `downside_risk` 기반 Downside 열, `portfolio_exposure_buckets` 기반 Exposure 열을 표시해 기술적 `ENTER`, 계좌 실행 준비도, 유동성, 가이드 기준 하방 손실, 포트폴리오 집중 bucket을 분리해 보여줍니다.
 10. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
 11. Sell AI Brief artifact는 `report_index` type/filter와 ticker 검색 대상에 포함되며, 상세 화면은 generic JSON fallback으로 원본 판단 artifact를 열람할 수 있습니다. Dedicated 판단 UI는 별도 후속 작업입니다.
+12. Decision Board 목록 데이터 경계는 `run_kind`, `run_id`, `idempotency_key`, `decision_created_at`과 deterministic key의 일치를 검증합니다. malformed row는 legacy row로 강등하지 않고 제외하며, run-kind별 latest는 `decision_created_at DESC, run_id DESC, report_key DESC, bucket_id DESC`로 조회합니다. 전용 detail renderer와 UI run-kind control은 후속 작업입니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
@@ -501,11 +502,13 @@ run envelope aggregation, persistence/index, Web, network/model adapter, Toss/or
   - `YYYY-MM-DD(.n).ai-brief.json`
   - `YYYY-MM-DD(.n).ai-brief-skip.json`
   - `YYYY-MM-DD(.n).sell-ai-brief.json`
+  - `YYYY-MM-DD.decision-board.{entry|holding}.<safe-run-id>.<full-idempotency-digest>.json` (Decision Board는 duplicate suffix를 할당하지 않음)
 
 ### 5.2 Supabase Storage
 
 - 버킷: `reports` (private, JSON MIME 제한)
 - 키 규칙: `YYYY/MM/YYYY-MM-DD(.n).{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json`
+- Decision Board 키 규칙: `YYYY/MM/YYYY-MM-DD.decision-board.{entry|holding}.<safe-run-id>.<64-lower-hex>.json`. 날짜는 envelope `created_at`의 UTC 날짜이고 account/trigger/ticker/수량/가격/손익/메모/tag를 포함하지 않습니다.
 
 ### 5.3 Supabase Postgres
 
@@ -513,7 +516,8 @@ run envelope aggregation, persistence/index, Web, network/model adapter, Toss/or
   - 앱과 동일한 ticker 계약을 DB 제약으로 강제합니다(`KR 6자리` 또는 명시 거래소 suffix `.NAS/.NYS/.AMS`).
   - 모호한 `.US` suffix는 DB에서도 허용하지 않으며, 기존 row는 migration 시 수동 정리 대상으로 남깁니다.
   - `entry_pattern`은 buy/entry report의 `pattern`을 active holding에 보존하는 nullable marker입니다. 허용값은 `trend_pullback_bounce`, `swing_high_breakout`, `rsi_oversold_reversal`이고 inactive row(`quantity=0`)는 `null`만 허용합니다. `replace_holdings_v1`은 omitted active key preserve, explicit null clear, entry identity/strategy change guard를 적용합니다.
-- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief`)
+- `report_index`: 리포트 목록 조회 최적화 인덱스(날짜/타입/중복 인덱스 + summary/tickers, `buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief|decision-board`)
+  - Decision Board row는 `run_kind`, `run_id`, full `idempotency_key`, authoritative `decision_created_at`을 모두 요구하고 bucket/run-kind별 idempotency와 run ID를 유일하게 유지합니다. legacy row에서는 네 필드가 null입니다.
   - `summary`는 Reports 목록 요약과 `/metrics` 운영 대시보드의 단일 집계 소스입니다.
   - `buy.summary`: `candidate_count`, `system_issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`, `rs_benchmark_requested/unavailable_count`, `rs_benchmark_unavailable_ratio`, `market_regime_unavailable_count`, `market_regime_blocked_count`, `market_regime_blocked_by_market`, `market_regime_unavailable_by_market`
   - `sell.summary`: `evaluated_count`, `issue_count`, `data_requested/covered/missing_count`, `data_coverage_ratio`, `provider_fallback_count/ratio`
@@ -559,8 +563,8 @@ run envelope aggregation, persistence/index, Web, network/model adapter, Toss/or
   - 부분 수집 누락 시 coverage(`수집성공/평가대상`)가 `0.70` 이상이면 경고로 계속 진행, `0.70` 미만이면 실패 처리
 - 산출물 안정성
   - 리포트는 파일 락 + 원자적 쓰기로 기록
-  - 중복 파일명은 suffix(`-1`, `-2`, ...)로 충돌 회피
-  - Supabase 업로드도 duplicate index를 순차 탐색해 충돌 회피
+  - legacy 중복 파일명은 suffix(`-1`, `-2`, ...)로 충돌 회피하고 Supabase 업로드도 duplicate index를 순차 탐색합니다.
+  - Decision Board는 run/idempotency deterministic identity를 사용합니다. 같은 identity의 동일 bytes는 성공, 다른 bytes는 typed conflict이며 local/Storage 모두 기존 값을 덮어쓰지 않습니다. 새 Storage object 뒤 index 실패만 rollback-delete하고, 이미 존재하던 동일 object의 index repair 실패는 object를 삭제하지 않습니다.
   - GitHub Actions 실행에서는 Storage 업로드 또는 `report_index` upsert 실패 시 run을 실패 처리(fail-closed)
 - 운영 자동화
   - `cleanup.yml`이 보관기간 초과 리포트를 정리

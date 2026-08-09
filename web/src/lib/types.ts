@@ -8,9 +8,13 @@ export const REPORT_TYPES = [
   "ai-brief",
   "ai-brief-skip",
   "sell-ai-brief",
+  "decision-board",
 ] as const;
-export const REPORT_TYPE_PATTERN = REPORT_TYPES.join("|");
+export const REPORT_TYPE_PATTERN = REPORT_TYPES.filter(
+  (type) => type !== "decision-board",
+).join("|");
 export type ReportType = (typeof REPORT_TYPES)[number];
+export type DecisionBoardRunKind = "ENTRY" | "HOLDING";
 
 export function isReportType(value: unknown): value is ReportType {
   return (
@@ -25,6 +29,7 @@ export interface ReportListItem {
   type: ReportType;
   reportDate: string;
   duplicateIndex: number;
+  runKind?: DecisionBoardRunKind;
   generatedAt?: string;
   summary?: Record<string, unknown>;
   tickers?: string[];

@@ -115,6 +115,26 @@ describe("Decision Board V0 schema", () => {
     );
   });
 
+  it.each([
+    undefined,
+    "",
+    `sha256:${"A".repeat(64)}`,
+    `sha256:${"a".repeat(63)}`,
+    123,
+  ])("rejects noncanonical envelope idempotency key %j", (idempotencyKey) => {
+    const fixture = loadFixture("published-entry.json") as Record<
+      string,
+      unknown
+    >;
+    if (idempotencyKey === undefined) {
+      delete fixture.idempotency_key;
+    } else {
+      fixture.idempotency_key = idempotencyKey;
+    }
+
+    expect(safeParseDecisionBoardReportStructure(fixture).success).toBe(false);
+  });
+
   it("rejects cycles with typed path errors in canonical and verified boundaries", async () => {
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;

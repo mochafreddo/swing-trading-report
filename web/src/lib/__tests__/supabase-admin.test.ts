@@ -96,6 +96,10 @@ describe("fetchReportIndexPage", () => {
         summary: { candidate_count: 1 },
         tickers: ["AAPL.US"],
         tickers_hydrated: true,
+        run_kind: null,
+        run_id: null,
+        idempotency_key: null,
+        decision_created_at: null,
       },
     ]);
 
@@ -187,6 +191,10 @@ describe("fetchReportIndexPage", () => {
           summary,
           tickers,
           tickers_hydrated: true,
+          run_kind: null,
+          run_id: null,
+          idempotency_key: null,
+          decision_created_at: null,
         },
       ]);
     },

@@ -17,7 +17,16 @@ from urllib.parse import quote
 
 import requests  # type: ignore[import-untyped]
 
+from ..decision_board.contracts import (
+    canonical_json_bytes,
+    validate_decision_board_report,
+)
 from ..env_loader import env_flag
+from .decision_board import (
+    DecisionBoardIdempotencyConflictError,
+    build_decision_board_storage_key,
+    parse_decision_board_storage_key,
+)
 from .storage_key import (
     REPORT_RUN_TYPE_PATTERN,
     build_report_storage_key,
@@ -98,6 +107,13 @@ class SupabaseStorageConfig:
 class _HttpResponseData:
     status_code: int
     text: str
+
+
+@dataclass(frozen=True)
+class _HttpResponseBytes:
+    status_code: int
+    text: str
+    content: bytes
 
 
 def _is_github_actions() -> bool:
@@ -306,6 +322,26 @@ def _storage_upload_request(
     return _response_to_data(response)
 
 
+def _storage_download_request(
+    *,
+    config: SupabaseStorageConfig,
+    key: str,
+    session: requests.Session,
+) -> _HttpResponseBytes:
+    quoted_key = quote(key, safe="/")
+    url = f"{config.url}/storage/v1/object/{config.bucket}/{quoted_key}"
+    response = session.get(
+        url,
+        headers=_auth_headers(config),
+        timeout=config.timeout_seconds,
+    )
+    return _HttpResponseBytes(
+        status_code=response.status_code,
+        text=response.text,
+        content=response.content,
+    )
+
+
 def _report_index_upsert_request(
     *,
     config: SupabaseStorageConfig,
@@ -322,6 +358,57 @@ def _report_index_upsert_request(
         url,
         headers=headers,
         data=json.dumps([row], ensure_ascii=False).encode("utf-8"),
+        timeout=config.timeout_seconds,
+    )
+    return _response_to_data(response)
+
+
+def _decision_board_index_upsert_request(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+) -> _HttpResponseData:
+    identity = "bucket_id,report_type,run_kind,idempotency_key"
+    url = f"{config.url}/rest/v1/report_index?on_conflict={identity}"
+    headers = {
+        **_auth_headers(config),
+        "content-type": "application/json",
+        "prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    response = session.post(
+        url,
+        headers=headers,
+        data=json.dumps([row], ensure_ascii=False).encode("utf-8"),
+        timeout=config.timeout_seconds,
+    )
+    return _response_to_data(response)
+
+
+def _decision_board_index_read_request(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+) -> _HttpResponseData:
+    fields = (
+        "bucket_id,report_key,report_type,report_date,duplicate_index,generated_at,"
+        "summary,tickers,tickers_hydrated,run_kind,run_id,idempotency_key,"
+        "decision_created_at"
+    )
+    filters = (
+        f"bucket_id=eq.{quote(str(row['bucket_id']), safe='')}",
+        "report_type=eq.decision-board",
+        f"run_kind=eq.{quote(str(row['run_kind']), safe='')}",
+        f"idempotency_key=eq.{quote(str(row['idempotency_key']), safe='')}",
+    )
+    url = f"{config.url}/rest/v1/report_index?select={fields}&{'&'.join(filters)}"
+    response = session.get(
+        url,
+        headers={
+            **_auth_headers(config),
+            "accept": "application/json",
+        },
         timeout=config.timeout_seconds,
     )
     return _response_to_data(response)
@@ -684,6 +771,246 @@ def _delete_uploaded_object(
     )
 
 
+def _build_decision_board_index_row(
+    *,
+    bucket_id: str,
+    storage_key: str,
+    report: dict[str, object],
+) -> dict[str, object]:
+    parsed = parse_decision_board_storage_key(storage_key, report=report)
+    if parsed is None:
+        raise ValueError("Decision Board storage key does not match report identity")
+    return {
+        "bucket_id": bucket_id,
+        "report_key": storage_key,
+        "report_type": "decision-board",
+        "report_date": parsed.report_date.isoformat(),
+        "duplicate_index": 0,
+        "generated_at": None,
+        "summary": None,
+        "tickers": [],
+        "tickers_hydrated": False,
+        "run_kind": parsed.run_kind,
+        "run_id": parsed.run_id,
+        "idempotency_key": parsed.idempotency_key,
+        "decision_created_at": report["created_at"],
+    }
+
+
+def _normalize_decision_created_at(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(dt.UTC).isoformat()
+
+
+def _authoritative_decision_board_row_matches(
+    actual: object,
+    expected: dict[str, object],
+) -> bool:
+    if not isinstance(actual, dict) or set(actual) != set(expected):
+        return False
+    actual_row = dict(actual)
+    expected_row = dict(expected)
+    actual_row["decision_created_at"] = _normalize_decision_created_at(
+        actual_row["decision_created_at"]
+    )
+    expected_row["decision_created_at"] = _normalize_decision_created_at(
+        expected_row["decision_created_at"]
+    )
+    return actual_row == expected_row
+
+
+def _upsert_decision_board_index(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+) -> None:
+    storage_key = str(row["report_key"])
+    response: _HttpResponseData | None = None
+    for attempt in range(1, _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS + 1):
+        try:
+            response = _decision_board_index_upsert_request(
+                config=config,
+                row=row,
+                session=session,
+            )
+        except requests.RequestException as exc:
+            raise SupabaseReportIndexError(
+                f"failed to upsert Decision Board report index for '{storage_key}': {exc}",
+                storage_key=storage_key,
+            ) from exc
+        if response.status_code in {200, 201, 204}:
+            break
+        if (
+            response.status_code >= 500
+            and attempt < _REPORT_INDEX_UPSERT_RETRY_ATTEMPTS
+        ):
+            time.sleep(_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS * attempt)
+            continue
+        raise SupabaseReportIndexError(
+            f"failed to upsert Decision Board report index for '{storage_key}': "
+            f"{_response_message(status_code=response.status_code, text=response.text)}",
+            storage_key=storage_key,
+        )
+
+    assert response is not None
+    try:
+        authoritative = _decision_board_index_read_request(
+            config=config,
+            row=row,
+            session=session,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': {exc}",
+            storage_key=storage_key,
+        ) from exc
+    if authoritative.status_code != 200:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': "
+            f"{_response_message(status_code=authoritative.status_code, text=authoritative.text)}",
+            storage_key=storage_key,
+        )
+    try:
+        rows = json.loads(authoritative.text)
+    except json.JSONDecodeError as exc:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': invalid response",
+            storage_key=storage_key,
+        ) from exc
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 1
+        or not _authoritative_decision_board_row_matches(rows[0], row)
+    ):
+        raise DecisionBoardIdempotencyConflictError(
+            "Decision Board report index identity contains different metadata"
+        )
+
+
+def _upload_or_confirm_decision_board_object(
+    *,
+    config: SupabaseStorageConfig,
+    storage_key: str,
+    payload: bytes,
+    session: requests.Session,
+) -> bool:
+    try:
+        response = _storage_upload_request(
+            config=config,
+            key=storage_key,
+            payload=payload,
+            session=session,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseStorageError(
+            f"failed to upload Decision Board object '{storage_key}': {exc}"
+        ) from exc
+    if response.status_code in {200, 201}:
+        return True
+    if not _is_conflict_response(
+        status_code=response.status_code,
+        text=response.text,
+    ):
+        raise SupabaseStorageError(
+            f"failed to upload Decision Board object '{storage_key}': "
+            f"{_response_message(status_code=response.status_code, text=response.text)}"
+        )
+    try:
+        existing = _storage_download_request(
+            config=config,
+            key=storage_key,
+            session=session,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseStorageError(
+            f"failed to verify existing Decision Board object '{storage_key}': {exc}"
+        ) from exc
+    if existing.status_code != 200:
+        raise SupabaseStorageError(
+            f"failed to verify existing Decision Board object '{storage_key}': "
+            f"{_response_message(status_code=existing.status_code, text=existing.text)}"
+        )
+    if existing.content != payload:
+        raise DecisionBoardIdempotencyConflictError(
+            "Decision Board Storage identity already contains different bytes"
+        )
+    return False
+
+
+def upload_decision_board_report(
+    *,
+    local_path: str | Path,
+    storage_key: str,
+    config: SupabaseStorageConfig,
+    session: requests.Session | None = None,
+) -> str:
+    """Persist one canonical Decision Board report without suffix allocation."""
+
+    path = Path(local_path)
+    payload = path.read_bytes()
+    decoded = _decode_report_json_object(payload=payload, local_path=path.as_posix())
+    report = validate_decision_board_report(decoded)
+    expected_key = build_decision_board_storage_key(report)
+    parsed = parse_decision_board_storage_key(expected_key, report=report)
+    assert parsed is not None
+    if payload != canonical_json_bytes(report):
+        raise ValueError("Decision Board local report bytes are not canonical")
+    if storage_key != expected_key or path.name != parsed.basename:
+        raise ValueError(
+            "Decision Board storage key does not match local report identity"
+        )
+    row = _build_decision_board_index_row(
+        bucket_id=config.bucket,
+        storage_key=storage_key,
+        report=report,
+    )
+
+    active_session = session or requests.Session()
+    should_close_session = session is None
+    created = False
+    try:
+        created = _upload_or_confirm_decision_board_object(
+            config=config,
+            storage_key=storage_key,
+            payload=payload,
+            session=active_session,
+        )
+        try:
+            _upsert_decision_board_index(
+                config=config,
+                row=row,
+                session=active_session,
+            )
+        except (SupabaseReportIndexError, DecisionBoardIdempotencyConflictError) as exc:
+            if not created:
+                raise
+            try:
+                _delete_uploaded_object(
+                    config=config,
+                    key=storage_key,
+                    session=active_session,
+                )
+            except SupabaseStorageError as cleanup_exc:
+                raise SupabaseReportIndexError(
+                    f"{exc}; rollback delete failed: {cleanup_exc}",
+                    storage_key=storage_key,
+                    cleanup_failed=True,
+                ) from exc
+            raise
+        return storage_key
+    finally:
+        if should_close_session:
+            active_session.close()
+
+
 def upload_report_artifact(
     *,
     local_path: str,
@@ -854,5 +1181,6 @@ __all__ = [
     "SupabaseStorageError",
     "maybe_upload_report_artifact",
     "suppress_report_uploads",
+    "upload_decision_board_report",
     "upload_report_artifact",
 ]

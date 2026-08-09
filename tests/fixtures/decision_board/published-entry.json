@@ -2,6 +2,7 @@
   "schema_version": "decision-board.v0",
   "run_id": "entry-2026-08-06T010000Z",
   "created_at": "2026-08-06T01:00:05Z",
+  "idempotency_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "run_kind": "ENTRY",
   "status": "PUBLISHED",
   "issues": [],

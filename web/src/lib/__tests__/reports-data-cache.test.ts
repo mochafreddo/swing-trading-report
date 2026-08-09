@@ -108,6 +108,48 @@ describe("reports-data cache", () => {
     expect(fetchReportIndexPage).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps Decision Board run kind in list cache identity", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValue({
+      items: [],
+      total: 0,
+      fetchedCount: 0,
+      hasMore: false,
+      nextCursor: null,
+    });
+
+    await listReports({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+    await listReports({
+      type: "decision-board",
+      runKind: "HOLDING",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+    await listReports({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+
+    expect(fetchReportIndexPage).toHaveBeenCalledTimes(2);
+    expect(fetchReportIndexPage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runKind: "ENTRY" }),
+    );
+    expect(fetchReportIndexPage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runKind: "HOLDING" }),
+    );
+  });
+
   it("caches report detail for same key", async () => {
     vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({

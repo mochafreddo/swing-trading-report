@@ -83,6 +83,7 @@ def validate_decision_board_report(value: Any) -> dict[str, Any]:
             "schema_version",
             "run_id",
             "created_at",
+            "idempotency_key",
             "run_kind",
             "status",
             "issues",
@@ -92,6 +93,7 @@ def validate_decision_board_report(value: Any) -> dict[str, Any]:
     _literal(report["schema_version"], "$.schema_version", SCHEMA_VERSION)
     _non_empty_string(report["run_id"], "$.run_id")
     _timestamp(report["created_at"], "$.created_at")
+    _hash(report["idempotency_key"], "$.idempotency_key")
     run_kind = _enum(report["run_kind"], "$.run_kind", _RUN_KINDS)
     status = _enum(report["status"], "$.status", {"PUBLISHED", "BLOCKED"})
     issues = _issues(report["issues"], "$.issues")

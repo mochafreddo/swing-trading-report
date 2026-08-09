@@ -22,6 +22,7 @@ import type {
   ReportListItem,
   ReportSearchWarning,
   ReportsListResponse,
+  DecisionBoardRunKind,
   ReportType,
 } from "@/lib/types";
 
@@ -52,6 +53,7 @@ function toReportListItem(
     type: row.report_type,
     reportDate: row.report_date,
     duplicateIndex: row.duplicate_index,
+    ...(row.run_kind ? { runKind: row.run_kind } : {}),
     ...extras,
   };
 }
@@ -76,6 +78,7 @@ export interface ListReportsOptions {
   limit: number;
   searchWindow: number;
   refresh?: boolean;
+  runKind?: DecisionBoardRunKind;
 }
 
 type ListReportsInput = Omit<ListReportsOptions, "refresh">;
@@ -103,6 +106,7 @@ function buildListReportsCacheKey(options: ListReportsInput): string {
   const normalizedQuery = options.q.trim().toLowerCase();
   return [
     `type=${options.type}`,
+    `runKind=${options.runKind ?? ""}`,
     `q=${normalizedQuery}`,
     `limit=${options.limit}`,
     `searchWindow=${options.searchWindow}`,
@@ -116,11 +120,16 @@ function resolveListReportsTtlMs(query: string): number {
 async function listReportsUncached(
   options: ListReportsInput,
 ): Promise<ReportsListResponse> {
-  const { type, q, limit, searchWindow } = options;
+  const { type, runKind, q, limit, searchWindow } = options;
+
+  if (runKind !== undefined && type !== "decision-board") {
+    throw new TypeError("runKind requires type=decision-board");
+  }
 
   if (!q) {
     const { items, hasMore } = await fetchReportIndexPage({
       type,
+      runKind,
       limit,
       includeTotal: false,
       lookahead: true,
@@ -153,6 +162,7 @@ async function listReportsUncached(
     try {
       page = await fetchReportIndexPage({
         type,
+        runKind,
         limit: pageSize,
         cursor,
         includeTotal: false,
@@ -227,6 +237,7 @@ export async function listReports(
 ): Promise<ReportsListResponse> {
   const input: ListReportsInput = {
     type: options.type,
+    runKind: options.runKind,
     q: options.q.trim(),
     limit: options.limit,
     searchWindow: options.searchWindow,

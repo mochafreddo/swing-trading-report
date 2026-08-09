@@ -170,6 +170,7 @@ const envelopeBaseShape = {
   schema_version: z.literal("decision-board.v0"),
   run_id: z.string().min(1),
   created_at: timestampV0Schema,
+  idempotency_key: hashV0Schema,
   issues: z.array(decisionBoardIssueV0Schema),
   metadata: z.record(z.string(), z.unknown()).optional(),
 };

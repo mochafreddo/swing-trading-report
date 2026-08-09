@@ -126,10 +126,43 @@ def test_payload_hash_uses_canonical_payload_only() -> None:
 
     changed_envelope = copy.deepcopy(report)
     changed_envelope["metadata"] = {"compiler_version": "different"}
+    changed_envelope["idempotency_key"] = "sha256:" + ("f" * 64)
     assert (
         decision_payload_hash(changed_envelope["decision_payload"])
         == report["decision_payload_hash"]
     )
+
+
+@pytest.mark.parametrize("fixture_name", VALID_FIXTURES)
+def test_golden_reports_require_canonical_idempotency_key(fixture_name: str) -> None:
+    report = _load_json(FIXTURE_DIR / fixture_name)
+
+    assert report["idempotency_key"].startswith("sha256:")
+    assert len(report["idempotency_key"]) == 71
+    assert validate_decision_board_report(report) == report
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param("", id="blank"),
+        pytest.param("sha256:" + ("A" * 64), id="uppercase"),
+        pytest.param("sha256:" + ("a" * 63), id="short"),
+        pytest.param(123, id="coerced-number"),
+    ],
+)
+def test_envelope_rejects_noncanonical_idempotency_key(value: object) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    if value is None:
+        report.pop("idempotency_key", None)
+    else:
+        report["idempotency_key"] = value
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError, match=r"\$\.idempotency_key"):
+        validate_decision_board_report(report)
 
 
 def test_payload_hash_mismatch_is_rejected_with_a_useful_path() -> None:

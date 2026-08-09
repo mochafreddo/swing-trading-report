@@ -7,6 +7,8 @@ import {
 const REPORT_KEY_PATTERN = new RegExp(
   `^(?<year>\\d{4})\\/(?<month>\\d{2})\\/(?<date>\\d{4}-\\d{2}-\\d{2})(?:-(?<dup>\\d+))?\\.(?<type>${REPORT_TYPE_PATTERN})\\.json$`,
 );
+const DECISION_BOARD_KEY_PATTERN =
+  /^(?<year>\d{4})\/(?<month>\d{2})\/(?<date>\d{4}-\d{2}-\d{2})\.decision-board\.(?<kind>entry|holding)\.(?<runId>[A-Za-z0-9][A-Za-z0-9_-]{0,127})\.(?<digest>[0-9a-f]{64})\.json$/;
 
 export interface ParsedReportStorageKey {
   key: string;
@@ -15,6 +17,9 @@ export interface ParsedReportStorageKey {
   duplicateIndex: number;
   year: number;
   month: number;
+  runKind?: "ENTRY" | "HOLDING";
+  runId?: string;
+  idempotencyKey?: string;
 }
 
 function isValidReportDate(year: number, month: number, day: number): boolean {
@@ -40,13 +45,14 @@ export function parseReportStorageKey(
   key: string,
 ): ParsedReportStorageKey | null {
   const normalized = key.trim();
-  const match = REPORT_KEY_PATTERN.exec(normalized);
+  const decisionMatch = DECISION_BOARD_KEY_PATTERN.exec(normalized);
+  const match = decisionMatch ?? REPORT_KEY_PATTERN.exec(normalized);
   if (!match?.groups) {
     return null;
   }
 
   const date = match.groups.date;
-  const reportType = match.groups.type;
+  const reportType = decisionMatch ? "decision-board" : match.groups.type;
   const year = Number.parseInt(match.groups.year, 10);
   const month = Number.parseInt(match.groups.month, 10);
   const [dateYearText, dateMonthText, dateDayText] = date.split("-");
@@ -75,7 +81,7 @@ export function parseReportStorageKey(
     return null;
   }
 
-  return {
+  const parsed: ParsedReportStorageKey = {
     key: normalized,
     type: reportType,
     reportDate: date,
@@ -83,6 +89,12 @@ export function parseReportStorageKey(
     year,
     month,
   };
+  if (decisionMatch) {
+    parsed.runKind = match.groups.kind === "entry" ? "ENTRY" : "HOLDING";
+    parsed.runId = match.groups.runId;
+    parsed.idempotencyKey = `sha256:${match.groups.digest}`;
+  }
+  return parsed;
 }
 
 export function compareParsedReportKeys(

@@ -435,6 +435,7 @@
         "schema_version",
         "run_id",
         "created_at",
+        "idempotency_key",
         "run_kind",
         "status",
         "issues"
@@ -449,6 +450,9 @@
         },
         "created_at": {
           "$ref": "#/$defs/TimestampV0"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/HashV0"
         },
         "run_kind": {
           "$ref": "#/$defs/RunKindV0"
