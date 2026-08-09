@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import gc
 import json
+import weakref
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import sab.decision_board.claims as claim_module
 from jsonschema import (  # type: ignore[import-untyped]
     Draft202012Validator,
     FormatChecker,
@@ -91,6 +94,21 @@ def _article(
         final_url="https://evidence.example/aurora/final-update",
         normalized_text=str(recorded["article_text"]),
         policy=policy or ResearchSourcePolicyV0(),
+    )
+
+
+def _article_with_text(
+    source: SourceCandidateV0,
+    policy: ResearchSourcePolicyV0,
+    *,
+    text: str,
+    final_url: str,
+) -> ArticleArtifactV0:
+    return create_article_artifact_v0(
+        source=source,
+        final_url=final_url,
+        normalized_text=text,
+        policy=policy,
     )
 
 
@@ -630,6 +648,229 @@ def test_request_mutation_after_sealing_cannot_keep_action_eligibility() -> None
         expected_source=source,
         policy=policy,
     )
+
+
+def test_context_only_supported_issuance_rejects_new_action_request() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    original = _request(source.instrument, action_changing=False)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=original,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    substitute = _request(source.instrument, action_changing=True)
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=substitute,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_issuance_rejects_fresh_request_with_changed_claim_text() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    original = _request(source.instrument)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=original,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    substitute = ClaimRequestV0(
+        claim_id=original.claim_id,
+        instrument=original.instrument,
+        claim_text="Aurora lowered its synthetic guidance.",
+        action_changing=True,
+    )
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=substitute,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_issuance_rejects_coherent_other_source_article_and_validation() -> None:
+    policy = ResearchSourcePolicyV0()
+    original_source = _source()
+    original_article = _article(original_source, policy)
+    request = _request(original_source.instrument)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=request,
+        article=original_article,
+        source=original_source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    other_source = create_source_candidate_v0(
+        instrument=request.instrument,
+        title="Different synthetic update",
+        canonical_url="https://evidence.example/aurora/different",
+        publisher="Different Synthetic Wire",
+        published_at=datetime(2026, 8, 9, 2, 3, 4, tzinfo=UTC),
+        purpose=SourcePurposeV0.ACTION_CHANGING,
+    )
+    other_article = _article_with_text(
+        other_source,
+        policy,
+        text="Aurora cut guidance. Synthetic demand weakened.",
+        final_url="https://evidence.example/aurora/different-final",
+    )
+    validation = result.validation
+    object.__setattr__(validation, "source_url", other_article.final_url)
+    object.__setattr__(validation, "publisher", other_source.publisher)
+    object.__setattr__(validation, "published_at", other_source.published_at)
+    object.__setattr__(validation, "article_content_hash", other_article.content_hash)
+    object.__setattr__(validation, "supporting_span", "Aurora cut guidance.")
+    object.__setattr__(validation.supporting_location, "start", 0)
+    object.__setattr__(validation.supporting_location, "end", 20)
+
+    assert not is_action_change_eligible_v0(
+        validation,
+        request=request,
+        article=other_article,
+        expected_source=other_source,
+        policy=policy,
+    )
+
+
+def test_contradicted_issuance_cannot_be_mutated_to_supported() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    request = _request(source.instrument)
+    result = _run(
+        _RecordedVerifier(_response("CONTRADICTED")),
+        request=request,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    object.__setattr__(result.validation, "entailment", EntailmentV0.SUPPORTED)
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=request,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_issued_span_location_cannot_move_to_another_exact_occurrence() -> None:
+    policy = ResearchSourcePolicyV0()
+    source = _source()
+    article = _article(source, policy)
+    request = _request(source.instrument)
+    result = _run(
+        _RecordedVerifier(_response()),
+        request=request,
+        article=article,
+        source=source,
+        policy=policy,
+    )
+    assert type(result) is ClaimValidationSucceededV0
+    object.__setattr__(result.validation.supporting_location, "start", 22)
+    object.__setattr__(result.validation.supporting_location, "end", 43)
+
+    assert not is_action_change_eligible_v0(
+        result.validation,
+        request=request,
+        article=article,
+        expected_source=source,
+        policy=policy,
+    )
+
+
+def test_serializer_rejects_mutated_issued_validation() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+    object.__setattr__(result.validation.supporting_location, "start", 22)
+    object.__setattr__(result.validation.supporting_location, "end", 43)
+
+    with pytest.raises(ValueError, match="unchanged issued value"):
+        result.validation.to_public_dict()
+
+
+def test_serializer_rejects_raw_and_subclass_values_with_issued_fields() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+
+    class ForgedValidation(ClaimValidationV0):
+        pass
+
+    for forged_type in (ClaimValidationV0, ForgedValidation):
+        forged = object.__new__(forged_type)
+        for slot in ClaimValidationV0.__slots__:
+            if slot == "__weakref__":
+                continue
+            object.__setattr__(forged, slot, getattr(result.validation, slot))
+        with pytest.raises(ValueError, match="unchanged issued value"):
+            forged.to_public_dict()
+
+
+def test_issuance_registry_stores_alias_free_deep_snapshots() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+
+    record = claim_module._SEALED_VALIDATIONS[id(result.validation)]
+
+    assert type(record).__name__ == "_ClaimIssuanceRecordV0"
+    assert record.reference() is result.validation
+    assert type(record.validation_snapshot) is tuple
+    assert type(record.validation_serialization) is bytes
+    assert type(record.request_snapshot) is tuple
+    assert type(record.source_snapshot) is tuple
+    assert type(record.article_snapshot) is tuple
+    assert type(record.policy_snapshot) is tuple
+    assert type(record.verifier_output_snapshot) is tuple
+
+
+def test_issuance_registry_weakref_cleanup_has_no_strong_reference_leak() -> None:
+    result = _run(_RecordedVerifier(_response()))
+    assert type(result) is ClaimValidationSucceededV0
+    validation = result.validation
+    validation_id = id(validation)
+    reference = weakref.ref(validation)
+    assert validation_id in claim_module._SEALED_VALIDATIONS
+
+    del validation
+    del result
+    gc.collect()
+
+    assert reference() is None
+    assert validation_id not in claim_module._SEALED_VALIDATIONS
+
+
+def test_registry_identity_check_rejects_wrong_record_at_same_lookup_key() -> None:
+    first = _run(_RecordedVerifier(_response()))
+    second = _run(_RecordedVerifier(_response()))
+    assert type(first) is ClaimValidationSucceededV0
+    assert type(second) is ClaimValidationSucceededV0
+    first_record = claim_module._SEALED_VALIDATIONS[id(first.validation)]
+    second_key = id(second.validation)
+    second_record = claim_module._SEALED_VALIDATIONS[second_key]
+    claim_module._SEALED_VALIDATIONS[second_key] = first_record
+    try:
+        with pytest.raises(ValueError, match="unchanged issued value"):
+            second.validation.to_public_dict()
+    finally:
+        claim_module._SEALED_VALIDATIONS[second_key] = second_record
 
 
 def test_serialization_is_direct_allowlist_and_matches_task1_contract_and_schema() -> (

@@ -243,14 +243,31 @@ claim 단위 `TIMED_OUT` review outcome이 되고, malformed output과 예상하
 `DEADLINE_INVARIANT`로 우선합니다. 반환 뒤에도 invocation input과 article hash를 원래
 baseline에 재검증하며 alias mutation은 fail closed입니다.
 
-action eligibility는 sealed validation을 exact request/article/source baseline에 다시
-검증하고 `action_changing=true`이면서 entailment가 `SUPPORTED`일 때만 true입니다.
+claim issuance 시 registry는 exact validation object를 가리키는 weak reference와 함께
+validation canonical bytes/fields, 원래 claim text/action flag/full instrument, T4
+source/article text/hash/seal, source policy, verifier output/version/span/location의 immutable
+tuple/bytes snapshot을 저장합니다. snapshot에는 request/source/article/policy object alias가
+없으며 validation이 수거되면 identity-safe weakref callback이 같은 record만 제거합니다.
+process가 바뀌거나 registry에 없는 값은 구조가 같아도 발급된 action authority가 아닙니다.
+
+action eligibility는 exact registered identity와 현재 validation serialization을 issuance
+snapshot에 먼저 대조하고, caller가 전달한 request/article/source/policy도 deep-copy한 뒤
+원래 issuance snapshot과 exact equality를 확인합니다. 원래 `action_changing=true`이고 발급
+당시와 현재 entailment가 모두 unchanged `SUPPORTED`일 때만 true입니다. context-only
+claim에 새 action request를 대입하거나 claim text, action flag, source/article, hash,
+span/location, entailment를 일관되게 바꿔도 권위가 이동하지 않습니다.
 `CONTRADICTED`, `UNCLEAR`, non-action-changing support는 compiler에 보고할 수 있지만
 BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. 이 owner는 compiler, runner, production model
 adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. rollout은 T3/T4 consumer
 확인 후 recorded synthetic verifier로 shadow 관측, production verifier adapter 별도 검증,
 compiler consumer 연결 순서이며, rollback은 claim consumer 연결만 제거하고 T3/T4
 producer와 shared schema를 유지합니다.
+
+claims module의 serializer는 registered identity와 unchanged issuance snapshot을 통과한
+값만 fresh Task 1 allowlist dict로 내보냅니다. `validate_claim_validation()`과 JSON Schema는
+일반 dict의 구조 호환성을 확인하는 generic consumer contract일 뿐 issuance나 action
+authority를 부여하지 않습니다. compiler는 generic schema 통과 결과를 action gate 대신
+사용해서는 안 됩니다.
 
 ## 4. 핵심 플로우
 
