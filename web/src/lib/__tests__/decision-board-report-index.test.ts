@@ -153,6 +153,115 @@ describe("Decision Board report index", () => {
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(url.searchParams.get("report_type")).toBe("eq.decision-board");
     expect(url.searchParams.get("run_kind")).toBe("eq.ENTRY");
-    expect(url.searchParams.get("limit")).toBe("1");
+    expect(url.searchParams.get("limit")).toBe("2");
+  });
+
+  it("continues latest lookup past a malformed newest raw row", async () => {
+    const malformedNewest = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const older = decisionRow({
+      report_key: `2026/08/2026-08-05.decision-board.entry.older-run.${DIGEST_B}.json`,
+      report_date: "2026-08-05",
+      run_id: "older-run",
+      idempotency_key: `sha256:${DIGEST_B}`,
+      decision_created_at: "2026-08-05T01:00:05Z",
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response([malformedNewest, older]))
+      .mockResolvedValueOnce(response([older]));
+
+    await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toEqual(
+      older,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(secondUrl.searchParams.get("or")).toContain(
+      'decision_created_at.lt."2026-08-06T01:00:05Z"',
+    );
+    expect(secondUrl.searchParams.get("or")).toContain('run_id.lt."entry-run"');
+  });
+
+  it("uses a strict raw Decision cursor across invalid pages until valid data", async () => {
+    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const invalidSecond = decisionRow({
+      report_key: `2026/08/2026-08-05.decision-board.entry.middle-run.${DIGEST_B}.json`,
+      report_date: "2026-08-05",
+      run_id: "middle-run",
+      idempotency_key: `sha256:${DIGEST_B}`,
+      decision_created_at: "2026-08-05T01:00:05Z",
+      tickers: ["PRIVATE.NAS"],
+    });
+    const validThird = decisionRow({
+      report_key: `2026/08/2026-08-04.decision-board.entry.older-run.${DIGEST_A}.json`,
+      report_date: "2026-08-04",
+      run_id: "older-run",
+      decision_created_at: "2026-08-04T01:00:05Z",
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response([invalidFirst, invalidSecond]))
+      .mockResolvedValueOnce(response([invalidSecond, validThird]))
+      .mockResolvedValueOnce(response([validThird]));
+
+    await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toEqual(
+      validThird,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    const thirdUrl = new URL(String(fetchMock.mock.calls[2]?.[0]));
+    expect(secondUrl.searchParams.get("or")).toContain('run_id.lt."entry-run"');
+    expect(thirdUrl.searchParams.get("or")).toContain('run_id.lt."middle-run"');
+  });
+
+  it("derives a Decision cursor from an all-malformed emitted page", async () => {
+    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const invalidLookahead = decisionRow({
+      report_key: `2026/08/2026-08-05.decision-board.entry.lookahead-run.${DIGEST_B}.json`,
+      report_date: "2026-08-05",
+      run_id: "lookahead-run",
+      idempotency_key: `sha256:${DIGEST_B}`,
+      decision_created_at: "2026-08-05T01:00:05Z",
+      tickers: ["PRIVATE.NAS"],
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response([invalidFirst, invalidLookahead]),
+    );
+
+    const page = await fetchReportIndexPage({
+      type: "decision-board",
+      runKind: "ENTRY",
+      limit: 1,
+      lookahead: true,
+    });
+
+    expect(page.items).toEqual([]);
+    expect(page.fetchedCount).toBe(1);
+    expect(page.hasMore).toBe(true);
+    expect(page.nextCursor).toMatchObject({
+      decision_created_at: invalidFirst.decision_created_at,
+      run_id: invalidFirst.run_id,
+      report_key: invalidFirst.report_key,
+      bucket_id: invalidFirst.bucket_id,
+    });
+  });
+
+  it("exhausts bounded latest pages when every Decision row is invalid", async () => {
+    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const invalidLast = decisionRow({
+      report_key: `2026/08/2026-08-05.decision-board.entry.last-run.${DIGEST_B}.json`,
+      report_date: "2026-08-05",
+      run_id: "last-run",
+      idempotency_key: `sha256:${DIGEST_B}`,
+      decision_created_at: "2026-08-05T01:00:05Z",
+      tickers: ["PRIVATE.NAS"],
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response([invalidFirst, invalidLast]))
+      .mockResolvedValueOnce(response([invalidLast]));
+
+    await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

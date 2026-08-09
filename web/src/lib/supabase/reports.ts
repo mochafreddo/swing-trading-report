@@ -25,6 +25,7 @@ const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const LATEST_DECISION_BOARD_MAX_PAGES = 100;
 
 export interface ReportIndexRow {
   bucket_id: string;
@@ -154,6 +155,55 @@ function parseReportIndexCursor(payload: unknown): ReportIndexCursor | null {
     duplicate_index: duplicateIndex,
     report_key: reportKey,
     bucket_id: bucketId,
+  };
+}
+
+function parseDecisionBoardIndexCursor(
+  payload: unknown,
+): ReportIndexCursor | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const raw = payload as {
+    report_date?: unknown;
+    duplicate_index?: unknown;
+    report_key?: unknown;
+    bucket_id?: unknown;
+    decision_created_at?: unknown;
+    run_id?: unknown;
+  };
+  const reportDate = trimmedString(raw.report_date);
+  const duplicateIndex = nonNegativeNumber(raw.duplicate_index, {
+    integer: true,
+  });
+  const reportKey = trimmedString(raw.report_key);
+  const bucketId = trimmedString(raw.bucket_id);
+  const decisionCreatedAt = nullableIdentityString(raw.decision_created_at);
+  const runId = nullableIdentityString(raw.run_id);
+  if (
+    typeof raw.report_date !== "string" ||
+    raw.report_date !== reportDate ||
+    duplicateIndex === null ||
+    typeof raw.report_key !== "string" ||
+    raw.report_key !== reportKey ||
+    !reportKey ||
+    typeof raw.bucket_id !== "string" ||
+    raw.bucket_id !== bucketId ||
+    !bucketId ||
+    decisionCreatedAt == null ||
+    parseOffsetTimestamp(decisionCreatedAt) === null ||
+    runId == null ||
+    !RUN_ID_PATTERN.test(runId)
+  ) {
+    return null;
+  }
+  return {
+    report_date: reportDate,
+    duplicate_index: duplicateIndex,
+    report_key: reportKey,
+    bucket_id: bucketId,
+    decision_created_at: decisionCreatedAt,
+    run_id: runId,
   };
 }
 
@@ -385,21 +435,9 @@ export async function fetchReportIndexPage(
   const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
   const fetchedCount = pageRows.length;
   const items = parseReportIndexRows(pageRows, runKind);
-  const lastItem = items[items.length - 1];
   const nextCursor = hasMore
-    ? isDecisionBoard && lastItem
-      ? {
-          report_date: lastItem.report_date,
-          duplicate_index: lastItem.duplicate_index,
-          report_key: lastItem.report_key,
-          bucket_id: lastItem.bucket_id,
-          ...(lastItem.decision_created_at && lastItem.run_id
-            ? {
-                decision_created_at: lastItem.decision_created_at,
-                run_id: lastItem.run_id,
-              }
-            : {}),
-        }
+    ? isDecisionBoard
+      ? parseDecisionBoardIndexCursor(pageRows[pageRows.length - 1])
       : parseReportIndexCursor(pageRows[pageRows.length - 1])
     : null;
   const total =
@@ -418,14 +456,30 @@ export async function fetchReportIndexPage(
 export async function fetchLatestDecisionBoardReport(
   runKind: DecisionBoardRunKind,
 ): Promise<ReportIndexRow | null> {
-  const page = await fetchReportIndexPage({
-    type: "decision-board",
-    runKind,
-    limit: 1,
-    includeTotal: false,
-  });
-  const row = page.items[0] ?? null;
-  return row?.run_kind === runKind ? row : null;
+  let cursor: ReportIndexCursor | undefined;
+  for (
+    let pageNumber = 0;
+    pageNumber < LATEST_DECISION_BOARD_MAX_PAGES;
+    pageNumber += 1
+  ) {
+    const page = await fetchReportIndexPage({
+      type: "decision-board",
+      runKind,
+      limit: 1,
+      includeTotal: false,
+      lookahead: true,
+      cursor,
+    });
+    const row = page.items[0];
+    if (row?.run_kind === runKind) {
+      return row;
+    }
+    if (!page.hasMore || !page.nextCursor) {
+      return null;
+    }
+    cursor = page.nextCursor;
+  }
+  return null;
 }
 
 export async function upsertReportIndexEntry(

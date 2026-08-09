@@ -483,3 +483,90 @@ def test_open_lock_rejects_persistent_path_replacement_after_acquisition(
             storage.os.fstat(acquired_fd)
     finally:
         os.close(directory_fd)
+
+
+def test_writer_fails_when_lock_path_is_replaced_after_open_and_second_inode_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    report = _report()
+    basename = Path(build_decision_board_storage_key(report)).name
+    digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
+    lock_name = f".decision-board-{digest}.lock"
+    real_write_temp = storage._write_temp
+    replacement_fd: int | None = None
+    second_inode_locked = False
+
+    def replace_after_open(
+        directory_fd: int, target_basename: str, payload: bytes
+    ) -> str:
+        nonlocal replacement_fd, second_inode_locked
+        storage.os.unlink(lock_name, dir_fd=directory_fd)
+        replacement_fd = storage.os.open(
+            lock_name,
+            storage.os.O_RDWR | storage.os.O_CREAT | storage.os.O_EXCL,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        storage.fcntl.flock(
+            replacement_fd,
+            storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB,
+        )
+        second_inode_locked = True
+        return real_write_temp(directory_fd, target_basename, payload)
+
+    monkeypatch.setattr(storage, "_write_temp", replace_after_open)
+    try:
+        with pytest.raises(DecisionBoardStoragePathError, match="lock changed"):
+            storage.write_decision_board_report(report, report_dir=tmp_path)
+
+        assert second_inode_locked
+        assert list(tmp_path.glob("*.json")) == []
+        assert list(tmp_path.glob(".*.tmp")) == []
+    finally:
+        if replacement_fd is not None:
+            storage.fcntl.flock(replacement_fd, storage.fcntl.LOCK_UN)
+            storage.os.close(replacement_fd)
+
+
+def test_writer_removes_new_target_when_lock_changes_before_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    report = _report()
+    basename = Path(build_decision_board_storage_key(report)).name
+    digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
+    lock_name = f".decision-board-{digest}.lock"
+    real_fsync = storage.os.fsync
+    replacement_fd: int | None = None
+
+    def replace_during_directory_fsync(fd: int) -> None:
+        nonlocal replacement_fd
+        if stat.S_ISDIR(storage.os.fstat(fd).st_mode) and replacement_fd is None:
+            storage.os.unlink(lock_name, dir_fd=fd)
+            replacement_fd = storage.os.open(
+                lock_name,
+                storage.os.O_RDWR | storage.os.O_CREAT | storage.os.O_EXCL,
+                0o600,
+                dir_fd=fd,
+            )
+            storage.fcntl.flock(
+                replacement_fd,
+                storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB,
+            )
+        real_fsync(fd)
+
+    monkeypatch.setattr(storage.os, "fsync", replace_during_directory_fsync)
+    try:
+        with pytest.raises(DecisionBoardStoragePathError, match="lock changed"):
+            storage.write_decision_board_report(report, report_dir=tmp_path)
+
+        assert replacement_fd is not None
+        assert list(tmp_path.glob("*.json")) == []
+        assert list(tmp_path.glob(".*.tmp")) == []
+    finally:
+        if replacement_fd is not None:
+            storage.fcntl.flock(replacement_fd, storage.fcntl.LOCK_UN)
+            storage.os.close(replacement_fd)

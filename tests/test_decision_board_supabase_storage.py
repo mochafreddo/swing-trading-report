@@ -394,6 +394,32 @@ def test_new_object_index_failure_preserves_object_on_authoritative_mismatch(
     assert session.delete_calls == []
 
 
+def test_new_object_index_identity_mismatch_preserves_typed_conflict_metadata(
+    tmp_path: Path,
+) -> None:
+    report = _report()
+    local_path, key = _local_report(tmp_path, report)
+    wrong = _index_row(report, key)
+    wrong["run_id"] = "competing-run"
+    session = _Session(
+        posts=[_Response(201), _Response(201)],
+        gets=[_authoritative_response(wrong), _authoritative_response(wrong)],
+    )
+
+    with pytest.raises(DecisionBoardIdempotencyConflictError) as exc:
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.storage_key == key
+    assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
+
+
 @pytest.mark.parametrize("failure_kind", ["http", "request", "invalid-json"])
 def test_new_object_index_failure_preserves_object_when_recheck_is_uncertain(
     tmp_path: Path,

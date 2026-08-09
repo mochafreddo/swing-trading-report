@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from urllib.parse import quote
 
@@ -95,6 +96,12 @@ class SupabaseReportIndexError(SupabaseStorageError):
         self.storage_key = storage_key
         self.cleanup_failed = cleanup_failed
         self.rollback_skipped = rollback_skipped
+
+
+class _DecisionBoardIndexState(StrEnum):
+    ABSENT = "absent"
+    MATCHING = "matching"
+    MISMATCH = "mismatch"
 
 
 @dataclass(frozen=True)
@@ -833,7 +840,7 @@ def _read_decision_board_index_state(
     config: SupabaseStorageConfig,
     row: dict[str, object],
     session: requests.Session,
-) -> str:
+) -> _DecisionBoardIndexState:
     storage_key = str(row["report_key"])
     try:
         authoritative = _decision_board_index_read_request(
@@ -860,12 +867,12 @@ def _read_decision_board_index_state(
             storage_key=storage_key,
         ) from exc
     if not isinstance(rows, list):
-        return "mismatch"
+        return _DecisionBoardIndexState.MISMATCH
     if not rows:
-        return "absent"
+        return _DecisionBoardIndexState.ABSENT
     if len(rows) == 1 and _authoritative_decision_board_row_matches(rows[0], row):
-        return "matching"
-    return "mismatch"
+        return _DecisionBoardIndexState.MATCHING
+    return _DecisionBoardIndexState.MISMATCH
 
 
 def _upsert_decision_board_index(
@@ -909,10 +916,11 @@ def _upsert_decision_board_index(
             row=row,
             session=session,
         )
-        != "matching"
+        != _DecisionBoardIndexState.MATCHING
     ):
         raise DecisionBoardIdempotencyConflictError(
-            "Decision Board report index identity contains different metadata"
+            "Decision Board report index identity contains different metadata",
+            storage_key=storage_key,
         )
 
 
@@ -939,9 +947,16 @@ def _reconcile_or_preserve_new_decision_board_object(
             rollback_skipped=True,
         ) from index_error
 
-    if index_state == "matching":
+    if index_state is _DecisionBoardIndexState.MATCHING:
         return
-    if index_state == "mismatch":
+    if index_state is _DecisionBoardIndexState.MISMATCH:
+        if isinstance(index_error, DecisionBoardIdempotencyConflictError):
+            raise DecisionBoardIdempotencyConflictError(
+                f"{index_error}; rollback delete skipped: authoritative index mismatch",
+                storage_key=storage_key,
+                cleanup_failed=True,
+                rollback_skipped=True,
+            ) from index_error
         raise SupabaseReportIndexError(
             f"{index_error}; rollback delete skipped: authoritative index mismatch",
             storage_key=storage_key,

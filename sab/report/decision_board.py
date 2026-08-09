@@ -42,6 +42,19 @@ class DecisionBoardStoragePathError(DecisionBoardStorageError):
 class DecisionBoardIdempotencyConflictError(DecisionBoardStorageError):
     """The deterministic identity already contains different bytes."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        storage_key: str | None = None,
+        cleanup_failed: bool = False,
+        rollback_skipped: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.storage_key = storage_key
+        self.cleanup_failed = cleanup_failed
+        self.rollback_skipped = rollback_skipped
+
 
 @dataclass(frozen=True)
 class ParsedDecisionBoardStorageKey:
@@ -51,6 +64,14 @@ class ParsedDecisionBoardStorageKey:
     run_id: str
     idempotency_key: str
     basename: str
+
+
+@dataclass(frozen=True)
+class _LockHandle:
+    fd: int
+    name: str
+    device: int
+    inode: int
 
 
 def _report_created_at_utc(report: dict[str, Any]) -> datetime:
@@ -153,7 +174,29 @@ def _open_report_directory(report_dir: Path) -> int:
     return directory_fd
 
 
-def _open_lock(directory_fd: int, basename: str) -> int:
+def _assert_lock_unchanged(directory_fd: int, lock: _LockHandle) -> None:
+    try:
+        opened = os.fstat(lock.fd)
+        current = os.stat(lock.name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            "target lock changed during protected operation"
+        ) from exc
+    expected_identity = (lock.device, lock.inode)
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or opened.st_nlink != 1
+        or (opened.st_dev, opened.st_ino) != expected_identity
+        or not stat.S_ISREG(current.st_mode)
+        or current.st_nlink != 1
+        or (current.st_dev, current.st_ino) != expected_identity
+    ):
+        raise DecisionBoardStoragePathError(
+            "target lock changed during protected operation"
+        )
+
+
+def _open_lock(directory_fd: int, basename: str) -> _LockHandle:
     digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
     lock_name = f".decision-board-{digest}.lock"
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -174,35 +217,42 @@ def _open_lock(directory_fd: int, basename: str) -> int:
         raise DecisionBoardStoragePathError(
             "target lock could not be opened safely"
         ) from exc
-    acquired = False
+    directory_acquired = False
+    target_acquired = False
     try:
         info = os.fstat(lock_fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise DecisionBoardStoragePathError(
                 "target lock is not a private regular file"
             )
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        directory_acquired = True
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        acquired = True
-        current = os.stat(lock_name, dir_fd=directory_fd, follow_symlinks=False)
-        if (
-            not stat.S_ISREG(current.st_mode)
-            or current.st_nlink != 1
-            or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
-        ):
-            raise DecisionBoardStoragePathError(
-                "target lock changed during acquisition"
-            )
-        return lock_fd
+        target_acquired = True
+        lock = _LockHandle(
+            fd=lock_fd,
+            name=lock_name,
+            device=info.st_dev,
+            inode=info.st_ino,
+        )
+        _assert_lock_unchanged(directory_fd, lock)
+        return lock
     except DecisionBoardStoragePathError:
-        if acquired:
+        if target_acquired:
             with suppress(OSError):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        if directory_acquired:
+            with suppress(OSError):
+                fcntl.flock(directory_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
         raise
     except OSError as exc:
-        if acquired:
+        if target_acquired:
             with suppress(OSError):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        if directory_acquired:
+            with suppress(OSError):
+                fcntl.flock(directory_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
         raise DecisionBoardStoragePathError(
             "target lock could not be validated or acquired safely"
@@ -297,14 +347,17 @@ def write_decision_board_report(
     assert parsed is not None
     directory = Path(report_dir)
     directory_fd = _open_report_directory(directory)
-    lock_fd: int | None = None
+    lock: _LockHandle | None = None
     temp_name: str | None = None
     created_target: os.stat_result | None = None
     try:
-        lock_fd = _open_lock(directory_fd, parsed.basename)
+        lock = _open_lock(directory_fd, parsed.basename)
+        _assert_lock_unchanged(directory_fd, lock)
         temp_name = _write_temp(directory_fd, parsed.basename, payload)
+        _assert_lock_unchanged(directory_fd, lock)
         temp_info = os.stat(temp_name, dir_fd=directory_fd, follow_symlinks=False)
         try:
+            _assert_lock_unchanged(directory_fd, lock)
             os.link(
                 temp_name,
                 parsed.basename,
@@ -331,20 +384,45 @@ def write_decision_board_report(
             raise
         if created_target is not None:
             try:
+                _assert_lock_unchanged(directory_fd, lock)
                 os.fsync(directory_fd)
             except OSError:
                 if _target_matches(directory_fd, parsed.basename, created_target):
                     os.unlink(parsed.basename, dir_fd=directory_fd)
                 raise
+        _assert_lock_unchanged(directory_fd, lock)
         return directory / parsed.basename
+    except DecisionBoardStoragePathError:
+        if created_target is not None and _target_matches(
+            directory_fd, parsed.basename, created_target
+        ):
+            os.unlink(parsed.basename, dir_fd=directory_fd)
+            with suppress(OSError):
+                os.fsync(directory_fd)
+        raise
     finally:
+        lock_error: DecisionBoardStoragePathError | None = None
+        if lock is not None:
+            try:
+                _assert_lock_unchanged(directory_fd, lock)
+            except DecisionBoardStoragePathError as exc:
+                lock_error = exc
+                if created_target is not None and _target_matches(
+                    directory_fd, parsed.basename, created_target
+                ):
+                    with suppress(OSError):
+                        os.unlink(parsed.basename, dir_fd=directory_fd)
+                        os.fsync(directory_fd)
         if temp_name is not None:
             with suppress(FileNotFoundError):
                 os.unlink(temp_name, dir_fd=directory_fd)
-        if lock_fd is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            os.close(lock_fd)
+        if lock is not None:
+            fcntl.flock(lock.fd, fcntl.LOCK_UN)
+            os.close(lock.fd)
+            fcntl.flock(directory_fd, fcntl.LOCK_UN)
         os.close(directory_fd)
+        if lock_error is not None:
+            raise lock_error
 
 
 __all__ = [
