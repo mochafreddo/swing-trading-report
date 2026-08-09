@@ -273,6 +273,43 @@ claims module의 serializer는 registered identity와 unchanged issuance snapsho
 authority를 부여하지 않습니다. compiler는 generic schema 통과 결과를 action gate 대신
 사용해서는 안 됩니다.
 
+### 3.5 DecisionCompilerV0 pure precedence boundary
+
+compiler 전파 경로는 `T3 InstrumentRefV0 + sealed policy facts + T5 issuance inputs ->
+DecisionCompilerV0 -> Task 1 DecisionPayloadV0`입니다. ENTRY와 HOLDING input은 lane prefix와
+canonical ticker가 exact 결속된 conservative ASCII item identity, exact public instrument, finite approval/dependency/
+signal/exposure/hard-exit/research enum, compiler-issued evidence binding만 포함합니다. factory는
+instrument를 trusted copy로 소유하고 process-local weakref registry에 전체 scalar snapshot과
+nested evidence identity를 기록합니다. compile 시 exact type/identity/snapshot을 다시
+검사하므로 post-factory mutation, alias 교체, subclass, `object.__new__` raw allocation은
+authority가 아닙니다. account ID, quantity, entry price, P/L, notes, tags, raw broker row,
+arbitrary metadata나 rationale text는 이 projection에 없습니다.
+
+ENTRY는 미승인 item/identity를 먼저 REVIEW하고, READY/ENTER가 아닌 확정 non-candidate는
+omit합니다. 필수 deterministic state gap은 REVIEW, 독립 exposure fail은 AVOID입니다.
+research conflict/gap은 evidence veto를 추측하지 않고 REVIEW하며, 나머지 candidate만
+unchanged T5 action gate를 통과한 MATERIAL_ADVERSE로 AVOID하거나 BUY합니다. HOLDING은
+current broker/candle/rule이 뒷받침한 hard stop/confirmed exit SELL을 lattice 최상단에 둡니다.
+그 뒤 identity/deterministic gap, supported material adverse, research gap 순으로 REVIEW하고
+나머지만 HOLD합니다. hard SELL은 evidence timeout/conflict/absence/`NOT_SELECTED_CAP`으로
+낮아지지 않습니다.
+
+`select_holding_research_v0`는 caller의 bounded priority/order를 UTF-8 byte ordering으로
+정렬해 0..5개만 선택하고 나머지를 typed `NOT_SELECTED_CAP`으로 표시할 뿐 compile 입력을
+자르지 않습니다. compiler도 item identity와 full instrument identity 중복을 fail closed하고,
+item/issue/evidence를 명시적 UTF-8 rule로 정렬·dedupe합니다. T5 validation dict나 generic
+schema 통과 여부는 action authority가 아니며, 원래 request/article/source/policy와 exact
+issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검증한 unchanged
+action-changing `SUPPORTED`만 `{claim_id, entailment: SUPPORTED}` evidence가 됩니다.
+
+완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는
+기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. 이 owner에는 runner,
+run envelope aggregation, persistence/index, Web, network/model adapter, Toss/order capability가
+없습니다. rollout은 T3/T4/T5 shadow producer 확인, recorded compiler replay, 별도 runner/storage
+통합 순서입니다. rollback은 compiler consumer 연결만 제거하고 T1-T5 producer와 schema를
+유지합니다. runner의 shared prerequisite `BLOCKED|FAILED` 집계와 storage idempotency는 아직
+구현되지 않았습니다.
+
 ## 4. 핵심 플로우
 
 ### 4.1 `scan` 플로우

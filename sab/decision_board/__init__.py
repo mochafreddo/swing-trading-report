@@ -1,5 +1,19 @@
 """Decision Board V0 public contract helpers."""
 
+from .compiler import (
+    ApprovalStateV0,
+    CompilerEvidenceKindV0,
+    CompilerEvidenceV0,
+    CompilerInputError,
+    DecisionCompilerV0,
+    DependencyStateV0,
+    EntryCompilerItemV0,
+    EntrySignalStateV0,
+    ExposureStateV0,
+    HardExitStateV0,
+    HoldingCompilerItemV0,
+    ResearchStateV0,
+)
 from .contracts import (
     ContractError,
     canonical_json_bytes,
@@ -7,6 +21,7 @@ from .contracts import (
     load_decision_board_report,
     validate_claim_validation,
     validate_decision_board_report,
+    validate_decision_payload,
 )
 from .inputs import (
     ApprovedSwingRefV0,
@@ -27,16 +42,35 @@ from .instruments import (
     VersionedInstrumentRegistryV0,
     copy_trusted_instrument_ref_v0,
 )
+from .policy import (
+    MAX_RESEARCH_ITEMS_V0,
+    HoldingResearchSelectionV0,
+    select_holding_research_v0,
+)
 
 __all__ = [
+    "MAX_RESEARCH_ITEMS_V0",
+    "ApprovalStateV0",
     "ApprovedSwingRefV0",
+    "CompilerEvidenceKindV0",
+    "CompilerEvidenceV0",
+    "CompilerInputError",
     "ContractError",
+    "DecisionCompilerV0",
+    "DependencyStateV0",
+    "EntryCompilerItemV0",
     "EntryIdentityApprovedV0",
     "EntryIdentityResultV0",
     "EntryIdentityReviewV0",
+    "EntrySignalStateV0",
+    "ExposureStateV0",
+    "HardExitStateV0",
+    "HoldingCompilerItemV0",
+    "HoldingResearchSelectionV0",
     "IdentityGateIssueV0",
     "InstrumentRefV0",
     "InstrumentRegistryError",
+    "ResearchStateV0",
     "SwingApprovalResultV0",
     "SwingApprovedV0",
     "SwingReviewV0",
@@ -48,6 +82,8 @@ __all__ = [
     "load_decision_board_report",
     "project_research_instruments_v0",
     "resolve_entry_identity_v0",
+    "select_holding_research_v0",
     "validate_claim_validation",
     "validate_decision_board_report",
+    "validate_decision_payload",
 ]

@@ -163,6 +163,13 @@ def validate_claim_validation(value: Any) -> dict[str, Any]:
     return claim
 
 
+def validate_decision_payload(value: Any) -> dict[str, Any]:
+    """Validate and return one publishable DecisionPayloadV0 without coercion."""
+
+    _strict_json_value(value, "$")
+    return _decision_payload(value, "$")
+
+
 def _decision_payload(value: Any, path: str) -> dict[str, Any]:
     payload = _object(value, path)
     _strict_keys(
