@@ -25,6 +25,7 @@ const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const LATEST_DECISION_BOARD_PAGE_SIZE = 25;
 const LATEST_DECISION_BOARD_MAX_PAGES = 100;
 
 export interface ReportIndexRow {
@@ -465,7 +466,7 @@ export async function fetchLatestDecisionBoardReport(
     const page = await fetchReportIndexPage({
       type: "decision-board",
       runKind,
-      limit: 1,
+      limit: LATEST_DECISION_BOARD_PAGE_SIZE,
       includeTotal: false,
       lookahead: true,
       cursor,
@@ -474,12 +475,21 @@ export async function fetchLatestDecisionBoardReport(
     if (row?.run_kind === runKind) {
       return row;
     }
-    if (!page.hasMore || !page.nextCursor) {
+    if (!page.hasMore) {
       return null;
+    }
+    if (!page.nextCursor) {
+      throw new SupabaseApiError(
+        "Failed to continue latest Decision Board lookup: no safe Decision Board cursor",
+        502,
+      );
     }
     cursor = page.nextCursor;
   }
-  return null;
+  throw new SupabaseApiError(
+    `${LATEST_DECISION_BOARD_MAX_PAGES}-page safety limit reached during latest Decision Board lookup`,
+    502,
+  );
 }
 
 export async function upsertReportIndexEntry(

@@ -39,6 +39,15 @@ function decisionRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function safeInvalidDecisionRow(index: number) {
+  const runId = `invalid-run-${String(999 - index).padStart(3, "0")}`;
+  return decisionRow({
+    report_key: `2026/08/2026-08-06.decision-board.entry.${runId}.${DIGEST_A}.json`,
+    run_id: runId,
+    tickers: ["PRIVATE.NAS"],
+  });
+}
+
 beforeAll(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_test_key";
@@ -153,11 +162,11 @@ describe("Decision Board report index", () => {
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(url.searchParams.get("report_type")).toBe("eq.decision-board");
     expect(url.searchParams.get("run_kind")).toBe("eq.ENTRY");
-    expect(url.searchParams.get("limit")).toBe("2");
+    expect(url.searchParams.get("limit")).toBe("26");
   });
 
-  it("continues latest lookup past a malformed newest raw row", async () => {
-    const malformedNewest = decisionRow({ tickers: ["PRIVATE.NAS"] });
+  it("finds an older valid row behind a whitespace-wrapped newest key", async () => {
+    const malformedNewest = decisionRow({ report_key: ` ${ENTRY_KEY}` });
     const older = decisionRow({
       report_key: `2026/08/2026-08-05.decision-board.entry.older-run.${DIGEST_B}.json`,
       report_date: "2026-08-05",
@@ -167,31 +176,25 @@ describe("Decision Board report index", () => {
     });
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(response([malformedNewest, older]))
-      .mockResolvedValueOnce(response([older]));
+      .mockResolvedValue(response([malformedNewest, older]));
 
     await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toEqual(
       older,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
-    expect(secondUrl.searchParams.get("or")).toContain(
-      'decision_created_at.lt."2026-08-06T01:00:05Z"',
-    );
-    expect(secondUrl.searchParams.get("or")).toContain('run_id.lt."entry-run"');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("uses a strict raw Decision cursor across invalid pages until valid data", async () => {
-    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
-    const invalidSecond = decisionRow({
-      report_key: `2026/08/2026-08-05.decision-board.entry.middle-run.${DIGEST_B}.json`,
-      report_date: "2026-08-05",
-      run_id: "middle-run",
-      idempotency_key: `sha256:${DIGEST_B}`,
-      decision_created_at: "2026-08-05T01:00:05Z",
-      tickers: ["PRIVATE.NAS"],
-    });
+  it("advances across malformed ordering values when the page ends safely", async () => {
+    const malformedOrdering = [
+      decisionRow({ decision_created_at: "not-a-timestamp" }),
+      decisionRow({ run_id: "../unsafe" }),
+      decisionRow({ bucket_id: " reports" }),
+      decisionRow({ report_key: ` ${ENTRY_KEY}` }),
+    ];
+    const safeInvalidRows = Array.from({ length: 21 }, (_, index) =>
+      safeInvalidDecisionRow(index),
+    );
     const validThird = decisionRow({
       report_key: `2026/08/2026-08-04.decision-board.entry.older-run.${DIGEST_A}.json`,
       report_date: "2026-08-04",
@@ -200,18 +203,19 @@ describe("Decision Board report index", () => {
     });
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(response([invalidFirst, invalidSecond]))
-      .mockResolvedValueOnce(response([invalidSecond, validThird]))
+      .mockResolvedValueOnce(
+        response([...malformedOrdering, ...safeInvalidRows, validThird]),
+      )
       .mockResolvedValueOnce(response([validThird]));
 
     await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toEqual(
       validThird,
     );
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
-    const thirdUrl = new URL(String(fetchMock.mock.calls[2]?.[0]));
-    expect(secondUrl.searchParams.get("or")).toContain('run_id.lt."entry-run"');
-    expect(thirdUrl.searchParams.get("or")).toContain('run_id.lt."middle-run"');
+    expect(secondUrl.searchParams.get("or")).toContain(
+      `run_id.lt."${safeInvalidRows.at(-1)?.run_id}"`,
+    );
   });
 
   it("derives a Decision cursor from an all-malformed emitted page", async () => {
@@ -258,10 +262,50 @@ describe("Decision Board report index", () => {
     });
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(response([invalidFirst, invalidLast]))
-      .mockResolvedValueOnce(response([invalidLast]));
+      .mockResolvedValue(response([invalidFirst, invalidLast]));
 
     await expect(fetchLatestDecisionBoardReport("ENTRY")).resolves.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces an unsafe terminal cursor instead of claiming no latest row", async () => {
+    const safeInvalidRows = Array.from({ length: 24 }, (_, index) =>
+      safeInvalidDecisionRow(index),
+    );
+    const unsafeLast = decisionRow({ report_key: ` ${ENTRY_KEY}` });
+    const hiddenValidLookahead = decisionRow({
+      report_key: `2026/08/2026-08-05.decision-board.entry.hidden-run.${DIGEST_B}.json`,
+      report_date: "2026-08-05",
+      run_id: "hidden-run",
+      idempotency_key: `sha256:${DIGEST_B}`,
+      decision_created_at: "2026-08-05T01:00:05Z",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response([...safeInvalidRows, unsafeLast, hiddenValidLookahead]),
+    );
+
+    await expect(fetchLatestDecisionBoardReport("ENTRY")).rejects.toMatchObject(
+      {
+        status: 502,
+        message: expect.stringContaining("safe Decision Board cursor"),
+      },
+    );
+  });
+
+  it("surfaces the documented 100-page latest traversal cap", async () => {
+    const fullInvalidPage = Array.from({ length: 26 }, (_, index) =>
+      safeInvalidDecisionRow(index),
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() => Promise.resolve(response(fullInvalidPage)));
+
+    await expect(fetchLatestDecisionBoardReport("ENTRY")).rejects.toMatchObject(
+      {
+        status: 502,
+        message: expect.stringContaining("100-page safety limit"),
+      },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(100);
   });
 });

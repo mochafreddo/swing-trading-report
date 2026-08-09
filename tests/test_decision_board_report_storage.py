@@ -570,3 +570,114 @@ def test_writer_removes_new_target_when_lock_changes_before_success(
         if replacement_fd is not None:
             storage.fcntl.flock(replacement_fd, storage.fcntl.LOCK_UN)
             storage.os.close(replacement_fd)
+
+
+@pytest.mark.parametrize(
+    ("failures", "first_failure"),
+    [
+        ({"target_unlock"}, "target unlock failed"),
+        ({"target_close"}, "target close failed"),
+        ({"directory_unlock"}, "directory unlock failed"),
+        ({"directory_close"}, "directory close failed"),
+        (
+            {
+                "target_unlock",
+                "target_close",
+                "directory_unlock",
+                "directory_close",
+            },
+            "target unlock failed",
+        ),
+    ],
+)
+def test_writer_cleanup_attempts_every_unlock_and_close_after_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failures: set[str],
+    first_failure: str,
+) -> None:
+    import sab.report.decision_board as storage
+
+    captured: dict[str, int] = {}
+    real_open_lock = storage._open_lock
+    real_flock = storage.fcntl.flock
+    real_close = storage.os.close
+
+    def capture_lock(directory_fd: int, basename: str) -> storage._LockHandle:
+        captured["directory"] = directory_fd
+        lock = real_open_lock(directory_fd, basename)
+        captured["target"] = lock.fd
+        return lock
+
+    def cleanup_flock(fd: int, operation: int) -> None:
+        real_flock(fd, operation)
+        if operation != storage.fcntl.LOCK_UN:
+            return
+        if fd == captured.get("target") and "target_unlock" in failures:
+            raise OSError("target unlock failed")
+        if fd == captured.get("directory") and "directory_unlock" in failures:
+            raise OSError("directory unlock failed")
+
+    def cleanup_close(fd: int) -> None:
+        real_close(fd)
+        if fd == captured.get("target") and "target_close" in failures:
+            raise OSError("target close failed")
+        if fd == captured.get("directory") and "directory_close" in failures:
+            raise OSError("directory close failed")
+
+    monkeypatch.setattr(storage, "_open_lock", capture_lock)
+    monkeypatch.setattr(storage.fcntl, "flock", cleanup_flock)
+    monkeypatch.setattr(storage.os, "close", cleanup_close)
+
+    with pytest.raises(DecisionBoardStoragePathError, match=first_failure):
+        storage.write_decision_board_report(_report(), report_dir=tmp_path)
+
+    for fd in captured.values():
+        with pytest.raises(OSError):
+            storage.os.fstat(fd)
+
+    monkeypatch.setattr(storage.fcntl, "flock", real_flock)
+    monkeypatch.setattr(storage.os, "close", real_close)
+    probe_fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        real_flock(probe_fd, storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB)
+        real_flock(probe_fd, storage.fcntl.LOCK_UN)
+    finally:
+        os.close(probe_fd)
+    assert write_decision_board_report(_report(), report_dir=tmp_path).is_file()
+
+
+def test_writer_cleanup_preserves_primary_error_when_unlock_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    captured: dict[str, int] = {}
+    real_open_lock = storage._open_lock
+    real_flock = storage.fcntl.flock
+
+    def capture_lock(directory_fd: int, basename: str) -> storage._LockHandle:
+        captured["directory"] = directory_fd
+        lock = real_open_lock(directory_fd, basename)
+        captured["target"] = lock.fd
+        return lock
+
+    def failing_target_unlock(fd: int, operation: int) -> None:
+        real_flock(fd, operation)
+        if operation == storage.fcntl.LOCK_UN and fd == captured.get("target"):
+            raise OSError("secondary cleanup failure")
+
+    monkeypatch.setattr(storage, "_open_lock", capture_lock)
+    monkeypatch.setattr(storage.fcntl, "flock", failing_target_unlock)
+    monkeypatch.setattr(
+        storage,
+        "_write_temp",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("primary write failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="primary write failure"):
+        storage.write_decision_board_report(_report(), report_dir=tmp_path)
+
+    for fd in captured.values():
+        with pytest.raises(OSError):
+            storage.os.fstat(fd)

@@ -113,6 +113,20 @@ class _CompetingIndexAfterAbsentSession(_Session):
         return response
 
 
+class _FailingSecondGetSession(_Session):
+    def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> _Response:
+        if len(self.get_calls) == 1:
+            self.get_calls.append({"url": url, "headers": headers, "timeout": timeout})
+            raise requests.Timeout("typed conflict recheck timed out")
+        return super().get(url, headers=headers, timeout=timeout)
+
+
 def _report(name: str = "published-entry.json") -> dict[str, Any]:
     value = json.loads((_FIXTURES / name).read_text(encoding="utf-8"))
     assert isinstance(value, dict)
@@ -405,6 +419,44 @@ def test_new_object_index_identity_mismatch_preserves_typed_conflict_metadata(
         posts=[_Response(201), _Response(201)],
         gets=[_authoritative_response(wrong), _authoritative_response(wrong)],
     )
+
+    with pytest.raises(DecisionBoardIdempotencyConflictError) as exc:
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.storage_key == key
+    assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
+
+
+@pytest.mark.parametrize("failure_kind", ["http", "request", "invalid-json"])
+def test_typed_index_conflict_survives_uncertain_authoritative_recheck(
+    tmp_path: Path,
+    failure_kind: str,
+) -> None:
+    report = _report()
+    local_path, key = _local_report(tmp_path, report)
+    wrong = _index_row(report, key)
+    wrong["run_id"] = "competing-run"
+    posts = [_Response(201), _Response(201)]
+    first_get = _authoritative_response(wrong)
+    if failure_kind == "request":
+        session: _Session = _FailingSecondGetSession(
+            posts=posts,
+            gets=[first_get],
+        )
+    else:
+        recheck = (
+            _Response(503, text="index unavailable")
+            if failure_kind == "http"
+            else _Response(200, text="not-json")
+        )
+        session = _Session(posts=posts, gets=[first_get, recheck])
 
     with pytest.raises(DecisionBoardIdempotencyConflictError) as exc:
         upload_decision_board_report(

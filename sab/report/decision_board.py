@@ -10,6 +10,8 @@ import os
 import re
 import secrets
 import stat
+import sys
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -393,36 +395,71 @@ def write_decision_board_report(
         _assert_lock_unchanged(directory_fd, lock)
         return directory / parsed.basename
     except DecisionBoardStoragePathError:
-        if created_target is not None and _target_matches(
-            directory_fd, parsed.basename, created_target
-        ):
-            os.unlink(parsed.basename, dir_fd=directory_fd)
-            with suppress(OSError):
+        with suppress(OSError):
+            if created_target is not None and _target_matches(
+                directory_fd, parsed.basename, created_target
+            ):
+                os.unlink(parsed.basename, dir_fd=directory_fd)
                 os.fsync(directory_fd)
         raise
     finally:
+        primary_error = sys.exception()
         lock_error: DecisionBoardStoragePathError | None = None
+        cleanup_error: OSError | None = None
+
+        def record_cleanup_error(exc: OSError) -> None:
+            nonlocal cleanup_error
+            if cleanup_error is None:
+                cleanup_error = exc
+
+        def attempt_cleanup(operation: Callable[[], None]) -> None:
+            try:
+                operation()
+            except OSError as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+
         if lock is not None:
             try:
                 _assert_lock_unchanged(directory_fd, lock)
             except DecisionBoardStoragePathError as exc:
                 lock_error = exc
-                if created_target is not None and _target_matches(
-                    directory_fd, parsed.basename, created_target
-                ):
-                    with suppress(OSError):
+                try:
+                    if created_target is not None and _target_matches(
+                        directory_fd, parsed.basename, created_target
+                    ):
                         os.unlink(parsed.basename, dir_fd=directory_fd)
                         os.fsync(directory_fd)
+                except OSError as cleanup_exc:
+                    record_cleanup_error(cleanup_exc)
         if temp_name is not None:
-            with suppress(FileNotFoundError):
+            try:
                 os.unlink(temp_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
         if lock is not None:
-            fcntl.flock(lock.fd, fcntl.LOCK_UN)
-            os.close(lock.fd)
-            fcntl.flock(directory_fd, fcntl.LOCK_UN)
-        os.close(directory_fd)
-        if lock_error is not None:
-            raise lock_error
+            try:
+                attempt_cleanup(lambda: fcntl.flock(lock.fd, fcntl.LOCK_UN))
+            finally:
+                try:
+                    attempt_cleanup(lambda: os.close(lock.fd))
+                finally:
+                    try:
+                        attempt_cleanup(
+                            lambda: fcntl.flock(directory_fd, fcntl.LOCK_UN)
+                        )
+                    finally:
+                        attempt_cleanup(lambda: os.close(directory_fd))
+        else:
+            attempt_cleanup(lambda: os.close(directory_fd))
+        if primary_error is None:
+            if lock_error is not None:
+                raise lock_error
+            if cleanup_error is not None:
+                raise DecisionBoardStoragePathError(
+                    f"writer cleanup failed: {cleanup_error}"
+                ) from cleanup_error
 
 
 __all__ = [

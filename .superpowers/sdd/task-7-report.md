@@ -61,14 +61,14 @@ Disposable container는 검사 뒤 stop/auto-remove했다. linked/production Sup
 
 `ReportType`은 `decision-board`를 포함한다. Server-only `ReportIndexRow` parser는 nullable identity field를 legacy row에 null로 정규화하고 Decision Board row에서는 key/date/run-kind/run-id/full-idempotency/offset timestamp/privacy-neutral fields를 함께 검증한다. malformed row는 skip하며 legacy shape로 강등하지 않는다.
 
-`runKind`는 `type=decision-board`에서만 허용하고 ENTRY/HOLDING을 query filter와 cache identity에 포함한다. Decision Board order는 `decision_created_at.desc,run_id.desc,report_key.desc,bucket_id.desc`이고 dedicated latest lookup은 explicit type/run-kind filter를 사용한다. latest lookup은 bounded keyset paging으로 malformed newest row를 건너뛴다. all-malformed page의 cursor는 emitted item이나 legacy fields가 아니라 마지막 raw row의 strict Decision ordering fields에서 만든다. Decision Board detail key는 Python identity처럼 surrounding whitespace를 거부하고, legacy detail key의 기존 trim 동작은 유지한다.
+`runKind`는 `type=decision-board`에서만 허용하고 ENTRY/HOLDING을 query filter와 cache identity에 포함한다. Decision Board order는 `decision_created_at.desc,run_id.desc,report_key.desc,bucket_id.desc`이고 dedicated latest lookup은 explicit type/run-kind filter를 사용한다. latest lookup은 25 rows + lookahead, 최대 100-page bounded keyset paging으로 malformed newest row를 건너뛴다. all-malformed page의 cursor는 emitted item이나 legacy fields가 아니라 마지막 raw row의 exact strict Decision ordering fields에서 만든다. cursor가 unsafe한 full page와 100-page cap은 typed 502 error로 관측되고, 실제 exhaustion만 `null`이다. Decision Board detail key는 Python identity처럼 surrounding whitespace를 거부하고, legacy detail key의 기존 trim 동작은 유지한다.
 
 ## 전체 검증
 
 - T1/T6 + T3/T4/T5 focused regressions: 431 passed.
 - docs state contract: 21 passed.
-- `UV_CACHE_DIR=.uv-cache mise exec -- just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2865 passed / 8 skipped / 1297 dependency warnings.
-- `UV_CACHE_DIR=.uv-cache mise exec -- just ci-web`: install/lint/format/typecheck, 91 files / 653 tests, coverage gate, Next 16 production build all passed.
+- `UV_CACHE_DIR=.uv-cache mise exec -- just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2874 passed / 8 skipped / 1297 dependency warnings.
+- `UV_CACHE_DIR=.uv-cache mise exec -- just ci-web`: install/lint/format/typecheck, 91 files / 655 tests, coverage gate, Next 16 production build all passed.
 - `git diff --check`: passed.
 
 ## Rollout/rollback

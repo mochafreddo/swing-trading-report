@@ -939,6 +939,14 @@ def _reconcile_or_preserve_new_decision_board_object(
             session=session,
         )
     except SupabaseReportIndexError as recheck_exc:
+        if isinstance(index_error, DecisionBoardIdempotencyConflictError):
+            raise DecisionBoardIdempotencyConflictError(
+                f"{index_error}; rollback delete skipped: authoritative index recheck failed: "
+                f"{recheck_exc}",
+                storage_key=storage_key,
+                cleanup_failed=True,
+                rollback_skipped=True,
+            ) from index_error
         raise SupabaseReportIndexError(
             f"{index_error}; rollback delete skipped: authoritative index recheck failed: "
             f"{recheck_exc}",
