@@ -20,9 +20,9 @@ runner/CLI/scheduler, RunJournal, detail renderer, notification, Toss/order 호�
 
 ## Local concurrency/crash proof
 
-writer는 caller graph를 strict canonical JSON bytes로 한 번 snapshot한 뒤 alias-free built-in graph를 validate하고, 같은 snapshot bytes와 graph에서 key/filename/payload를 만든다. caller mutation, dict/list subclass, cycle, non-finite number는 key/bytes 사이에 끼어들 수 없다. real directory를 `O_NOFOLLOW`로 열고 stable directory-level advisory `flock`과 target별 persistent lock을 함께 사용한다. target lock의 최초 inode는 temp/target mutation 전후와 success/final cleanup 전에 재검증한다. same-directory private temp, file `fsync`, hard-link `O_EXCL` equivalent create, directory `fsync`를 사용한다. lock `fstat`/`flock` 실패는 열린 FD를 닫고, post-return pathname replacement와 multiple-inode race는 temp/final cleanup 뒤 fail closed한다. open inode와 final directory entry도 다시 비교하므로 symlink/non-regular target과 replacement race를 거부한다.
+writer는 caller graph를 strict canonical JSON bytes로 한 번 snapshot한 뒤 alias-free built-in graph를 validate하고, 같은 snapshot bytes와 graph에서 key/filename/payload를 만든다. caller mutation, dict/list subclass, cycle, non-finite number는 key/bytes 사이에 끼어들 수 없다. real directory를 `O_NOFOLLOW`로 열고 stable directory-level advisory `flock`과 target별 persistent lock을 함께 사용한다. target lock의 최초 inode는 temp/target mutation 전후와 success/final cleanup 전에 재검증한다. same-directory private temp, file `fsync`, hard-link `O_EXCL` equivalent create, directory `fsync`를 사용한다. lock `fstat`/`flock` 실패는 열린 FD를 닫고, post-return pathname replacement와 multiple-inode race는 temp/final cleanup 뒤 fail closed한다. open inode와 final directory entry도 다시 비교하므로 symlink/non-regular target과 replacement race를 거부한다. lock 획득 또는 cleanup 중 `KeyboardInterrupt`/`SystemExit`가 발생해도 모든 unlock/close를 시도하며, body primary exception을 보존하고 process-control exception을 business error로 변환하지 않는다.
 
-검증은 deterministic caller-mutation interleaving, strict graph rejection, `fstat`/`flock` FD cleanup, persistent lock pathname replacement, thread/process 동일 bytes convergence, 다른 bytes one-winner+typed-conflict, 다른 run uniqueness, serializer/write/directory-fsync failure cleanup, symlink/directory/replacement race를 포함한다. Review-fix local+Supabase focused 묶음은 45 passed다.
+검증은 deterministic caller-mutation interleaving, strict graph rejection, `fstat`/`flock`/`BaseException` FD cleanup, persistent lock pathname replacement, thread/process 동일 bytes convergence, 다른 bytes one-winner+typed-conflict, 다른 run uniqueness, serializer/write/directory-fsync failure cleanup, symlink/directory/replacement race를 포함한다. Review-fix local+Supabase focused 묶음은 65 passed다.
 
 ## Storage/index rollback matrix
 
@@ -67,7 +67,8 @@ Disposable container는 검사 뒤 stop/auto-remove했다. linked/production Sup
 
 - T1/T6 + T3/T4/T5 focused regressions: 431 passed.
 - docs state contract: 21 passed.
-- `UV_CACHE_DIR=.uv-cache mise exec -- just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2874 passed / 8 skipped / 1297 dependency warnings.
+- late-standards TDD: RED 6 failed / 2 passed, GREEN 8 passed; Decision Board + legacy storage 123 passed.
+- `UV_CACHE_DIR=.uv-cache mise exec -- just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2882 passed / 8 skipped / 1297 dependency warnings.
 - `UV_CACHE_DIR=.uv-cache mise exec -- just ci-web`: install/lint/format/typecheck, 91 files / 655 tests, coverage gate, Next 16 production build all passed.
 - `git diff --check`: passed.
 

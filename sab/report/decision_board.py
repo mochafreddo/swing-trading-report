@@ -239,26 +239,28 @@ def _open_lock(directory_fd: int, basename: str) -> _LockHandle:
         )
         _assert_lock_unchanged(directory_fd, lock)
         return lock
-    except DecisionBoardStoragePathError:
+    except BaseException as exc:
         if target_acquired:
-            with suppress(OSError):
+            with suppress(BaseException):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
         if directory_acquired:
-            with suppress(OSError):
+            try:
                 fcntl.flock(directory_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
+            except BaseException:
+                with suppress(BaseException):
+                    fcntl.flock(directory_fd, fcntl.LOCK_UN)
+        try:
+            os.close(lock_fd)
+        except BaseException:
+            with suppress(BaseException):
+                os.close(lock_fd)
+        if isinstance(exc, DecisionBoardStoragePathError):
+            raise
+        if isinstance(exc, OSError):
+            raise DecisionBoardStoragePathError(
+                "target lock could not be validated or acquired safely"
+            ) from exc
         raise
-    except OSError as exc:
-        if target_acquired:
-            with suppress(OSError):
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        if directory_acquired:
-            with suppress(OSError):
-                fcntl.flock(directory_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
-        raise DecisionBoardStoragePathError(
-            "target lock could not be validated or acquired safely"
-        ) from exc
 
 
 def _snapshot_decision_board_report(
@@ -405,9 +407,9 @@ def write_decision_board_report(
     finally:
         primary_error = sys.exception()
         lock_error: DecisionBoardStoragePathError | None = None
-        cleanup_error: OSError | None = None
+        cleanup_error: BaseException | None = None
 
-        def record_cleanup_error(exc: OSError) -> None:
+        def record_cleanup_error(exc: BaseException) -> None:
             nonlocal cleanup_error
             if cleanup_error is None:
                 cleanup_error = exc
@@ -415,8 +417,21 @@ def write_decision_board_report(
         def attempt_cleanup(operation: Callable[[], None]) -> None:
             try:
                 operation()
-            except OSError as cleanup_exc:
+            except BaseException as cleanup_exc:
                 record_cleanup_error(cleanup_exc)
+
+        def attempt_close(fd: int) -> None:
+            try:
+                os.close(fd)
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+                try:
+                    os.close(fd)
+                except OSError as retry_exc:
+                    if retry_exc.errno != errno.EBADF:
+                        record_cleanup_error(retry_exc)
+                except BaseException as retry_exc:
+                    record_cleanup_error(retry_exc)
 
         if lock is not None:
             try:
@@ -431,35 +446,39 @@ def write_decision_board_report(
                         os.fsync(directory_fd)
                 except OSError as cleanup_exc:
                     record_cleanup_error(cleanup_exc)
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
         if temp_name is not None:
             try:
                 os.unlink(temp_name, dir_fd=directory_fd)
             except FileNotFoundError:
                 pass
-            except OSError as cleanup_exc:
+            except BaseException as cleanup_exc:
                 record_cleanup_error(cleanup_exc)
         if lock is not None:
             try:
                 attempt_cleanup(lambda: fcntl.flock(lock.fd, fcntl.LOCK_UN))
             finally:
                 try:
-                    attempt_cleanup(lambda: os.close(lock.fd))
+                    attempt_close(lock.fd)
                 finally:
                     try:
                         attempt_cleanup(
                             lambda: fcntl.flock(directory_fd, fcntl.LOCK_UN)
                         )
                     finally:
-                        attempt_cleanup(lambda: os.close(directory_fd))
+                        attempt_close(directory_fd)
         else:
-            attempt_cleanup(lambda: os.close(directory_fd))
+            attempt_close(directory_fd)
         if primary_error is None:
             if lock_error is not None:
                 raise lock_error
             if cleanup_error is not None:
-                raise DecisionBoardStoragePathError(
-                    f"writer cleanup failed: {cleanup_error}"
-                ) from cleanup_error
+                if isinstance(cleanup_error, OSError):
+                    raise DecisionBoardStoragePathError(
+                        f"writer cleanup failed: {cleanup_error}"
+                    ) from cleanup_error
+                raise cleanup_error
 
 
 __all__ = [

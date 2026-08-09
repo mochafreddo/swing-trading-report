@@ -2,7 +2,7 @@
 
 ## 범위와 불변식
 
-세 차례의 리뷰 수정은 Decision Board V0의 local writer, Supabase object/index 정합성, Web server-only index read 경계만 다뤘다. legacy report naming/upload/query, runner/CLI/scheduler, Toss/order, notification 동작은 변경하지 않았다.
+네 차례의 리뷰 수정은 Decision Board V0의 local writer, Supabase object/index 정합성, Web server-only index read 경계만 다뤘다. legacy report naming/upload/query, runner/CLI/scheduler, Toss/order, notification 동작은 변경하지 않았다.
 
 유지한 핵심 불변식은 다음과 같다.
 
@@ -41,14 +41,22 @@ Review fix 2 commit은 `8ed39fdf`이다.
 - full page가 모두 malformed이면 마지막 raw row의 exact, non-whitespace, quote-safe Decision ordering scalars만 cursor로 사용한다. exact cursor가 없는데 lookahead가 있으면 `502 SupabaseApiError`를 내고, 100-page cap에 도달해도 같은 typed observable failure를 낸다. 실제 exhaustion만 `null`이다.
 - 100-page cap은 page당 25 emitted raw rows이므로 한 latest lookup이 노출 검사하는 최대 범위를 2,500 rows로 제한한다.
 
+## Review fix 4
+
+- `_open_lock`가 target lock을 획득한 뒤 반환하기 전에 `KeyboardInterrupt`, `SystemExit` 또는 다른 `BaseException`을 만나도 target/directory lock 해제와 FD close를 끝까지 시도한다. `OSError`만 storage path error로 변환하고 process-control exception은 원형 그대로 다시 던진다.
+- writer final cleanup도 각 unlock/close 경계에서 `BaseException`을 기록한 뒤 남은 cleanup을 계속한다. body primary exception이 있으면 cleanup exception이 이를 덮지 않고, primary가 없으면 첫 cleanup exception을 결정적으로 보존한다.
+- close 전에 주입된 process-control exception 회귀에서는 close를 다시 시도한다. 실제 close 뒤 exception을 낸 wrapper의 retry `EBADF`는 이미 닫힌 것으로 처리해 FD 누수 없이 첫 exception을 유지한다.
+- target/directory contender의 `LOCK_NB` 성공으로 interrupted acquisition과 cleanup 뒤 lock이 남지 않음을 검증했다. process-control exception을 business exception으로 변환하는 경로는 추가하지 않았다.
+
 ## 검증
 
 - second-round TDD RED: Python 2 failed / 45 passed, Web 4 failed / 15 passed.
 - final-round TDD RED: Python 8 failed / 48 passed, Web 6 failed / 16 passed.
-- review-fix Python focused: 57 passed.
-- Decision Board + legacy storage: 115 passed.
+- late-standards TDD RED: 6 failed / 2 passed; 동일 선택군 GREEN: 8 passed.
+- review-fix Python focused: 65 passed.
+- Decision Board + legacy storage: 123 passed.
 - Decision Board Web index focused: 22 passed; key/detail 포함 focused 38 passed.
-- full `just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2874 passed / 8 skipped / 1297 dependency warnings.
+- full `just quality`: Ruff, 295-file format check, mypy 282 sources, pytest 2882 passed / 8 skipped / 1297 dependency warnings.
 - full `just ci-web`: install/lint/format/typecheck, 91 files / 655 tests, coverage gate, Next 16 production build all passed.
 - `git diff --check`: passed.
 

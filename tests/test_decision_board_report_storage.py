@@ -681,3 +681,211 @@ def test_writer_cleanup_preserves_primary_error_when_unlock_also_fails(
     for fd in captured.values():
         with pytest.raises(OSError):
             storage.os.fstat(fd)
+
+
+@pytest.mark.parametrize("exception_type", [KeyboardInterrupt, SystemExit])
+def test_open_lock_releases_every_resource_on_post_acquire_base_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[BaseException],
+) -> None:
+    import sab.report.decision_board as storage
+
+    basename = "report.json"
+    digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
+    lock_name = f".decision-board-{digest}.lock"
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    opened: list[int] = []
+    real_open = storage.os.open
+    real_assert_lock = storage._assert_lock_unchanged
+
+    def tracking_open(*args: Any, **kwargs: Any) -> int:
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def interrupt_after_acquire(*_args: Any) -> None:
+        raise exception_type("post-acquire interruption")
+
+    monkeypatch.setattr(storage.os, "open", tracking_open)
+    monkeypatch.setattr(storage, "_assert_lock_unchanged", interrupt_after_acquire)
+    try:
+        with pytest.raises(exception_type, match="post-acquire interruption"):
+            storage._open_lock(directory_fd, basename)
+
+        target_fd = opened[-1]
+        with pytest.raises(OSError):
+            storage.os.fstat(target_fd)
+
+        monkeypatch.setattr(storage, "_assert_lock_unchanged", real_assert_lock)
+        directory_probe = os.open(tmp_path, os.O_RDONLY)
+        target_probe = os.open(lock_name, os.O_RDWR, dir_fd=directory_fd)
+        try:
+            storage.fcntl.flock(
+                directory_probe,
+                storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB,
+            )
+            storage.fcntl.flock(
+                target_probe,
+                storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB,
+            )
+            storage.fcntl.flock(target_probe, storage.fcntl.LOCK_UN)
+            storage.fcntl.flock(directory_probe, storage.fcntl.LOCK_UN)
+        finally:
+            os.close(target_probe)
+            os.close(directory_probe)
+    finally:
+        os.close(directory_fd)
+
+
+@pytest.mark.parametrize(
+    ("faults", "expected_type"),
+    [
+        ({"target_unlock": KeyboardInterrupt}, KeyboardInterrupt),
+        ({"target_close": SystemExit}, SystemExit),
+        ({"directory_unlock": KeyboardInterrupt}, KeyboardInterrupt),
+        ({"directory_close": SystemExit}, SystemExit),
+        (
+            {
+                "target_unlock": KeyboardInterrupt,
+                "target_close": SystemExit,
+                "directory_unlock": SystemExit,
+                "directory_close": SystemExit,
+            },
+            KeyboardInterrupt,
+        ),
+    ],
+)
+def test_writer_cleanup_preserves_first_base_exception_and_attempts_all_steps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    faults: dict[str, type[BaseException]],
+    expected_type: type[BaseException],
+) -> None:
+    import sab.report.decision_board as storage
+
+    captured: dict[str, int] = {}
+    injected: set[str] = set()
+    attempted: list[str] = []
+    real_open_lock = storage._open_lock
+    real_flock = storage.fcntl.flock
+    real_close = storage.os.close
+
+    def capture_lock(directory_fd: int, basename: str) -> storage._LockHandle:
+        captured["directory"] = directory_fd
+        lock = real_open_lock(directory_fd, basename)
+        captured["target"] = lock.fd
+        return lock
+
+    def inject_once(stage: str) -> None:
+        attempted.append(stage)
+        exception_type = faults.get(stage)
+        if exception_type is not None and stage not in injected:
+            injected.add(stage)
+            raise exception_type(f"{stage} interrupted")
+
+    def interrupting_flock(fd: int, operation: int) -> None:
+        if operation == storage.fcntl.LOCK_UN:
+            if fd == captured.get("target"):
+                inject_once("target_unlock")
+            elif fd == captured.get("directory"):
+                inject_once("directory_unlock")
+        real_flock(fd, operation)
+
+    def interrupting_close(fd: int) -> None:
+        if fd == captured.get("target"):
+            inject_once("target_close")
+        elif fd == captured.get("directory"):
+            inject_once("directory_close")
+        real_close(fd)
+
+    monkeypatch.setattr(storage, "_open_lock", capture_lock)
+    monkeypatch.setattr(storage.fcntl, "flock", interrupting_flock)
+    monkeypatch.setattr(storage.os, "close", interrupting_close)
+
+    with pytest.raises(expected_type):
+        storage.write_decision_board_report(_report(), report_dir=tmp_path)
+
+    assert set(attempted) >= {
+        "target_unlock",
+        "target_close",
+        "directory_unlock",
+        "directory_close",
+    }
+    for fd in captured.values():
+        with pytest.raises(OSError):
+            storage.os.fstat(fd)
+
+    monkeypatch.setattr(storage.fcntl, "flock", real_flock)
+    monkeypatch.setattr(storage.os, "close", real_close)
+    directory_probe = os.open(tmp_path, os.O_RDONLY)
+    try:
+        real_flock(
+            directory_probe,
+            storage.fcntl.LOCK_EX | storage.fcntl.LOCK_NB,
+        )
+        real_flock(directory_probe, storage.fcntl.LOCK_UN)
+    finally:
+        os.close(directory_probe)
+
+
+def test_writer_cleanup_base_exception_never_masks_body_primary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    captured: dict[str, int] = {}
+    injected: set[str] = set()
+    attempted: list[str] = []
+    real_open_lock = storage._open_lock
+    real_flock = storage.fcntl.flock
+    real_close = storage.os.close
+
+    def capture_lock(directory_fd: int, basename: str) -> storage._LockHandle:
+        captured["directory"] = directory_fd
+        lock = real_open_lock(directory_fd, basename)
+        captured["target"] = lock.fd
+        return lock
+
+    def interrupt_once(stage: str, exception: BaseException) -> None:
+        attempted.append(stage)
+        if stage not in injected:
+            injected.add(stage)
+            raise exception
+
+    def cleanup_flock(fd: int, operation: int) -> None:
+        if operation == storage.fcntl.LOCK_UN:
+            if fd == captured.get("target"):
+                interrupt_once("target_unlock", KeyboardInterrupt("secondary"))
+            elif fd == captured.get("directory"):
+                attempted.append("directory_unlock")
+        real_flock(fd, operation)
+
+    def cleanup_close(fd: int) -> None:
+        if fd == captured.get("target"):
+            attempted.append("target_close")
+        elif fd == captured.get("directory"):
+            interrupt_once("directory_close", SystemExit("tertiary"))
+        real_close(fd)
+
+    monkeypatch.setattr(storage, "_open_lock", capture_lock)
+    monkeypatch.setattr(storage.fcntl, "flock", cleanup_flock)
+    monkeypatch.setattr(storage.os, "close", cleanup_close)
+    monkeypatch.setattr(
+        storage,
+        "_write_temp",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("primary body error")),
+    )
+
+    with pytest.raises(RuntimeError, match="primary body error"):
+        storage.write_decision_board_report(_report(), report_dir=tmp_path)
+
+    assert set(attempted) >= {
+        "target_unlock",
+        "target_close",
+        "directory_unlock",
+        "directory_close",
+    }
+    for fd in captured.values():
+        with pytest.raises(OSError):
+            storage.os.fstat(fd)
