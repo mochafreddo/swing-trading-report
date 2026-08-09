@@ -12,6 +12,7 @@
 
 - `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, 로컬 `sab sell-ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
+- Decision Board V0 shadow claim validation은 기사와 claim 사이의 exact-span entailment만 봉인하며 현재 `scan`/`sell`/`entry` action compiler에는 연결되지 않았습니다.
 
 ### 실험
 
@@ -446,6 +447,14 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - `time_stop_days` 경과 시 `REVIEW`(단, 이미 `SELL`이면 유지)
 - corporate action 의심(분할 유사 급변) 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다.
   - 기존 action이 `SELL`이면 보존하고, `HOLD` 등 `SELL`이 아닌 action만 `REVIEW`로 보정해 수동 확인을 우선합니다.
+
+### Decision Board V0 claim evidence policy (shadow)
+
+- 한 validation은 공개 claim 하나와 검증된 공개 기사 하나만 다룹니다.
+- entailment는 `SUPPORTED`, `CONTRADICTED`, `UNCLEAR` 중 하나이며 세 상태 모두 normalized article text 안의 exact nonempty `[start, end)` 근거 span이 필요합니다.
+- directional action 변경 자격은 원래 claim이 `action_changing=true`이고 validation이 deep revalidation을 통과한 `SUPPORTED`일 때만 생깁니다.
+- `CONTRADICTED`와 `UNCLEAR`는 review 자료이며 action 변경을 승인하지 않습니다. context-only `SUPPORTED`도 action 변경을 승인하지 않습니다.
+- 이 정책은 advice-only shadow 경계입니다. 현재 action compiler나 주문 생성·수정·취소 경로를 추가하지 않습니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 

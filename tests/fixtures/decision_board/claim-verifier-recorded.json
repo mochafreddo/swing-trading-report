@@ -1,0 +1,35 @@
+{
+  "article_text": "Aurora beat guidance. Aurora beat guidance. Café demand is stable.",
+  "responses": {
+    "SUPPORTED": {
+      "entailment": "SUPPORTED",
+      "supporting_span": "Aurora beat guidance.",
+      "supporting_location": {
+        "kind": "TEXT_OFFSETS",
+        "start": 0,
+        "end": 21
+      },
+      "verifier_version": "synthetic-verifier-2026-08-09"
+    },
+    "CONTRADICTED": {
+      "entailment": "CONTRADICTED",
+      "supporting_span": "Aurora beat guidance.",
+      "supporting_location": {
+        "kind": "TEXT_OFFSETS",
+        "start": 22,
+        "end": 43
+      },
+      "verifier_version": "synthetic-verifier-2026-08-09"
+    },
+    "UNCLEAR": {
+      "entailment": "UNCLEAR",
+      "supporting_span": "Café demand is stable.",
+      "supporting_location": {
+        "kind": "TEXT_OFFSETS",
+        "start": 44,
+        "end": 66
+      },
+      "verifier_version": "synthetic-verifier-2026-08-09"
+    }
+  }
+}

@@ -336,6 +336,10 @@ def test_evidence_location_end_cannot_precede_start() -> None:
         validate_claim_validation(claim)
 
     claim["supporting_location"]["end"] = 20
+    with pytest.raises(ContractError, match=r"\$\.supporting_location\.end"):
+        validate_claim_validation(claim)
+
+    claim["supporting_location"]["end"] = 21
     assert validate_claim_validation(claim) == claim
 
 
@@ -359,7 +363,7 @@ def test_source_url_mutations_fail_schema_and_consumers(source_url: str) -> None
 def test_schema_documents_evidence_offset_consumer_invariant() -> None:
     schema = _load_json(SCHEMA_PATH)
 
-    assert "end >= start" in schema["$defs"]["SupportingLocationV0"]["$comment"]
+    assert "end > start" in schema["$defs"]["SupportingLocationV0"]["$comment"]
 
 
 def test_run_journal_allows_failed_without_directional_payload() -> None:

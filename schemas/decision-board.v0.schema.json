@@ -118,7 +118,7 @@
     "SupportingLocationV0": {
       "type": "object",
       "additionalProperties": false,
-      "$comment": "Consumers must enforce end >= start; draft 2020-12 has no portable cross-property numeric comparison.",
+      "$comment": "Consumers must enforce end > start; draft 2020-12 has no portable cross-property numeric comparison.",
       "required": ["kind", "start", "end"],
       "properties": {
         "kind": {

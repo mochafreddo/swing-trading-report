@@ -212,9 +212,45 @@ result status는 frozen sum-type variant에서 init 불가능한 literal로 고�
 
 현재 이 owner에는 production provider adapter, Decision Board runner/compiler 연결,
 OpenAI/Toss/order call이 없습니다. rollout은 T3 identity gate 확인 후 provider/verifier
-adapter를 shadow runner에 주입하고, 이후 Task 5 claim validation consumer를 연결하는
-순서입니다. 롤백은 이 shadow consumer 연결만 제거하며 기존 AI Brief source policy와
-top-five behavior는 유지합니다.
+adapter를 shadow runner에 주입하고, 이후 claim validation consumer를 연결하는 순서입니다.
+롤백은 이 shadow consumer 연결만 제거하며 기존 AI Brief source policy와 top-five
+behavior는 유지합니다.
+
+### 3.4 ClaimValidationV0 exact-span boundary
+
+claim validation 전파 경로는 `ClaimRequestV0 + T4 ArticleArtifactV0 + T3
+InstrumentRefV0 -> ClaimVerifierV0 -> ClaimValidationV0 -> action eligibility gate`입니다.
+요청은 한 종목의 한 공개 claim과 `action_changing` boolean만 허용합니다. factory가 만든
+request는 생성 시점 public field baseline과 대조하며, 호출 시작에는 request, source,
+source policy, article을 각각 재검증해 독립된 copy를 보관합니다. verifier에는 claim
+ID/text, 여섯 instrument field, 로컬 article hash/text만 전달합니다. source URL,
+publisher, publication time, hash, instrument는 verifier 응답 필드가 아니며, 최종
+validation에서는 재검증된 article/source baseline으로만 채웁니다.
+
+verifier 응답은 `entailment`, `supporting_span`, `supporting_location`,
+`verifier_version` exact allowlist만 받습니다. location은 Python Unicode code-point
+index의 `TEXT_OFFSETS` 반개구간 `[start, end)`이고 `0 <= start < end <= len(text)`를
+만족해야 합니다. span은 normalized article text의 그 slice와 exact match해야 하므로
+반복 문자열도 반환 offset으로만 식별하며 byte offset, trim, case folding, Unicode
+재정규화, approximate search는 허용하지 않습니다. `SUPPORTED`, `CONTRADICTED`,
+`UNCLEAR` 모두 exact nonempty span을 요구합니다.
+
+verifier 호출에는 T4에서 시작된 같은 `Deadline` 객체를 전달하고 operation timeout은
+남은 시간과 source policy limit 중 작은 값으로 줄입니다. operational verifier timeout은
+claim 단위 `TIMED_OUT` review outcome이 되고, malformed output과 예상하지 못한 verifier
+또는 내부 오류는 `FAILED`가 됩니다. 오류를 분류하기 직전에 deadline을 다시 확인하므로
+전체 만료와 monotonic clock rollback이 각각 `DEADLINE_EXPIRED`와
+`DEADLINE_INVARIANT`로 우선합니다. 반환 뒤에도 invocation input과 article hash를 원래
+baseline에 재검증하며 alias mutation은 fail closed입니다.
+
+action eligibility는 sealed validation을 exact request/article/source baseline에 다시
+검증하고 `action_changing=true`이면서 entailment가 `SUPPORTED`일 때만 true입니다.
+`CONTRADICTED`, `UNCLEAR`, non-action-changing support는 compiler에 보고할 수 있지만
+BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. 이 owner는 compiler, runner, production model
+adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. rollout은 T3/T4 consumer
+확인 후 recorded synthetic verifier로 shadow 관측, production verifier adapter 별도 검증,
+compiler consumer 연결 순서이며, rollback은 claim consumer 연결만 제거하고 T3/T4
+producer와 shared schema를 유지합니다.
 
 ## 4. 핵심 플로우
 

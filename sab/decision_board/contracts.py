@@ -246,8 +246,8 @@ def _supporting_location(value: Any, path: str) -> None:
     _literal(location["kind"], f"{path}.kind", "TEXT_OFFSETS")
     start = _integer(location["start"], f"{path}.start", minimum=0)
     end = _integer(location["end"], f"{path}.end", minimum=1)
-    if end < start:
-        raise ContractError(f"{path}.end", "must be greater than or equal to start")
+    if end <= start:
+        raise ContractError(f"{path}.end", "must be greater than start")
 
 
 def _issues(value: Any, path: str) -> list[Any]:
