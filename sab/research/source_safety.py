@@ -24,8 +24,6 @@ from .contracts import (
 from .deadline import Deadline
 from .urls import canonicalize_public_article_url_v0
 
-_CREATE_ARTIFACT_SEAL = object()
-
 
 class ArticleSafetyError(RuntimeError):
     """A public source could not be retrieved safely."""
@@ -84,14 +82,20 @@ def create_article_artifact_v0(
 ) -> ArticleArtifactV0:
     """Create one strictly validated immutable article artifact."""
 
-    return _validated_article_artifact_v0(
-        source=source,
-        expected_source=source,
-        final_url=final_url,
-        normalized_text=normalized_text,
-        content_hash=None,
-        integrity_seal=_CREATE_ARTIFACT_SEAL,
-        policy=policy,
+    trusted_source, canonical_url, trusted_text, content_hash = (
+        _canonical_article_artifact_fields_v0(
+            source=source,
+            expected_source=source,
+            final_url=final_url,
+            normalized_text=normalized_text,
+            policy=policy,
+        )
+    )
+    return _allocate_article_artifact_v0(
+        source=trusted_source,
+        final_url=canonical_url,
+        normalized_text=trusted_text,
+        content_hash=content_hash,
     )
 
 
@@ -106,29 +110,50 @@ def validate_and_copy_article_artifact_v0(
     if type(value) is not ArticleArtifactV0:
         raise ArticleArtifactValidationError("artifact must be exact ArticleArtifactV0")
     try:
-        return _validated_article_artifact_v0(
-            source=value.source,
-            expected_source=expected_source,
-            final_url=value.final_url,
-            normalized_text=value.normalized_text,
-            content_hash=value.content_hash,
-            integrity_seal=value._integrity_seal,
-            policy=policy,
-        )
+        source = value.source
+        final_url = value.final_url
+        normalized_text = value.normalized_text
+        supplied_hash = value.content_hash
+        supplied_seal = value._integrity_seal
     except AttributeError as exc:
         raise ArticleArtifactValidationError("artifact fields are unavailable") from exc
+    trusted_source, canonical_url, trusted_text, expected_hash = (
+        _canonical_article_artifact_fields_v0(
+            source=source,
+            expected_source=expected_source,
+            final_url=final_url,
+            normalized_text=normalized_text,
+            policy=policy,
+        )
+    )
+    if type(supplied_hash) is not str or supplied_hash != expected_hash:
+        raise ArticleArtifactValidationError("artifact content hash is invalid")
+    expected_seal = _article_integrity_seal(
+        source=trusted_source,
+        final_url=canonical_url,
+        normalized_text=trusted_text,
+        content_hash=expected_hash,
+    )
+    if type(supplied_seal) is not str or supplied_seal != expected_seal:
+        raise ArticleArtifactValidationError("artifact integrity seal is invalid")
+    return _allocate_article_artifact_v0(
+        source=trusted_source,
+        final_url=canonical_url,
+        normalized_text=trusted_text,
+        content_hash=expected_hash,
+    )
 
 
-def _validated_article_artifact_v0(
+def _canonical_article_artifact_fields_v0(
     *,
     source: object,
     expected_source: object,
     final_url: object,
     normalized_text: object,
-    content_hash: object | None,
-    integrity_seal: object | None,
     policy: object,
-) -> ArticleArtifactV0:
+) -> tuple[SourceCandidateV0, str, str, str]:
+    """Return canonical fields without treating a caller value as authority."""
+
     if type(expected_source) is not SourceCandidateV0:
         raise ArticleArtifactValidationError("artifact source must be exact V0 source")
     try:
@@ -151,7 +176,7 @@ def _validated_article_artifact_v0(
     trusted_policy = copy_research_source_policy_v0(policy)
     if trusted_policy is None:
         raise ArticleArtifactValidationError("artifact policy must be exact V0 policy")
-    if not isinstance(final_url, str):
+    if type(final_url) is not str:
         raise ArticleArtifactValidationError("artifact final URL must be text")
     try:
         canonical_final_url = canonicalize_public_article_url_v0(final_url)
@@ -177,29 +202,34 @@ def _validated_article_artifact_v0(
         or len(normalized_text) > trusted_policy.max_article_text_chars
     ):
         raise ArticleArtifactValidationError("artifact text exceeds its safe bound")
-    expected_hash = (
+    content_hash = (
         f"sha256:{hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()}"
     )
-    if content_hash is not None and (
-        type(content_hash) is not str or content_hash != expected_hash
-    ):
-        raise ArticleArtifactValidationError("artifact content hash is invalid")
-    expected_seal = _article_integrity_seal(
-        source=trusted_source,
-        final_url=canonical_final_url,
-        normalized_text=normalized_text,
-        content_hash=expected_hash,
-    )
-    if integrity_seal is not _CREATE_ARTIFACT_SEAL and (
-        type(integrity_seal) is not str or integrity_seal != expected_seal
-    ):
-        raise ArticleArtifactValidationError("artifact integrity seal is invalid")
+    return trusted_source, canonical_final_url, normalized_text, content_hash
+
+
+def _allocate_article_artifact_v0(
+    *,
+    source: SourceCandidateV0,
+    final_url: str,
+    normalized_text: str,
+    content_hash: str,
+) -> ArticleArtifactV0:
     artifact = object.__new__(ArticleArtifactV0)
-    object.__setattr__(artifact, "source", trusted_source)
-    object.__setattr__(artifact, "final_url", canonical_final_url)
+    object.__setattr__(artifact, "source", source)
+    object.__setattr__(artifact, "final_url", final_url)
     object.__setattr__(artifact, "normalized_text", normalized_text)
-    object.__setattr__(artifact, "content_hash", expected_hash)
-    object.__setattr__(artifact, "_integrity_seal", expected_seal)
+    object.__setattr__(artifact, "content_hash", content_hash)
+    object.__setattr__(
+        artifact,
+        "_integrity_seal",
+        _article_integrity_seal(
+            source=source,
+            final_url=final_url,
+            normalized_text=normalized_text,
+            content_hash=content_hash,
+        ),
+    )
     return artifact
 
 

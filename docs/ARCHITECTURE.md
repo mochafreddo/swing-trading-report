@@ -180,10 +180,17 @@ DNS를 다시 검증합니다. invocation의 `ResearchSourcePolicyV0`는 preflig
 normalized text 길이를 제한하고, 성공 artifact에는 exact normalized article text와
 `sha256:` content hash만 기록합니다. verifier 반환 artifact는 exact type, source binding,
 safe final URL, normalized text, length, hash를 orchestrator에서 다시 검증해 trusted copy로
-만듭니다. artifact factory는 source/URL/text/hash 전체의 internal integrity seal도 생성해
-factory 이후의 in-place mutation을 재검증에서 거부합니다. `SUCCEEDED` item도 public
-constructor를 닫고 invocation policy로 각 artifact를 다시 검증하는 internal factory만
-생성할 수 있습니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
+만듭니다. artifact 생성 경로는 canonical source/URL/text/hash와 계산된 integrity seal을
+직접 기록하고, 재검증 경로는 저장된 seal을 예외 없이 다시 계산해 비교합니다. 다만
+same-process Python의 underscore, frozen dataclass, seal 값은 보안 경계나 권위 증표가
+아닙니다. 실제 권위는 verifier가 받기 전에 별도로 복사한 invocation-owned source
+baseline과의 전체 field 비교입니다. `SUCCEEDED` item과 최종 `COMPLETED` container의
+public constructor를 모두 닫고, private final factory가 invocation policy, 입력 종목 순서,
+artifact별 source baseline으로 nested variant의 exact type/status/issues/instrument/artifact를
+다시 검증해 deep copy한 값만 반환합니다. 따라서 `object.__new__`으로 만든 raw object는
+authoritative completed output으로 승격되지 않습니다. 향후 외부 consumer 경계를 추가할
+때도 독립 baseline 없이 type이나 private field만 신뢰해서는 안 됩니다. claim span과
+entailment 판단은 이 계층의 책임이 아닙니다.
 
 invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을
 만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을

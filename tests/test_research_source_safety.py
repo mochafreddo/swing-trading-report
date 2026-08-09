@@ -5,12 +5,14 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+import sab.research.source_safety as research_source_safety
 from sab.decision_board.instruments import InstrumentRefV0
 from sab.research.contracts import (
     ResearchSourcePolicyV0,
     SourceCandidateV0,
     SourcePurposeV0,
     create_source_candidate_v0,
+    validate_and_copy_source_candidate_v0,
 )
 from sab.research.deadline import (
     Deadline,
@@ -331,12 +333,26 @@ def test_artifact_validation_detects_in_place_source_mutation() -> None:
         normalized_text="Synthetic trusted text",
         policy=policy,
     )
+    expected_source = validate_and_copy_source_candidate_v0(
+        artifact.source,
+        expected_instrument=artifact.source.instrument,
+    )
     object.__setattr__(artifact.source, "title", private_sentinel)
+    object.__setattr__(
+        artifact,
+        "_integrity_seal",
+        research_source_safety._article_integrity_seal(
+            source=artifact.source,
+            final_url=artifact.final_url,
+            normalized_text=artifact.normalized_text,
+            content_hash=artifact.content_hash,
+        ),
+    )
 
     with pytest.raises(ArticleArtifactValidationError) as exc_info:
         validate_and_copy_article_artifact_v0(
             artifact,
-            expected_source=artifact.source,
+            expected_source=expected_source,
             policy=policy,
         )
 
@@ -359,6 +375,34 @@ def test_artifact_validation_rejects_missing_integrity_seal() -> None:
             expected_source=artifact.source,
             policy=policy,
         )
+
+
+def test_artifact_validation_rejects_legacy_creation_sentinel_injection() -> None:
+    policy = ResearchSourcePolicyV0()
+    artifact = create_article_artifact_v0(
+        source=_source(),
+        final_url="https://evidence.example/start",
+        normalized_text="Synthetic trusted text",
+        policy=policy,
+    )
+    expected_source = validate_and_copy_source_candidate_v0(
+        artifact.source,
+        expected_instrument=artifact.source.instrument,
+    )
+    legacy_sentinel = getattr(
+        research_source_safety,
+        "_CREATE_ARTIFACT_SEAL",
+        object(),
+    )
+    object.__setattr__(artifact, "_integrity_seal", legacy_sentinel)
+
+    with pytest.raises(ArticleArtifactValidationError, match="integrity seal"):
+        validate_and_copy_article_artifact_v0(
+            artifact,
+            expected_source=expected_source,
+            policy=policy,
+        )
+    assert not hasattr(research_source_safety, "_CREATE_ARTIFACT_SEAL")
 
 
 @pytest.mark.parametrize("failure_site", ["dns", "fetch"])

@@ -192,6 +192,7 @@ def _create_research_item_succeeded_v0(
     *,
     instrument: InstrumentRefV0,
     articles: tuple[ArticleArtifactV0, ...],
+    expected_sources: tuple[SourceCandidateV0, ...],
     policy: ResearchSourcePolicyV0,
     issues: tuple[ResearchIssueV0, ...] = (),
 ) -> ResearchItemSucceededV0:
@@ -201,13 +202,15 @@ def _create_research_item_succeeded_v0(
     trusted_policy = _copy_required_policy(policy)
     if type(articles) is not tuple or not articles:
         raise TypeError("successful research artifacts must be a non-empty exact tuple")
+    if type(expected_sources) is not tuple or len(expected_sources) != len(articles):
+        raise TypeError("successful research artifact baselines are invalid")
     trusted_articles: list[ArticleArtifactV0] = []
-    for article in articles:
+    for article, expected_source in zip(articles, expected_sources, strict=True):
         if type(article) is not ArticleArtifactV0:
             raise TypeError("successful research artifact is invalid")
         try:
             trusted_source = validate_and_copy_source_candidate_v0(
-                article.source,
+                expected_source,
                 expected_instrument=trusted_instrument,
             )
             trusted_articles.append(
@@ -226,7 +229,7 @@ def _create_research_item_succeeded_v0(
             raise TypeError("successful research artifact is invalid") from None
     try:
         _require_issues(issues, allowed=_SUCCESS_ISSUE_CODES)
-    except TypeError, ValueError:
+    except AttributeError, TypeError, ValueError:
         raise TypeError("successful research issues are invalid") from None
     trusted_issues = tuple(_issue(issue.code) for issue in issues)
     result = object.__new__(ResearchItemSucceededV0)
@@ -333,16 +336,138 @@ _ITEM_RESULT_TYPES = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ResearchCompletedV0:
     items: tuple[ResearchItemResultV0, ...]
     status: Literal["COMPLETED"] = field(default="COMPLETED", init=False)
 
-    def __post_init__(self) -> None:
-        if not self.items or not all(
-            type(item) in _ITEM_RESULT_TYPES for item in self.items
-        ):
-            raise ValueError("completed research requires exact typed item results")
+    def __new__(cls) -> ResearchCompletedV0:
+        del cls
+        raise TypeError("completed research results require the trusted factory")
+
+
+def _create_research_completed_v0(
+    *,
+    items: tuple[ResearchItemResultV0, ...],
+    instruments: tuple[InstrumentRefV0, ...],
+    expected_source_baselines: tuple[tuple[SourceCandidateV0, ...], ...],
+    policy: ResearchSourcePolicyV0,
+) -> ResearchCompletedV0:
+    """Deep-validate and copy one invocation-owned completed result."""
+
+    trusted_policy = _copy_required_policy(policy)
+    if type(instruments) is not tuple or not instruments:
+        raise TypeError("completed research instrument order is invalid")
+    try:
+        trusted_instruments = tuple(
+            _require_exact_instrument(instrument) for instrument in instruments
+        )
+    except AttributeError, TypeError, ValueError:
+        raise TypeError("completed research instrument order is invalid") from None
+    if len(set(trusted_instruments)) != len(trusted_instruments):
+        raise ValueError("completed research instrument order is invalid")
+    if (
+        type(items) is not tuple
+        or type(expected_source_baselines) is not tuple
+        or len(items) != len(trusted_instruments)
+        or len(expected_source_baselines) != len(trusted_instruments)
+    ):
+        raise TypeError("completed research item shape is invalid")
+
+    trusted_items: list[ResearchItemResultV0] = []
+    for item, instrument, source_baselines in zip(
+        items,
+        trusted_instruments,
+        expected_source_baselines,
+        strict=True,
+    ):
+        if type(source_baselines) is not tuple or type(item) not in _ITEM_RESULT_TYPES:
+            raise TypeError("completed research item is invalid")
+        try:
+            item_instrument = _require_exact_instrument(item.instrument)
+            status = item.status
+        except AttributeError, TypeError, ValueError:
+            raise TypeError("completed research item is invalid") from None
+        if item_instrument != instrument:
+            raise ValueError("completed research item instrument is invalid")
+        try:
+            if type(item) is ResearchItemSucceededV0:
+                if status != "SUCCEEDED":
+                    raise TypeError("completed research item status is invalid")
+                trusted_items.append(
+                    _create_research_item_succeeded_v0(
+                        instrument=instrument,
+                        articles=item.articles,
+                        expected_sources=source_baselines,
+                        issues=item.issues,
+                        policy=trusted_policy,
+                    )
+                )
+            elif type(item) is ResearchItemNoUsableSourceV0:
+                _require_empty_source_baselines(source_baselines)
+                if status != "NO_USABLE_SOURCE":
+                    raise TypeError("completed research item status is invalid")
+                trusted_items.append(
+                    ResearchItemNoUsableSourceV0(
+                        instrument=instrument,
+                        issues=_copy_issues(
+                            item.issues,
+                            allowed=_NO_USABLE_SOURCE_ISSUE_CODES,
+                            nonempty=True,
+                        ),
+                    )
+                )
+            elif type(item) is ResearchItemTimedOutV0:
+                _require_empty_source_baselines(source_baselines)
+                if status != "TIMED_OUT":
+                    raise TypeError("completed research item status is invalid")
+                trusted_items.append(
+                    ResearchItemTimedOutV0(
+                        instrument=instrument,
+                        issues=_copy_issues(
+                            item.issues,
+                            allowed=_TIMED_OUT_ISSUE_CODES,
+                            nonempty=True,
+                        ),
+                    )
+                )
+            elif type(item) is ResearchItemMalformedV0:
+                _require_empty_source_baselines(source_baselines)
+                if status != "MALFORMED_PROVIDER_RESULT":
+                    raise TypeError("completed research item status is invalid")
+                trusted_items.append(
+                    ResearchItemMalformedV0(
+                        instrument=instrument,
+                        issues=_copy_issues(
+                            item.issues,
+                            allowed=frozenset(
+                                {ResearchIssueCodeV0.PROVIDER_RESULT_MALFORMED}
+                            ),
+                            nonempty=True,
+                        ),
+                    )
+                )
+            else:
+                _require_empty_source_baselines(source_baselines)
+                if status != "PROVIDER_FAILED":
+                    raise TypeError("completed research item status is invalid")
+                trusted_items.append(
+                    ResearchItemProviderFailedV0(
+                        instrument=instrument,
+                        issues=_copy_issues(
+                            item.issues,
+                            allowed=frozenset({ResearchIssueCodeV0.PROVIDER_FAILED}),
+                            nonempty=True,
+                        ),
+                    )
+                )
+        except ArticleArtifactValidationError, AttributeError, TypeError, ValueError:
+            raise TypeError("completed research item is invalid") from None
+
+    result = object.__new__(ResearchCompletedV0)
+    object.__setattr__(result, "items", tuple(trusted_items))
+    object.__setattr__(result, "status", "COMPLETED")
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,13 +543,19 @@ class EvidenceResearcherV0:
             return await self._verify_all(
                 search_outcomes,
                 deadline,
+                instruments=trusted_input.instruments,
                 policy=trusted_input.source_policy,
             )
         except DeadlineExpiredError:
-            return ResearchCompletedV0(
+            return _create_research_completed_v0(
                 items=tuple(
                     _timed_out(instrument) for instrument in trusted_input.instruments
-                )
+                ),
+                instruments=trusted_input.instruments,
+                expected_source_baselines=tuple(
+                    () for _instrument in trusted_input.instruments
+                ),
+                policy=trusted_input.source_policy,
             )
         except DeadlineInvariantError:
             return _deadline_invariant_failure()
@@ -533,9 +664,13 @@ class EvidenceResearcherV0:
         search_outcomes: tuple[_SearchOutcome, ...],
         deadline: Deadline,
         *,
+        instruments: tuple[InstrumentRefV0, ...],
         policy: ResearchSourcePolicyV0,
     ) -> ResearchCompletedV0:
         articles: list[list[ArticleArtifactV0]] = [[] for _outcome in search_outcomes]
+        article_source_baselines: list[list[SourceCandidateV0]] = [
+            [] for _outcome in search_outcomes
+        ]
         issues: list[list[ResearchIssueV0]] = [[] for _outcome in search_outcomes]
         scheduled: dict[str, list[tuple[int, SourceCandidateV0]]] = {}
         successful = [
@@ -605,14 +740,19 @@ class EvidenceResearcherV0:
             except DeadlineInvariantError:
                 raise
             for item_index, attributed_source in attributions:
+                trusted_attributed_source = validate_and_copy_source_candidate_v0(
+                    attributed_source,
+                    expected_instrument=instruments[item_index],
+                )
                 articles[item_index].append(
                     create_article_artifact_v0(
-                        source=attributed_source,
+                        source=trusted_attributed_source,
                         final_url=artifact.final_url,
                         normalized_text=artifact.normalized_text,
                         policy=policy,
                     )
                 )
+                article_source_baselines[item_index].append(trusted_attributed_source)
 
         results: list[ResearchItemResultV0] = []
         for index, search_outcome in enumerate(search_outcomes):
@@ -624,6 +764,7 @@ class EvidenceResearcherV0:
                     _create_research_item_succeeded_v0(
                         instrument=search_outcome.instrument,
                         articles=tuple(articles[index]),
+                        expected_sources=tuple(article_source_baselines[index]),
                         issues=tuple(issues[index]),
                         policy=policy,
                     )
@@ -643,7 +784,14 @@ class EvidenceResearcherV0:
                         issues=item_issues,
                     )
                 )
-        return ResearchCompletedV0(items=tuple(results))
+        return _create_research_completed_v0(
+            items=tuple(results),
+            instruments=instruments,
+            expected_source_baselines=tuple(
+                tuple(source_baselines) for source_baselines in article_source_baselines
+            ),
+            policy=policy,
+        )
 
     async def _verify_one(
         self,
@@ -755,6 +903,24 @@ def _require_issues(
         raise TypeError("research result requires exact allowed typed issues")
     if nonempty and not value:
         raise ValueError("research failure variants require at least one issue")
+
+
+def _copy_issues(
+    value: tuple[ResearchIssueV0, ...],
+    *,
+    allowed: frozenset[ResearchIssueCodeV0],
+    nonempty: bool = False,
+) -> tuple[ResearchIssueV0, ...]:
+    try:
+        _require_issues(value, allowed=allowed, nonempty=nonempty)
+        return tuple(_issue(issue.code) for issue in value)
+    except AttributeError, TypeError, ValueError:
+        raise TypeError("research result issues are invalid") from None
+
+
+def _require_empty_source_baselines(value: object) -> None:
+    if type(value) is not tuple or value:
+        raise TypeError("non-success research item cannot carry source baselines")
 
 
 __all__ = [

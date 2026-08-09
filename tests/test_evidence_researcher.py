@@ -6,6 +6,7 @@ import json
 import pytest
 import sab.research as research_package
 import sab.research.orchestrator as research_orchestrator
+import sab.research.source_safety as research_source_safety
 from sab.decision_board.instruments import InstrumentRefV0
 from sab.research.contracts import (
     ResearchInputV0,
@@ -13,6 +14,7 @@ from sab.research.contracts import (
     ResearchSourcePolicyV0,
     SourceCandidateV0,
     create_source_candidate_v0,
+    validate_and_copy_source_candidate_v0,
 )
 from sab.research.deadline import Deadline
 from sab.research.orchestrator import (
@@ -333,6 +335,7 @@ def test_result_variants_cannot_carry_arbitrary_or_contradictory_status() -> Non
         research_orchestrator._create_research_item_succeeded_v0(
             instrument=instrument,
             articles=(),
+            expected_sources=(),
             policy=ResearchSourcePolicyV0(),
         )
 
@@ -848,6 +851,7 @@ def test_success_result_rejects_article_bound_to_another_instrument(
         research_orchestrator._create_research_item_succeeded_v0(
             instrument=wrong_identity,
             articles=item.articles,
+            expected_sources=(item.articles[0].source,),
             policy=research_input.source_policy,
         )
 
@@ -981,7 +985,14 @@ def test_success_result_public_constructor_is_closed() -> None:
 
 @pytest.mark.parametrize(
     "artifact_case",
-    ["file_url", "bad_hash", "private_text", "source", "subclass"],
+    [
+        "file_url",
+        "bad_hash",
+        "private_text",
+        "source_with_legacy_sentinel",
+        "source_with_recomputed_seal",
+        "subclass",
+    ],
 )
 def test_success_factory_rejects_mutated_or_subclass_artifact(
     artifact_case: str,
@@ -1003,6 +1014,10 @@ def test_success_factory_rejects_mutated_or_subclass_artifact(
     item = result.items[0]
     assert type(item) is ResearchItemSucceededV0
     artifact = item.articles[0]
+    expected_source = validate_and_copy_source_candidate_v0(
+        artifact.source,
+        expected_instrument=item.instrument,
+    )
 
     if artifact_case == "file_url":
         object.__setattr__(artifact, "final_url", "file:///tmp/private")
@@ -1010,8 +1025,25 @@ def test_success_factory_rejects_mutated_or_subclass_artifact(
         object.__setattr__(artifact, "content_hash", f"sha256:{'0' * 64}")
     elif artifact_case == "private_text":
         object.__setattr__(artifact, "normalized_text", private_sentinel)
-    elif artifact_case == "source":
+    elif artifact_case == "source_with_legacy_sentinel":
         object.__setattr__(artifact.source, "title", private_sentinel)
+        object.__setattr__(
+            artifact,
+            "_integrity_seal",
+            getattr(research_source_safety, "_CREATE_ARTIFACT_SEAL", object()),
+        )
+    elif artifact_case == "source_with_recomputed_seal":
+        object.__setattr__(artifact.source, "title", private_sentinel)
+        object.__setattr__(
+            artifact,
+            "_integrity_seal",
+            research_source_safety._article_integrity_seal(
+                source=artifact.source,
+                final_url=artifact.final_url,
+                normalized_text=artifact.normalized_text,
+                content_hash=artifact.content_hash,
+            ),
+        )
     else:
 
         class ArtifactWithPrivateState(ArticleArtifactV0):
@@ -1032,6 +1064,7 @@ def test_success_factory_rejects_mutated_or_subclass_artifact(
         factory(
             instrument=item.instrument,
             articles=(artifact,),
+            expected_sources=(expected_source,),
             issues=(),
             policy=policy,
         )
@@ -1057,6 +1090,7 @@ def test_success_factory_copies_exact_artifact_tuple_and_rejects_tuple_subclass(
     item = result.items[0]
     assert type(item) is ResearchItemSucceededV0
     supplied = item.articles
+    expected_sources = tuple(article.source for article in supplied)
     factory = getattr(
         research_orchestrator,
         "_create_research_item_succeeded_v0",
@@ -1067,6 +1101,7 @@ def test_success_factory_copies_exact_artifact_tuple_and_rejects_tuple_subclass(
     copied = factory(
         instrument=item.instrument,
         articles=supplied,
+        expected_sources=expected_sources,
         issues=(),
         policy=policy,
     )
@@ -1082,8 +1117,225 @@ def test_success_factory_copies_exact_artifact_tuple_and_rejects_tuple_subclass(
         factory(
             instrument=item.instrument,
             articles=ArtifactTuple(supplied),
+            expected_sources=expected_sources,
             issues=(),
             policy=policy,
+        )
+
+
+def test_success_factory_rejects_forged_issue_with_static_error() -> None:
+    research_input = _research_input(1)
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    forged_issue = object.__new__(ResearchIssueV0)
+
+    with pytest.raises(TypeError, match="issues"):
+        research_orchestrator._create_research_item_succeeded_v0(
+            instrument=item.instrument,
+            articles=item.articles,
+            expected_sources=(item.articles[0].source,),
+            issues=(forged_issue,),
+            policy=research_input.source_policy,
+        )
+
+
+def test_completed_result_public_constructor_is_closed() -> None:
+    research_input = _research_input(1)
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    forged_item = object.__new__(ResearchItemSucceededV0)
+
+    with pytest.raises(TypeError):
+        ResearchCompletedV0(items=(forged_item,))  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        ResearchCompletedV0()
+    assert not hasattr(research_package, "create_research_completed_v0")
+    assert not hasattr(research_orchestrator, "create_research_completed_v0")
+
+
+def test_completed_factory_deep_copies_every_item_variant() -> None:
+    research_input = _research_input(5)
+    success_run = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(_research_input(1))
+    )
+    assert type(success_run) is ResearchCompletedV0
+    success_item = success_run.items[0]
+    assert type(success_item) is ResearchItemSucceededV0
+    items = (
+        success_item,
+        ResearchItemNoUsableSourceV0(
+            instrument=research_input.instruments[1],
+            issues=(research_orchestrator._issue("NO_SOURCE_CANDIDATES"),),
+        ),
+        ResearchItemTimedOutV0(
+            instrument=research_input.instruments[2],
+            issues=(research_orchestrator._issue("PROVIDER_TIMEOUT"),),
+        ),
+        ResearchItemMalformedV0(
+            instrument=research_input.instruments[3],
+            issues=(research_orchestrator._issue("PROVIDER_RESULT_MALFORMED"),),
+        ),
+        ResearchItemProviderFailedV0(
+            instrument=research_input.instruments[4],
+            issues=(research_orchestrator._issue("PROVIDER_FAILED"),),
+        ),
+    )
+    source_baselines = ((success_item.articles[0].source,), (), (), (), ())
+    factory = getattr(research_orchestrator, "_create_research_completed_v0", None)
+    assert callable(factory)
+
+    copied = factory(
+        items=items,
+        instruments=research_input.instruments,
+        expected_source_baselines=source_baselines,
+        policy=research_input.source_policy,
+    )
+
+    assert type(copied) is ResearchCompletedV0
+    assert [type(item) for item in copied.items] == [type(item) for item in items]
+    assert copied.items is not items
+    assert all(
+        copied_item is not item
+        for copied_item, item in zip(copied.items, items, strict=True)
+    )
+    copied_success = copied.items[0]
+    assert type(copied_success) is ResearchItemSucceededV0
+    assert copied_success.articles[0] is not success_item.articles[0]
+    non_success_types = (
+        ResearchItemNoUsableSourceV0,
+        ResearchItemTimedOutV0,
+        ResearchItemMalformedV0,
+        ResearchItemProviderFailedV0,
+    )
+    for copied_item, item in zip(copied.items[1:], items[1:], strict=True):
+        assert isinstance(copied_item, non_success_types)
+        assert isinstance(item, non_success_types)
+        assert copied_item.issues is not item.issues
+        assert copied_item.issues[0] is not item.issues[0]
+
+
+@pytest.mark.parametrize(
+    "forged_case",
+    ["empty_articles", "bad_status", "bad_issues", "mutated_resealed_artifact"],
+)
+def test_completed_factory_rejects_forged_nested_success(forged_case: str) -> None:
+    private_sentinel = "PRIVATE-COMPLETED-SENTINEL"
+    research_input = _research_input(1)
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider({"SYN0.NAS": _payload(_instrument(0))}),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    item = result.items[0]
+    assert type(item) is ResearchItemSucceededV0
+    expected_source = validate_and_copy_source_candidate_v0(
+        item.articles[0].source,
+        expected_instrument=item.instrument,
+    )
+    articles = item.articles
+    issues: object = item.issues
+    status: object = item.status
+    if forged_case == "empty_articles":
+        articles = ()
+    elif forged_case == "bad_status":
+        status = private_sentinel
+    elif forged_case == "bad_issues":
+        issues = (object(),)
+    else:
+        artifact = create_article_artifact_v0(
+            source=expected_source,
+            final_url=item.articles[0].final_url,
+            normalized_text=item.articles[0].normalized_text,
+            policy=research_input.source_policy,
+        )
+        object.__setattr__(artifact.source, "title", private_sentinel)
+        object.__setattr__(
+            artifact,
+            "_integrity_seal",
+            research_source_safety._article_integrity_seal(
+                source=artifact.source,
+                final_url=artifact.final_url,
+                normalized_text=artifact.normalized_text,
+                content_hash=artifact.content_hash,
+            ),
+        )
+        articles = (artifact,)
+    forged = object.__new__(ResearchItemSucceededV0)
+    object.__setattr__(forged, "instrument", item.instrument)
+    object.__setattr__(forged, "articles", articles)
+    object.__setattr__(forged, "issues", issues)
+    object.__setattr__(forged, "status", status)
+    factory = getattr(research_orchestrator, "_create_research_completed_v0", None)
+    assert callable(factory)
+
+    with pytest.raises(
+        (TypeError, ValueError), match=r"completed|artifact"
+    ) as exc_info:
+        factory(
+            items=(forged,),
+            instruments=research_input.instruments,
+            expected_source_baselines=((expected_source,),),
+            policy=research_input.source_policy,
+        )
+
+    assert private_sentinel not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("shape_case", ["missing", "duplicate", "wrong_order"])
+def test_completed_factory_rejects_item_shape_or_instrument_mismatch(
+    shape_case: str,
+) -> None:
+    research_input = _research_input(2)
+    result = asyncio.run(
+        EvidenceResearcherV0(
+            _ConcurrentProvider(
+                {
+                    instrument.canonical_ticker: _payload(instrument)
+                    for instrument in research_input.instruments
+                }
+            ),
+            _RecordingVerifier(),
+        ).research(research_input)
+    )
+    assert type(result) is ResearchCompletedV0
+    source_baselines = tuple(
+        (item.articles[0].source,)
+        for item in result.items
+        if type(item) is ResearchItemSucceededV0
+    )
+    assert len(source_baselines) == 2
+    if shape_case == "missing":
+        items = result.items[:1]
+    elif shape_case == "duplicate":
+        items = (result.items[0], result.items[0])
+    else:
+        items = tuple(reversed(result.items))
+    factory = getattr(research_orchestrator, "_create_research_completed_v0", None)
+    assert callable(factory)
+
+    with pytest.raises((TypeError, ValueError), match="completed"):
+        factory(
+            items=items,
+            instruments=research_input.instruments,
+            expected_source_baselines=source_baselines,
+            policy=research_input.source_policy,
         )
 
 
