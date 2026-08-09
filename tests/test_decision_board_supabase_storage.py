@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 from sab.report.decision_board import (
     DecisionBoardIdempotencyConflictError,
     build_decision_board_storage_key,
@@ -83,6 +84,33 @@ class _Session:
         self.delete_calls.append({"url": url, "headers": headers, "timeout": timeout})
         assert self._deletes, f"unexpected DELETE {url}"
         return self._deletes.pop(0)
+
+
+class _FailingGetSession(_Session):
+    def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> _Response:
+        self.get_calls.append({"url": url, "headers": headers, "timeout": timeout})
+        raise requests.Timeout("index recheck timed out")
+
+
+class _CompetingIndexAfterAbsentSession(_Session):
+    competing_index_inserted = False
+
+    def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> _Response:
+        response = super().get(url, headers=headers, timeout=timeout)
+        self.competing_index_inserted = True
+        return response
 
 
 def _report(name: str = "published-entry.json") -> dict[str, Any]:
@@ -215,7 +243,7 @@ def test_mismatched_existing_object_is_typed_conflict_and_never_indexes(
 
 
 @pytest.mark.parametrize("pre_existing", [False, True])
-def test_index_failure_rolls_back_only_a_newly_uploaded_object(
+def test_index_failure_never_deletes_an_object_without_atomic_coordination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     pre_existing: bool,
@@ -233,9 +261,10 @@ def test_index_failure_rolls_back_only_a_newly_uploaded_object(
             *[_Response(500, text="index down") for _ in range(3)],
         ],
         gets=(
-            [_Response(200, content=local_path.read_bytes())] if pre_existing else []
+            [_Response(200, content=local_path.read_bytes())]
+            if pre_existing
+            else [_Response(200, text="[]")]
         ),
-        deletes=[] if pre_existing else [_Response(204)],
     )
 
     with pytest.raises(SupabaseReportIndexError, match="index down") as exc:
@@ -247,11 +276,12 @@ def test_index_failure_rolls_back_only_a_newly_uploaded_object(
         )
 
     assert exc.value.storage_key == key
-    assert not exc.value.cleanup_failed
-    assert len(session.delete_calls) == (0 if pre_existing else 1)
+    assert exc.value.cleanup_failed is (not pre_existing)
+    assert exc.value.rollback_skipped is (not pre_existing)
+    assert session.delete_calls == []
 
 
-def test_new_object_index_failure_surfaces_rollback_cleanup_failure(
+def test_new_object_index_failure_does_not_attempt_unsafe_cleanup_delete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import sab.report.supabase_storage as storage
@@ -260,10 +290,13 @@ def test_new_object_index_failure_surfaces_rollback_cleanup_failure(
     local_path, key = _local_report(tmp_path, _report())
     session = _Session(
         posts=[_Response(201), *[_Response(500, text="index down") for _ in range(3)]],
-        deletes=[_Response(500, text="delete down")],
+        gets=[_Response(200, text="[]")],
+        deletes=[_Response(500, text="delete must not be attempted")],
     )
 
-    with pytest.raises(SupabaseReportIndexError, match="rollback delete failed") as exc:
+    with pytest.raises(
+        SupabaseReportIndexError, match="rollback delete skipped"
+    ) as exc:
         upload_decision_board_report(
             local_path=local_path,
             storage_key=key,
@@ -272,6 +305,129 @@ def test_new_object_index_failure_surfaces_rollback_cleanup_failure(
         )
 
     assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
+
+
+def test_absent_recheck_then_competing_index_insert_never_deletes_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.supabase_storage as storage
+
+    monkeypatch.setattr(storage, "_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS", 0)
+    local_path, key = _local_report(tmp_path, _report())
+    session = _CompetingIndexAfterAbsentSession(
+        posts=[_Response(201), *[_Response(500, text="index down") for _ in range(3)]],
+        gets=[_Response(200, text="[]")],
+        deletes=[_Response(204)],
+    )
+
+    with pytest.raises(
+        SupabaseReportIndexError, match="rollback delete skipped"
+    ) as exc:
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert session.competing_index_inserted
+    assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
+
+
+def test_new_object_index_failure_converges_when_competing_writer_repairs_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.supabase_storage as storage
+
+    monkeypatch.setattr(storage, "_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS", 0)
+    report = _report()
+    local_path, key = _local_report(tmp_path, report)
+    row = _index_row(report, key)
+    session = _Session(
+        posts=[_Response(201), *[_Response(500, text="index down") for _ in range(3)]],
+        gets=[_authoritative_response(row)],
+    )
+
+    assert (
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+        == key
+    )
+    assert session.delete_calls == []
+
+
+def test_new_object_index_failure_preserves_object_on_authoritative_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.supabase_storage as storage
+
+    monkeypatch.setattr(storage, "_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS", 0)
+    report = _report()
+    local_path, key = _local_report(tmp_path, report)
+    wrong = _index_row(report, key)
+    wrong["run_id"] = "competing-run"
+    session = _Session(
+        posts=[_Response(201), *[_Response(500, text="index down") for _ in range(3)]],
+        gets=[_authoritative_response(wrong)],
+    )
+
+    with pytest.raises(
+        SupabaseReportIndexError, match="rollback delete skipped"
+    ) as exc:
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
+
+
+@pytest.mark.parametrize("failure_kind", ["http", "request", "invalid-json"])
+def test_new_object_index_failure_preserves_object_when_recheck_is_uncertain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    import sab.report.supabase_storage as storage
+
+    monkeypatch.setattr(storage, "_REPORT_INDEX_UPSERT_RETRY_BASE_SECONDS", 0)
+    local_path, key = _local_report(tmp_path, _report())
+    posts = [_Response(201), *[_Response(500, text="index down") for _ in range(3)]]
+    if failure_kind == "request":
+        session: _Session = _FailingGetSession(posts=posts)
+    else:
+        recheck = (
+            _Response(503, text="index unavailable")
+            if failure_kind == "http"
+            else _Response(200, text="not-json")
+        )
+        session = _Session(posts=posts, gets=[recheck])
+
+    with pytest.raises(
+        SupabaseReportIndexError, match="rollback delete skipped"
+    ) as exc:
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
+
+    assert exc.value.cleanup_failed
+    assert exc.value.rollback_skipped
+    assert session.delete_calls == []
 
 
 def test_authoritative_index_row_mismatch_fails_closed_without_overwrite(

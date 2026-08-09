@@ -252,6 +252,18 @@ describe("reports-data cache", () => {
     );
   });
 
+  it("rejects whitespace-wrapped Decision Board detail keys before network access", async () => {
+    const key =
+      "2026/08/2026-08-06.decision-board.entry.run-1." +
+      `${"a".repeat(64)}.json`;
+
+    await expect(readReportDetail(` ${key} `)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(fetchReportIndexEntry).not.toHaveBeenCalled();
+    expect(downloadStorageJson).not.toHaveBeenCalled();
+  });
+
   it("bypasses detail cache when refresh=true", async () => {
     vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({

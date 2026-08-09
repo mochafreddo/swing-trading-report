@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import multiprocessing
 import os
@@ -137,6 +138,57 @@ def test_same_identity_equal_bytes_is_idempotent(tmp_path: Path) -> None:
     assert second == first
     assert first.read_bytes().startswith(b'{"created_at"')
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_writer_uses_one_alias_free_snapshot_for_key_and_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    report = _report()
+    expected = copy.deepcopy(report)
+    real_build_key = storage.build_decision_board_storage_key
+
+    def mutate_caller_after_key(value: object) -> str:
+        key = real_build_key(value)
+        report["run_id"] = "caller-mutated-after-key"
+        report["metadata"] = {"compiler_version": "caller-mutated"}
+        return key
+
+    monkeypatch.setattr(
+        storage, "build_decision_board_storage_key", mutate_caller_after_key
+    )
+
+    path = storage.write_decision_board_report(report, report_dir=tmp_path)
+
+    assert json.loads(path.read_bytes()) == expected
+    assert expected["run_id"] in path.name
+    assert "caller-mutated-after-key" not in path.name
+
+
+@pytest.mark.parametrize("invalid_kind", ["subclass", "cycle", "nonfinite"])
+def test_writer_rejects_non_strict_caller_graph_before_filesystem_access(
+    tmp_path: Path, invalid_kind: str
+) -> None:
+    report = _report()
+    invalid: object
+    if invalid_kind == "subclass":
+
+        class ReportSubclass(dict[str, Any]):
+            pass
+
+        invalid = ReportSubclass(report)
+    elif invalid_kind == "cycle":
+        report["metadata"] = report
+        invalid = report
+    else:
+        report["metadata"] = {"score": float("nan")}
+        invalid = report
+
+    with pytest.raises(ValueError):
+        write_decision_board_report(invalid, report_dir=tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_same_identity_different_bytes_conflicts_and_preserves_winner(
@@ -341,3 +393,93 @@ def test_report_directory_symlink_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(DecisionBoardStoragePathError):
         write_decision_board_report(_report(), report_dir=linked)
     assert os.listdir(real) == []
+
+
+@pytest.mark.parametrize("failure_stage", ["fstat", "flock"])
+def test_open_lock_closes_fd_when_post_open_validation_or_acquisition_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    import sab.report.decision_board as storage
+
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    opened: list[int] = []
+    closed: list[int] = []
+    real_open = storage.os.open
+    real_close = storage.os.close
+    real_fstat = storage.os.fstat
+    real_flock = storage.fcntl.flock
+
+    def tracking_open(*args: Any, **kwargs: Any) -> int:
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def tracking_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    def maybe_failing_fstat(fd: int) -> os.stat_result:
+        if failure_stage == "fstat" and opened and fd == opened[-1]:
+            raise OSError("fstat failed")
+        return real_fstat(fd)
+
+    def maybe_failing_flock(fd: int, operation: int) -> None:
+        if failure_stage == "flock" and operation == storage.fcntl.LOCK_EX:
+            raise OSError("flock failed")
+        real_flock(fd, operation)
+
+    monkeypatch.setattr(storage.os, "open", tracking_open)
+    monkeypatch.setattr(storage.os, "close", tracking_close)
+    monkeypatch.setattr(storage.os, "fstat", maybe_failing_fstat)
+    monkeypatch.setattr(storage.fcntl, "flock", maybe_failing_flock)
+    try:
+        with pytest.raises(DecisionBoardStoragePathError):
+            storage._open_lock(directory_fd, "report.json")
+
+        lock_fd = opened[-1]
+        assert lock_fd in closed
+        with pytest.raises(OSError):
+            real_fstat(lock_fd)
+    finally:
+        real_close(directory_fd)
+
+
+def test_open_lock_rejects_persistent_path_replacement_after_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sab.report.decision_board as storage
+
+    basename = "report.json"
+    digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
+    lock_name = f".decision-board-{digest}.lock"
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    acquired_fd: int | None = None
+    real_flock = storage.fcntl.flock
+
+    def replacing_flock(fd: int, operation: int) -> None:
+        nonlocal acquired_fd
+        real_flock(fd, operation)
+        if operation != storage.fcntl.LOCK_EX:
+            return
+        acquired_fd = fd
+        storage.os.unlink(lock_name, dir_fd=directory_fd)
+        replacement_fd = storage.os.open(
+            lock_name,
+            storage.os.O_WRONLY | storage.os.O_CREAT | storage.os.O_EXCL,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        storage.os.close(replacement_fd)
+
+    monkeypatch.setattr(storage.fcntl, "flock", replacing_flock)
+    try:
+        with pytest.raises(DecisionBoardStoragePathError, match="changed"):
+            storage._open_lock(directory_fd, basename)
+
+        assert acquired_fd is not None
+        with pytest.raises(OSError):
+            storage.os.fstat(acquired_fd)
+    finally:
+        os.close(directory_fd)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -173,12 +174,48 @@ def _open_lock(directory_fd: int, basename: str) -> int:
         raise DecisionBoardStoragePathError(
             "target lock could not be opened safely"
         ) from exc
-    info = os.fstat(lock_fd)
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+    acquired = False
+    try:
+        info = os.fstat(lock_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise DecisionBoardStoragePathError(
+                "target lock is not a private regular file"
+            )
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        acquired = True
+        current = os.stat(lock_name, dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or current.st_nlink != 1
+            or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
+        ):
+            raise DecisionBoardStoragePathError(
+                "target lock changed during acquisition"
+            )
+        return lock_fd
+    except DecisionBoardStoragePathError:
+        if acquired:
+            with suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
-        raise DecisionBoardStoragePathError("target lock is not a private regular file")
-    fcntl.flock(lock_fd, fcntl.LOCK_EX)
-    return lock_fd
+        raise
+    except OSError as exc:
+        if acquired:
+            with suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+        raise DecisionBoardStoragePathError(
+            "target lock could not be validated or acquired safely"
+        ) from exc
+
+
+def _snapshot_decision_board_report(
+    report: object,
+) -> tuple[dict[str, Any], bytes]:
+    payload = canonical_json_bytes(report)
+    snapshot = json.loads(payload)
+    validated = validate_decision_board_report(snapshot)
+    return validated, payload
 
 
 def _read_existing(directory_fd: int, basename: str) -> bytes:
@@ -254,11 +291,10 @@ def write_decision_board_report(
 ) -> Path:
     """Atomically create or idempotently confirm one Decision Board report."""
 
-    validated = validate_decision_board_report(report)
+    validated, payload = _snapshot_decision_board_report(report)
     key = build_decision_board_storage_key(validated)
     parsed = parse_decision_board_storage_key(key, report=validated)
     assert parsed is not None
-    payload = canonical_json_bytes(validated)
     directory = Path(report_dir)
     directory_fd = _open_report_directory(directory)
     lock_fd: int | None = None

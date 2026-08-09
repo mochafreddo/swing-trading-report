@@ -45,7 +45,7 @@ export function parseReportStorageKey(
   key: string,
 ): ParsedReportStorageKey | null {
   const normalized = key.trim();
-  const decisionMatch = DECISION_BOARD_KEY_PATTERN.exec(normalized);
+  const decisionMatch = DECISION_BOARD_KEY_PATTERN.exec(key);
   const match = decisionMatch ?? REPORT_KEY_PATTERN.exec(normalized);
   if (!match?.groups) {
     return null;

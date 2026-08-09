@@ -89,10 +89,12 @@ class SupabaseReportIndexError(SupabaseStorageError):
         *,
         storage_key: str,
         cleanup_failed: bool = False,
+        rollback_skipped: bool = False,
     ) -> None:
         super().__init__(message)
         self.storage_key = storage_key
         self.cleanup_failed = cleanup_failed
+        self.rollback_skipped = rollback_skipped
 
 
 @dataclass(frozen=True)
@@ -826,6 +828,46 @@ def _authoritative_decision_board_row_matches(
     return actual_row == expected_row
 
 
+def _read_decision_board_index_state(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+) -> str:
+    storage_key = str(row["report_key"])
+    try:
+        authoritative = _decision_board_index_read_request(
+            config=config,
+            row=row,
+            session=session,
+        )
+    except requests.RequestException as exc:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': {exc}",
+            storage_key=storage_key,
+        ) from exc
+    if authoritative.status_code != 200:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': "
+            f"{_response_message(status_code=authoritative.status_code, text=authoritative.text)}",
+            storage_key=storage_key,
+        )
+    try:
+        rows = json.loads(authoritative.text)
+    except json.JSONDecodeError as exc:
+        raise SupabaseReportIndexError(
+            f"failed to verify Decision Board report index for '{storage_key}': invalid response",
+            storage_key=storage_key,
+        ) from exc
+    if not isinstance(rows, list):
+        return "mismatch"
+    if not rows:
+        return "absent"
+    if len(rows) == 1 and _authoritative_decision_board_row_matches(rows[0], row):
+        return "matching"
+    return "mismatch"
+
+
 def _upsert_decision_board_index(
     *,
     config: SupabaseStorageConfig,
@@ -861,38 +903,58 @@ def _upsert_decision_board_index(
         )
 
     assert response is not None
-    try:
-        authoritative = _decision_board_index_read_request(
+    if (
+        _read_decision_board_index_state(
             config=config,
             row=row,
             session=session,
         )
-    except requests.RequestException as exc:
-        raise SupabaseReportIndexError(
-            f"failed to verify Decision Board report index for '{storage_key}': {exc}",
-            storage_key=storage_key,
-        ) from exc
-    if authoritative.status_code != 200:
-        raise SupabaseReportIndexError(
-            f"failed to verify Decision Board report index for '{storage_key}': "
-            f"{_response_message(status_code=authoritative.status_code, text=authoritative.text)}",
-            storage_key=storage_key,
-        )
-    try:
-        rows = json.loads(authoritative.text)
-    except json.JSONDecodeError as exc:
-        raise SupabaseReportIndexError(
-            f"failed to verify Decision Board report index for '{storage_key}': invalid response",
-            storage_key=storage_key,
-        ) from exc
-    if (
-        not isinstance(rows, list)
-        or len(rows) != 1
-        or not _authoritative_decision_board_row_matches(rows[0], row)
+        != "matching"
     ):
         raise DecisionBoardIdempotencyConflictError(
             "Decision Board report index identity contains different metadata"
         )
+
+
+def _reconcile_or_preserve_new_decision_board_object(
+    *,
+    config: SupabaseStorageConfig,
+    row: dict[str, object],
+    session: requests.Session,
+    index_error: Exception,
+) -> None:
+    storage_key = str(row["report_key"])
+    try:
+        index_state = _read_decision_board_index_state(
+            config=config,
+            row=row,
+            session=session,
+        )
+    except SupabaseReportIndexError as recheck_exc:
+        raise SupabaseReportIndexError(
+            f"{index_error}; rollback delete skipped: authoritative index recheck failed: "
+            f"{recheck_exc}",
+            storage_key=storage_key,
+            cleanup_failed=True,
+            rollback_skipped=True,
+        ) from index_error
+
+    if index_state == "matching":
+        return
+    if index_state == "mismatch":
+        raise SupabaseReportIndexError(
+            f"{index_error}; rollback delete skipped: authoritative index mismatch",
+            storage_key=storage_key,
+            cleanup_failed=True,
+            rollback_skipped=True,
+        ) from index_error
+    raise SupabaseReportIndexError(
+        f"{index_error}; rollback delete skipped: authoritative index was absent "
+        "but Storage deletion cannot be coordinated atomically with index writes",
+        storage_key=storage_key,
+        cleanup_failed=True,
+        rollback_skipped=True,
+    ) from index_error
 
 
 def _upload_or_confirm_decision_board_object(
@@ -992,19 +1054,13 @@ def upload_decision_board_report(
         except (SupabaseReportIndexError, DecisionBoardIdempotencyConflictError) as exc:
             if not created:
                 raise
-            try:
-                _delete_uploaded_object(
-                    config=config,
-                    key=storage_key,
-                    session=active_session,
-                )
-            except SupabaseStorageError as cleanup_exc:
-                raise SupabaseReportIndexError(
-                    f"{exc}; rollback delete failed: {cleanup_exc}",
-                    storage_key=storage_key,
-                    cleanup_failed=True,
-                ) from exc
-            raise
+            _reconcile_or_preserve_new_decision_board_object(
+                config=config,
+                row=row,
+                session=active_session,
+                index_error=exc,
+            )
+            return storage_key
         return storage_key
     finally:
         if should_close_session:
