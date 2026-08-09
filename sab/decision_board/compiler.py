@@ -233,15 +233,11 @@ class HoldingCompilerItemV0:
             ("research_state", research_state, ResearchStateV0),
         ):
             _require_exact_enum(field_value, enum_type, field_name)
-        if (
-            type(research_priority) is not int
-            or not 0 <= research_priority <= 1_000_000
-        ):
+        validated_priority = _validated_research_priority(research_priority)
+        if validated_priority is None:
             raise ValueError("research_priority must be an integer in range 0..1000000")
-        if (
-            type(research_order) is not str
-            or _ORDER_PATTERN.fullmatch(research_order) is None
-        ):
+        validated_order = _validated_research_order(research_order)
+        if validated_order is None:
             raise ValueError("research_order must use the conservative ASCII grammar")
         value = object.__new__(cls)
         for name, common_value in values:
@@ -251,8 +247,8 @@ class HoldingCompilerItemV0:
         object.__setattr__(value, "candle_state", candle_state)
         object.__setattr__(value, "rule_state", rule_state)
         object.__setattr__(value, "research_state", research_state)
-        object.__setattr__(value, "research_priority", research_priority)
-        object.__setattr__(value, "research_order", research_order)
+        object.__setattr__(value, "research_priority", validated_priority)
+        object.__setattr__(value, "research_order", validated_order)
         _register_item(value, _holding_snapshot(value), _HOLDING_ITEMS)
         return value
 
@@ -372,7 +368,12 @@ def _validated_items(
         items = tuple(values)
     except TypeError as exc:
         raise CompilerInputError("compiler items must be a finite iterable") from exc
-    validated: list[EntryCompilerItemV0 | HoldingCompilerItemV0] = []
+    validated: list[
+        tuple[
+            EntryCompilerItemV0 | HoldingCompilerItemV0,
+            _EntrySnapshot | _HoldingSnapshot,
+        ]
+    ] = []
     item_ids: set[str] = set()
     instruments: set[_InstrumentSnapshot] = set()
     for value in items:
@@ -387,23 +388,41 @@ def _validated_items(
         )
         if snapshot is None:
             raise CompilerInputError("compiler item is not an unchanged issued value")
-        if typed_value.item_id in item_ids or snapshot[1] in instruments:
+        item_id, instrument_snapshot = _compiler_item_identity(snapshot)
+        if item_id in item_ids or instrument_snapshot in instruments:
             raise CompilerInputError("compiler item identities must be unique")
-        item_ids.add(typed_value.item_id)
-        instruments.add(snapshot[1])  # type: ignore[arg-type]
-        validated.append(typed_value)
+        item_ids.add(item_id)
+        instruments.add(instrument_snapshot)
+        validated.append((typed_value, snapshot))
     return tuple(
-        sorted(
+        item
+        for item, _snapshot in sorted(
             validated,
-            key=lambda item: (
-                item.item_id.encode("utf-8"),
-                tuple(
-                    part.encode("utf-8")
-                    for part in _instrument_snapshot(item.instrument)
-                ),
-            ),
+            key=lambda pair: _compiler_item_sort_key(pair[1]),
         )
     )
+
+
+def _compiler_item_identity(
+    snapshot: _EntrySnapshot | _HoldingSnapshot,
+) -> tuple[str, _InstrumentSnapshot]:
+    item_id = snapshot[0]
+    instrument = snapshot[1]
+    if (
+        type(item_id) is not str
+        or type(instrument) is not tuple
+        or len(instrument) != 6
+        or not all(type(part) is str for part in instrument)
+    ):
+        raise CompilerInputError("compiler item snapshot is invalid")
+    return item_id, cast(_InstrumentSnapshot, instrument)
+
+
+def _compiler_item_sort_key(
+    snapshot: _EntrySnapshot | _HoldingSnapshot,
+) -> tuple[bytes, tuple[bytes, ...]]:
+    item_id, instrument = _compiler_item_identity(snapshot)
+    return item_id.encode("utf-8"), tuple(part.encode("utf-8") for part in instrument)
 
 
 def _validated_entry_snapshot(value: object) -> _EntrySnapshot | None:
@@ -572,12 +591,12 @@ def _validate_common_factory_values(
     trusted = copy_trusted_instrument_ref_v0(instrument)
     if trusted is None:
         raise TypeError("compiler item requires exact InstrumentRefV0")
-    expected_item_id = f"{item_id_prefix}{trusted.canonical_ticker}"
-    if (
-        type(item_id) is not str
-        or item_id != expected_item_id
-        or _ITEM_ID_PATTERN.fullmatch(item_id) is None
-    ):
+    validated_item_id = _validated_item_id(
+        item_id,
+        item_id_prefix=item_id_prefix,
+        canonical_ticker=trusted.canonical_ticker,
+    )
+    if validated_item_id is None:
         raise ValueError("item_id must match the lane public instrument identity")
     _require_exact_enum(item_state, ApprovalStateV0, "item_state")
     _require_exact_enum(identity_state, ApprovalStateV0, "identity_state")
@@ -586,7 +605,7 @@ def _validate_common_factory_values(
     ):
         raise TypeError("compiler evidence must be an exact tuple")
     return (
-        ("item_id", item_id),
+        ("item_id", validated_item_id),
         ("instrument", trusted),
         ("item_state", item_state),
         ("identity_state", identity_state),
@@ -601,6 +620,32 @@ def _require_exact_enum(value: object, enum_type: type[StrEnum], name: str) -> N
 
 def _is_canonical_enum_member(value: object, enum_type: type[StrEnum]) -> bool:
     return type(value) is enum_type and any(value is member for member in enum_type)
+
+
+def _validated_item_id(
+    value: object,
+    *,
+    item_id_prefix: str,
+    canonical_ticker: str,
+) -> str | None:
+    if type(value) is not str:
+        return None
+    expected = f"{item_id_prefix}{canonical_ticker}"
+    if value != expected or _ITEM_ID_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _validated_research_priority(value: object) -> int | None:
+    if type(value) is not int or not 0 <= value <= 1_000_000:
+        return None
+    return value
+
+
+def _validated_research_order(value: object) -> str | None:
+    if type(value) is not str or _ORDER_PATTERN.fullmatch(value) is None:
+        return None
+    return value
 
 
 def _instrument_snapshot(value: object) -> _InstrumentSnapshot:
@@ -637,6 +682,14 @@ def _evidence_snapshot(value: object) -> _EvidenceSnapshot | None:
 
 def _entry_snapshot(value: EntryCompilerItemV0) -> _EntrySnapshot:
     try:
+        instrument = _instrument_snapshot(value.instrument)
+        item_id = _validated_item_id(
+            value.item_id,
+            item_id_prefix="entry-",
+            canonical_ticker=instrument[1],
+        )
+        if item_id is None:
+            return ()
         if not all(
             (
                 _is_canonical_enum_member(value.item_state, ApprovalStateV0),
@@ -650,8 +703,8 @@ def _entry_snapshot(value: EntryCompilerItemV0) -> _EntrySnapshot:
         ):
             return ()
         return (
-            value.item_id,
-            _instrument_snapshot(value.instrument),
+            item_id,
+            instrument,
             value.item_state,
             value.identity_state,
             value.signal_state,
@@ -667,6 +720,16 @@ def _entry_snapshot(value: EntryCompilerItemV0) -> _EntrySnapshot:
 
 def _holding_snapshot(value: HoldingCompilerItemV0) -> _HoldingSnapshot:
     try:
+        instrument = _instrument_snapshot(value.instrument)
+        item_id = _validated_item_id(
+            value.item_id,
+            item_id_prefix="holding-",
+            canonical_ticker=instrument[1],
+        )
+        priority = _validated_research_priority(value.research_priority)
+        order = _validated_research_order(value.research_order)
+        if item_id is None or priority is None or order is None:
+            return ()
         if not all(
             (
                 _is_canonical_enum_member(value.item_state, ApprovalStateV0),
@@ -680,8 +743,8 @@ def _holding_snapshot(value: HoldingCompilerItemV0) -> _HoldingSnapshot:
         ):
             return ()
         return (
-            value.item_id,
-            _instrument_snapshot(value.instrument),
+            item_id,
+            instrument,
             value.item_state,
             value.identity_state,
             value.hard_exit_state,
@@ -689,8 +752,8 @@ def _holding_snapshot(value: HoldingCompilerItemV0) -> _HoldingSnapshot:
             value.candle_state,
             value.rule_state,
             value.research_state,
-            value.research_priority,
-            value.research_order,
+            priority,
+            order,
             tuple(id(item) for item in value.evidence),
         )
     except AttributeError, TypeError, CompilerInputError:

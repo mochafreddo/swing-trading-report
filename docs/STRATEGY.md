@@ -472,7 +472,10 @@ snapshot에 process-local로 결속되고 `compile_holding`의 필수 입력입�
 selection과 다른 subset/누락/중복 universe를 거부하고, unselected holding에
 `NOT_SELECTED_CAP`을 직접 적용합니다. 모든 compiler enum은 문자열 equality가 아니라
 canonical enum member identity까지 확인하므로 raw/fresh-equal 문자열 mutation은 action
-precedence를 바꿀 수 없습니다.
+precedence를 바꿀 수 없습니다. item ID와 research priority/order도 매 selection/compile에서
+exact scalar type과 lane/ticker/grammar/range를 재검증한 snapshot만 정렬에 사용하므로
+equal subclass나 post-factory mutation은 selection, output order, canonical hash를 바꿀 수
+없습니다.
 
 ### Decision Board V0 claim evidence policy (shadow)
 

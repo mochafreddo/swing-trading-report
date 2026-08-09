@@ -288,6 +288,10 @@ arbitrary metadata나 rationale text는 이 projection에 없습니다.
 type과 canonical member singleton identity를 함께 확인합니다. 따라서 같은 문자열인 raw
 `str`, `str` subclass, `str.__new__`로 만든 fresh-equal enum, `object.__setattr__` mutation은
 issuance snapshot과 값이 같아 보여도 precedence 입력이 될 수 없습니다.
+`item_id`, `research_order`, `research_priority`도 factory와 매 invocation에서 exact
+`str`/`int`, lane-prefix/canonical-ticker binding, ASCII grammar/range를 같은 validator로
+재검증합니다. 정렬·중복 검사는 이 validated snapshot만 사용하므로 caller가 넣은
+`str`/`int` subclass의 comparison이나 `encode()`를 호출하지 않습니다.
 
 ENTRY는 미승인 item/identity를 먼저 REVIEW하고, READY/ENTER가 아닌 확정 non-candidate는
 omit합니다. 필수 deterministic state gap은 REVIEW, 독립 exposure fail은 AVOID입니다.

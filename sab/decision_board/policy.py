@@ -12,7 +12,6 @@ from .compiler import (
     ResearchStateV0,
     _holding_selection_snapshot,
     _is_canonical_enum_member,
-    _validated_holding_snapshot,
 )
 
 MAX_RESEARCH_ITEMS_V0 = 5
@@ -58,41 +57,48 @@ def select_holding_research_v0(
             "research selection requires a finite iterable"
         ) from exc
     item_ids: set[str] = set()
-    validated: list[HoldingCompilerItemV0] = []
+    validated: list[tuple[HoldingCompilerItemV0, tuple[object, ...]]] = []
     for item in values:
-        if _validated_holding_snapshot(item) is None:
+        snapshot = _holding_selection_snapshot(item)
+        if snapshot is None:
             raise CompilerInputError(
                 "research selection item is not unchanged and issued"
             )
-        if item.item_id in item_ids:
+        item_id = _selection_item_id(snapshot)
+        if item_id in item_ids:
             raise CompilerInputError(
                 "research selection item identities must be unique"
             )
-        item_ids.add(item.item_id)
-        validated.append(item)
+        item_ids.add(item_id)
+        validated.append((item, snapshot))
     ordered = sorted(
         validated,
-        key=lambda item: (
-            item.research_priority,
-            item.research_order.encode("utf-8"),
-            item.item_id.encode("utf-8"),
+        key=lambda pair: (
+            _selection_priority(pair[1]),
+            _selection_order(pair[1]).encode("utf-8"),
+            _selection_item_id(pair[1]).encode("utf-8"),
         ),
     )
-    selected = tuple(item.item_id for item in ordered[:max_research_items])
+    selected = tuple(
+        _selection_item_id(snapshot) for _item, snapshot in ordered[:max_research_items]
+    )
     selected_set = set(selected)
     states = tuple(
         (
-            item.item_id,
+            _selection_item_id(snapshot),
             ResearchStateV0.CLEAR
-            if item.item_id in selected_set
+            if _selection_item_id(snapshot) in selected_set
             else ResearchStateV0.NOT_SELECTED_CAP,
         )
-        for item in sorted(validated, key=lambda value: value.item_id.encode("utf-8"))
+        for _item, snapshot in sorted(
+            validated,
+            key=lambda pair: _selection_item_id(pair[1]).encode("utf-8"),
+        )
     )
     return _allocate_selection_v0(
         selected_item_ids=selected,
         states=states,
-        universe_snapshot=_universe_snapshot(validated),
+        universe_snapshot=_universe_snapshot(item for item, _snapshot in validated),
     )
 
 
@@ -123,14 +129,18 @@ def _validate_holding_research_selection_v0(
     if _universe_snapshot(supplied_items) != record.universe_snapshot:
         raise CompilerInputError("holding compiler universe does not match selection")
     selected = set(record.selection_snapshot[0])
-    return {
-        item.item_id: (
+    result: dict[str, ResearchStateV0] = {}
+    for item in supplied_items:
+        snapshot = _holding_selection_snapshot(item)
+        if snapshot is None:
+            raise CompilerInputError("holding compiler universe item is invalid")
+        item_id = _selection_item_id(snapshot)
+        result[item_id] = (
             item.research_state
-            if item.item_id in selected
+            if item_id in selected
             else ResearchStateV0.NOT_SELECTED_CAP
         )
-        for item in supplied_items
-    }
+    return result
 
 
 def _allocate_selection_v0(
@@ -196,8 +206,32 @@ def _universe_snapshot(items: Iterable[HoldingCompilerItemV0]) -> _UniverseSnaps
             )
         snapshots.append(snapshot)
     return tuple(
-        sorted(snapshots, key=lambda snapshot: str(snapshot[0]).encode("utf-8"))
+        sorted(
+            snapshots,
+            key=lambda snapshot: _selection_item_id(snapshot).encode("utf-8"),
+        )
     )
+
+
+def _selection_item_id(snapshot: tuple[object, ...]) -> str:
+    value = snapshot[0]
+    if type(value) is not str:
+        raise CompilerInputError("holding selection item identity is invalid")
+    return value
+
+
+def _selection_priority(snapshot: tuple[object, ...]) -> int:
+    value = snapshot[8]
+    if type(value) is not int:
+        raise CompilerInputError("holding selection priority is invalid")
+    return value
+
+
+def _selection_order(snapshot: tuple[object, ...]) -> str:
+    value = snapshot[9]
+    if type(value) is not str:
+        raise CompilerInputError("holding selection order is invalid")
+    return value
 
 
 __all__ = [

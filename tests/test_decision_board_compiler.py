@@ -908,3 +908,140 @@ def test_selected_research_outcome_can_update_without_changing_universe() -> Non
     )
 
     assert [item["status"] for item in payload["items"]] == ["REVIEW", "REVIEW"]
+
+
+class _EvilOrderingText(str):
+    def encode(self, *_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError("untrusted encode must never run")
+
+    def __lt__(self, _other: object) -> bool:
+        raise AssertionError("untrusted comparison must never run")
+
+
+class _EvilPriority(int):
+    def __lt__(self, _other: object) -> bool:
+        raise AssertionError("untrusted comparison must never run")
+
+
+def test_entry_rejects_equal_item_id_subclass_before_ordering() -> None:
+    first = _entry(1)
+    second = _entry(2)
+    object.__setattr__(first, "item_id", _EvilOrderingText(first.item_id))
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_entry(
+            (second, first),
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "mutated"),
+    [
+        ("item_id", "holding-SYN1.NAS"),
+        ("research_order", "tie-01"),
+    ],
+)
+def test_holding_rejects_equal_text_subclass_before_selection(
+    field: str, mutated: str
+) -> None:
+    holding = _holding(1)
+    object.__setattr__(holding, field, _EvilOrderingText(mutated))
+
+    with pytest.raises(CompilerInputError):
+        select_holding_research_v0((holding,), max_research_items=1)
+
+
+@pytest.mark.parametrize("mutated", [True, _EvilPriority(1)])
+def test_holding_rejects_equal_nonexact_priority_before_selection(
+    mutated: object,
+) -> None:
+    holding = _holding(1, research_priority=1)
+    object.__setattr__(holding, "research_priority", mutated)
+
+    with pytest.raises(CompilerInputError):
+        select_holding_research_v0((holding, _holding(2)), max_research_items=1)
+
+
+@pytest.mark.parametrize(
+    ("field", "mutation"),
+    [
+        ("item_id", "evil-text"),
+        ("item_id", "wrong-lane"),
+        ("item_id", "wrong-ticker"),
+        ("item_id", "bad-grammar"),
+        ("research_order", "evil-text"),
+        ("research_order", "bad-grammar"),
+        ("research_priority", "evil-int"),
+        ("research_priority", "bool"),
+    ],
+)
+def test_holding_compile_rejects_ordering_scalar_mutation_after_selection(
+    field: str, mutation: str
+) -> None:
+    holdings = (_holding(1), _holding(2))
+    selection = select_holding_research_v0(holdings, max_research_items=1)
+    mutated: object
+    if field == "item_id":
+        mutated = {
+            "evil-text": _EvilOrderingText("holding-SYN1.NAS"),
+            "wrong-lane": "entry-SYN1.NAS",
+            "wrong-ticker": "holding-SYN2.NAS",
+            "bad-grammar": "holding-SYN1 NAS",
+        }[mutation]
+    elif field == "research_order":
+        mutated = (
+            _EvilOrderingText("tie-01") if mutation == "evil-text" else "unsafe order"
+        )
+    else:
+        mutated = _EvilPriority(1) if mutation == "evil-int" else True
+    object.__setattr__(holdings[0], field, mutated)
+
+    with pytest.raises(CompilerInputError):
+        DecisionCompilerV0.compile_holding(
+            holdings,
+            selection=selection,
+            sealed_input_hash=SEALED_HASH,
+        )
+
+
+@pytest.mark.parametrize(
+    ("factory", "overrides"),
+    [
+        (_entry, {"item_id": _EvilOrderingText("entry-SYN1.NAS")}),
+        (_holding, {"item_id": _EvilOrderingText("holding-SYN1.NAS")}),
+        (_holding, {"research_order": _EvilOrderingText("tie-01")}),
+        (_holding, {"research_priority": _EvilPriority(1)}),
+        (_holding, {"research_priority": True}),
+    ],
+)
+def test_factories_reject_nonexact_ordering_scalars(
+    factory: object, overrides: dict[str, object]
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        factory(**overrides)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    ("factory", "field", "mutated"),
+    [
+        (_entry, "item_id", "holding-SYN1.NAS"),
+        (_entry, "item_id", "entry-SYN2.NAS"),
+        (_entry, "item_id", "entry-SYN1 NAS"),
+        (_holding, "item_id", "entry-SYN1.NAS"),
+        (_holding, "item_id", "holding-SYN2.NAS"),
+        (_holding, "item_id", "holding-SYN1 NAS"),
+        (_holding, "research_order", "unsafe order"),
+    ],
+)
+def test_invocation_rejects_lane_binding_and_grammar_mutation(
+    factory: object, field: str, mutated: object
+) -> None:
+    item = factory()  # type: ignore[operator]
+    object.__setattr__(item, field, mutated)
+
+    with pytest.raises(CompilerInputError):
+        if type(item) is EntryCompilerItemV0:
+            DecisionCompilerV0.compile_entry((item,), sealed_input_hash=SEALED_HASH)
+        else:
+            select_holding_research_v0((item,), max_research_items=1)
