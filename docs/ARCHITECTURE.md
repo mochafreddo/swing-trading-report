@@ -336,8 +336,10 @@ canonical JSON compare-and-set과 atomic replace로 `STARTED` 및 terminal obser
 전역 anchor는 runner 밖의 짧은 local journal critical section만 직렬화하며, directory fsync와
 마지막 full-path 검증 이후에만 durable commit으로 인정합니다. 그 전까지 pinned-root rollback
 권한을 유지합니다. 중간 ancestor는 search-only FD로 순회하고 anchor/final root만 read FD로
-열며, store/open은 단일 Python thread local CLI 경계를 선검사합니다. 그 경계 안에서 모든
-blockable signal을 잠시 mask해 정확한 반환 FD만 소유하고, mask 복원은 이전 값을 재적용·검증합니다.
+열며, path-like 입력을 exact `str`로 먼저 resolve한 뒤 모든 blockable signal을 잠시 mask하고
+그 안에서 단일 Python thread local CLI 경계를 재검사해 정확한 반환 FD만 소유합니다. mask
+복원은 이전 값을 재적용·검증하며, 복원 뒤의 mkdir 및 후속 전진 filesystem mutation은 매번
+callback-free fresh admission을 다시 획득합니다.
 이는 일반 multi-thread process 전체 보장이 아닙니다. FD 목록 scan과 닫힌 번호 재시도는 하지
 않고 close 예외는 non-mutating FD 상태 조회로 완료 여부만 판정하며, commit 뒤 cleanup이
 불확실하면 safe identity/status의 typed error로 중단합니다. claim 시의

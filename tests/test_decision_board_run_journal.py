@@ -918,11 +918,80 @@ def test_owned_open_resolves_path_callback_before_masking() -> None:
             callback_masks.append(signal.pthread_sigmask(signal.SIG_BLOCK, frozenset()))
             return "/dev/null"
 
-    fd = run_journal._owned_open(ObservedPath(), os.O_RDONLY)  # type: ignore[arg-type]
+    fd = run_journal._owned_open(ObservedPath(), os.O_RDONLY)
     try:
         assert callback_masks == [original_mask]
     finally:
         os.close(fd)
+
+
+def test_owned_open_rechecks_threads_after_path_callback_before_create(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "callback-created"
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    before_fds = len(os.listdir("/dev/fd"))
+    opened_fd: int | None = None
+
+    class StartsWorkerPath:
+        def __fspath__(self) -> str:
+            worker.start()
+            return str(target)
+
+    try:
+        with pytest.raises(run_journal.RunJournalStorageError, match="single-threaded"):
+            opened_fd = run_journal._owned_open(
+                StartsWorkerPath(),
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        assert not target.exists()
+        assert len(os.listdir("/dev/fd")) == before_fds
+    finally:
+        if opened_fd is not None:
+            with suppress(OSError):
+                os.close(opened_fd)
+        stop.set()
+        if worker.ident is not None:
+            worker.join()
+
+
+def test_pending_signal_starts_worker_before_mkdir_and_fails_without_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    journal_root = tmp_path / "signal-mkdir-target"
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    real_open = run_journal.os.open
+    injected = False
+    before_fds = len(os.listdir("/dev/fd"))
+
+    def start_worker(_signum: int, _frame: object) -> None:
+        if worker.ident is None:
+            worker.start()
+
+    def open_with_pending_signal(*args: object, **kwargs: object) -> int:
+        nonlocal injected
+        if args and args[0] == journal_root.name and not injected:
+            injected = True
+            os.kill(os.getpid(), signal.SIGUSR1)
+        return real_open(*args, **kwargs)  # type: ignore[arg-type]
+
+    previous_handler = signal.signal(signal.SIGUSR1, start_worker)
+    monkeypatch.setattr(run_journal.os, "open", open_with_pending_signal)
+    try:
+        with pytest.raises(run_journal.RunJournalStorageError, match="single-threaded"):
+            RunJournalStoreV0(journal_root).status(limit=1)
+        assert injected
+        assert worker.ident is not None
+        assert not journal_root.exists()
+        assert len(os.listdir("/dev/fd")) == before_fds
+    finally:
+        signal.signal(signal.SIGUSR1, previous_handler)
+        stop.set()
+        if worker.ident is not None:
+            worker.join()
 
 
 def test_owned_open_fails_closed_before_open_with_multiple_threads(

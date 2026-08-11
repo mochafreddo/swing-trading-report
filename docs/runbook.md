@@ -81,8 +81,11 @@ journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지 
 process에서만 허용하며, 다중 thread가 감지되면 path open이나 directory 생성 전에 sanitized
 오류로 중단합니다. 이 전제 아래 FD open은 `SIGKILL`/`SIGSTOP`을 제외한 모든 blockable signal을
 잠시 차단해 반환된 정확한 FD의 ownership을 먼저 등록하고, signal mask 변경이 예외를 내면
-알고 있던 이전 mask를 재적용·검증한 뒤 그 FD만 한 번 닫습니다. path-like 변환은 signal 차단
-전에 끝냅니다. 이는 enforced single-thread local CLI boundary이며 일반적인 multi-thread process
+알고 있던 이전 mask를 재적용·검증한 뒤 그 FD만 한 번 닫습니다. path-like 변환과 exact `str`
+검증을 signal 차단 전에 끝내고, 차단한 구간 안에서 thread 수를 다시 확인한 직후 trusted stdlib
+`os.open`만 호출합니다. missing component open이 mask를 복원한 뒤 directory를 만들 때도 callback
+없는 path로 fresh signal admission과 thread 검사를 다시 수행합니다. write/link/replace/fsync 같은
+후속 전진 mutation도 각각 fresh admission을 사용합니다. 이는 enforced single-thread local CLI boundary이며 일반적인 multi-thread process
 전체의 signal/FD safety를 보장하지 않습니다. process-wide FD scan이나 닫힌 FD 번호 재시도는
 다른 FD를 닫을 수 있어 사용하지 않습니다. close가 예외를 낸 경우에도 재시도하지 않고
 `F_GETFD`로 이미 닫혔는지만 확인합니다. commit 뒤 unlock/close 오류의 완료 여부가 불확실하면 raw
