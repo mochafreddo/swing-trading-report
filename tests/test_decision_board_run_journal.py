@@ -994,6 +994,126 @@ def test_pending_signal_starts_worker_before_mkdir_and_fails_without_mutation(
             worker.join()
 
 
+def test_pending_signal_after_temp_create_keeps_cleanup_in_transaction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticPreCommitFailure(BaseException):
+        pass
+
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    real_open = run_journal.os.open
+    real_write = run_journal.os.write
+    signal_injected = False
+    write_called = False
+    before_fds = len(os.listdir("/dev/fd"))
+
+    def start_worker(_signum: int, _frame: object) -> None:
+        if worker.ident is None:
+            worker.start()
+
+    def open_temp_then_signal(*args: object, **kwargs: object) -> int:
+        nonlocal signal_injected
+        fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
+        path = args[0] if args else kwargs.get("path")
+        if (
+            type(path) is str
+            and path.startswith(".")
+            and path.endswith(".tmp")
+            and not signal_injected
+        ):
+            signal_injected = True
+            os.kill(os.getpid(), signal.SIGUSR1)
+        return fd
+
+    def fail_write(_fd: int, _payload: object) -> int:
+        nonlocal write_called
+        write_called = True
+        raise SyntheticPreCommitFailure
+
+    previous_handler = signal.signal(signal.SIGUSR1, start_worker)
+    monkeypatch.setattr(run_journal.os, "open", open_temp_then_signal)
+    monkeypatch.setattr(run_journal.os, "write", fail_write)
+    try:
+        with pytest.raises(SyntheticPreCommitFailure):
+            _started(RunJournalStoreV0(tmp_path), run_id="signal-after-temp")
+        assert signal_injected
+        assert write_called
+        assert worker.ident is not None
+        assert list(tmp_path.glob(".*.tmp")) == []
+        assert list(tmp_path.glob("*.json")) == []
+        assert len(os.listdir("/dev/fd")) == before_fds
+    finally:
+        signal.signal(signal.SIGUSR1, previous_handler)
+        monkeypatch.setattr(run_journal.os, "write", real_write)
+        stop.set()
+        if worker.ident is not None:
+            worker.join()
+
+
+def test_pending_signal_after_replace_rolls_back_exact_original_before_handler(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticPreCommitFailure(BaseException):
+        pass
+
+    store = RunJournalStoreV0(tmp_path)
+    started = _started(store, run_id="signal-after-replace")
+    record_path = next(tmp_path.glob("*.json"))
+    original = record_path.read_bytes()
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    real_replace = run_journal.os.replace
+    real_fsync = run_journal.os.fsync
+    replaced = False
+    post_replace_fsync_called = False
+    before_fds = len(os.listdir("/dev/fd"))
+
+    def start_worker(_signum: int, _frame: object) -> None:
+        if worker.ident is None:
+            worker.start()
+
+    def replace_then_signal(*args: object, **kwargs: object) -> None:
+        nonlocal replaced
+        real_replace(*args, **kwargs)  # type: ignore[arg-type]
+        target = args[1] if len(args) > 1 else kwargs.get("dst")
+        if target == record_path.name and not replaced:
+            replaced = True
+            os.kill(os.getpid(), signal.SIGUSR1)
+
+    def fail_post_replace_fsync(fd: int) -> None:
+        nonlocal post_replace_fsync_called
+        if replaced and not post_replace_fsync_called:
+            post_replace_fsync_called = True
+            raise SyntheticPreCommitFailure
+        real_fsync(fd)
+
+    previous_handler = signal.signal(signal.SIGUSR1, start_worker)
+    monkeypatch.setattr(run_journal.os, "replace", replace_then_signal)
+    monkeypatch.setattr(run_journal.os, "fsync", fail_post_replace_fsync)
+    try:
+        with pytest.raises(SyntheticPreCommitFailure):
+            store.finish(
+                started,
+                status=RunJournalStatusV0.FAILED,
+                terminal_at=TERMINAL_AT,
+                issue_codes=(DecisionRunIssueCodeV0.INTERNAL_ERROR.value,),
+            )
+        assert replaced
+        assert post_replace_fsync_called
+        assert worker.ident is not None
+        assert record_path.read_bytes() == original
+        assert list(tmp_path.glob(".*.tmp")) == []
+        assert list(tmp_path.glob(".*.backup")) == []
+        assert len(os.listdir("/dev/fd")) == before_fds
+    finally:
+        signal.signal(signal.SIGUSR1, previous_handler)
+        monkeypatch.setattr(run_journal.os, "fsync", real_fsync)
+        stop.set()
+        if worker.ident is not None:
+            worker.join()
+
+
 def test_owned_open_fails_closed_before_open_with_multiple_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -85,8 +85,13 @@ process에서만 허용하며, 다중 thread가 감지되면 path open이나 dir
 검증을 signal 차단 전에 끝내고, 차단한 구간 안에서 thread 수를 다시 확인한 직후 trusted stdlib
 `os.open`만 호출합니다. missing component open이 mask를 복원한 뒤 directory를 만들 때도 callback
 없는 path로 fresh signal admission과 thread 검사를 다시 수행합니다. write/link/replace/fsync 같은
-후속 전진 mutation도 각각 fresh admission을 사용합니다. 이는 enforced single-thread local CLI boundary이며 일반적인 multi-thread process
-전체의 signal/FD safety를 보장하지 않습니다. process-wide FD scan이나 닫힌 FD 번호 재시도는
+transaction mutation은 stable anchor/root/journal flock을 긴 signal mask 없이 모두 획득한 다음,
+현재 mask를 한 번 저장하고 모든 blockable signal을 차단한 단일 admission에서 수행합니다. 이 mask는
+temp create/write/link/replace/fsync, commit postcondition, rollback, inode-verified temp cleanup이
+durable commit 또는 완전한 rollback으로 끝날 때까지 유지됩니다. 그 뒤 이전 mask를 복원·검증하고,
+lock/FD cleanup은 transaction 밖에서 기존 committed-cleanup 규칙으로 처리합니다. 이는 enforced
+single-thread local CLI boundary이며 일반적인 multi-thread process 전체의 signal/FD safety를
+보장하지 않습니다. process-wide FD scan이나 닫힌 FD 번호 재시도는
 다른 FD를 닫을 수 있어 사용하지 않습니다. close가 예외를 낸 경우에도 재시도하지 않고
 `F_GETFD`로 이미 닫혔는지만 확인합니다. commit 뒤 unlock/close 오류의 완료 여부가 불확실하면 raw
 오류 대신 `run_kind + expected_at + run_id + status`만 담은 sanitized committed-cleanup 오류를

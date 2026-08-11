@@ -72,7 +72,7 @@ _ALL_FIELDS = frozenset(
     }
 )
 _LOGGER = logging.getLogger(__name__)
-_OWNED_OPEN_SIGNALS = frozenset(
+_BLOCKABLE_SIGNALS = frozenset(
     signal.valid_signals() - {signal.SIGKILL, signal.SIGSTOP}
 )
 _DIRECTORY_READ_FLAGS = (
@@ -648,7 +648,7 @@ def _block_owned_signals(
     previous_mask: frozenset[int | signal.Signals],
 ) -> None:
     try:
-        signal.pthread_sigmask(signal.SIG_BLOCK, _OWNED_OPEN_SIGNALS)
+        signal.pthread_sigmask(signal.SIG_BLOCK, _BLOCKABLE_SIGNALS)
     except BaseException as block_error:
         try:
             recovery_error = _restore_signal_mask(previous_mask)
@@ -660,8 +660,8 @@ def _block_owned_signals(
 
 
 @contextmanager
-def _mutation_admission() -> Iterator[None]:
-    """Keep one trusted local filesystem mutation inside fresh admission."""
+def _signal_admission() -> Iterator[None]:
+    """Keep a trusted single-threaded region under one exact signal mask."""
 
     previous_mask = _query_signal_mask()
     _block_owned_signals(previous_mask)
@@ -688,55 +688,8 @@ def _mutation_admission() -> Iterator[None]:
 def _owned_mkdir(path: str, mode: int, *, dir_fd: int) -> None:
     if type(path) is not str:
         raise RunJournalStorageError("journal path must be an exact string")
-    with _mutation_admission():
+    with _signal_admission():
         os.mkdir(path, mode=mode, dir_fd=dir_fd)
-
-
-def _owned_unlink(path: str, *, dir_fd: int) -> None:
-    if type(path) is not str:
-        raise RunJournalStorageError("journal path must be an exact string")
-    with _mutation_admission():
-        os.unlink(path, dir_fd=dir_fd)
-
-
-def _owned_write(fd: int, payload: memoryview) -> int:
-    with _mutation_admission():
-        return os.write(fd, payload)
-
-
-def _owned_fsync(fd: int) -> None:
-    with _mutation_admission():
-        os.fsync(fd)
-
-
-def _owned_link(source: str, target: str, *, directory_fd: int) -> None:
-    if type(source) is not str or type(target) is not str:
-        raise RunJournalStorageError("journal path must be an exact string")
-    with _mutation_admission():
-        os.link(
-            source,
-            target,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-            follow_symlinks=False,
-        )
-
-
-def _owned_replace(source: str, target: str, *, directory_fd: int) -> None:
-    if type(source) is not str or type(target) is not str:
-        raise RunJournalStorageError("journal path must be an exact string")
-    with _mutation_admission():
-        os.replace(
-            source,
-            target,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-        )
-
-
-def _owned_flock(fd: int, operation: int) -> None:
-    with _mutation_admission():
-        fcntl.flock(fd, operation)
 
 
 def _owned_open(
@@ -816,7 +769,7 @@ def _open_root_guard(root: Path) -> _RootGuard:
         if not stat.S_ISDIR(anchor_info.st_mode):
             raise RunJournalStorageError("journal path anchor is not a directory")
         # All local RunJournal processes share this stable, short critical section.
-        _owned_flock(anchor_fd, fcntl.LOCK_EX)
+        fcntl.flock(anchor_fd, fcntl.LOCK_EX)
         parent_fd = anchor_fd
         for index, component in enumerate(components):
             flags = (
@@ -957,9 +910,9 @@ def _open_journal_lock(directory_fd: int) -> _JournalLock:
         info = os.fstat(lock_fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise RunJournalStorageError("journal lock is not a private file")
-        _owned_flock(directory_fd, fcntl.LOCK_EX)
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
         directory_locked = True
-        _owned_flock(lock_fd, fcntl.LOCK_EX)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
         target_locked = True
         lock = _JournalLock(lock_fd, name, info.st_dev, info.st_ino)
         _assert_journal_lock(directory_fd, lock)
@@ -1065,7 +1018,7 @@ def _unlink_if_matches(
         or (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino)
     ):
         return False
-    _owned_unlink(basename, dir_fd=directory_fd)
+    os.unlink(basename, dir_fd=directory_fd)
     return True
 
 
@@ -1087,18 +1040,18 @@ def _write_private_temp(
             with suppress(BaseException):
                 current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISREG(current.st_mode) and current.st_nlink == 1:
-                    _owned_unlink(name, dir_fd=directory_fd)
+                    os.unlink(name, dir_fd=directory_fd)
             raise
         info: os.stat_result | None = None
         try:
             info = os.fstat(fd)
             view = memoryview(payload)
             while view:
-                written = _owned_write(fd, view)
+                written = os.write(fd, view)
                 if written < 1:
                     raise OSError("journal temporary write made no progress")
                 view = view[written:]
-            _owned_fsync(fd)
+            os.fsync(fd)
             assert info is not None
             return name, info
         except BaseException:
@@ -1106,7 +1059,7 @@ def _write_private_temp(
                 if info is None:
                     current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                     if stat.S_ISREG(current.st_mode) and current.st_nlink == 1:
-                        _owned_unlink(name, dir_fd=directory_fd)
+                        os.unlink(name, dir_fd=directory_fd)
                 else:
                     _unlink_if_matches(directory_fd, name, info)
             raise
@@ -1148,7 +1101,13 @@ def _atomic_replace_record(
             if not _target_matches(directory_fd, basename, expected):
                 raise RunJournalConflictError("journal compare-and-set conflict")
             backup_name = f".{basename}.{secrets.token_hex(12)}.backup"
-            _owned_link(basename, backup_name, directory_fd=directory_fd)
+            os.link(
+                basename,
+                backup_name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
             backup_info = os.stat(
                 backup_name, dir_fd=directory_fd, follow_symlinks=False
             )
@@ -1159,16 +1118,21 @@ def _atomic_replace_record(
                 != (expected.st_dev, expected.st_ino)
             ):
                 raise RunJournalStorageError("journal backup identity changed")
-            _owned_fsync(directory_fd)
+            os.fsync(directory_fd)
         _assert_journal_lock(directory_fd, lock)
         _assert_root_unchanged(root)
         try:
-            _owned_replace(temp_name, basename, directory_fd=directory_fd)
+            os.replace(
+                temp_name,
+                basename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
             if not _target_matches(directory_fd, basename, temp_info):
                 raise RunJournalStorageError("journal replacement identity changed")
             _assert_journal_lock(directory_fd, lock)
             _assert_root_unchanged(root)
-            _owned_fsync(directory_fd)
+            os.fsync(directory_fd)
             _assert_journal_lock(directory_fd, lock)
             _assert_root_unchanged(root)
         except BaseException as primary:
@@ -1226,10 +1190,11 @@ def _rollback_pending_write(directory_fd: int, pending: _PendingWrite) -> None:
         ):
             raise RunJournalStorageError("journal rollback identity changed")
         try:
-            _owned_replace(
+            os.replace(
                 pending.backup_name,
                 pending.basename,
-                directory_fd=directory_fd,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
             )
         except BaseException:
             if not _target_matches(directory_fd, pending.basename, pending.previous):
@@ -1237,7 +1202,7 @@ def _rollback_pending_write(directory_fd: int, pending: _PendingWrite) -> None:
         if not _target_matches(directory_fd, pending.basename, pending.previous):
             raise RunJournalStorageError("journal rollback target identity changed")
         pending.backup_name = None
-    _owned_fsync(directory_fd)
+    os.fsync(directory_fd)
 
 
 def _cleanup_committed_backup(directory_fd: int, pending: _PendingWrite) -> None:
@@ -1264,7 +1229,7 @@ def _cleanup_committed_backup(directory_fd: int, pending: _PendingWrite) -> None
     if not cleaned:
         raise RunJournalStorageError("journal committed backup cleanup was unsafe")
     pending.backup_name = None
-    _owned_fsync(directory_fd)
+    os.fsync(directory_fd)
 
 
 def _sweep_orphan_backups(directory_fd: int) -> int:
@@ -1290,7 +1255,7 @@ def _sweep_orphan_backups(directory_fd: int) -> int:
         ):
             swept += 1
     if swept:
-        _owned_fsync(directory_fd)
+        os.fsync(directory_fd)
         _LOGGER.info("swept %d orphan RunJournal backup(s)", swept)
     return swept
 
@@ -1330,43 +1295,54 @@ class RunJournalStoreV0:
         try:
             lock = _open_journal_lock(directory_fd)
             _assert_root_unchanged(root)
-            _sweep_orphan_backups(directory_fd)
-            session = _LockedJournal(directory_fd, lock, root, [])
-            yield session
-            _assert_root_unchanged(root)
-            _assert_journal_lock(directory_fd, lock)
-            for pending, _record in session.pending:
-                if not _target_matches(
-                    directory_fd, pending.basename, pending.replacement
-                ):
-                    raise RunJournalStorageError(
-                        "journal target changed before durable commit"
-                    )
-            # Durable commit point: replacement directory fsync has completed,
-            # and the full absolute path, lock, and target inode still match.
-            session.committed = tuple(record for _pending, record in session.pending)
-            committed_cleanup_error: tuple[RunJournalV0, BaseException] | None = None
-            for pending, record in session.pending:
+            # The stable anchor/root/journal locks are acquired before this
+            # transaction-wide mask. It remains active through every forward
+            # mutation, postcondition, rollback, and inode-verified temp cleanup.
+            with _signal_admission():
                 try:
-                    _cleanup_committed_backup(directory_fd, pending)
-                except BaseException as cleanup_error:
-                    if committed_cleanup_error is None:
-                        committed_cleanup_error = record, cleanup_error
-            if committed_cleanup_error is not None:
-                record, committed_error = committed_cleanup_error
-                raise RunJournalCommittedCleanupError(record) from committed_error
-        except BaseException as exc:
-            if session is not None and not session.committed:
-                rollback_error: BaseException | None = None
-                for pending, _record in reversed(session.pending):
-                    try:
-                        _rollback_pending_write(directory_fd, pending)
-                    except BaseException as candidate:
-                        if rollback_error is None:
-                            rollback_error = candidate
-                if rollback_error is not None:
-                    raise exc from rollback_error
-            raise
+                    _sweep_orphan_backups(directory_fd)
+                    session = _LockedJournal(directory_fd, lock, root, [])
+                    yield session
+                    _assert_root_unchanged(root)
+                    _assert_journal_lock(directory_fd, lock)
+                    for pending, _record in session.pending:
+                        if not _target_matches(
+                            directory_fd, pending.basename, pending.replacement
+                        ):
+                            raise RunJournalStorageError(
+                                "journal target changed before durable commit"
+                            )
+                    # Durable commit point: replacement directory fsync has completed,
+                    # and the full absolute path, lock, and target inode still match.
+                    session.committed = tuple(
+                        record for _pending, record in session.pending
+                    )
+                    committed_cleanup_error: (
+                        tuple[RunJournalV0, BaseException] | None
+                    ) = None
+                    for pending, record in session.pending:
+                        try:
+                            _cleanup_committed_backup(directory_fd, pending)
+                        except BaseException as cleanup_error:
+                            if committed_cleanup_error is None:
+                                committed_cleanup_error = record, cleanup_error
+                    if committed_cleanup_error is not None:
+                        record, committed_error = committed_cleanup_error
+                        raise RunJournalCommittedCleanupError(
+                            record
+                        ) from committed_error
+                except BaseException as exc:
+                    if session is not None and not session.committed:
+                        rollback_error: BaseException | None = None
+                        for pending, _record in reversed(session.pending):
+                            try:
+                                _rollback_pending_write(directory_fd, pending)
+                            except BaseException as candidate:
+                                if rollback_error is None:
+                                    rollback_error = candidate
+                        if rollback_error is not None:
+                            raise exc from rollback_error
+                    raise
         finally:
             primary = sys.exception()
             cleanup_errors: list[BaseException] = []
