@@ -568,6 +568,10 @@
       "format": "date-time",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$(?![\\s\\S])"
     },
+    "RunJournalReportFileV0": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$(?![\\s\\S])"
+    },
     "RunJournalDecisionIssueV0": {
       "type": "object",
       "additionalProperties": false,
@@ -752,10 +756,7 @@
         },
         "report_file": {
           "anyOf": [
-            {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
-            },
+            { "$ref": "#/$defs/RunJournalReportFileV0" },
             {
               "type": "null"
             }
@@ -785,8 +786,7 @@
                 "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
               },
               "report_file": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
+                "$ref": "#/$defs/RunJournalReportFileV0"
               }
             }
           }
@@ -807,8 +807,7 @@
                     "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
                   },
                   "report_file": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
+                    "$ref": "#/$defs/RunJournalReportFileV0"
                   }
                 }
               },

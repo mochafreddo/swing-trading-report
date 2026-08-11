@@ -22,6 +22,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -45,6 +46,9 @@ from .runner import RunKindV0
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 _ISSUE_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _REPORT_FILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}\Z")
+_ORPHAN_BACKUP_PATTERN = re.compile(
+    r"^\.[A-Za-z0-9][A-Za-z0-9._-]{0,511}\.json\.[0-9a-f]{24}\.backup\Z"
+)
 _NORMAL_TERMINAL = frozenset({"PUBLISHED", "BLOCKED", "FAILED"})
 _SANITIZED_ISSUE_CODES = frozenset(code.value for code in DecisionRunIssueCodeV0) | {
     "MISSED_EXPECTED",
@@ -65,6 +69,7 @@ _ALL_FIELDS = frozenset(
         "report_file",
     }
 )
+_LOGGER = logging.getLogger(__name__)
 
 
 class RunJournalError(RuntimeError):
@@ -77,6 +82,16 @@ class RunJournalConflictError(RunJournalError):
 
 class RunJournalStorageError(RunJournalError):
     """The local journal could not be read or written safely."""
+
+
+class RunJournalCommittedCleanupError(RunJournalStorageError):
+    """A durable record committed, but owned-resource cleanup was incomplete."""
+
+    def __init__(self, record: RunJournalV0) -> None:
+        self.run_id = record.run_id
+        self.run_kind = record.run_kind.value
+        self.status = record.status.value
+        super().__init__("journal committed but resource cleanup was incomplete")
 
 
 class RunJournalStatusV0(StrEnum):
@@ -538,12 +553,41 @@ class _JournalLock:
 
 
 @dataclass(frozen=True, slots=True)
-class _RootGuard:
-    parent_fd: int
-    directory_fd: int
+class _PathNode:
+    fd: int
     name: str
     device: int
     inode: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RootGuard:
+    anchor_fd: int
+    anchor_device: int
+    anchor_inode: int
+    nodes: tuple[_PathNode, ...]
+
+    @property
+    def directory_fd(self) -> int:
+        return self.nodes[-1].fd
+
+
+@dataclass(slots=True)
+class _PendingWrite:
+    basename: str
+    replacement: os.stat_result
+    previous: os.stat_result | None
+    backup_name: str | None
+    backup_info: os.stat_result | None
+
+
+@dataclass(slots=True)
+class _LockedJournal:
+    directory_fd: int
+    lock: _JournalLock
+    root: _RootGuard
+    pending: list[tuple[_PendingWrite, RunJournalV0]]
+    committed: tuple[RunJournalV0, ...] = ()
 
 
 def _close_fd(fd: int) -> None:
@@ -560,23 +604,71 @@ def _close_fd(fd: int) -> None:
         raise
 
 
-def _open_journal_directory(root: Path) -> int:
+def _snapshot_open_fds() -> frozenset[int]:
+    """Snapshot process FDs for single-threaded post-effect open recovery."""
+
+    for directory in ("/dev/fd", "/proc/self/fd"):
+        try:
+            candidates = tuple(
+                int(name) for name in os.listdir(directory) if name.isdecimal()
+            )
+        except OSError:
+            continue
+        opened: set[int] = set()
+        for fd in candidates:
+            try:
+                os.fstat(fd)
+            except OSError:
+                continue
+            opened.add(fd)
+        return frozenset(opened)
+    raise RunJournalStorageError("open file descriptors could not be inspected")
+
+
+def _owned_open(
+    path: str | Path,
+    flags: int,
+    mode: int = 0o777,
+    *,
+    dir_fd: int | None = None,
+) -> int:
+    """Open one FD and recover it if an injected syscall raises post-effect."""
+
+    before = _snapshot_open_fds()
     try:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        before = root.lstat()
-    except OSError as exc:
-        raise RunJournalStorageError("journal root is unavailable") from exc
-    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
-        raise RunJournalStorageError("journal root is not a safe directory")
+        return os.open(path, flags, mode, dir_fd=dir_fd)
+    except BaseException:
+        with suppress(BaseException):
+            leaked = _snapshot_open_fds() - before
+            expected: tuple[int, int] | None = None
+            with suppress(BaseException):
+                info = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+                expected = info.st_dev, info.st_ino
+            owned: list[int] = []
+            for fd in leaked:
+                with suppress(BaseException):
+                    info = os.fstat(fd)
+                    if expected is None or (info.st_dev, info.st_ino) == expected:
+                        owned.append(fd)
+            for fd in sorted(owned, reverse=True):
+                with suppress(BaseException):
+                    _close_fd(fd)
+        raise
+
+
+def _open_journal_directory(root: Path) -> int:
+    """Compatibility helper used by focused acquisition-failure probes."""
+
+    absolute = Path(os.path.abspath(root))
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        directory_fd = os.open(root, flags)
+        directory_fd = _owned_open(absolute, flags)
     except OSError as exc:
         raise RunJournalStorageError("journal root could not be opened safely") from exc
     try:
-        after = os.fstat(directory_fd)
-        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-            raise RunJournalStorageError("journal root changed during validation")
+        opened = os.fstat(directory_fd)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise RunJournalStorageError("journal root is not a safe directory")
     except BaseException:
         with suppress(BaseException):
             _close_fd(directory_fd)
@@ -585,71 +677,113 @@ def _open_journal_directory(root: Path) -> int:
 
 
 def _open_root_guard(root: Path) -> _RootGuard:
-    if root.name in {"", ".", ".."}:
-        raise RunJournalStorageError("journal root must have a stable parent entry")
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    absolute = Path(os.path.abspath(root))
+    components = absolute.parts[1:]
+    if not components:
+        raise RunJournalStorageError("journal root must not be the filesystem root")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        before = root.lstat()
+        anchor_fd = _owned_open("/", flags)
     except OSError as exc:
-        raise RunJournalStorageError("journal root is unavailable") from exc
-    parent_fd = _open_journal_directory(root.parent)
-    parent_locked = False
-    directory_fd: int | None = None
+        raise RunJournalStorageError("journal path anchor is unavailable") from exc
+    nodes: list[_PathNode] = []
     try:
-        fcntl.flock(parent_fd, fcntl.LOCK_EX)
-        parent_locked = True
-        current = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
-        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (
-            before.st_dev,
-            before.st_ino,
-        ):
-            raise RunJournalStorageError("journal root changed before coordination")
-        flags = (
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        anchor_info = os.fstat(anchor_fd)
+        if not stat.S_ISDIR(anchor_info.st_mode):
+            raise RunJournalStorageError("journal path anchor is not a directory")
+        # All local RunJournal processes share this stable, short critical section.
+        fcntl.flock(anchor_fd, fcntl.LOCK_EX)
+        parent_fd = anchor_fd
+        for component in components:
+            try:
+                child_fd = _owned_open(component, flags, dir_fd=parent_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=parent_fd)
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise RunJournalStorageError(
+                        "journal path component could not be created"
+                    ) from exc
+                try:
+                    child_fd = _owned_open(component, flags, dir_fd=parent_fd)
+                except OSError as exc:
+                    raise RunJournalStorageError(
+                        "journal path component could not be opened safely"
+                    ) from exc
+            except OSError as exc:
+                raise RunJournalStorageError(
+                    "journal path component could not be opened safely"
+                ) from exc
+            try:
+                child_info = os.fstat(child_fd)
+                if not stat.S_ISDIR(child_info.st_mode):
+                    raise RunJournalStorageError(
+                        "journal path component is not a directory"
+                    )
+            except BaseException:
+                with suppress(BaseException):
+                    _close_fd(child_fd)
+                raise
+            nodes.append(
+                _PathNode(
+                    child_fd,
+                    component,
+                    child_info.st_dev,
+                    child_info.st_ino,
+                )
+            )
+            parent_fd = child_fd
+        guard = _RootGuard(
+            anchor_fd,
+            anchor_info.st_dev,
+            anchor_info.st_ino,
+            tuple(nodes),
         )
-        directory_fd = os.open(root.name, flags, dir_fd=parent_fd)
-        try:
-            opened = os.fstat(directory_fd)
-        except BaseException:
-            with suppress(BaseException):
-                _close_fd(directory_fd)
-            directory_fd = None
-            raise
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise RunJournalStorageError("journal root changed while opening")
-        return _RootGuard(
-            parent_fd,
-            directory_fd,
-            root.name,
-            opened.st_dev,
-            opened.st_ino,
-        )
+        _assert_root_unchanged(guard)
+        return guard
     except BaseException:
-        if directory_fd is not None:
+        for node in reversed(nodes):
             with suppress(BaseException):
-                _close_fd(directory_fd)
-        if parent_locked:
-            with suppress(BaseException):
-                fcntl.flock(parent_fd, fcntl.LOCK_UN)
+                _close_fd(node.fd)
         with suppress(BaseException):
-            _close_fd(parent_fd)
+            fcntl.flock(anchor_fd, fcntl.LOCK_UN)
+        with suppress(BaseException):
+            _close_fd(anchor_fd)
         raise
 
 
 def _assert_root_unchanged(root: _RootGuard) -> None:
     try:
-        opened = os.fstat(root.directory_fd)
-        current = os.stat(root.name, dir_fd=root.parent_fd, follow_symlinks=False)
+        anchor_opened = os.fstat(root.anchor_fd)
+        anchor_current = os.stat("/", follow_symlinks=False)
     except OSError as exc:
-        raise RunJournalStorageError("journal root changed") from exc
-    expected = (root.device, root.inode)
+        raise RunJournalStorageError("journal path changed") from exc
+    anchor_expected = (root.anchor_device, root.anchor_inode)
     if (
-        not stat.S_ISDIR(opened.st_mode)
-        or (opened.st_dev, opened.st_ino) != expected
-        or not stat.S_ISDIR(current.st_mode)
-        or (current.st_dev, current.st_ino) != expected
+        not stat.S_ISDIR(anchor_opened.st_mode)
+        or (anchor_opened.st_dev, anchor_opened.st_ino) != anchor_expected
+        or not stat.S_ISDIR(anchor_current.st_mode)
+        or (anchor_current.st_dev, anchor_current.st_ino) != anchor_expected
     ):
-        raise RunJournalStorageError("journal root changed")
+        raise RunJournalStorageError("journal path changed")
+    parent_fd = root.anchor_fd
+    for node in root.nodes:
+        try:
+            opened = os.fstat(node.fd)
+            current = os.stat(node.name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise RunJournalStorageError("journal path changed") from exc
+        expected = (node.device, node.inode)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != expected
+            or not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino) != expected
+        ):
+            raise RunJournalStorageError("journal path changed")
+        parent_fd = node.fd
 
 
 def _assert_journal_lock(directory_fd: int, lock: _JournalLock) -> None:
@@ -675,7 +809,7 @@ def _open_journal_lock(directory_fd: int) -> _JournalLock:
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     try:
         try:
-            created_fd = os.open(
+            created_fd = _owned_open(
                 name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
                 0o600,
@@ -685,7 +819,7 @@ def _open_journal_lock(directory_fd: int) -> _JournalLock:
             pass
         else:
             _close_fd(created_fd)
-        lock_fd = os.open(name, os.O_RDWR | nofollow, dir_fd=directory_fd)
+        lock_fd = _owned_open(name, os.O_RDWR | nofollow, dir_fd=directory_fd)
     except OSError as exc:
         raise RunJournalStorageError("journal lock could not be opened safely") from exc
     directory_locked = False
@@ -728,7 +862,7 @@ def _read_record(
 ) -> tuple[RunJournalV0, bytes, os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        target_fd = os.open(basename, flags, dir_fd=directory_fd)
+        target_fd = _owned_open(basename, flags, dir_fd=directory_fd)
     except FileNotFoundError:
         raise
     except OSError as exc:
@@ -812,7 +946,7 @@ def _write_private_temp(
     for _ in range(32):
         name = f".{basename}.{secrets.token_hex(12)}.tmp"
         try:
-            fd = os.open(
+            fd = _owned_open(
                 name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                 0o600,
@@ -820,6 +954,12 @@ def _write_private_temp(
             )
         except FileExistsError:
             continue
+        except BaseException:
+            with suppress(BaseException):
+                current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISREG(current.st_mode) and current.st_nlink == 1:
+                    os.unlink(name, dir_fd=directory_fd)
+            raise
         info: os.stat_result | None = None
         try:
             info = os.fstat(fd)
@@ -862,7 +1002,7 @@ def _atomic_replace_record(
     payload: bytes,
     *,
     expected: os.stat_result | None,
-) -> None:
+) -> _PendingWrite:
     temp_name, temp_info = _write_private_temp(directory_fd, basename, payload)
     backup_name: str | None = None
     backup_info: os.stat_result | None = None
@@ -913,72 +1053,151 @@ def _atomic_replace_record(
             os.fsync(directory_fd)
             _assert_journal_lock(directory_fd, lock)
             _assert_root_unchanged(root)
-        except BaseException:
-            if _target_matches(directory_fd, basename, temp_info):
-                if backup_name is None:
-                    _unlink_if_matches(directory_fd, basename, temp_info)
-                else:
-                    assert expected is not None
-                    assert backup_info is not None
-                    current_backup = os.stat(
-                        backup_name,
-                        dir_fd=directory_fd,
-                        follow_symlinks=False,
-                    )
-                    if (
-                        not stat.S_ISREG(current_backup.st_mode)
-                        or current_backup.st_nlink != 1
-                        or (current_backup.st_dev, current_backup.st_ino)
-                        != (expected.st_dev, expected.st_ino)
-                    ):
-                        raise RunJournalStorageError(
-                            "journal rollback identity changed"
-                        ) from None
-                    try:
-                        os.replace(
-                            backup_name,
-                            basename,
-                            src_dir_fd=directory_fd,
-                            dst_dir_fd=directory_fd,
-                        )
-                    except BaseException:
-                        if not _target_matches(directory_fd, basename, expected):
-                            raise
-                    if not _target_matches(directory_fd, basename, expected):
-                        raise RunJournalStorageError(
-                            "journal rollback target identity changed"
-                        ) from None
-                    backup_name = None
-                with suppress(BaseException):
-                    os.fsync(directory_fd)
+        except BaseException as primary:
+            pending = _PendingWrite(
+                basename, temp_info, expected, backup_name, backup_info
+            )
+            try:
+                _rollback_pending_write(directory_fd, pending)
+            except BaseException as rollback_error:
+                raise primary from rollback_error
             raise
         temp_name = ""
-        if backup_name is not None:
-            assert expected is not None
-            assert backup_info is not None
-            try:
-                cleaned = _unlink_if_matches(
-                    directory_fd,
-                    backup_name,
-                    backup_info,
-                    expected_links=frozenset({1}),
-                )
-            except BaseException:
-                cleaned = False
-            if cleaned:
-                backup_name = None
-    finally:
-        if temp_name:
-            with suppress(BaseException):
-                _unlink_if_matches(directory_fd, temp_name, temp_info)
+        return _PendingWrite(basename, temp_info, expected, backup_name, backup_info)
+    except BaseException as primary:
         if backup_name is not None and backup_info is not None:
-            with suppress(BaseException):
+            try:
                 _unlink_if_matches(
                     directory_fd,
                     backup_name,
                     backup_info,
                     expected_links=frozenset({1, 2}),
                 )
+            except BaseException as cleanup_error:
+                raise primary from cleanup_error
+        raise
+    finally:
+        if temp_name:
+            with suppress(BaseException):
+                _unlink_if_matches(directory_fd, temp_name, temp_info)
+
+
+def _rollback_pending_write(directory_fd: int, pending: _PendingWrite) -> None:
+    if not _target_matches(directory_fd, pending.basename, pending.replacement):
+        if pending.previous is not None and _target_matches(
+            directory_fd, pending.basename, pending.previous
+        ):
+            return
+        raise RunJournalStorageError("journal rollback target identity changed")
+    if pending.previous is None:
+        if not _unlink_if_matches(directory_fd, pending.basename, pending.replacement):
+            raise RunJournalStorageError("journal rollback target identity changed")
+    else:
+        if pending.backup_name is None or pending.backup_info is None:
+            raise RunJournalStorageError("journal rollback backup is unavailable")
+        current_backup = os.stat(
+            pending.backup_name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(current_backup.st_mode)
+            or current_backup.st_nlink != 1
+            or (current_backup.st_dev, current_backup.st_ino)
+            != (pending.previous.st_dev, pending.previous.st_ino)
+        ):
+            raise RunJournalStorageError("journal rollback identity changed")
+        try:
+            os.replace(
+                pending.backup_name,
+                pending.basename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+        except BaseException:
+            if not _target_matches(directory_fd, pending.basename, pending.previous):
+                raise
+        if not _target_matches(directory_fd, pending.basename, pending.previous):
+            raise RunJournalStorageError("journal rollback target identity changed")
+        pending.backup_name = None
+    os.fsync(directory_fd)
+
+
+def _cleanup_committed_backup(directory_fd: int, pending: _PendingWrite) -> None:
+    if pending.backup_name is None or pending.backup_info is None:
+        return
+    try:
+        cleaned = _unlink_if_matches(
+            directory_fd,
+            pending.backup_name,
+            pending.backup_info,
+            expected_links=frozenset({1}),
+        )
+    except BaseException:
+        try:
+            os.stat(
+                pending.backup_name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pending.backup_name = None
+            return
+        raise
+    if not cleaned:
+        raise RunJournalStorageError("journal committed backup cleanup was unsafe")
+    pending.backup_name = None
+    os.fsync(directory_fd)
+
+
+def _sweep_orphan_backups(directory_fd: int) -> int:
+    try:
+        names = os.listdir(directory_fd)
+    except OSError as exc:
+        raise RunJournalStorageError("journal directory could not be listed") from exc
+    swept = 0
+    for name in names:
+        if type(name) is not str or _ORPHAN_BACKUP_PATTERN.fullmatch(name) is None:
+            continue
+        try:
+            info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink not in {1, 2}:
+            raise RunJournalStorageError("journal orphan backup is unsafe")
+        if _unlink_if_matches(
+            directory_fd,
+            name,
+            info,
+            expected_links=frozenset({1, 2}),
+        ):
+            swept += 1
+    if swept:
+        os.fsync(directory_fd)
+        _LOGGER.info("swept %d orphan RunJournal backup(s)", swept)
+    return swept
+
+
+def _fd_is_closed(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError as exc:
+        return exc.errno == errno.EBADF
+    return False
+
+
+def _cleanup_close_fd(fd: int) -> tuple[BaseException | None, bool]:
+    try:
+        os.close(fd)
+        return None, True
+    except BaseException as first:
+        if _fd_is_closed(fd):
+            return first, True
+        try:
+            os.close(fd)
+        except BaseException:
+            return first, _fd_is_closed(fd)
+        return first, True
 
 
 class RunJournalStoreV0:
@@ -989,95 +1208,134 @@ class RunJournalStoreV0:
             path = root
         else:
             raise TypeError("journal root must be a path string or exact Path")
-        self._root = path
+        self._root = Path(os.path.abspath(path))
 
     @contextmanager
-    def _locked(self) -> Iterator[tuple[int, _JournalLock, _RootGuard]]:
+    def _locked(self) -> Iterator[_LockedJournal]:
         root = _open_root_guard(self._root)
         directory_fd = root.directory_fd
         lock: _JournalLock | None = None
+        session: _LockedJournal | None = None
         try:
             lock = _open_journal_lock(directory_fd)
             _assert_root_unchanged(root)
-            yield directory_fd, lock, root
+            _sweep_orphan_backups(directory_fd)
+            session = _LockedJournal(directory_fd, lock, root, [])
+            yield session
             _assert_root_unchanged(root)
+            _assert_journal_lock(directory_fd, lock)
+            for pending, _record in session.pending:
+                if not _target_matches(
+                    directory_fd, pending.basename, pending.replacement
+                ):
+                    raise RunJournalStorageError(
+                        "journal target changed before durable commit"
+                    )
+            # Durable commit point: replacement directory fsync has completed,
+            # and the full absolute path, lock, and target inode still match.
+            session.committed = tuple(record for _pending, record in session.pending)
+            committed_cleanup_error: tuple[RunJournalV0, BaseException] | None = None
+            for pending, record in session.pending:
+                try:
+                    _cleanup_committed_backup(directory_fd, pending)
+                except BaseException as cleanup_error:
+                    if committed_cleanup_error is None:
+                        committed_cleanup_error = record, cleanup_error
+            if committed_cleanup_error is not None:
+                record, committed_error = committed_cleanup_error
+                raise RunJournalCommittedCleanupError(record) from committed_error
+        except BaseException as exc:
+            if session is not None and not session.committed:
+                rollback_error: BaseException | None = None
+                for pending, _record in reversed(session.pending):
+                    try:
+                        _rollback_pending_write(directory_fd, pending)
+                    except BaseException as candidate:
+                        if rollback_error is None:
+                            rollback_error = candidate
+                if rollback_error is not None:
+                    raise exc from rollback_error
+            raise
         finally:
             primary = sys.exception()
-            cleanup_error: BaseException | None = None
+            cleanup_errors: list[BaseException] = []
+            incomplete = False
 
             def attempt_cleanup(operation: Callable[[], None]) -> None:
-                nonlocal cleanup_error
                 try:
                     operation()
                 except BaseException as exc:
-                    if cleanup_error is None:
-                        cleanup_error = exc
+                    cleanup_errors.append(exc)
+
+            def attempt_close(fd: int) -> None:
+                nonlocal incomplete
+                error, closed = _cleanup_close_fd(fd)
+                if error is not None:
+                    cleanup_errors.append(error)
+                if not closed:
+                    incomplete = True
 
             if lock is not None:
                 try:
                     _assert_journal_lock(directory_fd, lock)
                 except BaseException as exc:
-                    cleanup_error = exc
+                    cleanup_errors.append(exc)
                 try:
                     attempt_cleanup(lambda: fcntl.flock(lock.fd, fcntl.LOCK_UN))
                 finally:
                     try:
-                        attempt_cleanup(lambda: _close_fd(lock.fd))
+                        attempt_close(lock.fd)
                     finally:
                         try:
                             attempt_cleanup(
                                 lambda: fcntl.flock(directory_fd, fcntl.LOCK_UN)
                             )
                         finally:
-                            try:
-                                attempt_cleanup(lambda: _close_fd(directory_fd))
-                            finally:
-                                try:
-                                    attempt_cleanup(
-                                        lambda: fcntl.flock(
-                                            root.parent_fd, fcntl.LOCK_UN
-                                        )
-                                    )
-                                finally:
-                                    attempt_cleanup(lambda: _close_fd(root.parent_fd))
+                            for node in reversed(root.nodes):
+                                attempt_close(node.fd)
             else:
-                try:
-                    attempt_cleanup(lambda: _close_fd(directory_fd))
-                finally:
-                    try:
-                        attempt_cleanup(
-                            lambda: fcntl.flock(root.parent_fd, fcntl.LOCK_UN)
-                        )
-                    finally:
-                        attempt_cleanup(lambda: _close_fd(root.parent_fd))
-            if primary is None and cleanup_error is not None:
-                if isinstance(cleanup_error, RunJournalStorageError):
-                    raise cleanup_error
-                if isinstance(cleanup_error, OSError):
+                for node in reversed(root.nodes):
+                    attempt_close(node.fd)
+            try:
+                attempt_cleanup(lambda: fcntl.flock(root.anchor_fd, fcntl.LOCK_UN))
+            finally:
+                attempt_close(root.anchor_fd)
+            if primary is None and cleanup_errors:
+                committed = () if session is None else session.committed
+                if committed:
+                    if incomplete:
+                        raise RunJournalCommittedCleanupError(
+                            committed[-1]
+                        ) from cleanup_errors[0]
+                    # Post-effect cleanup errors are recovered only after every
+                    # owned descriptor is verified closed.
+                elif isinstance(cleanup_errors[0], RunJournalStorageError):
+                    raise cleanup_errors[0]
+                elif isinstance(cleanup_errors[0], OSError):
                     raise RunJournalStorageError(
                         "journal cleanup failed"
-                    ) from cleanup_error
-                raise cleanup_error
+                    ) from cleanup_errors[0]
+                else:
+                    raise cleanup_errors[0]
 
     @staticmethod
     def _write(
-        directory_fd: int,
-        lock: _JournalLock,
-        root: _RootGuard,
+        session: _LockedJournal,
         basename: str,
         record: RunJournalV0,
         *,
         expected: os.stat_result | None,
     ) -> None:
         try:
-            _atomic_replace_record(
-                directory_fd,
-                lock,
-                root,
+            pending = _atomic_replace_record(
+                session.directory_fd,
+                session.lock,
+                session.root,
                 basename,
                 canonical_run_journal_bytes_v0(record),
                 expected=expected,
             )
+            session.pending.append((pending, record))
         except RunJournalError:
             raise
         except OSError as exc:
@@ -1107,14 +1365,13 @@ class RunJournalStoreV0:
             desired.run_kind, desired.expected_at, desired.run_id
         )
         desired_bytes = canonical_run_journal_bytes_v0(desired)
-        with self._locked() as (directory_fd, lock, root):
+        with self._locked() as session:
+            directory_fd = session.directory_fd
             try:
                 current, current_bytes, _ = _read_record(directory_fd, basename)
             except FileNotFoundError:
                 self._write(
-                    directory_fd,
-                    lock,
-                    root,
+                    session,
                     basename,
                     desired,
                     expected=None,
@@ -1158,7 +1415,8 @@ class RunJournalStoreV0:
         )
         original_bytes = canonical_run_journal_bytes_v0(original)
         desired_bytes = canonical_run_journal_bytes_v0(desired)
-        with self._locked() as (directory_fd, lock, root):
+        with self._locked() as session:
+            directory_fd = session.directory_fd
             try:
                 current, current_bytes, current_info = _read_record(
                     directory_fd, basename
@@ -1170,9 +1428,7 @@ class RunJournalStoreV0:
             if current_bytes != original_bytes:
                 raise RunJournalConflictError("journal compare-and-set conflict")
             self._write(
-                directory_fd,
-                lock,
-                root,
+                session,
                 basename,
                 desired,
                 expected=current_info,
@@ -1212,14 +1468,13 @@ class RunJournalStoreV0:
         basename = _journal_basename(
             desired.run_kind, desired.expected_at, desired.run_id
         )
-        with self._locked() as (directory_fd, lock, root):
+        with self._locked() as session:
+            directory_fd = session.directory_fd
             try:
                 current, _, _ = _read_record(directory_fd, basename)
             except FileNotFoundError:
                 self._write(
-                    directory_fd,
-                    lock,
-                    root,
+                    session,
                     basename,
                     desired,
                     expected=None,
@@ -1281,7 +1536,8 @@ class RunJournalStoreV0:
             type(status) is not RunJournalStatusV0 for status in allowed
         ):
             raise TypeError("status filter requires exact journal statuses")
-        with self._locked() as (directory_fd, _lock, _root):
+        with self._locked() as session:
+            directory_fd = session.directory_fd
             records = [record for record, _ in self._read_all_locked(directory_fd)]
         if allowed is not None:
             records = [record for record in records if record.status in allowed]
@@ -1307,7 +1563,8 @@ class RunJournalStoreV0:
         if len(identities) != len(slots):
             raise ValueError("expected slots must be unique")
 
-        with self._locked() as (directory_fd, lock, root):
+        with self._locked() as session:
+            directory_fd = session.directory_fd
             current = self._read_all_locked(directory_fd)
             by_identity = {
                 (record.run_kind, record.expected_at, record.run_id): (
@@ -1345,9 +1602,7 @@ class RunJournalStoreV0:
                     )
                     basename = _journal_basename(*identity)
                     self._write(
-                        directory_fd,
-                        lock,
-                        root,
+                        session,
                         basename,
                         stale,
                         expected=record_info,
@@ -1373,9 +1628,7 @@ class RunJournalStoreV0:
                 )
                 basename = _journal_basename(*identity)
                 self._write(
-                    directory_fd,
-                    lock,
-                    root,
+                    session,
                     basename,
                     missed,
                     expected=None,
@@ -1444,6 +1697,7 @@ def journal_decision_run_v0(
 
 __all__ = [
     "ExpectedRunV0",
+    "RunJournalCommittedCleanupError",
     "RunJournalConflictError",
     "RunJournalError",
     "RunJournalIssueV0",

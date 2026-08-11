@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from sab.decision_board.results import (
 )
 from sab.decision_board.run_journal import (
     ExpectedRunV0,
+    RunJournalCommittedCleanupError,
     RunJournalConflictError,
     RunJournalStatusV0,
     RunJournalStoreV0,
@@ -207,6 +210,53 @@ def test_schema_accepts_sanitized_report_basename_and_rejects_path(
     assert errors
 
 
+def test_schema_reuses_absolute_end_report_file_contract_for_every_file_branch(
+    tmp_path: Path,
+) -> None:
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "schemas/decision-board.v0.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    report_schema = schema["$defs"]["RunJournalReportFileV0"]
+    assert report_schema == {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$(?![\\s\\S])",
+    }
+    validator = Draft202012Validator(
+        {
+            "$schema": schema["$schema"],
+            "$defs": schema["$defs"],
+            "$ref": "#/$defs/RunJournalV0",
+        },
+        format_checker=FormatChecker(),
+    )
+    store = RunJournalStoreV0(tmp_path)
+    started = _started(store)
+    published = store.finish(
+        started,
+        status=RunJournalStatusV0.PUBLISHED,
+        terminal_at=TERMINAL_AT,
+        report_file="2026-08-11.entry.decision-board.json",
+    ).to_public_dict()
+    failed_upload = {
+        **published,
+        "status": "FAILED",
+        "issues": [
+            {
+                "code": "UPLOAD_FAILED",
+                "message": "Run reported sanitized issue code UPLOAD_FAILED.",
+            }
+        ],
+    }
+    for record in (published, failed_upload):
+        mutated = {**record, "report_file": f"{record['report_file']}\n"}
+        assert list(validator.iter_errors(mutated)), mutated
+        with pytest.raises(ValueError, match="report_file"):
+            parse_run_journal_v0(mutated)
+
+
 def test_schema_matches_runtime_run_journal_contract(tmp_path: Path) -> None:
     schema = json.loads(
         (
@@ -388,23 +438,45 @@ def test_store_rejects_symlink_lock_without_creating_record(tmp_path: Path) -> N
     assert target.read_text(encoding="utf-8") == "PRIVATE-SENTINEL"
 
 
+def test_root_component_creation_error_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "missing" / "journal"
+
+    def fail_mkdir(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("PRIVATE-SENTINEL mkdir failure")
+
+    monkeypatch.setattr(run_journal.os, "mkdir", fail_mkdir)
+    with pytest.raises(run_journal.RunJournalStorageError) as exc_info:
+        _started(RunJournalStoreV0(root), run_id="mkdir-sanitized")
+    assert "PRIVATE-SENTINEL" not in str(exc_info.value)
+
+
 def test_store_rejects_root_replacement_without_split_brain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     moved = tmp_path.parent / f"{tmp_path.name}-moved"
     real_flock = run_journal.fcntl.flock
+    original_root_info = tmp_path.stat()
     replaced = False
 
     def replace_root(fd: int, operation: int) -> None:
         nonlocal replaced
         real_flock(fd, operation)
-        if operation == run_journal.fcntl.LOCK_EX and not replaced:
+        info = os.fstat(fd)
+        if (
+            operation == run_journal.fcntl.LOCK_EX
+            and (info.st_dev, info.st_ino)
+            == (original_root_info.st_dev, original_root_info.st_ino)
+            and not replaced
+        ):
             replaced = True
             tmp_path.rename(moved)
             tmp_path.mkdir()
 
     monkeypatch.setattr(run_journal.fcntl, "flock", replace_root)
-    with pytest.raises(run_journal.RunJournalStorageError, match="root"):
+    with pytest.raises(run_journal.RunJournalStorageError, match=r"path|root"):
         _started(RunJournalStoreV0(tmp_path))
 
     assert list(tmp_path.glob("*.json")) == []
@@ -434,6 +506,83 @@ def test_store_rejects_root_replacement_without_split_brain(
     )
     assert second.returncode == 0, second.stderr
     assert len(list(tmp_path.glob("*.json"))) == 1
+    assert list(moved.glob("*.json")) == []
+
+
+def test_parent_replacement_and_second_process_cannot_split_same_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    parent = tmp_path / "authority"
+    root = parent / "journal"
+    root.mkdir(parents=True)
+    moved_parent = tmp_path / "authority-moved"
+    original_root_info = root.stat()
+    real_flock = run_journal.fcntl.flock
+    second: subprocess.Popen[str] | None = None
+
+    def replace_parent_when_root_is_locked(fd: int, operation: int) -> None:
+        nonlocal second
+        real_flock(fd, operation)
+        info = os.fstat(fd)
+        if (
+            operation == run_journal.fcntl.LOCK_EX
+            and (info.st_dev, info.st_ino)
+            == (original_root_info.st_dev, original_root_info.st_ino)
+            and second is None
+        ):
+            parent.rename(moved_parent)
+            root.mkdir(parents=True)
+            second = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from datetime import UTC,datetime; "
+                        "from sab.decision_board.run_journal import RunJournalStoreV0; "
+                        "from sab.decision_board.runner import RunKindV0; "
+                        f"RunJournalStoreV0({str(root)!r}).start("
+                        "run_kind=RunKindV0.ENTRY,"
+                        "expected_at=datetime(2026,8,11,1,0,tzinfo=UTC),"
+                        "run_id='parent-split-probe',"
+                        "started_at=datetime(2026,8,11,1,0,1,tzinfo=UTC),"
+                        "grace_seconds=60,stale_seconds=300)"
+                    ),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+    monkeypatch.setattr(run_journal.fcntl, "flock", replace_parent_when_root_is_locked)
+    with pytest.raises(run_journal.RunJournalStorageError, match=r"path|root"):
+        _started(RunJournalStoreV0(root), run_id="parent-split-probe")
+    assert second is not None
+    stdout, stderr = second.communicate(timeout=10)
+    assert second.returncode == 0, (stdout, stderr)
+    assert len(list(root.glob("*.json"))) == 1
+    assert list((moved_parent / "journal").glob("*.json")) == []
+
+
+def test_last_path_check_swap_rolls_back_pinned_root_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    moved = tmp_path.parent / f"{tmp_path.name}-last-check-moved"
+    real_assert = run_journal._assert_root_unchanged
+    checks = 0
+
+    def swap_on_context_exit(root: object) -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 5:
+            tmp_path.rename(moved)
+            tmp_path.mkdir()
+        real_assert(root)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(run_journal, "_assert_root_unchanged", swap_on_context_exit)
+    with pytest.raises(run_journal.RunJournalStorageError, match=r"path|root"):
+        _started(RunJournalStoreV0(tmp_path), run_id="last-path-check")
+    assert list(tmp_path.glob("*.json")) == []
     assert list(moved.glob("*.json")) == []
 
 
@@ -594,6 +743,140 @@ def test_directory_and_temp_fstat_baseexception_close_owned_resources(
     finally:
         monkeypatch.undo()
         os.close(directory_fd)
+
+
+@pytest.mark.parametrize("stage", ["anchor", "lock", "temp"])
+def test_post_effect_open_baseexception_closes_fd_and_temp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str
+) -> None:
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    real_open = run_journal.os.open
+    interrupted = False
+
+    def open_then_interrupt(*args: object, **kwargs: object) -> int:
+        nonlocal interrupted
+        fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
+        target_arg = args[0]
+        flags_arg = args[1]
+        assert isinstance(target_arg, (str, Path))
+        assert type(flags_arg) is int
+        target = os.fspath(target_arg)
+        flags = flags_arg
+        matches = {
+            "anchor": target == "/",
+            "lock": target == ".run-journal-v0.lock" and not flags & os.O_CREAT,
+            "temp": target.endswith(".tmp"),
+        }[stage]
+        if matches and not interrupted:
+            interrupted = True
+            raise SyntheticInterrupt
+        return fd
+
+    before_fds = set(os.listdir("/dev/fd"))
+    monkeypatch.setattr(run_journal.os, "open", open_then_interrupt)
+    with pytest.raises(SyntheticInterrupt):
+        _started(RunJournalStoreV0(tmp_path), run_id=f"post-open-{stage}")
+    assert interrupted
+    assert set(os.listdir("/dev/fd")) == before_fds
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_post_effect_cleanup_baseexception_returns_durable_committed_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticCleanupInterrupt(BaseException):
+        pass
+
+    real_replace = run_journal.os.replace
+    real_close = run_journal.os.close
+    replaced = False
+    interrupted = False
+
+    def mark_replace(*args: object, **kwargs: object) -> None:
+        nonlocal replaced
+        real_replace(*args, **kwargs)  # type: ignore[arg-type]
+        replaced = True
+
+    def close_then_interrupt(fd: int) -> None:
+        nonlocal interrupted
+        real_close(fd)
+        if replaced and not interrupted:
+            interrupted = True
+            raise SyntheticCleanupInterrupt
+
+    monkeypatch.setattr(run_journal.os, "replace", mark_replace)
+    monkeypatch.setattr(run_journal.os, "close", close_then_interrupt)
+    committed = _started(RunJournalStoreV0(tmp_path), run_id="cleanup-post-effect")
+    assert interrupted
+    assert committed.status is RunJournalStatusV0.STARTED
+    assert len(list(tmp_path.glob("*.json"))) == 1
+    for path in (tmp_path / ".run-journal-v0.lock", Path("/")):
+        probe_fd = os.open(path, os.O_RDONLY)
+        try:
+            run_journal.fcntl.flock(
+                probe_fd,
+                run_journal.fcntl.LOCK_EX | run_journal.fcntl.LOCK_NB,
+            )
+            run_journal.fcntl.flock(probe_fd, run_journal.fcntl.LOCK_UN)
+        finally:
+            os.close(probe_fd)
+
+
+def test_next_locked_operation_sweeps_and_observes_safe_orphan_backup(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    store = RunJournalStoreV0(tmp_path)
+    _started(store, run_id="orphan-sweep")
+    record_path = next(tmp_path.glob("*.json"))
+    backup_path = tmp_path / f".{record_path.name}.{'a' * 24}.backup"
+    os.link(record_path, backup_path)
+    caplog.set_level(logging.INFO, logger=run_journal.__name__)
+
+    assert store.status(limit=1)[0].run_id == "orphan-sweep"
+    assert not backup_path.exists()
+    assert "swept 1 orphan RunJournal backup(s)" in caplog.text
+
+
+def test_unclosed_resource_after_commit_raises_safe_typed_cleanup_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real_replace = run_journal.os.replace
+    real_close = run_journal.os.close
+    replaced = False
+    blocked_fds: set[int] = set()
+
+    def mark_replace(*args: object, **kwargs: object) -> None:
+        nonlocal replaced
+        real_replace(*args, **kwargs)  # type: ignore[arg-type]
+        replaced = True
+
+    def fail_close(fd: int) -> None:
+        if replaced:
+            blocked_fds.add(fd)
+            raise OSError("PRIVATE-SENTINEL committed cleanup failure")
+        real_close(fd)
+
+    monkeypatch.setattr(run_journal.os, "replace", mark_replace)
+    monkeypatch.setattr(run_journal.os, "close", fail_close)
+    try:
+        with pytest.raises(run_journal.RunJournalStorageError) as exc_info:
+            _started(RunJournalStoreV0(tmp_path), run_id="cleanup-unclosed")
+        assert isinstance(exc_info.value, RunJournalCommittedCleanupError)
+        assert exc_info.value.run_id == "cleanup-unclosed"
+        assert exc_info.value.status == "STARTED"
+        assert "PRIVATE-SENTINEL" not in str(exc_info.value)
+        assert len(blocked_fds) >= 3
+        assert len(list(tmp_path.glob("*.json"))) == 1
+    finally:
+        monkeypatch.setattr(run_journal.os, "close", real_close)
+        for fd in blocked_fds:
+            with suppress(OSError):
+                run_journal.fcntl.flock(fd, run_journal.fcntl.LOCK_UN)
+            with suppress(OSError):
+                real_close(fd)
 
 
 def test_cross_process_start_is_idempotent_only_for_exact_bytes(tmp_path: Path) -> None:

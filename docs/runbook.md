@@ -73,10 +73,23 @@ uv run python -m sab decision-board \
 provenance로 보존하며, 이후 reconcile에서 다른 정책으로 재해석하면 conflict로 중단합니다.
 journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지 않습니다.
 
+경로 authority는 filesystem root(`/`)의 read-only directory FD에 잡는 짧은 전역
+`flock` 아래 journal 절대 경로의 모든 component를 `O_DIRECTORY|O_NOFOLLOW`로 순회해
+각 dev/inode를 고정합니다. write 뒤 directory fsync와 마지막 full-chain/lock/target inode
+검증이 모두 끝난 순간만 durable commit point입니다. 그 전의 pathname 교체는 pinned root의
+변경을 rollback하고 실패합니다. commit 뒤 unlock/close가 post-effect 예외를 내더라도 모든
+owned FD가 실제로 닫혔으면 committed record를 반환하며, 닫힘을 확인할 수 없으면 raw 오류
+대신 identity/status만 담은 sanitized committed-cleanup 오류를 냅니다. 안전한 정규식 이름의
+orphan backup은 다음 lock 획득 때 inode/link-count를 확인해 삭제하고 개수만 로컬 로그에
+남깁니다. 이 anchor는 서로 다른 journal directory의 짧은 local operation도 직렬화하는
+보수적 tradeoff이므로 lock 내부에서 runner나 네트워크 작업을 수행하지 않습니다.
+
 공개 JSON Schema는 canonical 필드 형태를 검사하지만 timestamp 간 시간 순서는 표준 JSON
 Schema만으로 완전히 표현하지 못합니다. Python 소비 경계는 반드시
 `parse_run_journal_v0()`를 사용해 chronology를 포함한 semantic contract까지 검증해야 합니다.
 Web mirror는 같은 chronology refinement를 적용합니다.
+`report_file`이 존재하는 모든 상태 branch는 하나의 공유 basename schema를 사용하며 마지막
+개행까지 거부합니다.
 
 wrapper와 두 plist 파일은 shadow 검증용 템플릿일 뿐입니다.
 `com.mochafreddo.sab.decision-board.{entry,holding}-shadow.plist.template`은

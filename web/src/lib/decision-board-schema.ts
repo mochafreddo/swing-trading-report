@@ -10,7 +10,7 @@ const runJournalTimestampV0Schema = z
   .pipe(z.iso.datetime({ offset: false }));
 const runJournalReportFileV0Schema = z
   .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/);
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$(?![\s\S])/);
 const runJournalDecisionIssueMessages = {
   COMPILER_CONTRACT_INVALID:
     "Run reported sanitized issue code COMPILER_CONTRACT_INVALID.",

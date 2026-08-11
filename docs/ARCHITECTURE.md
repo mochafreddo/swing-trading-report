@@ -331,8 +331,11 @@ schema, local artifact를 유지합니다.
 T9 local operations owner는 `sab/decision_board/run_journal.py`의 local-only
 `RunJournalV0`와 `scripts/launchd/sab-decision-board-shadow-wrapper.sh`만 추가로 소유합니다.
 명시적으로 주입된 `run_kind + expected_at(UTC) + run_id`가 journal identity이고, cross-process
-stable parent-directory coordination과 root/lock inode 재검증 아래 canonical JSON
-compare-and-set과 atomic replace로 `STARTED` 및 terminal observation을 기록합니다. claim 시의
+filesystem-root anchor coordination과 절대 경로 전체 component/root/lock inode 재검증 아래
+canonical JSON compare-and-set과 atomic replace로 `STARTED` 및 terminal observation을 기록합니다.
+전역 anchor는 runner 밖의 짧은 local journal critical section만 직렬화하며, directory fsync와
+마지막 full-path 검증 이후에만 durable commit으로 인정합니다. 그 전까지 pinned-root rollback
+권한을 유지하고, commit 뒤 cleanup은 모든 FD/lock의 닫힘을 검증합니다. claim 시의
 grace/stale 정책도 record에 고정하며 status/reconcile CLI는 이 local directory만 읽고 bounded
 sanitized record를 반환합니다.
 launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지

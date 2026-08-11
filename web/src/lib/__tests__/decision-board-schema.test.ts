@@ -129,6 +129,33 @@ describe("Decision Board V0 schema", () => {
         ],
       }).success,
     ).toBe(false);
+
+    const published = {
+      ...started,
+      status: "PUBLISHED",
+      terminal_at: "2026-08-11T01:00:02Z",
+      report_file: "2026-08-11.entry.decision-board.json",
+    };
+    expect(runJournalV0Schema.safeParse(published).success).toBe(true);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...published,
+        report_file: `${published.report_file}\n`,
+      }).success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...published,
+        status: "FAILED",
+        issues: [
+          {
+            code: "UPLOAD_FAILED",
+            message: "Run reported sanitized issue code UPLOAD_FAILED.",
+          },
+        ],
+        report_file: `${published.report_file}\n`,
+      }).success,
+    ).toBe(false);
   });
 
   it.each(["published-entry.json", "published-holding.json", "blocked.json"])(
