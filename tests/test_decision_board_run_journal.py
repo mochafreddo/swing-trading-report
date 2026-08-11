@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -453,6 +454,26 @@ def test_root_component_creation_error_is_sanitized(
     assert "PRIVATE-SENTINEL" not in str(exc_info.value)
 
 
+def test_search_only_ancestor_allows_write_status_and_revalidation(
+    tmp_path: Path,
+) -> None:
+    ancestor = tmp_path / "search-only"
+    nested = ancestor / "nested"
+    root = nested / "journal"
+    nested.mkdir(parents=True)
+    # The first ancestor proves 0111 traversal; the second grants only
+    # write+search so the final root must be created through mkdirat/search FD.
+    nested.chmod(0o333)
+    ancestor.chmod(0o111)
+    try:
+        store = RunJournalStoreV0(root)
+        started = _started(store, run_id="search-only-ancestor")
+        assert store.status(limit=1)[0].to_public_dict() == started.to_public_dict()
+    finally:
+        ancestor.chmod(0o700)
+        nested.chmod(0o700)
+
+
 def test_store_rejects_root_replacement_without_split_brain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -745,46 +766,85 @@ def test_directory_and_temp_fstat_baseexception_close_owned_resources(
         os.close(directory_fd)
 
 
-@pytest.mark.parametrize("stage", ["anchor", "lock", "temp"])
-def test_post_effect_open_baseexception_closes_fd_and_temp(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str
+def test_signal_interrupted_open_closes_only_returned_fd_not_foreign_same_inode(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class SyntheticInterrupt(BaseException):
         pass
 
     real_open = run_journal.os.open
-    interrupted = False
+    real_close = run_journal.os.close
+    owned_fd: int | None = None
+    foreign_fd: int | None = None
 
-    def open_then_interrupt(*args: object, **kwargs: object) -> int:
-        nonlocal interrupted
+    def raise_interrupt(_signum: int, _frame: object) -> None:
+        raise SyntheticInterrupt
+
+    def open_then_signal(*args: object, **kwargs: object) -> int:
+        nonlocal owned_fd, foreign_fd
         fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
-        target_arg = args[0]
-        flags_arg = args[1]
-        assert isinstance(target_arg, (str, Path))
-        assert type(flags_arg) is int
-        target = os.fspath(target_arg)
-        flags = flags_arg
-        matches = {
-            "anchor": target == "/",
-            "lock": target == ".run-journal-v0.lock" and not flags & os.O_CREAT,
-            "temp": target.endswith(".tmp"),
-        }[stage]
-        if matches and not interrupted:
-            interrupted = True
-            raise SyntheticInterrupt
+        owned_fd = fd
+        foreign_fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
+        os.kill(os.getpid(), signal.SIGTERM)
         return fd
 
-    before_fds = set(os.listdir("/dev/fd"))
-    monkeypatch.setattr(run_journal.os, "open", open_then_interrupt)
-    with pytest.raises(SyntheticInterrupt):
-        _started(RunJournalStoreV0(tmp_path), run_id=f"post-open-{stage}")
-    assert interrupted
-    assert set(os.listdir("/dev/fd")) == before_fds
-    assert list(tmp_path.glob("*.tmp")) == []
-    assert list(tmp_path.glob("*.json")) == []
+    previous_handler = signal.signal(signal.SIGTERM, raise_interrupt)
+    monkeypatch.setattr(run_journal.os, "open", open_then_signal)
+    try:
+        with pytest.raises(SyntheticInterrupt):
+            run_journal._owned_open("/dev/null", os.O_RDONLY)
+        assert owned_fd is not None
+        with pytest.raises(OSError) as closed_error:
+            os.fstat(owned_fd)
+        assert closed_error.value.errno == 9
+        assert foreign_fd is not None
+        os.fstat(foreign_fd)
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+        if foreign_fd is not None:
+            with suppress(OSError):
+                real_close(foreign_fd)
 
 
-def test_post_effect_cleanup_baseexception_returns_durable_committed_record(
+@pytest.mark.parametrize("helper", ["ordinary", "cleanup"])
+def test_close_never_retries_reused_fd_number(
+    monkeypatch: pytest.MonkeyPatch, helper: str
+) -> None:
+    class SyntheticCloseInterrupt(BaseException):
+        pass
+
+    real_close = run_journal.os.close
+    source_fd = os.open("/dev/null", os.O_RDONLY)
+    target_fd = os.dup(source_fd)
+    injected = False
+
+    def close_then_reuse(fd: int) -> None:
+        nonlocal injected
+        if fd == target_fd and not injected:
+            injected = True
+            real_close(fd)
+            os.dup2(source_fd, fd)
+            raise SyntheticCloseInterrupt
+        real_close(fd)
+
+    monkeypatch.setattr(run_journal.os, "close", close_then_reuse)
+    try:
+        if helper == "ordinary":
+            with pytest.raises(SyntheticCloseInterrupt):
+                run_journal._close_fd(target_fd)
+        else:
+            error, closed = run_journal._cleanup_close_fd(target_fd)
+            assert isinstance(error, SyntheticCloseInterrupt)
+            assert closed is False
+        os.fstat(target_fd)
+    finally:
+        monkeypatch.setattr(run_journal.os, "close", real_close)
+        with suppress(OSError):
+            real_close(target_fd)
+        real_close(source_fd)
+
+
+def test_cleanup_reused_fd_is_not_reclosed_and_reports_committed_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     class SyntheticCleanupInterrupt(BaseException):
@@ -792,6 +852,8 @@ def test_post_effect_cleanup_baseexception_returns_durable_committed_record(
 
     real_replace = run_journal.os.replace
     real_close = run_journal.os.close
+    source_fd = os.open("/dev/null", os.O_RDONLY)
+    reused_fd: int | None = None
     replaced = False
     interrupted = False
 
@@ -801,28 +863,32 @@ def test_post_effect_cleanup_baseexception_returns_durable_committed_record(
         replaced = True
 
     def close_then_interrupt(fd: int) -> None:
-        nonlocal interrupted
+        nonlocal interrupted, reused_fd
         real_close(fd)
         if replaced and not interrupted:
             interrupted = True
+            os.dup2(source_fd, fd)
+            reused_fd = fd
             raise SyntheticCleanupInterrupt
 
     monkeypatch.setattr(run_journal.os, "replace", mark_replace)
     monkeypatch.setattr(run_journal.os, "close", close_then_interrupt)
-    committed = _started(RunJournalStoreV0(tmp_path), run_id="cleanup-post-effect")
-    assert interrupted
-    assert committed.status is RunJournalStatusV0.STARTED
-    assert len(list(tmp_path.glob("*.json"))) == 1
-    for path in (tmp_path / ".run-journal-v0.lock", Path("/")):
-        probe_fd = os.open(path, os.O_RDONLY)
-        try:
-            run_journal.fcntl.flock(
-                probe_fd,
-                run_journal.fcntl.LOCK_EX | run_journal.fcntl.LOCK_NB,
-            )
-            run_journal.fcntl.flock(probe_fd, run_journal.fcntl.LOCK_UN)
-        finally:
-            os.close(probe_fd)
+    try:
+        with pytest.raises(RunJournalCommittedCleanupError) as exc_info:
+            _started(RunJournalStoreV0(tmp_path), run_id="cleanup-reused-fd")
+        assert interrupted
+        assert exc_info.value.run_id == "cleanup-reused-fd"
+        assert exc_info.value.status == "STARTED"
+        assert exc_info.value.expected_at == "2026-08-11T01:00:00Z"
+        assert reused_fd is not None
+        os.fstat(reused_fd)
+        assert len(list(tmp_path.glob("*.json"))) == 1
+    finally:
+        monkeypatch.setattr(run_journal.os, "close", real_close)
+        if reused_fd is not None:
+            with suppress(OSError):
+                real_close(reused_fd)
+        real_close(source_fd)
 
 
 def test_next_locked_operation_sweeps_and_observes_safe_orphan_backup(
@@ -867,6 +933,7 @@ def test_unclosed_resource_after_commit_raises_safe_typed_cleanup_error(
         assert isinstance(exc_info.value, RunJournalCommittedCleanupError)
         assert exc_info.value.run_id == "cleanup-unclosed"
         assert exc_info.value.status == "STARTED"
+        assert exc_info.value.expected_at == "2026-08-11T01:00:00Z"
         assert "PRIVATE-SENTINEL" not in str(exc_info.value)
         assert len(blocked_fds) >= 3
         assert len(list(tmp_path.glob("*.json"))) == 1

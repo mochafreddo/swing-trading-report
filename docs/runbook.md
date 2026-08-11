@@ -77,12 +77,19 @@ journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지 
 `flock` 아래 journal 절대 경로의 모든 component를 `O_DIRECTORY|O_NOFOLLOW`로 순회해
 각 dev/inode를 고정합니다. write 뒤 directory fsync와 마지막 full-chain/lock/target inode
 검증이 모두 끝난 순간만 durable commit point입니다. 그 전의 pathname 교체는 pinned root의
-변경을 rollback하고 실패합니다. commit 뒤 unlock/close가 post-effect 예외를 내더라도 모든
-owned FD가 실제로 닫혔으면 committed record를 반환하며, 닫힘을 확인할 수 없으면 raw 오류
-대신 identity/status만 담은 sanitized committed-cleanup 오류를 냅니다. 안전한 정규식 이름의
+변경을 rollback하고 실패합니다. FD open은 catchable interrupt/termination signal을 잠시
+차단해 반환된 정확한 FD의 ownership을 먼저 등록하고, signal mask 복원 중 handler가 예외를
+내면 그 FD만 한 번 닫습니다. process-wide FD scan이나 닫힌 FD 번호 재시도는 다른 FD를
+닫을 수 있어 사용하지 않습니다. commit 뒤 unlock/close 오류의 완료 여부가 불확실하면 raw
+오류 대신 `run_kind + expected_at + run_id + status`만 담은 sanitized committed-cleanup 오류를
+냅니다. 안전한 정규식 이름의
 orphan backup은 다음 lock 획득 때 inode/link-count를 확인해 삭제하고 개수만 로컬 로그에
 남깁니다. 이 anchor는 서로 다른 journal directory의 짧은 local operation도 직렬화하는
 보수적 tradeoff이므로 lock 내부에서 runner나 네트워크 작업을 수행하지 않습니다.
+
+절대 경로 중간 ancestor는 macOS `O_SEARCH`(`O_DIRECTORY|O_NOFOLLOW`)로 열어 read 권한 없이
+search 권한만 있는 `0111` directory도 정상 순회·재검증합니다. filesystem anchor와 실제
+journal root만 각각 flock과 listing/write에 필요한 read FD로 엽니다.
 
 공개 JSON Schema는 canonical 필드 형태를 검사하지만 timestamp 간 시간 순서는 표준 JSON
 Schema만으로 완전히 표현하지 못합니다. Python 소비 경계는 반드시

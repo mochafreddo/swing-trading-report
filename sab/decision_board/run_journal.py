@@ -18,7 +18,6 @@ later schedule identity starts independently and can complete normally.
 
 from __future__ import annotations
 
-import errno
 import fcntl
 import hashlib
 import json
@@ -26,6 +25,7 @@ import logging
 import os
 import re
 import secrets
+import signal
 import stat
 import sys
 import weakref
@@ -70,6 +70,19 @@ _ALL_FIELDS = frozenset(
     }
 )
 _LOGGER = logging.getLogger(__name__)
+_OWNED_OPEN_SIGNALS = frozenset(
+    getattr(signal, name)
+    for name in ("SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM")
+    if hasattr(signal, name)
+)
+_DIRECTORY_READ_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+)
+_DIRECTORY_SEARCH_FLAGS = (
+    getattr(os, "O_SEARCH", getattr(os, "O_PATH", os.O_RDONLY))
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
 
 
 class RunJournalError(RuntimeError):
@@ -91,6 +104,9 @@ class RunJournalCommittedCleanupError(RunJournalStorageError):
         self.run_id = record.run_id
         self.run_kind = record.run_kind.value
         self.status = record.status.value
+        expected_at = _format_timestamp(record.expected_at)
+        assert expected_at is not None
+        self.expected_at = expected_at
         super().__init__("journal committed but resource cleanup was incomplete")
 
 
@@ -591,38 +607,7 @@ class _LockedJournal:
 
 
 def _close_fd(fd: int) -> None:
-    try:
-        os.close(fd)
-    except BaseException as first:
-        try:
-            os.close(fd)
-        except OSError as retry:
-            if retry.errno != errno.EBADF:
-                raise first from retry
-        except BaseException as retry:
-            raise first from retry
-        raise
-
-
-def _snapshot_open_fds() -> frozenset[int]:
-    """Snapshot process FDs for single-threaded post-effect open recovery."""
-
-    for directory in ("/dev/fd", "/proc/self/fd"):
-        try:
-            candidates = tuple(
-                int(name) for name in os.listdir(directory) if name.isdecimal()
-            )
-        except OSError:
-            continue
-        opened: set[int] = set()
-        for fd in candidates:
-            try:
-                os.fstat(fd)
-            except OSError:
-                continue
-            opened.add(fd)
-        return frozenset(opened)
-    raise RunJournalStorageError("open file descriptors could not be inspected")
+    os.close(fd)
 
 
 def _owned_open(
@@ -632,37 +617,36 @@ def _owned_open(
     *,
     dir_fd: int | None = None,
 ) -> int:
-    """Open one FD and recover it if an injected syscall raises post-effect."""
+    """Open one FD while catchable termination signals cannot split ownership."""
 
-    before = _snapshot_open_fds()
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _OWNED_OPEN_SIGNALS)
+    fd: int | None = None
+    operation_error: BaseException | None = None
     try:
-        return os.open(path, flags, mode, dir_fd=dir_fd)
-    except BaseException:
-        with suppress(BaseException):
-            leaked = _snapshot_open_fds() - before
-            expected: tuple[int, int] | None = None
+        fd = os.open(path, flags, mode, dir_fd=dir_fd)
+    except BaseException as exc:
+        operation_error = exc
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+    except BaseException as restore_error:
+        if fd is not None:
             with suppress(BaseException):
-                info = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
-                expected = info.st_dev, info.st_ino
-            owned: list[int] = []
-            for fd in leaked:
-                with suppress(BaseException):
-                    info = os.fstat(fd)
-                    if expected is None or (info.st_dev, info.st_ino) == expected:
-                        owned.append(fd)
-            for fd in sorted(owned, reverse=True):
-                with suppress(BaseException):
-                    _close_fd(fd)
+                os.close(fd)
+        if operation_error is not None:
+            raise operation_error from restore_error
         raise
+    if operation_error is not None:
+        raise operation_error
+    assert fd is not None
+    return fd
 
 
 def _open_journal_directory(root: Path) -> int:
     """Compatibility helper used by focused acquisition-failure probes."""
 
     absolute = Path(os.path.abspath(root))
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        directory_fd = _owned_open(absolute, flags)
+        directory_fd = _owned_open(absolute, _DIRECTORY_READ_FLAGS)
     except OSError as exc:
         raise RunJournalStorageError("journal root could not be opened safely") from exc
     try:
@@ -681,9 +665,8 @@ def _open_root_guard(root: Path) -> _RootGuard:
     components = absolute.parts[1:]
     if not components:
         raise RunJournalStorageError("journal root must not be the filesystem root")
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        anchor_fd = _owned_open("/", flags)
+        anchor_fd = _owned_open("/", _DIRECTORY_READ_FLAGS)
     except OSError as exc:
         raise RunJournalStorageError("journal path anchor is unavailable") from exc
     nodes: list[_PathNode] = []
@@ -694,7 +677,12 @@ def _open_root_guard(root: Path) -> _RootGuard:
         # All local RunJournal processes share this stable, short critical section.
         fcntl.flock(anchor_fd, fcntl.LOCK_EX)
         parent_fd = anchor_fd
-        for component in components:
+        for index, component in enumerate(components):
+            flags = (
+                _DIRECTORY_READ_FLAGS
+                if index == len(components) - 1
+                else _DIRECTORY_SEARCH_FLAGS
+            )
             try:
                 child_fd = _owned_open(component, flags, dir_fd=parent_fd)
             except FileNotFoundError:
@@ -1178,26 +1166,12 @@ def _sweep_orphan_backups(directory_fd: int) -> int:
     return swept
 
 
-def _fd_is_closed(fd: int) -> bool:
-    try:
-        os.fstat(fd)
-    except OSError as exc:
-        return exc.errno == errno.EBADF
-    return False
-
-
 def _cleanup_close_fd(fd: int) -> tuple[BaseException | None, bool]:
     try:
         os.close(fd)
         return None, True
     except BaseException as first:
-        if _fd_is_closed(fd):
-            return first, True
-        try:
-            os.close(fd)
-        except BaseException:
-            return first, _fd_is_closed(fd)
-        return first, True
+        return first, False
 
 
 class RunJournalStoreV0:
