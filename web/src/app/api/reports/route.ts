@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
 
   const parsedQuery = reportListQuerySchema.safeParse({
     type: request.nextUrl.searchParams.get("type") ?? undefined,
+    runKind: request.nextUrl.searchParams.get("runKind") ?? undefined,
     q: request.nextUrl.searchParams.get("q") ?? "",
     limit: request.nextUrl.searchParams.get("limit") ?? undefined,
     refresh: request.nextUrl.searchParams.get("refresh") ?? undefined,
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { type, q, limit, refresh } = parsedQuery.data;
+  const { type, runKind, q, limit, refresh } = parsedQuery.data;
   const searchWindow = resolveReportSearchWindow(
     process.env.REPORT_SEARCH_WINDOW,
   );
@@ -81,6 +82,7 @@ export async function GET(request: NextRequest) {
   try {
     const payload = await listReports({
       type,
+      runKind,
       q,
       limit,
       searchWindow,

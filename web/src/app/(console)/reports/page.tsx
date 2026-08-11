@@ -1,11 +1,16 @@
 import { Suspense } from "react";
 
 import { ReportsClient } from "@/components/reports-client";
-import { parseReportType } from "@/components/reports/helpers";
+import {
+  parseDecisionBoardRunKind,
+  parseReportType,
+} from "@/components/reports/helpers";
 import type { ReportsInitialState } from "@/components/reports/types";
 import { hasValidAdminSession } from "@/lib/admin-prefetch";
 import { listReports, readReportDetail } from "@/lib/reports-data";
 import { resolveReportSearchWindow } from "@/lib/report-search-policy";
+import { readDecisionBoardJournalStatus } from "@/lib/decision-board-journal.server";
+import { parseReportStorageKey } from "@/lib/report-key";
 
 const REPORT_PAGE_LIMIT = 30;
 
@@ -31,9 +36,22 @@ export async function loadReportsInitialState(
 ): Promise<ReportsInitialState | undefined> {
   const params = await Promise.resolve(searchParams ?? {});
   const reportType = parseReportType(readFirstValue(params.type));
+  const runKind =
+    reportType === "decision-board"
+      ? (parseDecisionBoardRunKind(readFirstValue(params.runKind)) ?? "ENTRY")
+      : null;
   const query = readFirstValue(params.q) ?? "";
   const appliedQuery = query.trim();
-  const requestedKey = (readFirstValue(params.key) ?? "").trim() || null;
+  const requestedKeyValue = (readFirstValue(params.key) ?? "").trim() || null;
+  const requestedParsedKey = requestedKeyValue
+    ? parseReportStorageKey(requestedKeyValue)
+    : null;
+  const requestedKey =
+    reportType === "decision-board" &&
+    (requestedParsedKey?.type !== "decision-board" ||
+      requestedParsedKey.runKind !== runKind)
+      ? null
+      : requestedKeyValue;
   const requestedBucketId =
     (readFirstValue(params.bucket) ?? "").trim() || null;
   const showRaw = readFirstValue(params.raw) === "1";
@@ -42,12 +60,22 @@ export async function loadReportsInitialState(
   );
 
   if (await hasValidAdminSession()) {
-    const list = await listReports({
-      type: reportType,
-      q: appliedQuery,
-      limit: REPORT_PAGE_LIMIT,
-      searchWindow,
-    });
+    const [list, journalStatus] = await Promise.all([
+      listReports({
+        type: reportType,
+        ...(runKind ? { runKind } : {}),
+        q: appliedQuery,
+        limit: REPORT_PAGE_LIMIT,
+        searchWindow,
+      }),
+      reportType === "decision-board"
+        ? readDecisionBoardJournalStatus()
+        : Promise.resolve({
+            state: "UNAVAILABLE" as const,
+            reason: "NOT_CONFIGURED" as const,
+            records: [],
+          }),
+    ]);
     const selectedItem =
       requestedKey && requestedBucketId
         ? list.items.find(
@@ -80,6 +108,7 @@ export async function loadReportsInitialState(
 
     return {
       reportType,
+      runKind,
       query,
       appliedQuery,
       items: list.items,
@@ -94,6 +123,7 @@ export async function loadReportsInitialState(
       detailKey,
       detailBucketId,
       showRaw,
+      journalStatus,
     };
   }
 

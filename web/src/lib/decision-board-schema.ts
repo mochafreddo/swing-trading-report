@@ -396,6 +396,7 @@ export type DecisionPayloadV0 = z.infer<typeof decisionPayloadV0Schema>;
 export type DecisionBoardEnvelopeV0 = z.infer<
   typeof decisionBoardEnvelopeV0Schema
 >;
+export type RunJournalV0 = z.infer<typeof runJournalV0Schema>;
 
 /** Structural validation only; this synchronous boundary does not verify the payload digest. */
 export const parseDecisionBoardReportStructure = (

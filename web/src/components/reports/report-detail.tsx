@@ -22,6 +22,8 @@ import {
   readString,
 } from "./helpers";
 import type { ReportJson } from "./types";
+import { DecisionBoardDetail } from "./decision-board-detail";
+import type { DecisionBoardEnvelopeV0 } from "@/lib/decision-board-schema";
 
 interface ReportDetailProps {
   detail: ReportJson | null;
@@ -241,6 +243,10 @@ export function ReportDetail({
     null,
   );
   const reportType = readString(detail?.type);
+  const decisionBoardDetail =
+    detail?.schema_version === "decision-board.v0"
+      ? (detail as unknown as DecisionBoardEnvelopeV0)
+      : null;
   const isEntryReport = reportType === "entry";
   const isAiBriefReport =
     reportType === "ai_brief" || reportType === "ai-brief";
@@ -399,7 +405,14 @@ export function ReportDetail({
         <p className="subtle">리포트를 선택하세요.</p>
       )}
 
-      {detail && (
+      {detail && decisionBoardDetail && (
+        <DecisionBoardDetail
+          report={decisionBoardDetail}
+          showRaw={showRaw}
+          rawJson={rawDetailJson}
+        />
+      )}
+      {detail && !decisionBoardDetail && (
         <>
           <dl className={styles.metaGrid}>
             <div>

@@ -33,6 +33,7 @@ vi.mock("next/navigation", () => ({
 
 const INITIAL_STATE: ReportsInitialState = {
   reportType: "all",
+  runKind: null,
   query: "",
   appliedQuery: "",
   items: [
@@ -65,6 +66,11 @@ const INITIAL_STATE: ReportsInitialState = {
     type: "buy",
   },
   showRaw: false,
+  journalStatus: {
+    state: "UNAVAILABLE",
+    reason: "NOT_CONFIGURED",
+    records: [],
+  },
 };
 
 const EMPTY_SEARCH_STATE: ReportsInitialState = {

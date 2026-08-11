@@ -10,7 +10,11 @@ import {
   withApiRequestId,
 } from "@/lib/api-request-log";
 import { toErrorMessage } from "@/lib/error-utils";
-import { InvalidReportKeyError, readReportDetail } from "@/lib/reports-data";
+import {
+  InvalidDecisionBoardReportError,
+  InvalidReportKeyError,
+  readReportDetail,
+} from "@/lib/reports-data";
 import { jsonWithNoStore } from "@/lib/reports-response";
 import { reportDetailQuerySchema } from "@/lib/schemas";
 import { SupabaseApiError } from "@/lib/supabase-admin";
@@ -41,8 +45,9 @@ export async function GET(request: NextRequest) {
     return withApiRequestId(guardError, requestId);
   }
 
+  const rawKey = request.nextUrl.searchParams.get("key") ?? undefined;
   const query = reportDetailQuerySchema.safeParse({
-    key: request.nextUrl.searchParams.get("key") ?? undefined,
+    key: rawKey,
     bucket: request.nextUrl.searchParams.get("bucket") ?? undefined,
     refresh: request.nextUrl.searchParams.get("refresh") ?? undefined,
   });
@@ -72,7 +77,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = await readReportDetail(query.data.key, {
+    const requestedKey = rawKey?.trim().includes(".decision-board.")
+      ? rawKey
+      : query.data.key;
+    const payload = await readReportDetail(requestedKey, {
       refresh: query.data.refresh,
       bucketId: query.data.bucket,
     });
@@ -93,6 +101,31 @@ export async function GET(request: NextRequest) {
     });
     return withApiRequestId(response, requestId);
   } catch (error) {
+    if (error instanceof InvalidDecisionBoardReportError) {
+      logApiWarn({
+        event: "web_api_request_rejected",
+        request_id: requestId,
+        route: ROUTE,
+        method: METHOD,
+        operation: OPERATION,
+        status: "failed",
+        status_code: error.status,
+        reason: "invalid_decision_board_report",
+        report_key: query.data.key,
+        report_bucket: query.data.bucket,
+        duration_ms: elapsedMs(startedAtMs),
+      });
+      return withApiRequestId(
+        jsonWithNoStore(
+          {
+            error: error.message,
+            code: "invalid_decision_board_report",
+          },
+          { status: error.status },
+        ),
+        requestId,
+      );
+    }
     if (error instanceof InvalidReportKeyError) {
       logApiWarn({
         event: "web_api_request_rejected",

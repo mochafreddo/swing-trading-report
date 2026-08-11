@@ -8,6 +8,7 @@ describe("ReportsList component", () => {
     const html = renderToStaticMarkup(
       ReportsList({
         reportType: "all",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [],
@@ -21,6 +22,7 @@ describe("ReportsList component", () => {
         loadingList: false,
         refreshing: false,
         onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
         onQueryChange: vi.fn(),
         onSelectKey: vi.fn(),
         onRefresh: vi.fn(),
@@ -34,6 +36,7 @@ describe("ReportsList component", () => {
     const html = renderToStaticMarkup(
       ReportsList({
         reportType: "all",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [],
@@ -47,6 +50,7 @@ describe("ReportsList component", () => {
         loadingList: false,
         refreshing: true,
         onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
         onQueryChange: vi.fn(),
         onSelectKey: vi.fn(),
         onRefresh: vi.fn(),
@@ -61,6 +65,7 @@ describe("ReportsList component", () => {
     const html = renderToStaticMarkup(
       ReportsList({
         reportType: "entry",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [],
@@ -74,6 +79,7 @@ describe("ReportsList component", () => {
         loadingList: false,
         refreshing: false,
         onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
         onQueryChange: vi.fn(),
         onSelectKey: vi.fn(),
         onRefresh: vi.fn(),
@@ -87,6 +93,7 @@ describe("ReportsList component", () => {
     const html = renderToStaticMarkup(
       ReportsList({
         reportType: "ai-brief",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [],
@@ -100,6 +107,7 @@ describe("ReportsList component", () => {
         loadingList: false,
         refreshing: false,
         onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
         onQueryChange: vi.fn(),
         onSelectKey: vi.fn(),
         onRefresh: vi.fn(),
@@ -113,6 +121,7 @@ describe("ReportsList component", () => {
     const html = renderToStaticMarkup(
       ReportsList({
         reportType: "sell-ai-brief",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [],
@@ -126,6 +135,7 @@ describe("ReportsList component", () => {
         loadingList: false,
         refreshing: false,
         onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
         onQueryChange: vi.fn(),
         onSelectKey: vi.fn(),
         onRefresh: vi.fn(),
@@ -133,5 +143,46 @@ describe("ReportsList component", () => {
     );
 
     expect(html).toContain(">Sell AI Brief</option>");
+  });
+
+  it("renders Decision Board lane and public run identity", () => {
+    const html = renderToStaticMarkup(
+      ReportsList({
+        reportType: "decision-board",
+        runKind: "ENTRY",
+        query: "",
+        appliedQuery: "",
+        items: [
+          {
+            key: `2026/08/2026-08-06.decision-board.entry.entry-slot-001.${"e".repeat(64)}.json`,
+            bucketId: "reports",
+            type: "decision-board",
+            reportDate: "2026-08-06",
+            duplicateIndex: 0,
+            runKind: "ENTRY",
+            runId: "entry-slot-001",
+          },
+        ],
+        total: 1,
+        searched: 0,
+        truncated: false,
+        searchWindow: 100,
+        warnings: [],
+        selectedKey: null,
+        selectedBucketId: null,
+        loadingList: false,
+        refreshing: false,
+        onReportTypeChange: vi.fn(),
+        onRunKindChange: vi.fn(),
+        onQueryChange: vi.fn(),
+        onSelectKey: vi.fn(),
+        onRefresh: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain(">Decision Board</option>");
+    expect(html).toContain('name="runKind"');
+    expect(html).toContain("ENTRY");
+    expect(html).toContain("entry-slot-001");
   });
 });

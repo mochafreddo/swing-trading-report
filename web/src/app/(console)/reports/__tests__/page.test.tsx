@@ -6,11 +6,17 @@ const {
   listReports,
   readReportDetail,
   resolveReportSearchWindow,
+  readDecisionBoardJournalStatus,
 } = vi.hoisted(() => ({
   hasValidAdminSession: vi.fn(),
   listReports: vi.fn(),
   readReportDetail: vi.fn(),
   resolveReportSearchWindow: vi.fn(() => 100),
+  readDecisionBoardJournalStatus: vi.fn(async () => ({
+    state: "UNAVAILABLE",
+    reason: "NOT_CONFIGURED",
+    records: [],
+  })),
 }));
 
 vi.mock("@/components/reports-client", () => ({
@@ -21,6 +27,8 @@ vi.mock("@/components/reports-client", () => ({
 
 vi.mock("@/components/reports/helpers", () => ({
   parseReportType: (value: string | null) => value ?? "all",
+  parseDecisionBoardRunKind: (value: string | null) =>
+    value === "HOLDING" ? "HOLDING" : "ENTRY",
 }));
 
 vi.mock("@/lib/admin-prefetch", () => ({
@@ -36,6 +44,10 @@ vi.mock("@/lib/report-search-policy", () => ({
   resolveReportSearchWindow,
 }));
 
+vi.mock("@/lib/decision-board-journal.server", () => ({
+  readDecisionBoardJournalStatus,
+}));
+
 import ReportsPage, {
   loadReportsInitialState,
 } from "@/app/(console)/reports/page";
@@ -47,6 +59,7 @@ describe("ReportsPage", () => {
     readReportDetail.mockReset();
     resolveReportSearchWindow.mockClear();
     resolveReportSearchWindow.mockReturnValue(100);
+    readDecisionBoardJournalStatus.mockClear();
   });
 
   it("returns a Suspense boundary immediately", () => {
@@ -91,6 +104,7 @@ describe("ReportsPage", () => {
     await expect(loadReportsInitialState(Promise.resolve({}))).resolves.toEqual(
       {
         reportType: "all",
+        runKind: null,
         query: "",
         appliedQuery: "",
         items: [{ key: "report-1", bucketId: "reports" }],
@@ -105,8 +119,67 @@ describe("ReportsPage", () => {
         detailKey: null,
         detailBucketId: null,
         showRaw: false,
+        journalStatus: {
+          state: "UNAVAILABLE",
+          reason: "NOT_CONFIGURED",
+          records: [],
+        },
       },
     );
+  });
+
+  it("prefetches the exact Decision Board lane from the URL", async () => {
+    hasValidAdminSession.mockResolvedValue(true);
+    listReports.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      searched: 0,
+      truncated: false,
+      searchWindow: 100,
+      warnings: [],
+    });
+
+    const state = await loadReportsInitialState(
+      Promise.resolve({ type: "decision-board", runKind: "HOLDING" }),
+    );
+
+    expect(listReports).toHaveBeenCalledWith({
+      type: "decision-board",
+      runKind: "HOLDING",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+    expect(state).toMatchObject({
+      reportType: "decision-board",
+      runKind: "HOLDING",
+    });
+  });
+
+  it("does not prefetch a Decision Board key from the wrong lane", async () => {
+    hasValidAdminSession.mockResolvedValue(true);
+    listReports.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      searched: 0,
+      truncated: false,
+      searchWindow: 100,
+      warnings: [],
+    });
+    const wrongLaneKey =
+      "2026/08/2026-08-06.decision-board.holding.holding-slot-001." +
+      `${"f".repeat(64)}.json`;
+
+    const state = await loadReportsInitialState(
+      Promise.resolve({
+        type: "decision-board",
+        runKind: "ENTRY",
+        key: wrongLaneKey,
+      }),
+    );
+
+    expect(state).toMatchObject({ selectedKey: null, detail: null });
+    expect(readReportDetail).not.toHaveBeenCalled();
   });
 
   it("prefetches a requested report key even when it is outside the current list", async () => {

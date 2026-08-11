@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import aiBriefStateContract from "@/components/reports/ai-brief-state-contract.json";
 import { ReportDetail } from "@/components/reports/report-detail";
@@ -27,7 +29,67 @@ function renderReportDetail(
   );
 }
 
+const loadDecisionFixture = (name: string): ReportJson =>
+  JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../../../../tests/fixtures/decision_board/${name}`,
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    ),
+  ) as ReportJson;
+
 describe("ReportDetail component", () => {
+  it("renders a dedicated published Decision Board ENTRY detail", () => {
+    const detail = loadDecisionFixture("published-entry.json");
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("Decision Board");
+    expect(html).toContain("entry-2026-08-06T010000Z");
+    expect(html).toContain("ENTRY");
+    expect(html).toContain("AUR.NAS");
+    expect(html).toContain("BUY");
+    expect(html).toContain("claim-aurora-demand");
+    expect(html).toContain("EVIDENCE_UNCLEAR");
+  });
+
+  it("keeps HOLDING SELL visually explicit", () => {
+    const html = renderReportDetail(
+      loadDecisionFixture("published-holding.json"),
+    );
+
+    expect(html).toContain("HOLDING");
+    expect(html).toContain("ELM.NYS");
+    expect(html).toContain("SELL");
+    expect(html).toContain("decisionSell");
+  });
+
+  it("renders BLOCKED without a directional table", () => {
+    const html = renderReportDetail(loadDecisionFixture("blocked.json"));
+
+    expect(html).toContain("BLOCKED");
+    expect(html).toContain("IDENTITY_UNRESOLVED");
+    expect(html).not.toContain("Decision items");
+    expect(html).not.toContain(">BUY<");
+    expect(html).not.toContain(">SELL<");
+  });
+
+  it("renders an empty published Decision Board universe as a valid state", () => {
+    const detail = loadDecisionFixture("published-entry.json") as {
+      decision_payload: { items: unknown[] };
+    } & ReportJson;
+    detail.decision_payload.items = [];
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("No eligible Decision Board items");
+    expect(html).not.toContain("리포트를 선택하세요");
+  });
+
   it("renders candidate reason/risk columns and issues section", () => {
     const detail: ReportJson = {
       schema: "sab.report.v1",

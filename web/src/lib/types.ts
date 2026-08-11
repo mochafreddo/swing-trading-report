@@ -1,3 +1,5 @@
+import type { RunJournalV0 } from "@/lib/decision-board-schema";
+
 export type Provider = "kis" | "pykrx";
 export type ScanUniverse = "KR" | "US" | "both";
 
@@ -30,9 +32,16 @@ export interface ReportListItem {
   reportDate: string;
   duplicateIndex: number;
   runKind?: DecisionBoardRunKind;
+  runId?: string;
   generatedAt?: string;
   summary?: Record<string, unknown>;
   tickers?: string[];
+}
+
+export interface DecisionBoardJournalStatus {
+  state: "AVAILABLE" | "UNAVAILABLE";
+  reason?: "NOT_CONFIGURED" | "UNSAFE_OR_INVALID";
+  records: RunJournalV0[];
 }
 
 export interface ReportSearchWarning {

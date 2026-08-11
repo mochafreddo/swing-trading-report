@@ -63,4 +63,21 @@ describe("resolveSelectedKeyFromUrl", () => {
 
     expect(result).toBe("2026/02/2026-02-01.buy.json");
   });
+
+  it("rejects a Decision Board key from a different run lane", () => {
+    const holdingKey =
+      "2026/08/2026-08-11.decision-board.holding.hold-run." +
+      "a".repeat(64) +
+      ".json";
+
+    const result = resolveSelectedKeyFromUrl({
+      previousSelectedKey: null,
+      nextKeyRaw: holdingKey,
+      reportType: "decision-board",
+      runKind: "ENTRY",
+      availableKeys: [holdingKey],
+    });
+
+    expect(result).toBeNull();
+  });
 });

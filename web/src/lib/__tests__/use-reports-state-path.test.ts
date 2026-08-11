@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildReportDetailRequestPath,
   buildReportsListRequestPath,
+  buildReportsStateQueryString,
+  parseDecisionBoardJournalStatusPayload,
 } from "@/components/reports/use-reports-state";
 
 describe("reports request path builders", () => {
@@ -47,6 +49,32 @@ describe("reports request path builders", () => {
     expect(path).toBe("/api/reports?type=ai-brief&limit=30");
   });
 
+  it("keeps Decision Board run kind in list request identity", () => {
+    const path = buildReportsListRequestPath({
+      type: "decision-board",
+      runKind: "HOLDING",
+      limit: 30,
+      query: "",
+    });
+
+    expect(path).toBe(
+      "/api/reports?type=decision-board&limit=30&runKind=HOLDING",
+    );
+  });
+
+  it("keeps Decision Board run kind in browser URL identity", () => {
+    expect(
+      buildReportsStateQueryString({
+        reportType: "decision-board",
+        runKind: "ENTRY",
+        appliedQuery: "",
+        selectedKey: null,
+        selectedBucketId: null,
+        showRaw: false,
+      }),
+    ).toBe("type=decision-board&runKind=ENTRY");
+  });
+
   it("builds detail path without refresh by default", () => {
     const path = buildReportDetailRequestPath({
       key: "2026/02/2026-02-14.buy.json",
@@ -77,5 +105,21 @@ describe("reports request path builders", () => {
     expect(path).toBe(
       "/api/reports/detail?key=2026%2F02%2F2026-02-14.buy.json&bucket=custom-reports",
     );
+  });
+
+  it("rejects malformed or non-warning local journal payloads", () => {
+    expect(
+      parseDecisionBoardJournalStatusPayload({
+        state: "AVAILABLE",
+        records: [{ status: "STARTED" }],
+      }),
+    ).toBeNull();
+    expect(
+      parseDecisionBoardJournalStatusPayload({
+        state: "UNAVAILABLE",
+        reason: "PRIVATE_PATH",
+        records: [],
+      }),
+    ).toBeNull();
   });
 });

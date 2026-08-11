@@ -463,7 +463,7 @@ launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설�
 2. `/api/reports/detail`은 storage key를 검증 후 Storage 원본 JSON을 반환합니다.
 3. 서버(`web/src/lib/reports-data.ts`)는 in-memory TTL/LRU 캐시를 사용합니다.
    - 목록: `type/runKind/q/limit/searchWindow` 키 기준 단기 TTL(검색 없음 5초, 검색 10초). `runKind`는 `decision-board`에서만 `ENTRY|HOLDING`을 허용합니다.
-   - 상세: `report_key` 기준 장기 TTL(1시간)
+   - 상세: bucket/key 기준 장기 TTL(1시간). Decision Board는 deterministic idempotency content identity도 cache key에 포함합니다.
 4. 클라이언트(`ReportsClient`)는 목록/상세 요청에 in-flight dedupe + 세션 메모리 캐시를 적용합니다.
 5. ticker 검색(`q`) 시에는 `report_index`만 페이지 단위로 순회하고, `tickers_hydrated=false` 항목은 결과에서 제외하며 경고를 반환합니다.
 6. 검색 중 일부 페이지 조회 실패가 발생하면 이미 수집된 부분 결과를 반환하고 경고를 함께 제공합니다.
@@ -472,7 +472,8 @@ launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설�
 9. entry 상세는 `entries[]` 전용 표와 `source_buy_report`, `signal_eval_date`, `entry_session_date`(또는 시장별 date map) 메타를 함께 렌더링합니다. 표에는 `implementation_ready`/`investment_readiness`/reason 기반 Readiness 열, `liquidity_exit_capacity`/`liquidity_warnings` 기반 Exit Capacity 열, `downside_risk` 기반 Downside 열, `portfolio_exposure_buckets` 기반 Exposure 열을 표시해 기술적 `ENTER`, 계좌 실행 준비도, 유동성, 가이드 기준 하방 손실, 포트폴리오 집중 bucket을 분리해 보여줍니다.
 10. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
 11. Sell AI Brief artifact는 `report_index` type/filter와 ticker 검색 대상에 포함되며, 상세 화면은 generic JSON fallback으로 원본 판단 artifact를 열람할 수 있습니다. Dedicated 판단 UI는 별도 후속 작업입니다.
-12. Decision Board 목록 데이터 경계는 `run_kind`, `run_id`, `idempotency_key`, `decision_created_at`과 deterministic key의 일치를 검증합니다. malformed row는 legacy row로 강등하지 않고 제외하며, run-kind별 latest는 `decision_created_at DESC, run_id DESC, report_key DESC, bucket_id DESC`로 조회합니다. 전용 detail renderer와 UI run-kind control은 후속 작업입니다.
+12. Decision Board 목록 데이터 경계는 `run_kind`, `run_id`, `idempotency_key`, `decision_created_at`과 deterministic key의 일치를 검증합니다. malformed row는 legacy row로 강등하지 않고 제외하며, run-kind별 latest는 `decision_created_at DESC, run_id DESC, report_key DESC, bucket_id DESC`로 조회합니다. Reports UI는 exact `ENTRY|HOLDING` lane을 URL/SSR/client cache/navigation identity에 보존하고, lane과 다른 key를 선택하지 않습니다.
+13. Decision Board detail은 T1 Web schema, recomputed payload hash, key의 run-kind/run-ID/idempotency identity를 검증한 뒤 전용 public-safe renderer로 전달합니다. invalid object는 sanitized 422로 끝나며 raw fallback이 없습니다. 선택적 local journal panel은 server-only private absolute directory에서 bounded canonical T9 `MISSED_EXPECTED|STALE_INCOMPLETE` record만 읽고, 경로가 없거나 unsafe하면 path/raw error 없이 unavailable 상태로 닫힙니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 

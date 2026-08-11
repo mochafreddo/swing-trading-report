@@ -181,6 +181,54 @@
   font-family: var(--font-mono), monospace;
 }
 
+.itemRunId {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-family: var(--font-mono), monospace;
+  overflow-wrap: anywhere;
+}
+
+.journalPanel {
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, var(--line));
+  border-radius: 18px;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--warn) 9%, var(--panel));
+}
+
+.journalPanel h3,
+.journalPanel p {
+  margin: 0;
+}
+
+.journalPanel p,
+.journalPanel li {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.journalPanel ul {
+  margin: var(--space-3) 0 0;
+  padding-left: 1.1rem;
+}
+
+.decisionBlocked {
+  margin-top: var(--space-6);
+  border-top: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  padding-top: var(--space-4);
+}
+
+.decisionBlocked li {
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.decisionSell {
+  color: var(--danger);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 .active {
   background: linear-gradient(
     90deg,

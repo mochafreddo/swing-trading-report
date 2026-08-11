@@ -3,6 +3,10 @@ import "server-only";
 import { getSupabaseEnv } from "@/lib/env.server";
 import { toErrorMessage } from "@/lib/error-utils";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
+import {
+  parseVerifiedDecisionBoardReport,
+  type DecisionBoardEnvelopeV0,
+} from "@/lib/decision-board-schema";
 import { parseReportStorageKey } from "@/lib/report-key";
 import {
   REPORT_DETAIL_CACHE_MAX_ENTRIES,
@@ -54,6 +58,7 @@ function toReportListItem(
     reportDate: row.report_date,
     duplicateIndex: row.duplicate_index,
     ...(row.run_kind ? { runKind: row.run_kind } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
     ...extras,
   };
 }
@@ -264,6 +269,77 @@ export class InvalidReportKeyError extends Error {
   }
 }
 
+export class InvalidDecisionBoardReportError extends Error {
+  readonly status = 422;
+
+  constructor() {
+    super("Decision Board report failed validation");
+    this.name = "InvalidDecisionBoardReportError";
+  }
+}
+
+const PRIVATE_DECISION_BOARD_FIELDS = new Set([
+  "account",
+  "accountid",
+  "accountnumber",
+  "articlefulltext",
+  "articletext",
+  "credential",
+  "currentprice",
+  "entryprice",
+  "exception",
+  "notes",
+  "pl",
+  "pnl",
+  "private",
+  "providererror",
+  "providerexception",
+  "quantity",
+  "rawarticle",
+  "secret",
+  "tags",
+  "token",
+  "traceback",
+]);
+
+function containsPrivateDecisionBoardField(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsPrivateDecisionBoardField);
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return Object.entries(value).some(
+    ([key, child]) =>
+      PRIVATE_DECISION_BOARD_FIELDS.has(
+        key.toLowerCase().replace(/[^a-z0-9]/g, ""),
+      ) || containsPrivateDecisionBoardField(child),
+  );
+}
+
+async function validateDecisionBoardDetail(
+  report: Record<string, unknown>,
+  parsedKey: NonNullable<ReturnType<typeof parseReportStorageKey>>,
+): Promise<DecisionBoardEnvelopeV0> {
+  try {
+    const validated = await parseVerifiedDecisionBoardReport(report);
+    if (
+      containsPrivateDecisionBoardField(validated) ||
+      validated.run_kind !== parsedKey.runKind ||
+      validated.run_id !== parsedKey.runId ||
+      validated.idempotency_key !== parsedKey.idempotencyKey
+    ) {
+      throw new InvalidDecisionBoardReportError();
+    }
+    return validated;
+  } catch (error) {
+    if (error instanceof InvalidDecisionBoardReportError) {
+      throw error;
+    }
+    throw new InvalidDecisionBoardReportError();
+  }
+}
+
 async function readReportDetailUncached(
   key: string,
   bucketId?: string,
@@ -272,13 +348,21 @@ async function readReportDetailUncached(
   bucketId: string;
   report: Record<string, unknown>;
 }> {
+  const parsedKey = parseReportStorageKey(key);
+  if (!parsedKey) {
+    throw new InvalidReportKeyError();
+  }
   const env = getSupabaseEnv();
   const indexEntry = await fetchReportIndexEntry(key, bucketId);
-  if (bucketId && !indexEntry) {
+  if ((bucketId || parsedKey.type === "decision-board") && !indexEntry) {
     throw new SupabaseApiError("Report not found", 404);
   }
   const bucket = indexEntry?.bucket_id ?? env.SUPABASE_REPORTS_BUCKET;
-  const report = await downloadStorageJson(bucket, key);
+  const downloaded = await downloadStorageJson(bucket, key);
+  const report =
+    parsedKey.type === "decision-board"
+      ? await validateDecisionBoardDetail(downloaded, parsedKey)
+      : downloaded;
   return { key, bucketId: bucket, report };
 }
 
@@ -294,6 +378,9 @@ export async function readReportDetail(
   if (!parsedKey) {
     throw new InvalidReportKeyError();
   }
+  if (parsedKey.type === "decision-board" && parsedKey.key !== key) {
+    throw new InvalidReportKeyError();
+  }
 
   const refresh = options?.refresh === true;
   const bucketId = options?.bucketId?.trim() || undefined;
@@ -302,7 +389,7 @@ export async function readReportDetail(
   }
 
   return reportDetailCache.getOrLoad({
-    key: `bucket=${bucketId ?? ""}&key=${parsedKey.key}`,
+    key: `bucket=${bucketId ?? ""}&key=${parsedKey.key}&identity=${parsedKey.idempotencyKey ?? "legacy"}`,
     ttlMs: REPORT_DETAIL_CACHE_TTL_MS,
     refresh,
     load: () => readReportDetailUncached(parsedKey.key, bucketId),
