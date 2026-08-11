@@ -328,6 +328,15 @@ production provider/model adapter, RunJournal/launchd, Web detail UI, Toss/order
 없습니다. rollback은 `sab decision-board`와 scheduler shadow consumer를 제거하고 T1-T7 producer,
 schema, local artifact를 유지합니다.
 
+T9 local operations owner는 `sab/decision_board/run_journal.py`의 local-only
+`RunJournalV0`와 `scripts/launchd/sab-decision-board-shadow-wrapper.sh`만 추가로 소유합니다.
+명시적으로 주입된 `run_kind + expected_at(UTC) + run_id`가 journal identity이고, cross-process
+file lock 아래 canonical JSON compare-and-set과 atomic replace로 `STARTED` 및 terminal observation을
+기록합니다. status/reconcile CLI는 이 local directory만 읽고 bounded sanitized record를 반환합니다.
+launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지
+않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를
+호출하거나 변경하지 않습니다.
+
 ## 4. 핵심 플로우
 
 ### 4.1 `scan` 플로우

@@ -48,8 +48,8 @@ gh run list --limit 10
 
 Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다.
 현재 production preparation/research adapter가 의도적으로 미설정되어 있어 아래 형식의 실행은
-가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. T9 전에는 launchd,
-RunJournal, 알림, 기존 workflow gating에 연결하지 않습니다.
+가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 이 경로는 기존
+workflow gating이나 외부 알림에 연결되지 않습니다.
 
 ```bash
 uv run python -m sab decision-board \
@@ -59,6 +59,68 @@ uv run python -m sab decision-board \
   --created-at 2026-08-09T12:00:00Z \
   --sealed-input-hash sha256:<64-lowercase-hex>
 ```
+
+### Decision Board local shadow RunJournal
+
+`RunJournalV0`는 로컬 journal directory만 durable authority로 사용합니다. wrapper는 runner
+호출 직전에 `STARTED`를 원자적으로 기록하고, runner가 정상적인 sanitized 결과를 반환한
+경우에만 `PUBLISHED`, `BLOCKED`, `FAILED` 중 하나로 compare-and-set 전이합니다. runner가
+중단되거나 결과 계약을 반환하지 않으면 `STARTED`를 남기며, 별도 reconcile이 명시된 TTL 뒤
+`STALE_INCOMPLETE`로 전이합니다. 실행이 시작되지 않은 명시적 expected slot은 grace 뒤
+`MISSED_EXPECTED`가 됩니다. journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지
+않습니다.
+
+wrapper와 두 plist 파일은 shadow 검증용 템플릿일 뿐입니다.
+`com.mochafreddo.sab.decision-board.{entry,holding}-shadow.plist.template`은
+`Disabled=true`이고 실제 시간표가 없습니다. 저장소는 운영 wall-clock, 설치 경로,
+`run_id`를 선택하거나 `launchctl`로 load하지 않습니다. 운영자가 별도 승인된 schedule을
+정한 뒤에도 먼저 아래처럼 모든 UTC identity와 runner 인자를 직접 주입해 dry-run 합니다.
+
+```bash
+scripts/launchd/sab-decision-board-shadow-wrapper.sh \
+  --run-kind ENTRY \
+  --expected-at 2026-08-11T01:00:00Z \
+  --run-id entry-shadow-example \
+  --journal-dir logs/decision-board-journal \
+  --grace-seconds 300 \
+  --stale-seconds 1800 \
+  --dry-run \
+  -- uv run python -m sab decision-board \
+    --run-kind ENTRY \
+    --run-id entry-shadow-example \
+    --idempotency-key sha256:<64-lowercase-hex> \
+    --created-at 2026-08-11T01:00:00Z \
+    --sealed-input-hash sha256:<64-lowercase-hex>
+```
+
+status는 bounded, 최신 expected slot 우선 순서의 sanitized JSON만 출력합니다.
+
+```bash
+uv run python -m sab decision-board-journal-status \
+  --journal-dir logs/decision-board-journal \
+  --limit 100
+```
+
+missed/stale 판정은 현재 시각까지 명시적으로 주입합니다. 다음 예시는 형식 설명용이며 운영
+시간표가 아닙니다.
+
+```bash
+uv run python -m sab decision-board-journal-reconcile \
+  --journal-dir logs/decision-board-journal \
+  --run-kind ENTRY \
+  --expected-at 2026-08-11T01:00:00Z \
+  --run-id entry-shadow-example \
+  --now 2026-08-11T01:30:01Z \
+  --grace-seconds 300 \
+  --stale-seconds 1800 \
+  --limit 100
+```
+
+장애 시에는 먼저 관련 템플릿을 계속 disabled 상태로 두고 wrapper 호출을 중단합니다.
+journal JSON을 수동 편집하거나 stale/missed 기록을 삭제해 재사용하지 않습니다. 다음 slot은
+새 `expected_at + run_id` identity로 실행할 수 있습니다. 기능 rollback은 wrapper와 journal
+CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board report artifact를 보존하는
+것입니다. 이 shadow lane은 외부 전송이나 주문 실행을 소유하지 않습니다.
 
 ## 필수 품질 게이트
 

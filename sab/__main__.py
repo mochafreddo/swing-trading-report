@@ -24,6 +24,20 @@ from .decision_board.results import (
     decision_run_exit_code_v0,
     serialize_decision_run_result_v0,
 )
+from .decision_board.run_journal import (
+    ExpectedRunV0,
+    RunJournalError,
+    RunJournalStatusV0,
+    RunJournalStoreV0,
+)
+from .decision_board.run_journal_cli import (
+    JournalShadowProcessConfigV0,
+    execute_journal_shadow_process_v0,
+    parse_bounded_int_v0,
+    parse_utc_rfc3339_v0,
+    public_records_v0,
+)
+from .decision_board.runner import RunKindV0
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -283,6 +297,40 @@ def _build_parser() -> argparse.ArgumentParser:
         default="disabled",
     )
     decision_board.add_argument("--report-dir", default="reports")
+
+    journal_status = sub.add_parser(
+        "decision-board-journal-status",
+        help="Read bounded sanitized local Decision Board journal state",
+    )
+    journal_status.add_argument("--journal-dir", required=True)
+    journal_status.add_argument("--status", action="append", default=None)
+    journal_status.add_argument("--limit", default="100")
+
+    journal_reconcile = sub.add_parser(
+        "decision-board-journal-reconcile",
+        help="Persist missed/stale local Decision Board observations",
+    )
+    journal_reconcile.add_argument("--journal-dir", required=True)
+    journal_reconcile.add_argument("--run-kind", required=True)
+    journal_reconcile.add_argument("--expected-at", required=True)
+    journal_reconcile.add_argument("--run-id", required=True)
+    journal_reconcile.add_argument("--now", required=True)
+    journal_reconcile.add_argument("--grace-seconds", required=True)
+    journal_reconcile.add_argument("--stale-seconds", required=True)
+    journal_reconcile.add_argument("--limit", default="100")
+
+    journal_run = sub.add_parser(
+        "decision-board-journal-run",
+        help="Run one local Decision Board shadow process with durable journaling",
+    )
+    journal_run.add_argument("--journal-dir", required=True)
+    journal_run.add_argument("--run-kind", required=True)
+    journal_run.add_argument("--expected-at", required=True)
+    journal_run.add_argument("--run-id", required=True)
+    journal_run.add_argument("--grace-seconds", required=True)
+    journal_run.add_argument("--stale-seconds", required=True)
+    journal_run.add_argument("--dry-run", action="store_true")
+    journal_run.add_argument("runner_args", nargs=argparse.REMAINDER)
 
     backtest = sub.add_parser(
         "backtest",
@@ -698,6 +746,84 @@ def _run_decision_board_command(ns: argparse.Namespace) -> int:
     return exit_code
 
 
+def _journal_cli_failure() -> int:
+    print(
+        json.dumps(
+            {"status": "FAILED", "exit_code": 2, "issue_code": "JOURNAL_INVALID"},
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _run_decision_board_journal_status_command(ns: argparse.Namespace) -> int:
+    try:
+        limit = parse_bounded_int_v0(ns.limit, field="limit", minimum=1, maximum=1000)
+        statuses = (
+            None
+            if ns.status is None
+            else tuple(RunJournalStatusV0(value) for value in ns.status)
+        )
+        records = RunJournalStoreV0(ns.journal_dir).status(
+            limit=limit, statuses=statuses
+        )
+        print(json.dumps(public_records_v0(records), sort_keys=True))
+        return 0
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
+def _run_decision_board_journal_reconcile_command(ns: argparse.Namespace) -> int:
+    try:
+        kind = RunKindV0(ns.run_kind.upper())
+        expected = ExpectedRunV0.create(
+            run_kind=kind,
+            expected_at=parse_utc_rfc3339_v0(ns.expected_at, field="expected_at"),
+            run_id=ns.run_id,
+        )
+        records = RunJournalStoreV0(ns.journal_dir).reconcile(
+            expected=(expected,),
+            now=parse_utc_rfc3339_v0(ns.now, field="now"),
+            grace_seconds=parse_bounded_int_v0(
+                ns.grace_seconds,
+                field="grace_seconds",
+                minimum=0,
+                maximum=604800,
+            ),
+            stale_seconds=parse_bounded_int_v0(
+                ns.stale_seconds,
+                field="stale_seconds",
+                minimum=1,
+                maximum=604800,
+            ),
+            limit=parse_bounded_int_v0(
+                ns.limit, field="limit", minimum=1, maximum=1000
+            ),
+        )
+        print(json.dumps(public_records_v0(records), sort_keys=True))
+        return 0
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
+def _run_decision_board_journal_run_command(ns: argparse.Namespace) -> int:
+    try:
+        config = JournalShadowProcessConfigV0.from_strings(
+            run_kind=ns.run_kind,
+            expected_at=ns.expected_at,
+            run_id=ns.run_id,
+            journal_dir=ns.journal_dir,
+            grace_seconds=ns.grace_seconds,
+            stale_seconds=ns.stale_seconds,
+            runner_args=ns.runner_args,
+            dry_run=ns.dry_run,
+        )
+        return execute_journal_shadow_process_v0(config)
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
 def _run_backtest_command(ns: argparse.Namespace) -> int:
     try:
         return run_backtest(
@@ -1034,6 +1160,11 @@ def _dispatch_command(
         "sell": _run_sell_command,
         "entry": _run_entry_command,
         "decision-board": _run_decision_board_command,
+        "decision-board-journal-status": (_run_decision_board_journal_status_command),
+        "decision-board-journal-reconcile": (
+            _run_decision_board_journal_reconcile_command
+        ),
+        "decision-board-journal-run": _run_decision_board_journal_run_command,
         "backtest": _run_backtest_command,
         "ai-brief": _run_ai_brief_command,
         "sell-ai-brief": _run_sell_ai_brief_command,

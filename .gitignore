@@ -54,6 +54,7 @@ mise.local.lock
 /.worktrees/
 /data/
 /logs/launchd/*.log
+/logs/decision-board-journal/
 /logs/measurements/
 /logs/scheduled/
 /reports/
