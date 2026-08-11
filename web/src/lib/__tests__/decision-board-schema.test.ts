@@ -79,6 +79,8 @@ describe("Decision Board V0 schema", () => {
       expected_at: "2026-08-11T01:00:00Z",
       started_at: "2026-08-11T01:00:01Z",
       terminal_at: null,
+      grace_seconds: 60,
+      stale_seconds: 300,
       issues: [],
       report_file: null,
     };
@@ -88,9 +90,24 @@ describe("Decision Board V0 schema", () => {
         .success,
     ).toBe(false);
     expect(
+      runJournalV0Schema.safeParse({ ...started, run_id: "abc\n" }).success,
+    ).toBe(false);
+    expect(
       runJournalV0Schema.safeParse({
         ...started,
         expected_at: "2026-08-11T10:00:00+09:00",
+      }).success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...started,
+        expected_at: "2026-08-11T01:00:00.1Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...started,
+        started_at: "2026-08-11T00:59:59Z",
       }).success,
     ).toBe(false);
     expect(

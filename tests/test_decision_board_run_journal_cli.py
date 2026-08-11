@@ -23,6 +23,16 @@ PLISTS = (
     REPO_ROOT
     / "scripts/launchd/com.mochafreddo.sab.decision-board.holding-shadow.plist.template",
 )
+CURRENT_SLOT_TEXT = (
+    datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+)
+
+
+def _t7_basename(run_kind: str, run_id: str) -> str:
+    return (
+        f"{CURRENT_SLOT_TEXT[:10]}.decision-board.{run_kind.lower()}."
+        f"{run_id}.{'a' * 64}.json"
+    )
 
 
 def _run_terminal_script(
@@ -38,7 +48,7 @@ def _run_terminal_script(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             run_id,
             "--journal-dir",
@@ -69,6 +79,8 @@ def test_status_and_reconcile_cli_are_bounded_typed_and_sanitized(
         expected_at=datetime(2026, 8, 11, 1, 0, tzinfo=UTC),
         run_id="entry-stale-001",
         started_at=datetime(2026, 8, 11, 1, 0, 1, tzinfo=UTC),
+        grace_seconds=60,
+        stale_seconds=60,
     )
     parser = _build_parser()
     reconcile = parser.parse_args(
@@ -128,7 +140,7 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             "entry-shadow-001",
             "--journal-dir",
@@ -153,7 +165,7 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
     public = json.loads(result.stdout)
     assert public == {
         "dry_run": True,
-        "expected_at": "2026-08-11T01:00:00Z",
+        "expected_at": CURRENT_SLOT_TEXT,
         "grace_seconds": 60,
         "run_id": "entry-shadow-001",
         "run_kind": "ENTRY",
@@ -175,7 +187,7 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             "entry-shadow-failed",
             "--journal-dir",
@@ -210,7 +222,7 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
             "--run-kind",
             "HOLDING",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             "holding-shadow-crashed",
             "--journal-dir",
@@ -247,10 +259,11 @@ def test_shadow_wrapper_maps_stored_terminal_status(
     status: str, tmp_path: Path
 ) -> None:
     journal_dir = tmp_path / "journal"
+    run_id = f"entry-shadow-{status.lower()}"
     public = {
         "status": status,
         "exit_code": 0,
-        "report_file": f"2026-08-11.{status.lower()}.decision-board.json",
+        "report_file": _t7_basename("ENTRY", run_id),
         "storage_key": None,
         "degraded": False,
     }
@@ -260,9 +273,9 @@ def test_shadow_wrapper_maps_stored_terminal_status(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
-            f"entry-shadow-{status.lower()}",
+            run_id,
             "--journal-dir",
             str(journal_dir),
             "--grace-seconds",
@@ -301,7 +314,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             "entry-shadow-raw",
             "--journal-dir",
@@ -341,7 +354,7 @@ def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> N
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T01:00:00Z",
+            CURRENT_SLOT_TEXT,
             "--run-id",
             "entry-shadow-exit-conflict",
             "--journal-dir",
@@ -490,6 +503,77 @@ def test_shadow_wrapper_reserializes_one_valid_terminal_result(tmp_path: Path) -
     assert store.status(limit=1)[0].status.value == "FAILED"
 
 
+@pytest.mark.parametrize("upload_failed", [False, True])
+def test_shadow_wrapper_binds_t7_report_identity_to_config(
+    tmp_path: Path, upload_failed: bool
+) -> None:
+    basename = f"2026-08-11.decision-board.holding.other-run.{'a' * 64}.json"
+    if upload_failed:
+        public = {
+            "status": "FAILED",
+            "exit_code": 2,
+            "issue_code": "UPLOAD_FAILED",
+            "report_file": basename,
+        }
+    else:
+        public = {
+            "status": "PUBLISHED",
+            "exit_code": 0,
+            "report_file": basename,
+            "storage_key": f"2026/08/{basename}",
+            "degraded": False,
+        }
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id="wrapper-slot",
+        script=(
+            f"import json,sys; print(json.dumps({public!r})); "
+            f"raise SystemExit({public['exit_code']})"
+        ),
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stderr)["issue_code"] == "JOURNAL_RUNNER_INVALID"
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+def test_shadow_wrapper_claims_expired_slot_without_running_child(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "runner-called"
+    journal_dir = tmp_path / "journal"
+    result = subprocess.run(
+        [
+            str(WRAPPER),
+            "--run-kind",
+            "ENTRY",
+            "--expected-at",
+            "2020-01-01T00:00:00Z",
+            "--run-id",
+            "expired-slot",
+            "--journal-dir",
+            str(journal_dir),
+            "--grace-seconds",
+            "1",
+            "--stale-seconds",
+            "300",
+            "--",
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not marker.exists()
+    record = RunJournalStoreV0(journal_dir).status(limit=1)[0]
+    assert record.status.value == "MISSED_EXPECTED"
+    assert record.grace_seconds == 1
+    assert record.stale_seconds == 300
+
+
 def test_shadow_process_baseexception_propagates_and_started_remains(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -502,7 +586,7 @@ def test_shadow_process_baseexception_propagates_and_started_remains(
 
     config = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at="2026-08-11T01:00:00Z",
+        expected_at=CURRENT_SLOT_TEXT,
         run_id="entry-subprocess-interrupt",
         journal_dir=str(tmp_path),
         grace_seconds="60",

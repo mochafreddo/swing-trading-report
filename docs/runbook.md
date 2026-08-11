@@ -63,12 +63,20 @@ uv run python -m sab decision-board \
 ### Decision Board local shadow RunJournal
 
 `RunJournalV0`는 로컬 journal directory만 durable authority로 사용합니다. wrapper는 runner
-호출 직전에 `STARTED`를 원자적으로 기록하고, runner가 정상적인 sanitized 결과를 반환한
+호출 전에 expected identity를 원자적으로 claim합니다. grace가 이미 지난 slot은
+`MISSED_EXPECTED`를 기록하고 runner를 호출하지 않으며, 유효한 slot만 호출 직전에
+`STARTED`를 기록합니다. runner가 정상적인 sanitized 결과를 반환한
 경우에만 `PUBLISHED`, `BLOCKED`, `FAILED` 중 하나로 compare-and-set 전이합니다. runner가
 중단되거나 결과 계약을 반환하지 않으면 `STARTED`를 남기며, 별도 reconcile이 명시된 TTL 뒤
 `STALE_INCOMPLETE`로 전이합니다. 실행이 시작되지 않은 명시적 expected slot은 grace 뒤
-`MISSED_EXPECTED`가 됩니다. journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지
-않습니다.
+`MISSED_EXPECTED`가 됩니다. 각 record는 claim 시의 `grace_seconds`와 `stale_seconds`를
+provenance로 보존하며, 이후 reconcile에서 다른 정책으로 재해석하면 conflict로 중단합니다.
+journal에는 절대 경로, 계좌 식별자, provider 원문 오류를 쓰지 않습니다.
+
+공개 JSON Schema는 canonical 필드 형태를 검사하지만 timestamp 간 시간 순서는 표준 JSON
+Schema만으로 완전히 표현하지 못합니다. Python 소비 경계는 반드시
+`parse_run_journal_v0()`를 사용해 chronology를 포함한 semantic contract까지 검증해야 합니다.
+Web mirror는 같은 chronology refinement를 적용합니다.
 
 wrapper와 두 plist 파일은 shadow 검증용 템플릿일 뿐입니다.
 `com.mochafreddo.sab.decision-board.{entry,holding}-shadow.plist.template`은

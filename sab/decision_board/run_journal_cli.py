@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sab.report.decision_board import parse_decision_board_storage_key
+from sab.report.decision_board import (
+    ParsedDecisionBoardStorageKey,
+    parse_decision_board_storage_key,
+)
 
 from .results import DecisionRunIssueCodeV0
 from .run_journal import (
@@ -149,11 +152,27 @@ def _valid_report_file(value: object) -> bool:
     )
 
 
+def _parse_t7_report_basename(
+    value: object,
+) -> ParsedDecisionBoardStorageKey | None:
+    if not _valid_report_file(value):
+        return None
+    assert isinstance(value, str)
+    if len(value) < 10:
+        return None
+    parsed = parse_decision_board_storage_key(f"{value[:4]}/{value[5:7]}/{value}")
+    if parsed is None or parsed.basename != value:
+        return None
+    return parsed
+
+
 def _parse_runner_terminal_v0(
     stdout: str,
     stderr: str,
     *,
     returncode: int,
+    expected_run_kind: RunKindV0,
+    expected_run_id: str,
 ) -> dict[str, object] | None:
     streams = [stream.strip() for stream in (stdout, stderr) if stream.strip()]
     if len(streams) != 1:
@@ -184,8 +203,14 @@ def _parse_runner_terminal_v0(
             or issue_code not in allowed_issue_codes
         ):
             return None
-        if "report_file" in value and not _valid_report_file(value["report_file"]):
-            return None
+        if "report_file" in value:
+            parsed_report = _parse_t7_report_basename(value["report_file"])
+            if (
+                parsed_report is None
+                or parsed_report.run_kind != expected_run_kind.value
+                or parsed_report.run_id != expected_run_id
+            ):
+                return None
         return value
     if status not in {"PUBLISHED", "BLOCKED"}:
         return None
@@ -204,7 +229,13 @@ def _parse_runner_terminal_v0(
         or value["exit_code"] != 0
         or returncode != 0
         or type(value["degraded"]) is not bool
-        or not _valid_report_file(value["report_file"])
+    ):
+        return None
+    parsed_report = _parse_t7_report_basename(value["report_file"])
+    if (
+        parsed_report is None
+        or parsed_report.run_kind != expected_run_kind.value
+        or parsed_report.run_id != expected_run_id
     ):
         return None
     degraded = value["degraded"]
@@ -219,7 +250,7 @@ def _parse_runner_terminal_v0(
         if type(storage_key) is not str:
             return None
         parsed = parse_decision_board_storage_key(storage_key)
-        if parsed is None or parsed.basename != value["report_file"]:
+        if parsed is None or parsed != parsed_report:
             return None
     return value
 
@@ -237,12 +268,21 @@ def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> i
         return 0
 
     store = RunJournalStoreV0(config.journal_dir)
-    started = store.start(
+    observed_at = datetime.now(UTC)
+    started, should_run = store.claim(
         run_kind=config.run_kind,
         expected_at=config.expected_at,
         run_id=config.run_id,
-        started_at=datetime.now(UTC),
+        observed_at=observed_at,
+        grace_seconds=config.grace_seconds,
+        stale_seconds=config.stale_seconds,
     )
+    if not should_run:
+        print(
+            json.dumps(serialize_run_journal_v0(started), sort_keys=True),
+            file=sys.stderr,
+        )
+        return 2
     completed = subprocess.run(
         config.runner_args,
         capture_output=True,
@@ -253,6 +293,8 @@ def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> i
         completed.stdout,
         completed.stderr,
         returncode=completed.returncode,
+        expected_run_kind=config.run_kind,
+        expected_run_id=config.run_id,
     )
     if terminal is None:
         _emit_public_result(_RUNNER_INVALID)

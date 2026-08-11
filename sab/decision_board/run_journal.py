@@ -59,6 +59,8 @@ _ALL_FIELDS = frozenset(
         "expected_at",
         "started_at",
         "terminal_at",
+        "grace_seconds",
+        "stale_seconds",
         "issues",
         "report_file",
     }
@@ -176,6 +178,8 @@ class RunJournalV0:
     expected_at: datetime
     started_at: datetime | None
     terminal_at: datetime | None
+    grace_seconds: int
+    stale_seconds: int
     issues: tuple[RunJournalIssueV0, ...]
     report_file: str | None
 
@@ -230,6 +234,12 @@ def _require_report_file(value: object) -> str | None:
     return value
 
 
+def _require_policy_seconds(value: object, field: str, *, minimum: int) -> int:
+    if type(value) is not int or value < minimum or value > 604800:
+        raise ValueError(f"{field} must be a bounded integer")
+    return value
+
+
 def _validate_issue(code: object, message: object) -> tuple[str, str]:
     if type(code) is not str or _ISSUE_CODE_PATTERN.fullmatch(code) is None:
         raise ValueError("journal issue code is invalid")
@@ -265,9 +275,13 @@ def _validate_state(
     expected_at: datetime,
     started_at: datetime | None,
     terminal_at: datetime | None,
+    grace_seconds: int,
+    stale_seconds: int,
     issues: tuple[RunJournalIssueV0, ...],
     report_file: str | None,
 ) -> None:
+    _require_policy_seconds(grace_seconds, "grace_seconds", minimum=0)
+    _require_policy_seconds(stale_seconds, "stale_seconds", minimum=1)
     if status is RunJournalStatusV0.STARTED:
         if started_at is None or terminal_at is not None or issues or report_file:
             raise ValueError("STARTED has only a started timestamp")
@@ -323,6 +337,8 @@ def create_run_journal_v0(
     status: RunJournalStatusV0,
     started_at: datetime | None,
     terminal_at: datetime | None,
+    grace_seconds: int,
+    stale_seconds: int,
     issue_codes: Iterable[str] = (),
     report_file: str | None = None,
 ) -> RunJournalV0:
@@ -333,6 +349,8 @@ def create_run_journal_v0(
         raise TypeError("status must be an exact RunJournalStatusV0")
     started = _require_optional_utc(started_at, "started_at")
     terminal = _require_optional_utc(terminal_at, "terminal_at")
+    grace = _require_policy_seconds(grace_seconds, "grace_seconds", minimum=0)
+    stale = _require_policy_seconds(stale_seconds, "stale_seconds", minimum=1)
     issues = _make_issues(issue_codes)
     basename = _require_report_file(report_file)
     _validate_state(
@@ -340,6 +358,8 @@ def create_run_journal_v0(
         expected_at=expected,
         started_at=started,
         terminal_at=terminal,
+        grace_seconds=grace,
+        stale_seconds=stale,
         issues=issues,
         report_file=basename,
     )
@@ -351,6 +371,8 @@ def create_run_journal_v0(
     object.__setattr__(value, "expected_at", expected)
     object.__setattr__(value, "started_at", started)
     object.__setattr__(value, "terminal_at", terminal)
+    object.__setattr__(value, "grace_seconds", grace)
+    object.__setattr__(value, "stale_seconds", stale)
     object.__setattr__(value, "issues", issues)
     object.__setattr__(value, "report_file", basename)
     _register(value)
@@ -366,6 +388,8 @@ def _snapshot(value: RunJournalV0) -> _Snapshot:
         value.expected_at,
         value.started_at,
         value.terminal_at,
+        value.grace_seconds,
+        value.stale_seconds,
         value.issues,
         value.report_file,
     )
@@ -399,6 +423,8 @@ def _require_record(value: object) -> RunJournalV0:
         expected_at=value.expected_at,
         started_at=value.started_at,
         terminal_at=value.terminal_at,
+        grace_seconds=value.grace_seconds,
+        stale_seconds=value.stale_seconds,
         issues=value.issues,
         report_file=value.report_file,
     )
@@ -421,6 +447,8 @@ def serialize_run_journal_v0(value: object) -> dict[str, object]:
         "expected_at": _format_timestamp(record.expected_at),
         "started_at": _format_timestamp(record.started_at),
         "terminal_at": _format_timestamp(record.terminal_at),
+        "grace_seconds": record.grace_seconds,
+        "stale_seconds": record.stale_seconds,
         "issues": [issue.to_public_dict() for issue in record.issues],
         "report_file": record.report_file,
     }
@@ -477,6 +505,8 @@ def parse_run_journal_v0(value: object) -> RunJournalV0:
         status=RunJournalStatusV0(value["status"]),
         started_at=_parse_timestamp(value["started_at"], "started_at"),
         terminal_at=_parse_timestamp(value["terminal_at"], "terminal_at"),
+        grace_seconds=value["grace_seconds"],  # type: ignore[arg-type]
+        stale_seconds=value["stale_seconds"],  # type: ignore[arg-type]
         issue_codes=issue_codes,
         report_file=value["report_file"],  # type: ignore[arg-type]
     )
@@ -502,6 +532,15 @@ def _journal_basename(run_kind: RunKindV0, expected_at: datetime, run_id: str) -
 @dataclass(frozen=True, slots=True)
 class _JournalLock:
     fd: int
+    name: str
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RootGuard:
+    parent_fd: int
+    directory_fd: int
     name: str
     device: int
     inode: int
@@ -534,12 +573,83 @@ def _open_journal_directory(root: Path) -> int:
         directory_fd = os.open(root, flags)
     except OSError as exc:
         raise RunJournalStorageError("journal root could not be opened safely") from exc
-    after = os.fstat(directory_fd)
-    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+    try:
+        after = os.fstat(directory_fd)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise RunJournalStorageError("journal root changed during validation")
+    except BaseException:
         with suppress(BaseException):
             _close_fd(directory_fd)
-        raise RunJournalStorageError("journal root changed during validation")
+        raise
     return directory_fd
+
+
+def _open_root_guard(root: Path) -> _RootGuard:
+    if root.name in {"", ".", ".."}:
+        raise RunJournalStorageError("journal root must have a stable parent entry")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        before = root.lstat()
+    except OSError as exc:
+        raise RunJournalStorageError("journal root is unavailable") from exc
+    parent_fd = _open_journal_directory(root.parent)
+    parent_locked = False
+    directory_fd: int | None = None
+    try:
+        fcntl.flock(parent_fd, fcntl.LOCK_EX)
+        parent_locked = True
+        current = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (
+            before.st_dev,
+            before.st_ino,
+        ):
+            raise RunJournalStorageError("journal root changed before coordination")
+        flags = (
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        directory_fd = os.open(root.name, flags, dir_fd=parent_fd)
+        try:
+            opened = os.fstat(directory_fd)
+        except BaseException:
+            with suppress(BaseException):
+                _close_fd(directory_fd)
+            directory_fd = None
+            raise
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise RunJournalStorageError("journal root changed while opening")
+        return _RootGuard(
+            parent_fd,
+            directory_fd,
+            root.name,
+            opened.st_dev,
+            opened.st_ino,
+        )
+    except BaseException:
+        if directory_fd is not None:
+            with suppress(BaseException):
+                _close_fd(directory_fd)
+        if parent_locked:
+            with suppress(BaseException):
+                fcntl.flock(parent_fd, fcntl.LOCK_UN)
+        with suppress(BaseException):
+            _close_fd(parent_fd)
+        raise
+
+
+def _assert_root_unchanged(root: _RootGuard) -> None:
+    try:
+        opened = os.fstat(root.directory_fd)
+        current = os.stat(root.name, dir_fd=root.parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise RunJournalStorageError("journal root changed") from exc
+    expected = (root.device, root.inode)
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or (opened.st_dev, opened.st_ino) != expected
+        or not stat.S_ISDIR(current.st_mode)
+        or (current.st_dev, current.st_ino) != expected
+    ):
+        raise RunJournalStorageError("journal root changed")
 
 
 def _assert_journal_lock(directory_fd: int, lock: _JournalLock) -> None:
@@ -710,8 +820,9 @@ def _write_private_temp(
             )
         except FileExistsError:
             continue
-        info = os.fstat(fd)
+        info: os.stat_result | None = None
         try:
+            info = os.fstat(fd)
             view = memoryview(payload)
             while view:
                 written = os.write(fd, view)
@@ -719,10 +830,16 @@ def _write_private_temp(
                     raise OSError("journal temporary write made no progress")
                 view = view[written:]
             os.fsync(fd)
+            assert info is not None
             return name, info
         except BaseException:
             with suppress(BaseException):
-                _unlink_if_matches(directory_fd, name, info)
+                if info is None:
+                    current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if stat.S_ISREG(current.st_mode) and current.st_nlink == 1:
+                        os.unlink(name, dir_fd=directory_fd)
+                else:
+                    _unlink_if_matches(directory_fd, name, info)
             raise
         finally:
             primary = sys.exception()
@@ -731,7 +848,8 @@ def _write_private_temp(
             except BaseException:
                 if primary is None:
                     with suppress(BaseException):
-                        _unlink_if_matches(directory_fd, name, info)
+                        if info is not None:
+                            _unlink_if_matches(directory_fd, name, info)
                     raise
     raise RunJournalStorageError("journal temporary file could not be allocated")
 
@@ -739,6 +857,7 @@ def _write_private_temp(
 def _atomic_replace_record(
     directory_fd: int,
     lock: _JournalLock,
+    root: _RootGuard,
     basename: str,
     payload: bytes,
     *,
@@ -779,19 +898,21 @@ def _atomic_replace_record(
                 raise RunJournalStorageError("journal backup identity changed")
             os.fsync(directory_fd)
         _assert_journal_lock(directory_fd, lock)
-        os.replace(
-            temp_name,
-            basename,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-        )
-        temp_name = ""
+        _assert_root_unchanged(root)
         try:
+            os.replace(
+                temp_name,
+                basename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
             if not _target_matches(directory_fd, basename, temp_info):
                 raise RunJournalStorageError("journal replacement identity changed")
             _assert_journal_lock(directory_fd, lock)
+            _assert_root_unchanged(root)
             os.fsync(directory_fd)
             _assert_journal_lock(directory_fd, lock)
+            _assert_root_unchanged(root)
         except BaseException:
             if _target_matches(directory_fd, basename, temp_info):
                 if backup_name is None:
@@ -813,27 +934,39 @@ def _atomic_replace_record(
                         raise RunJournalStorageError(
                             "journal rollback identity changed"
                         ) from None
-                    os.replace(
-                        backup_name,
-                        basename,
-                        src_dir_fd=directory_fd,
-                        dst_dir_fd=directory_fd,
-                    )
+                    try:
+                        os.replace(
+                            backup_name,
+                            basename,
+                            src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd,
+                        )
+                    except BaseException:
+                        if not _target_matches(directory_fd, basename, expected):
+                            raise
+                    if not _target_matches(directory_fd, basename, expected):
+                        raise RunJournalStorageError(
+                            "journal rollback target identity changed"
+                        ) from None
                     backup_name = None
                 with suppress(BaseException):
                     os.fsync(directory_fd)
             raise
+        temp_name = ""
         if backup_name is not None:
             assert expected is not None
             assert backup_info is not None
-            if not _unlink_if_matches(
-                directory_fd,
-                backup_name,
-                backup_info,
-                expected_links=frozenset({1}),
-            ):
-                raise RunJournalStorageError("journal backup cleanup identity changed")
-            backup_name = None
+            try:
+                cleaned = _unlink_if_matches(
+                    directory_fd,
+                    backup_name,
+                    backup_info,
+                    expected_links=frozenset({1}),
+                )
+            except BaseException:
+                cleaned = False
+            if cleaned:
+                backup_name = None
     finally:
         if temp_name:
             with suppress(BaseException):
@@ -859,12 +992,15 @@ class RunJournalStoreV0:
         self._root = path
 
     @contextmanager
-    def _locked(self) -> Iterator[tuple[int, _JournalLock]]:
-        directory_fd = _open_journal_directory(self._root)
+    def _locked(self) -> Iterator[tuple[int, _JournalLock, _RootGuard]]:
+        root = _open_root_guard(self._root)
+        directory_fd = root.directory_fd
         lock: _JournalLock | None = None
         try:
             lock = _open_journal_lock(directory_fd)
-            yield directory_fd, lock
+            _assert_root_unchanged(root)
+            yield directory_fd, lock, root
+            _assert_root_unchanged(root)
         finally:
             primary = sys.exception()
             cleanup_error: BaseException | None = None
@@ -893,9 +1029,27 @@ class RunJournalStoreV0:
                                 lambda: fcntl.flock(directory_fd, fcntl.LOCK_UN)
                             )
                         finally:
-                            attempt_cleanup(lambda: _close_fd(directory_fd))
+                            try:
+                                attempt_cleanup(lambda: _close_fd(directory_fd))
+                            finally:
+                                try:
+                                    attempt_cleanup(
+                                        lambda: fcntl.flock(
+                                            root.parent_fd, fcntl.LOCK_UN
+                                        )
+                                    )
+                                finally:
+                                    attempt_cleanup(lambda: _close_fd(root.parent_fd))
             else:
-                attempt_cleanup(lambda: _close_fd(directory_fd))
+                try:
+                    attempt_cleanup(lambda: _close_fd(directory_fd))
+                finally:
+                    try:
+                        attempt_cleanup(
+                            lambda: fcntl.flock(root.parent_fd, fcntl.LOCK_UN)
+                        )
+                    finally:
+                        attempt_cleanup(lambda: _close_fd(root.parent_fd))
             if primary is None and cleanup_error is not None:
                 if isinstance(cleanup_error, RunJournalStorageError):
                     raise cleanup_error
@@ -909,6 +1063,7 @@ class RunJournalStoreV0:
     def _write(
         directory_fd: int,
         lock: _JournalLock,
+        root: _RootGuard,
         basename: str,
         record: RunJournalV0,
         *,
@@ -918,6 +1073,7 @@ class RunJournalStoreV0:
             _atomic_replace_record(
                 directory_fd,
                 lock,
+                root,
                 basename,
                 canonical_run_journal_bytes_v0(record),
                 expected=expected,
@@ -934,6 +1090,8 @@ class RunJournalStoreV0:
         expected_at: datetime,
         run_id: str,
         started_at: datetime,
+        grace_seconds: int,
+        stale_seconds: int,
     ) -> RunJournalV0:
         desired = create_run_journal_v0(
             run_kind=run_kind,
@@ -942,18 +1100,21 @@ class RunJournalStoreV0:
             status=RunJournalStatusV0.STARTED,
             started_at=started_at,
             terminal_at=None,
+            grace_seconds=grace_seconds,
+            stale_seconds=stale_seconds,
         )
         basename = _journal_basename(
             desired.run_kind, desired.expected_at, desired.run_id
         )
         desired_bytes = canonical_run_journal_bytes_v0(desired)
-        with self._locked() as (directory_fd, lock):
+        with self._locked() as (directory_fd, lock, root):
             try:
                 current, current_bytes, _ = _read_record(directory_fd, basename)
             except FileNotFoundError:
                 self._write(
                     directory_fd,
                     lock,
+                    root,
                     basename,
                     desired,
                     expected=None,
@@ -987,6 +1148,8 @@ class RunJournalStoreV0:
             status=status,
             started_at=original.started_at,
             terminal_at=terminal_at,
+            grace_seconds=original.grace_seconds,
+            stale_seconds=original.stale_seconds,
             issue_codes=issue_codes,
             report_file=report_file,
         )
@@ -995,7 +1158,7 @@ class RunJournalStoreV0:
         )
         original_bytes = canonical_run_journal_bytes_v0(original)
         desired_bytes = canonical_run_journal_bytes_v0(desired)
-        with self._locked() as (directory_fd, lock):
+        with self._locked() as (directory_fd, lock, root):
             try:
                 current, current_bytes, current_info = _read_record(
                     directory_fd, basename
@@ -1009,11 +1172,65 @@ class RunJournalStoreV0:
             self._write(
                 directory_fd,
                 lock,
+                root,
                 basename,
                 desired,
                 expected=current_info,
             )
         return desired
+
+    def claim(
+        self,
+        *,
+        run_kind: RunKindV0,
+        expected_at: datetime,
+        run_id: str,
+        observed_at: datetime,
+        grace_seconds: int,
+        stale_seconds: int,
+    ) -> tuple[RunJournalV0, bool]:
+        observed = _require_utc(observed_at, "observed_at")
+        expected = _require_utc(expected_at, "expected_at")
+        grace = _require_policy_seconds(grace_seconds, "grace_seconds", minimum=0)
+        stale = _require_policy_seconds(stale_seconds, "stale_seconds", minimum=1)
+        missed = (observed - expected).total_seconds() >= grace
+        desired = create_run_journal_v0(
+            run_kind=run_kind,
+            expected_at=expected,
+            run_id=run_id,
+            status=(
+                RunJournalStatusV0.MISSED_EXPECTED
+                if missed
+                else RunJournalStatusV0.STARTED
+            ),
+            started_at=None if missed else observed,
+            terminal_at=observed if missed else None,
+            grace_seconds=grace,
+            stale_seconds=stale,
+            issue_codes=((RunJournalStatusV0.MISSED_EXPECTED.value,) if missed else ()),
+        )
+        basename = _journal_basename(
+            desired.run_kind, desired.expected_at, desired.run_id
+        )
+        with self._locked() as (directory_fd, lock, root):
+            try:
+                current, _, _ = _read_record(directory_fd, basename)
+            except FileNotFoundError:
+                self._write(
+                    directory_fd,
+                    lock,
+                    root,
+                    basename,
+                    desired,
+                    expected=None,
+                )
+            else:
+                if current.grace_seconds != grace or current.stale_seconds != stale:
+                    raise RunJournalConflictError(
+                        "journal schedule policy does not match durable provenance"
+                    )
+                return current, False
+        return desired, desired.status is RunJournalStatusV0.STARTED
 
     @staticmethod
     def _read_all_locked(
@@ -1064,7 +1281,7 @@ class RunJournalStoreV0:
             type(status) is not RunJournalStatusV0 for status in allowed
         ):
             raise TypeError("status filter requires exact journal statuses")
-        with self._locked() as (directory_fd, _lock):
+        with self._locked() as (directory_fd, _lock, _root):
             records = [record for record, _ in self._read_all_locked(directory_fd)]
         if allowed is not None:
             records = [record for record in records if record.status in allowed]
@@ -1090,7 +1307,7 @@ class RunJournalStoreV0:
         if len(identities) != len(slots):
             raise ValueError("expected slots must be unique")
 
-        with self._locked() as (directory_fd, lock):
+        with self._locked() as (directory_fd, lock, root):
             current = self._read_all_locked(directory_fd)
             by_identity = {
                 (record.run_kind, record.expected_at, record.run_id): (
@@ -1101,12 +1318,19 @@ class RunJournalStoreV0:
             }
             for record, record_info in current:
                 identity = (record.run_kind, record.expected_at, record.run_id)
+                if identity in identities and (
+                    record.grace_seconds != grace_seconds
+                    or record.stale_seconds != stale_seconds
+                ):
+                    raise RunJournalConflictError(
+                        "journal schedule policy does not match durable provenance"
+                    )
                 if (
                     identity in identities
                     and record.status is RunJournalStatusV0.STARTED
                     and record.started_at is not None
                     and (observed_at - record.started_at).total_seconds()
-                    >= stale_seconds
+                    >= record.stale_seconds
                 ):
                     stale = create_run_journal_v0(
                         run_kind=record.run_kind,
@@ -1115,12 +1339,15 @@ class RunJournalStoreV0:
                         status=RunJournalStatusV0.STALE_INCOMPLETE,
                         started_at=record.started_at,
                         terminal_at=observed_at,
+                        grace_seconds=record.grace_seconds,
+                        stale_seconds=record.stale_seconds,
                         issue_codes=(RunJournalStatusV0.STALE_INCOMPLETE.value,),
                     )
                     basename = _journal_basename(*identity)
                     self._write(
                         directory_fd,
                         lock,
+                        root,
                         basename,
                         stale,
                         expected=record_info,
@@ -1140,12 +1367,15 @@ class RunJournalStoreV0:
                     status=RunJournalStatusV0.MISSED_EXPECTED,
                     started_at=None,
                     terminal_at=observed_at,
+                    grace_seconds=grace_seconds,
+                    stale_seconds=stale_seconds,
                     issue_codes=(RunJournalStatusV0.MISSED_EXPECTED.value,),
                 )
                 basename = _journal_basename(*identity)
                 self._write(
                     directory_fd,
                     lock,
+                    root,
                     basename,
                     missed,
                     expected=None,
@@ -1175,6 +1405,8 @@ def journal_decision_run_v0(
     expected_at: datetime,
     run_id: str,
     started_at: datetime,
+    grace_seconds: int,
+    stale_seconds: int,
     terminal_at: Callable[[], datetime],
     run_once: Callable[[], DecisionRunResultV0],
 ) -> tuple[RunJournalV0, DecisionRunResultV0]:
@@ -1185,6 +1417,8 @@ def journal_decision_run_v0(
         expected_at=expected_at,
         run_id=run_id,
         started_at=started_at,
+        grace_seconds=grace_seconds,
+        stale_seconds=stale_seconds,
     )
     result = run_once()
     public = serialize_decision_run_result_v0(result)

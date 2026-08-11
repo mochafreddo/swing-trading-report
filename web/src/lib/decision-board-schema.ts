@@ -5,7 +5,7 @@ const timestampV0Schema = z.iso.datetime({ offset: true });
 const runJournalTimestampV0Schema = z
   .string()
   .regex(
-    /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z$/,
+    /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{6})?Z$/,
   )
   .pipe(z.iso.datetime({ offset: false }));
 const runJournalReportFileV0Schema = z
@@ -70,9 +70,11 @@ const runJournalStaleIssueV0Schema = z
   .strict();
 const runJournalBaseShape = {
   schema_version: z.literal("decision-board.v0"),
-  run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
+  run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$(?![\s\S])/),
   run_kind: z.enum(["ENTRY", "HOLDING"]),
   expected_at: runJournalTimestampV0Schema,
+  grace_seconds: z.number().int().min(0).max(604800),
+  stale_seconds: z.number().int().min(1).max(604800),
 };
 const runJournalStartedV0Schema = z
   .object({
@@ -140,7 +142,7 @@ const runJournalStaleV0Schema = z
   })
   .strict();
 
-export const runJournalV0Schema = z.union([
+const runJournalStructuralV0Schema = z.union([
   runJournalStartedV0Schema,
   runJournalPublishedOrBlockedV0Schema("PUBLISHED"),
   runJournalPublishedOrBlockedV0Schema("BLOCKED"),
@@ -148,6 +150,31 @@ export const runJournalV0Schema = z.union([
   runJournalMissedV0Schema,
   runJournalStaleV0Schema,
 ]);
+
+export const runJournalV0Schema = runJournalStructuralV0Schema.superRefine(
+  (record, context) => {
+    const expected = Date.parse(record.expected_at);
+    const started =
+      record.started_at === null ? null : Date.parse(record.started_at);
+    const terminal =
+      record.terminal_at === null ? null : Date.parse(record.terminal_at);
+    if (started !== null && started < expected) {
+      context.addIssue({
+        code: "custom",
+        path: ["started_at"],
+        message: "started_at cannot precede expected_at",
+      });
+    }
+    const lowerBound = started ?? expected;
+    if (terminal !== null && terminal < lowerBound) {
+      context.addIssue({
+        code: "custom",
+        path: ["terminal_at"],
+        message: "terminal_at cannot precede the observed state",
+      });
+    }
+  },
+);
 const sourceUrlV0Schema = z.url().refine(
   (value) => {
     if (/[\s\u0000-\u001f\u007f]/u.test(value)) {

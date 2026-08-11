@@ -34,14 +34,24 @@ from sab.decision_board.runner import RunKindV0
 EXPECTED_AT = datetime(2026, 8, 11, 1, 0, tzinfo=UTC)
 STARTED_AT = datetime(2026, 8, 11, 1, 0, 1, tzinfo=UTC)
 TERMINAL_AT = datetime(2026, 8, 11, 1, 0, 2, tzinfo=UTC)
+GRACE_SECONDS = 60
+STALE_SECONDS = 300
 
 
-def _started(store: RunJournalStoreV0, *, run_id: str = "entry-slot-001"):
+def _started(
+    store: RunJournalStoreV0,
+    *,
+    run_id: str = "entry-slot-001",
+    grace_seconds: int = GRACE_SECONDS,
+    stale_seconds: int = STALE_SECONDS,
+):
     return store.start(
         run_kind=RunKindV0.ENTRY,
         expected_at=EXPECTED_AT,
         run_id=run_id,
         started_at=STARTED_AT,
+        grace_seconds=grace_seconds,
+        stale_seconds=stale_seconds,
     )
 
 
@@ -55,6 +65,8 @@ def test_started_and_terminal_records_are_canonical_private_safe_and_exact() -> 
         status=RunJournalStatusV0.STARTED,
         started_at=STARTED_AT,
         terminal_at=None,
+        grace_seconds=GRACE_SECONDS,
+        stale_seconds=STALE_SECONDS,
     )
     public = serialize_run_journal_v0(issued)
     assert public == {
@@ -65,6 +77,8 @@ def test_started_and_terminal_records_are_canonical_private_safe_and_exact() -> 
         "expected_at": "2026-08-11T01:00:00Z",
         "started_at": "2026-08-11T01:00:01Z",
         "terminal_at": None,
+        "grace_seconds": GRACE_SECONDS,
+        "stale_seconds": STALE_SECONDS,
         "issues": [],
         "report_file": None,
     }
@@ -112,6 +126,8 @@ def test_factory_rejects_unsafe_identity_and_non_utc_timestamps(field, value) ->
         "status": RunJournalStatusV0.STARTED,
         "started_at": STARTED_AT,
         "terminal_at": None,
+        "grace_seconds": GRACE_SECONDS,
+        "stale_seconds": STALE_SECONDS,
     }
     values[field] = value
     with pytest.raises((TypeError, ValueError)):
@@ -128,6 +144,8 @@ def test_public_parser_rejects_raw_subclass_extra_fields_and_noncanonical_issue(
         status=RunJournalStatusV0.FAILED,
         started_at=STARTED_AT,
         terminal_at=TERMINAL_AT,
+        grace_seconds=GRACE_SECONDS,
+        stale_seconds=STALE_SECONDS,
         issue_codes=(DecisionRunIssueCodeV0.INTERNAL_ERROR.value,),
     )
     public = record.to_public_dict()
@@ -152,6 +170,8 @@ def test_public_parser_rejects_raw_subclass_extra_fields_and_noncanonical_issue(
             status=RunJournalStatusV0.FAILED,
             started_at=STARTED_AT,
             terminal_at=TERMINAL_AT,
+            grace_seconds=GRACE_SECONDS,
+            stale_seconds=STALE_SECONDS,
             issue_codes=("PRIVATE_ACCOUNT_12345",),
         )
 
@@ -214,7 +234,9 @@ def test_schema_matches_runtime_run_journal_contract(tmp_path: Path) -> None:
     invalid_records.extend(
         [
             {**valid, "run_id": "../private"},
+            {**valid, "run_id": "abc\n"},
             {**valid, "expected_at": "2026-08-11T10:00:00+09:00"},
+            {**valid, "expected_at": "2026-08-11T01:00:00.1Z"},
             {**valid, "expected_at": None},
             {**valid, "terminal_at": "2026-08-11T01:00:02Z"},
             {
@@ -256,6 +278,12 @@ def test_schema_matches_runtime_run_journal_contract(tmp_path: Path) -> None:
     for invalid in invalid_records:
         assert list(validator.iter_errors(invalid)), invalid
 
+    chronology = {**valid, "started_at": "2026-08-11T00:59:59Z"}
+    assert list(validator.iter_errors(chronology)) == []
+    with pytest.raises(ValueError, match="precede"):
+        parse_run_journal_v0(chronology)
+    assert "parse_run_journal_v0" in schema["$defs"]["RunJournalV0"]["$comment"]
+
 
 def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
     tmp_path: Path,
@@ -268,6 +296,8 @@ def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
             expected_at=EXPECTED_AT,
             run_id="entry-slot-001",
             started_at=STARTED_AT,
+            grace_seconds=GRACE_SECONDS,
+            stale_seconds=STALE_SECONDS,
         ).to_public_dict()
         == started.to_public_dict()
     )
@@ -278,6 +308,8 @@ def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
             expected_at=EXPECTED_AT,
             run_id="entry-slot-001",
             started_at=STARTED_AT + timedelta(seconds=1),
+            grace_seconds=GRACE_SECONDS,
+            stale_seconds=STALE_SECONDS,
         )
 
     terminal = store.finish(
@@ -316,6 +348,8 @@ def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
             expected_at=EXPECTED_AT,
             run_id="entry-slot-001",
             started_at=STARTED_AT,
+            grace_seconds=GRACE_SECONDS,
+            stale_seconds=STALE_SECONDS,
         )
 
 
@@ -354,7 +388,7 @@ def test_store_rejects_symlink_lock_without_creating_record(tmp_path: Path) -> N
     assert target.read_text(encoding="utf-8") == "PRIVATE-SENTINEL"
 
 
-def test_store_uses_stable_directory_fd_when_root_path_is_replaced(
+def test_store_rejects_root_replacement_without_split_brain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     moved = tmp_path.parent / f"{tmp_path.name}-moved"
@@ -370,10 +404,37 @@ def test_store_uses_stable_directory_fd_when_root_path_is_replaced(
             tmp_path.mkdir()
 
     monkeypatch.setattr(run_journal.fcntl, "flock", replace_root)
-    _started(RunJournalStoreV0(tmp_path))
+    with pytest.raises(run_journal.RunJournalStorageError, match="root"):
+        _started(RunJournalStoreV0(tmp_path))
 
     assert list(tmp_path.glob("*.json")) == []
-    assert len(list(moved.glob("*.json"))) == 1
+    assert list(moved.glob("*.json")) == []
+
+    monkeypatch.setattr(run_journal.fcntl, "flock", real_flock)
+    second = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from datetime import UTC,datetime; "
+                "from sab.decision_board.run_journal import RunJournalStoreV0; "
+                "from sab.decision_board.runner import RunKindV0; "
+                f"RunJournalStoreV0({str(tmp_path)!r}).start("
+                "run_kind=RunKindV0.ENTRY,"
+                "expected_at=datetime(2026,8,11,1,0,tzinfo=UTC),"
+                "run_id='entry-slot-001',"
+                "started_at=datetime(2026,8,11,1,0,2,tzinfo=UTC),"
+                "grace_seconds=60,stale_seconds=300)"
+            ),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert second.returncode == 0, second.stderr
+    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert list(moved.glob("*.json")) == []
 
 
 def test_store_rejects_replaced_lock_path_before_record_write(
@@ -386,7 +447,11 @@ def test_store_rejects_replaced_lock_path_before_record_write(
     def replace_lock(fd: int, operation: int) -> None:
         nonlocal replaced
         real_flock(fd, operation)
-        if operation == run_journal.fcntl.LOCK_EX and not replaced:
+        if (
+            operation == run_journal.fcntl.LOCK_EX
+            and lock_path.exists()
+            and not replaced
+        ):
             replaced = True
             lock_path.unlink()
             lock_path.write_text("replacement", encoding="utf-8")
@@ -463,6 +528,74 @@ def test_baseexception_during_replace_propagates_and_releases_lock_and_fds(
         os.close(lock_fd)
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_post_effect_replace_baseexception_rolls_back_before_rethrow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, existing: bool
+) -> None:
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    store = RunJournalStoreV0(tmp_path)
+    started = _started(store, run_id="post-effect") if existing else None
+    before = next(tmp_path.glob("*.json")).read_bytes() if existing else None
+    real_replace = run_journal.os.replace
+
+    def replace_then_interrupt(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)  # type: ignore[arg-type]
+        raise SyntheticInterrupt
+
+    monkeypatch.setattr(run_journal.os, "replace", replace_then_interrupt)
+    with pytest.raises(SyntheticInterrupt):
+        if started is None:
+            _started(store, run_id="post-effect")
+        else:
+            store.finish(
+                started,
+                status=RunJournalStatusV0.FAILED,
+                terminal_at=TERMINAL_AT,
+                issue_codes=(DecisionRunIssueCodeV0.INTERNAL_ERROR.value,),
+            )
+
+    paths = list(tmp_path.glob("*.json"))
+    if before is None:
+        assert paths == []
+    else:
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == before
+
+
+def test_directory_and_temp_fstat_baseexception_close_owned_resources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    before_fds = len(os.listdir("/dev/fd"))
+    monkeypatch.setattr(
+        run_journal.os, "fstat", lambda _fd: (_ for _ in ()).throw(SyntheticInterrupt)
+    )
+    with pytest.raises(SyntheticInterrupt):
+        run_journal._open_journal_directory(tmp_path)
+    assert len(os.listdir("/dev/fd")) == before_fds
+
+    monkeypatch.undo()
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        before_fds = len(os.listdir("/dev/fd"))
+        monkeypatch.setattr(
+            run_journal.os,
+            "fstat",
+            lambda _fd: (_ for _ in ()).throw(SyntheticInterrupt),
+        )
+        with pytest.raises(SyntheticInterrupt):
+            run_journal._write_private_temp(directory_fd, "probe.json", b"{}\n")
+        assert len(os.listdir("/dev/fd")) == before_fds
+        assert list(tmp_path.glob("*.tmp")) == []
+    finally:
+        monkeypatch.undo()
+        os.close(directory_fd)
+
+
 def test_cross_process_start_is_idempotent_only_for_exact_bytes(tmp_path: Path) -> None:
     script = """
 import json, pathlib, sys, time
@@ -478,6 +611,8 @@ try:
         expected_at=datetime(2026, 8, 11, 1, 0, tzinfo=UTC),
         run_id="entry-slot-001",
         started_at=datetime(2026, 8, 11, 1, 0, 1, tzinfo=UTC) + timedelta(seconds=int(sys.argv[2])),
+        grace_seconds=60,
+        stale_seconds=300,
     )
 except RunJournalConflictError:
     print("conflict")
@@ -523,7 +658,12 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
     tmp_path: Path,
 ) -> None:
     store = RunJournalStoreV0(tmp_path)
-    old_started = _started(store, run_id="entry-stale-001")
+    old_started = _started(
+        store,
+        run_id="entry-stale-001",
+        grace_seconds=30,
+        stale_seconds=60,
+    )
     next_expected = ExpectedRunV0.create(
         run_kind=RunKindV0.ENTRY,
         expected_at=EXPECTED_AT + timedelta(hours=1),
@@ -536,9 +676,9 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
     )
     before_grace = store.reconcile(
         expected=(old_expected, next_expected),
-        now=next_expected.expected_at + timedelta(seconds=29),
+        now=STARTED_AT + timedelta(seconds=59),
         grace_seconds=30,
-        stale_seconds=7200,
+        stale_seconds=60,
         limit=10,
     )
     assert [record.status for record in before_grace] == [RunJournalStatusV0.STARTED]
@@ -562,6 +702,8 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
         expected_at=EXPECTED_AT + timedelta(hours=2),
         run_id="entry-recovery-003",
         started_at=EXPECTED_AT + timedelta(hours=2, seconds=1),
+        grace_seconds=GRACE_SECONDS,
+        stale_seconds=STALE_SECONDS,
     )
     completed = store.finish(
         later,
@@ -618,7 +760,12 @@ def test_expected_slot_rejects_raw_subclass_and_mutation(tmp_path: Path) -> None
 
 def test_reconcile_stales_only_explicitly_supplied_identity(tmp_path: Path) -> None:
     store = RunJournalStoreV0(tmp_path)
-    selected = _started(store, run_id="entry-selected-stale")
+    selected = _started(
+        store,
+        run_id="entry-selected-stale",
+        grace_seconds=30,
+        stale_seconds=60,
+    )
     unrelated = _started(store, run_id="entry-unrelated-started")
     expected = ExpectedRunV0.create(
         run_kind=selected.run_kind,
@@ -635,6 +782,35 @@ def test_reconcile_stales_only_explicitly_supplied_identity(tmp_path: Path) -> N
     states = {record.run_id: record.status for record in store.status(limit=10)}
     assert states[selected.run_id] is RunJournalStatusV0.STALE_INCOMPLETE
     assert states[unrelated.run_id] is RunJournalStatusV0.STARTED
+
+
+def test_stale_policy_is_persisted_and_cannot_be_reinterpreted(tmp_path: Path) -> None:
+    store = RunJournalStoreV0(tmp_path)
+    started = store.start(
+        run_kind=RunKindV0.ENTRY,
+        expected_at=EXPECTED_AT,
+        run_id="entry-policy-bound",
+        started_at=STARTED_AT,
+        grace_seconds=30,
+        stale_seconds=300,
+    )
+    assert started.to_public_dict()["grace_seconds"] == 30
+    assert started.to_public_dict()["stale_seconds"] == 300
+    expected = ExpectedRunV0.create(
+        run_kind=started.run_kind,
+        expected_at=started.expected_at,
+        run_id=started.run_id,
+    )
+
+    with pytest.raises(RunJournalConflictError, match="policy"):
+        store.reconcile(
+            expected=(expected,),
+            now=STARTED_AT + timedelta(seconds=60),
+            grace_seconds=30,
+            stale_seconds=1,
+            limit=10,
+        )
+    assert store.status(limit=1)[0].status is RunJournalStatusV0.STARTED
 
 
 def test_runner_writes_started_before_call_maps_failed_and_leaves_crash_started(
@@ -655,6 +831,8 @@ def test_runner_writes_started_before_call_maps_failed_and_leaves_crash_started(
         expected_at=EXPECTED_AT,
         run_id="entry-failed-001",
         started_at=STARTED_AT,
+        grace_seconds=GRACE_SECONDS,
+        stale_seconds=STALE_SECONDS,
         terminal_at=lambda: TERMINAL_AT,
         run_once=failed_runner,
     )
@@ -677,6 +855,8 @@ def test_runner_writes_started_before_call_maps_failed_and_leaves_crash_started(
             expected_at=EXPECTED_AT,
             run_id="holding-crash-001",
             started_at=STARTED_AT,
+            grace_seconds=GRACE_SECONDS,
+            stale_seconds=STALE_SECONDS,
             terminal_at=lambda: TERMINAL_AT,
             run_once=crash,
         )

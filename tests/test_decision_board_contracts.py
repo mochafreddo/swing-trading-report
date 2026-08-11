@@ -419,6 +419,8 @@ def test_run_journal_allows_failed_without_directional_payload() -> None:
         "expected_at": "2026-08-06T05:00:00Z",
         "started_at": "2026-08-06T05:00:01Z",
         "terminal_at": "2026-08-06T05:00:02Z",
+        "grace_seconds": 60,
+        "stale_seconds": 300,
         "issues": [
             {
                 "code": "COMPILER_CONTRACT_INVALID",
