@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from sab.report.decision_board import parse_decision_board_storage_key
 
 from .results import DecisionRunIssueCodeV0
 from .run_journal import (
@@ -17,6 +20,13 @@ from .run_journal import (
     serialize_run_journal_v0,
 )
 from .runner import RunKindV0
+
+_REPORT_FILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}\Z")
+_RUNNER_INVALID = {
+    "status": "FAILED",
+    "exit_code": 2,
+    "issue_code": "JOURNAL_RUNNER_INVALID",
+}
 
 
 def parse_utc_rfc3339_v0(value: object, *, field: str) -> datetime:
@@ -131,52 +141,92 @@ class JournalShadowProcessConfigV0:
         }
 
 
-def _parse_runner_terminal_v0(stdout: str, stderr: str) -> dict[str, object] | None:
+def _valid_report_file(value: object) -> bool:
+    return (
+        type(value) is str
+        and _REPORT_FILE_PATTERN.fullmatch(value) is not None
+        and Path(value).name == value
+    )
+
+
+def _parse_runner_terminal_v0(
+    stdout: str,
+    stderr: str,
+    *,
+    returncode: int,
+) -> dict[str, object] | None:
+    streams = [stream.strip() for stream in (stdout, stderr) if stream.strip()]
+    if len(streams) != 1:
+        return None
+    try:
+        value = json.loads(streams[0])
+    except json.JSONDecodeError:
+        return None
     allowed_issue_codes = {code.value for code in DecisionRunIssueCodeV0}
-    for line in reversed((stdout + "\n" + stderr).splitlines()):
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if type(value) is not dict or type(value.get("status")) is not str:
-            continue
-        status = value["status"]
-        if status == "FAILED":
-            allowed = {"status", "exit_code", "issue_code", "report_file"}
-            if not {"status", "exit_code", "issue_code"} <= value.keys() <= allowed:
-                continue
-            if type(value["exit_code"]) is not int or value["exit_code"] != 2:
-                continue
-            issue_code = value["issue_code"]
-            if type(issue_code) is not str or issue_code not in allowed_issue_codes:
-                continue
-        elif status in {"PUBLISHED", "BLOCKED"}:
-            required = {
-                "status",
-                "exit_code",
-                "report_file",
-                "storage_key",
-                "degraded",
-            }
-            allowed = required | {"upload_issue"}
-            if not required <= value.keys() <= allowed:
-                continue
-            if type(value["exit_code"]) is not int or value["exit_code"] != 0:
-                continue
-            if type(value["degraded"]) is not bool:
-                continue
-            upload_issue = value.get("upload_issue")
-            if upload_issue is not None and upload_issue != "UPLOAD_FAILED":
-                continue
-        else:
-            continue
-        report_file = value.get("report_file")
-        if report_file is not None and (
-            type(report_file) is not str or Path(report_file).name != report_file
+    if type(value) is not dict or type(value.get("status")) is not str:
+        return None
+    status = value["status"]
+    if status == "FAILED":
+        base = {"status", "exit_code", "issue_code"}
+        issue_code = value.get("issue_code")
+        expected_fields = (
+            base | {"report_file"}
+            if issue_code == DecisionRunIssueCodeV0.UPLOAD_FAILED.value
+            else base
+        )
+        if set(value) != expected_fields:
+            return None
+        if (
+            type(value["exit_code"]) is not int
+            or value["exit_code"] != 2
+            or returncode != 2
+            or type(issue_code) is not str
+            or issue_code not in allowed_issue_codes
         ):
-            continue
+            return None
+        if "report_file" in value and not _valid_report_file(value["report_file"]):
+            return None
         return value
-    return None
+    if status not in {"PUBLISHED", "BLOCKED"}:
+        return None
+    required = {
+        "status",
+        "exit_code",
+        "report_file",
+        "storage_key",
+        "degraded",
+    }
+    allowed = required | {"upload_issue"}
+    if not required <= set(value) <= allowed:
+        return None
+    if (
+        type(value["exit_code"]) is not int
+        or value["exit_code"] != 0
+        or returncode != 0
+        or type(value["degraded"]) is not bool
+        or not _valid_report_file(value["report_file"])
+    ):
+        return None
+    degraded = value["degraded"]
+    storage_key = value["storage_key"]
+    upload_issue = value.get("upload_issue")
+    if degraded:
+        if upload_issue != "UPLOAD_FAILED" or storage_key is not None:
+            return None
+    elif upload_issue is not None:
+        return None
+    if storage_key is not None:
+        if type(storage_key) is not str:
+            return None
+        parsed = parse_decision_board_storage_key(storage_key)
+        if parsed is None or parsed.basename != value["report_file"]:
+            return None
+    return value
+
+
+def _emit_public_result(value: dict[str, object]) -> None:
+    stream = sys.stderr if value["status"] == "FAILED" else sys.stdout
+    print(json.dumps(value, sort_keys=True), file=stream)
 
 
 def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> int:
@@ -199,22 +249,27 @@ def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> i
         text=True,
         check=False,
     )
-    sys.stdout.write(completed.stdout)
-    sys.stderr.write(completed.stderr)
-    terminal = _parse_runner_terminal_v0(completed.stdout, completed.stderr)
-    if terminal is not None and terminal["exit_code"] == completed.returncode:
-        issue_codes: tuple[str, ...] = ()
-        if terminal.get("issue_code") is not None:
-            issue_codes = (str(terminal["issue_code"]),)
-        elif terminal.get("upload_issue") is not None:
-            issue_codes = (str(terminal["upload_issue"]),)
-        store.finish(
-            started,
-            status=RunJournalStatusV0(str(terminal["status"])),
-            terminal_at=datetime.now(UTC),
-            issue_codes=issue_codes,
-            report_file=terminal.get("report_file"),  # type: ignore[arg-type]
-        )
+    terminal = _parse_runner_terminal_v0(
+        completed.stdout,
+        completed.stderr,
+        returncode=completed.returncode,
+    )
+    if terminal is None:
+        _emit_public_result(_RUNNER_INVALID)
+        return 2
+    issue_codes: tuple[str, ...] = ()
+    if terminal.get("issue_code") is not None:
+        issue_codes = (str(terminal["issue_code"]),)
+    elif terminal.get("upload_issue") is not None:
+        issue_codes = (str(terminal["upload_issue"]),)
+    store.finish(
+        started,
+        status=RunJournalStatusV0(str(terminal["status"])),
+        terminal_at=datetime.now(UTC),
+        issue_codes=issue_codes,
+        report_file=terminal.get("report_file"),  # type: ignore[arg-type]
+    )
+    _emit_public_result(terminal)
     return completed.returncode
 
 

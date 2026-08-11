@@ -563,6 +563,116 @@
         }
       ]
     },
+    "RunJournalTimestampV0": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "RunJournalDecisionIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "COMPILER_CONTRACT_INVALID",
+            "CONFIG_UNAVAILABLE",
+            "IDEMPOTENCY_CONFLICT",
+            "INTERNAL_ERROR",
+            "ITEM_ENRICHMENT_INVALID",
+            "LOCAL_PERSISTENCE_FAILED",
+            "PREPARATION_INVALID",
+            "SHARED_PREFLIGHT_UNAVAILABLE",
+            "UPLOAD_FAILED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "const": "COMPILER_CONTRACT_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code COMPILER_CONTRACT_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "CONFIG_UNAVAILABLE" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code CONFIG_UNAVAILABLE." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "IDEMPOTENCY_CONFLICT" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code IDEMPOTENCY_CONFLICT." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "INTERNAL_ERROR" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code INTERNAL_ERROR." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "ITEM_ENRICHMENT_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code ITEM_ENRICHMENT_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "LOCAL_PERSISTENCE_FAILED" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code LOCAL_PERSISTENCE_FAILED." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "PREPARATION_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code PREPARATION_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "SHARED_PREFLIGHT_UNAVAILABLE" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code SHARED_PREFLIGHT_UNAVAILABLE." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "UPLOAD_FAILED" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code UPLOAD_FAILED." } } }
+        }
+      ]
+    },
+    "RunJournalNonUploadDecisionIssueV0": {
+      "allOf": [
+        { "$ref": "#/$defs/RunJournalDecisionIssueV0" },
+        {
+          "properties": {
+            "code": { "not": { "const": "UPLOAD_FAILED" } }
+          }
+        }
+      ]
+    },
+    "RunJournalUploadIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "UPLOAD_FAILED" },
+        "message": { "const": "Run reported sanitized issue code UPLOAD_FAILED." }
+      }
+    },
+    "RunJournalMissedIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "MISSED_EXPECTED" },
+        "message": { "const": "Expected run did not start before its grace deadline." }
+      }
+    },
+    "RunJournalStaleIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "STALE_INCOMPLETE" },
+        "message": { "const": "Started run did not reach a terminal state before its TTL." }
+      }
+    },
+    "RunJournalIssueV0": {
+      "oneOf": [
+        { "$ref": "#/$defs/RunJournalDecisionIssueV0" },
+        { "$ref": "#/$defs/RunJournalMissedIssueV0" },
+        { "$ref": "#/$defs/RunJournalStaleIssueV0" }
+      ]
+    },
     "RunJournalV0": {
       "type": "object",
       "additionalProperties": false,
@@ -574,7 +684,8 @@
         "expected_at",
         "started_at",
         "terminal_at",
-        "issues"
+        "issues",
+        "report_file"
       ],
       "properties": {
         "schema_version": {
@@ -582,7 +693,7 @@
         },
         "run_id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
         },
         "run_kind": {
           "$ref": "#/$defs/RunKindV0"
@@ -598,19 +709,12 @@
           ]
         },
         "expected_at": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TimestampV0"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/RunJournalTimestampV0"
         },
         "started_at": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TimestampV0"
+              "$ref": "#/$defs/RunJournalTimestampV0"
             },
             {
               "type": "null"
@@ -620,7 +724,7 @@
         "terminal_at": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TimestampV0"
+              "$ref": "#/$defs/RunJournalTimestampV0"
             },
             {
               "type": "null"
@@ -630,7 +734,7 @@
         "issues": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/IssueV0"
+            "$ref": "#/$defs/RunJournalIssueV0"
           }
         },
         "report_file": {
@@ -644,7 +748,101 @@
             }
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "STARTED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "type": "null" },
+              "issues": { "maxItems": 0 },
+              "report_file": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["PUBLISHED", "BLOCKED"] } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
+              },
+              "report_file": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "FAILED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "issues": {
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
+                  },
+                  "report_file": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "issues": {
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": { "$ref": "#/$defs/RunJournalNonUploadDecisionIssueV0" }
+                  },
+                  "report_file": { "type": "null" }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "MISSED_EXPECTED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "type": "null" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalMissedIssueV0" }
+              },
+              "report_file": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "STALE_INCOMPLETE" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalStaleIssueV0" }
+              },
+              "report_file": { "type": "null" }
+            }
+          }
+        }
+      ]
     }
   }
 }

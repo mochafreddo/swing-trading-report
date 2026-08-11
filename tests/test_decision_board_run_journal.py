@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 import time
@@ -185,6 +187,76 @@ def test_schema_accepts_sanitized_report_basename_and_rejects_path(
     assert errors
 
 
+def test_schema_matches_runtime_run_journal_contract(tmp_path: Path) -> None:
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "schemas/decision-board.v0.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(
+        {
+            "$schema": schema["$schema"],
+            "$defs": schema["$defs"],
+            "$ref": "#/$defs/RunJournalV0",
+        },
+        format_checker=FormatChecker(),
+    )
+    store = RunJournalStoreV0(tmp_path)
+    started = _started(store)
+    valid = started.to_public_dict()
+    validator.validate(valid)
+
+    invalid_records: list[dict[str, object]] = []
+    missing_report_file = dict(valid)
+    del missing_report_file["report_file"]
+    invalid_records.append(missing_report_file)
+    invalid_records.extend(
+        [
+            {**valid, "run_id": "../private"},
+            {**valid, "expected_at": "2026-08-11T10:00:00+09:00"},
+            {**valid, "expected_at": None},
+            {**valid, "terminal_at": "2026-08-11T01:00:02Z"},
+            {
+                **valid,
+                "issues": [
+                    {
+                        "code": "MISSED_EXPECTED",
+                        "message": "Expected run did not start before its grace deadline.",
+                        "metadata": {"private": True},
+                    }
+                ],
+            },
+            {
+                **valid,
+                "status": "MISSED_EXPECTED",
+                "started_at": None,
+                "terminal_at": "2026-08-11T01:00:02Z",
+                "issues": [
+                    {
+                        "code": "MISSED_EXPECTED",
+                        "message": "wrong message",
+                    }
+                ],
+            },
+            {
+                **valid,
+                "status": "FAILED",
+                "terminal_at": "2026-08-11T01:00:02Z",
+                "issues": [],
+            },
+            {
+                **valid,
+                "status": "PUBLISHED",
+                "terminal_at": "2026-08-11T01:00:02Z",
+                "report_file": None,
+            },
+        ]
+    )
+    for invalid in invalid_records:
+        assert list(validator.iter_errors(invalid)), invalid
+
+
 def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
     tmp_path: Path,
 ) -> None:
@@ -236,6 +308,7 @@ def test_store_replay_is_exact_and_conflicting_or_regressive_transitions_fail(
             started,
             status=RunJournalStatusV0.PUBLISHED,
             terminal_at=TERMINAL_AT,
+            report_file="conflicting-published.json",
         )
     with pytest.raises(RunJournalConflictError):
         store.start(
@@ -254,11 +327,11 @@ def test_atomic_transition_failure_preserves_started_record(
     journal_path = next(tmp_path.glob("*.json"))
     before = journal_path.read_bytes()
 
-    def fail_write(path: str, payload: bytes) -> None:
-        del path, payload
+    def fail_write(*args: object, **kwargs: object) -> None:
+        del args, kwargs
         raise OSError("PRIVATE-SENTINEL synthetic write failure")
 
-    monkeypatch.setattr(run_journal, "_atomic_write_bytes", fail_write)
+    monkeypatch.setattr(run_journal, "_atomic_replace_record", fail_write)
     with pytest.raises(run_journal.RunJournalStorageError):
         store.finish(
             started,
@@ -279,6 +352,115 @@ def test_store_rejects_symlink_lock_without_creating_record(tmp_path: Path) -> N
         _started(store)
     assert list(tmp_path.glob("*.json")) == []
     assert target.read_text(encoding="utf-8") == "PRIVATE-SENTINEL"
+
+
+def test_store_uses_stable_directory_fd_when_root_path_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    moved = tmp_path.parent / f"{tmp_path.name}-moved"
+    real_flock = run_journal.fcntl.flock
+    replaced = False
+
+    def replace_root(fd: int, operation: int) -> None:
+        nonlocal replaced
+        real_flock(fd, operation)
+        if operation == run_journal.fcntl.LOCK_EX and not replaced:
+            replaced = True
+            tmp_path.rename(moved)
+            tmp_path.mkdir()
+
+    monkeypatch.setattr(run_journal.fcntl, "flock", replace_root)
+    _started(RunJournalStoreV0(tmp_path))
+
+    assert list(tmp_path.glob("*.json")) == []
+    assert len(list(moved.glob("*.json"))) == 1
+
+
+def test_store_rejects_replaced_lock_path_before_record_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real_flock = run_journal.fcntl.flock
+    lock_path = tmp_path / ".run-journal-v0.lock"
+    replaced = False
+
+    def replace_lock(fd: int, operation: int) -> None:
+        nonlocal replaced
+        real_flock(fd, operation)
+        if operation == run_journal.fcntl.LOCK_EX and not replaced:
+            replaced = True
+            lock_path.unlink()
+            lock_path.write_text("replacement", encoding="utf-8")
+
+    monkeypatch.setattr(run_journal.fcntl, "flock", replace_lock)
+    with pytest.raises(run_journal.RunJournalStorageError, match="lock"):
+        _started(RunJournalStoreV0(tmp_path))
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_post_replace_directory_fsync_failure_rolls_back_new_and_existing_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = RunJournalStoreV0(tmp_path)
+    real_fsync = run_journal.os.fsync
+
+    def fail_on_directory_call(call_to_fail: int):
+        directory_calls = 0
+
+        def fail_directory_fsync(fd: int) -> None:
+            nonlocal directory_calls
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                directory_calls += 1
+                if directory_calls == call_to_fail:
+                    raise OSError("synthetic post-replace directory fsync failure")
+            real_fsync(fd)
+
+        return fail_directory_fsync
+
+    monkeypatch.setattr(run_journal.os, "fsync", fail_on_directory_call(1))
+    with pytest.raises(run_journal.RunJournalStorageError):
+        _started(store, run_id="new-fsync-failure")
+    assert list(tmp_path.glob("*.json")) == []
+
+    monkeypatch.setattr(run_journal.os, "fsync", real_fsync)
+    started = _started(store, run_id="existing-fsync-failure")
+    path = next(tmp_path.glob("*.json"))
+    before = path.read_bytes()
+    # The first directory fsync durably records the rollback link. The second
+    # follows os.replace(), so this specifically exercises post-replace rollback.
+    monkeypatch.setattr(run_journal.os, "fsync", fail_on_directory_call(2))
+    with pytest.raises(run_journal.RunJournalStorageError):
+        store.finish(
+            started,
+            status=RunJournalStatusV0.FAILED,
+            terminal_at=TERMINAL_AT,
+            issue_codes=(DecisionRunIssueCodeV0.INTERNAL_ERROR.value,),
+        )
+    assert path.read_bytes() == before
+
+
+def test_baseexception_during_replace_propagates_and_releases_lock_and_fds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    def interrupt_replace(*args, **kwargs) -> None:
+        del args, kwargs
+        raise SyntheticInterrupt
+
+    monkeypatch.setattr(run_journal.os, "replace", interrupt_replace)
+    with pytest.raises(SyntheticInterrupt):
+        _started(RunJournalStoreV0(tmp_path), run_id="baseexception-cleanup")
+    assert list(tmp_path.glob("*.tmp")) == []
+    lock_fd = os.open(tmp_path / ".run-journal-v0.lock", os.O_RDWR)
+    try:
+        run_journal.fcntl.flock(
+            lock_fd,
+            run_journal.fcntl.LOCK_EX | run_journal.fcntl.LOCK_NB,
+        )
+        run_journal.fcntl.flock(lock_fd, run_journal.fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
 
 
 def test_cross_process_start_is_idempotent_only_for_exact_bytes(tmp_path: Path) -> None:
@@ -347,8 +529,13 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
         expected_at=EXPECTED_AT + timedelta(hours=1),
         run_id="entry-missed-002",
     )
+    old_expected = ExpectedRunV0.create(
+        run_kind=old_started.run_kind,
+        expected_at=old_started.expected_at,
+        run_id=old_started.run_id,
+    )
     before_grace = store.reconcile(
-        expected=(next_expected,),
+        expected=(old_expected, next_expected),
         now=next_expected.expected_at + timedelta(seconds=29),
         grace_seconds=30,
         stale_seconds=7200,
@@ -357,7 +544,7 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
     assert [record.status for record in before_grace] == [RunJournalStatusV0.STARTED]
 
     reconciled = store.reconcile(
-        expected=(next_expected,),
+        expected=(old_expected, next_expected),
         now=next_expected.expected_at + timedelta(seconds=31),
         grace_seconds=30,
         stale_seconds=60,
@@ -388,6 +575,66 @@ def test_reconcile_missed_stale_and_later_slot_recovery_are_deterministic(
         RunJournalStatusV0.MISSED_EXPECTED,
         RunJournalStatusV0.STALE_INCOMPLETE,
     }
+
+
+def test_expected_slot_rejects_raw_subclass_and_mutation(tmp_path: Path) -> None:
+    issued = ExpectedRunV0.create(
+        run_kind=RunKindV0.ENTRY,
+        expected_at=EXPECTED_AT,
+        run_id="entry-issued-slot",
+    )
+    raw = object.__new__(ExpectedRunV0)
+    for name in ("run_kind", "expected_at", "run_id"):
+        object.__setattr__(raw, name, getattr(issued, name))
+
+    class ExpectedSubclass(ExpectedRunV0):
+        pass
+
+    subclassed = object.__new__(ExpectedSubclass)
+    for name in ("run_kind", "expected_at", "run_id"):
+        object.__setattr__(subclassed, name, getattr(issued, name))
+
+    store = RunJournalStoreV0(tmp_path)
+    for invalid in (raw, subclassed):
+        with pytest.raises(TypeError, match=r"issued|exact"):
+            store.reconcile(
+                expected=(invalid,),  # type: ignore[arg-type]
+                now=EXPECTED_AT + timedelta(minutes=1),
+                grace_seconds=30,
+                stale_seconds=60,
+                limit=10,
+            )
+
+    object.__setattr__(issued, "run_id", "mutated")
+    with pytest.raises(TypeError, match="unchanged"):
+        store.reconcile(
+            expected=(issued,),
+            now=EXPECTED_AT + timedelta(minutes=1),
+            grace_seconds=30,
+            stale_seconds=60,
+            limit=10,
+        )
+
+
+def test_reconcile_stales_only_explicitly_supplied_identity(tmp_path: Path) -> None:
+    store = RunJournalStoreV0(tmp_path)
+    selected = _started(store, run_id="entry-selected-stale")
+    unrelated = _started(store, run_id="entry-unrelated-started")
+    expected = ExpectedRunV0.create(
+        run_kind=selected.run_kind,
+        expected_at=selected.expected_at,
+        run_id=selected.run_id,
+    )
+    store.reconcile(
+        expected=(expected,),
+        now=STARTED_AT + timedelta(seconds=61),
+        grace_seconds=30,
+        stale_seconds=60,
+        limit=10,
+    )
+    states = {record.run_id: record.status for record in store.status(limit=10)}
+    assert states[selected.run_id] is RunJournalStatusV0.STALE_INCOMPLETE
+    assert states[unrelated.run_id] is RunJournalStatusV0.STARTED
 
 
 def test_runner_writes_started_before_call_maps_failed_and_leaves_crash_started(

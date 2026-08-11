@@ -9,8 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import sab.decision_board.run_journal_cli as run_journal_cli
 from sab.__main__ import _build_parser, _dispatch_command
 from sab.decision_board.run_journal import RunJournalStoreV0
+from sab.decision_board.run_journal_cli import JournalShadowProcessConfigV0
 from sab.decision_board.runner import RunKindV0
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +23,41 @@ PLISTS = (
     REPO_ROOT
     / "scripts/launchd/com.mochafreddo.sab.decision-board.holding-shadow.plist.template",
 )
+
+
+def _run_terminal_script(
+    tmp_path: Path,
+    *,
+    run_id: str,
+    script: str,
+) -> tuple[subprocess.CompletedProcess[str], RunJournalStoreV0]:
+    journal_dir = tmp_path / run_id
+    result = subprocess.run(
+        [
+            str(WRAPPER),
+            "--run-kind",
+            "ENTRY",
+            "--expected-at",
+            "2026-08-11T01:00:00Z",
+            "--run-id",
+            run_id,
+            "--journal-dir",
+            str(journal_dir),
+            "--grace-seconds",
+            "60",
+            "--stale-seconds",
+            "300",
+            "--",
+            sys.executable,
+            "-c",
+            script,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, RunJournalStoreV0(journal_dir)
 
 
 def test_status_and_reconcile_cli_are_bounded_typed_and_sanitized(
@@ -42,9 +79,9 @@ def test_status_and_reconcile_cli_are_bounded_typed_and_sanitized(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            "2026-08-11T02:00:00Z",
+            "2026-08-11T01:00:00Z",
             "--run-id",
-            "entry-missed-002",
+            "entry-stale-001",
             "--now",
             "2026-08-11T02:01:01Z",
             "--grace-seconds",
@@ -57,9 +94,8 @@ def test_status_and_reconcile_cli_are_bounded_typed_and_sanitized(
     )
     assert _dispatch_command(reconcile, parser) == 0
     reconciled = json.loads(capsys.readouterr().out)
-    assert reconciled["count"] == 2
+    assert reconciled["count"] == 1
     assert [record["status"] for record in reconciled["records"]] == [
-        "MISSED_EXPECTED",
         "STALE_INCOMPLETE",
     ]
     assert str(tmp_path) not in json.dumps(reconciled)
@@ -193,7 +229,12 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
         text=True,
         check=False,
     )
-    assert crashed.returncode == 9
+    assert crashed.returncode == 2
+    assert json.loads(crashed.stderr) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "JOURNAL_RUNNER_INVALID",
+    }
     states = {
         record.run_id: record.status.value
         for record in RunJournalStoreV0(journal_dir).status(limit=10)
@@ -319,9 +360,162 @@ def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> N
         text=True,
         check=False,
     )
-    assert result.returncode == 7
+    assert result.returncode == 2
+    assert json.loads(result.stderr) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "JOURNAL_RUNNER_INVALID",
+    }
     record = RunJournalStoreV0(journal_dir).status(limit=1)[0]
     assert record.status.value == "STARTED"
+
+
+def test_shadow_wrapper_never_relays_raw_runner_output(tmp_path: Path) -> None:
+    public = {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id="entry-raw-output",
+        script=(
+            "import json,sys; print('PRIVATE-SENTINEL raw stdout'); "
+            f"print(json.dumps({public!r}), file=sys.stderr); raise SystemExit(2)"
+        ),
+    )
+    assert result.returncode == 2
+    assert "PRIVATE-SENTINEL" not in result.stdout + result.stderr
+    assert json.loads(result.stderr) == {
+        "exit_code": 2,
+        "issue_code": "JOURNAL_RUNNER_INVALID",
+        "status": "FAILED",
+    }
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+def test_shadow_wrapper_requires_exactly_one_terminal_result(tmp_path: Path) -> None:
+    public = {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id="entry-multiple-terminal",
+        script=(
+            "import json,sys; value="
+            f"{public!r}; print(json.dumps(value), file=sys.stderr); "
+            "print(json.dumps(value), file=sys.stderr); raise SystemExit(2)"
+        ),
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stderr)["issue_code"] == "JOURNAL_RUNNER_INVALID"
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+def test_shadow_wrapper_missing_terminal_is_sanitized_nonzero(tmp_path: Path) -> None:
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id="entry-missing-terminal",
+        script="raise SystemExit(0)",
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["issue_code"] == "JOURNAL_RUNNER_INVALID"
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+@pytest.mark.parametrize(
+    "public",
+    [
+        {
+            "status": "PUBLISHED",
+            "exit_code": 0,
+            "report_file": "2026-08-11.published.decision-board.json",
+            "storage_key": None,
+            "degraded": True,
+        },
+        {
+            "status": "BLOCKED",
+            "exit_code": 0,
+            "report_file": "2026-08-11.blocked.decision-board.json",
+            "storage_key": "PRIVATE-SENTINEL",
+            "degraded": False,
+        },
+        {
+            "status": "FAILED",
+            "exit_code": 2,
+            "issue_code": "CONFIG_UNAVAILABLE",
+            "report_file": "unexpected.json",
+        },
+        {
+            "status": "FAILED",
+            "exit_code": 2,
+            "issue_code": "UPLOAD_FAILED",
+        },
+    ],
+)
+def test_shadow_wrapper_rejects_inconsistent_terminal_truth(
+    public: dict[str, object], tmp_path: Path
+) -> None:
+    exit_code = public["exit_code"]
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id=f"entry-inconsistent-{len(json.dumps(public))}",
+        script=(
+            f"import json; print(json.dumps({public!r})); raise SystemExit({exit_code})"
+        ),
+    )
+    assert result.returncode == 2
+    assert "PRIVATE-SENTINEL" not in result.stdout + result.stderr
+    assert json.loads(result.stderr)["issue_code"] == "JOURNAL_RUNNER_INVALID"
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+def test_shadow_wrapper_reserializes_one_valid_terminal_result(tmp_path: Path) -> None:
+    public = {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id="entry-one-valid-terminal",
+        script=f"import json,sys; print(json.dumps({public!r}, indent=2), file=sys.stderr); raise SystemExit(2)",
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == json.dumps(public, sort_keys=True) + "\n"
+    assert store.status(limit=1)[0].status.value == "FAILED"
+
+
+def test_shadow_process_baseexception_propagates_and_started_remains(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    def interrupt_run(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise SyntheticInterrupt
+
+    config = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-11T01:00:00Z",
+        run_id="entry-subprocess-interrupt",
+        journal_dir=str(tmp_path),
+        grace_seconds="60",
+        stale_seconds="300",
+        runner_args=[sys.executable, "-c", "raise SystemExit(0)"],
+        dry_run=False,
+    )
+    monkeypatch.setattr(run_journal_cli.subprocess, "run", interrupt_run)
+
+    with pytest.raises(SyntheticInterrupt):
+        run_journal_cli.execute_journal_shadow_process_v0(config)
+
+    assert RunJournalStoreV0(tmp_path).status(limit=1)[0].status.value == "STARTED"
 
 
 def test_wrapper_and_disabled_plists_are_local_notification_order_network_free() -> (

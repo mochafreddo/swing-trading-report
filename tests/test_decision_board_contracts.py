@@ -421,10 +421,13 @@ def test_run_journal_allows_failed_without_directional_payload() -> None:
         "terminal_at": "2026-08-06T05:00:02Z",
         "issues": [
             {
-                "code": "COMPILER_FAILED",
-                "message": "Synthetic compiler failure.",
+                "code": "COMPILER_CONTRACT_INVALID",
+                "message": (
+                    "Run reported sanitized issue code COMPILER_CONTRACT_INVALID."
+                ),
             }
         ],
+        "report_file": None,
     }
 
     Draft202012Validator(journal_schema, format_checker=FormatChecker()).validate(

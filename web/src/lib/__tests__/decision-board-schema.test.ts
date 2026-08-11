@@ -12,6 +12,7 @@ import {
   decisionBoardEnvelopeV0Schema,
   parseDecisionBoardReportStructure,
   parseVerifiedDecisionBoardReport,
+  runJournalV0Schema,
   safeParseDecisionBoardReportStructure,
   safeParseVerifiedDecisionBoardReport,
 } from "@/lib/decision-board-schema";
@@ -69,6 +70,50 @@ const validClaim = () => {
 };
 
 describe("Decision Board V0 schema", () => {
+  it("mirrors the strict RunJournalV0 runtime contract", () => {
+    const started = {
+      schema_version: "decision-board.v0",
+      run_id: "entry-slot-001",
+      run_kind: "ENTRY",
+      status: "STARTED",
+      expected_at: "2026-08-11T01:00:00Z",
+      started_at: "2026-08-11T01:00:01Z",
+      terminal_at: null,
+      issues: [],
+      report_file: null,
+    };
+    expect(runJournalV0Schema.safeParse(started).success).toBe(true);
+    expect(
+      runJournalV0Schema.safeParse({ ...started, run_id: "../private" })
+        .success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...started,
+        expected_at: "2026-08-11T10:00:00+09:00",
+      }).success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...started,
+        status: "PUBLISHED",
+        terminal_at: "2026-08-11T01:00:02Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      runJournalV0Schema.safeParse({
+        ...started,
+        issues: [
+          {
+            code: "MISSED_EXPECTED",
+            message: "Expected run did not start before its grace deadline.",
+            metadata: { private: true },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   it.each(["published-entry.json", "published-holding.json", "blocked.json"])(
     "parses shared golden fixture %s",
     (name) => {
