@@ -7,6 +7,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta, timezone
@@ -766,8 +767,10 @@ def test_directory_and_temp_fstat_baseexception_close_owned_resources(
         os.close(directory_fd)
 
 
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGUSR1])
 def test_signal_interrupted_open_closes_only_returned_fd_not_foreign_same_inode(
     monkeypatch: pytest.MonkeyPatch,
+    signum: signal.Signals,
 ) -> None:
     class SyntheticInterrupt(BaseException):
         pass
@@ -785,10 +788,10 @@ def test_signal_interrupted_open_closes_only_returned_fd_not_foreign_same_inode(
         fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
         owned_fd = fd
         foreign_fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
-        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signum)
         return fd
 
-    previous_handler = signal.signal(signal.SIGTERM, raise_interrupt)
+    previous_handler = signal.signal(signum, raise_interrupt)
     monkeypatch.setattr(run_journal.os, "open", open_then_signal)
     try:
         with pytest.raises(SyntheticInterrupt):
@@ -800,10 +803,176 @@ def test_signal_interrupted_open_closes_only_returned_fd_not_foreign_same_inode(
         assert foreign_fd is not None
         os.fstat(foreign_fd)
     finally:
-        signal.signal(signal.SIGTERM, previous_handler)
+        signal.signal(signum, previous_handler)
+        if owned_fd is not None:
+            with suppress(OSError):
+                real_close(owned_fd)
         if foreign_fd is not None:
             with suppress(OSError):
                 real_close(foreign_fd)
+
+
+def test_owned_open_queries_mask_then_recovers_block_post_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SyntheticMaskInterrupt(BaseException):
+        pass
+
+    real_sigmask = signal.pthread_sigmask
+    real_open = os.open
+    original_mask = real_sigmask(signal.SIG_BLOCK, frozenset())
+    calls: list[tuple[int, frozenset[int | signal.Signals]]] = []
+    block_injected = False
+    open_called = False
+
+    def mask_then_interrupt(
+        how: int,
+        mask: set[int | signal.Signals] | frozenset[int | signal.Signals],
+    ) -> set[int | signal.Signals]:
+        nonlocal block_injected
+        frozen = frozenset(mask)
+        calls.append((how, frozen))
+        result = real_sigmask(how, mask)
+        if how == signal.SIG_BLOCK and frozen and not block_injected:
+            block_injected = True
+            raise SyntheticMaskInterrupt
+        return result
+
+    def observe_open(*args: object, **kwargs: object) -> int:
+        nonlocal open_called
+        open_called = True
+        return real_open(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(run_journal.signal, "pthread_sigmask", mask_then_interrupt)
+    monkeypatch.setattr(run_journal.os, "open", observe_open)
+    try:
+        with pytest.raises(SyntheticMaskInterrupt):
+            run_journal._owned_open("/dev/null", os.O_RDONLY)
+        assert calls[0] == (signal.SIG_BLOCK, frozenset())
+        assert calls[1] == (
+            signal.SIG_BLOCK,
+            frozenset(signal.valid_signals() - {signal.SIGKILL, signal.SIGSTOP}),
+        )
+        assert real_sigmask(signal.SIG_BLOCK, frozenset()) == original_mask
+        assert not open_called
+    finally:
+        real_sigmask(signal.SIG_SETMASK, original_mask)
+
+
+def test_owned_open_verifies_mask_after_restore_post_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SyntheticMaskInterrupt(BaseException):
+        pass
+
+    real_sigmask = signal.pthread_sigmask
+    real_open = os.open
+    original_mask = real_sigmask(signal.SIG_BLOCK, frozenset())
+    query_count = 0
+    restore_injected = False
+    owned_fd: int | None = None
+
+    def mask_then_interrupt(
+        how: int,
+        mask: set[int | signal.Signals] | frozenset[int | signal.Signals],
+    ) -> set[int | signal.Signals]:
+        nonlocal query_count, restore_injected
+        frozen = frozenset(mask)
+        result = real_sigmask(how, mask)
+        if how == signal.SIG_BLOCK and not frozen:
+            query_count += 1
+        if how == signal.SIG_SETMASK and not restore_injected:
+            restore_injected = True
+            raise SyntheticMaskInterrupt
+        return result
+
+    def capture_open(*args: object, **kwargs: object) -> int:
+        nonlocal owned_fd
+        owned_fd = real_open(*args, **kwargs)  # type: ignore[arg-type]
+        return owned_fd
+
+    monkeypatch.setattr(run_journal.signal, "pthread_sigmask", mask_then_interrupt)
+    monkeypatch.setattr(run_journal.os, "open", capture_open)
+    try:
+        with pytest.raises(SyntheticMaskInterrupt):
+            run_journal._owned_open("/dev/null", os.O_RDONLY)
+        assert query_count >= 2
+        assert real_sigmask(signal.SIG_BLOCK, frozenset()) == original_mask
+        assert owned_fd is not None
+        with pytest.raises(OSError) as closed_error:
+            os.fstat(owned_fd)
+        assert closed_error.value.errno == 9
+    finally:
+        real_sigmask(signal.SIG_SETMASK, original_mask)
+        if owned_fd is not None:
+            with suppress(OSError):
+                os.close(owned_fd)
+
+
+def test_owned_open_resolves_path_callback_before_masking() -> None:
+    original_mask = signal.pthread_sigmask(signal.SIG_BLOCK, frozenset())
+    callback_masks: list[set[int | signal.Signals]] = []
+
+    class ObservedPath:
+        def __fspath__(self) -> str:
+            callback_masks.append(signal.pthread_sigmask(signal.SIG_BLOCK, frozenset()))
+            return "/dev/null"
+
+    fd = run_journal._owned_open(ObservedPath(), os.O_RDONLY)  # type: ignore[arg-type]
+    try:
+        assert callback_masks == [original_mask]
+    finally:
+        os.close(fd)
+
+
+def test_owned_open_fails_closed_before_open_with_multiple_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    worker.start()
+    open_called = False
+    real_open = run_journal.os.open
+
+    def observe_open(*args: object, **kwargs: object) -> int:
+        nonlocal open_called
+        open_called = True
+        return real_open(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(run_journal.os, "open", observe_open)
+    try:
+        with pytest.raises(run_journal.RunJournalStorageError, match="single-threaded"):
+            run_journal._owned_open("/dev/null", os.O_RDONLY)
+        assert not open_called
+    finally:
+        stop.set()
+        worker.join()
+
+
+def test_store_fails_closed_before_mutation_with_multiple_threads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    journal_root = tmp_path / "journal"
+    stop = threading.Event()
+    worker = threading.Thread(target=stop.wait)
+    worker.start()
+    open_called = False
+    real_open = run_journal.os.open
+
+    def observe_open(*args: object, **kwargs: object) -> int:
+        nonlocal open_called
+        open_called = True
+        return real_open(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(run_journal.os, "open", observe_open)
+    try:
+        with pytest.raises(run_journal.RunJournalStorageError, match="single-threaded"):
+            _started(RunJournalStoreV0(journal_root), run_id="threaded")
+        assert not open_called
+        assert not journal_root.exists()
+    finally:
+        stop.set()
+        worker.join()
 
 
 @pytest.mark.parametrize("helper", ["ordinary", "cleanup"])
@@ -889,6 +1058,40 @@ def test_cleanup_reused_fd_is_not_reclosed_and_reports_committed_identity(
             with suppress(OSError):
                 real_close(reused_fd)
         real_close(source_fd)
+
+
+def test_cleanup_close_post_effect_ebadf_recovers_committed_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class SyntheticCleanupInterrupt(BaseException):
+        pass
+
+    real_replace = run_journal.os.replace
+    real_close = run_journal.os.close
+    replaced = False
+    interrupted = False
+
+    def mark_replace(*args: object, **kwargs: object) -> None:
+        nonlocal replaced
+        real_replace(*args, **kwargs)  # type: ignore[arg-type]
+        replaced = True
+
+    def close_then_interrupt(fd: int) -> None:
+        nonlocal interrupted
+        real_close(fd)
+        if replaced and not interrupted:
+            interrupted = True
+            raise SyntheticCleanupInterrupt
+
+    monkeypatch.setattr(run_journal.os, "replace", mark_replace)
+    monkeypatch.setattr(run_journal.os, "close", close_then_interrupt)
+
+    record = _started(RunJournalStoreV0(tmp_path), run_id="cleanup-post-effect")
+
+    assert interrupted
+    assert record.run_id == "cleanup-post-effect"
+    assert record.status is RunJournalStatusV0.STARTED
+    assert len(list(tmp_path.glob("*.json"))) == 1
 
 
 def test_next_locked_operation_sweeps_and_observes_safe_orphan_backup(

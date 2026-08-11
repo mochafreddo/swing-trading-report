@@ -18,6 +18,7 @@ later schedule identity starts independently and can complete normally.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -28,6 +29,7 @@ import secrets
 import signal
 import stat
 import sys
+import threading
 import weakref
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, suppress
@@ -71,9 +73,7 @@ _ALL_FIELDS = frozenset(
 )
 _LOGGER = logging.getLogger(__name__)
 _OWNED_OPEN_SIGNALS = frozenset(
-    getattr(signal, name)
-    for name in ("SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM")
-    if hasattr(signal, name)
+    signal.valid_signals() - {signal.SIGKILL, signal.SIGSTOP}
 )
 _DIRECTORY_READ_FLAGS = (
     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -610,6 +610,40 @@ def _close_fd(fd: int) -> None:
     os.close(fd)
 
 
+def _require_single_threaded() -> None:
+    if threading.active_count() != 1:
+        raise RunJournalStorageError(
+            "journal operations require a single-threaded process"
+        )
+
+
+def _query_signal_mask() -> frozenset[int | signal.Signals]:
+    return frozenset(signal.pthread_sigmask(signal.SIG_BLOCK, frozenset()))
+
+
+def _restore_signal_mask(
+    previous_mask: frozenset[int | signal.Signals],
+) -> BaseException | None:
+    """Restore a known mask, returning any recovered post-effect exception."""
+
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        return None
+    except BaseException as first:
+        with suppress(BaseException):
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        try:
+            current_mask = _query_signal_mask()
+        except BaseException as verify_error:
+            raise first from verify_error
+        if current_mask != previous_mask:
+            verification_error = RunJournalStorageError(
+                "journal signal mask restoration could not be verified"
+            )
+            raise first from verification_error
+        return first
+
+
 def _owned_open(
     path: str | Path,
     flags: int,
@@ -617,24 +651,43 @@ def _owned_open(
     *,
     dir_fd: int | None = None,
 ) -> int:
-    """Open one FD while catchable termination signals cannot split ownership."""
+    """Open one FD while blockable signals cannot split ownership."""
 
-    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _OWNED_OPEN_SIGNALS)
+    _require_single_threaded()
+    resolved_path = os.fspath(path)
+    previous_mask = _query_signal_mask()
+    try:
+        signal.pthread_sigmask(signal.SIG_BLOCK, _OWNED_OPEN_SIGNALS)
+    except BaseException as block_error:
+        try:
+            recovery_error = _restore_signal_mask(previous_mask)
+        except BaseException as recovery_failure:
+            raise block_error from recovery_failure
+        if recovery_error is not None:
+            raise block_error from recovery_error
+        raise
     fd: int | None = None
     operation_error: BaseException | None = None
     try:
-        fd = os.open(path, flags, mode, dir_fd=dir_fd)
+        fd = os.open(resolved_path, flags, mode, dir_fd=dir_fd)
     except BaseException as exc:
         operation_error = exc
     try:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
-    except BaseException as restore_error:
+        restore_error = _restore_signal_mask(previous_mask)
+    except BaseException as restore_failure:
         if fd is not None:
             with suppress(BaseException):
                 os.close(fd)
         if operation_error is not None:
-            raise operation_error from restore_error
+            raise operation_error from restore_failure
         raise
+    if restore_error is not None:
+        if operation_error is not None:
+            raise operation_error from restore_error
+        assert fd is not None
+        with suppress(BaseException):
+            os.close(fd)
+        raise restore_error
     if operation_error is not None:
         raise operation_error
     assert fd is not None
@@ -1171,6 +1224,13 @@ def _cleanup_close_fd(fd: int) -> tuple[BaseException | None, bool]:
         os.close(fd)
         return None, True
     except BaseException as first:
+        try:
+            fcntl.fcntl(fd, fcntl.F_GETFD)
+        except OSError as probe_error:
+            if probe_error.errno == errno.EBADF:
+                return first, True
+        except BaseException:
+            pass
         return first, False
 
 
@@ -1186,6 +1246,7 @@ class RunJournalStoreV0:
 
     @contextmanager
     def _locked(self) -> Iterator[_LockedJournal]:
+        _require_single_threaded()
         root = _open_root_guard(self._root)
         directory_fd = root.directory_fd
         lock: _JournalLock | None = None
