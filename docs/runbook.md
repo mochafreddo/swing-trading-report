@@ -46,6 +46,20 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 gh run list --limit 10
 ```
 
+Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다.
+현재 production preparation/research adapter가 의도적으로 미설정되어 있어 아래 형식의 실행은
+가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. T9 전에는 launchd,
+RunJournal, 알림, 기존 workflow gating에 연결하지 않습니다.
+
+```bash
+uv run python -m sab decision-board \
+  --run-kind entry \
+  --run-id entry-shadow-001 \
+  --idempotency-key sha256:<64-lowercase-hex> \
+  --created-at 2026-08-09T12:00:00Z \
+  --sealed-input-hash sha256:<64-lowercase-hex>
+```
+
 ## 필수 품질 게이트
 
 ```bash

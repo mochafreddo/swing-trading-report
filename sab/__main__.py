@@ -13,6 +13,17 @@ from typing import Any
 from . import ai_brief_latency_probe
 from .ai_brief import run_ai_brief
 from .backtest import run_backtest
+from .decision_board.cli import (
+    DecisionBoardCliConfigV0,
+    execute_decision_board_cli_v0,
+)
+from .decision_board.results import (
+    DecisionRunIssueCodeV0,
+    DecisionRunResultV0,
+    create_decision_run_failed_v0,
+    decision_run_exit_code_v0,
+    serialize_decision_run_result_v0,
+)
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -257,6 +268,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upload entry report to Supabase Storage/report_index",
     )
+
+    decision_board = sub.add_parser(
+        "decision-board",
+        help="Run one local notification-free Decision Board shadow decision",
+    )
+    decision_board.add_argument("--run-kind", required=True)
+    decision_board.add_argument("--run-id", required=True)
+    decision_board.add_argument("--idempotency-key", required=True)
+    decision_board.add_argument("--created-at", required=True)
+    decision_board.add_argument("--sealed-input-hash", required=True)
+    decision_board.add_argument(
+        "--upload-mode",
+        default="disabled",
+    )
+    decision_board.add_argument("--report-dir", default="reports")
 
     backtest = sub.add_parser(
         "backtest",
@@ -635,6 +661,43 @@ def _run_entry_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _run_decision_board_command(ns: argparse.Namespace) -> int:
+    result: DecisionRunResultV0
+    try:
+        config = DecisionBoardCliConfigV0.from_strings(
+            run_kind=ns.run_kind,
+            run_id=ns.run_id,
+            idempotency_key=ns.idempotency_key,
+            created_at=ns.created_at,
+            sealed_input_hash=ns.sealed_input_hash,
+            upload_mode=ns.upload_mode,
+            report_dir=ns.report_dir,
+        )
+    except TypeError, ValueError:
+        result = create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.PREPARATION_INVALID
+        )
+    else:
+        try:
+            result = execute_decision_board_cli_v0(config)
+        except Exception:
+            result = create_decision_run_failed_v0(
+                issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+            )
+    try:
+        public = serialize_decision_run_result_v0(result)
+        exit_code = decision_run_exit_code_v0(result)
+    except TypeError, ValueError:
+        result = create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+        )
+        public = serialize_decision_run_result_v0(result)
+        exit_code = decision_run_exit_code_v0(result)
+    stream = sys.stderr if public["status"] == "FAILED" else sys.stdout
+    print(json.dumps(public, ensure_ascii=False, sort_keys=True), file=stream)
+    return exit_code
+
+
 def _run_backtest_command(ns: argparse.Namespace) -> int:
     try:
         return run_backtest(
@@ -970,6 +1033,7 @@ def _dispatch_command(
         "scan": _run_scan_command,
         "sell": _run_sell_command,
         "entry": _run_entry_command,
+        "decision-board": _run_decision_board_command,
         "backtest": _run_backtest_command,
         "ai-brief": _run_ai_brief_command,
         "sell-ai-brief": _run_sell_ai_brief_command,

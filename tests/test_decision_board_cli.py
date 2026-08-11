@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+from sab.__main__ import _build_parser, _dispatch_command
+from sab.decision_board.cli import DecisionBoardCliConfigV0
+from sab.decision_board.results import (
+    DecisionRunIssueCodeV0,
+    create_decision_run_failed_v0,
+)
+
+
+def test_decision_board_cli_parses_safe_boundary_and_failed_exit(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    seen: list[DecisionBoardCliConfigV0] = []
+
+    def execute(config: DecisionBoardCliConfigV0):
+        seen.append(config)
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        )
+
+    monkeypatch.setattr("sab.__main__.execute_decision_board_cli_v0", execute)
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "entry-cli-001",
+            "--idempotency-key",
+            "sha256:" + "1" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "2" * 64,
+            "--upload-mode",
+            "optional",
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+    assert _dispatch_command(ns, parser) == 2
+    assert len(seen) == 1
+    assert seen[0].to_public_dict() == {
+        "run_kind": "ENTRY",
+        "run_id": "entry-cli-001",
+        "idempotency_key": "sha256:" + "1" * 64,
+        "created_at": "2026-08-09T12:00:00Z",
+        "sealed_input_hash": "sha256:" + "2" * 64,
+        "upload_mode": "OPTIONAL",
+    }
+    assert str(tmp_path) not in repr(seen[0].to_public_dict())
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+
+
+def test_decision_board_cli_defaults_to_local_shadow_and_unconfigured_fails_closed(
+    capsys, tmp_path
+) -> None:
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "holding",
+            "--run-id",
+            "holding-cli-001",
+            "--idempotency-key",
+            "sha256:" + "3" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "4" * 64,
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+    assert ns.upload_mode == "disabled"
+    assert _dispatch_command(ns, parser) == 2
+    assert json.loads(capsys.readouterr().err)["issue_code"] == "CONFIG_UNAVAILABLE"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_decision_board_cli_rejects_invalid_trigger_identity_before_executor(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "sab.__main__.execute_decision_board_cli_v0",
+        lambda config: calls.append(config),
+    )
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "../private-path",
+            "--idempotency-key",
+            "not-a-hash",
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "4" * 64,
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+    assert _dispatch_command(ns, parser) == 2
+    assert calls == []
+    assert json.loads(capsys.readouterr().err)["issue_code"] == "PREPARATION_INVALID"
+
+
+def test_decision_board_cli_contains_executor_error_without_private_output(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    def failed_executor(config: DecisionBoardCliConfigV0):
+        del config
+        raise RuntimeError("PRIVATE-SENTINEL executor failure")
+
+    monkeypatch.setattr(
+        "sab.__main__.execute_decision_board_cli_v0",
+        failed_executor,
+    )
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "entry-cli-internal",
+            "--idempotency-key",
+            "sha256:" + "5" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "6" * 64,
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert _dispatch_command(ns, parser) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err)["issue_code"] == "INTERNAL_ERROR"
+    assert "PRIVATE-SENTINEL" not in captured.err
+
+
+@pytest.mark.parametrize("invalid_field", ["run-kind", "upload-mode"])
+def test_decision_board_cli_does_not_echo_invalid_choice_value(
+    invalid_field, capsys, tmp_path
+) -> None:
+    parser = _build_parser()
+    run_kind = "PRIVATE-SENTINEL" if invalid_field == "run-kind" else "entry"
+    upload_mode = "PRIVATE-SENTINEL" if invalid_field == "upload-mode" else "disabled"
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            run_kind,
+            "--run-id",
+            "entry-cli-invalid-choice",
+            "--idempotency-key",
+            "sha256:" + "7" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "8" * 64,
+            "--upload-mode",
+            upload_mode,
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert _dispatch_command(ns, parser) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err)["issue_code"] == "PREPARATION_INVALID"
+    assert "PRIVATE-SENTINEL" not in captured.err

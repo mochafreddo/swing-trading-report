@@ -318,12 +318,15 @@ issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검
 action-changing `SUPPORTED`만 `{claim_id, entailment: SUPPORTED}` evidence가 됩니다.
 
 완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는
-기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. 이 owner에는 runner,
-run envelope aggregation, persistence/index, Web, network/model adapter, Toss/order capability가
-없습니다. rollout은 T3/T4/T5 shadow producer 확인, recorded compiler replay, 별도 runner/storage
-통합 순서입니다. rollback은 compiler consumer 연결만 제거하고 T1-T5 producer와 schema를
-유지합니다. runner의 shared prerequisite `BLOCKED|FAILED` 집계와 storage idempotency는 아직
-구현되지 않았습니다.
+기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. local-only
+`DecisionBoardRunnerV0`는 exact trigger request -> shared preparation -> selected item enrichment ->
+pure compile -> validated envelope -> T7 local atomic write -> optional upload 순서를 소유합니다.
+shared prerequisite만 `BLOCKED`, item operational failure는 `REVIEW`, authority/internal/persistence
+invariant failure는 `FAILED`로 분류합니다. local write는 upload보다 먼저이며 optional upload
+실패는 degraded terminal result, required upload 실패는 retained local artifact가 있는 `FAILED`입니다.
+production provider/model adapter, RunJournal/launchd, Web detail UI, Toss/order capability는 이 owner에
+없습니다. rollback은 `sab decision-board`와 scheduler shadow consumer를 제거하고 T1-T7 producer,
+schema, local artifact를 유지합니다.
 
 ## 4. 핵심 플로우
 

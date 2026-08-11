@@ -12,7 +12,7 @@
 
 - `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, 로컬 `sab sell-ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
-- Decision Board V0에는 sealed public fact만 받는 별도 pure shadow compiler가 있으며 현재 `scan`/`sell`/`entry` runner에는 연결되지 않았습니다.
+- Decision Board V0에는 sealed public fact만 받는 pure compiler와 local-only shadow runner가 있습니다. 이 runner는 기존 `scan`/`sell`/`entry` 결과나 알림을 바꾸지 않으며 production preparation/research adapter가 미설정된 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다.
 
 ### 실험
 
@@ -483,7 +483,15 @@ equal subclass나 post-factory mutation은 selection, output order, canonical ha
 - entailment는 `SUPPORTED`, `CONTRADICTED`, `UNCLEAR` 중 하나이며 세 상태 모두 normalized article text 안의 exact nonempty `[start, end)` 근거 span이 필요합니다.
 - directional action 변경 자격은 발급 당시 원래 claim이 `action_changing=true`이고 validation의 exact issued instrument/location identity 및 validation/request/article/source/policy의 immutable issuance snapshot과 deep revalidation을 통과한 unchanged `SUPPORTED`일 때만 생깁니다.
 - `CONTRADICTED`와 `UNCLEAR`는 review 자료이며 action 변경을 승인하지 않습니다. context-only `SUPPORTED`도 action 변경을 승인하지 않습니다.
-- 이 정책은 advice-only shadow 경계입니다. compiler는 action gate를 다시 실행하지만 runner 연결이나 주문 생성·수정·취소 경로를 추가하지 않습니다.
+- 이 정책은 advice-only shadow 경계입니다. runner는 exact issued item/selection만 compiler에 전달하며 주문 생성·수정·취소 경로를 추가하지 않습니다.
+
+### Decision Board V0 run aggregation policy (shadow)
+
+- shared snapshot/preflight prerequisite가 유효하지 않으면 directional payload 없이 typed `BLOCKED`를 local artifact로 남기며 exit 0입니다.
+- shared prerequisite가 유효하면 item timeout/provider/coverage failure를 해당 item의 `REVIEW`로 격리합니다. 모든 item이 `REVIEW`이거나 ENTRY signal item이 0개여도 run은 `PUBLISHED`, exit 0입니다.
+- raw/mutated/wrong-lane authority, compiler payload identity mismatch, unexpected adapter error, persistence invariant failure는 `FAILED`, exit 2이며 invalid artifact를 쓰거나 upload하지 않습니다.
+- HOLDING research cap은 enrichment 호출만 최대 5개로 제한합니다. full universe는 compile하며 hard `SELL`은 timeout과 `NOT_SELECTED_CAP`보다 우선합니다.
+- local canonical write가 항상 upload보다 먼저입니다. optional upload 실패는 local `PUBLISHED|BLOCKED`를 degraded 상태로 보존하고, required upload 실패는 retained local path를 가진 typed `FAILED`입니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 
