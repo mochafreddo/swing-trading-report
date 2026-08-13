@@ -63,25 +63,26 @@ T9 private local RunJournal
 5. 실제 Playwright fixture-only journey: 최초 RED는 기존 설정에 Playwright dependency/config/script가 없었고, 첫 실행은 bundled Chromium 부재를 확인했다. 네트워크 설치 없이 이미 설치된 system Chrome channel을 사용해 `/reports` ENTRY/PUBLISHED, BLOCKED, sanitized invalid error, HOLDING/SELL, stale journal, no order/notification 및 외부 request 없음까지 통과했다.
 6. late boundary regressions: lane과 key 불일치가 client에서 선택되는 1 failure, whitespace-normalized Decision Board URL key가 404로 진행되는 1 failure, alternate-case provider exception metadata가 200으로 통과하는 1 failure, malformed journal client payload가 무검증되는 failure를 각각 RED로 확인한 뒤 fail-closed GREEN으로 고정했다.
 7. public URL review regressions: hash-valid userinfo/local/IP/port/fragment/query/punycode/case mutation 15종이 Python/JSON Schema/Zod에서 통과하고 compiler가 민감 query를 그대로 내보내는 RED를 확인했다. compiler query omission과 canonical public-DNS HTTPS validation 후 GREEN.
-8. final public evidence regressions: shared research canonicalizer를 Decision HTTPS-only exact wrapper로 재사용하고 `.internal`/`.lan`/`.home`, missing canonical slash, 2048-byte 초과 URL을 Python/JSON Schema/Zod mirror에서 거부했다. public EvidenceRef에는 eligible issued ClaimValidation의 `SUPPORTED`, article hash, bounded exact span/location을 복원했다.
-9. final journal bridge regressions: Node pathname reader를 제거하고 T9 stdlib-only descriptor reader를 fixed-argv/no-shell subprocess로 호출한다. early scan, record/output byte cap, fatal UTF-8/duplicate key/canonical parse, timeout/stdout bound와 Web Zod 재검증을 적용했고 T9 writer 호환 및 subprocess failure/timeout/oversize를 고정했다. Docker는 Python/helper를 package하고 journal을 read-only mount한다.
-10. final browser gate regression: pinned `@playwright/test`가 제공하는 Chromium install script와 fixture-only Decision Board journey를 CI web job에 추가하고 Next telemetry를 비활성화했다. dynamic fixture/web ports와 optional browser channel을 유지하며 static workflow contract가 live secret/service 의존을 거부한다.
 8. journal review regressions: user-owned `0700` non-final ancestor가 AVAILABLE로 통과하는 RED를 확인했다. owner/write policy, swap-back/growth tests, pre-sized bounded read를 적용한 뒤 journal 10 tests를 5회 반복 GREEN.
 9. actual API browser regression: list/detail `route.fulfill`을 제거하자 실제 Next list가 T7-invalid fixture row를 제외해 timeout 나는 RED를 확인했다. fixture Supabase가 valid index/storage를 제공하도록 고치고 실제 Next list/detail 200 및 invalid envelope 422를 GREEN으로 고정했다.
+10. final public evidence regressions: shared research canonicalizer를 Decision HTTPS-only exact wrapper로 재사용하고 `.internal`/`.lan`/`.home`, missing canonical slash, 2048-byte 초과 URL을 Python/JSON Schema/Zod mirror에서 거부했다. public EvidenceRef에는 eligible issued ClaimValidation의 `SUPPORTED`, article hash, bounded exact span/location을 복원했다.
+11. final journal bridge regressions: Node pathname reader를 제거하고 T9 stdlib-only descriptor reader를 fixed-argv/no-shell subprocess로 호출한다. early scan, record/output byte cap, fatal UTF-8/duplicate key/canonical parse, timeout/stdout bound와 Web Zod 재검증을 적용했고 T9 writer 호환 및 subprocess failure/timeout/oversize를 고정했다. Docker는 Python/helper를 package하고 journal을 read-only mount한다.
+12. final browser gate regression: pinned `@playwright/test`가 제공하는 Chromium install script와 fixture-only Decision Board journey를 CI web job에 추가하고 Next telemetry를 비활성화했다. dynamic fixture/web ports와 optional browser channel을 유지하며 static workflow contract가 live secret/service 의존을 거부한다.
 
-최종 Web Vitest 묶음은 `96 files / 725 tests`가 통과했다.
+최종 Web Vitest 묶음은 `96 files / 726 tests`가 통과했다.
 
 ## 검증
 
-- `DECISION_BOARD_E2E_WEB_PORT=43137 DECISION_BOARD_E2E_FIXTURE_PORT=43138 pnpm --dir web run test:e2e:decision-board`: 실제 system Chrome에서 loopback fixture Supabase를 통해 실제 Next list/detail API를 호출해 `1 passed (3.0s)`. journal panel만 route interception하며 unexpected browser network는 active abort한다. live Supabase/provider/Toss/order/notification network 없음.
+- `NEXT_TELEMETRY_DISABLED=1 DECISION_BOARD_E2E_WEB_PORT=43147 DECISION_BOARD_E2E_FIXTURE_PORT=43148 PLAYWRIGHT_CHANNEL=chrome pnpm --dir web run test:e2e:decision-board`: 실제 system Chrome에서 loopback fixture Supabase를 통해 실제 Next list/detail API를 호출해 `1 passed (3.2s)`. journal panel만 route interception하며 unexpected browser network는 active abort한다. live Supabase/provider/Toss/order/notification network 없음.
 - `UV_CACHE_DIR=.uv-cache mise exec -- uv run python scripts/check_next_app_routes.py`: 통과.
 - `mise exec -- pnpm --dir web run lint`: 통과.
 - `mise exec -- pnpm --dir web run format:check`: 통과.
 - `mise exec -- pnpm --dir web run typecheck`: 통과.
-- `just ci-web`: lint/format/typecheck, `96 files / 725 tests`, coverage gate, Next production build 통과.
+- `just ci-web`: lint/format/typecheck, `96 files / 726 tests`, coverage gate, Next production build 통과.
 - focused Python Decision Board/compiler 묶음: `174 passed`.
 - focused Web strict parser/downloader 묶음: `45 passed`.
-- `just quality`: Ruff, Python format, mypy, pytest `3017 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
+- `just quality`: Ruff, Python format, mypy, pytest `3028 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
+- `docker compose config --quiet`: packaged Python helper, fixed env와 read-only journal bind 설정 parse 통과.
 - `git diff --check`: 통과.
 
 ## Self-review
@@ -96,8 +97,8 @@ T9 private local RunJournal
 
 ## Rollout, rollback, 남은 불확실성
 
-rollout 순서는 T7 migration/index와 producer가 준비된 뒤 Web consumer를 배포하고, journal panel은 서버가 읽을 수 있는 reviewed private absolute T9 journal directory를 명시적으로 설정할 때만 opt-in한다. 환경 변수를 설정하지 않으면 panel은 비활성 unavailable 상태다. 이번 변경은 Docker mount, production env, launchd template 설치/활성화를 수행하지 않았다.
+rollout 순서는 T7 migration/index와 producer가 준비된 뒤 Web consumer를 배포하고, journal panel은 T9 writer가 owner-only mode로 만든 host directory를 `DECISION_BOARD_JOURNAL_HOST_DIR`에 명시해 read-only bind할 때만 opt-in한다. helper 실패나 directory mode 불일치는 safe unavailable이다. 이번 변경은 Docker wiring만 추가했으며 실제 container deploy/mount와 launchd template 설치/활성화는 수행하지 않았다.
 
 rollback은 Web API/components를 되돌리고 `DECISION_BOARD_JOURNAL_DIR`를 제거하면 된다. Supabase report object/index와 local journal은 read-only 소비 대상이므로 삭제하거나 변형하지 않는다.
 
-live Supabase round-trip과 container journal mount는 수행하지 않았다. 실제 브라우저/server journey는 loopback fixture Supabase와 실제 Next list/detail API를 사용했고 journal panel 외 route interception, live 외부 network나 secret은 사용하지 않았다. 샌드박스가 후속 loopback bind를 `EPERM`으로 막아 최종 Playwright는 승인된 로컬 loopback 실행으로 재검증했다. host/container별 optional journal path wiring은 별도 운영 승인 사항으로 남는다.
+live Supabase round-trip과 container journal mount/build는 수행하지 않았다. 실제 브라우저/server journey는 loopback fixture Supabase와 실제 Next list/detail API를 사용했고 journal panel 외 route interception, live 외부 network나 secret은 사용하지 않았다. 샌드박스가 최초 loopback bind를 `EPERM`으로 막아 최종 Playwright는 승인된 로컬 loopback 실행으로 재검증했다. 실제 host journal bind/deploy는 별도 운영 승인 사항으로 남는다.
