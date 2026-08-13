@@ -352,8 +352,11 @@ rollback, temp cleanup까지 하나의 mask로 감쌉니다. durable commit 또�
 이는 일반 multi-thread process 전체 보장이 아닙니다. FD 목록 scan과 닫힌 번호 재시도는 하지
 않고 close 예외는 non-mutating FD 상태 조회로 완료 여부만 판정하며, commit 뒤 cleanup이
 불확실하면 safe identity/status의 typed error로 중단합니다. claim 시의
-grace/stale 정책도 record에 고정하며 status/reconcile CLI는 이 local directory만 읽고 bounded
-sanitized record를 반환합니다.
+grace/stale 정책도 record에 고정합니다. stdlib-only `run_journal_public.py` reader는 같은
+descriptor-relative root/record identity를 사용해 early scan cap, pre-sized record read와
+1-byte lookahead, fatal UTF-8/duplicate-key/canonical validation을 수행하고 bounded sanitized
+status envelope만 반환합니다. Web은 shell 없는 fixed-argv subprocess로 이 T9 seam을 짧은
+timeout/stdout bound 아래 호출한 뒤 Zod로 다시 검증합니다.
 launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지
 않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를
 호출하거나 변경하지 않습니다.

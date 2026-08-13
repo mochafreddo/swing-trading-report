@@ -37,6 +37,7 @@ from .decision_board.run_journal_cli import (
     parse_utc_rfc3339_v0,
     public_records_v0,
 )
+from .decision_board.run_journal_public import read_public_journal_status_v0
 from .decision_board.runner import RunKindV0
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
@@ -305,6 +306,9 @@ def _build_parser() -> argparse.ArgumentParser:
     journal_status.add_argument("--journal-dir", required=True)
     journal_status.add_argument("--status", action="append", default=None)
     journal_status.add_argument("--limit", default="100")
+    journal_status.add_argument("--scan-limit", default="1000")
+    journal_status.add_argument("--max-record-bytes", default="65536")
+    journal_status.add_argument("--max-output-bytes", default="262144")
 
     journal_reconcile = sub.add_parser(
         "decision-board-journal-reconcile",
@@ -760,15 +764,35 @@ def _journal_cli_failure() -> int:
 def _run_decision_board_journal_status_command(ns: argparse.Namespace) -> int:
     try:
         limit = parse_bounded_int_v0(ns.limit, field="limit", minimum=1, maximum=1000)
+        scan_limit = parse_bounded_int_v0(
+            ns.scan_limit, field="scan_limit", minimum=1, maximum=1000
+        )
+        max_record_bytes = parse_bounded_int_v0(
+            ns.max_record_bytes,
+            field="max_record_bytes",
+            minimum=1,
+            maximum=1024 * 1024,
+        )
+        max_output_bytes = parse_bounded_int_v0(
+            ns.max_output_bytes,
+            field="max_output_bytes",
+            minimum=1,
+            maximum=1024 * 1024,
+        )
         statuses = (
-            None
+            tuple(status.value for status in RunJournalStatusV0)
             if ns.status is None
-            else tuple(RunJournalStatusV0(value) for value in ns.status)
+            else tuple(RunJournalStatusV0(value).value for value in ns.status)
         )
-        records = RunJournalStoreV0(ns.journal_dir).status(
-            limit=limit, statuses=statuses
+        public = read_public_journal_status_v0(
+            ns.journal_dir,
+            limit=limit,
+            statuses=statuses,
+            scan_limit=scan_limit,
+            max_record_bytes=max_record_bytes,
+            max_output_bytes=max_output_bytes,
         )
-        print(json.dumps(public_records_v0(records), sort_keys=True))
+        print(json.dumps(public, sort_keys=True))
         return 0
     except OSError, RunJournalError, TypeError, ValueError:
         return _journal_cli_failure()

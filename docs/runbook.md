@@ -139,8 +139,17 @@ status는 bounded, 최신 expected slot 우선 순서의 sanitized JSON만 출�
 ```bash
 uv run python -m sab decision-board-journal-status \
   --journal-dir logs/decision-board-journal \
-  --limit 100
+  --limit 100 \
+  --scan-limit 1000 \
+  --max-record-bytes 65536 \
+  --max-output-bytes 262144
 ```
+
+Web journal panel을 Docker에서 opt-in할 때는 writer가 만든 repo-local private directory를
+`DECISION_BOARD_JOURNAL_HOST_DIR="$PWD/logs/decision-board-journal"`로 지정합니다. Compose는
+이를 `/var/lib/sab/decision-board-journal:ro`로만 mount하고 packaged stdlib-only T9 reader를
+`/usr/bin/python3` fixed executable로 호출합니다. host directory와 record는 각각 writer가
+만든 owner-only `0700`/`0600`이어야 하며, 조건이 맞지 않으면 panel은 safe unavailable입니다.
 
 missed/stale 판정은 현재 시각까지 명시적으로 주입합니다. 다음 예시는 형식 설명용이며 운영
 시간표가 아닙니다.
