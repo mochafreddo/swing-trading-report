@@ -100,12 +100,22 @@ export function DecisionBoardDetail({
                   <td data-label="Reason codes">{issueCodes(item.issues)}</td>
                   <td data-label="Evidence">
                     {item.evidence.length > 0
-                      ? item.evidence
-                          .map(
-                            (evidence) =>
-                              `${evidence.claim_id} (${evidence.entailment})`,
-                          )
-                          .join(" · ")
+                      ? item.evidence.map((evidence) => (
+                          <span key={evidence.claim_id}>
+                            <a
+                              href={evidence.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {evidence.citation_label}
+                            </a>{" "}
+                            ({evidence.role} · {evidence.publisher} ·{" "}
+                            <time dateTime={evidence.published_at}>
+                              {evidence.published_at}
+                            </time>{" "}
+                            · {evidence.freshness})
+                          </span>
+                        ))
                       : "-"}
                   </td>
                 </tr>

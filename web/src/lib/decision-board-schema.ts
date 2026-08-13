@@ -284,7 +284,15 @@ export const decisionInputV0Schema = z
 const evidenceRefV0Schema = z
   .object({
     claim_id: z.string().min(1),
-    entailment: z.literal("SUPPORTED"),
+    role: z.enum(["SUPPORTING", "OPPOSING"]),
+    source_url: sourceUrlV0Schema.refine(
+      (value) => new URL(value).protocol === "https:",
+      { message: "Public evidence links must use HTTPS" },
+    ),
+    publisher: z.string().min(1),
+    published_at: timestampV0Schema,
+    freshness: z.literal("WITHIN_POLICY"),
+    citation_label: z.string().min(1),
   })
   .strict();
 

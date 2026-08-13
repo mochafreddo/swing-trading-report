@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
 
-from sab.research.contracts import ResearchSourcePolicyV0, SourceCandidateV0
+from sab.research.contracts import (
+    ResearchSourcePolicyV0,
+    SourceCandidateV0,
+    validate_and_copy_source_candidate_v0,
+)
 from sab.research.source_safety import ArticleArtifactV0
 
 from .claims import (
@@ -454,8 +458,8 @@ def _holding_selection_snapshot(value: object) -> tuple[object, ...] | None:
 
 def _eligible_evidence(
     values: tuple[CompilerEvidenceV0, ...], instrument: InstrumentRefV0
-) -> tuple[list[dict[str, str]], bool]:
-    references: dict[str, dict[str, str]] = {}
+) -> tuple[list[dict[str, object]], bool]:
+    references: dict[str, dict[str, object]] = {}
     adverse = False
     for value in values:
         record = _EVIDENCE.get(id(value)) if type(value) is CompilerEvidenceV0 else None
@@ -479,7 +483,34 @@ def _eligible_evidence(
         claim_id = public["claim_id"]
         if type(claim_id) is not str:
             raise CompilerInputError("compiler evidence claim identity is invalid")
-        references[claim_id] = {"claim_id": claim_id, "entailment": "SUPPORTED"}
+        try:
+            source = validate_and_copy_source_candidate_v0(
+                value.expected_source,
+                expected_instrument=instrument,
+            )
+            reference = {
+                "claim_id": claim_id,
+                "role": (
+                    "OPPOSING"
+                    if value.kind is CompilerEvidenceKindV0.MATERIAL_ADVERSE
+                    else "SUPPORTING"
+                ),
+                "source_url": public["source_url"],
+                "publisher": public["publisher"],
+                "published_at": public["published_at"],
+                "freshness": "WITHIN_POLICY",
+                "citation_label": source.title,
+            }
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise CompilerInputError(
+                "compiler evidence public reference is invalid"
+            ) from exc
+        if not all(type(item) is str for item in reference.values()):
+            raise CompilerInputError("compiler evidence public reference is invalid")
+        existing = references.get(claim_id)
+        if existing is not None and existing != reference:
+            raise CompilerInputError("compiler evidence claim references conflict")
+        references[claim_id] = reference
         adverse = adverse or value.kind is CompilerEvidenceKindV0.MATERIAL_ADVERSE
     return [references[key] for key in sorted(references, key=str.encode)], adverse
 
@@ -540,7 +571,7 @@ def _issue(code: str) -> dict[str, str]:
 def _review_item(
     instrument: InstrumentRefV0,
     issues: list[dict[str, str]],
-    evidence: list[dict[str, str]],
+    evidence: list[dict[str, object]],
 ) -> dict[str, Any]:
     unique = {issue["code"]: issue for issue in issues}
     return {
@@ -552,7 +583,7 @@ def _review_item(
 
 
 def _decided_item(
-    instrument: InstrumentRefV0, action: str, evidence: list[dict[str, str]]
+    instrument: InstrumentRefV0, action: str, evidence: list[dict[str, object]]
 ) -> dict[str, Any]:
     return {
         "instrument": instrument.to_public_dict(),

@@ -28,7 +28,12 @@
         "evidence": [
           {
             "claim_id": "claim-aurora-demand",
-            "entailment": "SUPPORTED"
+            "role": "SUPPORTING",
+            "source_url": "https://evidence.example/aurora-demand",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T12:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Aurora demand update"
           }
         ]
       },
@@ -47,7 +52,12 @@
         "evidence": [
           {
             "claim_id": "claim-blue-harbor-delay",
-            "entailment": "SUPPORTED"
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/blue-harbor-delay",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T13:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Blue Harbor project delay"
           }
         ]
       },
@@ -72,5 +82,5 @@
       }
     ]
   },
-  "decision_payload_hash": "sha256:712333c3429aeb29aa0ecd85d71b0534812e5312f33d251837ae7355d0129205"
+  "decision_payload_hash": "sha256:2513312aed908011c8729b35d8ba047893dbbc60f46ecf32276dc38eab9ce555"
 }

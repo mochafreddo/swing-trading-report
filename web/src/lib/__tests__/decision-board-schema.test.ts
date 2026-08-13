@@ -35,7 +35,7 @@ type MutablePublishedReport = {
   decision_payload: {
     items: Array<{
       action?: string;
-      evidence: Array<{ entailment: string }>;
+      evidence: Array<{ freshness: string }>;
     }>;
   };
   decision_payload_hash: string;
@@ -384,7 +384,7 @@ describe("Decision Board V0 schema", () => {
       name: "unsupported evidence",
       structuralSuccess: false,
       mutate: (report: MutablePublishedReport) => {
-        report.decision_payload.items[0].evidence[0].entailment = "UNCLEAR";
+        report.decision_payload.items[0].evidence[0].freshness = "STALE";
       },
     },
     {

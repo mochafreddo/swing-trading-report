@@ -53,7 +53,11 @@ describe("ReportDetail component", () => {
     expect(html).toContain("ENTRY");
     expect(html).toContain("AUR.NAS");
     expect(html).toContain("BUY");
-    expect(html).toContain("claim-aurora-demand");
+    expect(html).toContain("Aurora demand update");
+    expect(html).toContain("https://evidence.example/aurora-demand");
+    expect(html).toContain("noopener noreferrer");
+    expect(html).toContain("Synthetic Wire");
+    expect(html).toContain("WITHIN_POLICY");
     expect(html).toContain("EVIDENCE_UNCLEAR");
   });
 

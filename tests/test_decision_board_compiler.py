@@ -357,7 +357,15 @@ def test_only_supported_action_changing_material_adverse_changes_entry_action() 
     )
     assert item["action"] == "AVOID"
     assert item["evidence"] == [
-        {"claim_id": "claim-adverse-1", "entailment": "SUPPORTED"}
+        {
+            "claim_id": "claim-adverse-1",
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/adverse-final",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-09T00:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Synthetic adverse event",
+        }
     ]
 
     for evidence, expected_references in (
@@ -366,7 +374,17 @@ def test_only_supported_action_changing_material_adverse_changes_entry_action() 
         (_evidence(action_changing=False), []),
         (
             _evidence(kind=CompilerEvidenceKindV0.SUPPORTIVE),
-            [{"claim_id": "claim-adverse-1", "entailment": "SUPPORTED"}],
+            [
+                {
+                    "claim_id": "claim-adverse-1",
+                    "role": "SUPPORTING",
+                    "source_url": "https://evidence.example/adverse-final",
+                    "publisher": "Synthetic Wire",
+                    "published_at": "2026-08-09T00:00:00Z",
+                    "freshness": "WITHIN_POLICY",
+                    "citation_label": "Synthetic adverse event",
+                }
+            ],
         ),
     ):
         item = _item(
@@ -448,7 +466,15 @@ def test_collision_precedence_and_hard_sell_non_override() -> None:
     )
     assert hard_sell["action"] == "SELL"
     assert hard_sell["evidence"] == [
-        {"claim_id": "claim-adverse-1", "entailment": "SUPPORTED"}
+        {
+            "claim_id": "claim-adverse-1",
+            "role": "SUPPORTING",
+            "source_url": "https://evidence.example/adverse-final",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-09T00:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Synthetic adverse event",
+        }
     ]
 
 
@@ -549,8 +575,24 @@ def test_deterministic_order_dedupe_replay_and_contract_validation() -> None:
     assert canonical_json_bytes(first) == canonical_json_bytes(replay)
     assert decision_payload_hash(first) == decision_payload_hash(replay)
     assert first["items"][0]["evidence"] == [  # type: ignore[index]
-        {"claim_id": "claim-a", "entailment": "SUPPORTED"},
-        {"claim_id": "claim-z", "entailment": "SUPPORTED"},
+        {
+            "claim_id": "claim-a",
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/adverse-final",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-09T00:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Synthetic adverse event",
+        },
+        {
+            "claim_id": "claim-z",
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/adverse-final",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-09T00:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Synthetic adverse event",
+        },
     ]
 
 

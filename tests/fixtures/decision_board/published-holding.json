@@ -25,7 +25,12 @@
         "evidence": [
           {
             "claim_id": "claim-dovetail-guidance",
-            "entailment": "SUPPORTED"
+            "role": "SUPPORTING",
+            "source_url": "https://evidence.example/dovetail-guidance",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T14:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Dovetail guidance"
           }
         ]
       },
@@ -44,7 +49,12 @@
         "evidence": [
           {
             "claim_id": "claim-elm-recall",
-            "entailment": "SUPPORTED"
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/elm-recall",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T15:00:00Z",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Elm River recall"
           }
         ]
       },
@@ -69,5 +79,5 @@
       }
     ]
   },
-  "decision_payload_hash": "sha256:3ca19513dd7b987e242e90b958f3cb5db0c6977f46289b152090f2a214f9d59e"
+  "decision_payload_hash": "sha256:0545c1b461355fd493fe70406db6112705c1e153b019a827e6df2fd4cdf4de8e"
 }

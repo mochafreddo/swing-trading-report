@@ -237,11 +237,24 @@ def _evidence_reference(value: Any, path: str) -> None:
     _strict_keys(
         reference,
         path,
-        required={"claim_id", "entailment"},
+        required={
+            "claim_id",
+            "role",
+            "source_url",
+            "publisher",
+            "published_at",
+            "freshness",
+            "citation_label",
+        },
         optional=set(),
     )
     _non_empty_string(reference["claim_id"], f"{path}.claim_id")
-    _literal(reference["entailment"], f"{path}.entailment", "SUPPORTED")
+    _enum(reference["role"], f"{path}.role", {"SUPPORTING", "OPPOSING"})
+    _https_url(reference["source_url"], f"{path}.source_url")
+    _non_empty_string(reference["publisher"], f"{path}.publisher")
+    _timestamp(reference["published_at"], f"{path}.published_at")
+    _literal(reference["freshness"], f"{path}.freshness", "WITHIN_POLICY")
+    _non_empty_string(reference["citation_label"], f"{path}.citation_label")
 
 
 def _supporting_location(value: Any, path: str) -> None:
@@ -400,6 +413,13 @@ def _url(value: Any, path: str) -> str:
         hostname.encode("idna")
     except UnicodeError as exc:
         raise ContractError(path, "must contain a valid host") from exc
+    return text
+
+
+def _https_url(value: Any, path: str) -> str:
+    text = _url(value, path)
+    if urlsplit(text).scheme.lower() != "https":
+        raise ContractError(path, "must be an absolute HTTPS URL")
     return text
 
 
