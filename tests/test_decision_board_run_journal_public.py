@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,6 +46,21 @@ def test_public_reader_rejects_duplicate_keys_and_invalid_utf8(tmp_path: Path) -
             b'"grace_seconds":60,',
             b'"grace_seconds":60,"grace_seconds":60,',
         )
+    )
+    os.chmod(record, 0o600)
+    with pytest.raises(PublicJournalReadError):
+        read_public_journal_status_v0(str(tmp_path), limit=1)
+
+
+def test_public_reader_rejects_non_public_schema_and_issue_values(
+    tmp_path: Path,
+) -> None:
+    record = _missed(tmp_path)
+    value = json.loads(record.read_text(encoding="utf-8"))
+    value["schema_version"] = "PRIVATE-SCHEMA-SENTINEL"
+    record.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
     )
     os.chmod(record, 0o600)
     with pytest.raises(PublicJournalReadError):

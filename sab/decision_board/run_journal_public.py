@@ -35,6 +35,18 @@ _FIELDS = {
 }
 _WARNINGS = {"MISSED_EXPECTED", "STALE_INCOMPLETE"}
 _STATUSES = _WARNINGS | {"STARTED", "PUBLISHED", "BLOCKED", "FAILED"}
+_DECISION_ISSUES = {
+    "COMPILER_CONTRACT_INVALID",
+    "CONFIG_UNAVAILABLE",
+    "IDEMPOTENCY_CONFLICT",
+    "INTERNAL_ERROR",
+    "ITEM_ENRICHMENT_INVALID",
+    "LOCAL_PERSISTENCE_FAILED",
+    "PREPARATION_INVALID",
+    "SHARED_PREFLIGHT_UNAVAILABLE",
+    "UPLOAD_FAILED",
+}
+_ISSUE_CODES = _WARNINGS | _DECISION_ISSUES
 _MESSAGES = {
     "MISSED_EXPECTED": "Expected run did not start before its grace deadline.",
     "STALE_INCOMPLETE": "Started run did not reach a terminal state before its TTL.",
@@ -78,7 +90,9 @@ def _canonical_record(value: object, name: str) -> dict[str, Any]:
     run_kind = record["run_kind"]
     status_value = record["status"]
     if (
-        type(run_id) is not str
+        record["schema_version"] != "decision-board.v0"
+        or type(record["schema_version"]) is not str
+        or type(run_id) is not str
         or _RUN_ID.fullmatch(run_id) is None
         or run_kind not in {"ENTRY", "HOLDING"}
         or status_value not in _STATUSES
@@ -113,6 +127,7 @@ def _canonical_record(value: object, name: str) -> dict[str, Any]:
         )
         if (
             type(code) is not str
+            or code not in _ISSUE_CODES
             or re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code) is None
             or message != expected_message
         ):
