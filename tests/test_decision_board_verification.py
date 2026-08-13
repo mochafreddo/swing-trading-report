@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sab.decision_board.claim_responses import ResponsesClaimVerifierV0
 from sab.decision_board.claims import (
     ClaimRequestV0,
     ClaimValidationFailedV0,
     ClaimValidationSucceededV0,
     ClaimValidationTimedOutV0,
-    ClaimVerifierRequestV0,
     ClaimVerifierTimeoutError,
     EntailmentV0,
     validate_claim_v0,
@@ -25,6 +25,7 @@ from sab.research.contracts import (
 )
 from sab.research.deadline import Deadline
 from sab.research.source_safety import create_article_artifact_v0
+from scripts.compare_decision_board_claim_live import main as live_compare_main
 
 FIXTURE = (
     Path(__file__).parent
@@ -33,9 +34,6 @@ FIXTURE = (
     / "claim-verifier-responses-recorded.json"
 )
 ARTICLE_TEXT = "Aurora beat guidance. Aurora beat guidance. Café demand is stable."
-_RESPONSE_FIELDS = {"id", "object", "status", "model", "output"}
-_MESSAGE_FIELDS = {"type", "role", "content"}
-_CONTENT_FIELDS = {"type", "text"}
 
 
 def _recording() -> dict[str, object]:
@@ -81,8 +79,8 @@ def _inputs():
     return request, source, article, policy
 
 
-class _RecordedResponsesVerifier:
-    """Strict offline adapter for the recorded Responses-style wire shape."""
+class _RecordedResponsesTransport:
+    """Fixture transport; the reusable decoder/adapter is production-neutral."""
 
     def __init__(self, recording: object, case: str) -> None:
         if type(recording) is not dict or set(recording) != {
@@ -100,39 +98,22 @@ class _RecordedResponsesVerifier:
         self._model = model
         self._case = copy.deepcopy(cases[case])
         self.requests: list[dict[str, object]] = []
+        self.deadlines: list[dict[str, float]] = []
 
-    async def verify(
+    async def create_response(
         self,
-        request: ClaimVerifierRequestV0,
+        request: dict[str, object],
         *,
         deadline: Deadline,
         timeout: float,
     ) -> object:
-        public = request.to_public_dict()
-        wire_request: dict[str, object] = {
-            "model": self._model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": json.dumps(
-                                public,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                                separators=(",", ":"),
-                            ),
-                        }
-                    ],
-                }
-            ],
-            "deadline": {
+        self.requests.append(copy.deepcopy(request))
+        self.deadlines.append(
+            {
                 "timeout_seconds": timeout,
                 "expires_at_monotonic": deadline.expires_at,
-            },
-        }
-        self.requests.append(wire_request)
+            }
+        )
         case = self._case
         if type(case) is not dict or set(case) not in ({"response"}, {"failure"}):
             raise RuntimeError("recorded case is invalid")
@@ -143,47 +124,17 @@ class _RecordedResponsesVerifier:
             if failure["kind"] == "timeout":
                 raise ClaimVerifierTimeoutError("recorded timeout")
             raise RuntimeError("recorded unexpected failure")
-        response = case["response"]
-        if type(response) is not dict or set(response) != _RESPONSE_FIELDS:
-            raise RuntimeError("recorded response is invalid")
-        if (
-            response["object"] != "response"
-            or response["status"] != "completed"
-            or response["model"] != self._model
-            or type(response["id"]) is not str
-        ):
-            raise RuntimeError("recorded response identity is invalid")
-        output = response["output"]
-        if type(output) is not list or len(output) != 1:
-            raise RuntimeError("recorded response output is invalid")
-        message = output[0]
-        if (
-            type(message) is not dict
-            or set(message) != _MESSAGE_FIELDS
-            or message["type"] != "message"
-            or message["role"] != "assistant"
-        ):
-            raise RuntimeError("recorded response message is invalid")
-        content = message["content"]
-        if type(content) is not list or len(content) != 1:
-            raise RuntimeError("recorded response content is invalid")
-        text = content[0]
-        if (
-            type(text) is not dict
-            or set(text) != _CONTENT_FIELDS
-            or text["type"] != "output_text"
-            or type(text["text"]) is not str
-        ):
-            raise RuntimeError("recorded response text is invalid")
-        try:
-            return json.loads(text["text"])
-        except json.JSONDecodeError:
-            return {}
+        return copy.deepcopy(case["response"])
 
 
 def _run(case: str, *, recording: object | None = None):
     request, source, article, policy = _inputs()
-    verifier = _RecordedResponsesVerifier(recording or _recording(), case)
+    recording_value = recording or _recording()
+    assert type(recording_value) is dict
+    model = recording_value.get("model")
+    assert type(model) is str
+    transport = _RecordedResponsesTransport(recording_value, case)
+    verifier = ResponsesClaimVerifierV0(transport=transport, model=model)
     result = asyncio.run(
         validate_claim_v0(
             request,
@@ -194,13 +145,13 @@ def _run(case: str, *, recording: object | None = None):
             deadline=Deadline.start(monotonic=lambda: 100.0),
         )
     )
-    return result, verifier.requests
+    return result, transport.requests, transport.deadlines
 
 
 @pytest.mark.parametrize("case", ["SUPPORTED", "CONTRADICTED", "UNCLEAR"])
 def test_recorded_responses_entailments_bind_exact_public_evidence(case: str) -> None:
-    first, requests = _run(case)
-    second, second_requests = _run(case)
+    first, requests, deadlines = _run(case)
+    second, second_requests, second_deadlines = _run(case)
 
     assert type(first) is ClaimValidationSucceededV0
     assert type(second) is ClaimValidationSucceededV0
@@ -217,16 +168,18 @@ def test_recorded_responses_entailments_bind_exact_public_evidence(case: str) ->
     )
     assert first.validation.source_url == "https://evidence.example/aurora/final-update"
     assert first.validation.publisher == "Synthetic Wire"
-    assert first.validation.verifier_version == "synthetic-verifier-2026-08-13"
+    assert first.validation.verifier_version == "decision-board-claim-verifier-v0"
     assert requests == second_requests
+    assert deadlines == second_deadlines
 
 
 def test_recorded_responses_request_is_public_bounded_and_deadline_aware() -> None:
-    _result, requests = _run("SUPPORTED")
+    _result, requests, deadlines = _run("SUPPORTED")
     assert len(requests) == 1
     wire = requests[0]
-    assert set(wire) == {"model", "input", "deadline"}
-    deadline = wire["deadline"]
+    assert set(wire) == {"model", "input", "text"}
+    assert len(deadlines) == 1
+    deadline = deadlines[0]
     assert type(deadline) is dict
     assert set(deadline) == {"timeout_seconds", "expires_at_monotonic"}
     input_rows = wire["input"]
@@ -248,7 +201,9 @@ def test_recorded_responses_request_is_public_bounded_and_deadline_aware() -> No
         "identity_source",
         "identity_version",
     }
-    serialized = json.dumps(wire, ensure_ascii=False).casefold()
+    serialized = json.dumps(
+        {"model": wire["model"], "input": wire["input"]}, ensure_ascii=False
+    ).casefold()
     for private_name in (
         "account",
         "portfolio",
@@ -273,7 +228,7 @@ def test_recorded_responses_request_is_public_bounded_and_deadline_aware() -> No
 def test_recorded_responses_failure_taxonomy(
     case: str, result_type: type, code: str
 ) -> None:
-    result, _requests = _run(case)
+    result, _requests, _deadlines = _run(case)
     assert type(result) is result_type
     assert getattr(result, "code", None) == code
 
@@ -288,7 +243,7 @@ def test_recorded_responses_mutation_and_raw_shape_fail_closed() -> None:
     assert type(response) is dict
     response["private_raw"] = "not-authoritative"
 
-    result, _requests = _run("SUPPORTED", recording=mutated)
+    result, _requests, _deadlines = _run("SUPPORTED", recording=mutated)
 
     assert type(result) is ClaimValidationFailedV0
     assert result.code == "VERIFIER_FAILED"
@@ -308,7 +263,22 @@ def test_recorded_responses_mutation_and_raw_shape_fail_closed() -> None:
     payload["source_url"] = "https://forged.example/private"
     content[0]["text"] = json.dumps(payload)  # type: ignore[index]
 
-    malformed, _requests = _run("SUPPORTED", recording=location_mutation)
+    malformed, _requests, _deadlines = _run("SUPPORTED", recording=location_mutation)
 
     assert type(malformed) is ClaimValidationFailedV0
     assert malformed.code == "VERIFIER_RESULT_MALFORMED"
+
+
+def test_claim_live_compare_is_explicit_and_forbidden_in_ci(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request_path = tmp_path / "request.json"
+    request_path.write_text('{"model":"gpt-5.4-mini"}', encoding="utf-8")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_PROVIDER_COMMAND", "provider")
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_MODEL", "gpt-5.4-mini")
+
+    with pytest.raises(SystemExit) as caught:
+        live_compare_main(["--request-json", str(request_path), "--case", "SUPPORTED"])
+
+    assert caught.value.code == 2

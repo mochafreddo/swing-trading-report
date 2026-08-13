@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sab.decision_board.claims import (
     ClaimRequestV0,
     ClaimValidationSucceededV0,
@@ -99,6 +100,17 @@ SENTINELS = {
     "private_url": "http://127.0.0.1/private-url-N4RY-sentinel",
     "local_url": "http://research.local/local-url-K2WT-sentinel",
 }
+
+
+class _PrivateBoundaryContext:
+    def __init__(self) -> None:
+        self.values = dict(SENTINELS)
+        self.entered: set[str] = set()
+
+    def enter(self, boundary: str) -> None:
+        assert set(self.values) == set(SENTINELS)
+        assert tuple(self.values.values()) == tuple(SENTINELS.values())
+        self.entered.add(boundary)
 
 
 def _scan(boundary: str, value: object) -> None:
@@ -194,12 +206,13 @@ def _private_snapshot():
 
 
 class _PublicSearchProvider:
-    def __init__(self, private_context: object) -> None:
+    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
         self.private_context = private_context
         self.requests: list[dict[str, object]] = []
 
     async def search(self, request: object, *, deadline: Deadline) -> object:
         del deadline
+        self.private_context.enter("research")
         public = request.to_public_dict()  # type: ignore[attr-defined]
         self.requests.append(public)
         instrument = public["instrument"]
@@ -220,7 +233,7 @@ class _PublicSearchProvider:
 
 
 class _PublicArticleVerifier:
-    def __init__(self, private_context: object) -> None:
+    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
         self.private_context = private_context
         self.requests: list[dict[str, object]] = []
 
@@ -235,6 +248,7 @@ class _PublicArticleVerifier:
         policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0:
         del deadline
+        self.private_context.enter("article")
         self.requests.append(
             {
                 "instrument": source.instrument.to_public_dict(),  # type: ignore[attr-defined]
@@ -250,7 +264,7 @@ class _PublicArticleVerifier:
 
 
 class _PublicClaimVerifier:
-    def __init__(self, private_context: object) -> None:
+    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
         self.private_context = private_context
         self.requests: list[dict[str, object]] = []
 
@@ -261,6 +275,7 @@ class _PublicClaimVerifier:
         deadline: Deadline,
         timeout: float,
     ) -> object:
+        self.private_context.enter("claim")
         self.requests.append(
             {
                 **request.to_public_dict(),
@@ -283,20 +298,24 @@ class _PublicClaimVerifier:
 
 
 class _Prepared:
-    def __init__(self, private_context: object) -> None:
+    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
         self.private_context = private_context
 
     def prepare(self, request: DecisionRunRequestV0):
+        self.private_context.enter("runner")
         return create_run_prepared_v0(request)
 
 
 class _EvidenceEnricher:
-    def __init__(self, evidence: CompilerEvidenceV0, private_context: object) -> None:
+    def __init__(
+        self, evidence: CompilerEvidenceV0, private_context: _PrivateBoundaryContext
+    ) -> None:
         self.evidence = evidence
         self.private_context = private_context
         self.requests: list[object] = []
 
     def enrich(self, item: CompilerItemV0, *, request: object):
+        self.private_context.enter("compiler")
         self.requests.append(request)
         assert type(item) is EntryCompilerItemV0
         return EntryCompilerItemV0.create(
@@ -314,11 +333,12 @@ class _EvidenceEnricher:
 
 
 class _CapturingUploader:
-    def __init__(self, private_context: object) -> None:
+    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
         self.private_context = private_context
         self.requests: list[dict[str, object]] = []
 
     def upload(self, *, local_path: Path, storage_key: str) -> str:
+        self.private_context.enter("upload")
         self.requests.append(
             {
                 "storage_key": storage_key,
@@ -378,7 +398,7 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
     caplog,
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    private_context = dict(SENTINELS)
+    private_context = _PrivateBoundaryContext()
 
     approval = approve_swing_snapshot_v0(_private_snapshot(), _registry(), now=NOW)
     assert type(approval[0]) is SwingApprovedV0
@@ -541,3 +561,24 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
     logs = [record.getMessage() for record in caplog.records]
     assert "swept 1 orphan RunJournal backup(s)" in logs
     _scan("logs", logs)
+    assert private_context.entered == {
+        "article",
+        "claim",
+        "compiler",
+        "research",
+        "runner",
+        "upload",
+    }
+
+
+@pytest.mark.parametrize(("label", "sentinel"), SENTINELS.items())
+def test_privacy_scanner_rejects_case_and_separator_mutations(
+    label: str, sentinel: str
+) -> None:
+    mutated = "_._".join(sentinel.swapcase())
+
+    with pytest.raises(AssertionError) as caught:
+        _scan("mutation boundary", mutated)
+
+    assert str(caught.value) == f"privacy leak at mutation boundary: {label}"
+    assert sentinel not in str(caught.value)

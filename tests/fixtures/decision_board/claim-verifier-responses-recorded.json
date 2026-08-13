@@ -1,21 +1,44 @@
 {
   "schema": "openai.responses.recorded.v0",
-  "model": "synthetic-claim-verifier-2026-08-13",
+  "model": "gpt-5.4-mini",
   "cases": {
     "SUPPORTED": {
       "response": {
-        "id": "resp_synthetic_supported",
+        "id": "resp_recorded_supported",
         "object": "response",
+        "created_at": 1786582923,
         "status": "completed",
-        "model": "synthetic-claim-verifier-2026-08-13",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-mini",
+        "background": false,
+        "instructions": null,
+        "max_output_tokens": 256,
+        "metadata": {},
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": {"effort": null, "summary": null},
+        "service_tier": "default",
+        "store": true,
+        "temperature": 1.0,
+        "text": {"format": {"type": "json_schema"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {"input_tokens": 128, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 48, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 176},
         "output": [
           {
+            "id": "msg_recorded_supported",
             "type": "message",
+            "status": "completed",
             "role": "assistant",
             "content": [
               {
                 "type": "output_text",
-                "text": "{\"entailment\":\"SUPPORTED\",\"supporting_span\":\"Aurora beat guidance.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":0,\"end\":21},\"verifier_version\":\"synthetic-verifier-2026-08-13\"}"
+                "annotations": [],
+                "logprobs": [],
+                "text": "{\"entailment\":\"SUPPORTED\",\"supporting_span\":\"Aurora beat guidance.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":0,\"end\":21},\"verifier_version\":\"decision-board-claim-verifier-v0\"}"
               }
             ]
           }
@@ -24,18 +47,41 @@
     },
     "CONTRADICTED": {
       "response": {
-        "id": "resp_synthetic_contradicted",
+        "id": "resp_recorded_contradicted",
         "object": "response",
+        "created_at": 1786582923,
         "status": "completed",
-        "model": "synthetic-claim-verifier-2026-08-13",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-mini",
+        "background": false,
+        "instructions": null,
+        "max_output_tokens": 256,
+        "metadata": {},
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": {"effort": null, "summary": null},
+        "service_tier": "default",
+        "store": true,
+        "temperature": 1.0,
+        "text": {"format": {"type": "json_schema"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {"input_tokens": 128, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 48, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 176},
         "output": [
           {
+            "id": "msg_recorded_contradicted",
             "type": "message",
+            "status": "completed",
             "role": "assistant",
             "content": [
               {
                 "type": "output_text",
-                "text": "{\"entailment\":\"CONTRADICTED\",\"supporting_span\":\"Aurora beat guidance.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":22,\"end\":43},\"verifier_version\":\"synthetic-verifier-2026-08-13\"}"
+                "annotations": [],
+                "logprobs": [],
+                "text": "{\"entailment\":\"CONTRADICTED\",\"supporting_span\":\"Aurora beat guidance.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":22,\"end\":43},\"verifier_version\":\"decision-board-claim-verifier-v0\"}"
               }
             ]
           }
@@ -44,18 +90,41 @@
     },
     "UNCLEAR": {
       "response": {
-        "id": "resp_synthetic_unclear",
+        "id": "resp_recorded_unclear",
         "object": "response",
+        "created_at": 1786582923,
         "status": "completed",
-        "model": "synthetic-claim-verifier-2026-08-13",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-mini",
+        "background": false,
+        "instructions": null,
+        "max_output_tokens": 256,
+        "metadata": {},
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": {"effort": null, "summary": null},
+        "service_tier": "default",
+        "store": true,
+        "temperature": 1.0,
+        "text": {"format": {"type": "json_schema"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {"input_tokens": 128, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 48, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 176},
         "output": [
           {
+            "id": "msg_recorded_unclear",
             "type": "message",
+            "status": "completed",
             "role": "assistant",
             "content": [
               {
                 "type": "output_text",
-                "text": "{\"entailment\":\"UNCLEAR\",\"supporting_span\":\"Café demand is stable.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":44,\"end\":66},\"verifier_version\":\"synthetic-verifier-2026-08-13\"}"
+                "annotations": [],
+                "logprobs": [],
+                "text": "{\"entailment\":\"UNCLEAR\",\"supporting_span\":\"Café demand is stable.\",\"supporting_location\":{\"kind\":\"TEXT_OFFSETS\",\"start\":44,\"end\":66},\"verifier_version\":\"decision-board-claim-verifier-v0\"}"
               }
             ]
           }
@@ -64,17 +133,40 @@
     },
     "MALFORMED": {
       "response": {
-        "id": "resp_synthetic_malformed",
+        "id": "resp_recorded_malformed",
         "object": "response",
+        "created_at": 1786582923,
         "status": "completed",
-        "model": "synthetic-claim-verifier-2026-08-13",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-mini",
+        "background": false,
+        "instructions": null,
+        "max_output_tokens": 256,
+        "metadata": {},
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": {"effort": null, "summary": null},
+        "service_tier": "default",
+        "store": true,
+        "temperature": 1.0,
+        "text": {"format": {"type": "json_schema"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {"input_tokens": 128, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 48, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 176},
         "output": [
           {
+            "id": "msg_recorded_malformed",
             "type": "message",
+            "status": "completed",
             "role": "assistant",
             "content": [
               {
                 "type": "output_text",
+                "annotations": [],
+                "logprobs": [],
                 "text": "{not-json"
               }
             ]
