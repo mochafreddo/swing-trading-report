@@ -81,7 +81,7 @@ T9 private local RunJournal
 - `just ci-web`: lint/format/typecheck, `96 files / 726 tests`, coverage gate, Next production build 통과.
 - focused Python Decision Board/compiler 묶음: `174 passed`.
 - focused Web strict parser/downloader 묶음: `45 passed`.
-- `just quality`: Ruff, Python format, mypy, pytest `3028 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
+- `just quality`: Ruff, Python format, mypy, pytest `3029 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
 - `docker compose config --quiet`: packaged Python helper, fixed env와 read-only journal bind 설정 parse 통과.
 - `git diff --check`: 통과.
 
