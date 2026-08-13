@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import math
 import re
@@ -11,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from sab.research.urls import canonicalize_public_article_url_v0
 
 SCHEMA_VERSION = "decision-board.v0"
 _HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -23,6 +24,8 @@ _ENTRY_ACTIONS = frozenset({"BUY", "AVOID"})
 _HOLDING_ACTIONS = frozenset({"HOLD", "SELL"})
 _PUBLIC_DNS_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _PUBLIC_DNS_TLD_PATTERN = re.compile(r"[a-z]{2,63}\Z")
+_MAX_PUBLIC_EVIDENCE_URL_BYTES = 2048
+_MAX_SUPPORTING_SPAN_CHARS = 4096
 
 
 class ContractError(ValueError):
@@ -246,6 +249,10 @@ def _evidence_reference(value: Any, path: str) -> None:
             "source_url",
             "publisher",
             "published_at",
+            "article_content_hash",
+            "supporting_span",
+            "supporting_location",
+            "entailment",
             "freshness",
             "citation_label",
         },
@@ -256,6 +263,16 @@ def _evidence_reference(value: Any, path: str) -> None:
     validate_public_evidence_url(reference["source_url"], f"{path}.source_url")
     _non_empty_string(reference["publisher"], f"{path}.publisher")
     _timestamp(reference["published_at"], f"{path}.published_at")
+    _hash(reference["article_content_hash"], f"{path}.article_content_hash")
+    span = _non_empty_string(reference["supporting_span"], f"{path}.supporting_span")
+    if len(span) > _MAX_SUPPORTING_SPAN_CHARS:
+        raise ContractError(
+            f"{path}.supporting_span", "must contain at most 4096 characters"
+        )
+    _supporting_location(
+        reference["supporting_location"], f"{path}.supporting_location"
+    )
+    _literal(reference["entailment"], f"{path}.entailment", "SUPPORTED")
     _literal(reference["freshness"], f"{path}.freshness", "WITHIN_POLICY")
     _non_empty_string(reference["citation_label"], f"{path}.citation_label")
 
@@ -427,11 +444,15 @@ def _https_url(value: Any, path: str) -> str:
 
 
 def validate_public_evidence_url(value: Any, path: str = "$") -> str:
-    """Validate a canonical public HTTPS URL without resolving DNS."""
+    """Apply the shared public URL policy plus Decision Board restrictions."""
 
     text = _https_url(value, path)
-    if not text.isascii():
+    if not text.isascii() or len(text.encode("ascii")) > _MAX_PUBLIC_EVIDENCE_URL_BYTES:
         raise ContractError(path, "must use an ASCII public DNS hostname")
+    try:
+        canonical = canonicalize_public_article_url_v0(text)
+    except (TypeError, ValueError) as exc:
+        raise ContractError(path, "must use a canonical public HTTPS URL") from exc
     parsed = urlsplit(text)
     hostname = parsed.hostname
     try:
@@ -439,7 +460,8 @@ def validate_public_evidence_url(value: Any, path: str = "$") -> str:
     except ValueError as exc:
         raise ContractError(path, "must not contain an invalid port") from exc
     if (
-        parsed.scheme != "https"
+        canonical != text
+        or parsed.scheme != "https"
         or hostname is None
         or parsed.username is not None
         or parsed.password is not None
@@ -454,18 +476,12 @@ def validate_public_evidence_url(value: Any, path: str = "$") -> str:
         )
     if len(hostname) > 253 or hostname.endswith("."):
         raise ContractError(path, "must use a canonical public DNS hostname")
-    try:
-        ipaddress.ip_address(hostname)
-    except ValueError:
-        pass
-    else:
-        raise ContractError(path, "must not use an IP literal")
     labels = hostname.split(".")
     if (
         len(labels) < 2
         or hostname == "localhost"
         or hostname.endswith(".localhost")
-        or hostname.endswith(".local")
+        or hostname.endswith((".local", ".internal", ".lan", ".home"))
         or any(label.startswith("xn--") for label in labels)
         or any(not _PUBLIC_DNS_LABEL_PATTERN.fullmatch(label) for label in labels)
         or not _PUBLIC_DNS_TLD_PATTERN.fullmatch(labels[-1])

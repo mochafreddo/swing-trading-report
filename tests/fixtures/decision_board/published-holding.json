@@ -29,6 +29,14 @@
             "source_url": "https://evidence.example/dovetail-guidance",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-05T14:00:00Z",
+            "article_content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "supporting_span": "Dovetail reaffirmed guidance.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Dovetail guidance"
           }
@@ -53,6 +61,14 @@
             "source_url": "https://evidence.example/elm-recall",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-05T15:00:00Z",
+            "article_content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "supporting_span": "Elm River announced a recall.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Elm River recall"
           }
@@ -79,5 +95,5 @@
       }
     ]
   },
-  "decision_payload_hash": "sha256:0545c1b461355fd493fe70406db6112705c1e153b019a827e6df2fd4cdf4de8e"
+  "decision_payload_hash": "sha256:2ee3c83777a95830ca36eaba9a53fc38c4c90e3e39bba0b8d826f11553cc2201"
 }

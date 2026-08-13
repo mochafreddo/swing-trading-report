@@ -519,6 +519,10 @@ def _eligible_evidence(
                 "source_url": source_url,
                 "publisher": public["publisher"],
                 "published_at": public["published_at"],
+                "article_content_hash": public["article_content_hash"],
+                "supporting_span": public["supporting_span"],
+                "supporting_location": public["supporting_location"],
+                "entailment": public["entailment"],
                 "freshness": "WITHIN_POLICY",
                 "citation_label": source.title,
             }
@@ -526,7 +530,7 @@ def _eligible_evidence(
             raise CompilerInputError(
                 "compiler evidence public reference is invalid"
             ) from exc
-        if not all(type(item) is str for item in reference.values()):
+        if reference["entailment"] != "SUPPORTED":
             raise CompilerInputError("compiler evidence public reference is invalid")
         existing = references.get(claim_id)
         if existing is not None and existing != reference:

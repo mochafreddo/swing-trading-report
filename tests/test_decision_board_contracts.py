@@ -350,6 +350,9 @@ def test_empty_published_universe_is_valid() -> None:
         pytest.param("https://localhost/article", id="localhost"),
         pytest.param("https://news.localhost/article", id="localhost-subdomain"),
         pytest.param("https://service.local/article", id="local-tld"),
+        pytest.param("https://service.internal/article", id="internal-tld"),
+        pytest.param("https://service.lan/article", id="lan-tld"),
+        pytest.param("https://service.home/article", id="home-tld"),
         pytest.param("https://127.0.0.1/article", id="ipv4-loopback"),
         pytest.param("https://[::1]/article", id="ipv6-loopback"),
         pytest.param("https://192.168.1.1/article", id="ipv4-private"),
@@ -360,6 +363,8 @@ def test_empty_published_universe_is_valid() -> None:
         pytest.param("https://xn--pple-43d.com/article", id="punycode-label"),
         pytest.param("https://аpple.com/article", id="unicode-lookalike"),
         pytest.param("https://Example.com/article", id="noncanonical-case"),
+        pytest.param("https://example.com", id="missing-canonical-slash"),
+        pytest.param("https://example.com/" + ("a" * 2030), id="over-2048-bytes"),
         pytest.param("https://example.com./article", id="trailing-dot"),
     ],
 )
@@ -374,6 +379,35 @@ def test_public_evidence_url_rejects_non_public_or_noncanonical_hosts(
         _schema_validator().validate(report)
     with pytest.raises(ContractError, match=r"source_url"):
         validate_decision_board_report(report)
+
+
+def test_evidence_reference_requires_exact_supported_claim_provenance() -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    evidence = report["decision_payload"]["items"][0]["evidence"][0]
+    required = {
+        "entailment",
+        "article_content_hash",
+        "supporting_span",
+        "supporting_location",
+    }
+
+    assert required <= evidence.keys()
+    assert evidence["entailment"] == "SUPPORTED"
+    assert evidence["supporting_location"] == {
+        "kind": "TEXT_OFFSETS",
+        "start": 0,
+        "end": len(evidence["supporting_span"]),
+    }
+
+    for field in required:
+        mutated = _load_json(FIXTURE_DIR / "published-entry.json")
+        del mutated["decision_payload"]["items"][0]["evidence"][0][field]
+        mutated["decision_payload_hash"] = decision_payload_hash(
+            mutated["decision_payload"]
+        )
+        with pytest.raises((ValidationError, ContractError)):
+            _schema_validator().validate(mutated)
+            validate_decision_board_report(mutated)
 
 
 def test_schema_exposes_all_normative_v0_contracts() -> None:

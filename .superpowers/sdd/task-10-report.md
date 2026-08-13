@@ -47,7 +47,7 @@ T9 private local RunJournal
 - report type selector에 `Decision Board`를 추가하고 lane selector를 필수로 표시한다. lane은 URL, SSR, client fetch, cache, refresh, browser back/forward reconciliation에 유지된다.
 - SSR과 client navigation은 filter lane과 다른 Decision Board key를 선택하지 않고 URL을 안전한 state로 정리한다.
 - list row는 report type, lane badge, public run ID를 표시한다.
-- PUBLISHED detail은 run identity/time/status, ticker/exchange, item status/action, reason code와 public EvidenceRef를 표시한다. EvidenceRef는 revalidated eligible CompilerEvidence의 `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time, `WITHIN_POLICY` freshness와 citation label을 가지며 링크는 새 탭과 `noopener noreferrer`로 연다. HOLDING `SELL`은 별도 시각 스타일을 유지한다.
+- PUBLISHED detail은 run identity/time/status, ticker/exchange, item status/action, reason code와 public EvidenceRef를 표시한다. EvidenceRef는 revalidated eligible CompilerEvidence의 `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time, `WITHIN_POLICY` freshness, citation label과 issued `SUPPORTED` entailment/article hash/bounded exact span/location을 가지며 링크는 새 탭과 `noopener noreferrer`로 연다. HOLDING `SELL`은 별도 시각 스타일을 유지한다.
 - BLOCKED는 shared issue code만 표시하고 directional table을 만들지 않는다. empty published universe는 정상 empty state다.
 - raw toggle은 server에서 이미 hash/key/privacy validation을 통과한 public envelope에만 적용된다.
 - local journal panel은 report status와 별도임을 설명하고 missed/stale 관측만 표시한다. order/notification/action button은 없다.
@@ -63,6 +63,7 @@ T9 private local RunJournal
 5. 실제 Playwright fixture-only journey: 최초 RED는 기존 설정에 Playwright dependency/config/script가 없었고, 첫 실행은 bundled Chromium 부재를 확인했다. 네트워크 설치 없이 이미 설치된 system Chrome channel을 사용해 `/reports` ENTRY/PUBLISHED, BLOCKED, sanitized invalid error, HOLDING/SELL, stale journal, no order/notification 및 외부 request 없음까지 통과했다.
 6. late boundary regressions: lane과 key 불일치가 client에서 선택되는 1 failure, whitespace-normalized Decision Board URL key가 404로 진행되는 1 failure, alternate-case provider exception metadata가 200으로 통과하는 1 failure, malformed journal client payload가 무검증되는 failure를 각각 RED로 확인한 뒤 fail-closed GREEN으로 고정했다.
 7. public URL review regressions: hash-valid userinfo/local/IP/port/fragment/query/punycode/case mutation 15종이 Python/JSON Schema/Zod에서 통과하고 compiler가 민감 query를 그대로 내보내는 RED를 확인했다. compiler query omission과 canonical public-DNS HTTPS validation 후 GREEN.
+8. final public evidence regressions: shared research canonicalizer를 Decision HTTPS-only exact wrapper로 재사용하고 `.internal`/`.lan`/`.home`, missing canonical slash, 2048-byte 초과 URL을 Python/JSON Schema/Zod mirror에서 거부했다. public EvidenceRef에는 eligible issued ClaimValidation의 `SUPPORTED`, article hash, bounded exact span/location을 복원했다.
 8. journal review regressions: user-owned `0700` non-final ancestor가 AVAILABLE로 통과하는 RED를 확인했다. owner/write policy, swap-back/growth tests, pre-sized bounded read를 적용한 뒤 journal 10 tests를 5회 반복 GREEN.
 9. actual API browser regression: list/detail `route.fulfill`을 제거하자 실제 Next list가 T7-invalid fixture row를 제외해 timeout 나는 RED를 확인했다. fixture Supabase가 valid index/storage를 제공하도록 고치고 실제 Next list/detail 200 및 invalid envelope 422를 GREEN으로 고정했다.
 

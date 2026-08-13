@@ -32,6 +32,14 @@
             "source_url": "https://evidence.example/aurora-demand",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-05T12:00:00Z",
+            "article_content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "supporting_span": "Aurora demand remains strong.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Aurora demand update"
           }
@@ -56,6 +64,14 @@
             "source_url": "https://evidence.example/blue-harbor-delay",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-05T13:00:00Z",
+            "article_content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "supporting_span": "Blue Harbor reported a project delay.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 37
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Blue Harbor project delay"
           }
@@ -82,5 +98,5 @@
       }
     ]
   },
-  "decision_payload_hash": "sha256:2513312aed908011c8729b35d8ba047893dbbc60f46ecf32276dc38eab9ce555"
+  "decision_payload_hash": "sha256:a4321f6f38e59554ee126329dc1bff3a95334d45b5f209b6b287d537c7d66480"
 }

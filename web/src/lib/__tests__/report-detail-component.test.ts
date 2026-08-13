@@ -58,6 +58,10 @@ describe("ReportDetail component", () => {
     expect(html).toContain("noopener noreferrer");
     expect(html).toContain("Synthetic Wire");
     expect(html).toContain("WITHIN_POLICY");
+    expect(html).toContain("SUPPORTED");
+    expect(html).toContain("Aurora demand remains strong.");
+    expect(html).toContain("sha256:1111111111111111");
+    expect(html).toContain("[0,29)");
     expect(html).toContain("EVIDENCE_UNCLEAR");
   });
 

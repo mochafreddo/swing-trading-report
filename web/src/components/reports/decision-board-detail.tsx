@@ -113,7 +113,14 @@ export function DecisionBoardDetail({
                             <time dateTime={evidence.published_at}>
                               {evidence.published_at}
                             </time>{" "}
-                            · {evidence.freshness})
+                            · {evidence.freshness} · {evidence.entailment})
+                            <br />
+                            <span className="subtle">
+                              {evidence.supporting_span} [
+                              {evidence.supporting_location.start},
+                              {evidence.supporting_location.end}) ·{" "}
+                              {evidence.article_content_hash}
+                            </span>
                           </span>
                         ))
                       : "-"}

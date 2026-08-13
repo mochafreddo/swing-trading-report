@@ -197,7 +197,7 @@ const PUBLIC_DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const PUBLIC_DNS_TLD = /^[a-z]{2,63}$/u;
 
 function isCanonicalPublicEvidenceUrl(value: string): boolean {
-  if (!/^https:\/\/[\x21-\x7e]+$/u.test(value)) {
+  if (value.length > 2048 || !/^https:\/\/[\x21-\x7e]+$/u.test(value)) {
     return false;
   }
   try {
@@ -211,13 +211,16 @@ function isCanonicalPublicEvidenceUrl(value: string): boolean {
       parsed.port === "" &&
       parsed.search === "" &&
       parsed.hash === "" &&
+      parsed.href === value &&
       authority === parsed.hostname &&
       parsed.hostname.length <= 253 &&
       !parsed.hostname.endsWith(".") &&
       labels.length >= 2 &&
       parsed.hostname !== "localhost" &&
       !parsed.hostname.endsWith(".localhost") &&
-      !parsed.hostname.endsWith(".local") &&
+      ![".local", ".internal", ".lan", ".home"].some((suffix) =>
+        parsed.hostname.endsWith(suffix),
+      ) &&
       !labels.some((label) => label.startsWith("xn--")) &&
       labels.every((label) => PUBLIC_DNS_LABEL.test(label)) &&
       PUBLIC_DNS_TLD.test(labels.at(-1) ?? "")
@@ -328,6 +331,10 @@ const evidenceRefV0Schema = z
     source_url: publicEvidenceUrlV0Schema,
     publisher: z.string().min(1),
     published_at: timestampV0Schema,
+    article_content_hash: hashV0Schema,
+    supporting_span: z.string().min(1).max(4096),
+    supporting_location: supportingLocationV0Schema,
+    entailment: z.literal("SUPPORTED"),
     freshness: z.literal("WITHIN_POLICY"),
     citation_label: z.string().min(1),
   })
@@ -484,6 +491,14 @@ export async function projectPublicDecisionBoardReport(
         source_url: evidence.source_url,
         publisher: evidence.publisher,
         published_at: evidence.published_at,
+        article_content_hash: evidence.article_content_hash,
+        supporting_span: evidence.supporting_span,
+        supporting_location: {
+          kind: evidence.supporting_location.kind,
+          start: evidence.supporting_location.start,
+          end: evidence.supporting_location.end,
+        },
+        entailment: evidence.entailment,
         freshness: evidence.freshness,
         citation_label: evidence.citation_label,
       })),

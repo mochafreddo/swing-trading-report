@@ -380,6 +380,9 @@ describe("Decision Board V0 schema", () => {
     ["localhost", "https://localhost/article"],
     ["localhost subdomain", "https://news.localhost/article"],
     ["local TLD", "https://service.local/article"],
+    ["internal TLD", "https://service.internal/article"],
+    ["LAN TLD", "https://service.lan/article"],
+    ["home TLD", "https://service.home/article"],
     ["IPv4 loopback", "https://127.0.0.1/article"],
     ["IPv6 loopback", "https://[::1]/article"],
     ["IPv4 private", "https://192.168.1.1/article"],
@@ -390,6 +393,8 @@ describe("Decision Board V0 schema", () => {
     ["punycode label", "https://xn--pple-43d.com/article"],
     ["Unicode lookalike", "https://аpple.com/article"],
     ["noncanonical host case", "https://Example.com/article"],
+    ["missing canonical slash", "https://example.com"],
+    ["over 2048 bytes", `https://example.com/${"a".repeat(2030)}`],
     ["trailing host dot", "https://example.com./article"],
   ])("rejects public evidence URL mutation: %s", async (_name, sourceUrl) => {
     const report = loadPublishedFixture();
@@ -400,6 +405,25 @@ describe("Decision Board V0 schema", () => {
 
     expect(safeParseDecisionBoardReportStructure(report).success).toBe(false);
     await expect(parseVerifiedDecisionBoardReport(report)).rejects.toThrow();
+  });
+
+  it("requires exact supported claim provenance on every evidence reference", () => {
+    const report = loadPublishedFixture();
+    const evidence = report.decision_payload.items[0].evidence[0] as Record<
+      string,
+      unknown
+    >;
+
+    expect(evidence).toMatchObject({
+      entailment: "SUPPORTED",
+      article_content_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      supporting_span: expect.any(String),
+      supporting_location: {
+        kind: "TEXT_OFFSETS",
+        start: expect.any(Number),
+        end: expect.any(Number),
+      },
+    });
   });
 
   it.each([

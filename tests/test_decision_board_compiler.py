@@ -384,17 +384,26 @@ def test_only_supported_action_changing_material_adverse_changes_entry_action() 
             "source_url": "https://evidence.example/adverse-final",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-09T00:00:00Z",
+            "article_content_hash": adverse.validation.article_content_hash,
+            "supporting_span": adverse.validation.supporting_span,
+            "supporting_location": {
+                "kind": "TEXT_OFFSETS",
+                "start": adverse.validation.supporting_location.start,
+                "end": adverse.validation.supporting_location.end,
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Synthetic adverse event",
         }
     ]
 
+    supportive = _evidence(kind=CompilerEvidenceKindV0.SUPPORTIVE)
     for evidence, expected_references in (
         (_evidence(entailment=EntailmentV0.CONTRADICTED), []),
         (_evidence(entailment=EntailmentV0.UNCLEAR), []),
         (_evidence(action_changing=False), []),
         (
-            _evidence(kind=CompilerEvidenceKindV0.SUPPORTIVE),
+            supportive,
             [
                 {
                     "claim_id": "claim-adverse-1",
@@ -402,6 +411,14 @@ def test_only_supported_action_changing_material_adverse_changes_entry_action() 
                     "source_url": "https://evidence.example/adverse-final",
                     "publisher": "Synthetic Wire",
                     "published_at": "2026-08-09T00:00:00Z",
+                    "article_content_hash": supportive.validation.article_content_hash,
+                    "supporting_span": supportive.validation.supporting_span,
+                    "supporting_location": {
+                        "kind": "TEXT_OFFSETS",
+                        "start": supportive.validation.supporting_location.start,
+                        "end": supportive.validation.supporting_location.end,
+                    },
+                    "entailment": "SUPPORTED",
                     "freshness": "WITHIN_POLICY",
                     "citation_label": "Synthetic adverse event",
                 }
@@ -493,6 +510,14 @@ def test_collision_precedence_and_hard_sell_non_override() -> None:
             "source_url": "https://evidence.example/adverse-final",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-09T00:00:00Z",
+            "article_content_hash": supportive.validation.article_content_hash,
+            "supporting_span": supportive.validation.supporting_span,
+            "supporting_location": {
+                "kind": "TEXT_OFFSETS",
+                "start": supportive.validation.supporting_location.start,
+                "end": supportive.validation.supporting_location.end,
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Synthetic adverse event",
         }
@@ -602,6 +627,14 @@ def test_deterministic_order_dedupe_replay_and_contract_validation() -> None:
             "source_url": "https://evidence.example/adverse-final",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-09T00:00:00Z",
+            "article_content_hash": second_evidence.validation.article_content_hash,
+            "supporting_span": second_evidence.validation.supporting_span,
+            "supporting_location": {
+                "kind": "TEXT_OFFSETS",
+                "start": second_evidence.validation.supporting_location.start,
+                "end": second_evidence.validation.supporting_location.end,
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Synthetic adverse event",
         },
@@ -611,6 +644,14 @@ def test_deterministic_order_dedupe_replay_and_contract_validation() -> None:
             "source_url": "https://evidence.example/adverse-final",
             "publisher": "Synthetic Wire",
             "published_at": "2026-08-09T00:00:00Z",
+            "article_content_hash": first_evidence.validation.article_content_hash,
+            "supporting_span": first_evidence.validation.supporting_span,
+            "supporting_location": {
+                "kind": "TEXT_OFFSETS",
+                "start": first_evidence.validation.supporting_location.start,
+                "end": first_evidence.validation.supporting_location.end,
+            },
+            "entailment": "SUPPORTED",
             "freshness": "WITHIN_POLICY",
             "citation_label": "Synthetic adverse event",
         },
