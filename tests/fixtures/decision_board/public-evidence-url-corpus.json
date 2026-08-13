@@ -1,0 +1,23 @@
+{
+  "valid": [
+    "https://example.com/",
+    "https://example.com/a-z_A.Z~09",
+    "https://example.com/!$&'()*+,;=:@/nested",
+    "https://example.com/encoded%20space/%2F"
+  ],
+  "invalid": [
+    "https://example.com/bad%",
+    "https://example.com/bad%2",
+    "https://example.com/bad%GG",
+    "https://example.com/a[b",
+    "https://example.com/a]b",
+    "https://example.com/a|b",
+    "https://example.com/a{b",
+    "https://example.com/a}b",
+    "https://example.com/a^b",
+    "https://example.com/a<b",
+    "https://example.com/a>b",
+    "https://example.com/a\\b",
+    "https://example.com/café"
+  ]
+}

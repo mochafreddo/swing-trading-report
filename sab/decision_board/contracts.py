@@ -24,6 +24,9 @@ _ENTRY_ACTIONS = frozenset({"BUY", "AVOID"})
 _HOLDING_ACTIONS = frozenset({"HOLD", "SELL"})
 _PUBLIC_DNS_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _PUBLIC_DNS_TLD_PATTERN = re.compile(r"[a-z]{2,63}\Z")
+_PUBLIC_EVIDENCE_PATH_PATTERN = re.compile(
+    r"/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*\Z"
+)
 _MAX_PUBLIC_EVIDENCE_URL_BYTES = 2048
 _MAX_SUPPORTING_SPAN_CHARS = 4096
 
@@ -469,6 +472,7 @@ def validate_public_evidence_url(value: Any, path: str = "$") -> str:
         or parsed.query
         or parsed.fragment
         or parsed.netloc != hostname
+        or _PUBLIC_EVIDENCE_PATH_PATTERN.fullmatch(parsed.path) is None
     ):
         raise ContractError(
             path,

@@ -195,6 +195,8 @@ const sourceUrlV0Schema = z.url().refine(
 
 const PUBLIC_DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const PUBLIC_DNS_TLD = /^[a-z]{2,63}$/u;
+const PUBLIC_EVIDENCE_PATH =
+  /^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*$/u;
 
 function isCanonicalPublicEvidenceUrl(value: string): boolean {
   if (value.length > 2048 || !/^https:\/\/[\x21-\x7e]+$/u.test(value)) {
@@ -212,6 +214,7 @@ function isCanonicalPublicEvidenceUrl(value: string): boolean {
       parsed.search === "" &&
       parsed.hash === "" &&
       parsed.href === value &&
+      PUBLIC_EVIDENCE_PATH.test(parsed.pathname) &&
       authority === parsed.hostname &&
       parsed.hostname.length <= 253 &&
       !parsed.hostname.endsWith(".") &&

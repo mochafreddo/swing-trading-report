@@ -20,6 +20,9 @@ from sab.decision_board.contracts import (
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "decision_board"
 SCHEMA_PATH = Path(__file__).parents[1] / "schemas" / "decision-board.v0.schema.json"
 VALID_FIXTURES = ("published-entry.json", "published-holding.json", "blocked.json")
+PUBLIC_URL_CORPUS = json.loads(
+    (FIXTURE_DIR / "public-evidence-url-corpus.json").read_text(encoding="utf-8")
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -366,6 +369,19 @@ def test_empty_published_universe_is_valid() -> None:
         pytest.param("https://example.com", id="missing-canonical-slash"),
         pytest.param("https://example.com/" + ("a" * 2030), id="over-2048-bytes"),
         pytest.param("https://example.com./article", id="trailing-dot"),
+        pytest.param("https://example.com/bad%", id="truncated-percent"),
+        pytest.param("https://example.com/bad%2", id="short-percent"),
+        pytest.param("https://example.com/bad%GG", id="nonhex-percent"),
+        pytest.param("https://example.com/a[b", id="raw-open-bracket"),
+        pytest.param("https://example.com/a]b", id="raw-close-bracket"),
+        pytest.param("https://example.com/a|b", id="raw-pipe"),
+        pytest.param("https://example.com/a{b", id="raw-open-brace"),
+        pytest.param("https://example.com/a}b", id="raw-close-brace"),
+        pytest.param("https://example.com/a^b", id="raw-caret"),
+        pytest.param("https://example.com/a<b", id="raw-less-than"),
+        pytest.param("https://example.com/a>b", id="raw-greater-than"),
+        pytest.param(r"https://example.com/a\b", id="backslash"),
+        pytest.param("https://example.com/café", id="non-ascii-path"),
     ],
 )
 def test_public_evidence_url_rejects_non_public_or_noncanonical_hosts(
@@ -379,6 +395,52 @@ def test_public_evidence_url_rejects_non_public_or_noncanonical_hosts(
         _schema_validator().validate(report)
     with pytest.raises(ContractError, match=r"source_url"):
         validate_decision_board_report(report)
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "https://example.com/",
+        "https://example.com/a-z_A.Z~09",
+        "https://example.com/!$&'()*+,;=:@/nested",
+        "https://example.com/encoded%20space/%2F",
+    ],
+)
+def test_public_evidence_url_accepts_conservative_rfc3986_paths(
+    source_url: str,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["decision_payload"]["items"][0]["evidence"][0]["source_url"] = source_url
+    report["decision_payload_hash"] = decision_payload_hash(report["decision_payload"])
+
+    _schema_validator().validate(report)
+    assert validate_decision_board_report(report) == report
+
+
+@pytest.mark.parametrize("source_url", PUBLIC_URL_CORPUS["invalid"])
+def test_shared_public_evidence_url_corpus_rejects_invalid_paths(
+    source_url: str,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["decision_payload"]["items"][0]["evidence"][0]["source_url"] = source_url
+    report["decision_payload_hash"] = decision_payload_hash(report["decision_payload"])
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError):
+        validate_decision_board_report(report)
+
+
+@pytest.mark.parametrize("source_url", PUBLIC_URL_CORPUS["valid"])
+def test_shared_public_evidence_url_corpus_accepts_valid_paths(
+    source_url: str,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["decision_payload"]["items"][0]["evidence"][0]["source_url"] = source_url
+    report["decision_payload_hash"] = decision_payload_hash(report["decision_payload"])
+
+    _schema_validator().validate(report)
+    assert validate_decision_board_report(report) == report
 
 
 def test_evidence_reference_requires_exact_supported_claim_provenance() -> None:

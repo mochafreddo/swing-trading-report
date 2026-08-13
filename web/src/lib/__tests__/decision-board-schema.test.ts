@@ -63,6 +63,10 @@ type MutablePublishedReport = {
 
 const loadPublishedFixture = (): MutablePublishedReport =>
   loadFixture("published-entry.json") as MutablePublishedReport;
+const publicUrlCorpus = loadFixture("public-evidence-url-corpus.json") as {
+  valid: string[];
+  invalid: string[];
+};
 
 const validClaim = () => {
   const fixture = loadPublishedFixture();
@@ -396,6 +400,19 @@ describe("Decision Board V0 schema", () => {
     ["missing canonical slash", "https://example.com"],
     ["over 2048 bytes", `https://example.com/${"a".repeat(2030)}`],
     ["trailing host dot", "https://example.com./article"],
+    ["truncated percent", "https://example.com/bad%"],
+    ["short percent", "https://example.com/bad%2"],
+    ["nonhex percent", "https://example.com/bad%GG"],
+    ["raw open bracket", "https://example.com/a[b"],
+    ["raw close bracket", "https://example.com/a]b"],
+    ["raw pipe", "https://example.com/a|b"],
+    ["raw open brace", "https://example.com/a{b"],
+    ["raw close brace", "https://example.com/a}b"],
+    ["raw caret", "https://example.com/a^b"],
+    ["raw less-than", "https://example.com/a<b"],
+    ["raw greater-than", "https://example.com/a>b"],
+    ["backslash", String.raw`https://example.com/a\b`],
+    ["non-ASCII path", "https://example.com/café"],
   ])("rejects public evidence URL mutation: %s", async (_name, sourceUrl) => {
     const report = loadPublishedFixture();
     report.decision_payload.items[0].evidence[0].source_url = sourceUrl;
@@ -406,6 +423,52 @@ describe("Decision Board V0 schema", () => {
     expect(safeParseDecisionBoardReportStructure(report).success).toBe(false);
     await expect(parseVerifiedDecisionBoardReport(report)).rejects.toThrow();
   });
+
+  it.each([
+    "https://example.com/",
+    "https://example.com/a-z_A.Z~09",
+    "https://example.com/!$&'()*+,;=:@/nested",
+    "https://example.com/encoded%20space/%2F",
+  ])("accepts conservative RFC3986 path %s", async (sourceUrl) => {
+    const report = loadPublishedFixture();
+    report.decision_payload.items[0].evidence[0].source_url = sourceUrl;
+    report.decision_payload_hash = uncheckedPayloadHash(
+      report.decision_payload,
+    );
+
+    expect(safeParseDecisionBoardReportStructure(report).success).toBe(true);
+    await expect(
+      parseVerifiedDecisionBoardReport(report),
+    ).resolves.toBeDefined();
+  });
+
+  it.each(publicUrlCorpus.invalid)(
+    "rejects shared public URL corpus entry %s",
+    async (sourceUrl) => {
+      const report = loadPublishedFixture();
+      report.decision_payload.items[0].evidence[0].source_url = sourceUrl;
+      report.decision_payload_hash = uncheckedPayloadHash(
+        report.decision_payload,
+      );
+      expect(safeParseDecisionBoardReportStructure(report).success).toBe(false);
+      await expect(parseVerifiedDecisionBoardReport(report)).rejects.toThrow();
+    },
+  );
+
+  it.each(publicUrlCorpus.valid)(
+    "accepts shared public URL corpus entry %s",
+    async (sourceUrl) => {
+      const report = loadPublishedFixture();
+      report.decision_payload.items[0].evidence[0].source_url = sourceUrl;
+      report.decision_payload_hash = uncheckedPayloadHash(
+        report.decision_payload,
+      );
+      expect(safeParseDecisionBoardReportStructure(report).success).toBe(true);
+      await expect(
+        parseVerifiedDecisionBoardReport(report),
+      ).resolves.toBeDefined();
+    },
+  );
 
   it("requires exact supported claim provenance on every evidence reference", () => {
     const report = loadPublishedFixture();
