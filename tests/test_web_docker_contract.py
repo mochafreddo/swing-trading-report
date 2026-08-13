@@ -12,6 +12,10 @@ def test_web_dockerignore_excludes_local_env_files_from_build_context() -> None:
     assert "!web/src/**" in patterns
     assert "!web/scripts/**" in patterns
     assert "!web/fixtures/toss-holdings.qa.json" in patterns
+    assert "web/src/**/__tests__/**" in patterns
+    assert "web/src/**/*.test.ts" in patterns
+    assert "web/src/**/*.test.tsx" in patterns
+    assert "web/scripts/*.test.mjs" in patterns
     assert "!sab/decision_board/run_journal_public.py" in patterns
     for private_path in (
         ".git",

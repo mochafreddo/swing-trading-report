@@ -10,8 +10,12 @@
 !web/middleware.ts
 !web/src/
 !web/src/**
+web/src/**/__tests__/**
+web/src/**/*.test.ts
+web/src/**/*.test.tsx
 !web/scripts/
 !web/scripts/**
+web/scripts/*.test.mjs
 !web/fixtures/
 !web/fixtures/toss-holdings.qa.json
 !sab/
