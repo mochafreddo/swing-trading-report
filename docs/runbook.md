@@ -150,6 +150,8 @@ Web journal panel을 Docker에서 opt-in할 때는 writer가 만든 repo-local p
 이를 `/var/lib/sab/decision-board-journal:ro`로만 mount하고 packaged stdlib-only T9 reader를
 `/usr/bin/python3` fixed executable로 호출합니다. host directory와 record는 각각 writer가
 만든 owner-only `0700`/`0600`이어야 하며, 조건이 맞지 않으면 panel은 safe unavailable입니다.
+Linux bind mount에서는 non-root Web user의 UID 1000이 journal directory/file owner로 보이도록
+host ownership을 사전에 확인해야 합니다. 권한을 완화하거나 container를 root로 실행하지 않습니다.
 
 missed/stale 판정은 현재 시각까지 명시적으로 주입합니다. 다음 예시는 형식 설명용이며 운영
 시간표가 아닙니다.

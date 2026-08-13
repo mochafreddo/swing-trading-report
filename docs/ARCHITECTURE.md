@@ -321,7 +321,8 @@ action-changing `SUPPORTED`만 compiler에서 source/claim을 다시 검증한 �
 article content hash, bounded exact supporting span/location을 가진 public EvidenceRef가 됩니다.
 public URL은 query를 제거하고 shared research URL canonicalizer를 거친 뒤 userinfo, port,
 fragment, local/internal/LAN/home/IP/punycode host를 허용하지 않는 2048-byte 이하 canonical
-ASCII public-DNS HTTPS URL로 다시 검증합니다.
+ASCII public-DNS HTTPS URL로 다시 검증합니다. path는 `/`, RFC3986 unreserved/sub-delims,
+colon/at과 정확한 `%HH` escape만 허용해 Python/JSON Schema/Zod가 같은 corpus를 따릅니다.
 
 완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는
 기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. local-only
@@ -357,6 +358,9 @@ descriptor-relative root/record identity를 사용해 early scan cap, pre-sized 
 1-byte lookahead, fatal UTF-8/duplicate-key/canonical validation을 수행하고 bounded sanitized
 status envelope만 반환합니다. Web은 shell 없는 fixed-argv subprocess로 이 T9 seam을 짧은
 timeout/stdout bound 아래 호출한 뒤 Zod로 다시 검증합니다.
+Web Docker image는 repository-pinned Python 3.14.5 Alpine runtime을 digest로 고정해 helper
+syntax/`--help`를 build 중 검사합니다. root build context는 Web build inputs, 단일 synthetic QA
+fixture와 `run_journal_public.py`만 허용하는 deny-by-default `.dockerignore`를 사용합니다.
 launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지
 않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를
 호출하거나 변경하지 않습니다.

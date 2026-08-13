@@ -68,6 +68,8 @@ T9 private local RunJournal
 10. final public evidence regressions: shared research canonicalizer를 Decision HTTPS-only exact wrapper로 재사용하고 `.internal`/`.lan`/`.home`, missing canonical slash, 2048-byte 초과 URL을 Python/JSON Schema/Zod mirror에서 거부했다. public EvidenceRef에는 eligible issued ClaimValidation의 `SUPPORTED`, article hash, bounded exact span/location을 복원했다.
 11. final journal bridge regressions: Node pathname reader를 제거하고 T9 stdlib-only descriptor reader를 fixed-argv/no-shell subprocess로 호출한다. early scan, record/output byte cap, fatal UTF-8/duplicate key/canonical parse, timeout/stdout bound와 Web Zod 재검증을 적용했고 T9 writer 호환 및 subprocess failure/timeout/oversize를 고정했다. Docker는 Python/helper를 package하고 journal을 read-only mount한다.
 12. final browser gate regression: pinned `@playwright/test`가 제공하는 Chromium install script와 fixture-only Decision Board journey를 CI web job에 추가하고 Next telemetry를 비활성화했다. dynamic fixture/web ports와 optional browser channel을 유지하며 static workflow contract가 live secret/service 의존을 거부한다.
+13. adjacent URL path regression: Python이 malformed percent escape와 raw `[ ] | { } ^ < >`를 허용하는 RED를 확인했다. shared corpus와 conservative RFC3986 path grammar로 Python/JSON Schema/Zod exact parity를 고정했다.
+14. adjacent Docker regression: strict root-context allowlist가 없고 helper `--help`가 실패하며 Docker Python이 unpinned인 RED를 확인했다. digest-pinned official Python 3.14.5 Alpine stage, portable exception syntax, build-time syntax/help check와 deny-by-default context allowlist를 적용했다. 최초 실제 build는 필요한 단일 Toss synthetic QA fixture 누락으로 실패했고 그 파일만 allowlist한 뒤 build 및 UID 1000 read-only bind journal read를 통과했다.
 
 최종 Web Vitest 묶음은 `96 files / 726 tests`가 통과했다.
 
@@ -83,6 +85,8 @@ T9 private local RunJournal
 - focused Web strict parser/downloader 묶음: `45 passed`.
 - `just quality`: Ruff, Python format, mypy, pytest `3029 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
 - `docker compose config --quiet`: packaged Python helper, fixed env와 read-only journal bind 설정 parse 통과.
+- `docker build --file web/Dockerfile --tag sab-web-decision-board-check .`: strict allowlist context에서 pinned Python helper syntax/help, Next production build와 non-root image 생성 통과.
+- built image `docker run`: UID 1000/Python 3.14.5/helper help 확인 및 owner-only `0700`/`0600` read-only bind journal의 MISSED_EXPECTED projection 통과.
 - `git diff --check`: 통과.
 
 ## Self-review

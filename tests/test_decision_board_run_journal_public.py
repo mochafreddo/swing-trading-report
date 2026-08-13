@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -36,6 +38,25 @@ def test_public_reader_reads_t9_record_without_mutation(tmp_path: Path) -> None:
     assert public["count"] == 1
     assert public["records"][0]["status"] == "MISSED_EXPECTED"  # type: ignore[index]
     assert record.read_bytes() == before
+
+
+def test_public_reader_script_has_portable_syntax_and_help() -> None:
+    helper = Path("sab/decision_board/run_journal_public.py")
+
+    subprocess.run(
+        [sys.executable, "-m", "py_compile", str(helper)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    completed = subprocess.run(
+        [sys.executable, str(helper), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+    assert "--journal-dir" in completed.stdout
 
 
 def test_public_reader_rejects_duplicate_keys_and_invalid_utf8(tmp_path: Path) -> None:

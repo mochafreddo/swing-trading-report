@@ -319,7 +319,7 @@ def _output_bytes(value: object) -> bytes:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--journal-dir", required=True)
     parser.add_argument("--limit", type=int, required=True)
     parser.add_argument("--scan-limit", type=int, required=True)
