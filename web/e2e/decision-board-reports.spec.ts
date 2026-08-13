@@ -134,6 +134,10 @@ test("fixture-only /reports Decision Board journey", async ({
   await expect(evidence).toHaveAttribute("rel", "noopener noreferrer");
   await expect(evidence.locator("..")).toContainText("Synthetic Wire");
   await expect(evidence.locator("..")).toContainText("WITHIN_POLICY");
+  await expect(evidence.locator("..")).toContainText("SUPPORTED");
+  await expect(evidence.locator("..")).toContainText(
+    "Aurora demand remains strong.",
+  );
 
   const blockedDetailResponse = page.waitForResponse((response) =>
     response
@@ -158,6 +162,8 @@ test("fixture-only /reports Decision Board journey", async ({
   await expect(page).toHaveURL(
     (url) => url.searchParams.get("key") === invalidKey,
   );
+  await expect(page.locator("#report-raw-json")).toHaveCount(0);
+  await expect(page.getByText("https://127.0.0.1/private")).toHaveCount(0);
 
   await page.goto("/reports?type=decision-board&runKind=HOLDING");
   await expect(page.locator('select[name="runKind"]')).toHaveValue("HOLDING");

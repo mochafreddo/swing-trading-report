@@ -45,6 +45,7 @@ export default defineConfig({
         SUPABASE_SECRET_KEY: "sb_secret_fixture_only",
         SUPABASE_REPORTS_BUCKET: "reports",
         REPORT_SEARCH_WINDOW: "100",
+        NEXT_TELEMETRY_DISABLED: "1",
       },
     },
   ],

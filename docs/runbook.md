@@ -178,6 +178,8 @@ CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board re
 just quality
 just ci-web
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q
+pnpm --dir web run playwright:install
+pnpm --dir web run test:e2e:decision-board
 ```
 
 ## 확인 필요

@@ -14,6 +14,8 @@
     "deadcode": "node scripts/check-knip-baseline.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "playwright:install": "playwright install chromium",
+    "playwright:install:ci": "playwright install --with-deps chromium",
     "test:e2e:decision-board": "playwright test --config playwright.decision-board.config.ts"
   },
   "dependencies": {
