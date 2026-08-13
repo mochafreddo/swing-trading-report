@@ -17,7 +17,10 @@ export function resolveSelectedKeyFromUrl({
   runKind,
   preserveSelectionWhenKeyMissing = false,
 }: ResolveSelectedKeyFromUrlInput): string | null {
-  const nextKey = nextKeyRaw?.trim() || null;
+  const nextKey =
+    reportType === "decision-board"
+      ? nextKeyRaw || null
+      : nextKeyRaw?.trim() || null;
   if (!nextKey) {
     return preserveSelectionWhenKeyMissing ? previousSelectedKey : null;
   }

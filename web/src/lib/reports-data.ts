@@ -5,8 +5,10 @@ import { toErrorMessage } from "@/lib/error-utils";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
 import {
   parseVerifiedDecisionBoardReport,
+  projectPublicDecisionBoardReport,
   type DecisionBoardEnvelopeV0,
 } from "@/lib/decision-board-schema";
+import { parseDecisionBoardJsonBytes } from "@/lib/decision-board-json";
 import { parseReportStorageKey } from "@/lib/report-key";
 import {
   REPORT_DETAIL_CACHE_MAX_ENTRIES,
@@ -16,6 +18,7 @@ import {
   REPORT_SEARCH_CACHE_TTL_MS,
 } from "@/lib/reports-cache-config";
 import {
+  downloadStorageBytes,
   downloadStorageJson,
   fetchReportIndexEntry,
   fetchReportIndexPage,
@@ -31,6 +34,7 @@ import type {
 } from "@/lib/types";
 
 const REPORT_SEARCH_PAGE_SIZE = 100;
+const DECISION_BOARD_REPORT_MAX_BYTES = 1024 * 1024;
 
 type ReportIndexRow = Awaited<
   ReturnType<typeof fetchReportIndexPage>
@@ -302,6 +306,15 @@ const PRIVATE_DECISION_BOARD_FIELDS = new Set([
   "traceback",
 ]);
 
+const PRIVATE_DECISION_BOARD_VALUE_PATTERNS = [
+  /(?:private|secret|token|credential|account|quantity|entry[ _-]?price|pnl)[ _-]?(?:value[ _-]?)?sentinel/iu,
+  /(?:^|\s)(?:\/[^\s]+|[A-Za-z]:[\\/][^\s]+)/u,
+  /Traceback \(most recent call last\):/u,
+  /(?:provider[ _-]?(?:error|exception)|OpenAI provider error)/iu,
+  /\b(?:access|refresh|api|bearer)?[ _-]?token(?:\s*[:=]\s*|\s+)[A-Za-z0-9._-]{8,}/iu,
+  /(?:\bsk-[A-Za-z0-9_-]{12,}\b|\bsb_secret_[A-Za-z0-9_-]+\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b)/u,
+];
+
 function containsPrivateDecisionBoardField(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(containsPrivateDecisionBoardField);
@@ -317,6 +330,21 @@ function containsPrivateDecisionBoardField(value: unknown): boolean {
   );
 }
 
+function containsPrivateDecisionBoardValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return PRIVATE_DECISION_BOARD_VALUE_PATTERNS.some((pattern) =>
+      pattern.test(value),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsPrivateDecisionBoardValue);
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return Object.values(value).some(containsPrivateDecisionBoardValue);
+}
+
 async function validateDecisionBoardDetail(
   report: Record<string, unknown>,
   parsedKey: NonNullable<ReturnType<typeof parseReportStorageKey>>,
@@ -325,13 +353,14 @@ async function validateDecisionBoardDetail(
     const validated = await parseVerifiedDecisionBoardReport(report);
     if (
       containsPrivateDecisionBoardField(validated) ||
+      containsPrivateDecisionBoardValue(validated) ||
       validated.run_kind !== parsedKey.runKind ||
       validated.run_id !== parsedKey.runId ||
       validated.idempotency_key !== parsedKey.idempotencyKey
     ) {
       throw new InvalidDecisionBoardReportError();
     }
-    return validated;
+    return await projectPublicDecisionBoardReport(validated);
   } catch (error) {
     if (error instanceof InvalidDecisionBoardReportError) {
       throw error;
@@ -358,11 +387,30 @@ async function readReportDetailUncached(
     throw new SupabaseApiError("Report not found", 404);
   }
   const bucket = indexEntry?.bucket_id ?? env.SUPABASE_REPORTS_BUCKET;
-  const downloaded = await downloadStorageJson(bucket, key);
-  const report =
-    parsedKey.type === "decision-board"
-      ? await validateDecisionBoardDetail(downloaded, parsedKey)
-      : downloaded;
+  let report: Record<string, unknown>;
+  if (parsedKey.type === "decision-board") {
+    try {
+      const bytes = await downloadStorageBytes(
+        bucket,
+        key,
+        DECISION_BOARD_REPORT_MAX_BYTES,
+      );
+      report = await validateDecisionBoardDetail(
+        parseDecisionBoardJsonBytes(bytes),
+        parsedKey,
+      );
+    } catch (error) {
+      if (error instanceof SupabaseApiError && error.status === 404) {
+        throw error;
+      }
+      if (error instanceof InvalidDecisionBoardReportError) {
+        throw error;
+      }
+      throw new InvalidDecisionBoardReportError();
+    }
+  } else {
+    report = await downloadStorageJson(bucket, key);
+  }
   return { key, bucketId: bucket, report };
 }
 

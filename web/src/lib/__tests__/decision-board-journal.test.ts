@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   realpathSync,
   symlinkSync,
@@ -163,6 +165,61 @@ describe("Decision Board local journal reader", () => {
     vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
 
     await expect(readDecisionBoardJournalStatus()).resolves.toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
+  it("rejects a user-owned writable ancestor even when the final directory is private", async () => {
+    const ancestor = createJournalRoot();
+    const root = join(ancestor, "journal");
+    mkdirSync(root, { mode: 0o700 });
+    chmodSync(root, 0o700);
+    chmodSync(ancestor, 0o770);
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+
+    await expect(readDecisionBoardJournalStatus()).resolves.toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
+  it("applies the scan cap to all directory entries", async () => {
+    const root = createJournalRoot();
+    writeFileSync(join(root, "ignored-a.txt"), "a", { mode: 0o600 });
+    writeFileSync(join(root, "ignored-b.txt"), "b", { mode: 0o600 });
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+    vi.stubEnv("DECISION_BOARD_JOURNAL_SCAN_LIMIT", "1");
+
+    await expect(readDecisionBoardJournalStatus()).resolves.toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
+  it("fails closed when the configured directory is swapped during file open", async () => {
+    const root = createJournalRoot();
+    const replacement = createJournalRoot();
+    const displaced = `${root}-displaced`;
+    const record = warningRecord(
+      "STALE_INCOMPLETE",
+      "2026-08-11T01:00:00Z",
+      "entry-slot-swap",
+    );
+    writeCanonicalRecord(root, record);
+    writeCanonicalRecord(replacement, record);
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+    roots.push(displaced);
+
+    const statusPromise = readDecisionBoardJournalStatus();
+    renameSync(root, displaced);
+    symlinkSync(replacement, root);
+    const status = await statusPromise;
+
+    expect(status).toEqual({
       state: "UNAVAILABLE",
       reason: "UNSAFE_OR_INVALID",
       records: [],

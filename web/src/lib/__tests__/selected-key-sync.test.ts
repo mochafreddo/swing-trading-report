@@ -80,4 +80,20 @@ describe("resolveSelectedKeyFromUrl", () => {
 
     expect(result).toBeNull();
   });
+
+  it("rejects surrounding whitespace instead of normalizing a Decision Board key", () => {
+    const entryKey =
+      "2026/08/2026-08-11.decision-board.entry.entry-run." +
+      "a".repeat(64) +
+      ".json";
+
+    expect(
+      resolveSelectedKeyFromUrl({
+        previousSelectedKey: null,
+        nextKeyRaw: ` ${entryKey} `,
+        reportType: "decision-board",
+        runKind: "ENTRY",
+      }),
+    ).toBeNull();
+  });
 });

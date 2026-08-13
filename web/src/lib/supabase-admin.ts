@@ -18,6 +18,7 @@ export type {
   RuntimeStateEntry,
 } from "@/lib/supabase/runtime-state";
 export {
+  downloadStorageBytes,
   downloadStorageJson,
   fetchLatestDecisionBoardReport,
   fetchReportIndexEntry,

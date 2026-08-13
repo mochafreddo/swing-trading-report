@@ -406,6 +406,60 @@ export type DecisionBoardEnvelopeV0 = z.infer<
 >;
 export type RunJournalV0 = z.infer<typeof runJournalV0Schema>;
 
+const publicIssue = (issue: DecisionBoardIssueV0): DecisionBoardIssueV0 => ({
+  code: issue.code,
+  message: `Decision Board issue ${issue.code}.`,
+});
+
+/** Build a fresh public allowlist; no producer-owned object reaches the API. */
+export async function projectPublicDecisionBoardReport(
+  report: DecisionBoardEnvelopeV0,
+): Promise<DecisionBoardEnvelopeV0> {
+  const base = {
+    schema_version: report.schema_version,
+    run_id: report.run_id,
+    created_at: report.created_at,
+    idempotency_key: report.idempotency_key,
+    run_kind: report.run_kind,
+    issues: report.issues.map(publicIssue),
+  } as const;
+  if (report.status === "BLOCKED") {
+    return { ...base, status: "BLOCKED" };
+  }
+  const decisionPayload = {
+    run_kind: report.decision_payload.run_kind,
+    sealed_input_hash: report.decision_payload.sealed_input_hash,
+    items: report.decision_payload.items.map((item) => ({
+      instrument: {
+        market: item.instrument.market,
+        canonical_ticker: item.instrument.canonical_ticker,
+        exchange: item.instrument.exchange,
+        company_name: item.instrument.company_name,
+        identity_source: item.instrument.identity_source,
+        identity_version: item.instrument.identity_version,
+      },
+      status: item.status,
+      ...(item.status === "DECIDED" ? { action: item.action } : {}),
+      issues: item.issues.map(publicIssue),
+      evidence: item.evidence.map((evidence) => ({
+        claim_id: evidence.claim_id,
+        role: evidence.role,
+        source_url: evidence.source_url,
+        publisher: evidence.publisher,
+        published_at: evidence.published_at,
+        freshness: evidence.freshness,
+        citation_label: evidence.citation_label,
+      })),
+    })),
+  } as DecisionPayloadV0;
+  return {
+    ...base,
+    status: "PUBLISHED",
+    decision_payload: decisionPayload,
+    decision_payload_hash: await decisionPayloadHashV0(decisionPayload),
+  } as DecisionBoardEnvelopeV0;
+}
+
 /** Structural validation only; this synchronous boundary does not verify the payload digest. */
 export const parseDecisionBoardReportStructure = (
   value: unknown,

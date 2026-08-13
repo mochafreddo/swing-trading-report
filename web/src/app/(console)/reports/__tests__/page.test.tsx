@@ -182,6 +182,32 @@ describe("ReportsPage", () => {
     expect(readReportDetail).not.toHaveBeenCalled();
   });
 
+  it("does not normalize a whitespace-padded Decision Board key during SSR", async () => {
+    hasValidAdminSession.mockResolvedValue(true);
+    listReports.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      searched: 0,
+      truncated: false,
+      searchWindow: 100,
+      warnings: [],
+    });
+    const entryKey =
+      "2026/08/2026-08-06.decision-board.entry.entry-slot-001." +
+      `${"e".repeat(64)}.json`;
+
+    const state = await loadReportsInitialState(
+      Promise.resolve({
+        type: "decision-board",
+        runKind: "ENTRY",
+        key: ` ${entryKey} `,
+      }),
+    );
+
+    expect(state).toMatchObject({ selectedKey: null, detail: null });
+    expect(readReportDetail).not.toHaveBeenCalled();
+  });
+
   it("prefetches a requested report key even when it is outside the current list", async () => {
     hasValidAdminSession.mockResolvedValue(true);
     listReports.mockResolvedValueOnce({

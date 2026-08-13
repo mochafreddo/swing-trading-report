@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, opendir } from "node:fs/promises";
 import { isAbsolute, join, parse, resolve, sep } from "node:path";
 
 import { runJournalV0Schema } from "@/lib/decision-board-schema";
@@ -50,7 +50,32 @@ async function validateDirectoryPath(configuredPath: string) {
     throw new TypeError("journal directory is unsafe");
   }
 
+  const effectiveUid = process.geteuid?.();
+  if (effectiveUid === undefined) {
+    throw new TypeError("journal owner policy is unavailable");
+  }
+  const validateDirectoryOwner = (
+    info: Awaited<ReturnType<typeof lstat>>,
+  ): void => {
+    const uid = Number(info.uid);
+    const mode = Number(info.mode);
+    if (uid !== 0 && uid !== effectiveUid) {
+      throw new TypeError("journal directory owner is unsafe");
+    }
+    if ((mode & 0o022) !== 0) {
+      const trustedRootSticky = uid === 0 && (mode & 0o1000) !== 0;
+      if (!trustedRootSticky) {
+        throw new TypeError("journal directory permissions are unsafe");
+      }
+    }
+  };
+
   const root = parse(configuredPath).root;
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new TypeError("journal directory is unsafe");
+  }
+  validateDirectoryOwner(rootInfo);
   const components = configuredPath
     .slice(root.length)
     .split(sep)
@@ -63,9 +88,14 @@ async function validateDirectoryPath(configuredPath: string) {
     if (info.isSymbolicLink() || !info.isDirectory()) {
       throw new TypeError("journal directory is unsafe");
     }
+    validateDirectoryOwner(info);
     finalInfo = info;
   }
-  if (!finalInfo || (finalInfo.mode & 0o077) !== 0) {
+  if (
+    !finalInfo ||
+    (Number(finalInfo.uid) !== 0 && Number(finalInfo.uid) !== effectiveUid) ||
+    (Number(finalInfo.mode) & 0o077) !== 0
+  ) {
     throw new TypeError("journal directory permissions are unsafe");
   }
   return finalInfo;
@@ -105,9 +135,12 @@ async function readJournalRecord(directory: string, name: string) {
   }
   const path = join(directory, name);
   const before = await lstat(path);
+  const effectiveUid = process.geteuid?.();
   if (
+    effectiveUid === undefined ||
     before.isSymbolicLink() ||
     !before.isFile() ||
+    (Number(before.uid) !== 0 && Number(before.uid) !== effectiveUid) ||
     before.nlink !== 1 ||
     (before.mode & 0o077) !== 0 ||
     before.size < 2 ||
@@ -152,6 +185,21 @@ async function readJournalRecord(directory: string, name: string) {
   }
 }
 
+async function assertSameDirectory(
+  directory: string,
+  expected: Awaited<ReturnType<typeof lstat>>,
+): Promise<void> {
+  const current = await lstat(directory);
+  if (
+    current.isSymbolicLink() ||
+    !current.isDirectory() ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino
+  ) {
+    throw new TypeError("journal directory changed");
+  }
+}
+
 export async function readDecisionBoardJournalStatus(): Promise<DecisionBoardJournalStatus> {
   const configuredPath = process.env.DECISION_BOARD_JOURNAL_DIR;
   if (!configuredPath) {
@@ -170,28 +218,25 @@ export async function readDecisionBoardJournalStatus(): Promise<DecisionBoardJou
       MAX_SCAN_LIMIT,
     );
     const before = await validateDirectoryPath(configuredPath);
-    const entries = await readdir(configuredPath, { withFileTypes: true });
-    const recordEntries = entries.filter((entry) =>
-      entry.name.endsWith(".json"),
-    );
-    if (recordEntries.length > scanLimit) {
-      throw new TypeError("journal scan bound exceeded");
-    }
     const records = [];
-    for (const entry of recordEntries) {
+    let scannedEntries = 0;
+    const directory = await opendir(configuredPath);
+    for await (const entry of directory) {
+      scannedEntries += 1;
+      if (scannedEntries > scanLimit) {
+        throw new TypeError("journal scan bound exceeded");
+      }
+      if (!entry.name.endsWith(".json")) {
+        continue;
+      }
       if (!entry.isFile() || entry.isSymbolicLink()) {
         throw new TypeError("journal record is unsafe");
       }
+      await assertSameDirectory(configuredPath, before);
       records.push(await readJournalRecord(configuredPath, entry.name));
+      await assertSameDirectory(configuredPath, before);
     }
-    const after = await lstat(configuredPath);
-    if (
-      after.isSymbolicLink() ||
-      after.dev !== before.dev ||
-      after.ino !== before.ino
-    ) {
-      throw new TypeError("journal directory changed");
-    }
+    await assertSameDirectory(configuredPath, before);
     const warnings = records
       .filter(
         (record) =>

@@ -42,7 +42,11 @@ export async function loadReportsInitialState(
       : null;
   const query = readFirstValue(params.q) ?? "";
   const appliedQuery = query.trim();
-  const requestedKeyValue = (readFirstValue(params.key) ?? "").trim() || null;
+  const requestedKeyRaw = readFirstValue(params.key) ?? "";
+  const requestedKeyValue =
+    reportType === "decision-board"
+      ? requestedKeyRaw || null
+      : requestedKeyRaw.trim() || null;
   const requestedParsedKey = requestedKeyValue
     ? parseReportStorageKey(requestedKeyValue)
     : null;

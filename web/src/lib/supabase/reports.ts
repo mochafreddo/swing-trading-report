@@ -601,3 +601,69 @@ export async function downloadStorageJson(
 
   throw new SupabaseApiError(`Report '${key}' is not a valid JSON object`, 500);
 }
+
+export async function downloadStorageBytes(
+  bucket: string,
+  key: string,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new TypeError("storage byte limit is invalid");
+  }
+  const env = getSupabaseEnv();
+  const encodedKey = encodeStorageKey(key);
+  const url = `${env.SUPABASE_URL}/storage/v1/object/${encodeURIComponent(bucket)}/${encodedKey}`;
+  const response = await fetchSupabase(url, {
+    headers: buildAuthHeaders({ Accept: "application/json" }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      "Storage object download failed",
+      response.status,
+    );
+  }
+
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength < 0 ||
+      parsedLength > maxBytes
+    ) {
+      throw new SupabaseApiError("Storage object exceeds byte limit", 422);
+    }
+  }
+  if (!response.body) {
+    throw new SupabaseApiError("Storage object body is unavailable", 422);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      length += value.byteLength;
+      if (length > maxBytes) {
+        await reader.cancel();
+        throw new SupabaseApiError("Storage object exceeds byte limit", 422);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}

@@ -13,6 +13,7 @@ import {
   applyScheduledTossQuarantine,
   captureBrokerHoldingsDigest,
   claimRuntimeStateLock,
+  downloadStorageBytes,
   downloadStorageJson,
   fetchReportIndexPage,
   fetchAllHoldings,
@@ -496,6 +497,34 @@ describe("downloadStorageJson", () => {
       status: 500,
       message:
         "Report '2026/02/2026-02-14.buy.json' is not a valid JSON object",
+    } satisfies Partial<SupabaseApiError>);
+  });
+});
+
+describe("downloadStorageBytes", () => {
+  it("reads exact bytes up to the Decision Board limit", async () => {
+    const bytes = new Uint8Array([0x7b, 0x7d]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: { "content-length": String(bytes.byteLength) },
+      }),
+    );
+
+    await expect(
+      downloadStorageBytes("reports", "decision.json", 2),
+    ).resolves.toEqual(bytes);
+  });
+
+  it("rejects a stream as soon as it exceeds the exact-byte limit", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([0x7b, 0x20, 0x7d]), { status: 200 }),
+    );
+
+    await expect(
+      downloadStorageBytes("reports", "decision.json", 2),
+    ).rejects.toMatchObject({
+      status: 422,
     } satisfies Partial<SupabaseApiError>);
   });
 });
