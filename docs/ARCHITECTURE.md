@@ -317,7 +317,9 @@ schema 통과 여부는 action authority가 아니며, 원래 request/article/so
 issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검증한 unchanged
 action-changing `SUPPORTED`만 compiler에서 source/claim을 다시 검증한 뒤
 `claim_id`, `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time,
-`WITHIN_POLICY` freshness, citation label을 가진 public EvidenceRef가 됩니다.
+`WITHIN_POLICY` freshness, citation label을 가진 public EvidenceRef가 됩니다. public URL은
+query를 제거하고 userinfo, port, fragment, local/IP/punycode host를 허용하지 않는 canonical
+ASCII public-DNS HTTPS URL로 다시 검증합니다.
 
 완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는
 기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. local-only

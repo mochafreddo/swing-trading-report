@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +29,25 @@ const fixturePath = (name: string) =>
 const loadFixture = (name: string): unknown =>
   JSON.parse(readFileSync(fixturePath(name), "utf8"));
 
+function canonicalJsonUnchecked(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJsonUnchecked).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map(
+      (key) => `${JSON.stringify(key)}:${canonicalJsonUnchecked(record[key])}`,
+    )
+    .join(",")}}`;
+}
+
+const uncheckedPayloadHash = (payload: unknown): string =>
+  `sha256:${createHash("sha256").update(canonicalJsonUnchecked(payload)).digest("hex")}`;
+
 type MutablePublishedReport = {
   status: string;
   issues: unknown[];
@@ -35,7 +55,7 @@ type MutablePublishedReport = {
   decision_payload: {
     items: Array<{
       action?: string;
-      evidence: Array<{ freshness: string }>;
+      evidence: Array<{ freshness: string; source_url: string }>;
     }>;
   };
   decision_payload_hash: string;
@@ -353,6 +373,33 @@ describe("Decision Board V0 schema", () => {
     claim.source_url = sourceUrl;
 
     expect(claimValidationV0Schema.safeParse(claim).success).toBe(false);
+  });
+
+  it.each([
+    ["userinfo", "https://user:pass@example.com/article"],
+    ["localhost", "https://localhost/article"],
+    ["localhost subdomain", "https://news.localhost/article"],
+    ["local TLD", "https://service.local/article"],
+    ["IPv4 loopback", "https://127.0.0.1/article"],
+    ["IPv6 loopback", "https://[::1]/article"],
+    ["IPv4 private", "https://192.168.1.1/article"],
+    ["IPv4 link-local", "https://169.254.169.254/latest"],
+    ["nondefault port", "https://example.com:8443/article"],
+    ["fragment", "https://example.com/article#private"],
+    ["query", "https://example.com/article?token=PRIVATE"],
+    ["punycode label", "https://xn--pple-43d.com/article"],
+    ["Unicode lookalike", "https://аpple.com/article"],
+    ["noncanonical host case", "https://Example.com/article"],
+    ["trailing host dot", "https://example.com./article"],
+  ])("rejects public evidence URL mutation: %s", async (_name, sourceUrl) => {
+    const report = loadPublishedFixture();
+    report.decision_payload.items[0].evidence[0].source_url = sourceUrl;
+    report.decision_payload_hash = uncheckedPayloadHash(
+      report.decision_payload,
+    );
+
+    expect(safeParseDecisionBoardReportStructure(report).success).toBe(false);
+    await expect(parseVerifiedDecisionBoardReport(report)).rejects.toThrow();
   });
 
   it.each([

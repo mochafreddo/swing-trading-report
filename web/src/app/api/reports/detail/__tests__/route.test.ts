@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -115,6 +116,25 @@ const decisionFixture = () =>
       "utf8",
     ),
   ) as Record<string, unknown>;
+
+function canonicalJsonUnchecked(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJsonUnchecked).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map(
+      (key) => `${JSON.stringify(key)}:${canonicalJsonUnchecked(record[key])}`,
+    )
+    .join(",")}}`;
+}
+
+const uncheckedPayloadHash = (payload: unknown): string =>
+  `sha256:${createHash("sha256").update(canonicalJsonUnchecked(payload)).digest("hex")}`;
 
 function mockDecisionBytes(report: Record<string, unknown>): void {
   vi.mocked(downloadStorageBytes).mockResolvedValueOnce(
@@ -454,6 +474,34 @@ describe("GET /api/reports/detail route", () => {
 
     expect(response.status).toBe(422);
     expect(responseText).not.toContain(privateValue);
+    expect(JSON.parse(responseText)).toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it("returns sanitized 422 for a hash-valid private evidence query", async () => {
+    const privateQuery = "PRIVATE-QUERY-SENTINEL";
+    const report = decisionFixture() as {
+      decision_payload: {
+        items: Array<{ evidence: Array<{ source_url: string }> }>;
+      };
+      decision_payload_hash: string;
+    };
+    report.decision_payload.items[0].evidence[0].source_url = `https://evidence.example/article?token=${privateQuery}`;
+    report.decision_payload_hash = uncheckedPayloadHash(
+      report.decision_payload,
+    );
+    mockDecisionIndex();
+    mockDecisionBytes(report as unknown as Record<string, unknown>);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(responseText).not.toContain(privateQuery);
     expect(JSON.parse(responseText)).toEqual({
       error: "Decision Board report failed validation",
       code: "invalid_decision_board_report",

@@ -304,6 +304,7 @@ def _evidence(
     action_changing: bool = True,
     kind: CompilerEvidenceKindV0 = CompilerEvidenceKindV0.MATERIAL_ADVERSE,
     claim_id: str = "claim-adverse-1",
+    final_url: str = "https://evidence.example/adverse-final",
 ) -> CompilerEvidenceV0:
     trusted = instrument or _instrument()
     policy = ResearchSourcePolicyV0()
@@ -317,7 +318,7 @@ def _evidence(
     )
     article = create_article_artifact_v0(
         source=source,
-        final_url="https://evidence.example/adverse-final",
+        final_url=final_url,
         normalized_text="Synthetic material event.",
         policy=policy,
     )
@@ -346,6 +347,26 @@ def _evidence(
         expected_source=source,
         policy=policy,
     )
+
+
+def test_public_evidence_omits_source_query_parameters() -> None:
+    evidence = _evidence(
+        final_url=(
+            "https://evidence.example/adverse-final"
+            "?utm_source=wire&token=PRIVATE-QUERY-SENTINEL"
+        )
+    )
+
+    item = _item(
+        DecisionCompilerV0.compile_entry(
+            (_entry(evidence=(evidence,)),), sealed_input_hash=SEALED_HASH
+        )
+    )
+
+    references = item["evidence"]
+    assert isinstance(references, list)
+    assert isinstance(references[0], dict)
+    assert references[0]["source_url"] == "https://evidence.example/adverse-final"
 
 
 def test_only_supported_action_changing_material_adverse_changes_entry_action() -> None:

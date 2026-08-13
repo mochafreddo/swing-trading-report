@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -20,6 +21,8 @@ _ISSUE_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _RUN_KINDS = frozenset({"ENTRY", "HOLDING"})
 _ENTRY_ACTIONS = frozenset({"BUY", "AVOID"})
 _HOLDING_ACTIONS = frozenset({"HOLD", "SELL"})
+_PUBLIC_DNS_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+_PUBLIC_DNS_TLD_PATTERN = re.compile(r"[a-z]{2,63}\Z")
 
 
 class ContractError(ValueError):
@@ -250,7 +253,7 @@ def _evidence_reference(value: Any, path: str) -> None:
     )
     _non_empty_string(reference["claim_id"], f"{path}.claim_id")
     _enum(reference["role"], f"{path}.role", {"SUPPORTING", "OPPOSING"})
-    _https_url(reference["source_url"], f"{path}.source_url")
+    validate_public_evidence_url(reference["source_url"], f"{path}.source_url")
     _non_empty_string(reference["publisher"], f"{path}.publisher")
     _timestamp(reference["published_at"], f"{path}.published_at")
     _literal(reference["freshness"], f"{path}.freshness", "WITHIN_POLICY")
@@ -420,6 +423,54 @@ def _https_url(value: Any, path: str) -> str:
     text = _url(value, path)
     if urlsplit(text).scheme.lower() != "https":
         raise ContractError(path, "must be an absolute HTTPS URL")
+    return text
+
+
+def validate_public_evidence_url(value: Any, path: str = "$") -> str:
+    """Validate a canonical public HTTPS URL without resolving DNS."""
+
+    text = _https_url(value, path)
+    if not text.isascii():
+        raise ContractError(path, "must use an ASCII public DNS hostname")
+    parsed = urlsplit(text)
+    hostname = parsed.hostname
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ContractError(path, "must not contain an invalid port") from exc
+    if (
+        parsed.scheme != "https"
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.netloc != hostname
+    ):
+        raise ContractError(
+            path,
+            "must be a canonical HTTPS URL without userinfo, port, query, or fragment",
+        )
+    if len(hostname) > 253 or hostname.endswith("."):
+        raise ContractError(path, "must use a canonical public DNS hostname")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise ContractError(path, "must not use an IP literal")
+    labels = hostname.split(".")
+    if (
+        len(labels) < 2
+        or hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or any(label.startswith("xn--") for label in labels)
+        or any(not _PUBLIC_DNS_LABEL_PATTERN.fullmatch(label) for label in labels)
+        or not _PUBLIC_DNS_TLD_PATTERN.fullmatch(labels[-1])
+    ):
+        raise ContractError(path, "must use a canonical public DNS hostname")
     return text
 
 

@@ -343,6 +343,39 @@ def test_empty_published_universe_is_valid() -> None:
     assert validate_decision_board_report(report) == report
 
 
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        pytest.param("https://user:pass@example.com/article", id="userinfo"),
+        pytest.param("https://localhost/article", id="localhost"),
+        pytest.param("https://news.localhost/article", id="localhost-subdomain"),
+        pytest.param("https://service.local/article", id="local-tld"),
+        pytest.param("https://127.0.0.1/article", id="ipv4-loopback"),
+        pytest.param("https://[::1]/article", id="ipv6-loopback"),
+        pytest.param("https://192.168.1.1/article", id="ipv4-private"),
+        pytest.param("https://169.254.169.254/latest", id="ipv4-link-local"),
+        pytest.param("https://example.com:8443/article", id="nondefault-port"),
+        pytest.param("https://example.com/article#private", id="fragment"),
+        pytest.param("https://example.com/article?token=PRIVATE", id="query"),
+        pytest.param("https://xn--pple-43d.com/article", id="punycode-label"),
+        pytest.param("https://аpple.com/article", id="unicode-lookalike"),
+        pytest.param("https://Example.com/article", id="noncanonical-case"),
+        pytest.param("https://example.com./article", id="trailing-dot"),
+    ],
+)
+def test_public_evidence_url_rejects_non_public_or_noncanonical_hosts(
+    source_url: str,
+) -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["decision_payload"]["items"][0]["evidence"][0]["source_url"] = source_url
+    report["decision_payload_hash"] = decision_payload_hash(report["decision_payload"])
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError, match=r"source_url"):
+        validate_decision_board_report(report)
+
+
 def test_schema_exposes_all_normative_v0_contracts() -> None:
     schema = _load_json(SCHEMA_PATH)
 

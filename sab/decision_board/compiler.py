@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from sab.research.contracts import (
     ResearchSourcePolicyV0,
@@ -22,7 +23,11 @@ from .claims import (
     is_action_change_eligible_v0,
     serialize_claim_validation_v0,
 )
-from .contracts import ContractError, validate_decision_payload
+from .contracts import (
+    ContractError,
+    validate_decision_payload,
+    validate_public_evidence_url,
+)
 from .instruments import InstrumentRefV0, copy_trusted_instrument_ref_v0
 
 _ITEM_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -488,6 +493,22 @@ def _eligible_evidence(
                 value.expected_source,
                 expected_instrument=instrument,
             )
+            raw_source_url = public["source_url"]
+            if type(raw_source_url) is not str:
+                raise CompilerInputError(
+                    "compiler evidence public reference is invalid"
+                )
+            parsed_source_url = urlsplit(raw_source_url)
+            source_url = urlunsplit(
+                (
+                    parsed_source_url.scheme,
+                    parsed_source_url.netloc,
+                    parsed_source_url.path,
+                    "",
+                    "",
+                )
+            )
+            validate_public_evidence_url(source_url, "$.source_url")
             reference = {
                 "claim_id": claim_id,
                 "role": (
@@ -495,7 +516,7 @@ def _eligible_evidence(
                     if value.kind is CompilerEvidenceKindV0.MATERIAL_ADVERSE
                     else "SUPPORTING"
                 ),
-                "source_url": public["source_url"],
+                "source_url": source_url,
                 "publisher": public["publisher"],
                 "published_at": public["published_at"],
                 "freshness": "WITHIN_POLICY",

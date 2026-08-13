@@ -193,6 +193,46 @@ const sourceUrlV0Schema = z.url().refine(
   { message: "Must be a valid absolute HTTP(S) URL" },
 );
 
+const PUBLIC_DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const PUBLIC_DNS_TLD = /^[a-z]{2,63}$/u;
+
+function isCanonicalPublicEvidenceUrl(value: string): boolean {
+  if (!/^https:\/\/[\x21-\x7e]+$/u.test(value)) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    const labels = parsed.hostname.split(".");
+    const authority = value.slice("https://".length).split("/", 1)[0];
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.port === "" &&
+      parsed.search === "" &&
+      parsed.hash === "" &&
+      authority === parsed.hostname &&
+      parsed.hostname.length <= 253 &&
+      !parsed.hostname.endsWith(".") &&
+      labels.length >= 2 &&
+      parsed.hostname !== "localhost" &&
+      !parsed.hostname.endsWith(".localhost") &&
+      !parsed.hostname.endsWith(".local") &&
+      !labels.some((label) => label.startsWith("xn--")) &&
+      labels.every((label) => PUBLIC_DNS_LABEL.test(label)) &&
+      PUBLIC_DNS_TLD.test(labels.at(-1) ?? "")
+    );
+  } catch {
+    return false;
+  }
+}
+
+const publicEvidenceUrlV0Schema = z
+  .string()
+  .refine(isCanonicalPublicEvidenceUrl, {
+    message: "Must use a canonical public HTTPS DNS URL",
+  });
+
 export const decisionBoardIssueV0Schema = z
   .object({
     code: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
@@ -285,10 +325,7 @@ const evidenceRefV0Schema = z
   .object({
     claim_id: z.string().min(1),
     role: z.enum(["SUPPORTING", "OPPOSING"]),
-    source_url: sourceUrlV0Schema.refine(
-      (value) => new URL(value).protocol === "https:",
-      { message: "Public evidence links must use HTTPS" },
-    ),
+    source_url: publicEvidenceUrlV0Schema,
     publisher: z.string().min(1),
     published_at: timestampV0Schema,
     freshness: z.literal("WITHIN_POLICY"),
