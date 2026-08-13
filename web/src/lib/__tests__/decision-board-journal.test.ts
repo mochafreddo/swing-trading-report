@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  appendFileSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -19,7 +20,11 @@ import { readDecisionBoardJournalStatus } from "@/lib/decision-board-journal.ser
 const roots: string[] = [];
 
 function createJournalRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "decision-board-journal-test-"));
+  const safeTemporaryParent =
+    process.platform === "darwin" ? "/private/tmp" : tmpdir();
+  const root = mkdtempSync(
+    join(safeTemporaryParent, "decision-board-journal-test-"),
+  );
   chmodSync(root, 0o700);
   const resolved = realpathSync(root);
   roots.push(resolved);
@@ -186,6 +191,21 @@ describe("Decision Board local journal reader", () => {
     });
   });
 
+  it("rejects a user-owned non-final ancestor even when it is not group writable", async () => {
+    const ancestor = createJournalRoot();
+    const root = join(ancestor, "journal");
+    mkdirSync(root, { mode: 0o700 });
+    chmodSync(root, 0o700);
+    chmodSync(ancestor, 0o700);
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+
+    await expect(readDecisionBoardJournalStatus()).resolves.toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
   it("applies the scan cap to all directory entries", async () => {
     const root = createJournalRoot();
     writeFileSync(join(root, "ignored-a.txt"), "a", { mode: 0o600 });
@@ -220,6 +240,63 @@ describe("Decision Board local journal reader", () => {
     const status = await statusPromise;
 
     expect(status).toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
+  it("fails closed when the configured directory is swapped and restored", async () => {
+    const root = createJournalRoot();
+    const replacement = createJournalRoot();
+    const displaced = `${root}-displaced`;
+    for (let index = 0; index < 100; index += 1) {
+      const expectedAt = `2026-08-11T01:${String(index).padStart(2, "0")}:00Z`;
+      writeCanonicalRecord(
+        root,
+        warningRecord(
+          "STALE_INCOMPLETE",
+          expectedAt,
+          `entry-slot-swap-back-${index}`,
+        ),
+      );
+    }
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+
+    const statusPromise = readDecisionBoardJournalStatus();
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 2));
+    renameSync(root, displaced);
+    renameSync(replacement, root);
+    renameSync(root, replacement);
+    renameSync(displaced, root);
+
+    await expect(statusPromise).resolves.toEqual({
+      state: "UNAVAILABLE",
+      reason: "UNSAFE_OR_INVALID",
+      records: [],
+    });
+  });
+
+  it("fails closed when a journal record grows while it is being read", async () => {
+    const root = createJournalRoot();
+    const record = warningRecord(
+      "STALE_INCOMPLETE",
+      "2026-08-11T01:00:00Z",
+      "entry-slot-growth",
+    );
+    record.issues = [
+      {
+        code: "STALE_INCOMPLETE",
+        message: "x".repeat(60 * 1024),
+      },
+    ];
+    const path = writeCanonicalRecord(root, record);
+    vi.stubEnv("DECISION_BOARD_JOURNAL_DIR", root);
+
+    const statusPromise = readDecisionBoardJournalStatus();
+    appendFileSync(path, "x".repeat(8 * 1024));
+
+    await expect(statusPromise).resolves.toEqual({
       state: "UNAVAILABLE",
       reason: "UNSAFE_OR_INVALID",
       records: [],
