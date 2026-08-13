@@ -1,7 +1,18 @@
 import { defineConfig } from "@playwright/test";
 
-const webPort = 43117;
-const fixturePort = 43118;
+function portFromEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 65535) {
+    throw new TypeError(`${name} must be a valid unprivileged TCP port`);
+  }
+  return value;
+}
+
+const webPort = portFromEnv("DECISION_BOARD_E2E_WEB_PORT", 43117);
+const fixturePort = portFromEnv("DECISION_BOARD_E2E_FIXTURE_PORT", 43118);
+const browserChannel =
+  process.env.PLAYWRIGHT_CHANNEL ??
+  (process.platform === "darwin" ? "chrome" : undefined);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -12,7 +23,7 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${webPort}`,
     browserName: "chromium",
-    channel: "chrome",
+    ...(browserChannel ? { channel: browserChannel } : {}),
     trace: "retain-on-failure",
   },
   webServer: [
