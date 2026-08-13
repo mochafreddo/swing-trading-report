@@ -13,7 +13,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "deadcode": "node scripts/check-knip-baseline.mjs",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e:decision-board": "playwright test --config playwright.decision-board.config.ts"
   },
   "dependencies": {
     "next": "16.2.10",
@@ -23,6 +24,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/node": "25.9.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
