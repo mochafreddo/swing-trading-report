@@ -71,19 +71,19 @@ T9 private local RunJournal
 13. adjacent URL path regression: Python이 malformed percent escape와 raw `[ ] | { } ^ < >`를 허용하는 RED를 확인했다. shared corpus와 conservative RFC3986 path grammar로 Python/JSON Schema/Zod exact parity를 고정했다.
 14. adjacent Docker regression: strict root-context allowlist가 없고 helper `--help`가 실패하며 Docker Python이 unpinned인 RED를 확인했다. digest-pinned official Python 3.14.5 Alpine stage, portable exception syntax, build-time syntax/help check와 deny-by-default context allowlist를 적용했다. 최초 실제 build는 필요한 단일 Toss synthetic QA fixture 누락으로 실패했고 그 파일만 allowlist한 뒤 build 및 UID 1000 read-only bind journal read를 통과했다.
 
-최종 Web Vitest 묶음은 `96 files / 726 tests`가 통과했다.
+최종 Web Vitest 묶음은 `96 files / 760 tests`가 통과했다.
 
 ## 검증
 
-- `NEXT_TELEMETRY_DISABLED=1 DECISION_BOARD_E2E_WEB_PORT=43147 DECISION_BOARD_E2E_FIXTURE_PORT=43148 PLAYWRIGHT_CHANNEL=chrome pnpm --dir web run test:e2e:decision-board`: 실제 system Chrome에서 loopback fixture Supabase를 통해 실제 Next list/detail API를 호출해 `1 passed (3.2s)`. journal panel만 route interception하며 unexpected browser network는 active abort한다. live Supabase/provider/Toss/order/notification network 없음.
+- `NEXT_TELEMETRY_DISABLED=1 DECISION_BOARD_E2E_WEB_PORT=43147 DECISION_BOARD_E2E_FIXTURE_PORT=43148 PLAYWRIGHT_CHANNEL=chrome pnpm --dir web run test:e2e:decision-board`: 실제 system Chrome에서 loopback fixture Supabase를 통해 실제 Next list/detail API를 호출해 `1 passed (3.4s)`. journal panel만 route interception하며 unexpected browser network는 active abort한다. live Supabase/provider/Toss/order/notification network 없음.
 - `UV_CACHE_DIR=.uv-cache mise exec -- uv run python scripts/check_next_app_routes.py`: 통과.
 - `mise exec -- pnpm --dir web run lint`: 통과.
 - `mise exec -- pnpm --dir web run format:check`: 통과.
 - `mise exec -- pnpm --dir web run typecheck`: 통과.
-- `just ci-web`: lint/format/typecheck, `96 files / 726 tests`, coverage gate, Next production build 통과.
+- `just ci-web`: lint/format/typecheck, `96 files / 760 tests`, coverage gate, Next production build 통과.
 - focused Python Decision Board/compiler 묶음: `174 passed`.
 - focused Web strict parser/downloader 묶음: `45 passed`.
-- `just quality`: Ruff, Python format, mypy, pytest `3029 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
+- `just quality`: Ruff, Python format, mypy, pytest `3065 passed / 8 skipped` 통과. dependency deprecation warning 1297건은 기존 경고다.
 - `docker compose config --quiet`: packaged Python helper, fixed env와 read-only journal bind 설정 parse 통과.
 - `docker build --file web/Dockerfile --tag sab-web-decision-board-check .`: strict allowlist context에서 pinned Python helper syntax/help, Next production build와 non-root image 생성 통과.
 - built image `docker run`: UID 1000/Python 3.14.5/helper help 확인 및 owner-only `0700`/`0600` read-only bind journal의 MISSED_EXPECTED projection 통과.
