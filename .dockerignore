@@ -5,7 +5,6 @@
 !web/pnpm-lock.yaml
 !web/pnpm-workspace.yaml
 !web/next.config.ts
-!web/next-env.d.ts
 !web/tsconfig.json
 !web/middleware.ts
 !web/src/
