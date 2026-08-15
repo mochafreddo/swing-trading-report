@@ -64,7 +64,11 @@ def test_decision_board_docs_do_not_claim_default_production_activation() -> Non
         "README.md"
     )
     assert "실제 launchd schedule은 미연결" in _read("docs/deployment.md")
-    assert "production adapter와 schedule이 없으므로" in _read("docs/operations.md")
+    operations = _read("docs/operations.md")
+    assert "production composition은 구현되어 있지만" in operations
+    assert (
+        "provider/credential dependency와 schedule이 연결되지 않았으므로" in operations
+    )
 
 
 def test_documented_journal_configuration_matches_compose_defaults() -> None:
