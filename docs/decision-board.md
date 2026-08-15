@@ -1,6 +1,6 @@
 # Decision Board V0 Reference
 
-상태: Accepted (구현 완료, production adapter 미연결 shadow)
+상태: Accepted (production composition 구현, runtime dependency 미연결 shadow)
 
 Decision Board V0는 기존 로직이 만든 US SWING 후보와 확인된 SWING 보유 종목을
 공개 근거로 보강해 `BUY|AVOID|REVIEW` 또는 `HOLD|SELL|REVIEW` 조언을 만드는
@@ -8,9 +8,12 @@ Decision Board V0는 기존 로직이 만든 US SWING 후보와 확인된 SWING 
 주문 생성·수정·취소, 조건부 주문, 알림 전송 권한이 없습니다.
 
 현재 schema, identity gate, research/claim validation, compiler, runner, atomic report
-storage, RunJournal, Reports UI와 검증 스위트는 구현되어 있습니다. 다만 기본 CLI의
-production preparation/research/claim-verifier adapter는 의도적으로 연결되지 않았습니다.
-따라서 저장소 기본 상태의 `sab decision-board`는 조언을 추측하지 않고
+storage, RunJournal, Reports UI와 검증 스위트는 구현되어 있습니다.
+`DecisionBoardProductionAdapterV0`는 CLI identity와 sealed request를 대조해 기존
+preparer/enricher/uploader를 runner에 결속하며 recorded Responses fixture로 게시 경로를
+검증합니다. 다만 approved request loader와 production preparation/research/claim-verifier adapter
+dependency는 의도적으로 연결되지 않았습니다. 따라서 저장소 기본 상태의
+`sab decision-board`는 조언을 추측하지 않고
 `CONFIG_UNAVAILABLE`, exit 2로 종료합니다. 실제 shadow 측정 기간은 approved adapter가
 별도 검증·연결된 뒤에만 시작할 수 있습니다.
 
@@ -107,8 +110,10 @@ projection을 새로 만들며 invalid/private-bearing artifact는 sanitized 422
 
 ## CLI reference
 
-기본 executor는 production adapter가 없으므로 항상 fail closed합니다. 아래 명령은
-형식 확인용이며 실제 조언 생성 예시가 아닙니다.
+기본 executor에는 adapter instance가 주입되지 않으므로 항상 fail closed합니다. 아래 명령은
+형식 확인용이며 실제 조언 생성 예시가 아닙니다. recorded 검증은
+`tests/test_decision_board_production_adapter.py`가 소유하며 live provider나 credential을
+사용하지 않습니다.
 
 ```bash
 uv run python -m sab decision-board \

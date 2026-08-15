@@ -368,11 +368,12 @@ launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설�
 
 ### 3.6 현재 통합 상태와 shadow 졸업 경계
 
-T1–T11은 schema, broker snapshot, public identity, bounded research, exact-span claims,
+T1–T12는 schema, broker snapshot, public identity, bounded research, exact-span claims,
 compiler, report storage, runner, RunJournal, Reports UI, privacy/no-order/workflow isolation을
-구현하고 fixture/recorded 경계에서 검증합니다. 이는 production adapter나 schedule이
-활성화됐다는 뜻이 아닙니다. 기본 CLI executor, schedule 없는 disabled launchd template,
-GitHub Actions production sidecar 금지가 이 차이를 fail closed로 유지합니다.
+구현하고 fixture/recorded 경계에서 검증합니다. production composition은 sealed request의
+CLI identity를 검증하고 runner collaborator를 결속하지만, approved request loader와 provider,
+credential, schedule이 연결됐다는 뜻은 아닙니다. 기본 CLI executor, schedule 없는 disabled
+launchd template, GitHub Actions production sidecar 금지가 이 차이를 fail closed로 유지합니다.
 
 실제 shadow 운영을 시작하려면 production preparation/research/claim-verifier adapter를
 먼저 별도 승인·연결하고, 사전 승인 gate manifest 아래 최소 20 US 거래 session의 ENTRY와

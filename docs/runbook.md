@@ -49,9 +49,10 @@ gh run list --limit 10
 ```
 
 Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다.
-현재 production preparation/research adapter가 의도적으로 미설정되어 있어 아래 형식의 실행은
-가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 이 경로는 기존
-workflow gating이나 외부 알림에 연결되지 않습니다.
+production composition은 구현되어 recorded fixture로 검증됐지만 approved request loader와
+production preparation/research adapter dependency는 의도적으로 미설정되어 있습니다. 따라서
+아래 형식의 실행은 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다.
+이 경로는 기존 workflow gating이나 외부 알림에 연결되지 않습니다.
 
 schema/compiler/runner/UI 테스트가 green이어도 production adapter가 연결됐다는 의미는
 아닙니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다.
