@@ -95,15 +95,21 @@ def build_decision_board_launchd_dry_run_package_v0(
         report_dir if report_dir is not None else root / "reports",
         "report directory",
     )
-    destination = _require_new_output_directory(output_dir)
     selected_slots = tuple(
-        slot for slot in manifest.slots if slot.session == selected_session
+        sorted(
+            (slot for slot in manifest.slots if slot.session == selected_session),
+            key=lambda slot: (
+                0 if slot.run_kind is RunKindV0.ENTRY else 1,
+                slot.run_id,
+            ),
+        )
     )
     if tuple(slot.run_kind for slot in selected_slots) != (
         RunKindV0.ENTRY,
         RunKindV0.HOLDING,
     ):
-        raise ShadowLaunchdPackageError("package manifest lane order is invalid")
+        raise ShadowLaunchdPackageError("package manifest lanes are invalid")
+    destination = _require_new_output_directory(output_dir)
 
     package_files: list[ShadowLaunchdPackageFileV0] = []
     written: list[Path] = []

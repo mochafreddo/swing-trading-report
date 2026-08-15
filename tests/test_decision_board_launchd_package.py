@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import json
 import os
@@ -157,4 +158,26 @@ def test_launchd_package_cli_is_sanitized_and_refuses_existing_output(
             journal_dir=tmp_path / "journal",
             output_dir=output_dir,
         )
+    assert len(list(output_dir.glob("*.plist"))) == 2
+
+
+def test_launchd_package_normalizes_valid_manifest_slot_order(tmp_path: Path) -> None:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    reordered = copy.deepcopy(raw)
+    slots = reordered["expected_slots"]
+    assert type(slots) is list
+    slots[0], slots[1] = slots[1], slots[0]
+    manifest = tmp_path / "reordered.json"
+    manifest.write_text(json.dumps(reordered), encoding="utf-8")
+    output_dir = tmp_path / "package"
+
+    result = build_decision_board_launchd_dry_run_package_v0(
+        manifest_path=manifest,
+        session="2026-08-17",
+        repo_root=ROOT,
+        journal_dir=tmp_path / "journal",
+        output_dir=output_dir,
+    )
+
+    assert [file.run_kind.value for file in result.files] == ["ENTRY", "HOLDING"]
     assert len(list(output_dir.glob("*.plist"))) == 2
