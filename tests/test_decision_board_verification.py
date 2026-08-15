@@ -5,7 +5,6 @@ import copy
 import json
 import os
 import shlex
-import signal
 import sys
 import time
 from datetime import UTC, datetime
@@ -49,6 +48,21 @@ FIXTURE = (
     / "claim-verifier-responses-recorded.json"
 )
 ARTICLE_TEXT = "Aurora beat guidance. Aurora beat guidance. Café demand is stable."
+
+
+def _process_is_running_for_test(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if not proc_stat.exists():
+        return True
+    try:
+        state = proc_stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return False
+    return state != "Z"
 
 
 def _recording() -> dict[str, object]:
@@ -451,8 +465,10 @@ def test_claim_live_compare_kills_spawned_process_group_on_timeout(
         time.sleep(0.01)
     assert child_pid_path.exists()
     child_pid = int(child_pid_path.read_text(encoding="utf-8"))
-    with pytest.raises(ProcessLookupError):
-        os.kill(child_pid, signal.SIGCONT)
+    deadline = time.monotonic() + 1.0
+    while _process_is_running_for_test(child_pid) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not _process_is_running_for_test(child_pid)
 
 
 def test_claim_live_compare_never_echoes_private_paths_or_provider_stderr(
