@@ -184,6 +184,10 @@ CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board re
 
 ### Shadow 졸업 판정
 
+committed proposal은 먼저 `just decision-board-shadow-gate-validate`로 구조와 20-session
+일정을 확인합니다. `--require-approved`가 `VALID_APPROVED`가 되기 전에는 어떤 slot도 평가
+표본으로 세지 않으며, 출력된 `manifest_sha256`을 local ledger에 결속합니다.
+
 RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot,
 기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고
 `UNEXPLAINED=0`, privacy/order/notification/replay/universe hard gate를 모두 통과해야 합니다.

@@ -81,6 +81,9 @@ ai-brief-source-live-compare *args:
 decision-board-claim-live-compare *args:
   uv run python scripts/compare_decision_board_claim_live.py {{args}}
 
+decision-board-shadow-gate-validate *args:
+  uv run python -m sab decision-board-shadow-gate-validate --manifest config/decision-board-shadow-gate.proposed.json {{args}}
+
 live-integration-smoke *args:
   uv run python scripts/live_integration_smoke.py {{args}}
 

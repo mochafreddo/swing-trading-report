@@ -9,7 +9,7 @@ GitHub Actions sidecar, 주문 권한은 별도 명시 승인 없이는 계속 �
 
 ## Prerequisites
 
-- T1–T11 contract, privacy, no-order, workflow isolation, Python/Web gate가 green입니다.
+- T1–T12 contract, privacy, no-order, workflow isolation, Python/Web gate가 green입니다.
 - production preparation, research, claim-verifier adapter가 recorded/live comparison을 거쳐
   별도 승인·연결되어 있습니다. 기본 `CONFIG_UNAVAILABLE` executor 상태에서는 측정이
   시작되지 않습니다.
@@ -21,14 +21,32 @@ GitHub Actions sidecar, 주문 권한은 별도 명시 승인 없이는 계속 �
   workflow test로 확인했습니다.
 - 평가 manifest를 첫 실행 전에 사람이 승인했습니다.
 
-## 1. Freeze the gate manifest
+## 1. Validate and approve the gate manifest
 
-Gitignore된 로컬 파일에 다음 항목을 기록하고 기간 중 덮어쓰지 않습니다.
+저장소의 [approval candidate](../config/decision-board-shadow-gate.proposed.json)는
+2026-08-17부터 2026-09-14까지 XNYS 20개 session과 ENTRY/HOLDING 40개 exact slot을
+명시합니다. ENTRY 12:30Z, HOLDING 22:40Z는 아직 승인되지 않은 운영 후보입니다.
+provider failure rate 최대 5%, research coverage와 fresh source rate 최소 90%, 아래 hard
+failure 전부 0을 첫 실행 전에 고정합니다.
+
+```bash
+just decision-board-shadow-gate-validate
+just decision-board-shadow-gate-validate --require-approved
+```
+
+첫 명령은 schema, XNYS 거래일, slot identity, version, threshold와 canonical manifest hash를
+검증합니다. 현재 candidate는 `VALID_PROPOSAL`입니다. 두 번째 명령은 사용자가 manifest의
+`approval.state`, `approved_by`, `approved_at`을 명시적으로 승인하기 전까지
+`APPROVAL_REQUIRED`로 실패해야 합니다. 승인 뒤 출력된 `manifest_sha256`을 평가 ledger에
+고정하고 기간 중 파일을 덮어쓰지 않습니다.
+
+Gitignore된 로컬 ledger에는 승인 hash와 아래 계약을 기록합니다. 계좌별 expected action이나
+private snapshot은 저장소 candidate가 아니라 gitignore된 별도 local artifact에 둡니다.
 
 ```json
 {
-  "gate_version": "us-swing-shadow-v1",
-  "start_session": "YYYY-MM-DD",
+  "gate_version": "us-swing-shadow-v1-20260817",
+  "start_session": "2026-08-17",
   "minimum_sessions": 20,
   "lanes": ["ENTRY", "HOLDING"],
   "policy_versions": {
@@ -36,7 +54,7 @@ Gitignore된 로컬 파일에 다음 항목을 기록하고 기간 중 덮어쓰
     "researcher": "approved-version",
     "verifier": "approved-version"
   },
-  "expected_slots": [],
+  "expected_slots": ["40 exact slots in the committed proposal"],
   "allowed_diff_reasons": [
     "EXPECTED_POLICY_CHANGE",
     "INPUT_GAP",
@@ -44,20 +62,12 @@ Gitignore된 로컬 파일에 다음 항목을 기록하고 기간 중 덮어쓰
     "BUG",
     "UNEXPLAINED"
   ],
-  "approved_thresholds": {
-    "unexplained": 0,
-    "privacy_leaks": 0,
-    "order_or_notification_accesses": 0,
-    "payload_replay_mismatches": 0,
-    "uncovered_eligible_holdings": 0
-  }
+  "approved_thresholds": "committed hard-zero and quality thresholds"
 }
 ```
 
-`expected_slots`에는 lane, UTC expected time, run ID 생성 규칙을 적습니다. provider
-failure-rate나 source coverage에 숫자 threshold가 필요하면 첫 실행 전에 manifest에
-추가합니다. 관찰 결과를 본 뒤 threshold를 낮추는 것은 허용하지 않습니다. 기준을
-바꾸려면 새 `gate_version`으로 전체 기간을 다시 시작합니다.
+관찰 결과를 본 뒤 threshold를 낮추는 것은 허용하지 않습니다. schedule, policy version,
+session 또는 threshold를 바꾸려면 새 `gate_version`으로 전체 기간을 다시 시작합니다.
 
 Manifest에 실제 계좌 번호, 수량, 단가, 손익, 메모, tag, credential을 넣지 않습니다.
 
