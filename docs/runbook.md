@@ -125,6 +125,13 @@ wrapper와 두 plist 파일은 shadow 검증용 템플릿일 뿐입니다.
 `run_id`를 선택하거나 `launchctl`로 load하지 않습니다. 운영자가 별도 승인된 schedule을
 정한 뒤에도 먼저 아래처럼 모든 UTC identity와 runner 인자를 직접 주입해 dry-run 합니다.
 
+20-session proposal의 한 session에서 ENTRY/HOLDING plist를 함께 검토하려면
+`just decision-board-shadow-launchd-dry-run-package --session 2026-08-17 --journal-dir
+"$PWD/logs/decision-board-journal" --report-dir "$PWD/reports" --output-dir
+"$PWD/tmp/decision-board-shadow-20260817"`를 사용합니다. 생성된 파일은 모두 disabled이고
+schedule이 없으며 wrapper `--dry-run`만 포함합니다. 기존 output directory를 덮어쓰지 않고
+어떤 scheduler 활성화 명령도 실행하지 않습니다.
+
 ```bash
 scripts/launchd/sab-decision-board-shadow-wrapper.sh \
   --run-kind ENTRY \

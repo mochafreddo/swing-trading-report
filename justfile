@@ -84,6 +84,9 @@ decision-board-claim-live-compare *args:
 decision-board-shadow-gate-validate *args:
   uv run python -m sab decision-board-shadow-gate-validate --manifest config/decision-board-shadow-gate.proposed.json {{args}}
 
+decision-board-shadow-launchd-dry-run-package *args:
+  uv run python scripts/launchd/build_decision_board_shadow_dry_run_package.py {{args}}
+
 live-integration-smoke *args:
   uv run python scripts/live_integration_smoke.py {{args}}
 

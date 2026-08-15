@@ -60,6 +60,10 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `decision-board-journal-reconcile` | missed/stale local slot 기록 | `--journal-dir`, `--run-kind`, `--expected-at`, `--run-id`, `--now`, `--grace-seconds`, `--stale-seconds` | reconciled public journal JSON |
 | `decision-board-journal-run` | one-shot runner를 local journal로 감싸기 | journal identity/policy, `--dry-run`, `-- <runner argv>` | STARTED/terminal journal observation |
 
+`scripts/launchd/build_decision_board_shadow_dry_run_package.py`는 validated gate manifest의 한
+session을 ENTRY/HOLDING disabled plist 두 개로 렌더링합니다. `--session`, absolute
+`--journal-dir`, 새 `--output-dir`가 필요하며 생성물에는 schedule/auto-start가 없습니다.
+
 ## Report Artifacts
 
 | Report Type | Local Pattern | Supabase Storage Pattern | Index Source |

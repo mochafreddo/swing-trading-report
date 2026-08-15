@@ -73,7 +73,24 @@ Manifest에 실제 계좌 번호, 수량, 단가, 손익, 메모, tag, credentia
 
 ## 2. Dry-run one ENTRY and one HOLDING slot
 
-RunJournal wrapper 형식과 identity만 먼저 확인합니다.
+승인 후보 manifest에서 disabled·schedule 없는 plist 두 개를 새 output directory에 생성합니다.
+이 package는 `RunAtLoad`, `KeepAlive`, `StartCalendarInterval`이 없고 wrapper의 `--dry-run`을
+ProgramArguments에 고정합니다. 생성기는 package 파일만 쓰며 scheduler를 load하거나 runner,
+provider, credential을 호출하지 않습니다.
+
+```bash
+just decision-board-shadow-launchd-dry-run-package \
+  --session 2026-08-17 \
+  --journal-dir "$PWD/logs/decision-board-journal" \
+  --report-dir "$PWD/reports" \
+  --output-dir "$PWD/tmp/decision-board-shadow-20260817"
+```
+
+출력의 `mode=DRY_RUN_ONLY`, `disabled=true`, `scheduled=false`, `runner_execution=false`,
+manifest/plist hash를 검토합니다. output directory가 이미 있으면 덮어쓰지 않고 실패합니다.
+실제 승인 뒤 package 생성까지 승인 여부를 강제하려면 `--require-approved`를 추가합니다.
+
+RunJournal wrapper 형식과 identity를 수동으로 확인할 때도 아래처럼 `--dry-run`을 유지합니다.
 
 ```bash
 scripts/launchd/sab-decision-board-shadow-wrapper.sh \
