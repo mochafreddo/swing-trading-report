@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.34.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.34.0...v1.34.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **web:** clean checkout Docker 빌드를 복원한다 ([f70f52b](https://github.com/mochafreddo/swing-trading-report/commit/f70f52b3eaf8577a64e2c509c209feae7815a018))
+* **web:** clean checkout Docker 빌드를 복원한다 ([496c92d](https://github.com/mochafreddo/swing-trading-report/commit/496c92de117ebf14bae0b006d790d431c3935dca))
+
 ## [1.34.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.33.1...v1.34.0) (2026-08-15)
 
 
