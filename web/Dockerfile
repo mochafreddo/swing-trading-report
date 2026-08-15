@@ -11,7 +11,7 @@ RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY web/next.config.ts web/next-env.d.ts web/tsconfig.json web/middleware.ts ./
+COPY web/next.config.ts web/tsconfig.json web/middleware.ts ./
 COPY web/scripts ./scripts
 COPY web/fixtures/toss-holdings.qa.json ./fixtures/toss-holdings.qa.json
 COPY web/src ./src

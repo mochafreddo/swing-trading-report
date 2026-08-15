@@ -31,6 +31,16 @@ def test_web_dockerignore_excludes_local_env_files_from_build_context() -> None:
         assert f"!{private_path}" not in patterns
 
 
+def test_web_dockerfiles_do_not_require_gitignored_next_env() -> None:
+    gitignore = Path(".gitignore").read_text(encoding="utf-8").splitlines()
+    dockerignore = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    assert "web/next-env.d.ts" in gitignore
+    assert "!web/next-env.d.ts" not in dockerignore
+    for path in (Path("web/Dockerfile"), Path("web/Dockerfile.dev")):
+        assert "web/next-env.d.ts" not in path.read_text(encoding="utf-8")
+
+
 def test_web_dev_container_runs_as_non_root_with_bind_mounted_source() -> None:
     compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     dockerfile = Path("web/Dockerfile.dev").read_text(encoding="utf-8")
