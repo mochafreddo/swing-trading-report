@@ -8,7 +8,9 @@ from typing import Protocol
 
 from sab.research.deadline import Deadline
 
-from .claims import ClaimVerifierRequestV0
+from .claims import MAX_CLAIM_TEXT_CHARS, ClaimVerifierRequestV0
+
+MAX_CLAIM_ARTICLE_TEXT_CHARS = 100_000
 
 _RESPONSE_REQUIRED = {
     "id",
@@ -101,6 +103,15 @@ def build_claim_responses_request_v0(
 ) -> dict[str, object]:
     if type(request) is not ClaimVerifierRequestV0:
         raise TypeError("claim request must use the exact public verifier type")
+    if (
+        type(request.claim_text) is not str
+        or not request.claim_text
+        or len(request.claim_text) > MAX_CLAIM_TEXT_CHARS
+        or type(request.article_text) is not str
+        or not request.article_text
+        or len(request.article_text) > MAX_CLAIM_ARTICLE_TEXT_CHARS
+    ):
+        raise ValueError("claim request text exceeds the safe bound")
     if type(model) is not str or not model or len(model) > 200:
         raise ValueError("model identity is invalid")
     return {

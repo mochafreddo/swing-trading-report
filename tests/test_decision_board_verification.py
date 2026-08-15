@@ -3,11 +3,19 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
+import shlex
+import signal
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sab.decision_board.claim_responses import ResponsesClaimVerifierV0
+from sab.decision_board.claim_responses import (
+    MAX_CLAIM_ARTICLE_TEXT_CHARS,
+    ResponsesClaimVerifierV0,
+)
 from sab.decision_board.claims import (
     ClaimRequestV0,
     ClaimValidationFailedV0,
@@ -25,7 +33,14 @@ from sab.research.contracts import (
 )
 from sab.research.deadline import Deadline
 from sab.research.source_safety import create_article_artifact_v0
-from scripts.compare_decision_board_claim_live import main as live_compare_main
+from scripts.compare_decision_board_claim_live import (
+    _provider_environment,
+    _run_bounded,
+    _strict_public_request,
+)
+from scripts.compare_decision_board_claim_live import (
+    main as live_compare_main,
+)
 
 FIXTURE = (
     Path(__file__).parent
@@ -282,3 +297,200 @@ def test_claim_live_compare_is_explicit_and_forbidden_in_ci(
         live_compare_main(["--request-json", str(request_path), "--case", "SUPPORTED"])
 
     assert caught.value.code == 2
+
+
+def _public_live_request() -> dict[str, object]:
+    request, _source, article, _policy = _inputs()
+    instrument = request.instrument
+    return {
+        "claim_id": request.claim_id,
+        "claim_text": request.claim_text,
+        "instrument": {
+            "market": instrument.market,
+            "canonical_ticker": instrument.canonical_ticker,
+            "exchange": instrument.exchange,
+            "company_name": instrument.company_name,
+            "identity_source": instrument.identity_source,
+            "identity_version": instrument.identity_version,
+        },
+        "article_content_hash": article.content_hash,
+        "article_text": article.normalized_text,
+    }
+
+
+def test_claim_live_compare_rebuilds_only_strict_public_request() -> None:
+    public = _public_live_request()
+    wire = _strict_public_request(public, model="gpt-5.4-mini")
+    assert set(wire) == {"model", "input", "text"}
+
+    for private_name in ("account", "quantity", "entry_price", "secret"):
+        mutated = {**public, private_name: "private sentinel"}
+        with pytest.raises(ValueError, match="only public"):
+            _strict_public_request(mutated, model="gpt-5.4-mini")
+    with pytest.raises(ValueError, match="safe bound"):
+        _strict_public_request(
+            {**public, "claim_text": "c" * 4_001}, model="gpt-5.4-mini"
+        )
+    with pytest.raises(ValueError, match="safe bound"):
+        _strict_public_request(
+            {
+                **public,
+                "article_text": "a" * (MAX_CLAIM_ARTICLE_TEXT_CHARS + 1),
+            },
+            model="gpt-5.4-mini",
+        )
+
+
+def test_claim_live_compare_provider_environment_is_default_deny(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TOSS_SECRET", "must-not-propagate")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "must-not-propagate")
+    monkeypatch.setenv("UNRELATED_SAFE_VALUE", "allowed")
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_SAFE_ENV", "UNRELATED_SAFE_VALUE")
+
+    environment = _provider_environment()
+
+    assert environment == {"PATH": os.defpath, "UNRELATED_SAFE_VALUE": "allowed"}
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_SAFE_ENV", "TOSS_SECRET")
+    with pytest.raises(ValueError, match="unsafe name"):
+        _provider_environment()
+
+
+def test_claim_live_compare_streams_and_kills_on_output_overflow(
+    tmp_path: Path,
+) -> None:
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "import sys\nsys.stdin.read()\nsys.stdout.write('x' * 1048577)\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(OverflowError, match="stdout exceeded"):
+        _run_bounded(
+            [sys.executable, str(provider)],
+            request_text="{}",
+            timeout=5.0,
+        )
+
+    provider.write_text(
+        "import sys\nsys.stdin.read()\nsys.stderr.write('x' * 65537)\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(OverflowError, match="stderr exceeded"):
+        _run_bounded([sys.executable, str(provider)], request_text="{}", timeout=5.0)
+
+
+def test_claim_live_compare_kills_provider_on_timeout(tmp_path: Path) -> None:
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "import sys, time\nsys.stdin.read()\ntime.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        _run_bounded([sys.executable, str(provider)], request_text="{}", timeout=0.05)
+
+
+def test_claim_live_compare_timeout_covers_provider_that_never_reads_stdin(
+    tmp_path: Path,
+) -> None:
+    provider = tmp_path / "provider.py"
+    provider.write_text("import time\ntime.sleep(10)\n", encoding="utf-8")
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        _run_bounded(
+            [sys.executable, str(provider)],
+            request_text="x" * 200_000,
+            timeout=0.05,
+        )
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("inf"), float("nan"), 301.0])
+def test_claim_live_compare_rejects_unsafe_timeout_before_spawn(timeout: float) -> None:
+    with pytest.raises(ValueError, match="timeout is invalid"):
+        _run_bounded(["provider"], request_text="{}", timeout=timeout)
+
+
+def test_claim_live_compare_kills_spawned_process_group_on_timeout(
+    tmp_path: Path,
+) -> None:
+    child_pid_path = tmp_path / "child.pid"
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os, sys, time\n"
+        "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    parent = tmp_path / "parent.py"
+    parent.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        _run_bounded(
+            [sys.executable, str(parent), str(child), str(child_pid_path)],
+            request_text="{}",
+            timeout=0.2,
+        )
+    deadline = time.monotonic() + 1.0
+    while not child_pid_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert child_pid_path.exists()
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, signal.SIGCONT)
+
+
+def test_claim_live_compare_never_echoes_private_paths_or_provider_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_path = tmp_path / "private-path-S5GA-sentinel.json"
+    private_error = "provider-stderr-P3LF-sentinel"
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "import sys\nsys.stdin.read()\nsys.stderr.write(sys.argv[1])\nsys.exit(3)\n",
+        encoding="utf-8",
+    )
+    private_path.write_text(json.dumps(_public_live_request()), encoding="utf-8")
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv(
+        "DECISION_BOARD_CLAIM_LIVE_PROVIDER_COMMAND",
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(provider))} "
+        f"{shlex.quote(private_error)}",
+    )
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_MODEL", "gpt-5.4-mini")
+
+    assert (
+        live_compare_main(["--request-json", str(private_path), "--case", "SUPPORTED"])
+        == 2
+    )
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert private_error not in combined
+    assert str(private_path) not in combined
+
+
+def test_claim_live_compare_missing_private_path_uses_fixed_safe_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_path = tmp_path / "private-missing-S5GA-sentinel.json"
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_PROVIDER_COMMAND", "provider")
+    monkeypatch.setenv("DECISION_BOARD_CLAIM_LIVE_MODEL", "gpt-5.4-mini")
+
+    with pytest.raises(SystemExit) as caught:
+        live_compare_main(["--request-json", str(private_path), "--case", "SUPPORTED"])
+
+    assert caught.value.code == 2
+    error = capsys.readouterr().err
+    assert str(private_path) not in error
+    assert "unavailable" in error

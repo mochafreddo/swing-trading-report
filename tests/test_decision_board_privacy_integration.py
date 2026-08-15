@@ -61,11 +61,15 @@ from sab.research.contracts import (
     ResearchInputV0,
     ResearchQuestionV0,
     ResearchSourcePolicyV0,
+    SourcePurposeV0,
+    create_source_candidate_v0,
 )
 from sab.research.deadline import Deadline
 from sab.research.orchestrator import EvidenceResearcherV0, ResearchCompletedV0
 from sab.research.source_safety import (
     ArticleArtifactV0,
+    ArticleFetchResponseV0,
+    SafeArticleVerifierV0,
     create_article_artifact_v0,
 )
 from sab.scheduler.holdings import (
@@ -100,17 +104,6 @@ SENTINELS = {
     "private_url": "http://127.0.0.1/private-url-N4RY-sentinel",
     "local_url": "http://research.local/local-url-K2WT-sentinel",
 }
-
-
-class _PrivateBoundaryContext:
-    def __init__(self) -> None:
-        self.values = dict(SENTINELS)
-        self.entered: set[str] = set()
-
-    def enter(self, boundary: str) -> None:
-        assert set(self.values) == set(SENTINELS)
-        assert tuple(self.values.values()) == tuple(SENTINELS.values())
-        self.entered.add(boundary)
 
 
 def _scan(boundary: str, value: object) -> None:
@@ -206,13 +199,13 @@ def _private_snapshot():
 
 
 class _PublicSearchProvider:
-    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
-        self.private_context = private_context
+    def __init__(self) -> None:
+        self.toss_secret = SENTINELS["toss_secret"]
+        self.api_secret = SENTINELS["api_secret"]
         self.requests: list[dict[str, object]] = []
 
     async def search(self, request: object, *, deadline: Deadline) -> object:
         del deadline
-        self.private_context.enter("research")
         public = request.to_public_dict()  # type: ignore[attr-defined]
         self.requests.append(public)
         instrument = public["instrument"]
@@ -233,8 +226,7 @@ class _PublicSearchProvider:
 
 
 class _PublicArticleVerifier:
-    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
-        self.private_context = private_context
+    def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
     def preflight(self, policy: ResearchSourcePolicyV0) -> None:
@@ -248,7 +240,6 @@ class _PublicArticleVerifier:
         policy: ResearchSourcePolicyV0,
     ) -> ArticleArtifactV0:
         del deadline
-        self.private_context.enter("article")
         self.requests.append(
             {
                 "instrument": source.instrument.to_public_dict(),  # type: ignore[attr-defined]
@@ -264,8 +255,7 @@ class _PublicArticleVerifier:
 
 
 class _PublicClaimVerifier:
-    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
-        self.private_context = private_context
+    def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
     async def verify(
@@ -275,7 +265,6 @@ class _PublicClaimVerifier:
         deadline: Deadline,
         timeout: float,
     ) -> object:
-        self.private_context.enter("claim")
         self.requests.append(
             {
                 **request.to_public_dict(),
@@ -298,24 +287,16 @@ class _PublicClaimVerifier:
 
 
 class _Prepared:
-    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
-        self.private_context = private_context
-
     def prepare(self, request: DecisionRunRequestV0):
-        self.private_context.enter("runner")
         return create_run_prepared_v0(request)
 
 
 class _EvidenceEnricher:
-    def __init__(
-        self, evidence: CompilerEvidenceV0, private_context: _PrivateBoundaryContext
-    ) -> None:
+    def __init__(self, evidence: CompilerEvidenceV0) -> None:
         self.evidence = evidence
-        self.private_context = private_context
         self.requests: list[object] = []
 
     def enrich(self, item: CompilerItemV0, *, request: object):
-        self.private_context.enter("compiler")
         self.requests.append(request)
         assert type(item) is EntryCompilerItemV0
         return EntryCompilerItemV0.create(
@@ -333,12 +314,10 @@ class _EvidenceEnricher:
 
 
 class _CapturingUploader:
-    def __init__(self, private_context: _PrivateBoundaryContext) -> None:
-        self.private_context = private_context
+    def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
     def upload(self, *, local_path: Path, storage_key: str) -> str:
-        self.private_context.enter("upload")
         self.requests.append(
             {
                 "storage_key": storage_key,
@@ -398,9 +377,12 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
     caplog,
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    private_context = _PrivateBoundaryContext()
-
-    approval = approve_swing_snapshot_v0(_private_snapshot(), _registry(), now=NOW)
+    snapshot = _private_snapshot()
+    assert snapshot.holdings[0].quantity == SENTINELS["quantity"]
+    assert snapshot.holdings[0].entry_price == SENTINELS["entry_price"]
+    assert snapshot.holdings[0].notes == SENTINELS["notes"]
+    assert SENTINELS["tags"] in snapshot.holdings[0].tags
+    approval = approve_swing_snapshot_v0(snapshot, _registry(), now=NOW)
     assert type(approval[0]) is SwingApprovedV0
     research_projection = project_research_instruments_v0(approval)
     _scan("research projection", research_projection)
@@ -410,8 +392,10 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
         instruments=(instrument,),
         questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
     )
-    search_provider = _PublicSearchProvider(private_context)
-    article_verifier = _PublicArticleVerifier(private_context)
+    search_provider = _PublicSearchProvider()
+    assert search_provider.toss_secret == SENTINELS["toss_secret"]
+    assert search_provider.api_secret == SENTINELS["api_secret"]
+    article_verifier = _PublicArticleVerifier()
     research = asyncio.run(
         EvidenceResearcherV0(search_provider, article_verifier).research(research_input)
     )
@@ -428,7 +412,7 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
         claim_text="Aurora raised its synthetic guidance.",
         action_changing=True,
     )
-    claim_verifier = _PublicClaimVerifier(private_context)
+    claim_verifier = _PublicClaimVerifier()
     claim_result = asyncio.run(
         validate_claim_v0(
             claim_request,
@@ -479,10 +463,10 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
             "verifier_version": "synthetic-verifier-v0",
         },
     )
-    enricher = _EvidenceEnricher(evidence, private_context)
-    uploader = _CapturingUploader(private_context)
+    enricher = _EvidenceEnricher(evidence)
+    uploader = _CapturingUploader()
     runner = DecisionBoardRunnerV0(
-        preparer=_Prepared(private_context),
+        preparer=_Prepared(),
         enricher=enricher,
         report_dir=tmp_path / "reports",
         uploader=uploader,
@@ -497,15 +481,17 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
 
     storage_key = build_decision_board_storage_key(terminal.envelope)
     storage_session = _StorageSession(_index_row(terminal.envelope, storage_key))
+    storage_config = SupabaseStorageConfig(
+        url="https://project.supabase.co",
+        service_role_key=SENTINELS["supabase_secret"],
+        bucket="reports",
+    )
+    assert storage_config.service_role_key == SENTINELS["supabase_secret"]
     assert (
         upload_decision_board_report(
             local_path=terminal.local_path,
             storage_key=storage_key,
-            config=SupabaseStorageConfig(
-                url="https://project.supabase.co",
-                service_role_key=SENTINELS["supabase_secret"],
-                bucket="reports",
-            ),
+            config=storage_config,
             session=storage_session,  # type: ignore[arg-type]
         )
         == storage_key
@@ -552,23 +538,158 @@ def test_privacy_sentinels_do_not_cross_integrated_public_boundaries(
                 )
             )
 
+    logging.getLogger("privacy-mutation-control").error(SENTINELS["provider_exception"])
+    with pytest.raises(AssertionError, match="privacy leak at mutation log"):
+        _scan("mutation log", [record.getMessage() for record in caplog.records])
+    caplog.clear()
     sanitized = DecisionBoardRunnerV0(
         preparer=_ExplodingPreparer(),
         enricher=enricher,
         report_dir=tmp_path / "failed",
     ).run(run_request)
     _scan("sanitized exception", serialize_decision_run_result_v0(sanitized))
-    logs = [record.getMessage() for record in caplog.records]
-    assert "swept 1 orphan RunJournal backup(s)" in logs
-    _scan("logs", logs)
-    assert private_context.entered == {
-        "article",
-        "claim",
-        "compiler",
-        "research",
-        "runner",
-        "upload",
+    failure_logs = [record.getMessage() for record in caplog.records]
+    assert failure_logs == []
+    _scan("failure logs", failure_logs)
+
+
+@pytest.mark.parametrize(
+    ("label", "container", "field"),
+    [
+        ("account_id", "snapshot", "account_id"),
+        ("account_number", "snapshot", "account_number"),
+        ("pnl", "holding", "pnl"),
+    ],
+)
+def test_private_snapshot_schema_rejects_unsupported_private_fields(
+    label: str, container: str, field: str
+) -> None:
+    holdings = [dict(_private_snapshot().holdings[0])]
+    digest = broker_holdings_digest_v0(holdings)
+    raw = {
+        "state_key": "toss-sync:success:MIXED:2026-08-13",
+        "session_date": "2026-08-13",
+        "status": "applied",
+        "fresh_until": (NOW + timedelta(minutes=5)).isoformat(),
+        "sealed_at": (NOW - timedelta(minutes=1)).isoformat(),
+        "holdings_digest": digest,
+        "revision": 13,
+        "marker": {
+            "scope": "MIXED",
+            "sessionDate": "2026-08-13",
+            "status": "applied",
+            "snapshotDigest": digest,
+            "snapshotRevision": 13,
+            "sealedAt": (NOW - timedelta(minutes=1)).isoformat(),
+        },
+        "holdings": holdings,
     }
+    if container == "snapshot":
+        raw[field] = SENTINELS[label]
+    else:
+        holdings[0][field] = SENTINELS[label]
+
+    with pytest.raises(Exception) as caught:
+        validate_broker_snapshot_v0([raw], now=NOW, expected_session_date="2026-08-13")
+    assert SENTINELS[label] not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("label", "field", "value"),
+    [
+        ("raw_article", "normalized_text", SENTINELS["raw_article"]),
+        ("local_url", "canonical_url", SENTINELS["local_url"]),
+        ("private_url", "canonical_url", SENTINELS["private_url"]),
+    ],
+)
+def test_research_boundary_mutations_are_detected_or_rejected(
+    label: str, field: str, value: str
+) -> None:
+    if field == "normalized_text":
+        with pytest.raises(AssertionError) as caught:
+            _scan("article public boundary", value)
+        assert str(caught.value) == f"privacy leak at article public boundary: {label}"
+        return
+    with pytest.raises(ValueError) as rejected:
+        create_source_candidate_v0(
+            instrument=_instrument(),
+            title="Rejected private source",
+            canonical_url=value,
+            publisher="Synthetic Wire",
+            published_at=NOW,
+            purpose=SourcePurposeV0.ACTION_CHANGING,
+        )
+    assert value not in str(rejected.value)
+
+
+def test_raw_article_sentinel_is_removed_by_real_html_fetch_normalization() -> None:
+    source = create_source_candidate_v0(
+        instrument=_instrument(),
+        title="Raw article rejection",
+        canonical_url="https://evidence.example/raw-article",
+        publisher="Synthetic Wire",
+        published_at=NOW,
+        purpose=SourcePurposeV0.ACTION_CHANGING,
+    )
+
+    class _Resolver:
+        async def resolve(self, _hostname: str, _port: int, *, timeout: float):
+            del timeout
+            return ("93.184.216.34",)
+
+    class _Fetcher:
+        async def fetch(
+            self,
+            _url: str,
+            _addresses: tuple[str, ...],
+            *,
+            timeout: float,
+            max_bytes: int,
+        ):
+            del timeout, max_bytes
+            return ArticleFetchResponseV0(
+                status_code=200,
+                content_type="text/html; charset=utf-8",
+                content_encoding=None,
+                body=(
+                    f"<html><script>{SENTINELS['raw_article']}</script>"
+                    f"<style>{SENTINELS['raw_article']}</style>"
+                    f"<body>{PUBLIC_ARTICLE}</body></html>"
+                ).encode(),
+                location=None,
+            )
+
+    verifier = SafeArticleVerifierV0(_Resolver(), _Fetcher())  # type: ignore[arg-type]
+    article = asyncio.run(
+        verifier.verify(
+            source,
+            deadline=Deadline.start(monotonic=lambda: 100.0),
+            policy=ResearchSourcePolicyV0(),
+        )
+    )
+    assert article.normalized_text == PUBLIC_ARTICLE
+    _scan("normalized fetched article", repr(article))
+
+    claim_request = ClaimRequestV0(
+        claim_id="claim-raw-normalization",
+        instrument=_instrument(),
+        claim_text="Aurora raised its synthetic guidance.",
+        action_changing=True,
+    )
+    claim_verifier = _PublicClaimVerifier()
+    validation = asyncio.run(
+        validate_claim_v0(
+            claim_request,
+            article,
+            expected_source=source,
+            policy=ResearchSourcePolicyV0(),
+            verifier=claim_verifier,
+            deadline=Deadline.start(monotonic=lambda: 100.0),
+        )
+    )
+    assert type(validation) is ClaimValidationSucceededV0
+    _scan("normalized article verifier trace", claim_verifier.requests)
+    assert PUBLIC_ARTICLE in json.dumps(claim_verifier.requests, ensure_ascii=False)
 
 
 @pytest.mark.parametrize(("label", "sentinel"), SENTINELS.items())

@@ -126,6 +126,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("Decision Board public privacy matrix", () => {
   it("rejects injected private route bytes and keeps valid API/raw/UI public", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const injected = fixture();
     injected.metadata = Object.fromEntries(
       Object.entries(SENTINELS).map(([label, value]) => [
@@ -142,6 +143,7 @@ describe("Decision Board public privacy matrix", () => {
     const rejection = await rejected.json();
     expect(rejected.status).toBe(422);
     assertNoSentinels("Web API rejection", rejection);
+    assertNoSentinels("Web route logs", warn.mock.calls);
 
     const valid = fixture();
     mockIndex();
