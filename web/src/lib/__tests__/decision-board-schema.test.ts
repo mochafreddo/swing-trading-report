@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  brokerSnapshotV0Schema,
   DecisionBoardIntegrityError,
   DecisionBoardJsonValueError,
   canonicalDecisionPayloadBytesV0,
@@ -86,7 +87,7 @@ const validClaim = () => {
     supporting_location: {
       kind: "TEXT_OFFSETS",
       start: 20,
-      end: 20,
+      end: 21,
     },
     verifier_version: "fixture-verifier-v0",
     entailment: "SUPPORTED",
@@ -323,6 +324,29 @@ describe("Decision Board V0 schema", () => {
     };
     nested.decision_payload.items[0].surprise = true;
     expect(decisionBoardEnvelopeV0Schema.safeParse(nested).success).toBe(false);
+
+    const privateMetadata = structuredClone(fixture);
+    privateMetadata.metadata = { account: "PRIVATE-ACCOUNT" };
+    expect(
+      decisionBoardEnvelopeV0Schema.safeParse(privateMetadata).success,
+    ).toBe(false);
+
+    const privateVersion = structuredClone(fixture);
+    privateVersion.metadata = { compiler_version: "build-secret-v1" };
+    expect(
+      decisionBoardEnvelopeV0Schema.safeParse(privateVersion).success,
+    ).toBe(false);
+
+    const privateTicker = structuredClone(fixture) as {
+      decision_payload: {
+        items: Array<{ instrument: { canonical_ticker: string } }>;
+      };
+    };
+    privateTicker.decision_payload.items[0].instrument.canonical_ticker =
+      "private sentinel";
+    expect(decisionBoardEnvelopeV0Schema.safeParse(privateTicker).success).toBe(
+      false,
+    );
   });
 
   it("rejects malformed hashes", () => {
@@ -367,6 +391,46 @@ describe("Decision Board V0 schema", () => {
         ]),
       );
     }
+  });
+
+  it("rejects zero-length evidence locations", () => {
+    const claim = validClaim();
+    claim.supporting_location.end = claim.supporting_location.start;
+
+    expect(claimValidationV0Schema.safeParse(claim).success).toBe(false);
+  });
+
+  it("mirrors the BrokerSnapshotV0 RPC consumer shape", () => {
+    const snapshot = {
+      state_key: "toss-sync:success:MIXED:2026-08-06",
+      session_date: "2026-08-06",
+      status: "applied",
+      fresh_until: "2026-08-07T15:00:00Z",
+      sealed_at: "2026-08-06T02:59:00Z",
+      holdings_digest: `sha256:${"0".repeat(64)}`,
+      revision: 7,
+      marker: {
+        scope: "MIXED",
+        sessionDate: "2026-08-06",
+        status: "applied",
+        snapshotDigest: `sha256:${"0".repeat(64)}`,
+        snapshotRevision: 7,
+        sealedAt: "2026-08-06T02:59:00Z",
+      },
+      holdings: [],
+    };
+
+    expect(brokerSnapshotV0Schema.safeParse(snapshot).success).toBe(true);
+    expect(
+      brokerSnapshotV0Schema.safeParse({
+        snapshot_id: "legacy-shape",
+        revision: "7",
+        captured_at: "2026-08-06T02:59:00Z",
+        fresh_until: "2026-08-07T15:00:00Z",
+        digest: `sha256:${"0".repeat(64)}`,
+        approved_holdings: [],
+      }).success,
+    ).toBe(false);
   });
 
   it.each([

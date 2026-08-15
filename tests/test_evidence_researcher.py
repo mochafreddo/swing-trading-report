@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
 
 import pytest
 import sab.research as research_package
@@ -40,6 +42,26 @@ from sab.research.source_safety import (
     SafeArticleVerifierV0,
     create_article_artifact_v0,
 )
+
+
+def test_public_research_package_imports_in_a_fresh_process() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from sab.research import ("
+                "EvidenceResearcherV0, ResearchSourcePolicyV0); "
+                "print(EvidenceResearcherV0.__name__, ResearchSourcePolicyV0.__name__)"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == ("EvidenceResearcherV0 ResearchSourcePolicyV0")
 
 
 def _instrument(index: int) -> InstrumentRefV0:

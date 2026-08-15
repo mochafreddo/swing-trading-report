@@ -27,8 +27,26 @@ _PUBLIC_DNS_TLD_PATTERN = re.compile(r"[a-z]{2,63}\Z")
 _PUBLIC_EVIDENCE_PATH_PATTERN = re.compile(
     r"/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*\Z"
 )
+_PUBLIC_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*\Z")
 _MAX_PUBLIC_EVIDENCE_URL_BYTES = 2048
 _MAX_SUPPORTING_SPAN_CHARS = 4096
+_PUBLIC_METADATA_COUNT_FIELDS = frozenset({"eligible_count", "selected_count"})
+_PUBLIC_METADATA_VERSION_FIELDS = frozenset(
+    {
+        "compiler_version",
+        "policy_version",
+        "registry_version",
+        "researcher_version",
+        "verifier_version",
+    }
+)
+_PUBLIC_METADATA_FIELDS = (
+    _PUBLIC_METADATA_COUNT_FIELDS | _PUBLIC_METADATA_VERSION_FIELDS
+)
+_PUBLIC_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_PRIVATE_VERSION_SEGMENTS = frozenset(
+    {"account", "credential", "password", "private", "secret", "token"}
+)
 
 
 class ContractError(ValueError):
@@ -107,7 +125,7 @@ def validate_decision_board_report(value: Any) -> dict[str, Any]:
     status = _enum(report["status"], "$.status", {"PUBLISHED", "BLOCKED"})
     issues = _issues(report["issues"], "$.issues")
     if "metadata" in report:
-        _object(report["metadata"], "$.metadata")
+        _envelope_metadata(report["metadata"], "$.metadata")
 
     if status == "BLOCKED":
         if not issues:
@@ -239,6 +257,10 @@ def _instrument(value: Any, path: str) -> None:
     _literal(instrument["market"], f"{path}.market", "US")
     for field in fields - {"market"}:
         _non_empty_string(instrument[field], f"{path}.{field}")
+    if _PUBLIC_TICKER_PATTERN.fullmatch(instrument["canonical_ticker"]) is None:
+        raise ContractError(
+            f"{path}.canonical_ticker", "must be a public canonical ticker"
+        )
 
 
 def _evidence_reference(value: Any, path: str) -> None:
@@ -317,6 +339,23 @@ def _issues(value: Any, path: str) -> list[Any]:
         if "metadata" in issue:
             _object(issue["metadata"], f"{item_path}.metadata")
     return issues
+
+
+def _envelope_metadata(value: Any, path: str) -> None:
+    metadata = _object(value, path)
+    unknown = metadata.keys() - _PUBLIC_METADATA_FIELDS
+    if unknown:
+        field = min(unknown)
+        raise ContractError(f"{path}.{field}", "is not public report metadata")
+    for field in _PUBLIC_METADATA_COUNT_FIELDS & metadata.keys():
+        _integer(metadata[field], f"{path}.{field}", minimum=0)
+    for field in _PUBLIC_METADATA_VERSION_FIELDS & metadata.keys():
+        version = _non_empty_string(metadata[field], f"{path}.{field}")
+        if _PUBLIC_VERSION_PATTERN.fullmatch(version) is None or (
+            _PRIVATE_VERSION_SEGMENTS
+            & {segment.casefold() for segment in re.split(r"[._-]", version)}
+        ):
+            raise ContractError(f"{path}.{field}", "must be a public version")
 
 
 def _strict_keys(

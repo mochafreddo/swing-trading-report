@@ -16,6 +16,30 @@
     "RunKindV0": {
       "enum": ["ENTRY", "HOLDING"]
     },
+    "PublicTickerV0": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$"
+    },
+    "PublicVersionV0": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": {
+        "pattern": "(^|[._-])(?:[Aa][Cc][Cc][Oo][Uu][Nn][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn])([._-]|$)"
+      }
+    },
+    "PublicEnvelopeMetadataV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eligible_count": { "type": "integer", "minimum": 0 },
+        "selected_count": { "type": "integer", "minimum": 0 },
+        "compiler_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "policy_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "registry_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "researcher_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "verifier_version": { "$ref": "#/$defs/PublicVersionV0" }
+      }
+    },
     "IssueV0": {
       "type": "object",
       "additionalProperties": false,
@@ -56,10 +80,7 @@
         "market": {
           "const": "US"
         },
-        "canonical_ticker": {
-          "type": "string",
-          "minLength": 1
-        },
+        "canonical_ticker": { "$ref": "#/$defs/PublicTickerV0" },
         "exchange": {
           "type": "string",
           "minLength": 1
@@ -78,40 +99,151 @@
         }
       }
     },
+    "BrokerHoldingV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticker",
+        "quantity",
+        "entry_price",
+        "entry_currency",
+        "entry_date",
+        "strategy",
+        "entry_pattern",
+        "notes",
+        "tags",
+        "stop_override",
+        "target_override",
+        "broker_state",
+        "broker_missing_first_seen_date",
+        "broker_missing_last_seen_date",
+        "broker_missing_count",
+        "broker_missing_diff_hash"
+      ],
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_price": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_currency": {
+          "type": ["string", "null"]
+        },
+        "entry_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "strategy": {
+          "type": ["string", "null"]
+        },
+        "entry_pattern": {
+          "type": ["string", "null"]
+        },
+        "notes": {
+          "type": ["string", "null"]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_override": {
+          "type": ["string", "null"]
+        },
+        "target_override": {
+          "type": ["string", "null"]
+        },
+        "broker_state": {
+          "enum": ["confirmed", "not_seen_in_toss"]
+        },
+        "broker_missing_first_seen_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "broker_missing_last_seen_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "broker_missing_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "broker_missing_diff_hash": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "BrokerSnapshotMarkerV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "sessionDate",
+        "status",
+        "snapshotDigest",
+        "snapshotRevision",
+        "sealedAt"
+      ],
+      "properties": {
+        "scope": { "const": "MIXED" },
+        "sessionDate": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "status": { "enum": ["applied", "unchanged"] },
+        "snapshotDigest": { "$ref": "#/$defs/HashV0" },
+        "snapshotRevision": { "type": "integer", "minimum": 1 },
+        "sealedAt": { "$ref": "#/$defs/TimestampV0" },
+        "diffHash": {},
+        "incomingCount": {},
+        "createCount": {},
+        "updateCount": {},
+        "deleteCount": {},
+        "unchangedCount": {},
+        "quarantinedCount": {},
+        "quarantinedTickers": {},
+        "source": {},
+        "timezone": {},
+        "updatedAt": {}
+      }
+    },
     "BrokerSnapshotV0": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "snapshot_id",
-        "revision",
-        "captured_at",
+        "state_key",
+        "session_date",
+        "status",
         "fresh_until",
-        "digest",
-        "approved_holdings"
+        "sealed_at",
+        "holdings_digest",
+        "revision",
+        "marker",
+        "holdings"
       ],
       "properties": {
-        "snapshot_id": {
+        "state_key": { "type": "string", "minLength": 1 },
+        "session_date": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
         },
-        "revision": {
-          "type": "string",
-          "minLength": 1
-        },
-        "captured_at": {
-          "$ref": "#/$defs/TimestampV0"
-        },
-        "fresh_until": {
-          "$ref": "#/$defs/TimestampV0"
-        },
-        "digest": {
-          "$ref": "#/$defs/HashV0"
-        },
-        "approved_holdings": {
+        "status": { "enum": ["applied", "unchanged"] },
+        "fresh_until": { "$ref": "#/$defs/TimestampV0" },
+        "sealed_at": { "$ref": "#/$defs/TimestampV0" },
+        "holdings_digest": { "$ref": "#/$defs/HashV0" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "marker": { "$ref": "#/$defs/BrokerSnapshotMarkerV0" },
+        "holdings": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/InstrumentRefV0"
-          }
+          "items": { "$ref": "#/$defs/BrokerHoldingV0" }
         }
       }
     },
@@ -513,8 +645,7 @@
           }
         },
         "metadata": {
-          "type": "object",
-          "additionalProperties": true
+          "$ref": "#/$defs/PublicEnvelopeMetadataV0"
         },
         "decision_payload": {
           "$ref": "#/$defs/DecisionPayloadV0"

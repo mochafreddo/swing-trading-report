@@ -239,7 +239,7 @@ const publicEvidenceUrlV0Schema = z
     message: "Must use a canonical public HTTPS DNS URL",
   });
 
-export const decisionBoardIssueV0Schema = z
+const decisionBoardIssueV0Schema = z
   .object({
     code: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
     message: z.string().min(1),
@@ -248,10 +248,10 @@ export const decisionBoardIssueV0Schema = z
   })
   .strict();
 
-export const instrumentRefV0Schema = z
+const instrumentRefV0Schema = z
   .object({
     market: z.literal("US"),
-    canonical_ticker: z.string().min(1),
+    canonical_ticker: z.string().regex(/^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$/),
     exchange: z.string().min(1),
     company_name: z.string().min(1),
     identity_source: z.string().min(1),
@@ -259,27 +259,75 @@ export const instrumentRefV0Schema = z
   })
   .strict();
 
-export const brokerSnapshotV0Schema = z
+const brokerDateV0Schema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const brokerHoldingV0Schema = z
   .object({
-    snapshot_id: z.string().min(1),
-    revision: z.string().min(1),
-    captured_at: timestampV0Schema,
-    fresh_until: timestampV0Schema,
-    digest: hashV0Schema,
-    approved_holdings: z.array(instrumentRefV0Schema),
+    ticker: z.string().min(1),
+    quantity: z.string().min(1),
+    entry_price: z.string().min(1),
+    entry_currency: z.string().nullable(),
+    entry_date: brokerDateV0Schema.nullable(),
+    strategy: z.string().nullable(),
+    entry_pattern: z.string().nullable(),
+    notes: z.string().nullable(),
+    tags: z.array(z.string()),
+    stop_override: z.string().nullable(),
+    target_override: z.string().nullable(),
+    broker_state: z.enum(["confirmed", "not_seen_in_toss"]),
+    broker_missing_first_seen_date: brokerDateV0Schema.nullable(),
+    broker_missing_last_seen_date: brokerDateV0Schema.nullable(),
+    broker_missing_count: z.number().int().nonnegative(),
+    broker_missing_diff_hash: z.string().nullable(),
   })
   .strict();
 
-export const supportingLocationV0Schema = z
+const brokerSnapshotMarkerV0Schema = z
+  .object({
+    scope: z.literal("MIXED"),
+    sessionDate: brokerDateV0Schema,
+    status: z.enum(["applied", "unchanged"]),
+    snapshotDigest: hashV0Schema,
+    snapshotRevision: z.number().int().positive(),
+    sealedAt: timestampV0Schema,
+    diffHash: z.unknown().optional(),
+    incomingCount: z.unknown().optional(),
+    createCount: z.unknown().optional(),
+    updateCount: z.unknown().optional(),
+    deleteCount: z.unknown().optional(),
+    unchangedCount: z.unknown().optional(),
+    quarantinedCount: z.unknown().optional(),
+    quarantinedTickers: z.unknown().optional(),
+    source: z.unknown().optional(),
+    timezone: z.unknown().optional(),
+    updatedAt: z.unknown().optional(),
+  })
+  .strict();
+
+export const brokerSnapshotV0Schema = z
+  .object({
+    state_key: z.string().min(1),
+    session_date: brokerDateV0Schema,
+    status: z.enum(["applied", "unchanged"]),
+    fresh_until: timestampV0Schema,
+    sealed_at: timestampV0Schema,
+    holdings_digest: hashV0Schema,
+    revision: z.number().int().positive(),
+    marker: brokerSnapshotMarkerV0Schema,
+    holdings: z.array(brokerHoldingV0Schema),
+  })
+  .strict();
+
+const supportingLocationV0Schema = z
   .object({
     kind: z.literal("TEXT_OFFSETS"),
     start: z.number().int().nonnegative(),
     end: z.number().int().positive(),
   })
   .strict()
-  .refine((location) => location.end >= location.start, {
+  .refine((location) => location.end > location.start, {
     path: ["end"],
-    message: "end must be greater than or equal to start",
+    message: "end must be greater than start",
   });
 
 export const claimValidationV0Schema = z
@@ -294,36 +342,6 @@ export const claimValidationV0Schema = z
     supporting_location: supportingLocationV0Schema,
     verifier_version: z.string().min(1),
     entailment: z.enum(["SUPPORTED", "CONTRADICTED", "UNCLEAR"]),
-  })
-  .strict();
-
-const sourceHashV0Schema = z
-  .object({
-    source: z.string().min(1),
-    hash: hashV0Schema,
-  })
-  .strict();
-
-const deterministicFactV0Schema = z
-  .object({
-    fact_id: z.string().min(1),
-    instrument: instrumentRefV0Schema,
-    field: z.string().min(1),
-    value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-    observed_at: timestampV0Schema,
-    source_hash: hashV0Schema,
-  })
-  .strict();
-
-export const decisionInputV0Schema = z
-  .object({
-    sealed_at: timestampV0Schema,
-    run_kind: z.enum(["ENTRY", "HOLDING"]),
-    input_hash: hashV0Schema,
-    source_hashes: z.array(sourceHashV0Schema),
-    instruments: z.array(instrumentRefV0Schema),
-    deterministic_facts: z.array(deterministicFactV0Schema),
-    validated_claims: z.array(claimValidationV0Schema),
   })
   .strict();
 
@@ -389,10 +407,40 @@ const holdingDecisionPayloadV0Schema = z
   })
   .strict();
 
-export const decisionPayloadV0Schema = z.discriminatedUnion("run_kind", [
+const decisionPayloadV0Schema = z.discriminatedUnion("run_kind", [
   entryDecisionPayloadV0Schema,
   holdingDecisionPayloadV0Schema,
 ]);
+
+const privateVersionSegments = new Set([
+  "account",
+  "credential",
+  "password",
+  "private",
+  "secret",
+  "token",
+]);
+const publicVersionV0Schema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
+  .refine(
+    (value) =>
+      !value
+        .split(/[._-]/u)
+        .some((segment) => privateVersionSegments.has(segment.toLowerCase())),
+    "version must not contain a private segment",
+  );
+const publicEnvelopeMetadataV0Schema = z
+  .object({
+    eligible_count: z.number().int().nonnegative().optional(),
+    selected_count: z.number().int().nonnegative().optional(),
+    compiler_version: publicVersionV0Schema.optional(),
+    policy_version: publicVersionV0Schema.optional(),
+    registry_version: publicVersionV0Schema.optional(),
+    researcher_version: publicVersionV0Schema.optional(),
+    verifier_version: publicVersionV0Schema.optional(),
+  })
+  .strict();
 
 const envelopeBaseShape = {
   schema_version: z.literal("decision-board.v0"),
@@ -400,7 +448,7 @@ const envelopeBaseShape = {
   created_at: timestampV0Schema,
   idempotency_key: hashV0Schema,
   issues: z.array(decisionBoardIssueV0Schema),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: publicEnvelopeMetadataV0Schema.optional(),
 };
 
 const publishedEntryEnvelopeV0Schema = z
@@ -442,16 +490,11 @@ export const decisionBoardEnvelopeV0Schema = z.discriminatedUnion("status", [
   blockedEnvelopeV0Schema,
 ]);
 
-export type DecisionBoardIssueV0 = z.infer<typeof decisionBoardIssueV0Schema>;
-export type InstrumentRefV0 = z.infer<typeof instrumentRefV0Schema>;
-export type BrokerSnapshotV0 = z.infer<typeof brokerSnapshotV0Schema>;
-export type ClaimValidationV0 = z.infer<typeof claimValidationV0Schema>;
-export type DecisionInputV0 = z.infer<typeof decisionInputV0Schema>;
+type DecisionBoardIssueV0 = z.infer<typeof decisionBoardIssueV0Schema>;
 export type DecisionPayloadV0 = z.infer<typeof decisionPayloadV0Schema>;
 export type DecisionBoardEnvelopeV0 = z.infer<
   typeof decisionBoardEnvelopeV0Schema
 >;
-export type RunJournalV0 = z.infer<typeof runJournalV0Schema>;
 
 const publicIssue = (issue: DecisionBoardIssueV0): DecisionBoardIssueV0 => ({
   code: issue.code,

@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from datetime import timedelta, timezone
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from sab.decision_board.instruments import InstrumentRefV0
@@ -33,6 +34,20 @@ def _instrument() -> InstrumentRefV0:
         identity_source="synthetic-directory",
         identity_version="fixture-2026-08-07",
     )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "freshness_hours",
+        "max_redirects",
+        "max_response_bytes",
+        "max_article_text_chars",
+    ],
+)
+def test_source_policy_requires_exact_integers(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        ResearchSourcePolicyV0(**cast(Any, {field: 1.5}))
 
 
 def test_recorded_provider_fixture_is_strict_and_deterministically_ordered() -> None:

@@ -208,6 +208,37 @@ def test_direct_validator_rejects_non_json_metadata_values(
         validate_decision_board_report(report)
 
 
+def test_report_metadata_is_limited_to_public_version_and_count_fields() -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["metadata"] = {"account": "PRIVATE-ACCOUNT"}
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError, match=r"\$\.metadata\.account"):
+        validate_decision_board_report(report)
+
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["metadata"] = {"compiler_version": "build-secret-v1"}
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError, match=r"\$\.metadata\.compiler_version"):
+        validate_decision_board_report(report)
+
+
+def test_report_instrument_requires_a_public_canonical_ticker() -> None:
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["decision_payload"]["items"][0]["instrument"]["canonical_ticker"] = (
+        "private sentinel"
+    )
+    report["decision_payload_hash"] = decision_payload_hash(report["decision_payload"])
+
+    with pytest.raises(ValidationError):
+        _schema_validator().validate(report)
+    with pytest.raises(ContractError, match=r"canonical_ticker"):
+        validate_decision_board_report(report)
+
+
 @pytest.mark.parametrize(
     "invalid_json_value",
     [
@@ -487,6 +518,59 @@ def test_schema_exposes_all_normative_v0_contracts() -> None:
         "DecisionBoardEnvelopeV0",
         "RunJournalV0",
     } <= schema["$defs"].keys()
+
+
+def test_broker_snapshot_schema_matches_the_rpc_consumer_boundary() -> None:
+    snapshot = {
+        "state_key": "toss-sync:success:MIXED:2026-08-06",
+        "session_date": "2026-08-06",
+        "status": "applied",
+        "fresh_until": "2026-08-07T15:00:00Z",
+        "sealed_at": "2026-08-06T02:59:00Z",
+        "holdings_digest": "sha256:" + "0" * 64,
+        "revision": 7,
+        "marker": {
+            "scope": "MIXED",
+            "sessionDate": "2026-08-06",
+            "status": "applied",
+            "snapshotDigest": "sha256:" + "0" * 64,
+            "snapshotRevision": 7,
+            "sealedAt": "2026-08-06T02:59:00Z",
+        },
+        "holdings": [
+            {
+                "ticker": "AAPL.NAS",
+                "quantity": "2.000000",
+                "entry_price": "190.5000",
+                "entry_currency": "USD",
+                "entry_date": "2026-08-01",
+                "strategy": "SWING",
+                "entry_pattern": "swing_high_breakout",
+                "notes": "synthetic note",
+                "tags": ["synthetic"],
+                "stop_override": "180.0000",
+                "target_override": "220.0000",
+                "broker_state": "confirmed",
+                "broker_missing_first_seen_date": None,
+                "broker_missing_last_seen_date": None,
+                "broker_missing_count": 0,
+                "broker_missing_diff_hash": None,
+            }
+        ],
+    }
+
+    _definition_validator("BrokerSnapshotV0").validate(snapshot)
+    with pytest.raises(ValidationError):
+        _definition_validator("BrokerSnapshotV0").validate(
+            {
+                "snapshot_id": "legacy-shape",
+                "revision": "7",
+                "captured_at": "2026-08-06T02:59:00Z",
+                "fresh_until": "2026-08-07T15:00:00Z",
+                "digest": "sha256:" + "0" * 64,
+                "approved_holdings": [],
+            }
+        )
 
 
 def test_evidence_location_end_cannot_precede_start() -> None:

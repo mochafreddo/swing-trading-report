@@ -72,19 +72,19 @@ class ResearchSourcePolicyV0:
 
     def __post_init__(self) -> None:
         if (
-            isinstance(self.freshness_hours, bool)
+            type(self.freshness_hours) is not int
             or not 1 <= self.freshness_hours <= 720
         ):
             raise ValueError("freshness_hours must be in the safe range 1..720")
-        if isinstance(self.max_redirects, bool) or not 0 <= self.max_redirects <= 5:
+        if type(self.max_redirects) is not int or not 0 <= self.max_redirects <= 5:
             raise ValueError("max_redirects must be in the safe range 0..5")
         if (
-            isinstance(self.max_response_bytes, bool)
+            type(self.max_response_bytes) is not int
             or not 1 <= self.max_response_bytes <= 2_000_000
         ):
             raise ValueError("max_response_bytes is outside the safe range")
         if (
-            isinstance(self.max_article_text_chars, bool)
+            type(self.max_article_text_chars) is not int
             or not 1 <= self.max_article_text_chars <= 200_000
         ):
             raise ValueError("max_article_text_chars is outside the safe range")
