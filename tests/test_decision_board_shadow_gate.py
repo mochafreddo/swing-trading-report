@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import sab.decision_board.shadow_gate as shadow_gate
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from sab.__main__ import _build_parser, _dispatch_command
 from sab.decision_board.shadow_gate import (
@@ -22,6 +23,58 @@ def _raw_manifest() -> dict[str, object]:
     value = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert type(value) is dict
     return value
+
+
+def _mutate_contract(raw: dict[str, object], mutation: str) -> None:
+    approval = raw["approval"]
+    policy = raw["policy_versions"]
+    schedule = raw["schedule_policy"]
+    slots = raw["expected_slots"]
+    thresholds = raw["approved_thresholds"]
+    assert type(approval) is dict
+    assert type(policy) is dict
+    assert type(schedule) is dict
+    assert type(slots) is list
+    assert type(thresholds) is dict
+    quality = thresholds["quality"]
+    assert type(quality) is dict
+    first_slot = slots[0]
+    assert type(first_slot) is dict
+
+    if mutation == "root-field":
+        raw["unexpected"] = True
+    elif mutation == "schema-version":
+        raw["schema_version"] = "decision-board-shadow-gate.v1"
+    elif mutation == "market":
+        raw["market"] = "KR"
+    elif mutation == "minimum-sessions":
+        raw["minimum_sessions"] = 21
+    elif mutation == "session-bounds":
+        raw["start_session"] = raw["end_session"]
+    elif mutation == "lanes":
+        raw["lanes"] = ["HOLDING", "ENTRY"]
+    elif mutation == "diff-reasons":
+        raw["allowed_diff_reasons"] = ["UNEXPLAINED"]
+    elif mutation == "approval":
+        approval["state"] = "APPROVED"
+    elif mutation == "policy-fields":
+        policy.pop("compiler")
+    elif mutation == "private-version":
+        policy["compiler"] = "secret"
+    elif mutation == "schedule-timezone":
+        schedule["timezone"] = "Asia/Seoul"
+    elif mutation == "schedule-bounds":
+        schedule["grace_seconds"] = schedule["stale_seconds"]
+    elif mutation == "slot-fields":
+        first_slot["unexpected"] = True
+    elif mutation == "slot-lane":
+        first_slot["run_kind"] = "OTHER"
+    elif mutation == "quality-shape":
+        quality["provider_failure_rate_max"] = "0.05"
+    elif mutation == "quality-too-weak":
+        quality["provider_failure_rate_max"] = 0.06
+    else:  # pragma: no cover - parameter table is closed below
+        raise AssertionError(f"unknown mutation: {mutation}")
 
 
 def test_proposed_gate_is_schema_valid_and_covers_twenty_xnys_sessions() -> None:
@@ -80,6 +133,42 @@ def test_gate_validator_rejects_schedule_and_threshold_mutation(
         hard_thresholds["unexplained"] = 1
     else:
         slots[0]["run_id"] = "entry-shadow-mutated"  # type: ignore[index]
+
+    with pytest.raises(ShadowGateManifestError, match=message):
+        validate_shadow_gate_manifest_v0(raw)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("root-field", "root fields"),
+        ("schema-version", "schema version"),
+        ("market", "market calendar"),
+        ("minimum-sessions", "minimum sessions"),
+        ("session-bounds", "session bounds"),
+        ("lanes", "lanes"),
+        ("diff-reasons", "diff reasons"),
+        ("approval", "approval identity"),
+        ("policy-fields", "policy versions"),
+        ("private-version", "policy version"),
+        ("schedule-timezone", "schedule timezone"),
+        ("schedule-bounds", "schedule bounds"),
+        ("slot-fields", "expected slots"),
+        ("slot-lane", "slot lane"),
+        ("quality-shape", "quality thresholds"),
+        ("quality-too-weak", "too weak"),
+    ],
+)
+def test_gate_validator_rejects_contract_mutations(
+    mutation: str,
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    _mutate_contract(raw, mutation)
+    monkeypatch.setattr(
+        shadow_gate, "is_trading_session", lambda *_args, **_kwargs: True
+    )
 
     with pytest.raises(ShadowGateManifestError, match=message):
         validate_shadow_gate_manifest_v0(raw)
