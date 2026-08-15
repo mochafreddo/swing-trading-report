@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 import requests
+from sab.decision_board.contracts import canonical_json_bytes
 from sab.report.decision_board import (
     DecisionBoardIdempotencyConflictError,
     build_decision_board_storage_key,
@@ -141,6 +142,17 @@ def _local_report(tmp_path: Path, report: dict[str, Any]) -> tuple[Path, str]:
 def _index_row(
     report: dict[str, Any], key: str, *, bucket: str = "reports"
 ) -> dict[str, object]:
+    payload = report.get("decision_payload")
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    tickers = sorted(
+        {
+            item["instrument"]["canonical_ticker"]
+            for item in items
+            if isinstance(item, dict)
+            and isinstance(item.get("instrument"), dict)
+            and isinstance(item["instrument"].get("canonical_ticker"), str)
+        }
+    )
     return {
         "bucket_id": bucket,
         "report_key": key,
@@ -149,8 +161,8 @@ def _index_row(
         "duplicate_index": 0,
         "generated_at": None,
         "summary": None,
-        "tickers": [],
-        "tickers_hydrated": False,
+        "tickers": tickers,
+        "tickers_hydrated": True,
         "run_kind": report["run_kind"],
         "run_id": report["run_id"],
         "idempotency_key": report["idempotency_key"],
@@ -170,40 +182,30 @@ def _authoritative_response(row: dict[str, object]) -> _Response:
     return _Response(200, text=json.dumps([row]))
 
 
-def test_new_object_upload_derives_safe_index_row_from_validated_bytes(
+def test_upload_rejects_private_metadata_before_storage_write(
     tmp_path: Path,
 ) -> None:
     report = _report()
+    key = build_decision_board_storage_key(report)
     report["metadata"] = {
         "account": "PRIVATE-ACCOUNT",
         "trigger": "PRIVATE-TRIGGER",
         "ticker": "PRIVATE-TICKER",
     }
-    local_path, key = _local_report(tmp_path, report)
-    row = _index_row(report, key)
-    session = _Session(
-        posts=[_Response(201), _Response(201)],
-        gets=[_authoritative_response(row)],
-    )
+    local_path = tmp_path / Path(key).name
+    local_path.write_bytes(canonical_json_bytes(report))
+    session = _Session(posts=[])
 
-    uploaded = upload_decision_board_report(
-        local_path=local_path,
-        storage_key=key,
-        config=_config(),
-        session=session,  # type: ignore[arg-type]
-    )
+    with pytest.raises(ValueError, match="metadata"):
+        upload_decision_board_report(
+            local_path=local_path,
+            storage_key=key,
+            config=_config(),
+            session=session,  # type: ignore[arg-type]
+        )
 
-    assert uploaded == key
-    storage_call, index_call = session.post_calls
-    assert storage_call["data"] == local_path.read_bytes()
-    assert storage_call["headers"]["x-upsert"] == "false"  # type: ignore[index]
-    assert "on_conflict=bucket_id,report_type,run_kind,idempotency_key" in str(
-        index_call["url"]
-    )
-    assert json.loads(index_call["data"])[0] == row  # type: ignore[arg-type]
-    exposed = key.encode() + index_call["data"]  # type: ignore[operator]
-    for sentinel in (b"PRIVATE-ACCOUNT", b"PRIVATE-TRIGGER", b"PRIVATE-TICKER"):
-        assert sentinel not in exposed
+    assert session.post_calls == []
+    assert session.get_calls == []
     assert session.delete_calls == []
 
 

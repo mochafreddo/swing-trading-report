@@ -252,4 +252,76 @@ describe("fixture-only Decision Board reports journey", () => {
     expect(container.querySelector('[data-order-action="true"]')).toBeNull();
     expect(navigationMock.searchParams.get("runKind")).toBe("HOLDING");
   });
+
+  it("does not show ENTRY rows when the HOLDING lane request fails", async () => {
+    const entryInitialState: ReportsInitialState = {
+      ...INITIAL_STATE,
+      reportType: "decision-board",
+      runKind: "ENTRY",
+      query: "failure-case",
+      appliedQuery: "failure-case",
+      items: [
+        {
+          key: ENTRY_KEY,
+          bucketId: "reports",
+          type: "decision-board",
+          reportDate: "2026-08-06",
+          duplicateIndex: 0,
+          runKind: "ENTRY",
+          runId: "entry-2026-08-06T010000Z",
+        },
+      ],
+      total: 1,
+      selectedKey: ENTRY_KEY,
+      selectedBucketId: "reports",
+      detail: fixture("published-entry.json"),
+      detailKey: ENTRY_KEY,
+      detailBucketId: "reports",
+    };
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), "http://localhost:55300");
+      if (url.pathname === "/api/reports") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "HOLDING unavailable" }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      return response({
+        state: "UNAVAILABLE",
+        reason: "NOT_CONFIGURED",
+        records: [],
+      });
+    });
+    navigationMock.searchParams = new URLSearchParams({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "failure-case",
+      key: ENTRY_KEY,
+      bucket: "reports",
+    });
+
+    await act(async () => {
+      root.render(<ReportsClient initialState={entryInitialState} />);
+    });
+    expect(container.textContent).toContain("entry-2026-08-06T010000Z");
+
+    const runKind = container.querySelector<HTMLSelectElement>(
+      'select[name="runKind"]',
+    );
+    navigationMock.searchParams.set("runKind", "HOLDING");
+    navigationMock.searchParams.delete("key");
+    navigationMock.searchParams.delete("bucket");
+    await act(async () => {
+      if (runKind) {
+        runKind.value = "HOLDING";
+        runKind.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    await waitForText(container, "HOLDING unavailable");
+
+    expect(container.textContent).not.toContain("entry-2026-08-06T010000Z");
+    expect(container.textContent).not.toContain("AUR.NAS");
+  });
 });

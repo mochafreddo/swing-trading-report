@@ -58,21 +58,30 @@ const holdingKey =
   "f".repeat(64) +
   ".json";
 
-const row = (reportKey, report) => ({
-  bucket_id: "reports",
-  report_key: reportKey,
-  report_type: "decision-board",
-  report_date: "2026-08-06",
-  duplicate_index: 0,
-  generated_at: null,
-  summary: null,
-  tickers: [],
-  tickers_hydrated: false,
-  run_kind: report.run_kind,
-  run_id: report.run_id,
-  idempotency_key: report.idempotency_key,
-  decision_created_at: report.created_at,
-});
+const row = (reportKey, report) => {
+  const tickers = Array.from(
+    new Set(
+      (report.decision_payload?.items ?? []).map(
+        (item) => item.instrument.canonical_ticker,
+      ),
+    ),
+  ).sort();
+  return {
+    bucket_id: "reports",
+    report_key: reportKey,
+    report_type: "decision-board",
+    report_date: "2026-08-06",
+    duplicate_index: 0,
+    generated_at: null,
+    summary: null,
+    tickers,
+    tickers_hydrated: true,
+    run_kind: report.run_kind,
+    run_id: report.run_id,
+    idempotency_key: report.idempotency_key,
+    decision_created_at: report.created_at,
+  };
+};
 
 const indexedReports = [
   [entryKey, entry],

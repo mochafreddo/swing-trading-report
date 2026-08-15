@@ -49,6 +49,9 @@ export function DecisionBoardDetail({
       {report.status === "BLOCKED" ? (
         <section className={styles.decisionBlocked}>
           <h3 className={styles.sectionTitle}>Shared issues</h3>
+          <p>
+            이 실행은 차단되어 어떤 매수·매도·보유 조언도 발행하지 않았습니다.
+          </p>
           <ul>
             {report.issues.map((issue) => (
               <li key={issue.code}>

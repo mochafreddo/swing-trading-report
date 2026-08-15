@@ -23,6 +23,7 @@ const DECISION_BOARD_REPORT_INDEX_ORDER =
   "decision_created_at.desc,run_id.desc,report_key.desc,bucket_id.desc";
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const DECISION_BOARD_TICKER_PATTERN = /^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$/;
 const TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const LATEST_DECISION_BOARD_PAGE_SIZE = 25;
@@ -343,8 +344,18 @@ function parseReportIndexRows(
         raw.generated_at != null ||
         raw.summary != null ||
         !Array.isArray(raw.tickers) ||
-        raw.tickers.length !== 0 ||
-        raw.tickers_hydrated !== false
+        raw.tickers_hydrated !== true ||
+        raw.tickers.length !== tickers.length ||
+        raw.tickers.some(
+          (ticker, index) =>
+            typeof ticker !== "string" ||
+            ticker !== tickers[index] ||
+            !DECISION_BOARD_TICKER_PATTERN.test(ticker),
+        ) ||
+        new Set(tickers).size !== tickers.length ||
+        tickers.some(
+          (ticker, index) => index > 0 && tickers[index - 1] >= ticker,
+        )
       ) {
         continue;
       }

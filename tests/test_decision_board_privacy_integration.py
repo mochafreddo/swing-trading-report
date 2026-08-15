@@ -355,6 +355,20 @@ class _StorageSession:
 
 
 def _index_row(report: dict[str, object], key: str) -> dict[str, object]:
+    payload = report["decision_payload"]
+    assert isinstance(payload, dict)
+    items = payload["items"]
+    assert isinstance(items, list)
+    tickers = sorted(
+        {
+            instrument["canonical_ticker"]
+            for item in items
+            if isinstance(item, dict)
+            and isinstance((instrument := item.get("instrument")), dict)
+            and isinstance(instrument.get("canonical_ticker"), str)
+        },
+        key=str.encode,
+    )
     return {
         "bucket_id": "reports",
         "report_key": key,
@@ -363,8 +377,8 @@ def _index_row(report: dict[str, object], key: str) -> dict[str, object]:
         "duplicate_index": 0,
         "generated_at": None,
         "summary": None,
-        "tickers": [],
-        "tickers_hydrated": False,
+        "tickers": tickers,
+        "tickers_hydrated": True,
         "run_kind": report["run_kind"],
         "run_id": report["run_id"],
         "idempotency_key": report["idempotency_key"],

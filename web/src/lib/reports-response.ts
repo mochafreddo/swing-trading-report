@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const API_JSON_CACHE_CONTROL =
-  "private, no-store, max-age=0, must-revalidate";
+const API_JSON_CACHE_CONTROL = "private, no-store, max-age=0, must-revalidate";
 
 export function jsonWithNoStore(
   payload: unknown,

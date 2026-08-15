@@ -4,6 +4,7 @@ import {
   fetchLatestDecisionBoardReport,
   fetchReportIndexPage,
 } from "@/lib/supabase-admin";
+import { listReports } from "@/lib/reports-data";
 import { isReportType } from "@/lib/types";
 
 const DIGEST_A = "a".repeat(64);
@@ -29,8 +30,8 @@ function decisionRow(overrides: Record<string, unknown> = {}) {
     duplicate_index: 0,
     generated_at: null,
     summary: null,
-    tickers: [],
-    tickers_hydrated: false,
+    tickers: ["AUR.NAS"],
+    tickers_hydrated: true,
     run_kind: "ENTRY",
     run_id: "entry-run",
     idempotency_key: `sha256:${DIGEST_A}`,
@@ -44,7 +45,7 @@ function safeInvalidDecisionRow(index: number) {
   return decisionRow({
     report_key: `2026/08/2026-08-06.decision-board.entry.${runId}.${DIGEST_A}.json`,
     run_id: runId,
-    tickers: ["PRIVATE.NAS"],
+    tickers: ["private sentinel"],
   });
 }
 
@@ -91,7 +92,7 @@ describe("Decision Board report index", () => {
     { idempotency_key: `sha256:${DIGEST_B}` },
     { decision_created_at: "2026-08-06T01:00:05" },
     { decision_created_at: "2026-08-07T01:00:05Z" },
-    { tickers: ["PRIVATE.NAS"] },
+    { tickers: ["private sentinel"] },
     { report_key: ` ${ENTRY_KEY}` },
     { report_date: " 2026-08-06" },
     { bucket_id: " reports" },
@@ -131,6 +132,26 @@ describe("Decision Board report index", () => {
       idempotency_key: null,
       decision_created_at: null,
     });
+  });
+
+  it("finds Decision Board reports by their public ticker index", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response([decisionRow()]));
+
+    const result = await listReports({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "aur",
+      limit: 10,
+      searchWindow: 100,
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      key: ENTRY_KEY,
+      runKind: "ENTRY",
+      tickers: ["AUR.NAS"],
+    });
+    expect(result.warnings).toEqual([]);
   });
 
   it.each(["buy", "all"] as const)(
@@ -219,14 +240,14 @@ describe("Decision Board report index", () => {
   });
 
   it("derives a Decision cursor from an all-malformed emitted page", async () => {
-    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const invalidFirst = decisionRow({ tickers: ["private sentinel"] });
     const invalidLookahead = decisionRow({
       report_key: `2026/08/2026-08-05.decision-board.entry.lookahead-run.${DIGEST_B}.json`,
       report_date: "2026-08-05",
       run_id: "lookahead-run",
       idempotency_key: `sha256:${DIGEST_B}`,
       decision_created_at: "2026-08-05T01:00:05Z",
-      tickers: ["PRIVATE.NAS"],
+      tickers: ["private sentinel"],
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       response([invalidFirst, invalidLookahead]),
@@ -251,14 +272,14 @@ describe("Decision Board report index", () => {
   });
 
   it("exhausts bounded latest pages when every Decision row is invalid", async () => {
-    const invalidFirst = decisionRow({ tickers: ["PRIVATE.NAS"] });
+    const invalidFirst = decisionRow({ tickers: ["private sentinel"] });
     const invalidLast = decisionRow({
       report_key: `2026/08/2026-08-05.decision-board.entry.last-run.${DIGEST_B}.json`,
       report_date: "2026-08-05",
       run_id: "last-run",
       idempotency_key: `sha256:${DIGEST_B}`,
       decision_created_at: "2026-08-05T01:00:05Z",
-      tickers: ["PRIVATE.NAS"],
+      tickers: ["private sentinel"],
     });
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

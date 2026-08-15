@@ -81,6 +81,7 @@ describe("ReportDetail component", () => {
 
     expect(html).toContain("BLOCKED");
     expect(html).toContain("IDENTITY_UNRESOLVED");
+    expect(html).toContain("어떤 매수·매도·보유 조언도 발행하지 않았습니다");
     expect(html).not.toContain("Decision items");
     expect(html).not.toContain(">BUY<");
     expect(html).not.toContain(">SELL<");

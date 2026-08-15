@@ -38,5 +38,10 @@
     "prettier": "3.9.4",
     "typescript": "6.0.3",
     "vitest": "4.1.9"
+  },
+  "knip": {
+    "entry": [
+      "e2e/decision-board-fixture-server.mjs"
+    ]
   }
 }

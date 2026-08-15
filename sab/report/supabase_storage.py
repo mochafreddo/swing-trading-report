@@ -789,6 +789,18 @@ def _build_decision_board_index_row(
     parsed = parse_decision_board_storage_key(storage_key, report=report)
     if parsed is None:
         raise ValueError("Decision Board storage key does not match report identity")
+    payload = report.get("decision_payload")
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    tickers = sorted(
+        {
+            instrument["canonical_ticker"]
+            for item in items
+            if isinstance(item, dict)
+            and isinstance((instrument := item.get("instrument")), dict)
+            and isinstance(instrument.get("canonical_ticker"), str)
+        },
+        key=str.encode,
+    )
     return {
         "bucket_id": bucket_id,
         "report_key": storage_key,
@@ -797,8 +809,8 @@ def _build_decision_board_index_row(
         "duplicate_index": 0,
         "generated_at": None,
         "summary": None,
-        "tickers": [],
-        "tickers_hydrated": False,
+        "tickers": tickers,
+        "tickers_hydrated": True,
         "run_kind": parsed.run_kind,
         "run_id": parsed.run_id,
         "idempotency_key": parsed.idempotency_key,

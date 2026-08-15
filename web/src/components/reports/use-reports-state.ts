@@ -9,7 +9,7 @@ import {
   REPORT_SEARCH_CACHE_TTL_MS,
 } from "@/lib/reports-cache-config";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
-import { runJournalV0Schema } from "@/lib/decision-board-schema";
+import { runJournalV0Schema } from "@/lib/decision-board-journal-schema";
 import type {
   DecisionBoardJournalStatus,
   ReportListItem,
@@ -520,6 +520,10 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const load = async () => {
       setLoadingList(true);
       setError(null);
+      setItems([]);
+      setTotal(null);
+      setSearched(0);
+      setTruncated(false);
       setWarnings([]);
 
       try {
@@ -714,7 +718,16 @@ export function useReportsState(initialState?: ReportsInitialState) {
     };
   }, [refreshToken, selectedBucketId, selectedKey]);
 
+  const selectedKeyInCurrentScope =
+    selectedKey !== null &&
+    resolveSelectedKeyFromUrl({
+      previousSelectedKey: null,
+      nextKeyRaw: selectedKey,
+      reportType,
+      runKind,
+    }) === selectedKey;
   const selectedDetail =
+    selectedKeyInCurrentScope &&
     selectedKey &&
     detailKey === selectedKey &&
     (selectedBucketId === null || detailBucketId === selectedBucketId)

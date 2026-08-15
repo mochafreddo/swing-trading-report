@@ -1,4 +1,4 @@
-import type { RunJournalV0 } from "@/lib/decision-board-schema";
+import type { RunJournalV0 } from "@/lib/decision-board-journal-schema";
 
 export type Provider = "kis" | "pykrx";
 export type ScanUniverse = "KR" | "US" | "both";
@@ -60,7 +60,7 @@ export interface ReportsListResponse {
 
 export type HoldingBrokerState = "confirmed" | "not_seen_in_toss";
 
-export interface HoldingBrokerStateSnapshot {
+interface HoldingBrokerStateSnapshot {
   broker_state?: HoldingBrokerState | null;
   broker_missing_first_seen_date?: string | null;
   broker_missing_last_seen_date?: string | null;
