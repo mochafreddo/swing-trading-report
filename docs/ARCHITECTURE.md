@@ -210,11 +210,12 @@ artifact는 보존하고, 현재 및 이후 schedule attribution에만 `ARTICLE_
 `SUCCEEDED`, artifact가 없는 영향 item은 `TIMED_OUT`으로 finalization됩니다.
 result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 
-현재 이 owner에는 production provider adapter, Decision Board runner/compiler 연결,
-OpenAI/Toss/order call이 없습니다. rollout은 T3 identity gate 확인 후 provider/verifier
-adapter를 shadow runner에 주입하고, 이후 claim validation consumer를 연결하는 순서입니다.
-롤백은 이 shadow consumer 연결만 제거하며 기존 AI Brief source policy와 top-five
-behavior는 유지합니다.
+이 owner에는 production provider adapter와 OpenAI/Toss/order call이 없습니다. public
+research, claim validation, compiler, runner consumer 경계는 injectable seam으로 구현됐지만
+기본 CLI executor에는 production adapter가 연결되지 않아 `CONFIG_UNAVAILABLE`로 닫힙니다.
+rollout은 recorded/live provider-verifier 비교를 통과한 adapter를 shadow runner에 주입한
+뒤 시작합니다. 롤백은 이 adapter/consumer 연결만 제거하며 기존 AI Brief source policy와
+top-five behavior는 유지합니다.
 
 ### 3.4 ClaimValidationV0 exact-span boundary
 
@@ -261,11 +262,11 @@ claim에 새 action request를 대입하거나 claim text, action flag, source/a
 span/location, entailment를 일관되게 바꾸거나 instrument/location을 동일 값의 새 객체로
 교체해도 권위가 이동하지 않습니다.
 `CONTRADICTED`, `UNCLEAR`, non-action-changing support는 compiler에 보고할 수 있지만
-BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. 이 owner는 compiler, runner, production model
-adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. rollout은 T3/T4 consumer
-확인 후 recorded synthetic verifier로 shadow 관측, production verifier adapter 별도 검증,
-compiler consumer 연결 순서이며, rollback은 claim consumer 연결만 제거하고 T3/T4
-producer와 shared schema를 유지합니다.
+BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. claims module 자체는 compiler, runner,
+production model adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. compiler와
+runner는 이 issuance API를 consumer로 사용하며 production verifier adapter는 여전히 별도
+검증·주입 대상입니다. rollback은 claim adapter/consumer 연결만 제거하고 T3/T4 producer와
+shared schema를 유지합니다.
 
 claims module의 serializer는 registered identity와 unchanged issuance snapshot을 통과한
 값만 fresh Task 1 allowlist dict로 내보냅니다. `validate_claim_validation()`과 JSON Schema는
@@ -364,6 +365,23 @@ fixture와 `run_journal_public.py`만 허용하는 deny-by-default `.dockerignor
 launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지
 않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를
 호출하거나 변경하지 않습니다.
+
+### 3.6 현재 통합 상태와 shadow 졸업 경계
+
+T1–T11은 schema, broker snapshot, public identity, bounded research, exact-span claims,
+compiler, report storage, runner, RunJournal, Reports UI, privacy/no-order/workflow isolation을
+구현하고 fixture/recorded 경계에서 검증합니다. 이는 production adapter나 schedule이
+활성화됐다는 뜻이 아닙니다. 기본 CLI executor, schedule 없는 disabled launchd template,
+GitHub Actions production sidecar 금지가 이 차이를 fail closed로 유지합니다.
+
+실제 shadow 운영을 시작하려면 production preparation/research/claim-verifier adapter를
+먼저 별도 승인·연결하고, 사전 승인 gate manifest 아래 최소 20 US 거래 session의 ENTRY와
+HOLDING slot을 기록해야 합니다. 모든 diff는
+`EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED` 중 하나와 input/source diff를
+가져야 하며 `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch,
+eligible holding 누락은 0이어야 합니다. 통과는 다음 cutover 검토 자격일 뿐 launchd,
+알림, workflow 또는 credential scope를 자동 변경하지 않습니다. 상세 산식은
+[Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
 
 ## 4. 핵심 플로우
 
@@ -486,7 +504,7 @@ launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설�
 10. AI Brief 상세는 `brief_state`, `brief_reason`, `recommendations[]`, `watch_candidates[]`, `vetoed_candidates[]`, `source_provider_summary`, `source_issues[]`, `system_issues[]`, `source_entry_report`, `model_provider/model_name` 메타를 함께 렌더링합니다. 레거시 artifact에 state/reason이 없으면 상세 화면에서 동일 규칙으로 fallback 추론하고, 새 watch/source chain 필드가 없으면 빈 placeholder를 표시하지 않습니다.
 11. Sell AI Brief artifact는 `report_index` type/filter와 ticker 검색 대상에 포함되며, 상세 화면은 generic JSON fallback으로 원본 판단 artifact를 열람할 수 있습니다. Dedicated 판단 UI는 별도 후속 작업입니다.
 12. Decision Board 목록 데이터 경계는 `run_kind`, `run_id`, `idempotency_key`, `decision_created_at`과 deterministic key의 일치를 검증합니다. malformed row는 legacy row로 강등하지 않고 제외하며, run-kind별 latest는 `decision_created_at DESC, run_id DESC, report_key DESC, bucket_id DESC`로 조회합니다. Reports UI는 exact `ENTRY|HOLDING` lane을 URL/SSR/client cache/navigation identity에 보존하고, lane과 다른 key를 선택하지 않습니다.
-13. Decision Board detail은 1 MiB exact-byte Storage reader, fatal UTF-8 및 duplicate-key-aware JSON parser, T1 Web schema, recomputed payload hash, key의 run-kind/run-ID/idempotency identity를 순서대로 통과합니다. API는 producer object를 그대로 반환하지 않고 명시적 public allowlist envelope를 새로 만들며 issue message도 code에서 재구성합니다. private sentinel/path/token/traceback/provider-error value나 invalid object는 sanitized 422로 끝나며 raw fallback이 없습니다. 선택적 local journal panel은 root-owned non-writable ancestor와 euid-owned `0700` final directory, root-owned sticky parent 예외, realpath/inode/ctime swap 검사, early-bounded `opendir` 순회와 pre-sized read + 1-byte lookahead를 통과한 euid-owned `0600` canonical T9 `MISSED_EXPECTED|STALE_INCOMPLETE` record만 읽고, 경로가 없거나 unsafe하면 path/raw error 없이 unavailable 상태로 닫힙니다.
+13. Decision Board detail은 1 MiB exact-byte Storage reader, fatal UTF-8 및 duplicate-key-aware JSON parser, T1 Web schema, recomputed payload hash, key의 run-kind/run-ID/idempotency identity를 순서대로 통과합니다. API는 producer object를 그대로 반환하지 않고 명시적 public allowlist envelope를 새로 만들며 issue message도 code에서 재구성합니다. private sentinel/path/token/traceback/provider-error value나 invalid object는 sanitized 422로 끝나며 raw fallback이 없습니다. 선택적 local journal panel은 fixed-argv subprocess로 packaged stdlib-only T9 reader를 호출합니다. reader는 writer와 같은 descriptor-relative authority, bounded filename scan, per-record/output byte cap, fatal UTF-8, duplicate-key/canonical validation을 적용해 public `MISSED_EXPECTED|STALE_INCOMPLETE`만 반환합니다. Web은 1.5초 timeout과 output cap 뒤 결과를 다시 Zod로 검증하며 경로가 없거나 unsafe하면 path/raw error 없이 unavailable 상태로 닫힙니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
@@ -605,7 +623,7 @@ launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설�
 - 산출물 안정성
   - 리포트는 파일 락 + 원자적 쓰기로 기록
   - legacy 중복 파일명은 suffix(`-1`, `-2`, ...)로 충돌 회피하고 Supabase 업로드도 duplicate index를 순차 탐색합니다.
-  - Decision Board는 run/idempotency deterministic identity를 사용합니다. 같은 identity의 동일 bytes는 성공, 다른 bytes는 typed conflict이며 local/Storage 모두 기존 값을 덮어쓰지 않습니다. 새 Storage object 뒤 index 실패만 rollback-delete하고, 이미 존재하던 동일 object의 index repair 실패는 object를 삭제하지 않습니다.
+  - Decision Board는 run/idempotency deterministic identity를 사용합니다. 같은 identity의 동일 bytes는 성공, 다른 bytes는 typed conflict이며 local/Storage 모두 기존 값을 덮어쓰지 않습니다. Storage와 index 사이 원자 coordination이 없으므로 index 실패 뒤 object를 자동 삭제하지 않습니다. matching authoritative index만 성공으로 수렴하고 absent/mismatch/unavailable이면 object를 보존한 채 typed cleanup failure로 관측합니다.
   - GitHub Actions 실행에서는 Storage 업로드 또는 `report_index` upsert 실패 시 run을 실패 처리(fail-closed)
 - 운영 자동화
   - `cleanup.yml`이 보관기간 초과 리포트를 정리

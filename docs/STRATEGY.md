@@ -455,6 +455,12 @@ Decision Board V0 compiler는 기존 `scan`/`sell`/`entry` action을 바꾸는 r
 shadow 경계입니다. 모델, 네트워크, 파일, clock, broker, 주문 API를 호출하지 않으며
 후보나 보유 universe를 넓히지 않습니다.
 
+첫 구현 범위는 US SWING ENTRY/HOLDING뿐입니다. KR과 LONG_TERM 판단, horizon mandate,
+portfolio optimizer는 이 truth table을 재사용해 추측하지 않고 별도 gate가 생길 때까지
+범위 밖입니다. 현재 기본 CLI에는 production preparation/research/claim-verifier adapter가
+연결되지 않아 `CONFIG_UNAVAILABLE`로 닫히며, fixture/recorded 검증 통과를 실제 shadow
+운영으로 오해해서는 안 됩니다. 모든 action은 조언이고 매수·매도는 사용자가 직접 합니다.
+
 ENTRY 우선순위는 item/identity 미승인 `REVIEW`, non-candidate signal omit, 필수
 mandate/signal/price/exposure gap `REVIEW`, deterministic exposure fail `AVOID`, research
 gap/conflict `REVIEW`, action-eligible `MATERIAL_ADVERSE` `AVOID`, 나머지 `BUY`입니다.
@@ -493,6 +499,22 @@ equal subclass나 post-factory mutation은 selection, output order, canonical ha
 - raw/mutated/wrong-lane authority, compiler payload identity mismatch, unexpected adapter error, persistence invariant failure는 `FAILED`, exit 2이며 invalid artifact를 쓰거나 upload하지 않습니다.
 - HOLDING research cap은 enrichment 호출만 최대 5개로 제한합니다. full universe는 compile하며 hard `SELL`은 timeout과 `NOT_SELECTED_CAP`보다 우선합니다.
 - local canonical write가 항상 upload보다 먼저입니다. optional upload 실패는 local `PUBLISHED|BLOCKED`를 degraded 상태로 보존하고, required upload 실패는 retained local path를 가진 typed `FAILED`입니다.
+
+### Decision Board V0 shadow graduation policy
+
+- 첫 측정 전에 policy/researcher/verifier version, planned ENTRY/HOLDING slot, diff reason,
+  provider/coverage/freshness threshold를 local gate manifest로 승인합니다.
+- 최소 20 US 거래 session 동안 모든 planned slot과 기존 경로의 후보/action 차이를
+  `EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED`로 분류합니다.
+- `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch, eligible holding
+  누락, queue 밖 hard-SELL 누락은 각각 0건이어야 합니다.
+- 관찰 뒤 threshold를 바꾸거나 서로 다른 policy version을 한 통계로 합치지 않습니다.
+  변경 시 새 gate version과 새 20-session 기간이 필요합니다.
+- gate 통과는 다음 cutover 검토 자격일 뿐 schedule/load, notification, workflow,
+  credential scope를 자동 변경하지 않습니다. 주문 실행은 영구적으로 사용자 수동입니다.
+
+측정 절차와 산식은 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md),
+public interface는 [Decision Board V0 reference](decision-board.md)를 기준으로 합니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 

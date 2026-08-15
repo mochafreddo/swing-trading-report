@@ -36,6 +36,8 @@
 | 장애 증상별 대응 | [troubleshooting.md](troubleshooting.md) |
 | 아키텍처와 데이터 흐름 | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 전략 신호/리스크 로직 | [STRATEGY.md](STRATEGY.md) |
+| Decision Board V0 계약/CLI | [decision-board.md](decision-board.md) |
+| Decision Board 20-session 평가 | [decision-board-shadow-evaluation.md](decision-board-shadow-evaluation.md) |
 | 기여/검증 규칙 | [contributing.md](contributing.md) |
 
 ## 빠른 운영 시작점
@@ -51,13 +53,18 @@ Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode
 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 이 경로는 기존
 workflow gating이나 외부 알림에 연결되지 않습니다.
 
+schema/compiler/runner/UI 테스트가 green이어도 production adapter가 연결됐다는 의미는
+아닙니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다.
+실제 측정은 승인된 adapter 연결 뒤 [shadow evaluation 절차](decision-board-shadow-evaluation.md)의
+frozen manifest와 최소 20 US 거래 session을 사용합니다.
+
 ```bash
 uv run python -m sab decision-board \
   --run-kind entry \
   --run-id entry-shadow-001 \
-  --idempotency-key sha256:<64-lowercase-hex> \
+  --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --created-at 2026-08-09T12:00:00Z \
-  --sealed-input-hash sha256:<64-lowercase-hex>
+  --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ```
 
 ### Decision Board local shadow RunJournal
@@ -129,9 +136,9 @@ scripts/launchd/sab-decision-board-shadow-wrapper.sh \
   -- uv run python -m sab decision-board \
     --run-kind ENTRY \
     --run-id entry-shadow-example \
-    --idempotency-key sha256:<64-lowercase-hex> \
+    --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --created-at 2026-08-11T01:00:00Z \
-    --sealed-input-hash sha256:<64-lowercase-hex>
+    --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ```
 
 status는 bounded, 최신 expected slot 우선 순서의 sanitized JSON만 출력합니다.
@@ -173,6 +180,14 @@ journal JSON을 수동 편집하거나 stale/missed 기록을 삭제해 재사�
 새 `expected_at + run_id` identity로 실행할 수 있습니다. 기능 rollback은 wrapper와 journal
 CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board report artifact를 보존하는
 것입니다. 이 shadow lane은 외부 전송이나 주문 실행을 소유하지 않습니다.
+
+### Shadow 졸업 판정
+
+RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot,
+기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고
+`UNEXPLAINED=0`, privacy/order/notification/replay/universe hard gate를 모두 통과해야 합니다.
+통과 결과는 별도 cutover 검토 자격일 뿐이며 이 runbook의 disabled template을 load하거나
+schedule을 추가하는 권한이 아닙니다. 주문은 gate 이후에도 사용자가 직접 실행합니다.
 
 ## 필수 품질 게이트
 

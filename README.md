@@ -2,7 +2,7 @@
 
 상태: Accepted (프로젝트 진입점)
 
-KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. `backtest`는 로컬 historical OHLCV 연구 산출물입니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
+KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. `backtest`는 로컬 historical OHLCV 연구 산출물입니다. US SWING Decision Board V0의 schema/compiler/runner/storage/UI는 advice-only shadow로 구현됐지만 production research adapter와 schedule은 아직 연결되지 않았습니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
 
 ## 문서 상태
 
@@ -90,12 +90,15 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 | 기존 runbook 링크나 운영 시작점은 | [docs/runbook.md](docs/runbook.md) |
 | 장애가 나면 어디서부터 보는가 | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | 전략 신호와 리스크 규칙은 | [docs/STRATEGY.md](docs/STRATEGY.md) |
+| Decision Board V0 계약과 현재 상태는 | [docs/decision-board.md](docs/decision-board.md) |
+| Decision Board shadow를 어떻게 평가하는가 | [docs/decision-board-shadow-evaluation.md](docs/decision-board-shadow-evaluation.md) |
 | 기여/커밋/검증 규칙은 | [docs/contributing.md](docs/contributing.md) |
 | 보안 신고와 시크릿 사고 대응은 | [SECURITY.md](SECURITY.md) |
 
 ## 주요 산출물
 
 - 로컬 리포트: `reports/YYYY-MM-DD(-n).{buy|sell|entry|backtest|ai-brief|ai-brief-skip|sell-ai-brief}.json`
+- Decision Board local report: `reports/YYYY-MM-DD.decision-board.{entry|holding}.<run_id>.<64hex>.json`
 - Supabase Storage key: `YYYY/MM/YYYY-MM-DD(-n).{buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief}.json`
 - 보유 목록 source of truth: Supabase `holdings`
 - 리포트 목록 source of truth: Supabase `report_index`

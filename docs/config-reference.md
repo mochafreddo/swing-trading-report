@@ -79,6 +79,13 @@
 | `SAB_RUN_DISPATCH_LOCK_TTL_SECONDS` | web `/api/run` duplicate lock | 기본 30 |
 | `REPORT_RETENTION_DAYS` | web display / cleanup workflow | 기본 30 |
 | `REPORT_SEARCH_WINDOW` | web report ticker search | 기본 100, 코드에서 min/max 적용 |
+| `DECISION_BOARD_JOURNAL_HOST_DIR` | Docker Compose Web | Optional local RunJournal host path. Read-only bind; actual path is private and records stay owner-only. |
+| `DECISION_BOARD_JOURNAL_LIMIT`, `DECISION_BOARD_JOURNAL_SCAN_LIMIT` | Web journal helper | Bounded public result and early directory scan limits. Defaults 20/200. |
+| `DECISION_BOARD_JOURNAL_MAX_RECORD_BYTES`, `DECISION_BOARD_JOURNAL_MAX_OUTPUT_BYTES` | Web journal helper | Record/output byte limits. Defaults 65536/262144. |
+| `DECISION_BOARD_JOURNAL_TIMEOUT_MS` | Web journal bridge | Fixed-argv stdlib helper timeout, default 1500ms. |
+| `DECISION_BOARD_CLAIM_LIVE_PROVIDER_COMMAND`, `DECISION_BOARD_CLAIM_LIVE_MODEL` | opt-in local claim comparison | Explicit local-only provider command/model. Forbidden in CI and not a production adapter setting. |
+| `DECISION_BOARD_CLAIM_LIVE_TIMEOUT_SECONDS` | opt-in local claim comparison | Whole provider process-group deadline, finite `0 < value <= 300`, default 15. |
+| `DECISION_BOARD_CLAIM_LIVE_SAFE_ENV` | opt-in local claim comparison | Default-deny environment allowlist. Secret/key/token/auth/Toss/Supabase names are rejected. |
 | `TOSS_INVEST_CLIENT_ID`, `TOSS_INVEST_CLIENT_SECRET` | web `/api/holdings/toss-sync` | Toss Open API OAuth client credentials. 서버 전용이며 커밋 금지 |
 | `TOSS_INVEST_ACCOUNT` | web `/api/holdings/toss-sync` | `X-Tossinvest-Account`에 쓰는 accountSeq. 실제 계좌 식별자는 커밋 금지 |
 | `TOSS_INVEST_BASE_URL` | web `/api/holdings/toss-sync` | 기본 `https://openapi.tossinvest.com` |

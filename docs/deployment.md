@@ -148,11 +148,16 @@ order by tablename;
 
 ### Decision Board report index rollout
 
-적용 순서는 `report_index migration -> Python Decision Board producer/upload adapter -> Web server data consumer`입니다. 현재 runner/scheduler와 UI control은 후속 작업이므로 이 변경만으로 자동 실행하거나 주문을 만들지 않습니다.
+적용 순서는 `report_index migration -> Python Decision Board producer/upload adapter -> Web server data consumer`입니다. runner, local scheduler seam, RunJournal과 UI는 구현됐지만 production preparation/research/claim-verifier adapter와 실제 launchd schedule은 미연결입니다. 따라서 이 배포만으로 자동 실행하거나 주문을 만들지 않습니다.
 
 Migration 뒤에는 `report_index`의 RLS/FORCE RLS가 모두 켜져 있고 `anon`/`authenticated` table privilege가 없으며 `service_role`의 필요한 CRUD grant가 있는지 확인합니다. 또한 `run_kind=ENTRY|HOLDING` 각각에서 `decision_created_at DESC, run_id DESC, report_key DESC` latest query를 확인합니다. Web을 migration보다 먼저 배포하면 새 nullable column select가 실패하므로 허용하지 않습니다.
 
-애플리케이션 rollback은 producer를 먼저 중지한 뒤 Web consumer와 Python adapter를 되돌립니다. Additive nullable column/index/migration은 legacy row를 바꾸지 않으므로 그대로 두는 것이 기본 rollback입니다. 이미 적용한 migration의 column/index 삭제나 Decision Board object/index row 삭제는 데이터 파괴 결정이므로 자동 수행하지 않고 forward-fix를 우선합니다. 새 object가 생성됐지만 index 기록이 실패한 호출만 adapter가 해당 object를 삭제하며, pre-existing equal object는 절대 rollback-delete하지 않습니다.
+애플리케이션 rollback은 producer를 먼저 중지한 뒤 Web consumer와 Python adapter를 되돌립니다. Additive nullable column/index/migration은 legacy row를 바꾸지 않으므로 그대로 두는 것이 기본 rollback입니다. 이미 적용한 migration의 column/index 삭제나 Decision Board object/index row 삭제는 데이터 파괴 결정이므로 자동 수행하지 않고 forward-fix를 우선합니다. Storage와 index 사이 원자 coordination이 없으므로 index 실패 뒤 object를 자동 삭제하지 않습니다. matching authoritative index면 성공 수렴하고, absent/mismatch/unavailable이면 object를 보존한 채 typed cleanup failure로 관측합니다.
+
+20-session shadow gate 통과도 배포 트리거가 아닙니다. schedule/load, notification owner,
+credential scope는 별도 수동 승인과 rollback rehearsal 뒤에만 바뀔 수 있으며 Toss 주문
+capability는 영구적으로 추가하지 않습니다. [평가 절차](decision-board-shadow-evaluation.md)를
+참고하세요.
 
 For the 2026-06 holdings `entry_pattern` runtime migration, the DB smoke checks
 the column, enabled non-null replace-all writes, omitted-key preserve behavior,
