@@ -189,6 +189,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Decision Board test Python dependencies
+        working-directory: .
+        run: uv sync --locked --no-dev --inexact
+
       - name: Lint
         run: pnpm run lint
 

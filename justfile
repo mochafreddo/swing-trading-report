@@ -145,7 +145,10 @@ web-format-check:
 web-typecheck:
   {{web_tool_path}} pnpm --dir web run typecheck
 
-web-test:
+web-python-test-setup:
+  uv sync --locked --no-dev --inexact
+
+web-test: web-python-test-setup
   {{web_tool_path}} pnpm --dir web run test:coverage
 
 deadcode-web:

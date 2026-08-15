@@ -17,6 +17,7 @@ def test_decision_board_playwright_is_pinned_fixture_only_and_runs_in_ci() -> No
     )
     steps = workflow["jobs"]["web"]["steps"]
     commands = "\n".join(str(step.get("run", "")) for step in steps)
+    step_names = [str(step.get("name", "")) for step in steps]
 
     assert package["devDependencies"]["@playwright/test"] == "1.61.1"
     assert package["scripts"]["playwright:install"] == "playwright install chromium"
@@ -27,3 +28,11 @@ def test_decision_board_playwright_is_pinned_fixture_only_and_runs_in_ci() -> No
     assert "playwright:install" in commands
     assert "test:e2e:decision-board" in commands
     assert "secrets." not in commands
+    python_setup = steps[
+        step_names.index("Install Decision Board test Python dependencies")
+    ]
+    assert python_setup["working-directory"] == "."
+    assert python_setup["run"] == "uv sync --locked --no-dev --inexact"
+    assert step_names.index(
+        "Install Decision Board test Python dependencies"
+    ) < step_names.index("Unit tests (coverage gate)")

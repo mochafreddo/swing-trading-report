@@ -48,6 +48,9 @@ def test_just_web_recipes_force_mise_pinned_node_runtime() -> None:
         block = _just_recipe_block(justfile, recipe_name)
         assert "{{web_tool_path}} pnpm --dir web" in block
 
+    assert "web-python-test-setup:\n  uv sync --locked --no-dev --inexact" in justfile
+    assert "web-test: web-python-test-setup" in justfile
+
 
 def test_python_audit_uses_project_pinned_pip_audit() -> None:
     with (REPO_ROOT / "pyproject.toml").open("rb") as file:

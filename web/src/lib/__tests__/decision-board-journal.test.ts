@@ -1,13 +1,6 @@
-import {
-  accessSync,
-  chmodSync,
-  constants,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,23 +9,7 @@ import { readDecisionBoardJournalStatus } from "@/lib/decision-board-journal.ser
 
 const roots: string[] = [];
 const repositoryRoot = resolve(process.cwd(), "..");
-
-function resolvePythonExecutable(): string {
-  const name = process.platform === "win32" ? "python.exe" : "python";
-  for (const directory of process.env.PATH?.split(delimiter) ?? []) {
-    if (!directory) continue;
-    const candidate = resolve(directory, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error("python executable is unavailable on PATH");
-}
-
-const pythonExecutable = resolvePythonExecutable();
+const pythonExecutable = resolve(repositoryRoot, ".venv/bin/python");
 const journalHelper = resolve(
   repositoryRoot,
   "sab/decision_board/run_journal_public.py",
