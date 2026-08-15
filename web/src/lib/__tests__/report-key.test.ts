@@ -30,6 +30,17 @@ describe("parseReportStorageKey", () => {
     expect(parseReportStorageKey("2026/03/2026-02-14.buy.json")).toBeNull();
     expect(parseReportStorageKey("2025/02/2026-02-14.sell.json")).toBeNull();
   });
+
+  it("rejects whitespace-wrapped Decision Board keys but preserves legacy trimming", () => {
+    const decisionKey =
+      "2026/08/2026-08-06.decision-board.entry.run-1." +
+      `${"a".repeat(64)}.json`;
+
+    expect(parseReportStorageKey(` ${decisionKey} `)).toBeNull();
+    expect(parseReportStorageKey(" 2026/02/2026-02-14.buy.json ")?.key).toBe(
+      "2026/02/2026-02-14.buy.json",
+    );
+  });
 });
 
 describe("filterAndSortReportKeys", () => {

@@ -9,15 +9,19 @@ import {
   REPORT_SEARCH_CACHE_TTL_MS,
 } from "@/lib/reports-cache-config";
 import { createMemoryTtlLruCache } from "@/lib/memory-ttl-lru-cache";
+import { runJournalV0Schema } from "@/lib/decision-board-journal-schema";
 import type {
+  DecisionBoardJournalStatus,
   ReportListItem,
   ReportsListResponse,
   ReportSearchWarning,
+  DecisionBoardRunKind,
 } from "@/lib/types";
 
 import {
   asRecord,
   asRecordArray,
+  parseDecisionBoardRunKind,
   parseReportType,
   readApiError,
 } from "./helpers";
@@ -38,6 +42,7 @@ type ReportDetailResponse = {
 
 interface ReportsListRequestPathOptions {
   type: ReportsFilterType;
+  runKind?: DecisionBoardRunKind;
   limit: number;
   query: string;
   refresh?: boolean;
@@ -47,6 +52,54 @@ interface ReportDetailRequestPathOptions {
   key: string;
   bucketId?: string | null;
   refresh?: boolean;
+}
+
+export function parseDecisionBoardJournalStatusPayload(
+  value: unknown,
+): DecisionBoardJournalStatus | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.state === "UNAVAILABLE") {
+    if (
+      Object.keys(record).some(
+        (key) => !["state", "reason", "records"].includes(key),
+      ) ||
+      (record.reason !== "NOT_CONFIGURED" &&
+        record.reason !== "UNSAFE_OR_INVALID") ||
+      !Array.isArray(record.records) ||
+      record.records.length !== 0
+    ) {
+      return null;
+    }
+    return {
+      state: "UNAVAILABLE",
+      reason: record.reason,
+      records: [],
+    };
+  }
+  if (
+    record.state !== "AVAILABLE" ||
+    Object.keys(record).some((key) => !["state", "records"].includes(key)) ||
+    !Array.isArray(record.records) ||
+    record.records.length > 100
+  ) {
+    return null;
+  }
+  const records = [];
+  for (const candidate of record.records) {
+    const parsed = runJournalV0Schema.safeParse(candidate);
+    if (
+      !parsed.success ||
+      (parsed.data.status !== "MISSED_EXPECTED" &&
+        parsed.data.status !== "STALE_INCOMPLETE")
+    ) {
+      return null;
+    }
+    records.push(parsed.data);
+  }
+  return { state: "AVAILABLE", records };
 }
 
 const reportListCache = createMemoryTtlLruCache<ReportsListResponse>({
@@ -76,6 +129,9 @@ export function buildReportsListRequestPath(
     type: options.type,
     limit: String(options.limit),
   });
+  if (options.type === "decision-board" && options.runKind) {
+    params.set("runKind", options.runKind);
+  }
   if (options.query) {
     params.set("q", options.query);
   }
@@ -100,16 +156,22 @@ export function buildReportDetailRequestPath(
 
 interface ReportsStateQueryInput {
   reportType: ReportsFilterType;
+  runKind: DecisionBoardRunKind | null;
   appliedQuery: string;
   selectedKey: string | null;
   selectedBucketId: string | null;
   showRaw: boolean;
 }
 
-function buildReportsStateQueryString(input: ReportsStateQueryInput): string {
+export function buildReportsStateQueryString(
+  input: ReportsStateQueryInput,
+): string {
   const params = new URLSearchParams();
   if (input.reportType !== "all") {
     params.set("type", input.reportType);
+  }
+  if (input.reportType === "decision-board" && input.runKind) {
+    params.set("runKind", input.runKind);
   }
   if (input.appliedQuery) {
     params.set("q", input.appliedQuery);
@@ -128,10 +190,11 @@ function buildReportsStateQueryString(input: ReportsStateQueryInput): string {
 
 async function fetchReportsListCached(
   reportType: ReportsFilterType,
+  runKind: DecisionBoardRunKind | null,
   appliedQuery: string,
   refresh = false,
 ): Promise<ReportsListResponse> {
-  const cacheKey = buildListCacheKey(reportType, appliedQuery);
+  const cacheKey = `${buildListCacheKey(reportType, appliedQuery)}&runKind=${runKind ?? ""}`;
 
   return reportListCache.getOrLoad({
     key: cacheKey,
@@ -140,6 +203,7 @@ async function fetchReportsListCached(
     load: async () => {
       const path = buildReportsListRequestPath({
         type: reportType,
+        ...(runKind ? { runKind } : {}),
         limit: PAGE_LIMIT,
         query: appliedQuery,
         refresh,
@@ -190,10 +254,28 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const initialUrlKey = (searchParams.get("key") ?? "").trim() || null;
+  const initialUrlReportType = parseReportType(searchParams.get("type"));
+  const initialUrlRunKind =
+    initialUrlReportType === "decision-board"
+      ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ?? "ENTRY")
+      : null;
+  const initialUrlKey = resolveSelectedKeyFromUrl({
+    previousSelectedKey: null,
+    nextKeyRaw: searchParams.get("key"),
+    reportType: initialUrlReportType,
+    runKind: initialUrlRunKind,
+  });
   const initialUrlBucketId = (searchParams.get("bucket") ?? "").trim() || null;
   const [reportType, setReportTypeState] = useState<ReportsFilterType>(
-    () => initialState?.reportType ?? parseReportType(searchParams.get("type")),
+    () => initialState?.reportType ?? initialUrlReportType,
+  );
+  const [runKind, setRunKindState] = useState<DecisionBoardRunKind | null>(
+    () => {
+      if (initialState) {
+        return initialState.runKind;
+      }
+      return initialUrlRunKind;
+    },
   );
   const [query, setQueryState] = useState(
     () => initialState?.query ?? searchParams.get("q") ?? "",
@@ -218,7 +300,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     () => initialState?.warnings ?? [],
   );
   const [selectedKey, setSelectedKeyState] = useState<string | null>(() =>
-    initialState ? initialState.selectedKey : searchParams.get("key"),
+    initialState ? initialState.selectedKey : initialUrlKey,
   );
   const [selectedBucketId, setSelectedBucketIdState] = useState<string | null>(
     () => (initialState ? initialState.selectedBucketId : initialUrlBucketId),
@@ -238,6 +320,15 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const [showRaw, setShowRawState] = useState(
     () => initialState?.showRaw ?? searchParams.get("raw") === "1",
   );
+  const [journalStatus, setJournalStatus] =
+    useState<DecisionBoardJournalStatus>(
+      () =>
+        initialState?.journalStatus ?? {
+          state: "UNAVAILABLE",
+          reason: "NOT_CONFIGURED",
+          records: [],
+        },
+    );
   const [refreshToken, setRefreshToken] = useState(0);
   const currentUrlKeyRef = useRef(initialUrlKey);
   const currentUrlBucketIdRef = useRef(initialUrlBucketId);
@@ -246,6 +337,11 @@ export function useReportsState(initialState?: ReportsInitialState) {
   const pendingUrlSync = useRef(
     Boolean(initialState) &&
       (initialState?.reportType !== parseReportType(searchParams.get("type")) ||
+        initialState?.runKind !==
+          (parseReportType(searchParams.get("type")) === "decision-board"
+            ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ??
+              "ENTRY")
+            : null) ||
         initialState?.appliedQuery !== (searchParams.get("q") ?? "").trim() ||
         initialState?.selectedKey !== initialUrlKey ||
         initialState?.selectedBucketId !== initialUrlBucketId ||
@@ -255,6 +351,9 @@ export function useReportsState(initialState?: ReportsInitialState) {
     Boolean(initialState?.selectedKey && !searchParams.get("key")),
   );
   const skipInitialListFetch = useRef(Boolean(initialState));
+  const skipInitialJournalFetch = useRef(
+    Boolean(initialState && initialState.reportType === "decision-board"),
+  );
   const consumedListRefreshToken = useRef(0);
   const consumedDetailRefreshToken = useRef(0);
   const skipInitialDetailFetchKey = useRef<string | null>(
@@ -276,18 +375,24 @@ export function useReportsState(initialState?: ReportsInitialState) {
     () =>
       buildReportsStateQueryString({
         reportType,
+        runKind,
         appliedQuery,
         selectedKey,
         selectedBucketId,
         showRaw,
       }),
-    [appliedQuery, reportType, selectedBucketId, selectedKey, showRaw],
+    [appliedQuery, reportType, runKind, selectedBucketId, selectedKey, showRaw],
   );
 
   const currentQueryString = useMemo(
     () =>
       buildReportsStateQueryString({
         reportType: parseReportType(searchParams.get("type")),
+        runKind:
+          parseReportType(searchParams.get("type")) === "decision-board"
+            ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ??
+              "ENTRY")
+            : null,
         appliedQuery: (searchParams.get("q") ?? "").trim(),
         selectedKey: searchParams.get("key"),
         selectedBucketId: (searchParams.get("bucket") ?? "").trim() || null,
@@ -299,13 +404,22 @@ export function useReportsState(initialState?: ReportsInitialState) {
   /* eslint-disable react-hooks/set-state-in-effect -- URL search params are an external source; this reconciles browser navigation with optimistic local report state. */
   useEffect(() => {
     const nextType = parseReportType(searchParams.get("type"));
+    const nextRunKind =
+      nextType === "decision-board"
+        ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ?? "ENTRY")
+        : null;
     const nextQuery = searchParams.get("q") ?? "";
     const nextAppliedQuery = nextQuery.trim();
     const nextKeyRaw = searchParams.get("key");
     const nextBucketId = (searchParams.get("bucket") ?? "").trim() || null;
     const nextShowRaw = searchParams.get("raw") === "1";
     const preserveWhenKeyMissing = preserveSelectionWhenUrlKeyMissing.current;
-    const nextKey = nextKeyRaw?.trim() || null;
+    const nextKey = resolveSelectedKeyFromUrl({
+      previousSelectedKey: null,
+      nextKeyRaw,
+      reportType: nextType,
+      runKind: nextRunKind,
+    });
     currentUrlKeyRef.current = nextKey;
     currentUrlBucketIdRef.current = nextBucketId;
     const hasLoadedEmptyResultSet = total === 0 && items.length === 0;
@@ -320,6 +434,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     pendingUrlSync.current = preserveWhenKeyMissing || hasInvalidUrlKey;
 
     setReportTypeState((prev) => (prev === nextType ? prev : nextType));
+    setRunKindState((prev) => (prev === nextRunKind ? prev : nextRunKind));
     setQueryState((prev) => (prev === nextQuery ? prev : nextQuery));
     setAppliedQueryState((prev) =>
       prev === nextAppliedQuery ? prev : nextAppliedQuery,
@@ -331,6 +446,8 @@ export function useReportsState(initialState?: ReportsInitialState) {
       return resolveSelectedKeyFromUrl({
         previousSelectedKey: prev,
         nextKeyRaw,
+        reportType: nextType,
+        runKind: nextRunKind,
         availableKeys: items.map((item) => item.key),
         preserveSelectionWhenKeyMissing: preserveWhenKeyMissing,
       });
@@ -403,11 +520,16 @@ export function useReportsState(initialState?: ReportsInitialState) {
     const load = async () => {
       setLoadingList(true);
       setError(null);
+      setItems([]);
+      setTotal(null);
+      setSearched(0);
+      setTruncated(false);
       setWarnings([]);
 
       try {
         const typed = await fetchReportsListCached(
           reportType,
+          runKind,
           appliedQuery,
           forceRefresh,
         );
@@ -493,7 +615,51 @@ export function useReportsState(initialState?: ReportsInitialState) {
     return () => {
       cancelled = true;
     };
-  }, [appliedQuery, reportType, refreshToken]);
+  }, [appliedQuery, reportType, refreshToken, runKind]);
+
+  useEffect(() => {
+    if (reportType !== "decision-board") {
+      return;
+    }
+    if (skipInitialJournalFetch.current) {
+      skipInitialJournalFetch.current = false;
+      return;
+    }
+    let cancelled = false;
+    const loadJournal = async () => {
+      try {
+        const response = await fetch("/api/reports/decision-board-journal", {
+          cache: "no-store",
+        });
+        const payload = parseDecisionBoardJournalStatusPayload(
+          await response.json(),
+        );
+        if (!cancelled) {
+          setJournalStatus(
+            response.ok && payload
+              ? payload
+              : {
+                  state: "UNAVAILABLE",
+                  reason: "UNSAFE_OR_INVALID",
+                  records: [],
+                },
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setJournalStatus({
+            state: "UNAVAILABLE",
+            reason: "UNSAFE_OR_INVALID",
+            records: [],
+          });
+        }
+      }
+    };
+    void loadJournal();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshToken, reportType]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -552,7 +718,16 @@ export function useReportsState(initialState?: ReportsInitialState) {
     };
   }, [refreshToken, selectedBucketId, selectedKey]);
 
+  const selectedKeyInCurrentScope =
+    selectedKey !== null &&
+    resolveSelectedKeyFromUrl({
+      previousSelectedKey: null,
+      nextKeyRaw: selectedKey,
+      reportType,
+      runKind,
+    }) === selectedKey;
   const selectedDetail =
+    selectedKeyInCurrentScope &&
     selectedKey &&
     detailKey === selectedKey &&
     (selectedBucketId === null || detailBucketId === selectedBucketId)
@@ -595,7 +770,31 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
   const setReportType = useCallback((value: ReportsFilterType) => {
     pendingUrlSync.current = true;
+    currentUrlKeyRef.current = null;
+    currentUrlBucketIdRef.current = null;
+    selectedKeyRef.current = null;
+    selectedBucketIdRef.current = null;
     setReportTypeState(value);
+    setRunKindState(value === "decision-board" ? "ENTRY" : null);
+    setSelectedKeyState(null);
+    setSelectedBucketIdState(null);
+    setDetail(null);
+    setDetailKey(null);
+    setDetailBucketId(null);
+  }, []);
+
+  const setRunKind = useCallback((value: DecisionBoardRunKind) => {
+    pendingUrlSync.current = true;
+    currentUrlKeyRef.current = null;
+    currentUrlBucketIdRef.current = null;
+    selectedKeyRef.current = null;
+    selectedBucketIdRef.current = null;
+    setRunKindState(value);
+    setSelectedKeyState(null);
+    setSelectedBucketIdState(null);
+    setDetail(null);
+    setDetailKey(null);
+    setDetailBucketId(null);
   }, []);
 
   const setQuery = useCallback((value: string) => {
@@ -610,6 +809,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
 
   return {
     reportType,
+    runKind,
     query,
     appliedQuery,
     items,
@@ -631,7 +831,9 @@ export function useReportsState(initialState?: ReportsInitialState) {
     entryRows,
     aiBriefRows,
     rawDetailJson,
+    journalStatus,
     setReportType,
+    setRunKind,
     setQuery,
     setSelectedKey,
     refreshReports,

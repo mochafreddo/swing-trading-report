@@ -1,3 +1,5 @@
+import type { RunJournalV0 } from "@/lib/decision-board-journal-schema";
+
 export type Provider = "kis" | "pykrx";
 export type ScanUniverse = "KR" | "US" | "both";
 
@@ -8,9 +10,13 @@ export const REPORT_TYPES = [
   "ai-brief",
   "ai-brief-skip",
   "sell-ai-brief",
+  "decision-board",
 ] as const;
-export const REPORT_TYPE_PATTERN = REPORT_TYPES.join("|");
+export const REPORT_TYPE_PATTERN = REPORT_TYPES.filter(
+  (type) => type !== "decision-board",
+).join("|");
 export type ReportType = (typeof REPORT_TYPES)[number];
+export type DecisionBoardRunKind = "ENTRY" | "HOLDING";
 
 export function isReportType(value: unknown): value is ReportType {
   return (
@@ -25,9 +31,17 @@ export interface ReportListItem {
   type: ReportType;
   reportDate: string;
   duplicateIndex: number;
+  runKind?: DecisionBoardRunKind;
+  runId?: string;
   generatedAt?: string;
   summary?: Record<string, unknown>;
   tickers?: string[];
+}
+
+export interface DecisionBoardJournalStatus {
+  state: "AVAILABLE" | "UNAVAILABLE";
+  reason?: "NOT_CONFIGURED" | "UNSAFE_OR_INVALID";
+  records: RunJournalV0[];
 }
 
 export interface ReportSearchWarning {
@@ -46,7 +60,7 @@ export interface ReportsListResponse {
 
 export type HoldingBrokerState = "confirmed" | "not_seen_in_toss";
 
-export interface HoldingBrokerStateSnapshot {
+interface HoldingBrokerStateSnapshot {
   broker_state?: HoldingBrokerState | null;
   broker_missing_first_seen_date?: string | null;
   broker_missing_last_seen_date?: string | null;

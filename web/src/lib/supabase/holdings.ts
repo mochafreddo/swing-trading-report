@@ -54,6 +54,15 @@ export interface ReplaceAllHoldingsResult {
   unchangedCount: number;
 }
 
+export interface BrokerHoldingsMutationResult extends ReplaceAllHoldingsResult {
+  postStateDigest: string;
+}
+
+export interface BrokerHoldingsState {
+  holdings: HoldingRecord[];
+  holdingsDigest: string;
+}
+
 export interface ReplaceAllHoldingsOptions {
   expectedCurrentHoldings?: readonly HoldingRecord[];
 }
@@ -71,7 +80,10 @@ export interface ApplyScheduledTossQuarantineResult {
   updatedCount: number;
   quarantinedCount: number;
   unchangedCount: number;
+  postStateDigest: string;
 }
+
+const BROKER_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export async function fetchHoldingsPage(
   options: FetchHoldingsPageOptions = {},
@@ -287,6 +299,7 @@ function parseScheduledTossQuarantineResult(
         updated_count?: unknown;
         quarantined_count?: unknown;
         unchanged_count?: unknown;
+        post_state_digest?: unknown;
       }
     | undefined;
   if (!raw || typeof raw !== "object") {
@@ -312,12 +325,18 @@ function parseScheduledTossQuarantineResult(
     Number.isFinite(raw.unchanged_count)
       ? raw.unchanged_count
       : null;
+  const postStateDigest =
+    typeof raw.post_state_digest === "string" &&
+    BROKER_DIGEST_PATTERN.test(raw.post_state_digest)
+      ? raw.post_state_digest
+      : null;
 
   if (
     insertedCount === null ||
     updatedCount === null ||
     quarantinedCount === null ||
-    unchangedCount === null
+    unchangedCount === null ||
+    postStateDigest === null
   ) {
     return null;
   }
@@ -327,6 +346,118 @@ function parseScheduledTossQuarantineResult(
     updatedCount,
     quarantinedCount,
     unchangedCount,
+    postStateDigest,
+  };
+}
+
+function parseBrokerReplaceResult(
+  payload: unknown,
+): BrokerHoldingsMutationResult | null {
+  const counts = parseReplaceAllHoldingsResult(payload);
+  const raw = Array.isArray(payload) ? payload[0] : null;
+  const postStateDigest =
+    raw &&
+    typeof raw === "object" &&
+    "post_state_digest" in raw &&
+    typeof raw.post_state_digest === "string" &&
+    BROKER_DIGEST_PATTERN.test(raw.post_state_digest)
+      ? raw.post_state_digest
+      : null;
+  return counts && postStateDigest ? { ...counts, postStateDigest } : null;
+}
+
+function parseBrokerHoldingNumber(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function parseBrokerHoldingRow(value: unknown): HoldingRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const quantity = parseBrokerHoldingNumber(raw.quantity);
+  const entryPrice = parseBrokerHoldingNumber(raw.entry_price);
+  if (
+    typeof raw.ticker !== "string" ||
+    !raw.ticker ||
+    quantity === null ||
+    entryPrice === null ||
+    !Array.isArray(raw.tags) ||
+    !raw.tags.every((tag) => typeof tag === "string")
+  ) {
+    return null;
+  }
+  const nullableText = (field: string): string | null =>
+    typeof raw[field] === "string" ? raw[field] : null;
+  const nullableNumber = (field: string): number | null =>
+    raw[field] == null ? null : parseBrokerHoldingNumber(raw[field]);
+  const missingCount = raw.broker_missing_count;
+  if (
+    (raw.broker_state !== "confirmed" &&
+      raw.broker_state !== "not_seen_in_toss") ||
+    typeof missingCount !== "number" ||
+    !Number.isSafeInteger(missingCount) ||
+    missingCount < 0
+  ) {
+    return null;
+  }
+  const stopOverride = nullableNumber("stop_override");
+  const targetOverride = nullableNumber("target_override");
+  if (
+    (raw.stop_override != null && stopOverride === null) ||
+    (raw.target_override != null && targetOverride === null)
+  ) {
+    return null;
+  }
+  return {
+    ticker: raw.ticker,
+    quantity,
+    entry_price: entryPrice,
+    entry_currency: nullableText("entry_currency"),
+    entry_date: nullableText("entry_date"),
+    strategy: nullableText("strategy"),
+    entry_pattern: nullableText("entry_pattern"),
+    notes: nullableText("notes"),
+    tags: [...raw.tags],
+    stop_override: stopOverride,
+    target_override: targetOverride,
+    broker_state: raw.broker_state,
+    broker_missing_first_seen_date: nullableText(
+      "broker_missing_first_seen_date",
+    ),
+    broker_missing_last_seen_date: nullableText(
+      "broker_missing_last_seen_date",
+    ),
+    broker_missing_count: missingCount,
+    broker_missing_diff_hash: nullableText("broker_missing_diff_hash"),
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+function parseBrokerHoldingsState(
+  payload: unknown,
+): BrokerHoldingsState | null {
+  if (!Array.isArray(payload) || payload.length !== 1) return null;
+  const raw = payload[0];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (
+    !Array.isArray(record.holdings) ||
+    typeof record.holdings_digest !== "string" ||
+    !BROKER_DIGEST_PATTERN.test(record.holdings_digest)
+  ) {
+    return null;
+  }
+  const holdings = record.holdings.map(parseBrokerHoldingRow);
+  if (holdings.some((row) => row === null)) return null;
+  return {
+    holdings: holdings as HoldingRecord[],
+    holdingsDigest: record.holdings_digest,
   };
 }
 
@@ -384,11 +515,147 @@ export async function replaceAllHoldings(
   return parsed;
 }
 
+export async function replaceAllHoldingsAndCaptureBrokerDigest(
+  input: HoldingReplaceSnapshot[],
+  options: ReplaceAllHoldingsOptions = {},
+): Promise<BrokerHoldingsMutationResult> {
+  const env = getSupabaseEnv();
+  const body: {
+    p_holdings: Array<ReturnType<typeof serializeHoldingReplaceRow>>;
+    p_expected_holdings?: Array<ReturnType<typeof serializeExpectedHolding>>;
+  } = { p_holdings: input.map(serializeHoldingReplaceRow) };
+  if (options.expectedCurrentHoldings) {
+    body.p_expected_holdings = options.expectedCurrentHoldings.map(
+      serializeExpectedHolding,
+    );
+  }
+  const response = await fetchSupabase(
+    `${env.SUPABASE_URL}/rest/v1/rpc/apply_broker_holdings_replace_v0`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      body: JSON.stringify(body),
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    const parsedError = await parseErrorPayload(response);
+    const isSnapshotConflict =
+      parsedError.code === "40001" ||
+      parsedError.details === "holdings_snapshot_conflict";
+    throw new SupabaseApiError(
+      `Failed to replace broker holdings: ${parsedError.message}`,
+      isSnapshotConflict ? 409 : response.status,
+      {
+        upstreamCode: parsedError.code,
+        details: parsedError.details,
+        hint: parsedError.hint,
+      },
+    );
+  }
+  const parsed = parseBrokerReplaceResult(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      "Supabase did not return a valid apply_broker_holdings_replace_v0 result",
+      500,
+    );
+  }
+  return parsed;
+}
+
+export async function fetchBrokerHoldingsState(): Promise<BrokerHoldingsState> {
+  const env = getSupabaseEnv();
+  const response = await fetchSupabase(
+    `${env.SUPABASE_URL}/rest/v1/rpc/get_broker_holdings_state_v0`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      body: "{}",
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to fetch broker holdings state: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+  const parsed = parseBrokerHoldingsState(await response.json());
+  if (!parsed) {
+    throw new SupabaseApiError(
+      "get_broker_holdings_state_v0 returned an invalid result",
+      500,
+    );
+  }
+  return parsed;
+}
+
+export async function captureBrokerHoldingsDigest(
+  expectedPreStateDigest: string,
+): Promise<string> {
+  if (!BROKER_DIGEST_PATTERN.test(expectedPreStateDigest)) {
+    throw new TypeError("Expected broker holdings pre-state digest is invalid");
+  }
+  const env = getSupabaseEnv();
+  const response = await fetchSupabase(
+    `${env.SUPABASE_URL}/rest/v1/rpc/capture_broker_holdings_digest_v0`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      body: JSON.stringify({
+        p_expected_pre_state_digest: expectedPreStateDigest,
+      }),
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    const parsedError = await parseErrorPayload(response);
+    const isConflict =
+      parsedError.code === "40001" ||
+      parsedError.details === "broker_holdings_pre_state_conflict";
+    throw new SupabaseApiError(
+      `Failed to capture broker holdings digest: ${parsedError.message}`,
+      isConflict ? 409 : response.status,
+      {
+        upstreamCode: parsedError.code,
+        details: parsedError.details,
+        hint: parsedError.hint,
+      },
+    );
+  }
+  const payload = (await response.json()) as unknown;
+  const raw =
+    Array.isArray(payload) && payload.length === 1 ? payload[0] : null;
+  const digest =
+    raw &&
+    typeof raw === "object" &&
+    "holdings_digest" in raw &&
+    typeof raw.holdings_digest === "string"
+      ? raw.holdings_digest
+      : "";
+  if (!BROKER_DIGEST_PATTERN.test(digest)) {
+    throw new SupabaseApiError(
+      "capture_broker_holdings_digest_v0 returned an invalid result",
+      500,
+    );
+  }
+  return digest;
+}
+
 export async function applyScheduledTossQuarantine(
   input: ApplyScheduledTossQuarantineInput,
 ): Promise<ApplyScheduledTossQuarantineResult> {
   const env = getSupabaseEnv();
-  const url = `${env.SUPABASE_URL}/rest/v1/rpc/apply_scheduled_toss_quarantine_v1`;
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/apply_broker_holdings_quarantine_v0`;
   const response = await fetchSupabase(url, {
     method: "POST",
     headers: buildAuthHeaders({
@@ -426,7 +693,7 @@ export async function applyScheduledTossQuarantine(
   const parsed = parseScheduledTossQuarantineResult(await response.json());
   if (!parsed) {
     throw new SupabaseApiError(
-      "Supabase did not return a valid apply_scheduled_toss_quarantine_v1 result",
+      "Supabase did not return a valid apply_broker_holdings_quarantine_v0 result",
       500,
     );
   }

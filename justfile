@@ -78,6 +78,9 @@ ai-brief-source-collect *args:
 ai-brief-source-live-compare *args:
   uv run python scripts/compare_ai_brief_live_sources.py {{args}}
 
+decision-board-claim-live-compare *args:
+  uv run python scripts/compare_decision_board_claim_live.py {{args}}
+
 live-integration-smoke *args:
   uv run python scripts/live_integration_smoke.py {{args}}
 
@@ -142,7 +145,10 @@ web-format-check:
 web-typecheck:
   {{web_tool_path}} pnpm --dir web run typecheck
 
-web-test:
+web-python-test-setup:
+  uv sync --locked --no-dev --inexact
+
+web-test: web-python-test-setup
   {{web_tool_path}} pnpm --dir web run test:coverage
 
 deadcode-web:

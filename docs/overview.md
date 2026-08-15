@@ -13,7 +13,9 @@
 
 ### 실험
 
-- 별도 실험 운영 모델은 현재 제공하지 않습니다.
+- US SWING Decision Board V0는 production adapter/schedule 미연결 advice-only shadow입니다.
+  [reference](decision-board.md)와 [20-session 평가 절차](decision-board-shadow-evaluation.md)를
+  통과하기 전 production owner가 아닙니다.
 
 ### 백로그
 
@@ -41,6 +43,9 @@
 5. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
 6. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
 7. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당하고, macOS `launchd` Toss runner가 local scheduled holdings sync를 호출합니다.
+8. Decision Board V0는 US SWING ENTRY/HOLDING public fact를 별도 local shadow report로
+   compile하고 Reports UI에서 보여줍니다. 기본 executor는 production adapter 미연결로
+   fail closed하며 기존 실행·알림을 바꾸지 않습니다.
 
 ## 핵심 용어
 
@@ -52,6 +57,8 @@
 | `backtest` report | 로컬 OHLCV로 과거 구간의 신호/거래/성과를 재현한 연구 JSON |
 | `ai-brief` report | entry 후보의 AI 요약/추천 JSON |
 | `ai-brief-skip` report | scheduled runtime guard로 실행이 중단됐음을 기록하는 JSON |
+| `decision-board` report | US SWING ENTRY/HOLDING advice-only shadow JSON |
+| `RunJournalV0` | local shadow의 planned/started/terminal/missed/stale 상태 기록 |
 | `report_index` | 웹 목록/검색용 Supabase Postgres 테이블 |
 | `runtime_state` | 로그인 throttle, scheduler lock/marker 같은 단기 상태 테이블 |
 | `holdings` | 보유 목록의 운영 source of truth인 Supabase 테이블 |
@@ -61,6 +68,7 @@
 ## 운영 원칙
 
 - 리포트와 보유 목록은 사람이 검토하기 위한 의사결정 보조 자료입니다.
+- Decision Board를 포함한 모든 매수·매도는 사용자가 직접 실행합니다.
 - 시크릿은 `.env`/GitHub Secrets/운영 환경변수에 두고 문서와 코드에 실제 값을 쓰지 않습니다.
 - 문서와 코드가 충돌하면 실제 코드, 실행 설정, CI, 테스트, 환경변수 예시, 현재 문서, 추론 순서로 판단합니다.
 - 운영 담당자, 실제 에스컬레이션 채널, 원격 production 운영 정책은 코드만으로 확인할 수 없으므로 `NEEDS_CONFIRMATION` 대상입니다.
@@ -72,3 +80,4 @@
 - 배포: [Deployment](deployment.md)
 - 운영: [Operations](operations.md)
 - 장애 대응: [Troubleshooting](troubleshooting.md)
+- Decision Board: [Reference](decision-board.md), [Shadow evaluation](decision-board-shadow-evaluation.md)

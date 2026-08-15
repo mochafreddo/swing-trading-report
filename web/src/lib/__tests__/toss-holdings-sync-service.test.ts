@@ -4,6 +4,31 @@ vi.mock("@/lib/supabase/runtime-state", () => ({
   upsertRuntimeStateEntry: vi.fn(),
 }));
 
+vi.mock("@/lib/env.server", () => ({
+  getSupabaseEnv: vi.fn(() => ({
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_API_KEY: "sb_secret_test",
+  })),
+}));
+
+vi.mock("@/lib/supabase/admin-client", () => ({
+  buildAuthHeaders: vi.fn((headers) => ({
+    apikey: "sb_secret_test",
+    Authorization: "Bearer sb_secret_test",
+    ...headers,
+  })),
+  fetchSupabase: vi.fn(),
+  parseError: vi.fn(async () => "upstream error"),
+  SupabaseApiError: class SupabaseApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+    }
+  },
+}));
+
 import {
   applyTossHoldingsSyncPreview,
   buildTossHoldingsSyncDependenciesFromEnv,
@@ -14,7 +39,13 @@ import {
   type TossHoldingsSyncDependencies,
 } from "@/lib/toss/holdings-sync-service";
 import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
+import { fetchSupabase } from "@/lib/supabase/admin-client";
 import type { HoldingRecord } from "@/lib/types";
+
+const REPLACE_DIGEST = `sha256:${"a".repeat(64)}`;
+const QUARANTINE_DIGEST = `sha256:${"b".repeat(64)}`;
+const UNCHANGED_DIGEST = `sha256:${"c".repeat(64)}`;
+const INITIAL_DIGEST = `sha256:${"d".repeat(64)}`;
 
 function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
   return {
@@ -44,8 +75,13 @@ function holding(overrides: Partial<HoldingRecord> & { ticker: string }) {
 function deps(
   overrides: Partial<TossHoldingsSyncDependencies> = {},
 ): TossHoldingsSyncDependencies {
+  const fetchAllHoldings = overrides.fetchAllHoldings ?? vi.fn(async () => []);
   return {
-    fetchAllHoldings: vi.fn(async () => []),
+    fetchAllHoldings,
+    fetchBrokerHoldingsState: vi.fn(async () => ({
+      holdings: await fetchAllHoldings(),
+      holdingsDigest: INITIAL_DIGEST,
+    })),
     fetchTossHoldingsItems: vi.fn(async () => []),
     listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
       candidates: [],
@@ -61,12 +97,21 @@ function deps(
       deletedCount: 0,
       unchangedCount: 0,
     })),
+    replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+      insertedCount: 0,
+      updatedCount: 0,
+      deletedCount: 0,
+      unchangedCount: 0,
+      postStateDigest: REPLACE_DIGEST,
+    })),
     applyScheduledTossQuarantine: vi.fn(async (input) => ({
       insertedCount: 0,
       updatedCount: 0,
       quarantinedCount: input.quarantineTickers.length,
       unchangedCount: 0,
+      postStateDigest: QUARANTINE_DIGEST,
     })),
+    captureBrokerHoldingsDigest: vi.fn(async () => UNCHANGED_DIGEST),
     ...overrides,
   };
 }
@@ -327,6 +372,7 @@ describe("toss holdings sync service", () => {
     );
 
     expect(result.status).toBe("applied");
+    expect(result.expectedPostStateDigest).toBe(QUARANTINE_DIGEST);
     expect(result.summary.deleteCount).toBe(1);
     expect(result.quarantinedCount).toBe(1);
     expect(result.quarantinedTickers).toEqual(["TSLA.NAS"]);
@@ -371,6 +417,13 @@ describe("toss holdings sync service", () => {
         deletedCount: 0,
         unchangedCount: 0,
       })),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
     });
 
     const result = await runScheduledTossAutoApply(
@@ -379,7 +432,10 @@ describe("toss holdings sync service", () => {
     );
 
     expect(result.status).toBe("applied");
-    expect(testDeps.replaceAllHoldings).toHaveBeenCalledWith(
+    expect(result.expectedPostStateDigest).toBe(REPLACE_DIGEST);
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith(
       [expect.objectContaining({ ticker: "005930", quantity: 2 })],
       { expectedCurrentHoldings: currentHoldings },
     );
@@ -416,6 +472,13 @@ describe("toss holdings sync service", () => {
         deletedCount: 0,
         unchangedCount: 0,
       })),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
     });
 
     const result = await runScheduledTossAutoApply(
@@ -437,10 +500,11 @@ describe("toss holdings sync service", () => {
         ],
       }),
     ]);
-    expect(testDeps.replaceAllHoldings).toHaveBeenCalledWith(
-      [expect.objectContaining({ ticker: "TSLA.NAS" })],
-      { expectedCurrentHoldings: currentHoldings },
-    );
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith([expect.objectContaining({ ticker: "TSLA.NAS" })], {
+      expectedCurrentHoldings: currentHoldings,
+    });
     expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
@@ -457,7 +521,133 @@ describe("toss holdings sync service", () => {
 
     expect(result.status).toBe("unchanged");
     expect(result.summary.incomingCount).toBe(0);
+    expect(result.expectedPostStateDigest).toBe(UNCHANGED_DIGEST);
+    expect(testDeps.captureBrokerHoldingsDigest).toHaveBeenCalledWith(
+      INITIAL_DIGEST,
+    );
     expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when holdings change between scheduled preview and unchanged capture", async () => {
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => []),
+      fetchTossHoldingsItems: vi.fn(async () => []),
+      captureBrokerHoldingsDigest: vi.fn(async () => {
+        throw new Error("broker holdings pre-state conflict");
+      }),
+    });
+
+    await expect(
+      runScheduledTossAutoApply(
+        { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+        testDeps,
+      ),
+    ).rejects.toThrow("pre-state conflict");
+    expect(testDeps.captureBrokerHoldingsDigest).toHaveBeenCalledWith(
+      INITIAL_DIGEST,
+    );
+  });
+
+  it("uses the DB mutation digest when an active normal holding becomes zero", async () => {
+    const currentHoldings = [
+      holding({
+        ticker: "005930",
+        quantity: 1,
+        entry_price: 70000,
+        entry_pattern: "trend_pullback_bounce",
+      }),
+    ];
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => currentHoldings),
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "005930",
+          marketCountry: "KR",
+          currency: "KRW",
+          quantity: "0",
+          averagePurchasePrice: "70000",
+        },
+      ]),
+      replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+        insertedCount: 0,
+        updatedCount: 1,
+        deletedCount: 0,
+        unchangedCount: 0,
+        postStateDigest: REPLACE_DIGEST,
+      })),
+    });
+
+    const result = await runScheduledTossAutoApply(
+      { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+      testDeps,
+    );
+
+    expect(result.expectedPostStateDigest).toBe(REPLACE_DIGEST);
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).toHaveBeenCalledWith(
+      [expect.objectContaining({ ticker: "005930", quantity: 0 })],
+      { expectedCurrentHoldings: currentHoldings },
+    );
+  });
+
+  it("uses the DB quarantine digest when an active target holding becomes zero", async () => {
+    const currentHoldings = [
+      holding({
+        ticker: "005930",
+        quantity: 1,
+        entry_price: 70000,
+        entry_pattern: "trend_pullback_bounce",
+      }),
+      holding({ ticker: "035420", quantity: 1, entry_price: 200000 }),
+    ];
+    const testDeps = deps({
+      fetchAllHoldings: vi.fn(async () => currentHoldings),
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "005930",
+          marketCountry: "KR",
+          currency: "KRW",
+          quantity: "0",
+          averagePurchasePrice: "70000",
+        },
+      ]),
+    });
+
+    const result = await runScheduledTossAutoApply(
+      { autoApplyEnabled: true, sessionDate: "2026-08-06" },
+      testDeps,
+    );
+
+    expect(result.expectedPostStateDigest).toBe(QUARANTINE_DIGEST);
+    expect(testDeps.applyScheduledTossQuarantine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetRows: [
+          expect.objectContaining({ ticker: "005930", quantity: 0 }),
+        ],
+        quarantineTickers: ["035420"],
+      }),
+    );
+  });
+
+  it("rejects a future KST session before reading or mutating holdings", async () => {
+    const testDeps = deps();
+
+    await expect(
+      runScheduledTossAutoApply(
+        {
+          autoApplyEnabled: true,
+          sessionDate: "2099-01-01",
+          now: new Date("2026-08-06T00:00:00Z"),
+        },
+        testDeps,
+      ),
+    ).rejects.toThrow("future KST session");
+    expect(testDeps.fetchAllHoldings).not.toHaveBeenCalled();
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
   });
 
   it("records a scheduled Toss freshness marker with key payload and TTL", async () => {
@@ -482,7 +672,25 @@ describe("toss holdings sync service", () => {
       targetRows: [],
       quarantinedCount: 1,
       quarantinedTickers: ["TSLA.NAS"],
+      expectedPostStateDigest: `sha256:${"c".repeat(64)}`,
     } satisfies ScheduledTossAutoSyncResponse;
+
+    vi.mocked(fetchSupabase).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            state_key: "toss-sync:success:MIXED:2026-07-06",
+            session_date: "2026-07-06",
+            status: "applied",
+            fresh_until: "2026-07-08T10:15:00.000Z",
+            sealed_at: "2026-07-06T22:15:01.000Z",
+            holdings_digest: `sha256:${"a".repeat(64)}`,
+            revision: 7,
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
 
     await expect(
       recordScheduledTossFreshnessMarker(result, {
@@ -492,28 +700,27 @@ describe("toss holdings sync service", () => {
     ).resolves.toEqual({
       stateKey: "toss-sync:success:MIXED:2026-07-06",
       sessionDate: "2026-07-06",
+      holdingsDigest: `sha256:${"a".repeat(64)}`,
+      revision: 7,
+      sealedAt: "2026-07-06T22:15:01.000Z",
     });
 
-    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
-      "toss-sync:success:MIXED:2026-07-06",
-      {
-        scope: "MIXED",
-        sessionDate: "2026-07-06",
-        status: "applied",
-        diffHash: "hash-1",
-        incomingCount: 3,
-        createCount: 1,
-        updateCount: 1,
-        deleteCount: 0,
-        unchangedCount: 1,
-        quarantinedCount: 1,
-        quarantinedTickers: ["TSLA.NAS"],
-        source: "scheduled-route",
-        timezone: "Asia/Seoul",
-        updatedAt: "2026-07-06T22:15:00.000Z",
-      },
-      "2026-07-08T10:15:00.000Z",
+    expect(fetchSupabase).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/seal_broker_snapshot_v0",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining(
+          '"p_state_key":"toss-sync:success:MIXED:2026-07-06"',
+        ),
+      }),
     );
+    const sealBody = JSON.parse(
+      String(vi.mocked(fetchSupabase).mock.calls[0]?.[1]?.body),
+    ) as Record<string, unknown>;
+    expect(sealBody.p_expected_post_state_digest).toBe(
+      `sha256:${"c".repeat(64)}`,
+    );
+    expect(upsertRuntimeStateEntry).not.toHaveBeenCalled();
   });
 
   it("uses the KST date fallback and skips non-success statuses for freshness markers", async () => {
@@ -538,24 +745,38 @@ describe("toss holdings sync service", () => {
       targetRows: [],
       quarantinedCount: 0,
       quarantinedTickers: [],
+      expectedPostStateDigest: `sha256:${"d".repeat(64)}`,
     } satisfies ScheduledTossAutoSyncResponse;
+
+    vi.mocked(fetchSupabase).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            state_key: "toss-sync:success:MIXED:2026-07-07",
+            session_date: "2026-07-07",
+            status: "unchanged",
+            fresh_until: "2026-07-08T04:00:00.000Z",
+            sealed_at: "2026-07-06T16:00:01.000Z",
+            holdings_digest: `sha256:${"b".repeat(64)}`,
+            revision: 8,
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
 
     await expect(
       recordScheduledTossFreshnessMarker(unchanged, { now }),
     ).resolves.toEqual({
       stateKey: "toss-sync:success:MIXED:2026-07-07",
       sessionDate: "2026-07-07",
+      holdingsDigest: `sha256:${"b".repeat(64)}`,
+      revision: 8,
+      sealedAt: "2026-07-06T16:00:01.000Z",
     });
 
-    expect(upsertRuntimeStateEntry).toHaveBeenCalledWith(
-      "toss-sync:success:MIXED:2026-07-07",
-      expect.objectContaining({
-        sessionDate: "2026-07-07",
-        status: "unchanged",
-      }),
-      "2026-07-08T04:00:00.000Z",
-    );
-    vi.mocked(upsertRuntimeStateEntry).mockClear();
+    expect(fetchSupabase).toHaveBeenCalledTimes(1);
+    vi.mocked(fetchSupabase).mockClear();
 
     await expect(
       recordScheduledTossFreshnessMarker({
@@ -565,7 +786,37 @@ describe("toss holdings sync service", () => {
       }),
     ).resolves.toBeNull();
 
+    expect(fetchSupabase).not.toHaveBeenCalled();
     expect(upsertRuntimeStateEntry).not.toHaveBeenCalled();
+  });
+
+  it("refuses to seal a successful sync without an expected post-state digest", async () => {
+    const result = {
+      mode: "auto-apply",
+      status: "unchanged",
+      summary: {
+        incomingCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        deleteCount: 0,
+        unchangedCount: 0,
+        createTickers: [],
+        updateTickers: [],
+        deleteTickers: [],
+      },
+      diffHash: "hash-empty",
+      applyBlocked: false,
+      changes: { create: [], update: [], delete: [], unchanged: [] },
+      blockedRows: [],
+      targetRows: [],
+      quarantinedCount: 0,
+      quarantinedTickers: [],
+    } satisfies ScheduledTossAutoSyncResponse;
+
+    await expect(recordScheduledTossFreshnessMarker(result)).rejects.toThrow(
+      "expected post-state digest",
+    );
+    expect(fetchSupabase).not.toHaveBeenCalled();
   });
 
   it("builds runtime dependencies that read QA holdings from a fixture file", async () => {

@@ -1,0 +1,102 @@
+{
+  "schema_version": "decision-board.v0",
+  "run_id": "entry-2026-08-06T010000Z",
+  "created_at": "2026-08-06T01:00:05Z",
+  "idempotency_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "run_kind": "ENTRY",
+  "status": "PUBLISHED",
+  "issues": [],
+  "metadata": {
+    "compiler_version": "fixture-v0"
+  },
+  "decision_payload": {
+    "run_kind": "ENTRY",
+    "sealed_input_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "items": [
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "AUR.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Aurora Systems",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "BUY",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-aurora-demand",
+            "role": "SUPPORTING",
+            "source_url": "https://evidence.example/aurora-demand",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T12:00:00Z",
+            "article_content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "supporting_span": "Aurora demand remains strong.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Aurora demand update"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "BHR.NYS",
+          "exchange": "NYSE",
+          "company_name": "Blue Harbor Robotics",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "AVOID",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-blue-harbor-delay",
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/blue-harbor-delay",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T13:00:00Z",
+            "article_content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "supporting_span": "Blue Harbor reported a project delay.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 37
+            },
+            "entailment": "SUPPORTED",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Blue Harbor project delay"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "CND.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Cinder Labs",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "REVIEW",
+        "issues": [
+          {
+            "code": "EVIDENCE_UNCLEAR",
+            "message": "The synthetic claim is not decisive.",
+            "path": ["validated_claims", "claim-cinder-outlook"]
+          }
+        ],
+        "evidence": []
+      }
+    ]
+  },
+  "decision_payload_hash": "sha256:a4321f6f38e59554ee126329dc1bff3a95334d45b5f209b6b287d537c7d66480"
+}

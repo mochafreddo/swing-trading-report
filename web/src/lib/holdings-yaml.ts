@@ -26,7 +26,7 @@ import type {
 const SUPPORTED_ENTRY_CURRENCIES = new Set(["KRW", "USD"]);
 const NUMERIC_TEXT_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 export const MAX_HOLDINGS_YAML_DOCUMENT_BYTES = 1_048_576;
-export const MAX_HOLDINGS_YAML_ROW_COUNT = 1_000;
+const MAX_HOLDINGS_YAML_ROW_COUNT = 1_000;
 
 interface HoldingsYamlSettings {
   default_currency: string | null;

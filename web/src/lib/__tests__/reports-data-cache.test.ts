@@ -108,6 +108,48 @@ describe("reports-data cache", () => {
     expect(fetchReportIndexPage).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps Decision Board run kind in list cache identity", async () => {
+    vi.mocked(fetchReportIndexPage).mockResolvedValue({
+      items: [],
+      total: 0,
+      fetchedCount: 0,
+      hasMore: false,
+      nextCursor: null,
+    });
+
+    await listReports({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+    await listReports({
+      type: "decision-board",
+      runKind: "HOLDING",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+    await listReports({
+      type: "decision-board",
+      runKind: "ENTRY",
+      q: "",
+      limit: 30,
+      searchWindow: 100,
+    });
+
+    expect(fetchReportIndexPage).toHaveBeenCalledTimes(2);
+    expect(fetchReportIndexPage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runKind: "ENTRY" }),
+    );
+    expect(fetchReportIndexPage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runKind: "HOLDING" }),
+    );
+  });
+
   it("caches report detail for same key", async () => {
     vi.mocked(fetchReportIndexEntry).mockResolvedValue(null);
     vi.mocked(downloadStorageJson).mockResolvedValue({
@@ -208,6 +250,18 @@ describe("reports-data cache", () => {
       "reports",
       "2026/05/2026-05-05.ai-brief.json",
     );
+  });
+
+  it("rejects whitespace-wrapped Decision Board detail keys before network access", async () => {
+    const key =
+      "2026/08/2026-08-06.decision-board.entry.run-1." +
+      `${"a".repeat(64)}.json`;
+
+    await expect(readReportDetail(` ${key} `)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(fetchReportIndexEntry).not.toHaveBeenCalled();
+    expect(downloadStorageJson).not.toHaveBeenCalled();
   });
 
   it("bypasses detail cache when refresh=true", async () => {

@@ -30,6 +30,7 @@
 | Reports | Supabase Storage `reports` + `report_index` | Web `Reports`, workflow logs |
 | Holdings | Supabase `holdings` | Web `Holdings`, SQL checks |
 | Runtime locks/markers | Supabase `runtime_state` | scheduled AI Brief and scheduled Sell AI Brief checks |
+| Decision Board shadow | local RunJournal + local canonical report | Web Decision Board lane, journal status CLI |
 | Automation | GitHub Actions + local scheduler + Toss launchd runner | GitHub run logs, Docker scheduler logs, Toss launchd logs |
 | Web console | local Docker `web` service | `/login` liveness, container logs |
 | Secrets | `.env`, `.env.scheduler.local`, GitHub Secrets | Do not print values |
@@ -62,6 +63,25 @@ value with `[REDACTED]` before sharing it.
 | Supabase table health | SQL checks below | required tables exist and RLS enabled |
 | Runtime state growth | SQL checks below | expired rows not accumulating unexpectedly |
 | Docs drift | `UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q` | PASS |
+| Decision Board gate | local frozen manifest + session ledger | No retroactive threshold/version changes |
+
+## Decision Board shadow operations
+
+Decision Board는 기본 상태에서 production adapter와 schedule이 없으므로
+`CONFIG_UNAVAILABLE`가 정상 fail-closed 결과입니다. 이를 운영 성공이나 20-session 표본으로
+세지 않습니다. 승인된 adapter를 연결해 실제 평가를 시작한 뒤에는 ENTRY/HOLDING planned
+slot을 모두 RunJournal에 결속하고 missed/stale를 삭제하지 않습니다.
+
+운영자는 매 session 다음을 확인합니다.
+
+- lane/run ID/expected UTC identity가 manifest와 일치하는가
+- terminal 또는 missed/stale 상태가 하나만 존재하는가
+- local report의 schema/hash/key identity가 유효한가
+- 기존 후보/action 차이에 reason과 input/source diff가 있는가
+- privacy, order, notification, existing-pipeline 영향이 0인가
+
+최소 20 US 거래 session 뒤의 산식과 수동 졸업 검토는
+[Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
 
 ## Logs And Health Checks
 

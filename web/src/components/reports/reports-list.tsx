@@ -1,12 +1,17 @@
 import styles from "../reports-client.module.css";
 
-import type { ReportListItem, ReportSearchWarning } from "@/lib/types";
+import type {
+  DecisionBoardRunKind,
+  ReportListItem,
+  ReportSearchWarning,
+} from "@/lib/types";
 
 import { formatDateLabel } from "./helpers";
 import type { ReportsFilterType } from "./types";
 
 interface ReportsListProps {
   reportType: ReportsFilterType;
+  runKind: DecisionBoardRunKind | null;
   query: string;
   appliedQuery: string;
   items: ReportListItem[];
@@ -20,6 +25,7 @@ interface ReportsListProps {
   loadingList: boolean;
   refreshing: boolean;
   onReportTypeChange: (value: ReportsFilterType) => void;
+  onRunKindChange: (value: DecisionBoardRunKind) => void;
   onQueryChange: (value: string) => void;
   onSelectKey: (key: string, bucketId?: string) => void;
   onRefresh: () => void;
@@ -27,6 +33,7 @@ interface ReportsListProps {
 
 export function ReportsList({
   reportType,
+  runKind,
   query,
   appliedQuery,
   items,
@@ -40,6 +47,7 @@ export function ReportsList({
   loadingList,
   refreshing,
   onReportTypeChange,
+  onRunKindChange,
   onQueryChange,
   onSelectKey,
   onRefresh,
@@ -78,8 +86,26 @@ export function ReportsList({
               <option value="ai-brief">AI Brief</option>
               <option value="ai-brief-skip">AI Brief Skip</option>
               <option value="sell-ai-brief">Sell AI Brief</option>
+              <option value="decision-board">Decision Board</option>
             </select>
           </label>
+
+          {reportType === "decision-board" && (
+            <label>
+              Lane
+              <select
+                name="runKind"
+                autoComplete="off"
+                value={runKind ?? "ENTRY"}
+                onChange={(event) =>
+                  onRunKindChange(event.target.value as DecisionBoardRunKind)
+                }
+              >
+                <option value="ENTRY">ENTRY</option>
+                <option value="HOLDING">HOLDING</option>
+              </select>
+            </label>
+          )}
 
           <label>
             Ticker 검색
@@ -154,6 +180,12 @@ export function ReportsList({
                   <span className={styles.badge}>
                     {item.type.toUpperCase()}
                   </span>
+                  {item.runKind && (
+                    <span className={styles.badge}>{item.runKind}</span>
+                  )}
+                  {item.runId && (
+                    <span className={styles.itemRunId}>{item.runId}</span>
+                  )}
                   {item.bucketId !== "reports" && (
                     <span className={styles.badge}>{item.bucketId}</span>
                   )}

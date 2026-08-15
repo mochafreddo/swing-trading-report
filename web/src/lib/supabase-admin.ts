@@ -18,7 +18,9 @@ export type {
   RuntimeStateEntry,
 } from "@/lib/supabase/runtime-state";
 export {
+  downloadStorageBytes,
   downloadStorageJson,
+  fetchLatestDecisionBoardReport,
   fetchReportIndexEntry,
   fetchReportIndexPage,
   upsertReportIndexEntry,
@@ -33,16 +35,21 @@ export type {
 export {
   addBuyToHolding,
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
   createHolding,
   deleteHolding,
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   fetchHoldingsPage,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
   updateHolding,
 } from "@/lib/supabase/holdings";
 export type {
   ApplyScheduledTossQuarantineInput,
   ApplyScheduledTossQuarantineResult,
+  BrokerHoldingsMutationResult,
+  BrokerHoldingsState,
   FetchHoldingsPageOptions,
   FetchHoldingsPageResult,
   HoldingAddBuyInput,

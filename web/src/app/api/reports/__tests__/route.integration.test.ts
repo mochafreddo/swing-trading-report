@@ -187,6 +187,60 @@ describe("/api/reports integration", () => {
     expect(requestUrl.searchParams.get("report_type")).toBe("eq.ai-brief");
   });
 
+  it("propagates exact Decision Board run kind and public run identity", async () => {
+    const digest = "e".repeat(64);
+    const reportKey =
+      "2026/08/2026-08-06.decision-board.entry.entry-slot-001." +
+      `${digest}.json`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify([
+          {
+            bucket_id: "reports",
+            report_key: reportKey,
+            report_type: "decision-board",
+            report_date: "2026-08-06",
+            duplicate_index: 0,
+            generated_at: null,
+            summary: null,
+            tickers: ["AUR.NAS"],
+            tickers_hydrated: true,
+            run_kind: "ENTRY",
+            run_id: "entry-slot-001",
+            idempotency_key: `sha256:${digest}`,
+            decision_created_at: "2026-08-06T01:00:05Z",
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const response = await GET(
+      makeRequest("type=decision-board&runKind=ENTRY&limit=1"),
+    );
+    const payload = (await response.json()) as {
+      items: Array<Record<string, unknown>>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.items).toEqual([
+      {
+        key: reportKey,
+        bucketId: "reports",
+        type: "decision-board",
+        reportDate: "2026-08-06",
+        duplicateIndex: 0,
+        runKind: "ENTRY",
+        runId: "entry-slot-001",
+      },
+    ]);
+    const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.get("report_type")).toBe(
+      "eq.decision-board",
+    );
+    expect(requestUrl.searchParams.get("run_kind")).toBe("eq.ENTRY");
+  });
+
   it("returns 400 before hitting Supabase when query validation fails", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 

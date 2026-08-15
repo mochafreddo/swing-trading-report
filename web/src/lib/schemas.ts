@@ -191,12 +191,30 @@ const entryDateSchema = z.preprocess((value) => {
   return value;
 }, isoCalendarDateSchema.nullable());
 
-export const reportListQuerySchema = z.object({
-  type: z.enum(REPORT_LIST_TYPES).default("all"),
-  q: z.string().trim().default(""),
-  limit: z.coerce.number().int().min(1).max(200).default(30),
-  refresh: toBooleanRefreshFlag,
-});
+export const reportListQuerySchema = z
+  .object({
+    type: z.enum(REPORT_LIST_TYPES).default("all"),
+    runKind: z.enum(["ENTRY", "HOLDING"]).optional(),
+    q: z.string().trim().default(""),
+    limit: z.coerce.number().int().min(1).max(200).default(30),
+    refresh: toBooleanRefreshFlag,
+  })
+  .superRefine((query, context) => {
+    if (query.type === "decision-board" && query.runKind === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["runKind"],
+        message: "runKind is required for Decision Board reports",
+      });
+    }
+    if (query.type !== "decision-board" && query.runKind !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["runKind"],
+        message: "runKind is only valid for Decision Board reports",
+      });
+    }
+  });
 
 export const reportDetailQuerySchema = z.object({
   key: z.string().trim().min(1),

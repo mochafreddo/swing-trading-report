@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 vi.mock("@/lib/env.server", () => ({
   getSupabaseEnv: vi.fn(() => ({
@@ -72,12 +75,15 @@ vi.mock("@/lib/supabase-admin", () => {
 
   return {
     SupabaseApiError,
+    downloadStorageBytes: vi.fn(),
     downloadStorageJson: vi.fn(),
     fetchReportIndexEntry: vi.fn(() => Promise.resolve(null)),
   };
 });
 
 import { GET } from "@/app/api/reports/detail/route";
+import { decisionPayloadHashV0 } from "@/lib/decision-board-schema";
+import { parseVerifiedDecisionBoardReport } from "@/lib/decision-board-schema";
 import { AdminAuthError, requireAdminAuth } from "@/lib/admin-auth";
 import {
   assertLocalRequest,
@@ -85,6 +91,7 @@ import {
 } from "@/lib/local-request-guard";
 import { assertSameOrigin, SameOriginError } from "@/lib/same-origin";
 import {
+  downloadStorageBytes,
   downloadStorageJson,
   fetchReportIndexEntry,
   SupabaseApiError,
@@ -95,6 +102,67 @@ const CACHE_CONTROL_VALUE = "private, no-store, max-age=0, must-revalidate";
 function makeRequest(query = ""): NextRequest {
   const suffix = query ? `?${query}` : "";
   return new NextRequest(`http://localhost:55300/api/reports/detail${suffix}`);
+}
+
+const decisionFixture = () =>
+  JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../../../../../tests/fixtures/decision_board/published-entry.json",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+
+function canonicalJsonUnchecked(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJsonUnchecked).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map(
+      (key) => `${JSON.stringify(key)}:${canonicalJsonUnchecked(record[key])}`,
+    )
+    .join(",")}}`;
+}
+
+const uncheckedPayloadHash = (payload: unknown): string =>
+  `sha256:${createHash("sha256").update(canonicalJsonUnchecked(payload)).digest("hex")}`;
+
+function mockDecisionBytes(report: Record<string, unknown>): void {
+  vi.mocked(downloadStorageBytes).mockResolvedValueOnce(
+    new TextEncoder().encode(JSON.stringify(report)),
+  );
+}
+
+const DECISION_DIGEST = "e".repeat(64);
+const DECISION_KEY =
+  "2026/08/2026-08-06.decision-board.entry." +
+  `entry-2026-08-06T010000Z.${DECISION_DIGEST}.json`;
+
+function mockDecisionIndex(): void {
+  vi.mocked(fetchReportIndexEntry).mockResolvedValueOnce({
+    bucket_id: "reports",
+    report_key: DECISION_KEY,
+    report_type: "decision-board",
+    report_date: "2026-08-06",
+    duplicate_index: 0,
+    generated_at: null,
+    summary: null,
+    tickers: [],
+    tickers_hydrated: false,
+    run_kind: "ENTRY",
+    run_id: "entry-2026-08-06T010000Z",
+    idempotency_key: `sha256:${DECISION_DIGEST}`,
+    decision_created_at: "2026-08-06T01:00:05Z",
+  });
 }
 
 beforeEach(() => {
@@ -271,6 +339,252 @@ describe("GET /api/reports/detail route", () => {
     expect(response.status).toBe(200);
     expect(payload.key).toBe("2026/05/2026-05-05.ai-brief.json");
     expect(payload.report).toEqual(report);
+  });
+
+  it("returns a verified and exact-key-bound Decision Board envelope", async () => {
+    const report = decisionFixture();
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const payload = (await response.json()) as { report: unknown };
+
+    expect(response.status).toBe(200);
+    expect(payload.report).toMatchObject({
+      schema_version: "decision-board.v0",
+      run_id: "entry-2026-08-06T010000Z",
+      run_kind: "ENTRY",
+      status: "PUBLISHED",
+    });
+    expect(payload.report).not.toHaveProperty("metadata");
+    await expect(
+      parseVerifiedDecisionBoardReport(payload.report),
+    ).resolves.toEqual(payload.report);
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a whitespace-normalized Decision Board key", async () => {
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(` ${DECISION_KEY} `)}`),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid report key format",
+    });
+    expect(vi.mocked(fetchReportIndexEntry)).not.toHaveBeenCalled();
+    expect(vi.mocked(downloadStorageJson)).not.toHaveBeenCalled();
+  });
+
+  it("returns sanitized 422 for a stale Decision Board payload hash", async () => {
+    const report = decisionFixture() as {
+      decision_payload: { items: Array<{ action?: string }> };
+    };
+    report.decision_payload.items[0].action = "AVOID";
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const payload = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(422);
+    expect(payload).toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+    expect(JSON.stringify(payload)).not.toContain("AVOID");
+  });
+
+  it("returns sanitized 422 when envelope identity does not match its key", async () => {
+    const report = decisionFixture();
+    report.run_id = "forged-run";
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it("returns sanitized 422 for privacy-bearing Decision Board metadata", async () => {
+    const report = decisionFixture();
+    report.metadata = {
+      compiler_version: "fixture-v0",
+      account_id: "PRIVATE-SENTINEL",
+    };
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(responseText).not.toContain("PRIVATE-SENTINEL");
+    expect(JSON.parse(responseText)).toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it("rejects alternate private field casing in Decision Board metadata", async () => {
+    const report = decisionFixture();
+    report.metadata = {
+      compiler_version: "fixture-v0",
+      providerException: "PRIVATE-PROVIDER-SENTINEL",
+    };
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(responseText).not.toContain("PRIVATE-PROVIDER-SENTINEL");
+  });
+
+  it.each([
+    "PRIVATE-VALUE-SENTINEL",
+    "/Users/example/private/report.json",
+    "Traceback (most recent call last): provider failed",
+    "OpenAI provider error: upstream token rejected",
+  ])("returns sanitized 422 for private value %s", async (privateValue) => {
+    const report = decisionFixture();
+    report.metadata = { diagnostic: privateValue };
+    mockDecisionIndex();
+    mockDecisionBytes(report);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(responseText).not.toContain(privateValue);
+    expect(JSON.parse(responseText)).toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it("returns sanitized 422 for a hash-valid private evidence query", async () => {
+    const privateQuery = "PRIVATE-QUERY-SENTINEL";
+    const report = decisionFixture() as {
+      decision_payload: {
+        items: Array<{ evidence: Array<{ source_url: string }> }>;
+      };
+      decision_payload_hash: string;
+    };
+    report.decision_payload.items[0].evidence[0].source_url = `https://evidence.example/article?token=${privateQuery}`;
+    report.decision_payload_hash = uncheckedPayloadHash(
+      report.decision_payload,
+    );
+    mockDecisionIndex();
+    mockDecisionBytes(report as unknown as Record<string, unknown>);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const responseText = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(responseText).not.toContain(privateQuery);
+    expect(JSON.parse(responseText)).toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it("reconstructs public issue messages and drops issue path/metadata", async () => {
+    const report = decisionFixture() as {
+      decision_payload: {
+        items: Array<{ issues: Array<Record<string, unknown>> }>;
+      };
+    };
+    report.decision_payload.items[2].issues = [
+      {
+        code: "EVIDENCE_UNCLEAR",
+        message: "Producer-owned issue wording.",
+        path: ["validated_claims"],
+        metadata: { source: "compiler" },
+      },
+    ];
+    (report as Record<string, unknown>).decision_payload_hash =
+      await decisionPayloadHashV0(report.decision_payload);
+    mockDecisionIndex();
+    mockDecisionBytes(report as Record<string, unknown>);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+    const payload = (await response.json()) as {
+      report: {
+        decision_payload: { items: Array<{ issues: unknown[] }> };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.report.decision_payload.items[2].issues).toEqual([
+      {
+        code: "EVIDENCE_UNCLEAR",
+        message: "Decision Board issue EVIDENCE_UNCLEAR.",
+      },
+    ]);
+    expect(JSON.stringify(payload)).not.toContain(
+      "Producer-owned issue wording",
+    );
+    expect(JSON.stringify(payload)).not.toContain("validated_claims");
+  });
+
+  it("returns sanitized 422 for duplicate-key Decision Board JSON", async () => {
+    mockDecisionIndex();
+    vi.mocked(downloadStorageBytes).mockResolvedValueOnce(
+      new TextEncoder().encode(
+        '{"schema_version":"decision-board.v0","schema_version":"decision-board.v0"}',
+      ),
+    );
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
+  });
+
+  it.each([
+    { name: "array", bytes: new TextEncoder().encode("[]") },
+    { name: "malformed JSON", bytes: new TextEncoder().encode("{bad}") },
+    { name: "invalid UTF-8", bytes: new Uint8Array([0x7b, 0xff, 0x7d]) },
+  ])("returns sanitized 422 for $name content", async ({ bytes }) => {
+    mockDecisionIndex();
+    vi.mocked(downloadStorageBytes).mockResolvedValueOnce(bytes);
+
+    const response = await GET(
+      makeRequest(`key=${encodeURIComponent(DECISION_KEY)}`),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Decision Board report failed validation",
+      code: "invalid_decision_board_report",
+    });
   });
 
   it("returns 500 for unknown errors", async () => {

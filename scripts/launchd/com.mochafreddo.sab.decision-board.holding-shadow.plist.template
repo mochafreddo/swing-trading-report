@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "file://localhost/System/Library/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mochafreddo.sab.decision-board.holding-shadow</string>
+  <key>Disabled</key>
+  <true/>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO_ROOT__/scripts/launchd/sab-decision-board-shadow-wrapper.sh</string>
+    <string>--run-kind</string>
+    <string>HOLDING</string>
+    <string>--expected-at</string>
+    <string>__EXPECTED_AT_UTC__</string>
+    <string>--run-id</string>
+    <string>__RUN_ID__</string>
+    <string>--journal-dir</string>
+    <string>__JOURNAL_DIR__</string>
+    <string>--grace-seconds</string>
+    <string>__GRACE_SECONDS__</string>
+    <string>--stale-seconds</string>
+    <string>__STALE_SECONDS__</string>
+    <string>--</string>
+    <string>__RUNNER_EXECUTABLE__</string>
+    <string>__RUNNER_ARGUMENTS__</string>
+  </array>
+</dict>
+</plist>

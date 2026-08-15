@@ -1,0 +1,99 @@
+{
+  "schema_version": "decision-board.v0",
+  "run_id": "holding-2026-08-06T020000Z",
+  "created_at": "2026-08-06T02:00:04Z",
+  "idempotency_key": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "run_kind": "HOLDING",
+  "status": "PUBLISHED",
+  "issues": [],
+  "decision_payload": {
+    "run_kind": "HOLDING",
+    "sealed_input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "items": [
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "DOV.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Dovetail Energy",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "HOLD",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-dovetail-guidance",
+            "role": "SUPPORTING",
+            "source_url": "https://evidence.example/dovetail-guidance",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T14:00:00Z",
+            "article_content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "supporting_span": "Dovetail reaffirmed guidance.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Dovetail guidance"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "ELM.NYS",
+          "exchange": "NYSE",
+          "company_name": "Elm River Foods",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "DECIDED",
+        "action": "SELL",
+        "issues": [],
+        "evidence": [
+          {
+            "claim_id": "claim-elm-recall",
+            "role": "OPPOSING",
+            "source_url": "https://evidence.example/elm-recall",
+            "publisher": "Synthetic Wire",
+            "published_at": "2026-08-05T15:00:00Z",
+            "article_content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "supporting_span": "Elm River announced a recall.",
+            "supporting_location": {
+              "kind": "TEXT_OFFSETS",
+              "start": 0,
+              "end": 29
+            },
+            "entailment": "SUPPORTED",
+            "freshness": "WITHIN_POLICY",
+            "citation_label": "Elm River recall"
+          }
+        ]
+      },
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "FRN.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Fern Networks",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "REVIEW",
+        "issues": [
+          {
+            "code": "SOURCE_CONFLICT",
+            "message": "Synthetic public sources disagree.",
+            "path": ["validated_claims"]
+          }
+        ],
+        "evidence": []
+      }
+    ]
+  },
+  "decision_payload_hash": "sha256:2ee3c83777a95830ca36eaba9a53fc38c4c90e3e39bba0b8d826f11553cc2201"
+}

@@ -160,6 +160,25 @@ describe("GET /api/reports route", () => {
     expect(vi.mocked(fetchReportIndexPage)).not.toHaveBeenCalled();
   });
 
+  it("requires exact runKind for Decision Board lists", async () => {
+    for (const query of [
+      "type=decision-board",
+      "type=decision-board&runKind=entry",
+      "type=decision-board&runKind=SELL",
+    ]) {
+      const response = await GET(makeRequest(query));
+      expect(response.status).toBe(400);
+    }
+    expect(vi.mocked(fetchReportIndexPage)).not.toHaveBeenCalled();
+  });
+
+  it("rejects runKind for legacy report types", async () => {
+    const response = await GET(makeRequest("type=buy&runKind=ENTRY"));
+
+    expect(response.status).toBe(400);
+    expect(vi.mocked(fetchReportIndexPage)).not.toHaveBeenCalled();
+  });
+
   it("returns 500 when supabase call fails", async () => {
     vi.mocked(fetchReportIndexPage).mockRejectedValueOnce(
       new SupabaseApiError("storage unavailable", 503),

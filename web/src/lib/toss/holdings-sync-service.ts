@@ -2,10 +2,19 @@ import "server-only";
 
 import {
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
 } from "@/lib/supabase-admin";
-import { upsertRuntimeStateEntry } from "@/lib/supabase/runtime-state";
+import { getSupabaseEnv } from "@/lib/env.server";
+import {
+  buildAuthHeaders,
+  fetchSupabase,
+  parseError,
+  SupabaseApiError,
+} from "@/lib/supabase/admin-client";
 import {
   listTickerDirectoryExactBaseCandidates,
   type TickerDirectoryExactBaseResponse,
@@ -24,7 +33,11 @@ import type {
   HoldingReplaceSnapshot,
   HoldingsYamlImportSummary,
 } from "@/lib/types";
-import type { ReplaceAllHoldingsResult } from "@/lib/supabase/holdings";
+import type {
+  BrokerHoldingsMutationResult,
+  BrokerHoldingsState,
+  ReplaceAllHoldingsResult,
+} from "@/lib/supabase/holdings";
 
 type TossHoldingsSyncMode = "dry-run" | "apply";
 
@@ -55,6 +68,7 @@ export interface ScheduledTossAutoSyncResponse extends Omit<
   status: ScheduledTossAutoSyncStatus;
   quarantinedCount: number;
   quarantinedTickers: string[];
+  expectedPostStateDigest?: string;
 }
 
 export interface TossHoldingsSyncPreview {
@@ -66,14 +80,17 @@ export interface TossHoldingsSyncPreview {
   hasChanges: boolean;
   hasCurrentHoldings: boolean;
   payload: TossHoldingsSyncResponsePayload;
+  initialHoldingsDigest: string | null;
 }
 
 export interface TossHoldingsSyncPreviewOptions {
   tickerDirectoryLookupFailureMode?: "ignore" | "throw";
+  brokerSnapshotBoundary?: boolean;
 }
 
 export interface TossHoldingsSyncDependencies {
   fetchAllHoldings: () => Promise<HoldingRecord[]>;
+  fetchBrokerHoldingsState: () => Promise<BrokerHoldingsState>;
   fetchTossHoldingsItems: () => Promise<TossHoldingsItem[]>;
   listTickerDirectoryExactBaseCandidates: (
     symbols: readonly string[],
@@ -82,6 +99,10 @@ export interface TossHoldingsSyncDependencies {
     rows: HoldingReplaceSnapshot[],
     options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
   ) => Promise<ReplaceAllHoldingsResult>;
+  replaceAllHoldingsAndCaptureBrokerDigest: (
+    rows: HoldingReplaceSnapshot[],
+    options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
+  ) => Promise<BrokerHoldingsMutationResult>;
   applyScheduledTossQuarantine: (input: {
     targetRows: HoldingReplaceSnapshot[];
     quarantineTickers: string[];
@@ -93,20 +114,30 @@ export interface TossHoldingsSyncDependencies {
     updatedCount: number;
     quarantinedCount: number;
     unchangedCount: number;
+    postStateDigest: string;
   }>;
+  captureBrokerHoldingsDigest: (
+    expectedPreStateDigest: string,
+  ) => Promise<string>;
 }
 
 export interface ScheduledTossFreshnessMarkerResult {
   stateKey: string;
   sessionDate: string;
+  holdingsDigest: string;
+  revision: number;
+  sealedAt: string;
 }
 
 const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
   fetchAllHoldings,
+  fetchBrokerHoldingsState,
   fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
   listTickerDirectoryExactBaseCandidates,
   replaceAllHoldings,
+  replaceAllHoldingsAndCaptureBrokerDigest,
   applyScheduledTossQuarantine,
+  captureBrokerHoldingsDigest,
 };
 
 class TossHoldingsFixtureError extends Error {
@@ -294,31 +325,94 @@ export async function recordScheduledTossFreshnessMarker(
   if (result.status !== "applied" && result.status !== "unchanged") {
     return null;
   }
+  if (!/^sha256:[0-9a-f]{64}$/.test(result.expectedPostStateDigest ?? "")) {
+    throw new Error(
+      "Scheduled Toss sync expected post-state digest is missing",
+    );
+  }
   const now = options.now ?? new Date();
   const sessionDate = options.sessionDate ?? resolveKstSessionDate(now);
   const stateKey = `toss-sync:success:MIXED:${sessionDate}`;
   const expiresAt = new Date(now.getTime() + 36 * 60 * 60 * 1000).toISOString();
-  await upsertRuntimeStateEntry(
-    stateKey,
+  const markerPayload = {
+    scope: "MIXED",
+    sessionDate,
+    status: result.status,
+    diffHash: result.diffHash,
+    incomingCount: result.summary.incomingCount,
+    createCount: result.summary.createCount,
+    updateCount: result.summary.updateCount,
+    deleteCount: result.summary.deleteCount,
+    unchangedCount: result.summary.unchangedCount,
+    quarantinedCount: result.quarantinedCount,
+    quarantinedTickers: result.quarantinedTickers,
+    source: "scheduled-route",
+    timezone: "Asia/Seoul",
+    updatedAt: now.toISOString(),
+  };
+  const env = getSupabaseEnv();
+  const response = await fetchSupabase(
+    `${env.SUPABASE_URL}/rest/v1/rpc/seal_broker_snapshot_v0`,
     {
-      scope: "MIXED",
-      sessionDate,
-      status: result.status,
-      diffHash: result.diffHash,
-      incomingCount: result.summary.incomingCount,
-      createCount: result.summary.createCount,
-      updateCount: result.summary.updateCount,
-      deleteCount: result.summary.deleteCount,
-      unchangedCount: result.summary.unchangedCount,
-      quarantinedCount: result.quarantinedCount,
-      quarantinedTickers: result.quarantinedTickers,
-      source: "scheduled-route",
-      timezone: "Asia/Seoul",
-      updatedAt: now.toISOString(),
+      method: "POST",
+      headers: buildAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      body: JSON.stringify({
+        p_state_key: stateKey,
+        p_session_date: sessionDate,
+        p_status: result.status,
+        p_expires_at: expiresAt,
+        p_marker_payload: markerPayload,
+        p_expected_post_state_digest: result.expectedPostStateDigest,
+      }),
+      cache: "no-store",
     },
-    expiresAt,
   );
-  return { stateKey, sessionDate };
+  if (!response.ok) {
+    throw new SupabaseApiError(
+      `Failed to seal BrokerSnapshotV0: ${await parseError(response)}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!Array.isArray(payload) || payload.length !== 1) {
+    throw new SupabaseApiError(
+      "seal_broker_snapshot_v0 returned ambiguous cardinality",
+      500,
+    );
+  }
+  const sealed = asRecord(payload[0]);
+  const holdingsDigest = sealed?.holdings_digest;
+  const revision = sealed?.revision;
+  const sealedAt = sealed?.sealed_at;
+  if (
+    sealed?.state_key !== stateKey ||
+    sealed?.session_date !== sessionDate ||
+    sealed?.status !== result.status ||
+    typeof holdingsDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/.test(holdingsDigest) ||
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision <= 0 ||
+    typeof sealedAt !== "string" ||
+    !Number.isFinite(Date.parse(sealedAt))
+  ) {
+    throw new SupabaseApiError(
+      "seal_broker_snapshot_v0 returned an invalid result",
+      500,
+    );
+  }
+
+  return {
+    stateKey,
+    sessionDate,
+    holdingsDigest,
+    revision,
+    sealedAt: new Date(sealedAt).toISOString(),
+  };
 }
 
 async function fetchTossTickerDirectoryCandidates(
@@ -356,10 +450,16 @@ export async function buildTossHoldingsSyncPreview(
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
   options: TossHoldingsSyncPreviewOptions = {},
 ): Promise<TossHoldingsSyncPreview> {
-  const [currentHoldings, tossItems] = await Promise.all([
-    deps.fetchAllHoldings(),
+  const [holdingsState, tossItems] = await Promise.all([
+    options.brokerSnapshotBoundary
+      ? deps.fetchBrokerHoldingsState()
+      : deps.fetchAllHoldings().then((holdings) => ({
+          holdings,
+          holdingsDigest: null,
+        })),
     deps.fetchTossHoldingsItems(),
   ]);
+  const currentHoldings = holdingsState.holdings;
   const tickerDirectoryCandidates = await fetchTossTickerDirectoryCandidates(
     tossItems,
     deps,
@@ -382,6 +482,7 @@ export async function buildTossHoldingsSyncPreview(
     hasChanges: hasChanges(dryRun.reconciliation.summary),
     hasCurrentHoldings: currentHoldings.length > 0,
     payload,
+    initialHoldingsDigest: holdingsState.holdingsDigest,
   };
 }
 
@@ -407,7 +508,7 @@ export async function applyTossHoldingsSyncPreview(
 }
 
 export async function runScheduledTossAutoApply(
-  options: { autoApplyEnabled: boolean; sessionDate?: string },
+  options: { autoApplyEnabled: boolean; sessionDate?: string; now?: Date },
   deps: TossHoldingsSyncDependencies = defaultTossHoldingsSyncDependencies,
 ): Promise<ScheduledTossAutoSyncResponse> {
   if (!options.autoApplyEnabled) {
@@ -434,9 +535,14 @@ export async function runScheduledTossAutoApply(
     };
   }
 
-  const sessionDate = options.sessionDate ?? resolveKstSessionDate();
+  const currentSessionDate = resolveKstSessionDate(options.now);
+  const sessionDate = options.sessionDate ?? currentSessionDate;
+  if (sessionDate > currentSessionDate) {
+    throw new Error("Scheduled Toss sync cannot use a future KST session");
+  }
   const preview = await buildTossHoldingsSyncPreview(deps, {
     tickerDirectoryLookupFailureMode: "throw",
+    brokerSnapshotBoundary: true,
   });
   const quarantinedTickers = preview.dryRun.reconciliation.changes.delete.map(
     (row) => row.ticker,
@@ -476,18 +582,33 @@ export async function runScheduledTossAutoApply(
       status: "applied",
       quarantinedCount: result.quarantinedCount,
       quarantinedTickers,
+      expectedPostStateDigest: result.postStateDigest,
     };
   }
   if (!preview.hasChanges) {
-    return { ...base, status: "unchanged" };
+    if (!preview.initialHoldingsDigest) {
+      throw new Error("Scheduled Toss sync initial DB digest is missing");
+    }
+    const expectedPostStateDigest = await deps.captureBrokerHoldingsDigest(
+      preview.initialHoldingsDigest,
+    );
+    return { ...base, status: "unchanged", expectedPostStateDigest };
   }
 
-  const applied = await applyTossHoldingsSyncPreview(preview, deps);
+  const applied = await deps.replaceAllHoldingsAndCaptureBrokerDigest(
+    preview.dryRun.targetRows,
+    { expectedCurrentHoldings: preview.currentHoldings },
+  );
+  assertReplaceAllResultMatchesPreview(
+    applied,
+    preview.dryRun.reconciliation.summary,
+  );
   return {
-    ...applied,
-    mode: "auto-apply",
+    ...preview.payload,
+    mode: "auto-apply" as const,
     status: "applied",
     quarantinedCount: 0,
     quarantinedTickers: [],
+    expectedPostStateDigest: applied.postStateDigest,
   };
 }

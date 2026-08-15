@@ -63,4 +63,37 @@ describe("resolveSelectedKeyFromUrl", () => {
 
     expect(result).toBe("2026/02/2026-02-01.buy.json");
   });
+
+  it("rejects a Decision Board key from a different run lane", () => {
+    const holdingKey =
+      "2026/08/2026-08-11.decision-board.holding.hold-run." +
+      "a".repeat(64) +
+      ".json";
+
+    const result = resolveSelectedKeyFromUrl({
+      previousSelectedKey: null,
+      nextKeyRaw: holdingKey,
+      reportType: "decision-board",
+      runKind: "ENTRY",
+      availableKeys: [holdingKey],
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("rejects surrounding whitespace instead of normalizing a Decision Board key", () => {
+    const entryKey =
+      "2026/08/2026-08-11.decision-board.entry.entry-run." +
+      "a".repeat(64) +
+      ".json";
+
+    expect(
+      resolveSelectedKeyFromUrl({
+        previousSelectedKey: null,
+        nextKeyRaw: ` ${entryKey} `,
+        reportType: "decision-board",
+        runKind: "ENTRY",
+      }),
+    ).toBeNull();
+  });
 });

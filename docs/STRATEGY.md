@@ -12,6 +12,7 @@
 
 - `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, 로컬 `sab sell-ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
+- Decision Board V0에는 sealed public fact만 받는 pure compiler와 local-only shadow runner가 있습니다. 이 runner는 기존 `scan`/`sell`/`entry` 결과나 알림을 바꾸지 않으며 production preparation/research adapter가 미설정된 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다.
 
 ### 실험
 
@@ -446,6 +447,74 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
   - `time_stop_days` 경과 시 `REVIEW`(단, 이미 `SELL`이면 유지)
 - corporate action 의심(분할 유사 급변) 감지 시 `flags=["CORPORATE_ACTION_SUSPECT"]`를 추가합니다.
   - 기존 action이 `SELL`이면 보존하고, `HOLD` 등 `SELL`이 아닌 action만 `REVIEW`로 보정해 수동 확인을 우선합니다.
+
+### Decision Board V0 ENTRY/HOLDING compiler policy (shadow)
+
+Decision Board V0 compiler는 기존 `scan`/`sell`/`entry` action을 바꾸는 runtime
+통합이 아니라, 이미 선택·봉인된 public SWING fact를 Task 1 payload로 투영하는 순수
+shadow 경계입니다. 모델, 네트워크, 파일, clock, broker, 주문 API를 호출하지 않으며
+후보나 보유 universe를 넓히지 않습니다.
+
+첫 구현 범위는 US SWING ENTRY/HOLDING뿐입니다. KR과 LONG_TERM 판단, horizon mandate,
+portfolio optimizer는 이 truth table을 재사용해 추측하지 않고 별도 gate가 생길 때까지
+범위 밖입니다. 현재 기본 CLI에는 production preparation/research/claim-verifier adapter가
+연결되지 않아 `CONFIG_UNAVAILABLE`로 닫히며, fixture/recorded 검증 통과를 실제 shadow
+운영으로 오해해서는 안 됩니다. 모든 action은 조언이고 매수·매도는 사용자가 직접 합니다.
+
+ENTRY 우선순위는 item/identity 미승인 `REVIEW`, non-candidate signal omit, 필수
+mandate/signal/price/exposure gap `REVIEW`, deterministic exposure fail `AVOID`, research
+gap/conflict `REVIEW`, action-eligible `MATERIAL_ADVERSE` `AVOID`, 나머지 `BUY`입니다.
+독립 exposure fail이 있으면 stale/unapproved evidence가 없어도 `AVOID`가 유지되지만,
+evidence conflict만으로 adverse veto를 추측하지 않고 `REVIEW`합니다.
+
+HOLDING 우선순위는 current broker/candle/rule에 근거한 hard stop/confirmed exit `SELL`,
+item/identity 또는 deterministic input gap `REVIEW`, action-eligible material adverse
+`REVIEW`, research coverage gap/error `REVIEW`, 나머지 `HOLD`입니다. 유효한 hard
+`SELL`은 supportive/adverse evidence, timeout, conflict, `NOT_SELECTED_CAP`이
+`HOLD`/`REVIEW`로 낮출 수 없습니다. research selection은 priority/order로 최대 5개만
+고르는 별도 순수 정책이고, 여섯 번째 이후 holding도 compiler universe에는 남아 정확히
+한 번 평가됩니다. selection result는 선택 당시 전체 holding universe의 immutable policy
+snapshot에 process-local로 결속되고 `compile_holding`의 필수 입력입니다. compiler는
+selection과 다른 subset/누락/중복 universe를 거부하고, unselected holding에
+`NOT_SELECTED_CAP`을 직접 적용합니다. 모든 compiler enum은 문자열 equality가 아니라
+canonical enum member identity까지 확인하므로 raw/fresh-equal 문자열 mutation은 action
+precedence를 바꿀 수 없습니다. item ID와 research priority/order도 매 selection/compile에서
+exact scalar type과 lane/ticker/grammar/range를 재검증한 snapshot만 정렬에 사용하므로
+equal subclass나 post-factory mutation은 selection, output order, canonical hash를 바꿀 수
+없습니다.
+
+### Decision Board V0 claim evidence policy (shadow)
+
+- 한 validation은 공개 claim 하나와 검증된 공개 기사 하나만 다룹니다.
+- entailment는 `SUPPORTED`, `CONTRADICTED`, `UNCLEAR` 중 하나이며 세 상태 모두 normalized article text 안의 exact nonempty `[start, end)` 근거 span이 필요합니다.
+- directional action 변경 자격은 발급 당시 원래 claim이 `action_changing=true`이고 validation의 exact issued instrument/location identity 및 validation/request/article/source/policy의 immutable issuance snapshot과 deep revalidation을 통과한 unchanged `SUPPORTED`일 때만 생깁니다.
+- `CONTRADICTED`와 `UNCLEAR`는 review 자료이며 action 변경을 승인하지 않습니다. context-only `SUPPORTED`도 action 변경을 승인하지 않습니다.
+- compiler가 게시하는 public EvidenceRef는 위 자격을 다시 확인한 claim/source에서만 만들며 `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time, `WITHIN_POLICY` freshness, citation label을 포함합니다. 모델·provider가 임의로 쓴 URL이나 citation metadata는 사용하지 않습니다.
+- 이 정책은 advice-only shadow 경계입니다. runner는 exact issued item/selection만 compiler에 전달하며 주문 생성·수정·취소 경로를 추가하지 않습니다.
+
+### Decision Board V0 run aggregation policy (shadow)
+
+- shared snapshot/preflight prerequisite가 유효하지 않으면 directional payload 없이 typed `BLOCKED`를 local artifact로 남기며 exit 0입니다.
+- shared prerequisite가 유효하면 item timeout/provider/coverage failure를 해당 item의 `REVIEW`로 격리합니다. 모든 item이 `REVIEW`이거나 ENTRY signal item이 0개여도 run은 `PUBLISHED`, exit 0입니다.
+- raw/mutated/wrong-lane authority, compiler payload identity mismatch, unexpected adapter error, persistence invariant failure는 `FAILED`, exit 2이며 invalid artifact를 쓰거나 upload하지 않습니다.
+- HOLDING research cap은 enrichment 호출만 최대 5개로 제한합니다. full universe는 compile하며 hard `SELL`은 timeout과 `NOT_SELECTED_CAP`보다 우선합니다.
+- local canonical write가 항상 upload보다 먼저입니다. optional upload 실패는 local `PUBLISHED|BLOCKED`를 degraded 상태로 보존하고, required upload 실패는 retained local path를 가진 typed `FAILED`입니다.
+
+### Decision Board V0 shadow graduation policy
+
+- 첫 측정 전에 policy/researcher/verifier version, planned ENTRY/HOLDING slot, diff reason,
+  provider/coverage/freshness threshold를 local gate manifest로 승인합니다.
+- 최소 20 US 거래 session 동안 모든 planned slot과 기존 경로의 후보/action 차이를
+  `EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED`로 분류합니다.
+- `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch, eligible holding
+  누락, queue 밖 hard-SELL 누락은 각각 0건이어야 합니다.
+- 관찰 뒤 threshold를 바꾸거나 서로 다른 policy version을 한 통계로 합치지 않습니다.
+  변경 시 새 gate version과 새 20-session 기간이 필요합니다.
+- gate 통과는 다음 cutover 검토 자격일 뿐 schedule/load, notification, workflow,
+  credential scope를 자동 변경하지 않습니다. 주문 실행은 영구적으로 사용자 수동입니다.
+
+측정 절차와 산식은 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md),
+public interface는 [Decision Board V0 reference](decision-board.md)를 기준으로 합니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 

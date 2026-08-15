@@ -54,14 +54,19 @@ describe("pnpm dependency overrides", () => {
 
     expect(packageJson.pnpm?.overrides).toBeUndefined();
     expect(workspace.overrides).toEqual({
-      "postcss@<8.5.10": ">=8.5.10",
+      "nanoid@<3.3.18": "3.3.18",
+      "postcss@<8.5.23": "8.5.23",
+      "sharp@<0.35.0": "0.35.0",
       vite: "8.0.16",
     });
 
     expect(lockfile.overrides).toEqual(workspace.overrides);
     expectPackageVersionsAtLeast(lockfile, "brace-expansion", "1.1.15");
     expectPackageVersionsAtLeast(lockfile, "js-yaml", "4.1.2");
-    expectPackageVersionsAtLeast(lockfile, "postcss", "8.5.10");
+    expectPackageVersionsAtLeast(lockfile, "nanoid", "3.3.18");
+    expectPackageVersionsAtLeast(lockfile, "next", "16.2.11");
+    expectPackageVersionsAtLeast(lockfile, "postcss", "8.5.23");
+    expectPackageVersionsAtLeast(lockfile, "sharp", "0.35.0");
     expectPackageVersionsAtLeast(lockfile, "undici", "7.28.0");
     expectPackageVersionsAtLeast(lockfile, "vite", "8.0.16");
   });

@@ -64,11 +64,23 @@ vi.mock("@/lib/supabase-admin", () => {
   return {
     SupabaseApiError,
     fetchAllHoldings: vi.fn(async () => []),
+    fetchBrokerHoldingsState: vi.fn(async () => ({
+      holdings: [],
+      holdingsDigest: "broker-digest",
+    })),
+    captureBrokerHoldingsDigest: vi.fn(async () => "broker-digest"),
     replaceAllHoldings: vi.fn(async () => ({
       insertedCount: 0,
       updatedCount: 0,
       deletedCount: 0,
       unchangedCount: 0,
+    })),
+    replaceAllHoldingsAndCaptureBrokerDigest: vi.fn(async () => ({
+      insertedCount: 0,
+      updatedCount: 0,
+      deletedCount: 0,
+      unchangedCount: 0,
+      holdingsDigest: "broker-digest",
     })),
     applyScheduledTossQuarantine: vi.fn(async () => ({
       insertedCount: 0,

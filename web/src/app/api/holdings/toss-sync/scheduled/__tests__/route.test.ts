@@ -135,6 +135,21 @@ describe("/api/holdings/toss-sync/scheduled route", () => {
     expect(runScheduledTossAutoApply).not.toHaveBeenCalled();
   });
 
+  it("rejects a future KST session before building sync dependencies", async () => {
+    const response = await POST(
+      makePostRequest(
+        { mode: "auto-apply", sessionDate: "2099-01-01" },
+        { authorization: "Bearer job-token" },
+      ),
+    );
+    const payload = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Future Toss sync session is not allowed");
+    expect(buildTossHoldingsSyncDependenciesFromEnv).not.toHaveBeenCalled();
+    expect(runScheduledTossAutoApply).not.toHaveBeenCalled();
+  });
+
   it("rejects non-local requests before running sync", async () => {
     vi.mocked(assertLocalRequest).mockImplementationOnce(() => {
       throw new LocalRequestGuardError("Local only");

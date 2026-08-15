@@ -82,6 +82,16 @@
 | `GITHUB_PAT` | required when dispatch enabled | none | `replace-with-github-token` | web `/api/run` | GitHub token for workflow dispatch | Secret. Server-only. |
 | `REPORT_RETENTION_DAYS` | no | `30` | `30` | web, cleanup workflow | Retention days display/cleanup input | Cleanup workflow validates positive integer. |
 | `REPORT_SEARCH_WINDOW` | no | `100` | `100` | web reports | Ticker search scan window | Code clamps min/max. |
+| `DECISION_BOARD_JOURNAL_HOST_DIR` | no | `./logs/decision-board-journal` | `/private/path/to/journal` | Docker Compose Web | Host RunJournal directory mounted read-only | Must remain owner-only; do not expose the real path in public output. |
+| `DECISION_BOARD_JOURNAL_LIMIT` | no | `20` | `20` | Web journal helper | Maximum returned public records | Positive bounded integer. |
+| `DECISION_BOARD_JOURNAL_SCAN_LIMIT` | no | `200` | `200` | Web journal helper | Maximum filenames scanned | Early scan bound. |
+| `DECISION_BOARD_JOURNAL_MAX_RECORD_BYTES` | no | `65536` | `65536` | Web journal helper | Per-record byte bound | Oversize records are not parsed. |
+| `DECISION_BOARD_JOURNAL_MAX_OUTPUT_BYTES` | no | `262144` | `262144` | Web journal helper | Helper stdout bound | Web revalidates the result with Zod. |
+| `DECISION_BOARD_JOURNAL_TIMEOUT_MS` | no | `1500` | `1500` | Web journal bridge | Fixed-argv helper timeout | Timeout yields safe unavailable, not raw stderr. |
+| `DECISION_BOARD_CLAIM_LIVE_PROVIDER_COMMAND` | opt-in eval only | none | `provider-command` | local claim live compare | Explicit provider subprocess | Never configure in CI; command receives strict public request JSON only. |
+| `DECISION_BOARD_CLAIM_LIVE_MODEL` | opt-in eval only | none | `approved-model-id` | local claim live compare | Expected model identity | Must match recorded/live response identity. |
+| `DECISION_BOARD_CLAIM_LIVE_TIMEOUT_SECONDS` | no | `15` | `15` | local claim live compare | Whole process-group deadline | Finite `0 < timeout <= 300`. |
+| `DECISION_BOARD_CLAIM_LIVE_SAFE_ENV` | no | empty | `LANG` | local claim live compare | Comma-separated provider env allowlist | Secret/token/key/auth/Toss/Supabase names are rejected; default environment contains only safe PATH. |
 | `TOSS_INVEST_CLIENT_ID` | required for Toss holdings sync | none | `replace-with-toss-client-id` | web `/api/holdings/toss-sync` | Toss Securities Open API OAuth client id | Secret-like credential. Do not commit. Used only server-side. |
 | `TOSS_INVEST_CLIENT_SECRET` | required for Toss holdings sync | none | `replace-with-toss-client-secret` | web `/api/holdings/toss-sync` | Toss Securities Open API OAuth client secret | Secret. Do not commit. Used only server-side. |
 | `TOSS_INVEST_ACCOUNT` | required for Toss holdings sync | none | `replace-with-account-seq` | web `/api/holdings/toss-sync` | Toss accountSeq for `X-Tossinvest-Account` | Treat as sensitive account metadata. Do not commit real values. |

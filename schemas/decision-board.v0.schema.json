@@ -1,0 +1,1037 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swing-trading-report.local/schemas/decision-board.v0.schema.json",
+  "title": "Decision Board V0 publishable report",
+  "$ref": "#/$defs/DecisionBoardEnvelopeV0",
+  "$defs": {
+    "HashV0": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "TimestampV0": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "RunKindV0": {
+      "enum": ["ENTRY", "HOLDING"]
+    },
+    "PublicTickerV0": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$"
+    },
+    "PublicVersionV0": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": {
+        "pattern": "(^|[._-])(?:[Aa][Cc][Cc][Oo][Uu][Nn][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn])([._-]|$)"
+      }
+    },
+    "PublicEnvelopeMetadataV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eligible_count": { "type": "integer", "minimum": 0 },
+        "selected_count": { "type": "integer", "minimum": 0 },
+        "compiler_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "policy_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "registry_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "researcher_version": { "$ref": "#/$defs/PublicVersionV0" },
+        "verifier_version": { "$ref": "#/$defs/PublicVersionV0" }
+      }
+    },
+    "IssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "InstrumentRefV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "canonical_ticker",
+        "exchange",
+        "company_name",
+        "identity_source",
+        "identity_version"
+      ],
+      "properties": {
+        "market": {
+          "const": "US"
+        },
+        "canonical_ticker": { "$ref": "#/$defs/PublicTickerV0" },
+        "exchange": {
+          "type": "string",
+          "minLength": 1
+        },
+        "company_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "BrokerHoldingV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticker",
+        "quantity",
+        "entry_price",
+        "entry_currency",
+        "entry_date",
+        "strategy",
+        "entry_pattern",
+        "notes",
+        "tags",
+        "stop_override",
+        "target_override",
+        "broker_state",
+        "broker_missing_first_seen_date",
+        "broker_missing_last_seen_date",
+        "broker_missing_count",
+        "broker_missing_diff_hash"
+      ],
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_price": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_currency": {
+          "type": ["string", "null"]
+        },
+        "entry_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "strategy": {
+          "type": ["string", "null"]
+        },
+        "entry_pattern": {
+          "type": ["string", "null"]
+        },
+        "notes": {
+          "type": ["string", "null"]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stop_override": {
+          "type": ["string", "null"]
+        },
+        "target_override": {
+          "type": ["string", "null"]
+        },
+        "broker_state": {
+          "enum": ["confirmed", "not_seen_in_toss"]
+        },
+        "broker_missing_first_seen_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "broker_missing_last_seen_date": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "broker_missing_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "broker_missing_diff_hash": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "BrokerSnapshotMarkerV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "sessionDate",
+        "status",
+        "snapshotDigest",
+        "snapshotRevision",
+        "sealedAt"
+      ],
+      "properties": {
+        "scope": { "const": "MIXED" },
+        "sessionDate": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "status": { "enum": ["applied", "unchanged"] },
+        "snapshotDigest": { "$ref": "#/$defs/HashV0" },
+        "snapshotRevision": { "type": "integer", "minimum": 1 },
+        "sealedAt": { "$ref": "#/$defs/TimestampV0" },
+        "diffHash": {},
+        "incomingCount": {},
+        "createCount": {},
+        "updateCount": {},
+        "deleteCount": {},
+        "unchangedCount": {},
+        "quarantinedCount": {},
+        "quarantinedTickers": {},
+        "source": {},
+        "timezone": {},
+        "updatedAt": {}
+      }
+    },
+    "BrokerSnapshotV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_key",
+        "session_date",
+        "status",
+        "fresh_until",
+        "sealed_at",
+        "holdings_digest",
+        "revision",
+        "marker",
+        "holdings"
+      ],
+      "properties": {
+        "state_key": { "type": "string", "minLength": 1 },
+        "session_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "status": { "enum": ["applied", "unchanged"] },
+        "fresh_until": { "$ref": "#/$defs/TimestampV0" },
+        "sealed_at": { "$ref": "#/$defs/TimestampV0" },
+        "holdings_digest": { "$ref": "#/$defs/HashV0" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "marker": { "$ref": "#/$defs/BrokerSnapshotMarkerV0" },
+        "holdings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/BrokerHoldingV0" }
+        }
+      }
+    },
+    "SupportingLocationV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Consumers must enforce end > start; draft 2020-12 has no portable cross-property numeric comparison.",
+      "required": ["kind", "start", "end"],
+      "properties": {
+        "kind": {
+          "const": "TEXT_OFFSETS"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ClaimValidationV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "instrument",
+        "source_url",
+        "publisher",
+        "published_at",
+        "article_content_hash",
+        "supporting_span",
+        "supporting_location",
+        "verifier_version",
+        "entailment"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://[^\\s\\u0000-\\u001F\\u007F]+$"
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "published_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "article_content_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "supporting_span": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supporting_location": {
+          "$ref": "#/$defs/SupportingLocationV0"
+        },
+        "verifier_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entailment": {
+          "enum": ["SUPPORTED", "CONTRADICTED", "UNCLEAR"]
+        }
+      }
+    },
+    "SourceHashV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "hash"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      }
+    },
+    "DeterministicFactV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fact_id",
+        "instrument",
+        "field",
+        "value",
+        "observed_at",
+        "source_hash"
+      ],
+      "properties": {
+        "fact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "source_hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      }
+    },
+    "DecisionInputV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sealed_at",
+        "run_kind",
+        "input_hash",
+        "source_hashes",
+        "instruments",
+        "deterministic_facts",
+        "validated_claims"
+      ],
+      "properties": {
+        "sealed_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "input_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "source_hashes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceHashV0"
+          }
+        },
+        "instruments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InstrumentRefV0"
+          }
+        },
+        "deterministic_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeterministicFactV0"
+          }
+        },
+        "validated_claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClaimValidationV0"
+          }
+        }
+      }
+    },
+    "EvidenceRefV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "role",
+        "source_url",
+        "publisher",
+        "published_at",
+        "article_content_hash",
+        "supporting_span",
+        "supporting_location",
+        "entailment",
+        "freshness",
+        "citation_label"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": ["SUPPORTING", "OPPOSING"]
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https://(?![^/]*@)(?![^/]*(?:^|\\.)localhost(?:/|$))(?![^/]*\\.(?:local|internal|lan|home)(?:/|$))(?![^/]*xn--)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*$"
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "published_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "article_content_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "supporting_span": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "supporting_location": {
+          "$ref": "#/$defs/SupportingLocationV0"
+        },
+        "entailment": {
+          "const": "SUPPORTED"
+        },
+        "freshness": {
+          "const": "WITHIN_POLICY"
+        },
+        "citation_label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "DecisionItemV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument", "status", "issues", "evidence"],
+      "properties": {
+        "instrument": {
+          "$ref": "#/$defs/InstrumentRefV0"
+        },
+        "status": {
+          "enum": ["DECIDED", "REVIEW"]
+        },
+        "action": {
+          "enum": ["BUY", "AVOID", "HOLD", "SELL"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueV0"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRefV0"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "DECIDED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["action"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "REVIEW"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "issues": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": ["action"]
+            }
+          }
+        }
+      ]
+    },
+    "DecisionPayloadV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_kind", "sealed_input_hash", "items"],
+      "properties": {
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "sealed_input_hash": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DecisionItemV0"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "ENTRY"
+              }
+            },
+            "required": ["run_kind"]
+          },
+          "then": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": ["BUY", "AVOID"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "HOLDING"
+              }
+            },
+            "required": ["run_kind"]
+          },
+          "then": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": ["HOLD", "SELL"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DecisionBoardEnvelopeV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "created_at",
+        "idempotency_key",
+        "run_kind",
+        "status",
+        "issues"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "decision-board.v0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "$ref": "#/$defs/TimestampV0"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/HashV0"
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "status": {
+          "enum": ["PUBLISHED", "BLOCKED"]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IssueV0"
+          }
+        },
+        "metadata": {
+          "$ref": "#/$defs/PublicEnvelopeMetadataV0"
+        },
+        "decision_payload": {
+          "$ref": "#/$defs/DecisionPayloadV0"
+        },
+        "decision_payload_hash": {
+          "$ref": "#/$defs/HashV0"
+        }
+      },
+      "$comment": "The payload hash is the sha256 digest of canonical DecisionPayloadV0 bytes; consumers enforce digest equality after structural validation.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "PUBLISHED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["decision_payload", "decision_payload_hash"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "BLOCKED"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "issues": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["decision_payload"]
+                },
+                {
+                  "required": ["decision_payload_hash"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "ENTRY"
+              }
+            },
+            "required": ["run_kind", "decision_payload"]
+          },
+          "then": {
+            "properties": {
+              "decision_payload": {
+                "properties": {
+                  "run_kind": {
+                    "const": "ENTRY"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "run_kind": {
+                "const": "HOLDING"
+              }
+            },
+            "required": ["run_kind", "decision_payload"]
+          },
+          "then": {
+            "properties": {
+              "decision_payload": {
+                "properties": {
+                  "run_kind": {
+                    "const": "HOLDING"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RunJournalTimestampV0": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$(?![\\s\\S])"
+    },
+    "RunJournalReportFileV0": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$(?![\\s\\S])"
+    },
+    "RunJournalDecisionIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "COMPILER_CONTRACT_INVALID",
+            "CONFIG_UNAVAILABLE",
+            "IDEMPOTENCY_CONFLICT",
+            "INTERNAL_ERROR",
+            "ITEM_ENRICHMENT_INVALID",
+            "LOCAL_PERSISTENCE_FAILED",
+            "PREPARATION_INVALID",
+            "SHARED_PREFLIGHT_UNAVAILABLE",
+            "UPLOAD_FAILED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "const": "COMPILER_CONTRACT_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code COMPILER_CONTRACT_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "CONFIG_UNAVAILABLE" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code CONFIG_UNAVAILABLE." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "IDEMPOTENCY_CONFLICT" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code IDEMPOTENCY_CONFLICT." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "INTERNAL_ERROR" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code INTERNAL_ERROR." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "ITEM_ENRICHMENT_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code ITEM_ENRICHMENT_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "LOCAL_PERSISTENCE_FAILED" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code LOCAL_PERSISTENCE_FAILED." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "PREPARATION_INVALID" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code PREPARATION_INVALID." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "SHARED_PREFLIGHT_UNAVAILABLE" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code SHARED_PREFLIGHT_UNAVAILABLE." } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": "UPLOAD_FAILED" } } },
+          "then": { "properties": { "message": { "const": "Run reported sanitized issue code UPLOAD_FAILED." } } }
+        }
+      ]
+    },
+    "RunJournalNonUploadDecisionIssueV0": {
+      "allOf": [
+        { "$ref": "#/$defs/RunJournalDecisionIssueV0" },
+        {
+          "properties": {
+            "code": { "not": { "const": "UPLOAD_FAILED" } }
+          }
+        }
+      ]
+    },
+    "RunJournalUploadIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "UPLOAD_FAILED" },
+        "message": { "const": "Run reported sanitized issue code UPLOAD_FAILED." }
+      }
+    },
+    "RunJournalMissedIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "MISSED_EXPECTED" },
+        "message": { "const": "Expected run did not start before its grace deadline." }
+      }
+    },
+    "RunJournalStaleIssueV0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "STALE_INCOMPLETE" },
+        "message": { "const": "Started run did not reach a terminal state before its TTL." }
+      }
+    },
+    "RunJournalIssueV0": {
+      "oneOf": [
+        { "$ref": "#/$defs/RunJournalDecisionIssueV0" },
+        { "$ref": "#/$defs/RunJournalMissedIssueV0" },
+        { "$ref": "#/$defs/RunJournalStaleIssueV0" }
+      ]
+    },
+    "RunJournalV0": {
+      "$comment": "Cross-field timestamp chronology is semantic and MUST be validated by parse_run_journal_v0 at Python consumption boundaries; JSON Schema alone is not the semantic authority.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "run_kind",
+        "status",
+        "expected_at",
+        "started_at",
+        "terminal_at",
+        "grace_seconds",
+        "stale_seconds",
+        "issues",
+        "report_file"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "decision-board.v0"
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$(?![\\s\\S])"
+        },
+        "run_kind": {
+          "$ref": "#/$defs/RunKindV0"
+        },
+        "status": {
+          "enum": [
+            "STARTED",
+            "PUBLISHED",
+            "BLOCKED",
+            "FAILED",
+            "MISSED_EXPECTED",
+            "STALE_INCOMPLETE"
+          ]
+        },
+        "expected_at": {
+          "$ref": "#/$defs/RunJournalTimestampV0"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunJournalTimestampV0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunJournalTimestampV0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grace_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 604800
+        },
+        "stale_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunJournalIssueV0"
+          }
+        },
+        "report_file": {
+          "anyOf": [
+            { "$ref": "#/$defs/RunJournalReportFileV0" },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "STARTED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "type": "null" },
+              "issues": { "maxItems": 0 },
+              "report_file": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["PUBLISHED", "BLOCKED"] } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
+              },
+              "report_file": {
+                "$ref": "#/$defs/RunJournalReportFileV0"
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "FAILED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "issues": {
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": { "$ref": "#/$defs/RunJournalUploadIssueV0" }
+                  },
+                  "report_file": {
+                    "$ref": "#/$defs/RunJournalReportFileV0"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "issues": {
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": { "$ref": "#/$defs/RunJournalNonUploadDecisionIssueV0" }
+                  },
+                  "report_file": { "type": "null" }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "MISSED_EXPECTED" } } },
+          "then": {
+            "properties": {
+              "started_at": { "type": "null" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalMissedIssueV0" }
+              },
+              "report_file": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "STALE_INCOMPLETE" } } },
+          "then": {
+            "properties": {
+              "started_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "terminal_at": { "$ref": "#/$defs/RunJournalTimestampV0" },
+              "issues": {
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/RunJournalStaleIssueV0" }
+              },
+              "report_file": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

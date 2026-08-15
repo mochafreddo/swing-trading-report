@@ -29,6 +29,8 @@ web/node_modules/
 web/.next/
 web/.turbo/
 web/coverage/
+web/playwright-report/
+web/test-results/
 web/tsconfig.tsbuildinfo
 web/next-env.d.ts
 
@@ -54,6 +56,7 @@ mise.local.lock
 /.worktrees/
 /data/
 /logs/launchd/*.log
+/logs/decision-board-journal/
 /logs/measurements/
 /logs/scheduled/
 /reports/

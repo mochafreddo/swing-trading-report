@@ -49,6 +49,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --all-groups
 
+      - name: Decision Board offline verification
+        run: >-
+          uv run python -m pytest -q
+          tests/test_decision_board_verification.py
+          tests/test_decision_board_privacy_integration.py
+          tests/test_decision_board_capability_contract.py
+
       - name: Ruff lint
         run: uv run ruff check .
 
@@ -77,6 +84,7 @@ jobs:
       GITHUB_OWNER: ci-owner
       GITHUB_REPO: ci-repo
       GITHUB_PAT: ghp_ci_token
+      NEXT_TELEMETRY_DISABLED: "1"
     defaults:
       run:
         working-directory: web
@@ -181,6 +189,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Decision Board test Python dependencies
+        working-directory: .
+        run: uv sync --locked --no-dev --inexact
+
       - name: Lint
         run: pnpm run lint
 
@@ -195,3 +207,9 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm run playwright:install:ci
+
+      - name: Decision Board fixture browser journey
+        run: pnpm run test:e2e:decision-board

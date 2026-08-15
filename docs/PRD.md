@@ -22,11 +22,17 @@
 - scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬
   generic wrapper가 담당하며, 정상 판단 전송과 freshness-blocked 보류 알림을
   분리합니다.
+- US SWING Decision Board V0의 public identity, bounded research, exact-span claim
+  validation, pure compiler, local runner/report/RunJournal, Supabase index와 Reports UI
+  계약은 구현되어 있습니다. production preparation/research/claim-verifier adapter와
+  실제 schedule은 미연결이라 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다.
 
 ### 실험
 
-- 별도 experimental 제품 문서는 운영하지 않습니다. 전략/파라미터 실험은
-  [전략 문서](STRATEGY.md), replay fixture, 테스트에서 추적합니다.
+- US SWING Decision Board는 advice-only shadow 실험입니다. 최소 20 US 거래 session의
+  사전 승인 manifest와 diff taxonomy를 통과하기 전 production owner가 될 수 없습니다.
+  현재 production adapter가 미연결이므로 측정 기간은 아직 시작되지 않았습니다.
+- 전략/파라미터 실험은 [전략 문서](STRATEGY.md), replay fixture, 테스트에서 추적합니다.
 
 ### 백로그
 
@@ -35,6 +41,7 @@
 - 원격 노출/클라우드 상시 운영 같은 운영 모델 확장 여부 결정
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
 - 추가 유료/벤더별 news/API adapter 운영화 여부 결정
+- Decision Board production adapter를 승인·연결하고 20-session shadow gate를 시작할지 결정
 
 ### 폐기 후보
 
@@ -50,6 +57,8 @@
 - 실행 결과는 사람이 재검토할 수 있는 JSON 리포트로 남기고, 로컬 웹에서
   탐색한다.
 - 자동 매매가 아니라, 후보 선별과 판단 보조를 목표로 한다.
+- Decision Board를 포함한 모든 매수·매도는 사용자가 직접 실행한다. 주문
+  생성·수정·취소·조건부 주문 capability는 제품 범위에 넣지 않는다.
 - 개인/단일 사용자 로컬 운영을 기본으로 하며, 원격 공개 운영은 별도 설계와
   보안 검토 전까지 범위 밖으로 둔다.
 
@@ -74,6 +83,8 @@
 | 운영 체크/장애 대응 | [Operations](operations.md), [Troubleshooting](troubleshooting.md) |
 | 시스템 구성과 데이터 흐름 | [ARCHITECTURE](ARCHITECTURE.md) |
 | 신호/리스크 전략 로직 | [STRATEGY](STRATEGY.md) |
+| Decision Board 구현/CLI/report 계약 | [Decision Board V0](decision-board.md) |
+| Decision Board shadow 졸업 측정 | [Shadow evaluation](decision-board-shadow-evaluation.md) |
 | Storage/report_index/runtime_state 계약 | [Spec v1.1](spec-v1.1.md) |
 | 환경변수와 config override | [config-reference](config-reference.md), [`.env.example`](../.env.example) |
 
@@ -86,6 +97,10 @@
   아니라 별도 인증/권한/비밀 관리 모델을 어떻게 둘 것인가?
 - AI Brief source provider는 어떤 품질 기준을 통과해야 기본 provider로 승격할
   수 있는가?
+- Decision Board provider/coverage/freshness threshold를 첫 shadow gate manifest에서
+  어떤 수치로 사전 승인할 것인가?
+- 20-session gate 통과 뒤에도 notification/schedule owner 전환은 어떤 별도 승인과
+  rollback rehearsal을 요구할 것인가?
 - 전략/리스크 변경 backlog는 제품 문서가 아니라 [STRATEGY](STRATEGY.md)와
   테스트 fixture에서 추적하는 것이 더 적합한가?
 

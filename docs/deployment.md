@@ -146,6 +146,19 @@ where schemaname = 'public'
 order by tablename;
 ```
 
+### Decision Board report index rollout
+
+적용 순서는 `report_index migration -> Python Decision Board producer/upload adapter -> Web server data consumer`입니다. runner, local scheduler seam, RunJournal과 UI는 구현됐지만 production preparation/research/claim-verifier adapter와 실제 launchd schedule은 미연결입니다. 따라서 이 배포만으로 자동 실행하거나 주문을 만들지 않습니다.
+
+Migration 뒤에는 `report_index`의 RLS/FORCE RLS가 모두 켜져 있고 `anon`/`authenticated` table privilege가 없으며 `service_role`의 필요한 CRUD grant가 있는지 확인합니다. 또한 `run_kind=ENTRY|HOLDING` 각각에서 `decision_created_at DESC, run_id DESC, report_key DESC` latest query를 확인합니다. Web을 migration보다 먼저 배포하면 새 nullable column select가 실패하므로 허용하지 않습니다.
+
+애플리케이션 rollback은 producer를 먼저 중지한 뒤 Web consumer와 Python adapter를 되돌립니다. Additive nullable column/index/migration은 legacy row를 바꾸지 않으므로 그대로 두는 것이 기본 rollback입니다. 이미 적용한 migration의 column/index 삭제나 Decision Board object/index row 삭제는 데이터 파괴 결정이므로 자동 수행하지 않고 forward-fix를 우선합니다. Storage와 index 사이 원자 coordination이 없으므로 index 실패 뒤 object를 자동 삭제하지 않습니다. matching authoritative index면 성공 수렴하고, absent/mismatch/unavailable이면 object를 보존한 채 typed cleanup failure로 관측합니다.
+
+20-session shadow gate 통과도 배포 트리거가 아닙니다. schedule/load, notification owner,
+credential scope는 별도 수동 승인과 rollback rehearsal 뒤에만 바뀔 수 있으며 Toss 주문
+capability는 영구적으로 추가하지 않습니다. [평가 절차](decision-board-shadow-evaluation.md)를
+참고하세요.
+
 For the 2026-06 holdings `entry_pattern` runtime migration, the DB smoke checks
 the column, enabled non-null replace-all writes, omitted-key preserve behavior,
 inactive-row null enforcement, and Add Buy replay shape:
@@ -273,6 +286,21 @@ just qa-toss-sync
 ```
 
 `just qa-toss-sync` runs `scripts/qa_toss_sync_local.sh`. It refuses to start unless `SUPABASE_URL` is local (`127.0.0.1`, `localhost`, `[::1]`, or `host.docker.internal`) unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_SUPABASE=1` is explicitly set; it also refuses non-loopback `TOSS_SYNC_QA_BASE_URL` unless `TOSS_SYNC_QA_ALLOW_NONLOCAL_BASE_URL=1` is set. For Dockerized web, loopback Supabase URLs are translated to `host.docker.internal` so the container can reach the host-published local Supabase API. The script rebuilds the web container with `TOSS_SYNC_SOURCE=fixture`, `TOSS_SYNC_QA_FIXTURE_ENABLED=1`, and `TOSS_SYNC_AUTO_APPLY_ENABLED=1`; logs in with the local admin credentials from `.env`; exports the current holdings YAML; seeds a two-row QA holdings set; requires the scheduled sync runner to return `status=applied`; verifies `005930` and `AAPL.NAS` quantities/prices; restores the original holdings YAML; removes local auth/cookie temp files; and recreates the web container with fixture mode unset on exit. This is the preferred QA path when browser/API tests must cover authenticated UI entry and valid-token auto-apply without touching live Toss or remote holdings data.
+
+### BrokerSnapshotV0 rollout and rollback
+
+배포 순서는 반드시 `migration -> Web producer -> Python consumer`입니다.
+migration 적용 전에는 scheduled sync 중지 후 진행 중인 producer가 없는지 확인합니다.
+migration 뒤 첫 성공한 scheduled Toss sync 전까지는 `initial unsealed` 상태이며,
+Python consumer는 snapshot 부재를 fail-closed 처리해야 합니다. Web을 migration보다
+먼저 배포하면 seal RPC가 없으므로 성공 sync도 `marker_failed`가 됩니다.
+
+이 RPC는 `service-role-only`, `SECURITY INVOKER`, `advice-only` 경계입니다.
+브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. migration 적용
+전 코드 rollback만 Python consumer, Web producer 순서로 되돌립니다. 적용된 migration의
+table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않습니다. 새 DB RPC가
+적용된 뒤에는 구 Web rollback 금지입니다. producer 중지 후 새 producer와
+호환되는 `forward-fix` migration을 적용하고 검증이 끝난 뒤 scheduled sync를 재개합니다.
 
 ## Rollback
 

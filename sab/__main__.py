@@ -13,6 +13,32 @@ from typing import Any
 from . import ai_brief_latency_probe
 from .ai_brief import run_ai_brief
 from .backtest import run_backtest
+from .decision_board.cli import (
+    DecisionBoardCliConfigV0,
+    execute_decision_board_cli_v0,
+)
+from .decision_board.results import (
+    DecisionRunIssueCodeV0,
+    DecisionRunResultV0,
+    create_decision_run_failed_v0,
+    decision_run_exit_code_v0,
+    serialize_decision_run_result_v0,
+)
+from .decision_board.run_journal import (
+    ExpectedRunV0,
+    RunJournalError,
+    RunJournalStatusV0,
+    RunJournalStoreV0,
+)
+from .decision_board.run_journal_cli import (
+    JournalShadowProcessConfigV0,
+    execute_journal_shadow_process_v0,
+    parse_bounded_int_v0,
+    parse_utc_rfc3339_v0,
+    public_records_v0,
+)
+from .decision_board.run_journal_public import read_public_journal_status_v0
+from .decision_board.runner import RunKindV0
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -257,6 +283,58 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upload entry report to Supabase Storage/report_index",
     )
+
+    decision_board = sub.add_parser(
+        "decision-board",
+        help="Run one local notification-free Decision Board shadow decision",
+    )
+    decision_board.add_argument("--run-kind", required=True)
+    decision_board.add_argument("--run-id", required=True)
+    decision_board.add_argument("--idempotency-key", required=True)
+    decision_board.add_argument("--created-at", required=True)
+    decision_board.add_argument("--sealed-input-hash", required=True)
+    decision_board.add_argument(
+        "--upload-mode",
+        default="disabled",
+    )
+    decision_board.add_argument("--report-dir", default="reports")
+
+    journal_status = sub.add_parser(
+        "decision-board-journal-status",
+        help="Read bounded sanitized local Decision Board journal state",
+    )
+    journal_status.add_argument("--journal-dir", required=True)
+    journal_status.add_argument("--status", action="append", default=None)
+    journal_status.add_argument("--limit", default="100")
+    journal_status.add_argument("--scan-limit", default="1000")
+    journal_status.add_argument("--max-record-bytes", default="65536")
+    journal_status.add_argument("--max-output-bytes", default="262144")
+
+    journal_reconcile = sub.add_parser(
+        "decision-board-journal-reconcile",
+        help="Persist missed/stale local Decision Board observations",
+    )
+    journal_reconcile.add_argument("--journal-dir", required=True)
+    journal_reconcile.add_argument("--run-kind", required=True)
+    journal_reconcile.add_argument("--expected-at", required=True)
+    journal_reconcile.add_argument("--run-id", required=True)
+    journal_reconcile.add_argument("--now", required=True)
+    journal_reconcile.add_argument("--grace-seconds", required=True)
+    journal_reconcile.add_argument("--stale-seconds", required=True)
+    journal_reconcile.add_argument("--limit", default="100")
+
+    journal_run = sub.add_parser(
+        "decision-board-journal-run",
+        help="Run one local Decision Board shadow process with durable journaling",
+    )
+    journal_run.add_argument("--journal-dir", required=True)
+    journal_run.add_argument("--run-kind", required=True)
+    journal_run.add_argument("--expected-at", required=True)
+    journal_run.add_argument("--run-id", required=True)
+    journal_run.add_argument("--grace-seconds", required=True)
+    journal_run.add_argument("--stale-seconds", required=True)
+    journal_run.add_argument("--dry-run", action="store_true")
+    journal_run.add_argument("runner_args", nargs=argparse.REMAINDER)
 
     backtest = sub.add_parser(
         "backtest",
@@ -635,6 +713,141 @@ def _run_entry_command(ns: argparse.Namespace) -> int:
     )
 
 
+def _run_decision_board_command(ns: argparse.Namespace) -> int:
+    result: DecisionRunResultV0
+    try:
+        config = DecisionBoardCliConfigV0.from_strings(
+            run_kind=ns.run_kind,
+            run_id=ns.run_id,
+            idempotency_key=ns.idempotency_key,
+            created_at=ns.created_at,
+            sealed_input_hash=ns.sealed_input_hash,
+            upload_mode=ns.upload_mode,
+            report_dir=ns.report_dir,
+        )
+    except TypeError, ValueError:
+        result = create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.PREPARATION_INVALID
+        )
+    else:
+        try:
+            result = execute_decision_board_cli_v0(config)
+        except Exception:
+            result = create_decision_run_failed_v0(
+                issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+            )
+    try:
+        public = serialize_decision_run_result_v0(result)
+        exit_code = decision_run_exit_code_v0(result)
+    except TypeError, ValueError:
+        result = create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+        )
+        public = serialize_decision_run_result_v0(result)
+        exit_code = decision_run_exit_code_v0(result)
+    stream = sys.stderr if public["status"] == "FAILED" else sys.stdout
+    print(json.dumps(public, ensure_ascii=False, sort_keys=True), file=stream)
+    return exit_code
+
+
+def _journal_cli_failure() -> int:
+    print(
+        json.dumps(
+            {"status": "FAILED", "exit_code": 2, "issue_code": "JOURNAL_INVALID"},
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _run_decision_board_journal_status_command(ns: argparse.Namespace) -> int:
+    try:
+        limit = parse_bounded_int_v0(ns.limit, field="limit", minimum=1, maximum=1000)
+        scan_limit = parse_bounded_int_v0(
+            ns.scan_limit, field="scan_limit", minimum=1, maximum=1000
+        )
+        max_record_bytes = parse_bounded_int_v0(
+            ns.max_record_bytes,
+            field="max_record_bytes",
+            minimum=1,
+            maximum=1024 * 1024,
+        )
+        max_output_bytes = parse_bounded_int_v0(
+            ns.max_output_bytes,
+            field="max_output_bytes",
+            minimum=1,
+            maximum=1024 * 1024,
+        )
+        statuses = (
+            tuple(status.value for status in RunJournalStatusV0)
+            if ns.status is None
+            else tuple(RunJournalStatusV0(value).value for value in ns.status)
+        )
+        public = read_public_journal_status_v0(
+            ns.journal_dir,
+            limit=limit,
+            statuses=statuses,
+            scan_limit=scan_limit,
+            max_record_bytes=max_record_bytes,
+            max_output_bytes=max_output_bytes,
+        )
+        print(json.dumps(public, sort_keys=True))
+        return 0
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
+def _run_decision_board_journal_reconcile_command(ns: argparse.Namespace) -> int:
+    try:
+        kind = RunKindV0(ns.run_kind.upper())
+        expected = ExpectedRunV0.create(
+            run_kind=kind,
+            expected_at=parse_utc_rfc3339_v0(ns.expected_at, field="expected_at"),
+            run_id=ns.run_id,
+        )
+        records = RunJournalStoreV0(ns.journal_dir).reconcile(
+            expected=(expected,),
+            now=parse_utc_rfc3339_v0(ns.now, field="now"),
+            grace_seconds=parse_bounded_int_v0(
+                ns.grace_seconds,
+                field="grace_seconds",
+                minimum=0,
+                maximum=604800,
+            ),
+            stale_seconds=parse_bounded_int_v0(
+                ns.stale_seconds,
+                field="stale_seconds",
+                minimum=1,
+                maximum=604800,
+            ),
+            limit=parse_bounded_int_v0(
+                ns.limit, field="limit", minimum=1, maximum=1000
+            ),
+        )
+        print(json.dumps(public_records_v0(records), sort_keys=True))
+        return 0
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
+def _run_decision_board_journal_run_command(ns: argparse.Namespace) -> int:
+    try:
+        config = JournalShadowProcessConfigV0.from_strings(
+            run_kind=ns.run_kind,
+            expected_at=ns.expected_at,
+            run_id=ns.run_id,
+            journal_dir=ns.journal_dir,
+            grace_seconds=ns.grace_seconds,
+            stale_seconds=ns.stale_seconds,
+            runner_args=ns.runner_args,
+            dry_run=ns.dry_run,
+        )
+        return execute_journal_shadow_process_v0(config)
+    except OSError, RunJournalError, TypeError, ValueError:
+        return _journal_cli_failure()
+
+
 def _run_backtest_command(ns: argparse.Namespace) -> int:
     try:
         return run_backtest(
@@ -970,6 +1183,12 @@ def _dispatch_command(
         "scan": _run_scan_command,
         "sell": _run_sell_command,
         "entry": _run_entry_command,
+        "decision-board": _run_decision_board_command,
+        "decision-board-journal-status": (_run_decision_board_journal_status_command),
+        "decision-board-journal-reconcile": (
+            _run_decision_board_journal_reconcile_command
+        ),
+        "decision-board-journal-run": _run_decision_board_journal_run_command,
         "backtest": _run_backtest_command,
         "ai-brief": _run_ai_brief_command,
         "sell-ai-brief": _run_sell_ai_brief_command,

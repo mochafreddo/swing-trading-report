@@ -1,4 +1,8 @@
-import { isReportType, type ReportListItem } from "@/lib/types";
+import {
+  isReportType,
+  type DecisionBoardRunKind,
+  type ReportListItem,
+} from "@/lib/types";
 
 import type { ReportJson, ReportsFilterType } from "./types";
 
@@ -6,6 +10,12 @@ export { readApiError } from "@/lib/error-utils";
 
 export function parseReportType(value: string | null): ReportsFilterType {
   return isReportType(value) ? value : "all";
+}
+
+export function parseDecisionBoardRunKind(
+  value: string | null,
+): DecisionBoardRunKind | null {
+  return value === "ENTRY" || value === "HOLDING" ? value : null;
 }
 
 export function asRecord(value: unknown): ReportJson | null {

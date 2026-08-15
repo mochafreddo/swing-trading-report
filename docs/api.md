@@ -54,6 +54,10 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `sell-ai-brief-generate-scheduled` | Toss freshness marker를 확인한 뒤 sell report와 Sell AI Brief를 생성, 품질 평가, 업로드, 전달 | `--scope MIXED`, `--session-date`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--provider`, `--model-provider`, `--model-name`, `--dry-run` | stdout status JSON, sell/Sell AI Brief reports, `scheduled-sell:*` runtime_state marker |
 | `sell-ai-brief-scheduled` | 기존 Sell AI Brief artifact를 validation + upload/index + notify 순서로 전달/재조정 | `--sell-ai-brief-report`, `--scope KR|US|MIXED`, `--session-date`, `--runner-role`, `--scheduled-tick`, `--attempt-id`, `--run-url`, `--dry-run` | stdout status JSON, `scheduled-sell:*` runtime_state marker, optional Storage/report_index delivery |
 | `ai-brief-latency-probe` | AI Brief primary/fallback 모델 호출 수와 반복 횟수 계획을 확인 | `--primary-model`, `--fallback-model`, `--repetitions 1..3` | stdout `planned_live_model_call_count=<n>`; upload/notification 없음 |
+| `decision-board` | local notification-free Decision Board shadow seam | `--run-kind`, `--run-id`, `--idempotency-key`, `--created-at`, `--sealed-input-hash`, `--upload-mode`, `--report-dir` | production adapter 미연결 기본 상태에서는 `CONFIG_UNAVAILABLE`, exit 2 |
+| `decision-board-journal-status` | bounded sanitized RunJournal 조회 | `--journal-dir`, `--status`, `--limit`, `--scan-limit`, `--max-record-bytes`, `--max-output-bytes` | public journal status JSON |
+| `decision-board-journal-reconcile` | missed/stale local slot 기록 | `--journal-dir`, `--run-kind`, `--expected-at`, `--run-id`, `--now`, `--grace-seconds`, `--stale-seconds` | reconciled public journal JSON |
+| `decision-board-journal-run` | one-shot runner를 local journal로 감싸기 | journal identity/policy, `--dry-run`, `-- <runner argv>` | STARTED/terminal journal observation |
 
 ## Report Artifacts
 
@@ -66,6 +70,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | `ai-brief` | `reports/YYYY-MM-DD(-n).ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief.json` | `report_index` |
 | `ai-brief-skip` | `reports/YYYY-MM-DD(-n).ai-brief-skip.json` | `YYYY/MM/YYYY-MM-DD(-n).ai-brief-skip.json` | `report_index` |
 | `sell-ai-brief` | `reports/YYYY-MM-DD(-n).sell-ai-brief.json` | `YYYY/MM/YYYY-MM-DD(-n).sell-ai-brief.json` | `report_index` |
+| `decision-board` | `reports/YYYY-MM-DD.decision-board.{entry|holding}.<run_id>.<64hex>.json` | `YYYY/MM/<local filename>` | `report_index` with exact run identity |
 
 ### Buy/Sell Risk Disclosure Notes
 
@@ -149,8 +154,9 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab <command> [options]
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/auth/login` | 관리자 로그인 | JSON `{ "username": string, "password": string }` | `200 { "ok": true }`, sets HttpOnly session cookie |
 | `POST` | `/api/auth/logout` | 관리자 로그아웃 | no body required | `200 { "ok": true }`, clears session cookie |
-| `GET` | `/api/reports` | report_index 목록 조회 | query `type=all|buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief`, `q`, `limit=1..200`, `refresh=true|false` | `ReportsListResponse` |
-| `GET` | `/api/reports/detail` | Storage JSON 상세 조회 | query `key=<storage-key>`, `refresh=true|false` | report JSON |
+| `GET` | `/api/reports` | report_index 목록 조회 | query `type=all|buy|sell|entry|ai-brief|ai-brief-skip|sell-ai-brief|decision-board`; Decision Board는 exact `runKind=ENTRY|HOLDING`; `q`, `limit=1..200`, `refresh=true|false` | `ReportsListResponse` |
+| `GET` | `/api/reports/detail` | Storage JSON 상세 조회 | query `key=<storage-key>`, `refresh=true|false`; Decision Board는 exact bytes/schema/hash/key/public projection 검증 | report JSON 또는 sanitized 422 |
+| `GET` | `/api/reports/decision-board-journal` | optional local RunJournal warning projection | no body; fixed-argv bounded helper | public missed/stale envelope 또는 safe unavailable |
 | `POST` | `/api/run` | `scan.yml`/`sell.yml` workflow_dispatch | scan: `{ "workflow":"scan", "provider":"kis|pykrx", "universe":"KR|US|both" }`; sell: `{ "workflow":"sell", "provider":"kis|pykrx" }` | `202 WorkflowDispatchResult` |
 | `GET` | `/api/holdings` | holdings 목록 | query `limit=1..200`, optional `cursor` | `{ items, nextCursor, hasMore }` |
 | `POST` | `/api/holdings` | holding 생성 | `HoldingMutationInput` with required `ticker` | `201 HoldingRecord` |

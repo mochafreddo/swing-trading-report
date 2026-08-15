@@ -1,0 +1,35 @@
+{
+  "schema_version": "decision-board.v0",
+  "run_id": "entry-2026-08-06T040000Z",
+  "created_at": "2026-08-06T04:00:02Z",
+  "idempotency_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "run_kind": "ENTRY",
+  "status": "PUBLISHED",
+  "issues": [],
+  "decision_payload": {
+    "run_kind": "ENTRY",
+    "sealed_input_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "items": [
+      {
+        "instrument": {
+          "market": "US",
+          "canonical_ticker": "GLN.NAS",
+          "exchange": "NASDAQ",
+          "company_name": "Glen Analytics",
+          "identity_source": "synthetic-directory",
+          "identity_version": "2026-08-06"
+        },
+        "status": "REVIEW",
+        "action": "BUY",
+        "issues": [
+          {
+            "code": "EVIDENCE_UNCLEAR",
+            "message": "The synthetic claim remains unclear."
+          }
+        ],
+        "evidence": []
+      }
+    ]
+  },
+  "decision_payload_hash": "sha256:7cb36e38e4bbfbf061b88873b07d97fb85997c924ea508a2a8768458e36c77c6"
+}

@@ -1,0 +1,492 @@
+"""Fail-closed local and Storage identity for Decision Board V0 reports."""
+
+from __future__ import annotations
+
+import errno
+import fcntl
+import hashlib
+import json
+import os
+import re
+import secrets
+import stat
+import sys
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+from sab.decision_board.contracts import (
+    canonical_json_bytes,
+    validate_decision_board_report,
+)
+
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+_KEY_PATTERN = re.compile(
+    r"(?P<year>\d{4})/(?P<month>\d{2})/"
+    r"(?P<date>\d{4}-\d{2}-\d{2})\.decision-board\."
+    r"(?P<kind>entry|holding)\."
+    r"(?P<run_id>[A-Za-z0-9][A-Za-z0-9_-]{0,127})\."
+    r"(?P<digest>[0-9a-f]{64})\.json\Z"
+)
+
+
+class DecisionBoardStorageError(RuntimeError):
+    """A Decision Board report could not be persisted safely."""
+
+
+class DecisionBoardStoragePathError(DecisionBoardStorageError):
+    """A report directory or target changed into an unsafe path."""
+
+
+class DecisionBoardIdempotencyConflictError(DecisionBoardStorageError):
+    """The deterministic identity already contains different bytes."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        storage_key: str | None = None,
+        cleanup_failed: bool = False,
+        rollback_skipped: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.storage_key = storage_key
+        self.cleanup_failed = cleanup_failed
+        self.rollback_skipped = rollback_skipped
+
+
+@dataclass(frozen=True)
+class ParsedDecisionBoardStorageKey:
+    key: str
+    report_date: date
+    run_kind: str
+    run_id: str
+    idempotency_key: str
+    basename: str
+
+
+@dataclass(frozen=True)
+class _LockHandle:
+    fd: int
+    name: str
+    device: int
+    inode: int
+
+
+def _report_created_at_utc(report: dict[str, Any]) -> datetime:
+    value = report["created_at"]
+    assert isinstance(value, str)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("created_at must include a UTC offset")
+    return parsed.astimezone(UTC)
+
+
+def _validated_run_id(value: object) -> str:
+    if not isinstance(value, str) or not _RUN_ID_PATTERN.fullmatch(value):
+        raise ValueError(
+            "run_id must be 1-128 ASCII letters, digits, underscores, or hyphens"
+        )
+    return value
+
+
+def build_decision_board_storage_key(report: object) -> str:
+    """Build the deterministic public-safe Storage key from a validated envelope."""
+
+    validated = validate_decision_board_report(report)
+    run_id = _validated_run_id(validated["run_id"])
+    created_at = _report_created_at_utc(validated)
+    run_kind = validated["run_kind"]
+    assert isinstance(run_kind, str)
+    kind = run_kind.lower()
+    idempotency_key = validated["idempotency_key"]
+    assert isinstance(idempotency_key, str)
+    digest = idempotency_key.removeprefix("sha256:")
+    basename = (
+        f"{created_at.date().isoformat()}.decision-board.{kind}.{run_id}.{digest}.json"
+    )
+    return f"{created_at:%Y/%m}/{basename}"
+
+
+def parse_decision_board_storage_key(
+    key: str,
+    *,
+    report: object | None = None,
+) -> ParsedDecisionBoardStorageKey | None:
+    """Parse one strict key, optionally requiring exact envelope identity parity."""
+
+    if not isinstance(key, str) or key != key.strip():
+        return None
+    match = _KEY_PATTERN.fullmatch(key)
+    if match is None:
+        return None
+    try:
+        report_date = date.fromisoformat(match.group("date"))
+    except ValueError:
+        return None
+    if f"{report_date.year:04d}" != match.group(
+        "year"
+    ) or f"{report_date.month:02d}" != match.group("month"):
+        return None
+    parsed = ParsedDecisionBoardStorageKey(
+        key=key,
+        report_date=report_date,
+        run_kind=match.group("kind").upper(),
+        run_id=match.group("run_id"),
+        idempotency_key=f"sha256:{match.group('digest')}",
+        basename=key.rsplit("/", 1)[-1],
+    )
+    if report is not None:
+        try:
+            expected = build_decision_board_storage_key(report)
+        except TypeError, ValueError:
+            return None
+        if expected != key:
+            return None
+    return parsed
+
+
+def _open_report_directory(report_dir: Path) -> int:
+    try:
+        before = report_dir.lstat()
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            f"report directory is unavailable: {report_dir}"
+        ) from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+        raise DecisionBoardStoragePathError(
+            f"report directory must be a real directory: {report_dir}"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory_fd = os.open(report_dir, flags)
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            f"report directory could not be opened safely: {report_dir}"
+        ) from exc
+    after = os.fstat(directory_fd)
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        os.close(directory_fd)
+        raise DecisionBoardStoragePathError(
+            "report directory changed during validation"
+        )
+    return directory_fd
+
+
+def _assert_lock_unchanged(directory_fd: int, lock: _LockHandle) -> None:
+    try:
+        opened = os.fstat(lock.fd)
+        current = os.stat(lock.name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            "target lock changed during protected operation"
+        ) from exc
+    expected_identity = (lock.device, lock.inode)
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or opened.st_nlink != 1
+        or (opened.st_dev, opened.st_ino) != expected_identity
+        or not stat.S_ISREG(current.st_mode)
+        or current.st_nlink != 1
+        or (current.st_dev, current.st_ino) != expected_identity
+    ):
+        raise DecisionBoardStoragePathError(
+            "target lock changed during protected operation"
+        )
+
+
+def _open_lock(directory_fd: int, basename: str) -> _LockHandle:
+    digest = hashlib.sha256(basename.encode("ascii")).hexdigest()
+    lock_name = f".decision-board-{digest}.lock"
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        try:
+            created_fd = os.open(
+                lock_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+                0o600,
+                dir_fd=directory_fd,
+            )
+        except FileExistsError:
+            pass
+        else:
+            os.close(created_fd)
+        lock_fd = os.open(lock_name, os.O_RDWR | nofollow, dir_fd=directory_fd)
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            "target lock could not be opened safely"
+        ) from exc
+    directory_acquired = False
+    target_acquired = False
+    try:
+        info = os.fstat(lock_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise DecisionBoardStoragePathError(
+                "target lock is not a private regular file"
+            )
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        directory_acquired = True
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        target_acquired = True
+        lock = _LockHandle(
+            fd=lock_fd,
+            name=lock_name,
+            device=info.st_dev,
+            inode=info.st_ino,
+        )
+        _assert_lock_unchanged(directory_fd, lock)
+        return lock
+    except BaseException as exc:
+        if target_acquired:
+            with suppress(BaseException):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        if directory_acquired:
+            try:
+                fcntl.flock(directory_fd, fcntl.LOCK_UN)
+            except BaseException:
+                with suppress(BaseException):
+                    fcntl.flock(directory_fd, fcntl.LOCK_UN)
+        try:
+            os.close(lock_fd)
+        except BaseException:
+            with suppress(BaseException):
+                os.close(lock_fd)
+        if isinstance(exc, DecisionBoardStoragePathError):
+            raise
+        if isinstance(exc, OSError):
+            raise DecisionBoardStoragePathError(
+                "target lock could not be validated or acquired safely"
+            ) from exc
+        raise
+
+
+def _snapshot_decision_board_report(
+    report: object,
+) -> tuple[dict[str, Any], bytes]:
+    payload = canonical_json_bytes(report)
+    snapshot = json.loads(payload)
+    validated = validate_decision_board_report(snapshot)
+    return validated, payload
+
+
+def _read_existing(directory_fd: int, basename: str) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        target_fd = os.open(basename, flags, dir_fd=directory_fd)
+    except OSError as exc:
+        raise DecisionBoardStoragePathError(
+            "existing target could not be opened safely"
+        ) from exc
+    try:
+        opened = os.fstat(target_fd)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise DecisionBoardStoragePathError("existing target is not a regular file")
+        chunks: list[bytes] = []
+        while chunk := os.read(target_fd, 1024 * 1024):
+            chunks.append(chunk)
+        current = os.stat(basename, dir_fd=directory_fd, follow_symlinks=False)
+        if not stat.S_ISREG(current.st_mode) or (
+            current.st_dev,
+            current.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            raise DecisionBoardStoragePathError(
+                "existing target changed during comparison"
+            )
+        return b"".join(chunks)
+    finally:
+        os.close(target_fd)
+
+
+def _write_temp(directory_fd: int, basename: str, payload: bytes) -> str:
+    for _ in range(32):
+        temp_name = f".{basename}.{secrets.token_hex(12)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            temp_fd = os.open(temp_name, flags, 0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            continue
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(temp_fd, view)
+                view = view[written:]
+            os.fsync(temp_fd)
+        except BaseException:
+            os.close(temp_fd)
+            os.unlink(temp_name, dir_fd=directory_fd)
+            raise
+        os.close(temp_fd)
+        return temp_name
+    raise DecisionBoardStorageError("could not allocate a private temporary file")
+
+
+def _target_matches(
+    directory_fd: int,
+    basename: str,
+    expected: os.stat_result,
+) -> bool:
+    try:
+        current = os.stat(basename, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(current.st_mode) and (
+        current.st_dev,
+        current.st_ino,
+    ) == (expected.st_dev, expected.st_ino)
+
+
+def write_decision_board_report(
+    report: object,
+    *,
+    report_dir: str | Path,
+) -> Path:
+    """Atomically create or idempotently confirm one Decision Board report."""
+
+    validated, payload = _snapshot_decision_board_report(report)
+    key = build_decision_board_storage_key(validated)
+    parsed = parse_decision_board_storage_key(key, report=validated)
+    assert parsed is not None
+    directory = Path(report_dir)
+    directory_fd = _open_report_directory(directory)
+    lock: _LockHandle | None = None
+    temp_name: str | None = None
+    created_target: os.stat_result | None = None
+    try:
+        lock = _open_lock(directory_fd, parsed.basename)
+        _assert_lock_unchanged(directory_fd, lock)
+        temp_name = _write_temp(directory_fd, parsed.basename, payload)
+        _assert_lock_unchanged(directory_fd, lock)
+        temp_info = os.stat(temp_name, dir_fd=directory_fd, follow_symlinks=False)
+        try:
+            _assert_lock_unchanged(directory_fd, lock)
+            os.link(
+                temp_name,
+                parsed.basename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            created_target = temp_info
+            if not _target_matches(directory_fd, parsed.basename, temp_info):
+                raise DecisionBoardStoragePathError(
+                    "new target changed during atomic creation"
+                )
+        except FileExistsError:
+            existing = _read_existing(directory_fd, parsed.basename)
+            if existing != payload:
+                raise DecisionBoardIdempotencyConflictError(
+                    "Decision Board identity already contains different bytes"
+                ) from None
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EISDIR}:
+                raise DecisionBoardStoragePathError(
+                    "target became unsafe during atomic creation"
+                ) from exc
+            raise
+        if created_target is not None:
+            try:
+                _assert_lock_unchanged(directory_fd, lock)
+                os.fsync(directory_fd)
+            except OSError:
+                if _target_matches(directory_fd, parsed.basename, created_target):
+                    os.unlink(parsed.basename, dir_fd=directory_fd)
+                raise
+        _assert_lock_unchanged(directory_fd, lock)
+        return directory / parsed.basename
+    except DecisionBoardStoragePathError:
+        with suppress(OSError):
+            if created_target is not None and _target_matches(
+                directory_fd, parsed.basename, created_target
+            ):
+                os.unlink(parsed.basename, dir_fd=directory_fd)
+                os.fsync(directory_fd)
+        raise
+    finally:
+        primary_error = sys.exception()
+        lock_error: DecisionBoardStoragePathError | None = None
+        cleanup_error: BaseException | None = None
+
+        def record_cleanup_error(exc: BaseException) -> None:
+            nonlocal cleanup_error
+            if cleanup_error is None:
+                cleanup_error = exc
+
+        def attempt_cleanup(operation: Callable[[], None]) -> None:
+            try:
+                operation()
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+
+        def attempt_close(fd: int) -> None:
+            try:
+                os.close(fd)
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+                try:
+                    os.close(fd)
+                except OSError as retry_exc:
+                    if retry_exc.errno != errno.EBADF:
+                        record_cleanup_error(retry_exc)
+                except BaseException as retry_exc:
+                    record_cleanup_error(retry_exc)
+
+        if lock is not None:
+            try:
+                _assert_lock_unchanged(directory_fd, lock)
+            except DecisionBoardStoragePathError as exc:
+                lock_error = exc
+                try:
+                    if created_target is not None and _target_matches(
+                        directory_fd, parsed.basename, created_target
+                    ):
+                        os.unlink(parsed.basename, dir_fd=directory_fd)
+                        os.fsync(directory_fd)
+                except OSError as cleanup_exc:
+                    record_cleanup_error(cleanup_exc)
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            except BaseException as cleanup_exc:
+                record_cleanup_error(cleanup_exc)
+        if lock is not None:
+            try:
+                attempt_cleanup(lambda: fcntl.flock(lock.fd, fcntl.LOCK_UN))
+            finally:
+                try:
+                    attempt_close(lock.fd)
+                finally:
+                    try:
+                        attempt_cleanup(
+                            lambda: fcntl.flock(directory_fd, fcntl.LOCK_UN)
+                        )
+                    finally:
+                        attempt_close(directory_fd)
+        else:
+            attempt_close(directory_fd)
+        if primary_error is None:
+            if lock_error is not None:
+                raise lock_error
+            if cleanup_error is not None:
+                if isinstance(cleanup_error, OSError):
+                    raise DecisionBoardStoragePathError(
+                        f"writer cleanup failed: {cleanup_error}"
+                    ) from cleanup_error
+                raise cleanup_error
+
+
+__all__ = [
+    "DecisionBoardIdempotencyConflictError",
+    "DecisionBoardStorageError",
+    "DecisionBoardStoragePathError",
+    "ParsedDecisionBoardStorageKey",
+    "build_decision_board_storage_key",
+    "parse_decision_board_storage_key",
+    "write_decision_board_report",
+]
