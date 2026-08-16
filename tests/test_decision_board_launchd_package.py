@@ -20,6 +20,46 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 
 
+def _assert_no_unexpected_cli_stderr(stderr: str) -> None:
+    known_warning = (
+        ": RuntimeWarning: The global interpreter lock (GIL) has been enabled to "
+        "load module 'pandas._libs.pandas_parser', which has not declared that it "
+        "can run safely without the GIL. To override this behavior and keep the GIL "
+        "disabled (at your own risk), run with PYTHON_GIL=0 or -Xgil=0."
+    )
+    unexpected = "".join(
+        line
+        for line in stderr.splitlines(keepends=True)
+        if not (
+            line.rstrip("\r\n").startswith("<frozen importlib._bootstrap>:")
+            and line.rstrip("\r\n").endswith(known_warning)
+        )
+    )
+    assert unexpected == ""
+
+
+def test_launchd_cli_stderr_allows_only_python_314t_pandas_gil_warning() -> None:
+    warning = (
+        "<frozen importlib._bootstrap>:491: RuntimeWarning: The global interpreter "
+        "lock (GIL) has been enabled to load module 'pandas._libs.pandas_parser', "
+        "which has not declared that it can run safely without the GIL. To override "
+        "this behavior and keep the GIL disabled (at your own risk), run with "
+        "PYTHON_GIL=0 or -Xgil=0.\n"
+    )
+
+    _assert_no_unexpected_cli_stderr(warning)
+
+
+def test_launchd_cli_stderr_rejects_operational_errors() -> None:
+    with pytest.raises(AssertionError, match="provider token leaked"):
+        _assert_no_unexpected_cli_stderr("provider token leaked\n")
+
+
+def test_launchd_cli_stderr_rejects_unexplained_blank_lines() -> None:
+    with pytest.raises(AssertionError):
+        _assert_no_unexpected_cli_stderr("\n")
+
+
 def test_launchd_package_builds_disabled_unscheduled_entry_and_holding_plists(
     tmp_path: Path,
 ) -> None:
@@ -93,7 +133,7 @@ def test_generated_launchd_program_arguments_execute_only_wrapper_dry_run(
             timeout=15,
         )
         assert completed.returncode == 0
-        assert completed.stderr == ""
+        _assert_no_unexpected_cli_stderr(completed.stderr)
         dry_run = json.loads(completed.stdout)
         assert dry_run["dry_run"] is True
         assert dry_run["runner_arg_count"] > 0
@@ -145,7 +185,7 @@ def test_launchd_package_cli_is_sanitized_and_refuses_existing_output(
         timeout=15,
     )
     assert completed.returncode == 0
-    assert completed.stderr == ""
+    _assert_no_unexpected_cli_stderr(completed.stderr)
     public = json.loads(completed.stdout)
     assert public["status"] == "PACKAGE_READY"
     assert str(tmp_path) not in completed.stdout
