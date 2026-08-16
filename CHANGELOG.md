@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.35.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.34.1...v1.35.0) (2026-08-16)
+
+
+### Features
+
+* **decision-board:** 20-session shadow gate를 고정한다 ([b1e07d2](https://github.com/mochafreddo/swing-trading-report/commit/b1e07d233e82ec7d3b5e9e0a4c3fe92448839819))
+* **decision-board:** launchd shadow dry-run 패키지를 만든다 ([d717367](https://github.com/mochafreddo/swing-trading-report/commit/d7173679264162bdaa72cdf562975f8aa597f646))
+* **decision-board:** production adapter 결속 경계를 추가한다 ([61b328e](https://github.com/mochafreddo/swing-trading-report/commit/61b328e8701b7d0fcc0542b6108eda1bf2d493b5))
+* **decision-board:** shadow 운영 준비 경계를 완성한다 ([bff6bfd](https://github.com/mochafreddo/swing-trading-report/commit/bff6bfdc50738a58cca60fee759592dbbbbc6b25))
+
+
+### Bug Fixes
+
+* **decision-board:** dry-run package lane 순서를 정규화한다 ([edbfa0d](https://github.com/mochafreddo/swing-trading-report/commit/edbfa0d2965d810ec02b9882db77d7b2994a4415))
+
 ## [1.34.1](https://github.com/mochafreddo/swing-trading-report/compare/v1.34.0...v1.34.1) (2026-08-15)
 
 
