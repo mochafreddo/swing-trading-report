@@ -5,7 +5,6 @@
 
 ### Features
 
-* **decision-board:** 오프라인 production 조립 경계를 고정한다 ([fd61fd9](https://github.com/mochafreddo/swing-trading-report/commit/fd61fd9daa781a7c0fe0a776beaae911906ce359))
 * **decision-board:** 오프라인 production 조립 경계를 고정한다 ([908e80f](https://github.com/mochafreddo/swing-trading-report/commit/908e80f4f40cd8895750eafb6c898115279d3234))
 
 ## [1.35.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.34.1...v1.35.0) (2026-08-16)
