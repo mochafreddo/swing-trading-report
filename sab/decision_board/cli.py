@@ -16,7 +16,10 @@ from .results import (
 from .runner import RunKindV0, UploadModeV0
 
 if TYPE_CHECKING:
-    from .production_adapter import DecisionBoardProductionAdapterV0
+    from .production_adapter import (
+        DecisionBoardProductionAdapterV0,
+        DecisionBoardProductionComponentsV0,
+    )
 
 _HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -84,9 +87,30 @@ def execute_decision_board_cli_v0(
     config: DecisionBoardCliConfigV0,
     *,
     adapter: DecisionBoardProductionAdapterV0 | None = None,
+    components: DecisionBoardProductionComponentsV0 | None = None,
 ) -> DecisionRunResultV0:
     """Execute an explicitly injected adapter or retain the fail-closed default."""
 
+    if adapter is not None and components is not None:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.PREPARATION_INVALID
+        )
+    if components is not None:
+        from .production_adapter import (
+            DecisionBoardAdapterUnavailableError,
+            compose_decision_board_production_adapter_v0,
+        )
+
+        try:
+            adapter = compose_decision_board_production_adapter_v0(components)
+        except DecisionBoardAdapterUnavailableError:
+            return create_decision_run_failed_v0(
+                issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+            )
+        except Exception:
+            return create_decision_run_failed_v0(
+                issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+            )
     if adapter is None:
         return create_decision_run_failed_v0(
             issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE

@@ -9,10 +9,20 @@ Decision Board V0는 기존 로직이 만든 US SWING 후보와 확인된 SWING 
 
 현재 schema, identity gate, research/claim validation, compiler, runner, atomic report
 storage, RunJournal, Reports UI와 검증 스위트는 구현되어 있습니다.
-`DecisionBoardProductionAdapterV0`는 CLI identity와 sealed request를 대조해 기존
-preparer/enricher/uploader를 runner에 결속하며 recorded Responses fixture로 게시 경로를
-검증합니다. 다만 approved request loader와 production preparation/research/claim-verifier adapter
-dependency는 의도적으로 연결되지 않았습니다. 따라서 저장소 기본 상태의
+`DecisionBoardProductionAdapterV0`는 CLI identity와 sealed request를 대조합니다.
+`DecisionBoardProductionComponentsV0`는 request loader, sealed preparer, public-only
+enricher와 optional uploader를 기존 CLI executor에 명시적으로 조립합니다. request source에는
+report 경로를 제외한 공개 trigger identity만 전달하고, evidence source에는 공개
+`run_kind/item_id/InstrumentRefV0`만 전달합니다. ENTRY/HOLDING의 deterministic facts는
+`PublicDecisionItemEnricherV0`가 원본 그대로 재발급하며, source는 typed research state와
+검증된 evidence만 돌려줄 수 있습니다. 이 경로는 recorded Responses fixture로 canonical report
+게시까지 검증합니다. component bundle은 세 least-authority wrapper의 exact type과 내부
+request/evidence source capability를 조립 시점에 검증하며 raw loader, preparer, enricher를
+허용하지 않습니다. 기존 직접 `adapter=` 주입은 낮은 수준의 호환 seam으로만 유지됩니다.
+
+다만 Supabase snapshot source, search provider, article fetcher, Responses transport와 uploader의
+production dependency는 의도적으로 선택하거나 연결하지 않았습니다. 조립 함수도 환경변수나
+credential을 읽지 않습니다. 따라서 저장소 기본 상태의
 `sab decision-board`는 조언을 추측하지 않고
 `CONFIG_UNAVAILABLE`, exit 2로 종료합니다. 실제 shadow 측정 기간은 approved adapter가
 별도 검증·연결된 뒤에만 시작할 수 있습니다.
@@ -110,10 +120,17 @@ projection을 새로 만들며 invalid/private-bearing artifact는 sanitized 422
 
 ## CLI reference
 
-기본 executor에는 adapter instance가 주입되지 않으므로 항상 fail closed합니다. 아래 명령은
-형식 확인용이며 실제 조언 생성 예시가 아닙니다. recorded 검증은
+기본 executor에는 adapter나 component bundle이 주입되지 않으므로 항상 fail closed합니다.
+component bundle은 애플리케이션 코드가 승인된 외부 경계를 명시적으로 주입할 때만 사용할 수
+있으며 CLI flag나 환경변수로 자동 구성되지 않습니다. 아래 명령은 형식 확인용이며 실제 조언
+생성 예시가 아닙니다. recorded 검증은
 `tests/test_decision_board_production_adapter.py`가 소유하며 live provider나 credential을
 사용하지 않습니다.
+
+현재 evidence source seam은 recorded/offline item 결과만 위한 동기 경계입니다. 최대 5종목의
+공유 45초 deadline, provider concurrency, URL dedupe와 전체 article cap을 소유하는 batch
+research adapter가 추가되기 전에는 live search/article/Responses transport를 이 seam에
+연결하지 않습니다.
 
 ```bash
 uv run python -m sab decision-board \
