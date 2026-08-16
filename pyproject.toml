@@ -1,6 +1,6 @@
 [project]
 name = "swing-trading-report"
-version = "1.35.0"
+version = "1.36.0"
 description = "Swing-trading signal scanner and report generator for KR/US markets"
 readme = "README.md"
 requires-python = ">=3.14"
