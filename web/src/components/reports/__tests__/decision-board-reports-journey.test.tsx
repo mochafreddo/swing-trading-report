@@ -10,13 +10,11 @@ import { ReportsClient } from "@/components/reports-client";
 import type { ReportsInitialState } from "@/components/reports/types";
 
 const navigationMock = vi.hoisted(() => ({
-  replace: vi.fn(),
   searchParams: new URLSearchParams(),
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/reports",
-  useRouter: () => ({ replace: navigationMock.replace }),
   useSearchParams: () => navigationMock.searchParams,
 }));
 
@@ -108,15 +106,21 @@ describe("fixture-only Decision Board reports journey", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    navigationMock.replace.mockReset();
+    window.history.replaceState(null, "", "/reports");
     navigationMock.searchParams = new URLSearchParams();
     requestedUrls = [];
-    navigationMock.replace.mockImplementation((value: string) => {
-      navigationMock.searchParams = new URL(
-        value,
-        "http://localhost:55300",
-      ).searchParams;
-    });
+    const originalReplaceState = window.history.replaceState.bind(
+      window.history,
+    );
+    vi.spyOn(window.history, "replaceState").mockImplementation(
+      (data, unused, value) => {
+        originalReplaceState(data, unused, value);
+        navigationMock.searchParams = new URL(
+          String(value),
+          "http://localhost:55300",
+        ).searchParams;
+      },
+    );
 
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = new URL(String(input), "http://localhost:55300");
