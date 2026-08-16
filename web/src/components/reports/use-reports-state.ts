@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import {
   REPORT_DETAIL_CACHE_MAX_ENTRIES,
@@ -188,6 +188,51 @@ export function buildReportsStateQueryString(
   return params.toString();
 }
 
+interface SearchParamsReader {
+  get(name: string): string | null;
+}
+
+function normalizeReportsStateQueryString(
+  searchParams: SearchParamsReader,
+): string {
+  const reportType = parseReportType(searchParams.get("type"));
+  return buildReportsStateQueryString({
+    reportType,
+    runKind:
+      reportType === "decision-board"
+        ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ?? "ENTRY")
+        : null,
+    appliedQuery: (searchParams.get("q") ?? "").trim(),
+    selectedKey: searchParams.get("key"),
+    selectedBucketId: (searchParams.get("bucket") ?? "").trim() || null,
+    showRaw: searchParams.get("raw") === "1",
+  });
+}
+
+function readBrowserReportsStateQueryString(): string {
+  return normalizeReportsStateQueryString(
+    new URLSearchParams(window.location.search),
+  );
+}
+
+function reportsListStateMatches(
+  searchParams: SearchParamsReader,
+  reportType: ReportsFilterType,
+  runKind: DecisionBoardRunKind | null,
+  appliedQuery: string,
+): boolean {
+  const browserReportType = parseReportType(searchParams.get("type"));
+  const browserRunKind =
+    browserReportType === "decision-board"
+      ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ?? "ENTRY")
+      : null;
+  return (
+    browserReportType === reportType &&
+    browserRunKind === runKind &&
+    (searchParams.get("q") ?? "").trim() === appliedQuery
+  );
+}
+
 async function fetchReportsListCached(
   reportType: ReportsFilterType,
   runKind: DecisionBoardRunKind | null,
@@ -252,7 +297,6 @@ async function fetchReportDetailCached(
 
 export function useReportsState(initialState?: ReportsInitialState) {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const initialUrlReportType = parseReportType(searchParams.get("type"));
   const initialUrlRunKind =
@@ -347,6 +391,8 @@ export function useReportsState(initialState?: ReportsInitialState) {
         initialState?.selectedBucketId !== initialUrlBucketId ||
         initialState?.showRaw !== (searchParams.get("raw") === "1")),
   );
+  const deferUrlReconciliation = useRef(false);
+  const internalUrlSyncCandidates = useRef(new Set<string>());
   const preserveSelectionWhenUrlKeyMissing = useRef(
     Boolean(initialState?.selectedKey && !searchParams.get("key")),
   );
@@ -385,24 +431,49 @@ export function useReportsState(initialState?: ReportsInitialState) {
   );
 
   const currentQueryString = useMemo(
-    () =>
-      buildReportsStateQueryString({
-        reportType: parseReportType(searchParams.get("type")),
-        runKind:
-          parseReportType(searchParams.get("type")) === "decision-board"
-            ? (parseDecisionBoardRunKind(searchParams.get("runKind")) ??
-              "ENTRY")
-            : null,
-        appliedQuery: (searchParams.get("q") ?? "").trim(),
-        selectedKey: searchParams.get("key"),
-        selectedBucketId: (searchParams.get("bucket") ?? "").trim() || null,
-        showRaw: searchParams.get("raw") === "1",
-      }),
+    () => normalizeReportsStateQueryString(searchParams),
     [searchParams],
   );
+  const currentQueryStringRef = useRef(currentQueryString);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- URL search params are an external source; this reconciles browser navigation with optimistic local report state. */
   useEffect(() => {
+    currentQueryStringRef.current = currentQueryString;
+  }, [currentQueryString]);
+
+  const finishLocalUrlSync = useCallback(() => {
+    pendingUrlSync.current = false;
+    deferUrlReconciliation.current = false;
+    internalUrlSyncCandidates.current.clear();
+  }, []);
+
+  const beginLocalUrlSync = useCallback(() => {
+    pendingUrlSync.current = true;
+    deferUrlReconciliation.current = true;
+    internalUrlSyncCandidates.current.clear();
+    internalUrlSyncCandidates.current.add(readBrowserReportsStateQueryString());
+  }, []);
+
+  const continueLocalUrlSync = useCallback(() => {
+    pendingUrlSync.current = true;
+    deferUrlReconciliation.current = true;
+    internalUrlSyncCandidates.current.add(readBrowserReportsStateQueryString());
+  }, []);
+
+  useEffect(() => {
+    const browserQueryString = readBrowserReportsStateQueryString();
+    if (currentQueryString !== browserQueryString) {
+      return;
+    }
+    if (
+      deferUrlReconciliation.current &&
+      desiredQueryString !== currentQueryString
+    ) {
+      if (internalUrlSyncCandidates.current.has(browserQueryString)) {
+        return;
+      }
+      finishLocalUrlSync();
+    }
+
     const nextType = parseReportType(searchParams.get("type"));
     const nextRunKind =
       nextType === "decision-board"
@@ -431,7 +502,11 @@ export function useReportsState(initialState?: ReportsInitialState) {
       Boolean(nextKey) && hasLoadedEmptyResultSet && !hasPrefetchedUrlDetail;
 
     preserveSelectionWhenUrlKeyMissing.current = false;
-    pendingUrlSync.current = preserveWhenKeyMissing || hasInvalidUrlKey;
+    if (preserveWhenKeyMissing || hasInvalidUrlKey) {
+      pendingUrlSync.current = true;
+    } else {
+      finishLocalUrlSync();
+    }
 
     setReportTypeState((prev) => (prev === nextType ? prev : nextType));
     setRunKindState((prev) => (prev === nextRunKind ? prev : nextRunKind));
@@ -474,36 +549,49 @@ export function useReportsState(initialState?: ReportsInitialState) {
       return prev === null ? prev : null;
     });
     setShowRawState((prev) => (prev === nextShowRaw ? prev : nextShowRaw));
-  }, [detailBucketId, detailKey, items, searchParams, total]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
+  }, [
+    currentQueryString,
+    desiredQueryString,
+    detailBucketId,
+    detailKey,
+    finishLocalUrlSync,
+    items,
+    searchParams,
+    total,
+  ]);
   useEffect(() => {
     const nextAppliedQuery = query.trim();
     if (nextAppliedQuery === appliedQuery) {
       return;
     }
     const timerId = window.setTimeout(() => {
-      pendingUrlSync.current = true;
+      beginLocalUrlSync();
       setAppliedQueryState(nextAppliedQuery);
     }, 300);
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [appliedQuery, query]);
+  }, [appliedQuery, beginLocalUrlSync, query]);
 
   useEffect(() => {
-    if (desiredQueryString === currentQueryString) {
-      pendingUrlSync.current = false;
+    const browserQueryString = readBrowserReportsStateQueryString();
+    if (pendingUrlSync.current) {
+      if (browserQueryString !== desiredQueryString) {
+        const targetUrl = desiredQueryString
+          ? `${pathname}?${desiredQueryString}`
+          : pathname;
+        internalUrlSyncCandidates.current.clear();
+        internalUrlSyncCandidates.current.add(desiredQueryString);
+        window.history.replaceState(null, "", targetUrl);
+        return;
+      }
+      if (desiredQueryString !== currentQueryString) {
+        return;
+      }
+      finishLocalUrlSync();
       return;
     }
-    if (!pendingUrlSync.current) {
-      return;
-    }
-    const targetUrl = desiredQueryString
-      ? `${pathname}?${desiredQueryString}`
-      : pathname;
-    router.replace(targetUrl, { scroll: false });
-  }, [currentQueryString, desiredQueryString, pathname, router]);
+  }, [currentQueryString, desiredQueryString, finishLocalUrlSync, pathname]);
 
   useEffect(() => {
     if (skipInitialListFetch.current) {
@@ -536,16 +624,44 @@ export function useReportsState(initialState?: ReportsInitialState) {
         if (cancelled) {
           return;
         }
+        const browserSearchParams = new URLSearchParams(window.location.search);
+        const browserQueryString =
+          normalizeReportsStateQueryString(browserSearchParams);
+        const hasUnexpectedBrowserNavigation =
+          currentQueryStringRef.current !== browserQueryString &&
+          !internalUrlSyncCandidates.current.has(browserQueryString);
+        if (
+          hasUnexpectedBrowserNavigation &&
+          !reportsListStateMatches(
+            browserSearchParams,
+            reportType,
+            runKind,
+            appliedQuery,
+          )
+        ) {
+          return;
+        }
+
         setItems(typed.items);
         setTotal(typed.total);
         setSearched(typed.searched);
         setTruncated(typed.truncated);
         setSearchWindow(typed.searchWindow);
         setWarnings(typed.warnings);
+        if (hasUnexpectedBrowserNavigation) {
+          return;
+        }
 
         const firstItem = typed.items[0] ?? null;
         const firstKey = firstItem?.key ?? null;
         const firstBucketId = firstItem?.bucketId ?? null;
+        if (
+          !currentUrlKeyRef.current &&
+          (selectedKeyRef.current !== firstKey ||
+            selectedBucketIdRef.current !== firstBucketId)
+        ) {
+          continueLocalUrlSync();
+        }
         setSelectedKeyState((prev) => {
           const explicitUrlKey = currentUrlKeyRef.current;
           if (explicitUrlKey) {
@@ -615,7 +731,7 @@ export function useReportsState(initialState?: ReportsInitialState) {
     return () => {
       cancelled = true;
     };
-  }, [appliedQuery, reportType, refreshToken, runKind]);
+  }, [appliedQuery, continueLocalUrlSync, reportType, refreshToken, runKind]);
 
   useEffect(() => {
     if (reportType !== "decision-board") {
@@ -760,52 +876,61 @@ export function useReportsState(initialState?: ReportsInitialState) {
   );
 
   const toggleShowRaw = useCallback(() => {
-    pendingUrlSync.current = true;
+    beginLocalUrlSync();
     setShowRawState((prev) => !prev);
-  }, []);
+  }, [beginLocalUrlSync]);
 
   const refreshReports = useCallback(() => {
     setRefreshToken((prev) => prev + 1);
   }, []);
 
-  const setReportType = useCallback((value: ReportsFilterType) => {
-    pendingUrlSync.current = true;
-    currentUrlKeyRef.current = null;
-    currentUrlBucketIdRef.current = null;
-    selectedKeyRef.current = null;
-    selectedBucketIdRef.current = null;
-    setReportTypeState(value);
-    setRunKindState(value === "decision-board" ? "ENTRY" : null);
-    setSelectedKeyState(null);
-    setSelectedBucketIdState(null);
-    setDetail(null);
-    setDetailKey(null);
-    setDetailBucketId(null);
-  }, []);
+  const setReportType = useCallback(
+    (value: ReportsFilterType) => {
+      beginLocalUrlSync();
+      currentUrlKeyRef.current = null;
+      currentUrlBucketIdRef.current = null;
+      selectedKeyRef.current = null;
+      selectedBucketIdRef.current = null;
+      setReportTypeState(value);
+      setRunKindState(value === "decision-board" ? "ENTRY" : null);
+      setSelectedKeyState(null);
+      setSelectedBucketIdState(null);
+      setDetail(null);
+      setDetailKey(null);
+      setDetailBucketId(null);
+    },
+    [beginLocalUrlSync],
+  );
 
-  const setRunKind = useCallback((value: DecisionBoardRunKind) => {
-    pendingUrlSync.current = true;
-    currentUrlKeyRef.current = null;
-    currentUrlBucketIdRef.current = null;
-    selectedKeyRef.current = null;
-    selectedBucketIdRef.current = null;
-    setRunKindState(value);
-    setSelectedKeyState(null);
-    setSelectedBucketIdState(null);
-    setDetail(null);
-    setDetailKey(null);
-    setDetailBucketId(null);
-  }, []);
+  const setRunKind = useCallback(
+    (value: DecisionBoardRunKind) => {
+      beginLocalUrlSync();
+      currentUrlKeyRef.current = null;
+      currentUrlBucketIdRef.current = null;
+      selectedKeyRef.current = null;
+      selectedBucketIdRef.current = null;
+      setRunKindState(value);
+      setSelectedKeyState(null);
+      setSelectedBucketIdState(null);
+      setDetail(null);
+      setDetailKey(null);
+      setDetailBucketId(null);
+    },
+    [beginLocalUrlSync],
+  );
 
   const setQuery = useCallback((value: string) => {
     setQueryState(value);
   }, []);
 
-  const setSelectedKey = useCallback((value: string, bucketId?: string) => {
-    pendingUrlSync.current = true;
-    setSelectedKeyState(value);
-    setSelectedBucketIdState(bucketId ?? null);
-  }, []);
+  const setSelectedKey = useCallback(
+    (value: string, bucketId?: string) => {
+      beginLocalUrlSync();
+      setSelectedKeyState(value);
+      setSelectedBucketIdState(bucketId ?? null);
+    },
+    [beginLocalUrlSync],
+  );
 
   return {
     reportType,

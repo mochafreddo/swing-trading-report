@@ -12,7 +12,6 @@ const navigationMock = vi.hoisted(() => {
   let searchParams = new URLSearchParams();
 
   return {
-    replace: vi.fn(),
     pathname: "/reports",
     setSearchParams(value: string) {
       searchParams = new URLSearchParams(value);
@@ -25,9 +24,6 @@ const navigationMock = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
-  useRouter: () => ({
-    replace: navigationMock.replace,
-  }),
   useSearchParams: () => navigationMock.getSearchParams(),
 }));
 
@@ -88,6 +84,17 @@ const EMPTY_SEARCH_STATE: ReportsInitialState = {
   detail: null,
 };
 
+const EMPTY_INITIAL_STATE: ReportsInitialState = {
+  ...INITIAL_STATE,
+  items: [],
+  total: 0,
+  selectedKey: null,
+  selectedBucketId: null,
+  detailKey: null,
+  detailBucketId: null,
+  detail: null,
+};
+
 function Harness({
   initialState,
 }: {
@@ -130,10 +137,46 @@ function DetailHarness({
   );
 }
 
+function ReportTypeHarness({
+  initialState,
+}: {
+  initialState: ReportsInitialState;
+}): React.JSX.Element {
+  const { reportType, runKind, selectedKey, setReportType } =
+    useReportsState(initialState);
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "output",
+      { "data-testid": "report-type" },
+      `${reportType}|${runKind ?? "none"}|${selectedKey ?? "none"}`,
+    ),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setReportType("decision-board"),
+      },
+      "Select Decision Board",
+    ),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setReportType("all"),
+      },
+      "Select All",
+    ),
+  );
+}
+
 describe("useReportsState URL sync", () => {
   let container: HTMLDivElement;
   let root: Root;
   let previousActEnvironment: boolean | undefined;
+  let replaceStateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     previousActEnvironment = (
@@ -146,7 +189,8 @@ describe("useReportsState URL sync", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    navigationMock.replace.mockReset();
+    window.history.replaceState(null, "", "/reports");
+    replaceStateSpy = vi.spyOn(window.history, "replaceState");
   });
 
   afterEach(() => {
@@ -164,20 +208,28 @@ describe("useReportsState URL sync", () => {
     value: string,
     initialState: ReportsInitialState = INITIAL_STATE,
   ): void {
-    navigationMock.setSearchParams(value);
+    setExternalSearchParams(value);
 
     act(() => {
       root.render(React.createElement(Harness, { initialState }));
     });
   }
 
+  function setExternalSearchParams(value: string): void {
+    const url = value ? `/reports?${value}` : "/reports";
+    window.history.replaceState(null, "", url);
+    navigationMock.setSearchParams(value);
+    replaceStateSpy.mockClear();
+  }
+
   it("keeps the server-selected key on first hydration when URL key is absent", () => {
     renderWithSearchParams("");
 
     expect(container.textContent).toContain(INITIAL_STATE.selectedKey ?? "");
-    expect(navigationMock.replace).toHaveBeenCalledWith(
+    expect(replaceStateSpy).toHaveBeenCalledWith(
+      null,
+      "",
       `/reports?key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}&bucket=reports`,
-      { scroll: false },
     );
   });
 
@@ -187,12 +239,12 @@ describe("useReportsState URL sync", () => {
       `key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}`,
     );
 
-    navigationMock.replace.mockClear();
+    replaceStateSpy.mockClear();
 
     renderWithSearchParams("");
 
     expect(container.textContent).toContain("none");
-    expect(navigationMock.replace).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
   });
 
   it("clears a stale URL key when the loaded report list is empty", () => {
@@ -202,9 +254,7 @@ describe("useReportsState URL sync", () => {
     );
 
     expect(container.textContent).toContain("none");
-    expect(navigationMock.replace).toHaveBeenCalledWith("/reports?q=AAPL", {
-      scroll: false,
-    });
+    expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/reports?q=AAPL");
   });
 
   it("keeps a prefetched deep-link key when the loaded report list is empty", () => {
@@ -222,11 +272,11 @@ describe("useReportsState URL sync", () => {
     });
 
     expect(container.textContent).toContain(selectedKey);
-    expect(navigationMock.replace).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
   });
 
   it("clears previous detail while loading a different selected key", async () => {
-    navigationMock.setSearchParams(
+    setExternalSearchParams(
       `key=${encodeURIComponent(INITIAL_STATE.selectedKey ?? "")}`,
     );
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -255,5 +305,273 @@ describe("useReportsState URL sync", () => {
     expect(container.textContent).toContain(
       "2026/02/2026-02-27.sell.json|loading|none",
     );
+  });
+
+  it("keeps a locally selected report type while the URL update is pending", async () => {
+    setExternalSearchParams("");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      container
+        .querySelector("button")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("decision-board|ENTRY");
+    expect(replaceStateSpy).toHaveBeenCalledWith(
+      null,
+      "",
+      "/reports?type=decision-board&runKind=ENTRY",
+    );
+
+    navigationMock.setSearchParams("type=decision-board&runKind=ENTRY");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("decision-board|ENTRY");
+
+    setExternalSearchParams("type=sell");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("sell|none");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+  });
+
+  it("honors external navigation before a local URL update completes", async () => {
+    setExternalSearchParams("");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container
+        .querySelector("button")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("decision-board|ENTRY");
+
+    setExternalSearchParams("type=sell");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("sell|none");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+  });
+
+  it("synchronously replaces the latest local report type selection", async () => {
+    setExternalSearchParams("");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    const buttons = Array.from(container.querySelectorAll("button"));
+    await act(async () => {
+      buttons[0]?.click();
+      await Promise.resolve();
+    });
+    expect(window.location.search).toBe("?type=decision-board&runKind=ENTRY");
+
+    await act(async () => {
+      buttons[1]?.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("all|none");
+    expect(window.location.search).toBe("");
+  });
+
+  it("ignores stale hook search params after an external navigation", async () => {
+    setExternalSearchParams("");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector("button")?.click();
+      await Promise.resolve();
+    });
+
+    navigationMock.setSearchParams("type=decision-board&runKind=ENTRY");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    setExternalSearchParams("type=sell");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("sell|none");
+
+    navigationMock.setSearchParams("type=decision-board&runKind=ENTRY");
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: EMPTY_INITIAL_STATE,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("sell|none");
+    expect(window.location.search).toBe("?type=sell");
+  });
+
+  it("does not let an older list response overwrite an external navigation", async () => {
+    const query = "external-list-race";
+    const raceInitialState: ReportsInitialState = {
+      ...EMPTY_INITIAL_STATE,
+      query,
+      appliedQuery: query,
+    };
+    setExternalSearchParams(`q=${query}`);
+
+    let resolveListResponse: ((response: Response) => void) | undefined;
+    const listResponse = new Promise<Response>((resolve) => {
+      resolveListResponse = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = new URL(String(input), "http://localhost:55301");
+      if (url.pathname === "/api/reports") {
+        return listResponse;
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            state: "UNAVAILABLE",
+            reason: "NOT_CONFIGURED",
+            records: [],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: raceInitialState,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector("button")?.click();
+      await Promise.resolve();
+    });
+
+    const decisionBoardQuery = `type=decision-board&runKind=ENTRY&q=${query}`;
+    navigationMock.setSearchParams(decisionBoardQuery);
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: raceInitialState,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    const sellKey = "2026/08/2026-08-16.sell.json";
+    const sellQuery =
+      `type=sell&q=${query}&key=${encodeURIComponent(sellKey)}` +
+      "&bucket=reports";
+    window.history.replaceState(null, "", `/reports?${sellQuery}`);
+    replaceStateSpy.mockClear();
+    await act(async () => {
+      resolveListResponse?.(
+        new Response(
+          JSON.stringify({
+            items: [],
+            total: 0,
+            searched: 0,
+            truncated: false,
+            searchWindow: 100,
+            warnings: [],
+          }),
+          { status: 200 },
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(window.location.search).toBe(`?${sellQuery}`);
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+
+    navigationMock.setSearchParams(sellQuery);
+    await act(async () => {
+      root.render(
+        React.createElement(ReportTypeHarness, {
+          initialState: raceInitialState,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("sell|none");
+    expect(container.textContent).toContain(sellKey);
+    expect(window.location.search).toBe(`?${sellQuery}`);
   });
 });
