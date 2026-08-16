@@ -49,9 +49,10 @@ gh run list --limit 10
 ```
 
 Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다.
-현재 production preparation/research adapter가 의도적으로 미설정되어 있어 아래 형식의 실행은
-가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 이 경로는 기존
-workflow gating이나 외부 알림에 연결되지 않습니다.
+production composition은 구현되어 recorded fixture로 검증됐지만 approved request loader와
+production preparation/research adapter dependency는 의도적으로 미설정되어 있습니다. 따라서
+아래 형식의 실행은 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다.
+이 경로는 기존 workflow gating이나 외부 알림에 연결되지 않습니다.
 
 schema/compiler/runner/UI 테스트가 green이어도 production adapter가 연결됐다는 의미는
 아닙니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다.
@@ -124,6 +125,13 @@ wrapper와 두 plist 파일은 shadow 검증용 템플릿일 뿐입니다.
 `run_id`를 선택하거나 `launchctl`로 load하지 않습니다. 운영자가 별도 승인된 schedule을
 정한 뒤에도 먼저 아래처럼 모든 UTC identity와 runner 인자를 직접 주입해 dry-run 합니다.
 
+20-session proposal의 한 session에서 ENTRY/HOLDING plist를 함께 검토하려면
+`just decision-board-shadow-launchd-dry-run-package --session 2026-08-17 --journal-dir
+"$PWD/logs/decision-board-journal" --report-dir "$PWD/reports" --output-dir
+"$PWD/tmp/decision-board-shadow-20260817"`를 사용합니다. 생성된 파일은 모두 disabled이고
+schedule이 없으며 wrapper `--dry-run`만 포함합니다. 기존 output directory를 덮어쓰지 않고
+어떤 scheduler 활성화 명령도 실행하지 않습니다.
+
 ```bash
 scripts/launchd/sab-decision-board-shadow-wrapper.sh \
   --run-kind ENTRY \
@@ -182,6 +190,10 @@ CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board re
 것입니다. 이 shadow lane은 외부 전송이나 주문 실행을 소유하지 않습니다.
 
 ### Shadow 졸업 판정
+
+committed proposal은 먼저 `just decision-board-shadow-gate-validate`로 구조와 20-session
+일정을 확인합니다. `--require-approved`가 `VALID_APPROVED`가 되기 전에는 어떤 slot도 평가
+표본으로 세지 않으며, 출력된 `manifest_sha256`을 local ledger에 결속합니다.
 
 RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot,
 기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고

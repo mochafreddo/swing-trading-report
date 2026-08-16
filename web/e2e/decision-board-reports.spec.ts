@@ -116,14 +116,13 @@ test("fixture-only /reports Decision Board journey", async ({
       response.url().includes("/api/reports?") &&
       response.url().includes("runKind=ENTRY"),
   );
-  await page.getByRole("button", { name: "새로고침" }).click();
-  await expect((await entryListResponse).status()).toBe(200);
   const entryDetailResponse = page.waitForResponse((response) =>
     response
       .url()
       .includes(`/api/reports/detail?key=${encodeURIComponent(entryKey)}`),
   );
-  await page.getByRole("button", { name: /entry-2026-08-06T010000Z/ }).click();
+  await page.getByRole("button", { name: "새로고침" }).click();
+  await expect((await entryListResponse).status()).toBe(200);
   await expect((await entryDetailResponse).status()).toBe(200);
   await expect(page.getByText("AUR.NAS")).toBeVisible();
   const evidence = page.getByRole("link", { name: "Aurora demand update" });
@@ -172,16 +171,13 @@ test("fixture-only /reports Decision Board journey", async ({
       response.url().includes("/api/reports?") &&
       response.url().includes("runKind=HOLDING"),
   );
-  await page.getByRole("button", { name: "새로고침" }).click();
-  await expect((await holdingListResponse).status()).toBe(200);
   const holdingDetailResponse = page.waitForResponse((response) =>
     response
       .url()
       .includes(`/api/reports/detail?key=${encodeURIComponent(holdingKey)}`),
   );
-  await page
-    .getByRole("button", { name: /holding-2026-08-06T020000Z/ })
-    .click();
+  await page.getByRole("button", { name: "새로고침" }).click();
+  await expect((await holdingListResponse).status()).toBe(200);
   await expect((await holdingDetailResponse).status()).toBe(200);
   await expect(page.getByText("ELM.NYS")).toBeVisible();
   await expect(page.getByText("SELL", { exact: true })).toBeVisible();

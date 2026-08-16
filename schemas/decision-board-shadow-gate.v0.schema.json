@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swing-trading-report.local/schemas/decision-board-shadow-gate.v0.schema.json",
+  "title": "Decision Board Shadow Gate V0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "gate_version",
+    "approval",
+    "market",
+    "calendar",
+    "start_session",
+    "end_session",
+    "minimum_sessions",
+    "sessions",
+    "lanes",
+    "policy_versions",
+    "schedule_policy",
+    "expected_slots",
+    "allowed_diff_reasons",
+    "approved_thresholds"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "decision-board-shadow-gate.v0"
+    },
+    "gate_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "approved_by",
+        "approved_at"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "PENDING",
+            "APPROVED"
+          ]
+        },
+        "approved_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "approved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "market": {
+      "const": "US"
+    },
+    "calendar": {
+      "const": "XNYS"
+    },
+    "start_session": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_session": {
+      "type": "string",
+      "format": "date"
+    },
+    "minimum_sessions": {
+      "const": 20
+    },
+    "sessions": {
+      "type": "array",
+      "minItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "date"
+      }
+    },
+    "lanes": {
+      "const": [
+        "ENTRY",
+        "HOLDING"
+      ]
+    },
+    "policy_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compiler",
+        "researcher",
+        "verifier",
+        "instrument_registry"
+      ],
+      "properties": {
+        "compiler": {
+          "$ref": "#/$defs/version"
+        },
+        "researcher": {
+          "$ref": "#/$defs/version"
+        },
+        "verifier": {
+          "$ref": "#/$defs/version"
+        },
+        "instrument_registry": {
+          "$ref": "#/$defs/version"
+        }
+      }
+    },
+    "schedule_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "entry_expected_time",
+        "holding_expected_time",
+        "grace_seconds",
+        "stale_seconds"
+      ],
+      "properties": {
+        "timezone": {
+          "const": "UTC"
+        },
+        "entry_expected_time": {
+          "type": "string",
+          "pattern": "^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z$"
+        },
+        "holding_expected_time": {
+          "type": "string",
+          "pattern": "^[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z$"
+        },
+        "grace_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "stale_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      }
+    },
+    "expected_slots": {
+      "type": "array",
+      "minItems": 40,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "run_kind",
+          "expected_at",
+          "run_id"
+        ],
+        "properties": {
+          "session": {
+            "type": "string",
+            "format": "date"
+          },
+          "run_kind": {
+            "enum": [
+              "ENTRY",
+              "HOLDING"
+            ]
+          },
+          "expected_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^(entry|holding)-shadow-[0-9]{8}$"
+          }
+        }
+      }
+    },
+    "allowed_diff_reasons": {
+      "const": [
+        "EXPECTED_POLICY_CHANGE",
+        "INPUT_GAP",
+        "SOURCE_GAP",
+        "BUG",
+        "UNEXPLAINED"
+      ]
+    },
+    "approved_thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hard_failures",
+        "quality"
+      ],
+      "properties": {
+        "hard_failures": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unexplained",
+            "privacy_leaks",
+            "order_or_notification_accesses",
+            "payload_replay_mismatches",
+            "uncovered_eligible_holdings",
+            "hard_sell_regressions",
+            "invalid_publications",
+            "existing_pipeline_impacts"
+          ],
+          "properties": {
+            "unexplained": {
+              "const": 0
+            },
+            "privacy_leaks": {
+              "const": 0
+            },
+            "order_or_notification_accesses": {
+              "const": 0
+            },
+            "payload_replay_mismatches": {
+              "const": 0
+            },
+            "uncovered_eligible_holdings": {
+              "const": 0
+            },
+            "hard_sell_regressions": {
+              "const": 0
+            },
+            "invalid_publications": {
+              "const": 0
+            },
+            "existing_pipeline_impacts": {
+              "const": 0
+            }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_failure_rate_max",
+            "research_coverage_rate_min",
+            "fresh_source_rate_min"
+          ],
+          "properties": {
+            "provider_failure_rate_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "research_coverage_rate_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fresh_source_rate_min": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    }
+  }
+}

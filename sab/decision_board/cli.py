@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .results import (
     DecisionRunIssueCodeV0,
@@ -13,6 +14,9 @@ from .results import (
     create_decision_run_failed_v0,
 )
 from .runner import RunKindV0, UploadModeV0
+
+if TYPE_CHECKING:
+    from .production_adapter import DecisionBoardProductionAdapterV0
 
 _HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -78,13 +82,22 @@ class DecisionBoardCliConfigV0:
 
 def execute_decision_board_cli_v0(
     config: DecisionBoardCliConfigV0,
+    *,
+    adapter: DecisionBoardProductionAdapterV0 | None = None,
 ) -> DecisionRunResultV0:
-    """Fail closed until production preparation/research adapters are configured."""
+    """Execute an explicitly injected adapter or retain the fail-closed default."""
 
-    del config
-    return create_decision_run_failed_v0(
-        issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
-    )
+    if adapter is None:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        )
+    from .production_adapter import DecisionBoardProductionAdapterV0
+
+    if type(adapter) is not DecisionBoardProductionAdapterV0:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.PREPARATION_INVALID
+        )
+    return adapter.execute(config)
 
 
 __all__ = ["DecisionBoardCliConfigV0", "execute_decision_board_cli_v0"]

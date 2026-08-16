@@ -39,6 +39,10 @@ from .decision_board.run_journal_cli import (
 )
 from .decision_board.run_journal_public import read_public_journal_status_v0
 from .decision_board.runner import RunKindV0
+from .decision_board.shadow_gate import (
+    ShadowGateManifestError,
+    load_shadow_gate_manifest_v0,
+)
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -298,6 +302,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="disabled",
     )
     decision_board.add_argument("--report-dir", default="reports")
+
+    shadow_gate = sub.add_parser(
+        "decision-board-shadow-gate-validate",
+        help="Validate one frozen Decision Board shadow gate manifest",
+    )
+    shadow_gate.add_argument("--manifest", required=True)
+    shadow_gate.add_argument("--require-approved", action="store_true")
 
     journal_status = sub.add_parser(
         "decision-board-journal-status",
@@ -750,6 +761,25 @@ def _run_decision_board_command(ns: argparse.Namespace) -> int:
     return exit_code
 
 
+def _run_decision_board_shadow_gate_validate_command(ns: argparse.Namespace) -> int:
+    try:
+        manifest = load_shadow_gate_manifest_v0(
+            ns.manifest,
+            require_approved=ns.require_approved,
+        )
+    except ShadowGateManifestError as exc:
+        print(
+            json.dumps(
+                {"status": "INVALID", "exit_code": 2, "issue_code": exc.code},
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    print(json.dumps(manifest.to_public_dict(), sort_keys=True))
+    return 0
+
+
 def _journal_cli_failure() -> int:
     print(
         json.dumps(
@@ -1184,6 +1214,9 @@ def _dispatch_command(
         "sell": _run_sell_command,
         "entry": _run_entry_command,
         "decision-board": _run_decision_board_command,
+        "decision-board-shadow-gate-validate": (
+            _run_decision_board_shadow_gate_validate_command
+        ),
         "decision-board-journal-status": (_run_decision_board_journal_status_command),
         "decision-board-journal-reconcile": (
             _run_decision_board_journal_reconcile_command

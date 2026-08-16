@@ -67,10 +67,11 @@ value with `[REDACTED]` before sharing it.
 
 ## Decision Board shadow operations
 
-Decision Board는 기본 상태에서 production adapter와 schedule이 없으므로
-`CONFIG_UNAVAILABLE`가 정상 fail-closed 결과입니다. 이를 운영 성공이나 20-session 표본으로
-세지 않습니다. 승인된 adapter를 연결해 실제 평가를 시작한 뒤에는 ENTRY/HOLDING planned
-slot을 모두 RunJournal에 결속하고 missed/stale를 삭제하지 않습니다.
+Decision Board production composition은 구현되어 있지만 기본 상태에서는 approved request
+loader, provider/credential dependency와 schedule이 연결되지 않았으므로 `CONFIG_UNAVAILABLE`가
+정상 fail-closed 결과입니다. 이를 운영 성공이나 20-session 표본으로 세지 않습니다. 승인된
+dependency를 adapter에 연결해 실제 평가를 시작한 뒤에는 ENTRY/HOLDING planned slot을 모두
+RunJournal에 결속하고 missed/stale를 삭제하지 않습니다.
 
 운영자는 매 session 다음을 확인합니다.
 

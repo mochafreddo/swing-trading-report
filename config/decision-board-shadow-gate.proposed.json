@@ -1,0 +1,319 @@
+{
+  "schema_version": "decision-board-shadow-gate.v0",
+  "gate_version": "us-swing-shadow-v1-20260817",
+  "approval": {
+    "state": "PENDING",
+    "approved_by": null,
+    "approved_at": null
+  },
+  "market": "US",
+  "calendar": "XNYS",
+  "start_session": "2026-08-17",
+  "end_session": "2026-09-14",
+  "minimum_sessions": 20,
+  "sessions": [
+    "2026-08-17",
+    "2026-08-18",
+    "2026-08-19",
+    "2026-08-20",
+    "2026-08-21",
+    "2026-08-24",
+    "2026-08-25",
+    "2026-08-26",
+    "2026-08-27",
+    "2026-08-28",
+    "2026-08-31",
+    "2026-09-01",
+    "2026-09-02",
+    "2026-09-03",
+    "2026-09-04",
+    "2026-09-08",
+    "2026-09-09",
+    "2026-09-10",
+    "2026-09-11",
+    "2026-09-14"
+  ],
+  "lanes": [
+    "ENTRY",
+    "HOLDING"
+  ],
+  "policy_versions": {
+    "compiler": "decision-policy.v0",
+    "researcher": "evidence-researcher.v0",
+    "verifier": "decision-board-claim-verifier-v0",
+    "instrument_registry": "us-instrument-registry.v0"
+  },
+  "schedule_policy": {
+    "timezone": "UTC",
+    "entry_expected_time": "12:30:00Z",
+    "holding_expected_time": "22:40:00Z",
+    "grace_seconds": 300,
+    "stale_seconds": 1800
+  },
+  "expected_slots": [
+    {
+      "session": "2026-08-17",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-17T12:30:00Z",
+      "run_id": "entry-shadow-20260817"
+    },
+    {
+      "session": "2026-08-17",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-17T22:40:00Z",
+      "run_id": "holding-shadow-20260817"
+    },
+    {
+      "session": "2026-08-18",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-18T12:30:00Z",
+      "run_id": "entry-shadow-20260818"
+    },
+    {
+      "session": "2026-08-18",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-18T22:40:00Z",
+      "run_id": "holding-shadow-20260818"
+    },
+    {
+      "session": "2026-08-19",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-19T12:30:00Z",
+      "run_id": "entry-shadow-20260819"
+    },
+    {
+      "session": "2026-08-19",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-19T22:40:00Z",
+      "run_id": "holding-shadow-20260819"
+    },
+    {
+      "session": "2026-08-20",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-20T12:30:00Z",
+      "run_id": "entry-shadow-20260820"
+    },
+    {
+      "session": "2026-08-20",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-20T22:40:00Z",
+      "run_id": "holding-shadow-20260820"
+    },
+    {
+      "session": "2026-08-21",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-21T12:30:00Z",
+      "run_id": "entry-shadow-20260821"
+    },
+    {
+      "session": "2026-08-21",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-21T22:40:00Z",
+      "run_id": "holding-shadow-20260821"
+    },
+    {
+      "session": "2026-08-24",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-24T12:30:00Z",
+      "run_id": "entry-shadow-20260824"
+    },
+    {
+      "session": "2026-08-24",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-24T22:40:00Z",
+      "run_id": "holding-shadow-20260824"
+    },
+    {
+      "session": "2026-08-25",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-25T12:30:00Z",
+      "run_id": "entry-shadow-20260825"
+    },
+    {
+      "session": "2026-08-25",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-25T22:40:00Z",
+      "run_id": "holding-shadow-20260825"
+    },
+    {
+      "session": "2026-08-26",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-26T12:30:00Z",
+      "run_id": "entry-shadow-20260826"
+    },
+    {
+      "session": "2026-08-26",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-26T22:40:00Z",
+      "run_id": "holding-shadow-20260826"
+    },
+    {
+      "session": "2026-08-27",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-27T12:30:00Z",
+      "run_id": "entry-shadow-20260827"
+    },
+    {
+      "session": "2026-08-27",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-27T22:40:00Z",
+      "run_id": "holding-shadow-20260827"
+    },
+    {
+      "session": "2026-08-28",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-28T12:30:00Z",
+      "run_id": "entry-shadow-20260828"
+    },
+    {
+      "session": "2026-08-28",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-28T22:40:00Z",
+      "run_id": "holding-shadow-20260828"
+    },
+    {
+      "session": "2026-08-31",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-08-31T12:30:00Z",
+      "run_id": "entry-shadow-20260831"
+    },
+    {
+      "session": "2026-08-31",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-08-31T22:40:00Z",
+      "run_id": "holding-shadow-20260831"
+    },
+    {
+      "session": "2026-09-01",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-01T12:30:00Z",
+      "run_id": "entry-shadow-20260901"
+    },
+    {
+      "session": "2026-09-01",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-01T22:40:00Z",
+      "run_id": "holding-shadow-20260901"
+    },
+    {
+      "session": "2026-09-02",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-02T12:30:00Z",
+      "run_id": "entry-shadow-20260902"
+    },
+    {
+      "session": "2026-09-02",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-02T22:40:00Z",
+      "run_id": "holding-shadow-20260902"
+    },
+    {
+      "session": "2026-09-03",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-03T12:30:00Z",
+      "run_id": "entry-shadow-20260903"
+    },
+    {
+      "session": "2026-09-03",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-03T22:40:00Z",
+      "run_id": "holding-shadow-20260903"
+    },
+    {
+      "session": "2026-09-04",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-04T12:30:00Z",
+      "run_id": "entry-shadow-20260904"
+    },
+    {
+      "session": "2026-09-04",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-04T22:40:00Z",
+      "run_id": "holding-shadow-20260904"
+    },
+    {
+      "session": "2026-09-08",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-08T12:30:00Z",
+      "run_id": "entry-shadow-20260908"
+    },
+    {
+      "session": "2026-09-08",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-08T22:40:00Z",
+      "run_id": "holding-shadow-20260908"
+    },
+    {
+      "session": "2026-09-09",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-09T12:30:00Z",
+      "run_id": "entry-shadow-20260909"
+    },
+    {
+      "session": "2026-09-09",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-09T22:40:00Z",
+      "run_id": "holding-shadow-20260909"
+    },
+    {
+      "session": "2026-09-10",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-10T12:30:00Z",
+      "run_id": "entry-shadow-20260910"
+    },
+    {
+      "session": "2026-09-10",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-10T22:40:00Z",
+      "run_id": "holding-shadow-20260910"
+    },
+    {
+      "session": "2026-09-11",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-11T12:30:00Z",
+      "run_id": "entry-shadow-20260911"
+    },
+    {
+      "session": "2026-09-11",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-11T22:40:00Z",
+      "run_id": "holding-shadow-20260911"
+    },
+    {
+      "session": "2026-09-14",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-14T12:30:00Z",
+      "run_id": "entry-shadow-20260914"
+    },
+    {
+      "session": "2026-09-14",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-14T22:40:00Z",
+      "run_id": "holding-shadow-20260914"
+    }
+  ],
+  "allowed_diff_reasons": [
+    "EXPECTED_POLICY_CHANGE",
+    "INPUT_GAP",
+    "SOURCE_GAP",
+    "BUG",
+    "UNEXPLAINED"
+  ],
+  "approved_thresholds": {
+    "hard_failures": {
+      "unexplained": 0,
+      "privacy_leaks": 0,
+      "order_or_notification_accesses": 0,
+      "payload_replay_mismatches": 0,
+      "uncovered_eligible_holdings": 0,
+      "hard_sell_regressions": 0,
+      "invalid_publications": 0,
+      "existing_pipeline_impacts": 0
+    },
+    "quality": {
+      "provider_failure_rate_max": 0.05,
+      "research_coverage_rate_min": 0.9,
+      "fresh_source_rate_min": 0.9
+    }
+  }
+}
