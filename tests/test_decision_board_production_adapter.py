@@ -123,6 +123,34 @@ class _ExplodingCapability:
         raise RuntimeError("PRIVATE-COMPOSITION-SENTINEL")
 
 
+class _NonCallableUploader:
+    upload = None
+
+
+class _ExplodingRequestCapability:
+    @property
+    def load_sealed_request(self) -> object:
+        raise RuntimeError("PRIVATE-NESTED-SENTINEL")
+
+
+class _ExplodingEvidenceCapability:
+    @property
+    def research(self) -> object:
+        raise RuntimeError("PRIVATE-NESTED-SENTINEL")
+
+
+class _UnavailableRequestSource:
+    def load_sealed_request(self, identity: dict[str, str]) -> object:
+        del identity
+        raise DecisionBoardAdapterUnavailableError("PRIVATE-SOURCE-SENTINEL")
+
+
+class _UnexpectedRequestSource:
+    def load_sealed_request(self, identity: dict[str, str]) -> object:
+        del identity
+        raise RuntimeError("PRIVATE-SOURCE-SENTINEL")
+
+
 class _RawEnricher:
     def enrich(self, item: object, *, request: object) -> object:
         del request
@@ -176,6 +204,21 @@ class _UntypedEvidenceSource:
     def research(self, request: DecisionItemEnrichmentRequestV0) -> object:
         assert request.run_kind is RunKindV0.ENTRY
         return {"research_state": "CLEAR"}
+
+
+@dataclass(frozen=True)
+class _ReturningEvidenceSource:
+    outcome: object
+
+    def research(self, request: DecisionItemEnrichmentRequestV0) -> object:
+        assert type(request) is DecisionItemEnrichmentRequestV0
+        return self.outcome
+
+
+class _ExplodingEvidenceSource:
+    def research(self, request: DecisionItemEnrichmentRequestV0) -> object:
+        del request
+        raise RuntimeError("PRIVATE-EVIDENCE-SENTINEL")
 
 
 class _RecordedTransport:
@@ -446,6 +489,65 @@ def test_production_composition_fails_closed_when_capability_is_missing(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_cli_rejects_non_exact_component_bundle_as_config_unavailable(
+    tmp_path: Path,
+) -> None:
+    request, _transport, _enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+    )
+
+    result = execute_decision_board_cli_v0(
+        config,
+        components=object(),  # type: ignore[arg-type]
+    )
+
+    assert serialize_decision_run_result_v0(result) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_composition_rejects_non_callable_uploader_before_loading(
+    tmp_path: Path,
+) -> None:
+    request, _transport, enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+    )
+    source = _RecordedRequestSource(request, config.to_public_dict())
+    components = DecisionBoardProductionComponentsV0(
+        request_loader=SealedDecisionRunRequestLoaderV0(source),
+        preparer=SealedDecisionRunPreparerV0(),
+        enricher=enricher,
+        uploader=_NonCallableUploader(),  # type: ignore[arg-type]
+    )
+
+    result = execute_decision_board_cli_v0(config, components=components)
+
+    assert serialize_decision_run_result_v0(result) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    assert source.identities == []
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("unsafe_capability", ["loader", "preparer", "enricher"])
 def test_production_composition_rejects_raw_authority_capability_before_loading(
     tmp_path: Path,
@@ -528,6 +630,49 @@ def test_production_composition_rejects_missing_nested_source_before_loading(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("exploding_source", ["request", "evidence"])
+def test_composition_sanitizes_exploding_nested_capability_getters(
+    tmp_path: Path,
+    exploding_source: str,
+) -> None:
+    request, _transport, enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+    )
+    source = _RecordedRequestSource(request, config.to_public_dict())
+    loader = SealedDecisionRunRequestLoaderV0(source)
+    if exploding_source == "request":
+        loader = SealedDecisionRunRequestLoaderV0(
+            _ExplodingRequestCapability()  # type: ignore[arg-type]
+        )
+    if exploding_source == "evidence":
+        enricher = PublicDecisionItemEnricherV0(
+            _ExplodingEvidenceCapability()  # type: ignore[arg-type]
+        )
+    components = DecisionBoardProductionComponentsV0(
+        request_loader=loader,
+        preparer=SealedDecisionRunPreparerV0(),
+        enricher=enricher,
+    )
+
+    result = execute_decision_board_cli_v0(config, components=components)
+
+    assert serialize_decision_run_result_v0(result) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "INTERNAL_ERROR",
+    }
+    assert "PRIVATE-NESTED-SENTINEL" not in repr(result)
+    assert source.identities == []
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("missing_source", ["request", "evidence"])
 def test_direct_adapter_rejects_missing_nested_source_before_loading(
     tmp_path: Path,
@@ -563,6 +708,47 @@ def test_direct_adapter_rejects_missing_nested_source_before_loading(
         "issue_code": "CONFIG_UNAVAILABLE",
     }
     assert source.identities == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_issue"),
+    [
+        (_UnavailableRequestSource(), "CONFIG_UNAVAILABLE"),
+        (_UnexpectedRequestSource(), "INTERNAL_ERROR"),
+    ],
+)
+def test_sealed_request_source_errors_are_sanitized(
+    tmp_path: Path,
+    source: object,
+    expected_issue: str,
+) -> None:
+    request, _transport, enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+    )
+    adapter = DecisionBoardProductionAdapterV0(
+        request_loader=SealedDecisionRunRequestLoaderV0(
+            source  # type: ignore[arg-type]
+        ),
+        preparer=SealedDecisionRunPreparerV0(),
+        enricher=enricher,
+    )
+
+    result = execute_decision_board_cli_v0(config, adapter=adapter)
+
+    assert serialize_decision_run_result_v0(result) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": expected_issue,
+    }
+    assert "PRIVATE-SOURCE-SENTINEL" not in repr(result)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -687,6 +873,64 @@ def test_production_composition_preserves_optional_upload_identity(
     )
 
 
+def test_research_outcome_factory_rejects_non_exact_state() -> None:
+    with pytest.raises(TypeError, match="exact V0 enum"):
+        DecisionItemResearchOutcomeV0.create(
+            research_state="CLEAR",  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("invalid_evidence", [[], (object(),)])
+def test_research_outcome_factory_rejects_invalid_evidence(
+    invalid_evidence: object,
+) -> None:
+    with pytest.raises(TypeError, match="exact V0 compiler evidence"):
+        DecisionItemResearchOutcomeV0.create(
+            research_state=ResearchStateV0.CLEAR,
+            evidence=invalid_evidence,  # type: ignore[arg-type]
+        )
+
+
+def test_public_enricher_rejects_non_exact_request_and_unsupported_item() -> None:
+    baseline, _transport, _enricher = _recorded_dependencies()
+    item = baseline.items[0]
+    public_request = DecisionItemEnrichmentRequestV0(
+        run_kind=baseline.run_kind,
+        item_id=item.item_id,
+        instrument=item.instrument,
+    )
+    enricher = PublicDecisionItemEnricherV0(
+        _ReturningEvidenceSource(
+            DecisionItemResearchOutcomeV0.create(research_state=ResearchStateV0.CLEAR)
+        )
+    )
+
+    with pytest.raises(TypeError, match="exact public V0 request"):
+        enricher.enrich(item, request=object())
+    with pytest.raises(TypeError, match="exact V0 lane"):
+        enricher.enrich(object(), request=public_request)
+
+
+@pytest.mark.parametrize("mutated_field", ["research_state", "evidence"])
+def test_public_enricher_rejects_mutated_exact_outcome(mutated_field: str) -> None:
+    baseline, _transport, _enricher = _recorded_dependencies()
+    item = baseline.items[0]
+    public_request = DecisionItemEnrichmentRequestV0(
+        run_kind=baseline.run_kind,
+        item_id=item.item_id,
+        instrument=item.instrument,
+    )
+    outcome = DecisionItemResearchOutcomeV0.create(research_state=ResearchStateV0.CLEAR)
+    if mutated_field == "research_state":
+        object.__setattr__(outcome, mutated_field, "CLEAR")
+    else:
+        object.__setattr__(outcome, mutated_field, [])
+    enricher = PublicDecisionItemEnricherV0(_ReturningEvidenceSource(outcome))
+
+    with pytest.raises(TypeError, match="research outcome"):
+        enricher.enrich(item, request=public_request)
+
+
 @pytest.mark.parametrize(
     ("hard_exit_state", "expected_action"),
     [
@@ -784,6 +1028,38 @@ def test_public_enricher_rejects_untyped_research_outcome(tmp_path: Path) -> Non
         "exit_code": 2,
         "issue_code": "ITEM_ENRICHMENT_INVALID",
     }
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_public_enricher_contains_evidence_source_errors_without_write(
+    tmp_path: Path,
+) -> None:
+    request, _transport, _enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+    )
+    components = DecisionBoardProductionComponentsV0(
+        request_loader=SealedDecisionRunRequestLoaderV0(
+            _RecordedRequestSource(request, config.to_public_dict())
+        ),
+        preparer=SealedDecisionRunPreparerV0(),
+        enricher=PublicDecisionItemEnricherV0(_ExplodingEvidenceSource()),
+    )
+
+    result = execute_decision_board_cli_v0(config, components=components)
+
+    assert serialize_decision_run_result_v0(result) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "ITEM_ENRICHMENT_INVALID",
+    }
+    assert "PRIVATE-EVIDENCE-SENTINEL" not in repr(result)
     assert list(tmp_path.iterdir()) == []
 
 
