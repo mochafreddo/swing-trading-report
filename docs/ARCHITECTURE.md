@@ -210,12 +210,23 @@ artifact는 보존하고, 현재 및 이후 schedule attribution에만 `ARTICLE_
 `SUCCEEDED`, artifact가 없는 영향 item은 `TIMED_OUT`으로 finalization됩니다.
 result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 
-이 owner에는 production provider adapter와 OpenAI/Toss/order call이 없습니다. public
-research, claim validation, compiler, runner consumer 경계는 injectable seam으로 구현됐지만
-기본 CLI executor에는 production adapter가 연결되지 않아 `CONFIG_UNAVAILABLE`로 닫힙니다.
-rollout은 recorded/live provider-verifier 비교를 통과한 adapter를 shadow runner에 주입한
-뒤 시작합니다. 롤백은 이 adapter/consumer 연결만 제거하며 기존 AI Brief source policy와
-top-five behavior는 유지합니다.
+이 owner에는 production provider 선택과 OpenAI/Toss/order call이 없습니다. public
+research, claim validation, compiler, runner consumer 경계는 injectable seam으로 구현됐습니다.
+production component bundle은 sealed request loader, preparer, public-only item enricher,
+optional uploader를 기존 CLI executor에 명시적으로 조립합니다. 외부 request source는 local
+report path를 볼 수 없고, 외부 evidence source는 공개 `run_kind/item_id/InstrumentRefV0`만
+받습니다. bundle은 이 세 wrapper의 exact type과 내부 source capability를 먼저 검증하므로 raw
+collaborator가 전체 CLI config나 compiler item을 직접 받는 우회 경로가 없습니다.
+deterministic ENTRY/HOLDING facts는 composition 내부에서 보존됩니다.
+
+Supabase snapshot, search, article fetch, Responses transport는 이 경계 밖의 주입 dependency로
+남고 기본 CLI executor에는 component bundle이 연결되지 않아 `CONFIG_UNAVAILABLE`로 닫힙니다.
+현재 item evidence seam은 offline/recorded 검증만 소유합니다. 기존
+`EvidenceResearcherV0`의 invocation-wide deadline, concurrency, URL dedupe와 article cap을
+보존하는 batch adapter가 구현되기 전에는 live provider를 연결하지 않습니다.
+rollout은 recorded/live provider-verifier 비교를 통과한 dependency bundle을 shadow runner에
+주입한 뒤 시작합니다. 롤백은 이 adapter/consumer 연결만 제거하며 기존 AI Brief source
+policy와 top-five behavior는 유지합니다.
 
 ### 3.4 ClaimValidationV0 exact-span boundary
 

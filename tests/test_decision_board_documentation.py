@@ -17,7 +17,15 @@ def test_decision_board_reference_is_linked_and_states_current_boundary() -> Non
     assert "US SWING" in reference
     assert "CONFIG_UNAVAILABLE" in reference
     assert "exit 2" in reference
-    assert "production preparation/research/claim-verifier adapter" in reference
+    assert "DecisionBoardProductionComponentsV0" in reference
+    assert (
+        "production dependency는 의도적으로 선택하거나 연결하지 않았습니다" in reference
+    )
+    assert "환경변수나" in reference and "credential을 읽지 않습니다" in reference
+    assert "raw loader, preparer, enricher를" in reference
+    assert (
+        "batch" in reference and "live search/article/Responses transport" in reference
+    )
     assert "사용자가 모든 매수·매도를 직접 실행" in reference
     assert "주문 생성·수정·취소" in reference
     assert "<64-lowercase-hex>" not in reference
