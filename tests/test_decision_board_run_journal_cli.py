@@ -24,16 +24,16 @@ PLISTS = (
     REPO_ROOT
     / "scripts/launchd/com.mochafreddo.sab.decision-board.holding-shadow.plist.template",
 )
-CURRENT_SLOT_TEXT = (
-    datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-)
 GATE_MANIFEST = REPO_ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 
 
-def _t7_basename(run_kind: str, run_id: str) -> str:
+def _current_slot_text() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _t7_basename(run_kind: str, run_id: str, *, expected_at: str) -> str:
     return (
-        f"{CURRENT_SLOT_TEXT[:10]}.decision-board.{run_kind.lower()}."
-        f"{run_id}.{'a' * 64}.json"
+        f"{expected_at[:10]}.decision-board.{run_kind.lower()}.{run_id}.{'a' * 64}.json"
     )
 
 
@@ -44,13 +44,14 @@ def _run_terminal_script(
     script: str,
 ) -> tuple[subprocess.CompletedProcess[str], RunJournalStoreV0]:
     journal_dir = tmp_path / run_id
+    expected_at = _current_slot_text()
     result = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             run_id,
             "--journal-dir",
@@ -136,13 +137,14 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
 ) -> None:
     runner_marker = tmp_path / "PRIVATE-SENTINEL-runner-called"
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     result = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-001",
             "--journal-dir",
@@ -167,7 +169,7 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
     public = json.loads(result.stdout)
     assert public == {
         "dry_run": True,
-        "expected_at": CURRENT_SLOT_TEXT,
+        "expected_at": expected_at,
         "grace_seconds": 60,
         "run_id": "entry-shadow-001",
         "run_kind": "ENTRY",
@@ -282,13 +284,14 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
     tmp_path: Path,
 ) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     failed = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-failed",
             "--journal-dir",
@@ -323,7 +326,7 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
             "--run-kind",
             "HOLDING",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "holding-shadow-crashed",
             "--journal-dir",
@@ -361,10 +364,11 @@ def test_shadow_wrapper_maps_stored_terminal_status(
 ) -> None:
     journal_dir = tmp_path / "journal"
     run_id = f"entry-shadow-{status.lower()}"
+    expected_at = _current_slot_text()
     public = {
         "status": status,
         "exit_code": 0,
-        "report_file": _t7_basename("ENTRY", run_id),
+        "report_file": _t7_basename("ENTRY", run_id, expected_at=expected_at),
         "storage_key": None,
         "degraded": False,
     }
@@ -374,7 +378,7 @@ def test_shadow_wrapper_maps_stored_terminal_status(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             run_id,
             "--journal-dir",
@@ -403,6 +407,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
     tmp_path: Path,
 ) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     raw = {
         "status": "FAILED",
         "exit_code": 2,
@@ -415,7 +420,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-raw",
             "--journal-dir",
@@ -442,6 +447,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
 
 def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     public = {
         "status": "PUBLISHED",
         "exit_code": 0,
@@ -455,7 +461,7 @@ def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> N
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-exit-conflict",
             "--journal-dir",
@@ -687,7 +693,7 @@ def test_shadow_process_baseexception_propagates_and_started_remains(
 
     config = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at=CURRENT_SLOT_TEXT,
+        expected_at=_current_slot_text(),
         run_id="entry-subprocess-interrupt",
         journal_dir=str(tmp_path),
         grace_seconds="60",
