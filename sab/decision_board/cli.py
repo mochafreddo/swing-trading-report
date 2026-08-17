@@ -35,6 +35,9 @@ class DecisionBoardCliConfigV0:
     upload_mode: UploadModeV0
     report_dir: Path
     gate_manifest_sha256: str | None = None
+    gate_manifest: Path | None = None
+    input_ledger: Path | None = None
+    expected_action_ledger: Path | None = None
 
     @classmethod
     def from_strings(
@@ -48,6 +51,9 @@ class DecisionBoardCliConfigV0:
         upload_mode: str,
         report_dir: str,
         gate_manifest_sha256: str | None = None,
+        gate_manifest: str | None = None,
+        input_ledger: str | None = None,
+        expected_action_ledger: str | None = None,
     ) -> DecisionBoardCliConfigV0:
         kind = RunKindV0(run_kind.upper())
         mode = UploadModeV0(upload_mode.upper())
@@ -69,6 +75,11 @@ class DecisionBoardCliConfigV0:
             or _HASH_PATTERN.fullmatch(gate_manifest_sha256) is None
         ):
             raise ValueError("gate_manifest_sha256 is invalid")
+        gate_paths = (gate_manifest, input_ledger, expected_action_ledger)
+        if any(path is not None for path in gate_paths) and not all(
+            type(path) is str and bool(path) for path in gate_paths
+        ):
+            raise ValueError("gate bundle paths must be complete")
         return cls(
             run_kind=kind,
             run_id=run_id,
@@ -78,6 +89,11 @@ class DecisionBoardCliConfigV0:
             upload_mode=mode,
             report_dir=Path(report_dir),
             gate_manifest_sha256=gate_manifest_sha256,
+            gate_manifest=None if gate_manifest is None else Path(gate_manifest),
+            input_ledger=None if input_ledger is None else Path(input_ledger),
+            expected_action_ledger=(
+                None if expected_action_ledger is None else Path(expected_action_ledger)
+            ),
         )
 
     def to_public_dict(self) -> dict[str, str]:
@@ -137,11 +153,15 @@ def execute_decision_board_shadow_live_cli_v0(
 ) -> DecisionRunResultV0:
     """Compose the explicit live boundary or retain a fail-closed result."""
 
-    from .live_runtime import build_decision_board_live_adapter_from_env_v0
+    from .live_runtime import (
+        build_decision_board_live_adapter_from_env_v0,
+        decision_board_live_claim_model_from_env_v0,
+    )
     from .production_adapter import DecisionBoardAdapterUnavailableError
+    from .shadow_execution import load_shadow_gate_execution_binding_v0
 
     try:
-        adapter = build_decision_board_live_adapter_from_env_v0()
+        claim_model = decision_board_live_claim_model_from_env_v0()
     except DecisionBoardAdapterUnavailableError:
         return create_decision_run_failed_v0(
             issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
@@ -150,7 +170,32 @@ def execute_decision_board_shadow_live_cli_v0(
         return create_decision_run_failed_v0(
             issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
         )
-    return adapter.execute(config)
+    try:
+        binding = load_shadow_gate_execution_binding_v0(
+            config,
+            repo_root=Path.cwd(),
+            claim_model=claim_model,
+        )
+    except Exception:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.PREPARATION_INVALID
+        )
+    try:
+        adapter = build_decision_board_live_adapter_from_env_v0()
+        if (
+            getattr(adapter.evidence_builder.claim_verifier, "model", None)
+            != claim_model
+        ):
+            raise ValueError("live claim model changed during composition")
+    except DecisionBoardAdapterUnavailableError:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        )
+    except Exception:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+        )
+    return adapter.execute(config, binding=binding)
 
 
 __all__ = [

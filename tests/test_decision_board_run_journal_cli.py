@@ -224,6 +224,59 @@ def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
         run_journal_cli.execute_journal_shadow_process_v0(mismatched)
     assert not mismatched.journal_dir.exists()
 
+    unbound_equals_form = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "unbound-equals"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=[
+            sys.executable,
+            f"--gate-manifest-sha256={manifest.manifest_sha256}",
+        ],
+        dry_run=True,
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        run_journal_cli.execute_journal_shadow_process_v0(unbound_equals_form)
+    assert not unbound_equals_form.journal_dir.exists()
+
+
+def test_non_dry_journal_validates_approved_bundle_before_claiming_started(
+    tmp_path: Path,
+) -> None:
+    manifest = load_shadow_gate_manifest_v0(GATE_MANIFEST)
+    journal_dir = tmp_path / "must-not-start"
+    config = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(journal_dir),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=[
+            sys.executable,
+            "-m",
+            "sab",
+            "decision-board-shadow-live",
+            "--gate-manifest-sha256",
+            manifest.manifest_sha256,
+            "--input-ledger",
+            str(tmp_path / "input-ledger.json"),
+            "--expected-action-ledger",
+            str(tmp_path / "expected-action-ledger.json"),
+        ],
+        dry_run=False,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256=manifest.manifest_sha256,
+        input_ledger=str(tmp_path / "input-ledger.json"),
+        expected_action_ledger=str(tmp_path / "expected-action-ledger.json"),
+    )
+
+    with pytest.raises(ValueError, match="approval"):
+        run_journal_cli.execute_journal_shadow_process_v0(config)
+    assert not journal_dir.exists()
+
 
 def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
     tmp_path: Path,

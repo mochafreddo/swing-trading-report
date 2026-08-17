@@ -33,6 +33,8 @@ failure 전부 0을 첫 실행 전에 고정합니다.
 just decision-board-shadow-gate-validate
 uv run python -m sab decision-board-shadow-gate-validate \
   --manifest config/decision-board-shadow-gate.approved.local.json \
+  --input-ledger /private/path/decision-board-shadow-input-ledger.json \
+  --expected-action-ledger /private/path/decision-board-shadow-expected-action-ledger.json \
   --require-approved
 ```
 
@@ -44,12 +46,18 @@ freeze 값이 `null`이므로 승인 가능한 상태가 아닙니다. 승인 �
 self-reference가 생기므로 proposal을 승인본으로 덮어쓰지 않습니다. 두 번째 명령은 승인본
 경로를 `--manifest`로 넘기며, 승인 서명뿐 아니라 Git revision, compiler/
 researcher/verifier/instrument-registry artifact digest, input ledger digest, case별 non-empty
-expected-action ledger digest가 모두 고정되기 전까지 실패해야 합니다. 승인 뒤 출력된
+expected-action ledger digest가 모두 고정되기 전까지 실패해야 합니다. `approved_by`는 exact
+`user`이고 `approved_at`은 첫 slot 전이어야 합니다. `approval_signature_sha256`는 전체 승인
+계약에서 그 signature 칸만 `null`로 둔 canonical JSON의 SHA-256이며 validator가 다시 계산해
+manifest 수정과 임의 hash를 거부합니다. 승인 뒤 출력된
 `manifest_sha256`을 기간 중 덮어쓰지 않습니다.
 
 계좌별 expected action이나 private snapshot은 저장소 candidate가 아니라 gitignore된 별도
 local artifact에 둡니다. 다만 manifest의 `evaluation_ledger`에는 그 artifact의 canonical
 SHA-256과 case count를 고정합니다. 빈 expected-action set은 승인 입력으로 사용할 수 없습니다.
+input ledger 각 case는 `case_id/run_kind/sealed_input_hash/item_id`, expected-action ledger 각
+case는 같은 `case_id`와 lane-compatible non-empty `expected_action_set`을 가지며 case ID 순서도
+canonical이어야 합니다.
 
 ```json
 {
@@ -115,6 +123,8 @@ scripts/launchd/sab-decision-board-shadow-wrapper.sh \
   --stale-seconds 1800 \
   --gate-manifest "$PWD/config/decision-board-shadow-gate.proposed.json" \
   --gate-manifest-sha256 sha256:<validated-manifest-hash> \
+  --input-ledger /private/path/decision-board-shadow-input-ledger.json \
+  --expected-action-ledger /private/path/decision-board-shadow-expected-action-ledger.json \
   --dry-run \
   -- uv run python -m sab decision-board-shadow-live \
     --run-kind ENTRY \
@@ -122,7 +132,10 @@ scripts/launchd/sab-decision-board-shadow-wrapper.sh \
     --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --created-at 2026-08-13T01:00:00Z \
     --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    --gate-manifest "$PWD/config/decision-board-shadow-gate.approved.local.json" \
     --gate-manifest-sha256 sha256:<validated-manifest-hash> \
+    --input-ledger /private/path/decision-board-shadow-input-ledger.json \
+    --expected-action-ledger /private/path/decision-board-shadow-expected-action-ledger.json \
     --upload-mode disabled
 ```
 

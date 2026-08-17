@@ -5,7 +5,8 @@
   "approval": {
     "state": "PENDING",
     "approved_by": null,
-    "approved_at": null
+    "approved_at": null,
+    "approval_signature_sha256": null
   },
   "market": "US",
   "calendar": "XNYS",

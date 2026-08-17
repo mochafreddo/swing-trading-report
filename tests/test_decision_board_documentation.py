@@ -25,6 +25,10 @@ def test_decision_board_reference_is_linked_and_states_current_boundary() -> Non
     assert "계속 환경변수나" in reference and "credential을 읽지 않으며" in reference
     assert "raw loader, preparer, enricher를" in reference
     assert "batch owner" in reference and "OpenAI Responses claim verifier" in reference
+    assert "--gate-manifest" in reference
+    assert "--input-ledger" in reference
+    assert "--expected-action-ledger" in reference
+    assert "attempts/failures/timeouts" in reference
     assert "사용자가 모든 매수·매도를 직접 실행" in reference
     assert "주문 생성·수정·취소" in reference
     assert "<64-lowercase-hex>" not in reference
@@ -48,6 +52,8 @@ def test_shadow_evaluation_freezes_the_approved_graduation_contract() -> None:
         assert reason in evaluation
     assert "`UNEXPLAINED` count | 0" in evaluation
     assert "통과는 자동 활성화가 아닙니다" in evaluation
+    assert "approval_signature_sha256" in evaluation
+    assert "case_id/run_kind/sealed_input_hash/item_id" in evaluation
     assert "주문 실행은 그 이후에도 사용자 수동" in evaluation
     assert "<64-lowercase-hex>" not in evaluation
 

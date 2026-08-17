@@ -15,6 +15,7 @@ from sab.research.live_adapters import (
     AiBriefNewsSearchProviderV0,
     AsyncPublicDnsResolverV0,
     PinnedArticleFetcherV0,
+    ProviderObservationCounterV0,
 )
 from sab.research.orchestrator import EvidenceResearcherV0
 from sab.research.source_safety import SafeArticleVerifierV0
@@ -61,16 +62,15 @@ def build_decision_board_live_adapter_from_env_v0() -> DecisionBoardLiveAdapterV
             "Decision Board news provider config is unavailable"
         )
     openai_key = _env_value("OPENAI_API_KEY")
-    model = _env_value("DECISION_BOARD_OPENAI_MODEL") or _env_value(
-        "OPENAI_AI_BRIEF_MODEL"
-    )
-    if not openai_key or not model:
+    model = decision_board_live_claim_model_from_env_v0()
+    if not openai_key:
         raise DecisionBoardAdapterUnavailableError(
             "Decision Board claim verifier config is unavailable"
         )
     policy = ResearchSourcePolicyV0()
+    provider_observations = ProviderObservationCounterV0()
     researcher = EvidenceResearcherV0(
-        AiBriefNewsSearchProviderV0(),
+        AiBriefNewsSearchProviderV0(observations=provider_observations),
         SafeArticleVerifierV0(
             resolver=AsyncPublicDnsResolverV0(),
             fetcher=PinnedArticleFetcherV0(),
@@ -84,6 +84,7 @@ def build_decision_board_live_adapter_from_env_v0() -> DecisionBoardLiveAdapterV
             model=model,
         ),
         source_policy=policy,
+        provider_metrics_source=provider_observations,
     )
     storage_config = SupabaseStorageConfig(
         url=supabase.url,
@@ -102,6 +103,17 @@ def build_decision_board_live_adapter_from_env_v0() -> DecisionBoardLiveAdapterV
     )
 
 
+def decision_board_live_claim_model_from_env_v0() -> str:
+    model = _env_value("DECISION_BOARD_OPENAI_MODEL") or _env_value(
+        "OPENAI_AI_BRIEF_MODEL"
+    )
+    if not model:
+        raise DecisionBoardAdapterUnavailableError(
+            "Decision Board claim verifier config is unavailable"
+        )
+    return model
+
+
 def _env_value(name: str) -> str | None:
     value = str(os.getenv(name) or "").strip()
     return value or None
@@ -110,4 +122,5 @@ def _env_value(name: str) -> str | None:
 __all__ = [
     "SupabaseDecisionBoardUploaderV0",
     "build_decision_board_live_adapter_from_env_v0",
+    "decision_board_live_claim_model_from_env_v0",
 ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from sab.research.contracts import (
     ResearchInputV0,
@@ -56,9 +57,15 @@ class BatchDecisionEvidenceError(RuntimeError):
     """The batch evidence invocation could not produce safe item outcomes."""
 
 
+class ProviderMetricsSourceV0(Protocol):
+    def snapshot(self) -> dict[str, int]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BatchDecisionEvidenceBlockedV0:
     """The shared article-verifier preflight blocked every selected item."""
+
+    provider_metrics: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +79,7 @@ class BatchDecisionEvidenceSourceV0:
     """Serve only invocation-owned outcomes by exact public item identity."""
 
     records: tuple[_OutcomeRecordV0, ...]
+    provider_metrics: tuple[tuple[str, int], ...] = ()
 
     def research(self, request: DecisionItemEnrichmentRequestV0) -> object:
         if type(request) is not DecisionItemEnrichmentRequestV0:
@@ -95,6 +103,11 @@ class BatchDecisionEvidenceBuilderV0:
     source_policy: ResearchSourcePolicyV0 = field(
         default_factory=ResearchSourcePolicyV0
     )
+    provider_metrics_source: ProviderMetricsSourceV0 | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if type(self.researcher) is not EvidenceResearcherV0 or not callable(
@@ -104,6 +117,10 @@ class BatchDecisionEvidenceBuilderV0:
         policy = copy_research_source_policy_v0(self.source_policy)
         if policy is None:
             raise TypeError("batch evidence source policy is invalid")
+        if self.provider_metrics_source is not None and not callable(
+            getattr(self.provider_metrics_source, "snapshot", None)
+        ):
+            raise TypeError("batch provider metrics source is invalid")
         object.__setattr__(self, "source_policy", policy)
 
     async def build(
@@ -131,7 +148,10 @@ class BatchDecisionEvidenceBuilderV0:
             item for item in trusted_request.items if item.item_id in selected_ids
         )
         if not selected_items:
-            return BatchDecisionEvidenceSourceV0(records=())
+            return BatchDecisionEvidenceSourceV0(
+                records=(),
+                provider_metrics=self._provider_metrics(),
+            )
         research_input = ResearchInputV0(
             instruments=tuple(item.instrument for item in selected_items),
             questions=_QUESTIONS,
@@ -142,7 +162,9 @@ class BatchDecisionEvidenceBuilderV0:
             deadline=deadline,
         )
         if type(researched) is ResearchSharedBlockedV0:
-            return BatchDecisionEvidenceBlockedV0()
+            return BatchDecisionEvidenceBlockedV0(
+                provider_metrics=self._provider_metrics()
+            )
         if type(researched) is ResearchInputFailedV0:
             raise BatchDecisionEvidenceError("batch research input failed")
         if type(researched) is not ResearchCompletedV0:
@@ -169,7 +191,22 @@ class BatchDecisionEvidenceBuilderV0:
                     outcome=outcome,
                 )
             )
-        return BatchDecisionEvidenceSourceV0(records=tuple(records))
+        return BatchDecisionEvidenceSourceV0(
+            records=tuple(records),
+            provider_metrics=self._provider_metrics(),
+        )
+
+    def _provider_metrics(self) -> tuple[tuple[str, int], ...]:
+        if self.provider_metrics_source is None:
+            return ()
+        value = self.provider_metrics_source.snapshot()
+        if (
+            type(value) is not dict
+            or any(type(key) is not str for key in value)
+            or any(type(count) is not int or count < 0 for count in value.values())
+        ):
+            raise BatchDecisionEvidenceError("batch provider metrics are invalid")
+        return tuple(sorted(value.items(), key=lambda pair: pair[0].encode("ascii")))
 
     async def _build_outcome(
         self,

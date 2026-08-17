@@ -6,20 +6,35 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import sab.decision_board.shadow_execution as shadow_execution
 import sab.decision_board.shadow_gate as shadow_gate
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from sab.__main__ import _build_parser, _dispatch_command
+from sab.decision_board.cli import DecisionBoardCliConfigV0
+from sab.decision_board.contracts import decision_payload_hash
+from sab.decision_board.shadow_execution import load_shadow_gate_execution_binding_v0
 from sab.decision_board.shadow_gate import (
     ShadowGateManifestError,
     current_shadow_gate_runtime_contract_v0,
     load_shadow_gate_manifest_v0,
+    shadow_gate_approval_signature_v0,
     validate_shadow_gate_manifest_v0,
     validate_shadow_gate_runtime_v0,
+)
+from sab.decision_board.shadow_ledger import (
+    ShadowEvaluationLedgerError,
+    validate_shadow_evaluation_ledgers_v0,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 SCHEMA = ROOT / "schemas" / "decision-board-shadow-gate.v0.schema.json"
+INPUT_LEDGER_SCHEMA = (
+    ROOT / "schemas" / "decision-board-shadow-input-ledger.v0.schema.json"
+)
+EXPECTED_LEDGER_SCHEMA = (
+    ROOT / "schemas" / "decision-board-shadow-expected-action-ledger.v0.schema.json"
+)
 APPROVED_LOCAL = ROOT / "config" / "decision-board-shadow-gate.approved.local.json"
 
 
@@ -27,6 +42,73 @@ def _raw_manifest() -> dict[str, object]:
     value = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert type(value) is dict
     return value
+
+
+def _freeze_ledgers(
+    raw: dict[str, object],
+    *,
+    expected_actions: list[str] | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    gate_version = raw["gate_version"]
+    input_ledger: dict[str, object] = {
+        "schema_version": "decision-board-shadow-input-ledger.v0",
+        "gate_version": gate_version,
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "run_kind": "ENTRY",
+                "sealed_input_hash": "sha256:" + "3" * 64,
+                "item_id": "entry-AAPL.NAS",
+            }
+        ],
+    }
+    expected_ledger: dict[str, object] = {
+        "schema_version": "decision-board-shadow-expected-action-ledger.v0",
+        "gate_version": gate_version,
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "expected_action_set": (
+                    ["BUY"] if expected_actions is None else expected_actions
+                ),
+            }
+        ],
+    }
+    ledger = raw["evaluation_ledger"]
+    assert type(ledger) is dict
+    ledger.update(
+        {
+            "input_ledger_sha256": decision_payload_hash(input_ledger),
+            "expected_action_ledger_sha256": decision_payload_hash(expected_ledger),
+            "case_count": 1,
+        }
+    )
+    return input_ledger, expected_ledger
+
+
+def _approve_and_freeze(
+    raw: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    approval = raw["approval"]
+    runtime = raw["runtime_contract"]
+    assert type(approval) is dict
+    assert type(runtime) is dict
+    approval.update(
+        {
+            "state": "APPROVED",
+            "approved_by": "user",
+            "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
+        }
+    )
+    runtime["code_revision"] = "git:" + "1" * 40
+    artifact_digests = runtime["artifact_digests"]
+    assert type(artifact_digests) is dict
+    for name in artifact_digests:
+        artifact_digests[name] = "sha256:" + "2" * 64
+    input_ledger, expected_ledger = _freeze_ledgers(raw)
+    approval["approval_signature_sha256"] = shadow_gate_approval_signature_v0(raw)
+    return input_ledger, expected_ledger
 
 
 def _mutate_contract(raw: dict[str, object], mutation: str) -> None:
@@ -213,6 +295,19 @@ def test_gate_requires_detached_operator_approval_before_shadow_counting() -> No
         load_shadow_gate_manifest_v0(MANIFEST, require_approved=True)
 
 
+def test_gate_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    duplicate = tmp_path / "duplicate-gate.json"
+    content = MANIFEST.read_text(encoding="utf-8").replace(
+        '"market": "US",',
+        '"market": "US", "market": "US",',
+        1,
+    )
+    duplicate.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ShadowGateManifestError, match="unavailable or invalid"):
+        load_shadow_gate_manifest_v0(duplicate)
+
+
 def test_approved_gate_requires_all_freeze_inputs_before_shadow_counting() -> None:
     raw = copy.deepcopy(_raw_manifest())
     approval = raw["approval"]
@@ -222,6 +317,7 @@ def test_approved_gate_requires_all_freeze_inputs_before_shadow_counting() -> No
             "state": "APPROVED",
             "approved_by": "user",
             "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
         }
     )
 
@@ -229,24 +325,275 @@ def test_approved_gate_requires_all_freeze_inputs_before_shadow_counting() -> No
         validate_shadow_gate_manifest_v0(raw, require_approved=True)
 
     runtime = raw["runtime_contract"]
-    ledger = raw["evaluation_ledger"]
     assert type(runtime) is dict
-    assert type(ledger) is dict
     runtime["code_revision"] = "git:" + "1" * 40
     artifact_digests = runtime["artifact_digests"]
     assert type(artifact_digests) is dict
     for name in artifact_digests:
         artifact_digests[name] = "sha256:" + "2" * 64
-    ledger.update(
+    input_ledger, expected_ledger = _freeze_ledgers(raw)
+    approval["approval_signature_sha256"] = shadow_gate_approval_signature_v0(raw)
+
+    validated = validate_shadow_gate_manifest_v0(
+        raw,
+        require_approved=True,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+    assert validated.approval_state == "APPROVED"
+
+
+def test_approved_gate_requires_explicit_user_identity_before_window() -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    approval = raw["approval"]
+    assert type(approval) is dict
+    approval.update(
         {
-            "input_ledger_sha256": "sha256:" + "3" * 64,
-            "expected_action_ledger_sha256": "sha256:" + "4" * 64,
-            "case_count": 1,
+            "state": "APPROVED",
+            "approved_by": "automation",
+            "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
         }
     )
 
-    validated = validate_shadow_gate_manifest_v0(raw, require_approved=True)
-    assert validated.approval_state == "APPROVED"
+    with pytest.raises(ShadowGateManifestError, match="identity must be user"):
+        validate_shadow_gate_manifest_v0(raw)
+
+    approval["approved_by"] = "user"
+    approval["approved_at"] = "2026-08-17T12:30:00Z"
+    with pytest.raises(ShadowGateManifestError, match="precede the evaluation window"):
+        validate_shadow_gate_manifest_v0(raw)
+
+
+def test_approved_gate_recomputes_ledgers_and_rejects_empty_actions() -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    input_ledger, expected_ledger = _approve_and_freeze(raw)
+    gate_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(gate_schema).validate(raw)
+    for schema_path, ledger_value in (
+        (INPUT_LEDGER_SCHEMA, input_ledger),
+        (EXPECTED_LEDGER_SCHEMA, expected_ledger),
+    ):
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(ledger_value)
+    approval = raw["approval"]
+    assert type(approval) is dict
+    valid_signature = approval["approval_signature_sha256"]
+    approval["approval_signature_sha256"] = "sha256:" + "9" * 64
+    with pytest.raises(ShadowGateManifestError, match="signature does not match"):
+        validate_shadow_gate_manifest_v0(
+            raw,
+            require_approved=True,
+            input_ledger=input_ledger,
+            expected_action_ledger=expected_ledger,
+        )
+    approval["approval_signature_sha256"] = valid_signature
+    expected_cases = expected_ledger["cases"]
+    assert type(expected_cases) is list
+    expected_case = expected_cases[0]
+    assert type(expected_case) is dict
+    expected_case["expected_action_set"] = []
+    ledger = raw["evaluation_ledger"]
+    assert type(ledger) is dict
+    ledger["expected_action_ledger_sha256"] = decision_payload_hash(expected_ledger)
+    approval["approval_signature_sha256"] = shadow_gate_approval_signature_v0(raw)
+
+    with pytest.raises(ShadowGateManifestError, match="ledgers are invalid"):
+        validate_shadow_gate_manifest_v0(
+            raw,
+            require_approved=True,
+            input_ledger=input_ledger,
+            expected_action_ledger=expected_ledger,
+        )
+
+    expected_case["expected_action_set"] = ["BUY"]
+    with pytest.raises(ShadowGateManifestError, match="ledgers are invalid"):
+        validate_shadow_gate_manifest_v0(
+            raw,
+            require_approved=True,
+            input_ledger=input_ledger,
+            expected_action_ledger=expected_ledger,
+        )
+
+
+def test_shadow_execution_requires_exact_manifest_slot_and_ledger_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    input_ledger, expected_ledger = _approve_and_freeze(raw)
+    manifest = validate_shadow_gate_manifest_v0(
+        raw,
+        require_approved=True,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+    manifest_path = tmp_path / "approved-gate.json"
+    input_path = tmp_path / "input-ledger.json"
+    expected_path = tmp_path / "expected-action-ledger.json"
+    manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+    input_path.write_text(json.dumps(input_ledger), encoding="utf-8")
+    expected_path.write_text(json.dumps(expected_ledger), encoding="utf-8")
+    first_slot = raw["expected_slots"][0]  # type: ignore[index]
+    assert type(first_slot) is dict
+    monkeypatch.setattr(
+        shadow_execution,
+        "validate_shadow_gate_runtime_v0",
+        lambda *_args, **_kwargs: None,
+    )
+    parser = _build_parser()
+    gate_command = parser.parse_args(
+        [
+            "decision-board-shadow-gate-validate",
+            "--manifest",
+            str(manifest_path),
+            "--input-ledger",
+            str(input_path),
+            "--expected-action-ledger",
+            str(expected_path),
+            "--require-approved",
+        ]
+    )
+    assert _dispatch_command(gate_command, parser) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "VALID_APPROVED"
+
+    def config(
+        *, sealed_input_hash: str, manifest_hash: str
+    ) -> DecisionBoardCliConfigV0:
+        return DecisionBoardCliConfigV0.from_strings(
+            run_kind=str(first_slot["run_kind"]),
+            run_id=str(first_slot["run_id"]),
+            idempotency_key="sha256:" + "8" * 64,
+            created_at=str(first_slot["expected_at"]),
+            sealed_input_hash=sealed_input_hash,
+            upload_mode="DISABLED",
+            report_dir=str(tmp_path),
+            gate_manifest_sha256=manifest_hash,
+            gate_manifest=str(manifest_path),
+            input_ledger=str(input_path),
+            expected_action_ledger=str(expected_path),
+        )
+
+    binding = load_shadow_gate_execution_binding_v0(
+        config(
+            sealed_input_hash="sha256:" + "3" * 64,
+            manifest_hash=manifest.manifest_sha256,
+        ),
+        repo_root=ROOT,
+        claim_model="gpt-5.6-sol",
+    )
+    assert binding.expected_item_ids == ("entry-AAPL.NAS",)
+
+    with pytest.raises(ShadowGateManifestError, match="manifest hash"):
+        load_shadow_gate_execution_binding_v0(
+            config(
+                sealed_input_hash="sha256:" + "3" * 64,
+                manifest_hash="sha256:" + "9" * 64,
+            ),
+            repo_root=ROOT,
+            claim_model="gpt-5.6-sol",
+        )
+    with pytest.raises(ShadowGateManifestError, match="outside the ledger"):
+        load_shadow_gate_execution_binding_v0(
+            config(
+                sealed_input_hash="sha256:" + "4" * 64,
+                manifest_hash=manifest.manifest_sha256,
+            ),
+            repo_root=ROOT,
+            claim_model="gpt-5.6-sol",
+        )
+
+    with pytest.raises(ShadowGateManifestError, match="slot does not match"):
+        load_shadow_gate_execution_binding_v0(
+            DecisionBoardCliConfigV0.from_strings(
+                run_kind=str(first_slot["run_kind"]),
+                run_id=str(first_slot["run_id"]),
+                idempotency_key="sha256:" + "8" * 64,
+                created_at="2026-08-17T12:31:00Z",
+                sealed_input_hash="sha256:" + "3" * 64,
+                upload_mode="DISABLED",
+                report_dir=str(tmp_path),
+                gate_manifest_sha256=manifest.manifest_sha256,
+                gate_manifest=str(manifest_path),
+                input_ledger=str(input_path),
+                expected_action_ledger=str(expected_path),
+            ),
+            repo_root=ROOT,
+            claim_model="gpt-5.6-sol",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("duplicate", "not unique"),
+        ("unordered", "not ordered"),
+        ("case-count", "case count"),
+        ("cross-ledger", "case identities"),
+        ("lane", "lane"),
+    ],
+)
+def test_shadow_ledgers_reject_case_identity_and_lane_mutations(
+    mutation: str,
+    message: str,
+) -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    input_ledger, expected_ledger = _freeze_ledgers(raw)
+    input_cases = input_ledger["cases"]
+    expected_cases = expected_ledger["cases"]
+    assert type(input_cases) is list
+    assert type(expected_cases) is list
+
+    if mutation == "duplicate":
+        input_cases.append(copy.deepcopy(input_cases[0]))
+        raw["evaluation_ledger"]["case_count"] = 2  # type: ignore[index]
+    elif mutation == "unordered":
+        input_cases.extend(
+            [
+                {
+                    "case_id": "case-entry-msft",
+                    "run_kind": "ENTRY",
+                    "sealed_input_hash": "sha256:" + "4" * 64,
+                    "item_id": "entry-MSFT.NAS",
+                }
+            ]
+        )
+        expected_cases.extend(
+            [{"case_id": "case-entry-msft", "expected_action_set": ["BUY"]}]
+        )
+        input_cases.reverse()
+        raw["evaluation_ledger"]["case_count"] = 2  # type: ignore[index]
+    elif mutation == "case-count":
+        input_cases.append(
+            {
+                "case_id": "case-entry-msft",
+                "run_kind": "ENTRY",
+                "sealed_input_hash": "sha256:" + "4" * 64,
+                "item_id": "entry-MSFT.NAS",
+            }
+        )
+        expected_cases.append(
+            {"case_id": "case-entry-msft", "expected_action_set": ["BUY"]}
+        )
+    elif mutation == "cross-ledger":
+        expected_cases[0]["case_id"] = "case-holding-aapl"
+    else:
+        expected_cases[0]["expected_action_set"] = ["SELL"]
+
+    ledger = raw["evaluation_ledger"]
+    assert type(ledger) is dict
+    ledger["input_ledger_sha256"] = decision_payload_hash(input_ledger)
+    ledger["expected_action_ledger_sha256"] = decision_payload_hash(expected_ledger)
+    manifest = validate_shadow_gate_manifest_v0(raw)
+
+    with pytest.raises(ShadowEvaluationLedgerError, match=message):
+        validate_shadow_evaluation_ledgers_v0(
+            manifest,
+            input_ledger=input_ledger,
+            expected_action_ledger=expected_ledger,
+        )
 
 
 def test_approved_gate_runtime_contract_matches_executed_artifacts(
@@ -254,28 +601,27 @@ def test_approved_gate_runtime_contract_matches_executed_artifacts(
 ) -> None:
     raw = copy.deepcopy(_raw_manifest())
     approval = raw["approval"]
-    ledger = raw["evaluation_ledger"]
     assert type(approval) is dict
-    assert type(ledger) is dict
     approval.update(
         {
             "state": "APPROVED",
             "approved_by": "user",
             "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
         }
     )
     raw["runtime_contract"] = current_shadow_gate_runtime_contract_v0(
         ROOT,
         claim_model="gpt-5.6-sol",
     )
-    ledger.update(
-        {
-            "input_ledger_sha256": "sha256:" + "3" * 64,
-            "expected_action_ledger_sha256": "sha256:" + "4" * 64,
-            "case_count": 1,
-        }
+    input_ledger, expected_ledger = _freeze_ledgers(raw)
+    approval["approval_signature_sha256"] = shadow_gate_approval_signature_v0(raw)
+    manifest = validate_shadow_gate_manifest_v0(
+        raw,
+        require_approved=True,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
     )
-    manifest = validate_shadow_gate_manifest_v0(raw, require_approved=True)
     monkeypatch.setattr(shadow_gate, "_require_clean_git_worktree", lambda _root: None)
 
     validate_shadow_gate_runtime_v0(

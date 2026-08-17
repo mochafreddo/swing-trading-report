@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import http.client
+import os
 import socket
 import ssl
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +24,10 @@ from sab.ai_brief_sources import (
     AiBriefSourceProviderTimeoutError,
     load_ai_brief_sources,
 )
+from sab.utils.bounded_process import (
+    AsyncBoundedProcessRunnerV0,
+    run_sync_in_bounded_process_async_v0,
+)
 
 from .contracts import SearchRequestV0
 from .deadline import Deadline, DeadlineExpiredError
@@ -37,9 +43,48 @@ _PROVIDERS = (
     SOURCE_PROVIDER_POLYGON_NEWS,
     SOURCE_PROVIDER_BENZINGA_NEWS,
 )
+_PROVIDER_CREDENTIAL_ENV = {
+    SOURCE_PROVIDER_FINNHUB: "FINNHUB_API_KEY",
+    SOURCE_PROVIDER_POLYGON_NEWS: "POLYGON_API_KEY",
+    SOURCE_PROVIDER_BENZINGA_NEWS: "BENZINGA_API_TOKEN",
+}
 type SourceLoaderV0 = Callable[..., AiBriefSourceProviderResult]
 type ResolveSyncV0 = Callable[[str, int], tuple[str, ...]]
 type FetchSyncV0 = Callable[[str, tuple[str, ...], float, int], ArticleFetchResponseV0]
+
+
+class ProviderObservationCounterV0:
+    """Invocation-local public counters for the fixed provider chain."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts = {
+            provider: {"attempts": 0, "failures": 0, "timeouts": 0}
+            for provider in _PROVIDERS
+        }
+
+    def record(self, provider: str, outcome: str) -> None:
+        if provider not in self._counts or outcome not in {
+            "SUCCEEDED",
+            "FAILED",
+            "TIMED_OUT",
+        }:
+            raise ValueError("provider observation is invalid")
+        with self._lock:
+            row = self._counts[provider]
+            row["attempts"] += 1
+            if outcome != "SUCCEEDED":
+                row["failures"] += 1
+            if outcome == "TIMED_OUT":
+                row["timeouts"] += 1
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                f"provider_{provider.replace('-', '_')}_{metric}": value
+                for provider in _PROVIDERS
+                for metric, value in self._counts[provider].items()
+            }
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +92,12 @@ class AsyncPublicDnsResolverV0:
     """Resolve a hostname off-loop while leaving public-IP policy to the verifier."""
 
     resolve_sync: ResolveSyncV0 = field(
-        default=lambda hostname, port: _resolve_sync(hostname, port),
+        default_factory=lambda: _resolve_sync,
+        repr=False,
+        compare=False,
+    )
+    bounded_runner: AsyncBoundedProcessRunnerV0 = field(
+        default=run_sync_in_bounded_process_async_v0,
         repr=False,
         compare=False,
     )
@@ -70,8 +120,9 @@ class AsyncPublicDnsResolverV0:
         ):
             raise ValueError("DNS request is invalid")
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(self.resolve_sync, hostname, port),
+            result = await self.bounded_runner(
+                self.resolve_sync,
+                (hostname, port),
                 timeout=float(timeout),
             )
         except TimeoutError:
@@ -88,12 +139,12 @@ class PinnedArticleFetcherV0:
     """Fetch one article by a previously verified address with hostname TLS checks."""
 
     fetch_sync: FetchSyncV0 = field(
-        default=lambda url, addresses, timeout, max_bytes: _fetch_pinned_sync(
-            url,
-            addresses,
-            timeout,
-            max_bytes,
-        ),
+        default_factory=lambda: _fetch_pinned_sync,
+        repr=False,
+        compare=False,
+    )
+    bounded_runner: AsyncBoundedProcessRunnerV0 = field(
+        default=run_sync_in_bounded_process_async_v0,
         repr=False,
         compare=False,
     )
@@ -119,14 +170,9 @@ class PinnedArticleFetcherV0:
         ):
             raise ValueError("article fetch request is invalid")
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.fetch_sync,
-                    url,
-                    addresses,
-                    float(timeout),
-                    max_bytes,
-                ),
+            response = await self.bounded_runner(
+                self.fetch_sync,
+                (url, addresses, float(timeout), max_bytes),
                 timeout=float(timeout),
             )
         except TimeoutError:
@@ -152,6 +198,16 @@ class AiBriefNewsSearchProviderV0:
         repr=False,
         compare=False,
     )
+    observations: ProviderObservationCounterV0 = field(
+        default_factory=ProviderObservationCounterV0,
+        repr=False,
+        compare=False,
+    )
+    bounded_runner: AsyncBoundedProcessRunnerV0 = field(
+        default=run_sync_in_bounded_process_async_v0,
+        repr=False,
+        compare=False,
+    )
 
     async def search(
         self,
@@ -173,36 +229,56 @@ class AiBriefNewsSearchProviderV0:
         timed_out = 0
         for index, provider in enumerate(_PROVIDERS):
             providers_left = len(_PROVIDERS) - index
+            attempted = False
             try:
                 timeout = deadline.child_timeout() / providers_left
-                result = await asyncio.to_thread(
-                    self.source_loader,
-                    source_provider=provider,
-                    source_report_path=None,
-                    source_api_url=None,
-                    source_timeout_seconds=timeout,
-                    eligible_tickers={instrument.canonical_ticker},
-                    now=current_time,
+                attempted = True
+                result = await self.bounded_runner(
+                    _load_provider_sources_sync,
+                    (
+                        self.source_loader,
+                        provider,
+                        os.getenv(_PROVIDER_CREDENTIAL_ENV[provider]),
+                    ),
+                    timeout=timeout,
+                    kwargs={
+                        "source_provider": provider,
+                        "source_report_path": None,
+                        "source_api_url": None,
+                        "source_timeout_seconds": timeout,
+                        "eligible_tickers": {instrument.canonical_ticker},
+                        "now": current_time,
+                    },
                 )
                 deadline.remaining()
-            except AiBriefSourceProviderTimeoutError:
+                candidate = _first_safe_source(
+                    result,
+                    ticker=instrument.canonical_ticker,
+                    now=current_time,
+                    freshness_hours=request.freshness_hours,
+                )
+            except asyncio.CancelledError:
+                if attempted:
+                    self.observations.record(provider, "TIMED_OUT")
+                raise
+            except AiBriefSourceProviderTimeoutError, TimeoutError:
+                self.observations.record(provider, "TIMED_OUT")
                 timed_out += 1
                 continue
             except AiBriefSourceProviderError:
+                self.observations.record(provider, "FAILED")
                 failed += 1
                 continue
             except DeadlineExpiredError as exc:
+                if attempted:
+                    self.observations.record(provider, "TIMED_OUT")
                 raise SearchProviderTimeoutError("live news search timed out") from exc
             except Exception as exc:
+                self.observations.record(provider, "FAILED")
                 raise SearchProviderOperationalError(
                     "live news provider failed"
                 ) from exc
-            candidate = _first_safe_source(
-                result,
-                ticker=instrument.canonical_ticker,
-                now=current_time,
-                freshness_hours=request.freshness_hours,
-            )
+            self.observations.record(provider, "SUCCEEDED")
             if candidate is not None and not any(
                 row["url"] == candidate["url"] for row in sources
             ):
@@ -294,6 +370,29 @@ def _resolve_sync(hostname: str, port: int) -> tuple[str, ...]:
         )
     }
     return tuple(sorted(addresses))
+
+
+def _load_provider_sources_sync(
+    source_loader: SourceLoaderV0,
+    provider: str,
+    credential: str | None,
+    **kwargs: object,
+) -> object:
+    env_name = _PROVIDER_CREDENTIAL_ENV.get(provider)
+    if env_name is None:
+        raise ValueError("live news provider is invalid")
+    previous = os.environ.get(env_name)
+    try:
+        if credential is None:
+            os.environ.pop(env_name, None)
+        else:
+            os.environ[env_name] = credential
+        return source_loader(**kwargs)
+    finally:
+        if previous is None:
+            os.environ.pop(env_name, None)
+        else:
+            os.environ[env_name] = previous
 
 
 class _PinnedHttpConnection(http.client.HTTPConnection):
@@ -417,4 +516,5 @@ __all__ = [
     "AiBriefNewsSearchProviderV0",
     "AsyncPublicDnsResolverV0",
     "PinnedArticleFetcherV0",
+    "ProviderObservationCounterV0",
 ]

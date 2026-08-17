@@ -165,6 +165,7 @@ class ShadowGateManifestV0:
     gate_version: str
     horizon: Literal["SWING"]
     approval_state: Literal["PENDING", "APPROVED"]
+    approval_signature_sha256: str | None
     market: str
     calendar: str
     start_session: date
@@ -213,32 +214,72 @@ def load_shadow_gate_manifest_v0(
     path: str | Path,
     *,
     require_approved: bool = False,
+    input_ledger_path: str | Path | None = None,
+    expected_action_ledger_path: str | Path | None = None,
 ) -> ShadowGateManifestV0:
     try:
         raw_bytes = Path(path).read_bytes()
         if len(raw_bytes) > _MAX_MANIFEST_BYTES:
             raise ShadowGateManifestError("manifest exceeds the safe bound")
-        raw = json.loads(raw_bytes.decode("utf-8"))
+        raw = json.loads(
+            raw_bytes.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ValueError("non-finite JSON is invalid")
+            ),
+        )
     except ShadowGateManifestError:
         raise
-    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+    except OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError:
         raise ShadowGateManifestError(
             "manifest input is unavailable or invalid"
         ) from None
-    return validate_shadow_gate_manifest_v0(raw, require_approved=require_approved)
+    manifest = validate_shadow_gate_manifest_v0(raw)
+    if require_approved:
+        if manifest.approval_state != "APPROVED":
+            raise ShadowGateManifestError(
+                "manifest approval is required",
+                code="APPROVAL_REQUIRED",
+            )
+        if input_ledger_path is None or expected_action_ledger_path is None:
+            raise ShadowGateManifestError(
+                "approved manifest ledgers are required",
+                code="APPROVAL_REQUIRED",
+            )
+        from .shadow_ledger import (
+            ShadowEvaluationLedgerError,
+            load_shadow_evaluation_ledgers_v0,
+        )
+
+        try:
+            load_shadow_evaluation_ledgers_v0(
+                manifest,
+                input_ledger_path=input_ledger_path,
+                expected_action_ledger_path=expected_action_ledger_path,
+            )
+        except ShadowEvaluationLedgerError:
+            raise ShadowGateManifestError(
+                "approved manifest ledgers are invalid",
+                code="APPROVAL_REQUIRED",
+            ) from None
+    return manifest
 
 
 def validate_shadow_gate_manifest_v0(
     raw: object,
     *,
     require_approved: bool = False,
+    input_ledger: object = None,
+    expected_action_ledger: object = None,
 ) -> ShadowGateManifestV0:
     if type(raw) is not dict or set(raw) != _ROOT_FIELDS:
         raise ShadowGateManifestError("manifest root fields are invalid")
     if raw["schema_version"] != "decision-board-shadow-gate.v0":
         raise ShadowGateManifestError("manifest schema version is invalid")
     gate_version = _require_version(raw["gate_version"], "gate version")
-    approval_state = _validate_approval(raw["approval"])
+    approval_state, approved_at, approval_signature = _validate_approval(
+        raw["approval"]
+    )
     if require_approved and approval_state != "APPROVED":
         raise ShadowGateManifestError(
             "manifest approval is required",
@@ -263,6 +304,14 @@ def validate_shadow_gate_manifest_v0(
     ledger = _validate_evaluation_ledger(raw["evaluation_ledger"])
     schedule = _validate_schedule(raw["schedule_policy"])
     slots = _validate_slots(raw["expected_slots"], sessions=sessions, schedule=schedule)
+    if (
+        approval_state == "APPROVED"
+        and approved_at is not None
+        and approved_at >= min(slot.expected_at for slot in slots)
+    ):
+        raise ShadowGateManifestError(
+            "manifest approval must precede the evaluation window"
+        )
     if raw["allowed_diff_reasons"] != list(_DIFF_REASONS):
         raise ShadowGateManifestError("manifest diff reasons are invalid")
     _validate_rule_diff_allowlist(raw["allowed_diff_reason_by_rule_id"])
@@ -271,6 +320,11 @@ def validate_shadow_gate_manifest_v0(
     _validate_thresholds(raw["approved_thresholds"])
     if approval_state == "APPROVED" and not _freeze_inputs_complete(runtime, ledger):
         raise ShadowGateManifestError("manifest approval freeze inputs are incomplete")
+    if (
+        approval_state == "APPROVED"
+        and approval_signature != shadow_gate_approval_signature_v0(raw)
+    ):
+        raise ShadowGateManifestError("manifest approval signature does not match")
     digest = hashlib.sha256(
         json.dumps(
             raw,
@@ -284,6 +338,7 @@ def validate_shadow_gate_manifest_v0(
         ("gate_version", gate_version),
         ("horizon", "SWING"),
         ("approval_state", approval_state),
+        ("approval_signature_sha256", approval_signature),
         ("market", "US"),
         ("calendar", "XNYS"),
         ("start_session", start_session),
@@ -305,6 +360,28 @@ def validate_shadow_gate_manifest_v0(
         ("manifest_sha256", f"sha256:{digest}"),
     ):
         object.__setattr__(value, field, field_value)
+    if require_approved:
+        if input_ledger is None or expected_action_ledger is None:
+            raise ShadowGateManifestError(
+                "approved manifest ledgers are required",
+                code="APPROVAL_REQUIRED",
+            )
+        from .shadow_ledger import (
+            ShadowEvaluationLedgerError,
+            validate_shadow_evaluation_ledgers_v0,
+        )
+
+        try:
+            validate_shadow_evaluation_ledgers_v0(
+                value,
+                input_ledger=input_ledger,
+                expected_action_ledger=expected_action_ledger,
+            )
+        except ShadowEvaluationLedgerError:
+            raise ShadowGateManifestError(
+                "approved manifest ledgers are invalid",
+                code="APPROVAL_REQUIRED",
+            ) from None
     return value
 
 
@@ -425,25 +502,67 @@ def _artifact_digests(root: Path) -> dict[str, str]:
     return result
 
 
-def _validate_approval(value: object) -> Literal["PENDING", "APPROVED"]:
+def _validate_approval(
+    value: object,
+) -> tuple[Literal["PENDING", "APPROVED"], datetime | None, str | None]:
     if type(value) is not dict or set(value) != {
         "state",
         "approved_by",
         "approved_at",
+        "approval_signature_sha256",
     }:
         raise ShadowGateManifestError("manifest approval fields are invalid")
     state = value["state"]
     approved_by = value["approved_by"]
     approved_at = value["approved_at"]
-    if state == "PENDING" and approved_by is None and approved_at is None:
-        return "PENDING"
+    approval_signature = value["approval_signature_sha256"]
+    if (
+        state == "PENDING"
+        and approved_by is None
+        and approved_at is None
+        and approval_signature is None
+    ):
+        return "PENDING", None, None
     if state != "APPROVED":
         raise ShadowGateManifestError("manifest approval state is invalid")
-    _require_version(approved_by, "approval identity")
+    if approved_by != "user":
+        raise ShadowGateManifestError("manifest approval identity must be user")
     approved_at_value = _parse_utc_datetime(approved_at, "approval timestamp")
     if approved_at_value.microsecond != 0:
         raise ShadowGateManifestError("manifest approval timestamp is invalid")
-    return "APPROVED"
+    if (
+        type(approval_signature) is not str
+        or _HASH_PATTERN.fullmatch(approval_signature) is None
+    ):
+        raise ShadowGateManifestError("manifest approval signature is invalid")
+    return "APPROVED", approved_at_value, approval_signature
+
+
+def shadow_gate_approval_signature_v0(raw: object) -> str:
+    """Hash the complete approved contract with only its signature slot cleared."""
+
+    if type(raw) is not dict or type(raw.get("approval")) is not dict:
+        raise ShadowGateManifestError("manifest approval signature input is invalid")
+    approval = dict(raw["approval"])
+    if set(approval) != {
+        "state",
+        "approved_by",
+        "approved_at",
+        "approval_signature_sha256",
+    }:
+        raise ShadowGateManifestError("manifest approval signature input is invalid")
+    approval["approval_signature_sha256"] = None
+    unsigned = dict(raw)
+    unsigned["approval"] = approval
+    digest = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"sha256:{digest}"
 
 
 def _validate_sessions(value: object, *, minimum: int) -> tuple[date, ...]:
@@ -696,12 +815,22 @@ def _parse_utc_time(value: object) -> time:
     return parsed
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 __all__ = [
     "ShadowGateManifestError",
     "ShadowGateManifestV0",
     "ShadowGateSlotV0",
     "current_shadow_gate_runtime_contract_v0",
     "load_shadow_gate_manifest_v0",
+    "shadow_gate_approval_signature_v0",
     "validate_shadow_gate_manifest_v0",
     "validate_shadow_gate_runtime_v0",
 ]

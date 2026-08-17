@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import time
@@ -13,6 +12,10 @@ from typing import Any, cast
 import requests  # type: ignore[import-untyped]
 
 from sab.research.deadline import Deadline
+from sab.utils.bounded_process import (
+    AsyncBoundedProcessRunnerV0,
+    run_sync_in_bounded_process_async_v0,
+)
 
 _OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 _MAX_RESPONSE_BYTES = 1_000_000
@@ -26,12 +29,12 @@ class OpenAIResponsesTransportV0:
 
     api_key: str = field(repr=False)
     post_json: PostJsonV0 = field(
-        default=lambda url, headers, payload, timeout: _post_json(
-            url,
-            headers,
-            payload,
-            timeout,
-        ),
+        default_factory=lambda: _post_json,
+        repr=False,
+        compare=False,
+    )
+    bounded_runner: AsyncBoundedProcessRunnerV0 = field(
+        default=run_sync_in_bounded_process_async_v0,
         repr=False,
         compare=False,
     )
@@ -70,9 +73,9 @@ class OpenAIResponsesTransportV0:
             "Content-Type": "application/json",
         }
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.post_json,
+            response = await self.bounded_runner(
+                self.post_json,
+                (
                     _OPENAI_RESPONSES_URL,
                     headers,
                     request,

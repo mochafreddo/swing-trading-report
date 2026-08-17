@@ -8,7 +8,11 @@ from typing import Protocol
 
 from sab.research.deadline import Deadline
 
-from .claims import MAX_CLAIM_TEXT_CHARS, ClaimVerifierRequestV0
+from .claims import (
+    MAX_CLAIM_TEXT_CHARS,
+    ClaimVerifierRequestV0,
+    ClaimVerifierTimeoutError,
+)
 
 MAX_CLAIM_ARTICLE_TEXT_CHARS = 100_000
 _CLAIM_VERIFIER_INSTRUCTIONS = (
@@ -271,11 +275,14 @@ class ResponsesClaimVerifierV0:
         timeout: float,
     ) -> object:
         wire_request = build_claim_responses_request_v0(request, model=self.model)
-        response = await self.transport.create_response(
-            wire_request,
-            deadline=deadline,
-            timeout=timeout,
-        )
+        try:
+            response = await self.transport.create_response(
+                wire_request,
+                deadline=deadline,
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            raise ClaimVerifierTimeoutError("claim transport timed out") from exc
         try:
             return decode_claim_response_v0(response, expected_model=self.model)
         except ClaimResponseOutputError:

@@ -17,16 +17,18 @@ grace_seconds=""
 stale_seconds=""
 gate_manifest=""
 gate_manifest_sha256=""
+input_ledger=""
+expected_action_ledger=""
 dry_run=false
 runner_args=()
 
 usage() {
-  printf '%s\n' "usage: $0 --run-kind ENTRY|HOLDING --expected-at UTC-RFC3339 --run-id ID --journal-dir DIR --grace-seconds N --stale-seconds N [--gate-manifest PATH --gate-manifest-sha256 HASH] [--dry-run] -- RUNNER [ARGS...]" >&2
+  printf '%s\n' "usage: $0 --run-kind ENTRY|HOLDING --expected-at UTC-RFC3339 --run-id ID --journal-dir DIR --grace-seconds N --stale-seconds N [--gate-manifest PATH --gate-manifest-sha256 HASH --input-ledger PATH --expected-action-ledger PATH] [--dry-run] -- RUNNER [ARGS...]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --run-kind|--expected-at|--run-id|--journal-dir|--grace-seconds|--stale-seconds|--gate-manifest|--gate-manifest-sha256)
+    --run-kind|--expected-at|--run-id|--journal-dir|--grace-seconds|--stale-seconds|--gate-manifest|--gate-manifest-sha256|--input-ledger|--expected-action-ledger)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
         usage
         exit 2
@@ -40,6 +42,8 @@ while [[ $# -gt 0 ]]; do
         --stale-seconds) stale_seconds="$2" ;;
         --gate-manifest) gate_manifest="$2" ;;
         --gate-manifest-sha256) gate_manifest_sha256="$2" ;;
+        --input-ledger) input_ledger="$2" ;;
+        --expected-action-ledger) expected_action_ledger="$2" ;;
       esac
       shift 2
       ;;
@@ -70,12 +74,19 @@ if [[ "${dry_run}" == true ]]; then
 fi
 
 gate_manifest_args=()
-if [[ -n "${gate_manifest}" || -n "${gate_manifest_sha256}" ]]; then
+if [[ -n "${gate_manifest}" || -n "${gate_manifest_sha256}" || -n "${input_ledger}" || -n "${expected_action_ledger}" ]]; then
   if [[ -z "${gate_manifest}" || -z "${gate_manifest_sha256}" ]]; then
     usage
     exit 2
   fi
   gate_manifest_args=(--gate-manifest "${gate_manifest}" --gate-manifest-sha256 "${gate_manifest_sha256}")
+  if [[ -n "${input_ledger}" || -n "${expected_action_ledger}" ]]; then
+    if [[ -z "${input_ledger}" || -z "${expected_action_ledger}" ]]; then
+      usage
+      exit 2
+    fi
+    gate_manifest_args+=(--input-ledger "${input_ledger}" --expected-action-ledger "${expected_action_ledger}")
+  fi
 fi
 
 exec uv run python -m sab decision-board-journal-run \

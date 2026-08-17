@@ -223,9 +223,14 @@ deterministic ENTRY/HOLDING facts는 composition 내부에서 보존됩니다.
 `CONFIG_UNAVAILABLE`로 닫힙니다. explicit `decision-board-shadow-live` composition root만
 Supabase content-addressed public input snapshot, Finnhub/Polygon/Benzinga search,
 public-DNS/pinned-address article fetch, OpenAI Responses claim transport와 optional report
-uploader를 조립합니다. `BatchDecisionEvidenceBuilderV0`가 기존 `EvidenceResearcherV0`의
+uploader를 조립합니다. 이 composition은 credentialed adapter를 만들기 전에 exact
+`approved_by=user` approval contract, manifest hash, slot/runtime digest, 실제 private ledger
+hash/count와 sealed input/item membership을 결속합니다. `BatchDecisionEvidenceBuilderV0`가 기존 `EvidenceResearcherV0`의
 invocation-wide deadline, concurrency, URL dedupe와 article cap을 보존한 채 claim validation까지
-같은 deadline을 전달하고, 결과를 exact public item identity mapping으로 runner에 제공합니다.
+같은 deadline을 전달하고, blocking DNS/HTTP/Responses 작업은 deadline에 포함된 killable child
+process에서 실행합니다. child environment는 비우고 provider loader에는 해당 provider
+credential 하나만 전달합니다. 결과는 exact public item identity mapping으로 runner에 제공하고,
+provider별 attempts/failures/timeouts만 public report metadata에 남깁니다.
 snapshot은 hash-derived Storage key로만 읽고 compiler public deterministic fact 외 unknown/private
 field를 거부합니다. rollout은 recorded/live provider-verifier 비교와 manifest 재승인 뒤에만
 시작하며, 롤백은 이 explicit adapter/consumer 연결만 제거합니다.

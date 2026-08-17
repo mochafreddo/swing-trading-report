@@ -199,8 +199,11 @@ committed proposal은 먼저 `just decision-board-shadow-gate-validate`로 구�
 그 파일을 `VALID_APPROVED`로 검증하기 전에는 어떤 slot도 평가
 표본으로 세지 않습니다. 승인 전에는 미래 20-session window, Git revision/artifact digest,
 private input/expected-action ledger digest와 case count, rule별 policy-change allowlist, exact
-metric 분자/분모를 모두 고정합니다. wrapper는 manifest path/hash/slot과 현재 runtime을 먼저
-검증하고, live runner는 같은 hash가 sealed snapshot metadata에 없으면 실행을 닫습니다.
+metric 분자/분모를 모두 고정합니다. exact `approved_by=user`, 첫 slot 이전 timestamp와
+content-bound approval signature도 함께 고정합니다. wrapper와 live runner는 manifest
+path/hash/slot, 현재 runtime, 실제 ledger hash/count, sealed input/item membership을 먼저
+검증합니다. snapshot hash는 manifest hash를 snapshot 안에 넣지 않는 단방향 ledger 결속이며,
+검증된 manifest hash는 실행 report metadata에 기록됩니다.
 
 RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot,
 기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고

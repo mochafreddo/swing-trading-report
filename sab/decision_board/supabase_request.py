@@ -11,6 +11,12 @@ from urllib.parse import quote, urlsplit
 
 import requests  # type: ignore[import-untyped]
 
+from sab.utils.bounded_process import (
+    BoundedProcessTimeoutError,
+    SyncBoundedProcessRunnerV0,
+    run_sync_in_bounded_process_v0,
+)
+
 from .cli import DecisionBoardCliConfigV0
 from .compiler import (
     ApprovalStateV0,
@@ -124,6 +130,11 @@ class SupabaseDecisionInputConfigV0:
 @dataclass(frozen=True, slots=True)
 class SupabaseSnapshotDownloaderV0:
     config: SupabaseDecisionInputConfigV0
+    bounded_runner: SyncBoundedProcessRunnerV0 = field(
+        default=run_sync_in_bounded_process_v0,
+        repr=False,
+        compare=False,
+    )
 
     def download(self, storage_key: str, *, max_bytes: int) -> bytes:
         if (
@@ -133,44 +144,66 @@ class SupabaseSnapshotDownloaderV0:
             or not 1 <= max_bytes <= _MAX_SNAPSHOT_BYTES
         ):
             raise ValueError("Decision Board snapshot download request is invalid")
-        quoted_key = quote(storage_key, safe="/")
-        url = f"{self.config.url}/storage/v1/object/{self.config.bucket}/{quoted_key}"
-        session = requests.Session()
-        session.trust_env = False
-        response: requests.Response | None = None
+        if not callable(self.bounded_runner):
+            raise ValueError("Decision Board snapshot downloader is invalid")
         try:
-            response = session.get(
-                url,
-                headers={
-                    "Accept": "application/json",
-                    "apikey": self.config.service_role_key,
-                    "Authorization": f"Bearer {self.config.service_role_key}",
-                },
-                timeout=(
-                    self.config.timeout_seconds,
-                    self.config.timeout_seconds,
-                ),
-                allow_redirects=False,
-                stream=True,
+            result = self.bounded_runner(
+                _download_snapshot_sync,
+                (self.config, storage_key, max_bytes),
+                timeout=self.config.timeout_seconds,
             )
-            if response.status_code != 200:
-                raise DecisionBoardAdapterUnavailableError(
-                    "Decision Board snapshot is unavailable"
-                )
-            body = bytearray()
-            for chunk in response.iter_content(chunk_size=64 * 1024):
-                body.extend(chunk)
-                if len(body) > max_bytes:
-                    raise ValueError("Decision Board snapshot exceeds the byte limit")
-            return bytes(body)
-        except requests.RequestException as exc:
+            if type(result) is not bytes:
+                raise ValueError("Decision Board snapshot response is invalid")
+            return result
+        except BoundedProcessTimeoutError as exc:
             raise DecisionBoardAdapterUnavailableError(
                 "Decision Board snapshot is unavailable"
             ) from exc
-        finally:
-            if response is not None:
-                response.close()
-            session.close()
+
+
+def _download_snapshot_sync(
+    config: SupabaseDecisionInputConfigV0,
+    storage_key: str,
+    max_bytes: int,
+) -> bytes:
+    quoted_key = quote(storage_key, safe="/")
+    url = f"{config.url}/storage/v1/object/{config.bucket}/{quoted_key}"
+    session = requests.Session()
+    session.trust_env = False
+    response: requests.Response | None = None
+    try:
+        response = session.get(
+            url,
+            headers={
+                "Accept": "application/json",
+                "apikey": config.service_role_key,
+                "Authorization": f"Bearer {config.service_role_key}",
+            },
+            timeout=(
+                config.timeout_seconds,
+                config.timeout_seconds,
+            ),
+            allow_redirects=False,
+            stream=True,
+        )
+        if response.status_code != 200:
+            raise DecisionBoardAdapterUnavailableError(
+                "Decision Board snapshot is unavailable"
+            )
+        body = bytearray()
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            body.extend(chunk)
+            if len(body) > max_bytes:
+                raise ValueError("Decision Board snapshot exceeds the byte limit")
+        return bytes(body)
+    except requests.RequestException as exc:
+        raise DecisionBoardAdapterUnavailableError(
+            "Decision Board snapshot is unavailable"
+        ) from exc
+    finally:
+        if response is not None:
+            response.close()
+        session.close()
 
 
 @dataclass(frozen=True, slots=True)

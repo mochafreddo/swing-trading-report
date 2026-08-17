@@ -93,7 +93,10 @@ HOLDING research queue는 최대 5개지만 compiler는 모든 eligible SWING ho
 - research 입력은 public `InstrumentRefV0`와 allowlisted question뿐입니다.
 - URL은 canonical public-DNS HTTPS, query/userinfo/port/fragment 없음, 최대 2048 bytes입니다.
 - search, retry, DNS, redirect, fetch, claim validation은 같은 monotonic 45초 deadline을
-  사용합니다.
+  사용합니다. blocking DNS/HTTP/Responses/Supabase 작업은 kill 가능한 child process에서
+  실행하므로 socket이나 executor thread가 timeout 뒤 남아 전체 wall-clock budget을 넘지
+  않습니다. child environment는 비우며 news loader에는 해당 provider credential 하나만
+  명시적으로 전달합니다.
 - action-changing evidence는 unchanged issued claim의 exact `SUPPORTED`, article content
   hash, exact supporting span/location, source identity가 모두 맞아야 합니다.
 - public EvidenceRef는 role, source URL, publisher, publication time, freshness, citation,
@@ -114,6 +117,7 @@ HOLDING research queue는 최대 5개지만 compiler는 모든 eligible SWING ho
 | list identity | `run_kind + run_id + idempotency_key + decision_created_at` |
 | local persistence | no-overwrite atomic write, same identity/same bytes idempotent |
 | upload | local-first; optional failure degraded, required failure retained local artifact |
+| provider observations | provider별 attempts/failures/timeouts count만 public metadata에 기록 |
 
 Web detail은 Storage exact bytes를 1 MiB로 제한하고 fatal UTF-8, duplicate JSON key,
 schema, recomputed payload hash, Storage key identity를 검증합니다. API는 public allowlist
@@ -146,12 +150,17 @@ uv run python -m sab decision-board \
 ```
 
 live transport를 명시적으로 선택할 때만 command를 바꿉니다. 승인된 gate의 canonical
-`--gate-manifest-sha256`가 추가로 필요하며,
+manifest와 private input/expected-action ledger 경로 및 `--gate-manifest-sha256`가 모두
+필요합니다. runner는 승인 상태, content-bound approval signature, exact slot, 현재 Git/artifact/
+model digest, ledger hash/count, sealed input membership을 provider 호출 전에 재검증합니다.
 `sealed_input_hash`에 해당하는 public snapshot이 먼저 Supabase Storage의
 `decision-board-inputs/v0/<64hex>.json`에 immutable canonical JSON으로 존재해야 합니다.
 snapshot exact field set은 `schema`, `run_kind`, `metadata`, `items`이며 ENTRY/HOLDING item은
 compiler의 public deterministic enum과 `InstrumentRefV0`만 포함합니다. quantity, entry price,
-P/L, notes, tags, account field나 unknown field는 전체 snapshot을 거부합니다.
+P/L, notes, tags, account field나 unknown field는 전체 snapshot을 거부합니다. snapshot은
+manifest hash를 포함하지 않은 canonical bytes로 content-addressing합니다. 승인 manifest가
+input ledger의 snapshot hash를 결속하고, 검증된 manifest hash는 실행 뒤 report metadata에
+별도로 기록하므로 hash dependency는 단방향입니다.
 
 ```bash
 uv run python -m sab decision-board-shadow-live \
@@ -160,7 +169,10 @@ uv run python -m sab decision-board-shadow-live \
   --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --created-at 2026-08-13T01:00:00Z \
   --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  --gate-manifest config/decision-board-shadow-gate.approved.local.json \
   --gate-manifest-sha256 sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+  --input-ledger /private/path/decision-board-shadow-input-ledger.json \
+  --expected-action-ledger /private/path/decision-board-shadow-expected-action-ledger.json \
   --upload-mode disabled \
   --report-dir reports
 ```
@@ -169,8 +181,8 @@ uv run python -m sab decision-board-shadow-live \
 `BENZINGA_API_TOKEN`, `OPENAI_API_KEY`, 그리고 `DECISION_BOARD_OPENAI_MODEL` 또는
 `OPENAI_AI_BRIEF_MODEL`입니다. 하나라도 없으면 snapshot/provider 호출 전에
 `CONFIG_UNAVAILABLE`로 닫힙니다. 이 명령은 주문·알림 capability를 import하거나 호출하지
-않습니다. sealed snapshot `metadata.gate_manifest_sha256`가 CLI 값과 다르면
-`PREPARATION_INVALID`로 닫히므로 manifest hash도 sealed input identity에 포함됩니다.
+않습니다. manifest/ledger/slot/runtime 및 snapshot hash/item membership 중 하나라도 다르면
+`PREPARATION_INVALID`로 닫힙니다.
 
 현재 vendor news chain은 검증 가능한 공개 기사 후보를 `PRIMARY` coverage로만 제공합니다.
 opposing/action-changing source 의미를 추측하지 않으므로 claim verification이 성공해도
@@ -184,6 +196,10 @@ semantic search adapter가 검증되기 전에는 이 상태를 `CLEAR`나 방�
 | `--idempotency-key` | `sha256:` + 64 lowercase hex | required |
 | `--created-at` | UTC timestamp | required |
 | `--sealed-input-hash` | `sha256:` + 64 lowercase hex | required |
+| `--gate-manifest` | approved local gate JSON | live required |
+| `--gate-manifest-sha256` | approved manifest canonical SHA-256 | live required |
+| `--input-ledger` | private canonical input ledger JSON | live required |
+| `--expected-action-ledger` | private canonical non-empty action-set ledger JSON | live required |
 | `--upload-mode` | `disabled|optional|required` | `disabled` |
 | `--report-dir` | local report directory | `reports` |
 

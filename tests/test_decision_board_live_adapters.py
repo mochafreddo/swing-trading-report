@@ -5,17 +5,22 @@ import copy
 import json
 import ssl
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sab.ai_brief_sources import AiBriefSourceProviderResult
+from sab.ai_brief_sources import (
+    AiBriefSourceProviderError,
+    AiBriefSourceProviderResult,
+)
 from sab.decision_board import live_adapters as openai_live_adapter_module
 from sab.decision_board.batch_evidence import (
     BatchDecisionEvidenceBuilderV0,
     BatchDecisionEvidenceSourceV0,
 )
-from sab.decision_board.claims import ClaimVerifierRequestV0
+from sab.decision_board.claim_responses import ResponsesClaimVerifierV0
+from sab.decision_board.claims import ClaimVerifierRequestV0, ClaimVerifierTimeoutError
 from sab.decision_board.cli import DecisionBoardCliConfigV0
 from sab.decision_board.compiler import (
     ApprovalStateV0,
@@ -30,6 +35,7 @@ from sab.decision_board.instruments import InstrumentRefV0
 from sab.decision_board.live_adapters import OpenAIResponsesTransportV0
 from sab.decision_board.live_production import DecisionBoardLiveAdapterV0
 from sab.decision_board.production_adapter import (
+    DecisionBoardAdapterUnavailableError,
     DecisionItemResearchOutcomeV0,
     SealedDecisionRunRequestLoaderV0,
 )
@@ -41,7 +47,20 @@ from sab.decision_board.runner import (
     UploadModeV0,
     create_decision_run_request_v0,
 )
-from sab.decision_board.supabase_request import SupabaseSealedRequestSourceV0
+from sab.decision_board.shadow_execution import (
+    ShadowGateExecutionBindingV0,
+    shadow_gate_binding_matches_request_v0,
+)
+from sab.decision_board.shadow_gate import (
+    shadow_gate_approval_signature_v0,
+    validate_shadow_gate_manifest_v0,
+)
+from sab.decision_board.shadow_ledger import validate_shadow_evaluation_ledgers_v0
+from sab.decision_board.supabase_request import (
+    SupabaseDecisionInputConfigV0,
+    SupabaseSealedRequestSourceV0,
+    SupabaseSnapshotDownloaderV0,
+)
 from sab.research import live_adapters as live_adapter_module
 from sab.research.contracts import (
     ResearchQuestionV0,
@@ -56,11 +75,77 @@ from sab.research.live_adapters import (
     AsyncPublicDnsResolverV0,
     PinnedArticleFetcherV0,
 )
-from sab.research.orchestrator import EvidenceResearcherV0
+from sab.research.orchestrator import (
+    EvidenceResearcherV0,
+    SearchProviderOperationalError,
+    SearchProviderTimeoutError,
+)
 from sab.research.source_safety import (
     ArticleFetchResponseV0,
     create_article_artifact_v0,
 )
+from sab.utils.bounded_process import BoundedProcessTimeoutError
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+async def _inline_bounded_runner(
+    operation: object,
+    args: tuple[object, ...],
+    *,
+    timeout: float,
+    kwargs: dict[str, object] | None = None,
+) -> object:
+    del timeout
+    assert callable(operation)
+    return operation(*args, **({} if kwargs is None else kwargs))
+
+
+def _shadow_binding_for(request: DecisionRunRequestV0) -> ShadowGateExecutionBindingV0:
+    raw = json.loads(
+        (ROOT / "config" / "decision-board-shadow-gate.proposed.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    gate_version = raw["gate_version"]
+    input_ledger = {
+        "schema_version": "decision-board-shadow-input-ledger.v0",
+        "gate_version": gate_version,
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "run_kind": request.run_kind.value,
+                "sealed_input_hash": request.sealed_input_hash,
+                "item_id": request.items[0].item_id,
+            }
+        ],
+    }
+    expected_ledger = {
+        "schema_version": "decision-board-shadow-expected-action-ledger.v0",
+        "gate_version": gate_version,
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "expected_action_set": ["BUY"],
+            }
+        ],
+    }
+    raw["evaluation_ledger"] = {
+        "input_ledger_sha256": decision_payload_hash(input_ledger),
+        "expected_action_ledger_sha256": decision_payload_hash(expected_ledger),
+        "case_count": 1,
+    }
+    manifest = validate_shadow_gate_manifest_v0(raw)
+    ledger = validate_shadow_evaluation_ledgers_v0(
+        manifest,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+    return ShadowGateExecutionBindingV0(
+        manifest=manifest,
+        ledger=ledger,
+        expected_item_ids=(request.items[0].item_id,),
+    )
 
 
 def _instrument() -> InstrumentRefV0:
@@ -71,6 +156,15 @@ def _instrument() -> InstrumentRefV0:
         company_name="Apple Inc.",
         identity_source="ticker-directory",
         identity_version="fixture-2026-08-16",
+    )
+
+
+def test_default_blocking_operations_are_spawn_picklable() -> None:
+    assert AsyncPublicDnsResolverV0().resolve_sync is live_adapter_module._resolve_sync
+    assert PinnedArticleFetcherV0().fetch_sync is live_adapter_module._fetch_pinned_sync
+    assert (
+        OpenAIResponsesTransportV0(api_key="recorded-key").post_json
+        is openai_live_adapter_module._post_json
     )
 
 
@@ -96,6 +190,7 @@ def test_live_news_search_uses_one_public_request_and_bounded_provider_chain() -
     provider = AiBriefNewsSearchProviderV0(
         source_loader=load_sources,
         now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        bounded_runner=_inline_bounded_runner,
     )
     request = SearchRequestV0(
         instrument=_instrument(),
@@ -115,10 +210,232 @@ def test_live_news_search_uses_one_public_request_and_bounded_provider_chain() -
     assert all(call["source_report_path"] is None for call in calls)
     assert all(call["source_api_url"] is None for call in calls)
     assert len(sources) == 3
+    assert provider.observations.snapshot() == {
+        "provider_benzinga_news_attempts": 1,
+        "provider_benzinga_news_failures": 0,
+        "provider_benzinga_news_timeouts": 0,
+        "provider_finnhub_attempts": 1,
+        "provider_finnhub_failures": 0,
+        "provider_finnhub_timeouts": 0,
+        "provider_polygon_news_attempts": 1,
+        "provider_polygon_news_failures": 0,
+        "provider_polygon_news_timeouts": 0,
+    }
     serialized = json.dumps(payload, sort_keys=True)
     assert "quantity" not in serialized
     assert "entry_price" not in serialized
     assert "account" not in serialized
+
+
+def test_live_news_search_keeps_partial_success_provider_metrics() -> None:
+    def load_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        if provider == "finnhub":
+            raise AiBriefSourceProviderError("recorded provider failure")
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [
+                    {
+                        "title": f"Apple update from {provider}",
+                        "url": f"https://{provider}.example/apple-update",
+                        "published_at": "2026-08-16T10:00:00+00:00",
+                    }
+                ]
+            }
+        )
+
+    provider = AiBriefNewsSearchProviderV0(
+        source_loader=load_sources,
+        now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        bounded_runner=_inline_bounded_runner,
+    )
+    request = SearchRequestV0(
+        instrument=_instrument(),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        freshness_hours=72,
+    )
+
+    payload = asyncio.run(provider.search(request, deadline=Deadline.start(10)))
+    sources = parse_search_response_v0(payload, expected_instrument=_instrument())
+
+    assert len(sources) == 2
+    assert provider.observations.snapshot()["provider_finnhub_attempts"] == 1
+    assert provider.observations.snapshot()["provider_finnhub_failures"] == 1
+    assert provider.observations.snapshot()["provider_finnhub_timeouts"] == 0
+
+
+def test_live_news_search_counts_hard_process_timeout_and_keeps_partial_success() -> (
+    None
+):
+    def load_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        provider = str(kwargs["source_provider"])
+        return AiBriefSourceProviderResult(
+            sources_by_ticker={
+                "AAPL.NAS": [
+                    {
+                        "title": f"Apple update from {provider}",
+                        "url": f"https://{provider}.example/apple-update",
+                        "published_at": "2026-08-16T10:00:00+00:00",
+                    }
+                ]
+            }
+        )
+
+    async def timeout_first_provider(
+        operation: object,
+        args: tuple[object, ...],
+        *,
+        timeout: float,
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
+        del timeout
+        assert kwargs is not None
+        if kwargs["source_provider"] == "finnhub":
+            raise BoundedProcessTimeoutError("recorded hard timeout")
+        assert callable(operation)
+        return operation(*args, **kwargs)
+
+    provider = AiBriefNewsSearchProviderV0(
+        source_loader=load_sources,
+        now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        bounded_runner=timeout_first_provider,
+    )
+    request = SearchRequestV0(
+        instrument=_instrument(),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        freshness_hours=72,
+    )
+
+    payload = asyncio.run(provider.search(request, deadline=Deadline.start(10)))
+    sources = parse_search_response_v0(payload, expected_instrument=_instrument())
+
+    assert len(sources) == 2
+    assert provider.observations.snapshot()["provider_finnhub_attempts"] == 1
+    assert provider.observations.snapshot()["provider_finnhub_failures"] == 1
+    assert provider.observations.snapshot()["provider_finnhub_timeouts"] == 1
+
+
+def test_live_news_search_counts_malformed_provider_result_as_failure() -> None:
+    def load_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        del kwargs
+        return cast(AiBriefSourceProviderResult, object())
+
+    provider = AiBriefNewsSearchProviderV0(
+        source_loader=load_sources,
+        now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        bounded_runner=_inline_bounded_runner,
+    )
+    request = SearchRequestV0(
+        instrument=_instrument(),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        freshness_hours=72,
+    )
+
+    with pytest.raises(SearchProviderOperationalError, match="provider failed"):
+        asyncio.run(provider.search(request, deadline=Deadline.start(10)))
+
+    assert provider.observations.snapshot()["provider_finnhub_attempts"] == 1
+    assert provider.observations.snapshot()["provider_finnhub_failures"] == 1
+
+
+@pytest.mark.parametrize("failure_kind", ["failure", "timeout"])
+def test_live_news_search_aggregates_all_provider_failures_and_timeouts(
+    failure_kind: str,
+) -> None:
+    def load_sources(**kwargs: object) -> AiBriefSourceProviderResult:
+        del kwargs
+        raise AiBriefSourceProviderError("recorded provider failure")
+
+    async def timeout_runner(
+        operation: object,
+        args: tuple[object, ...],
+        *,
+        timeout: float,
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
+        del timeout
+        if failure_kind == "timeout":
+            raise BoundedProcessTimeoutError("recorded hard timeout")
+        assert callable(operation)
+        return operation(*args, **({} if kwargs is None else kwargs))
+
+    provider = AiBriefNewsSearchProviderV0(
+        source_loader=load_sources,
+        now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        bounded_runner=(
+            timeout_runner if failure_kind == "timeout" else _inline_bounded_runner
+        ),
+    )
+    request = SearchRequestV0(
+        instrument=_instrument(),
+        questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+        freshness_hours=72,
+    )
+
+    expected_error = (
+        SearchProviderTimeoutError
+        if failure_kind == "timeout"
+        else SearchProviderOperationalError
+    )
+    expected_message = "timed out" if failure_kind == "timeout" else "providers failed"
+    with pytest.raises(expected_error, match=expected_message):
+        asyncio.run(provider.search(request, deadline=Deadline.start(10)))
+
+    observations = provider.observations.snapshot()
+    for provider_name in ("finnhub", "polygon_news", "benzinga_news"):
+        assert observations[f"provider_{provider_name}_attempts"] == 1
+        assert observations[f"provider_{provider_name}_failures"] == 1
+        assert observations[f"provider_{provider_name}_timeouts"] == (
+            1 if failure_kind == "timeout" else 0
+        )
+
+
+def test_live_news_search_cancellation_records_one_inflight_timeout_then_reraises() -> (
+    None
+):
+    async def exercise() -> None:
+        started = asyncio.Event()
+
+        async def in_flight_runner(
+            operation: object,
+            args: tuple[object, ...],
+            *,
+            timeout: float,
+            kwargs: dict[str, object] | None = None,
+        ) -> object:
+            del operation, args, timeout, kwargs
+            started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("the cancelled provider must not return")
+
+        provider = AiBriefNewsSearchProviderV0(
+            source_loader=lambda **kwargs: cast(AiBriefSourceProviderResult, object()),
+            now=lambda: datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+            bounded_runner=in_flight_runner,
+        )
+        request = SearchRequestV0(
+            instrument=_instrument(),
+            questions=(ResearchQuestionV0.RECENT_MATERIAL_DEVELOPMENTS,),
+            freshness_hours=72,
+        )
+        task = asyncio.create_task(
+            provider.search(request, deadline=Deadline.start(10))
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        observations = provider.observations.snapshot()
+        assert observations["provider_finnhub_attempts"] == 1
+        assert observations["provider_finnhub_failures"] == 1
+        assert observations["provider_finnhub_timeouts"] == 1
+        for provider_name in ("polygon_news", "benzinga_news"):
+            assert observations[f"provider_{provider_name}_attempts"] == 0
+            assert observations[f"provider_{provider_name}_failures"] == 0
+            assert observations[f"provider_{provider_name}_timeouts"] == 0
+
+    asyncio.run(exercise())
 
 
 def test_dns_and_article_fetch_adapters_preserve_resolved_address_boundary() -> None:
@@ -144,8 +461,14 @@ def test_dns_and_article_fetch_adapters_preserve_resolved_address_boundary() -> 
             location=None,
         )
 
-    resolver = AsyncPublicDnsResolverV0(resolve_sync=resolve_sync)
-    fetcher = PinnedArticleFetcherV0(fetch_sync=fetch_sync)
+    resolver = AsyncPublicDnsResolverV0(
+        resolve_sync=resolve_sync,
+        bounded_runner=_inline_bounded_runner,
+    )
+    fetcher = PinnedArticleFetcherV0(
+        fetch_sync=fetch_sync,
+        bounded_runner=_inline_bounded_runner,
+    )
 
     addresses = asyncio.run(resolver.resolve("news.example", 443, timeout=2.0))
     response = asyncio.run(
@@ -286,6 +609,7 @@ def test_openai_responses_transport_keeps_secret_out_of_public_payload() -> None
     transport = OpenAIResponsesTransportV0(
         api_key="openai-private-sentinel",
         post_json=post_json,
+        bounded_runner=_inline_bounded_runner,
     )
     request: dict[str, object] = {
         "model": "gpt-5-mini",
@@ -308,6 +632,115 @@ def test_openai_responses_transport_keeps_secret_out_of_public_payload() -> None
     assert headers["Authorization"] == "Bearer openai-private-sentinel"
     assert "openai-private-sentinel" not in json.dumps(calls[0]["payload"])
     assert calls[0]["timeout"] == 3.0
+
+
+def test_responses_verifier_maps_hard_transport_timeout_to_claim_timeout() -> None:
+    class TimeoutTransport:
+        async def create_response(
+            self,
+            request: dict[str, object],
+            *,
+            deadline: Deadline,
+            timeout: float,
+        ) -> object:
+            del request, deadline, timeout
+            raise BoundedProcessTimeoutError("recorded hard timeout")
+
+    verifier = ResponsesClaimVerifierV0(
+        transport=TimeoutTransport(),
+        model="recorded-model",
+    )
+    request = ClaimVerifierRequestV0(
+        claim_id="claim-aapl",
+        claim_text="Apple announced a public update.",
+        instrument=_instrument(),
+        article_content_hash="sha256:" + "d" * 64,
+        article_text="Apple announced a public update.",
+    )
+
+    with pytest.raises(ClaimVerifierTimeoutError, match="timed out"):
+        asyncio.run(
+            verifier.verify(
+                request,
+                deadline=Deadline.start(10),
+                timeout=3.0,
+            )
+        )
+
+
+def test_supabase_snapshot_downloader_maps_hard_process_timeout_to_unavailable() -> (
+    None
+):
+    def timeout_runner(
+        operation: object,
+        args: tuple[object, ...],
+        *,
+        timeout: float,
+        kwargs: dict[str, object] | None = None,
+    ) -> object:
+        del operation, args, timeout, kwargs
+        raise BoundedProcessTimeoutError("recorded hard timeout")
+
+    downloader = SupabaseSnapshotDownloaderV0(
+        config=SupabaseDecisionInputConfigV0(
+            url="https://supabase.example",
+            service_role_key="recorded-service-key",
+            timeout_seconds=3.0,
+        ),
+        bounded_runner=timeout_runner,
+    )
+
+    with pytest.raises(DecisionBoardAdapterUnavailableError, match="unavailable"):
+        downloader.download(
+            "decision-board-inputs/v0/" + "a" * 64 + ".json",
+            max_bytes=1024,
+        )
+
+
+def test_shadow_binding_rejects_sealed_request_item_set_mismatch() -> None:
+    item = EntryCompilerItemV0.create(
+        item_id="entry-AAPL.NAS",
+        instrument=_instrument(),
+        item_state=ApprovalStateV0.APPROVED,
+        identity_state=ApprovalStateV0.APPROVED,
+        signal_state=EntrySignalStateV0.READY_ENTER,
+        mandate_state=DependencyStateV0.CURRENT,
+        price_state=DependencyStateV0.CURRENT,
+        exposure_state=ExposureStateV0.PASS,
+        research_state=ResearchStateV0.COVERAGE_GAP,
+    )
+    second = EntryCompilerItemV0.create(
+        item_id="entry-MSFT.NAS",
+        instrument=InstrumentRefV0(
+            market="US",
+            canonical_ticker="MSFT.NAS",
+            exchange="NASDAQ",
+            company_name="Microsoft Corp.",
+            identity_source="ticker-directory",
+            identity_version="fixture-2026-08-16",
+        ),
+        item_state=ApprovalStateV0.APPROVED,
+        identity_state=ApprovalStateV0.APPROVED,
+        signal_state=EntrySignalStateV0.READY_ENTER,
+        mandate_state=DependencyStateV0.CURRENT,
+        price_state=DependencyStateV0.CURRENT,
+        exposure_state=ExposureStateV0.PASS,
+        research_state=ResearchStateV0.COVERAGE_GAP,
+    )
+    request = create_decision_run_request_v0(
+        run_kind=RunKindV0.ENTRY,
+        run_id="entry-item-set-mismatch",
+        idempotency_key="sha256:" + "a" * 64,
+        created_at=datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+        sealed_input_hash="sha256:" + "b" * 64,
+        items=(item, second),
+        selection=None,
+        upload_mode=UploadModeV0.DISABLED,
+        metadata={"policy_version": "decision-policy.v0"},
+    )
+    binding = _shadow_binding_for(request)
+
+    assert not shadow_gate_binding_matches_request_v0(binding, request)
 
 
 def test_openai_sync_transport_enforces_one_wall_clock_budget(monkeypatch) -> None:
@@ -428,6 +861,20 @@ def test_batch_evidence_builder_researches_selected_items_once_under_shared_dead
                 "verifier_version": "recorded-claim-v0",
             }
 
+    class ProviderMetrics:
+        def snapshot(self) -> dict[str, int]:
+            return {
+                "provider_finnhub_attempts": 1,
+                "provider_finnhub_failures": 1,
+                "provider_finnhub_timeouts": 0,
+                "provider_polygon_news_attempts": 1,
+                "provider_polygon_news_failures": 0,
+                "provider_polygon_news_timeouts": 0,
+                "provider_benzinga_news_attempts": 1,
+                "provider_benzinga_news_failures": 0,
+                "provider_benzinga_news_timeouts": 0,
+            }
+
     item = EntryCompilerItemV0.create(
         item_id="entry-AAPL.NAS",
         instrument=_instrument(),
@@ -457,6 +904,7 @@ def test_batch_evidence_builder_researches_selected_items_once_under_shared_dead
     builder = BatchDecisionEvidenceBuilderV0(
         researcher=EvidenceResearcherV0(Provider(), ArticleVerifier()),
         claim_verifier=ClaimVerifier(),
+        provider_metrics_source=ProviderMetrics(),
     )
 
     source = asyncio.run(builder.build(request, deadline=Deadline.start(10)))
@@ -499,10 +947,19 @@ def test_batch_evidence_builder_researches_selected_items_once_under_shared_dead
         report_dir=str(tmp_path),
     )
 
-    result = adapter.execute(config)
+    binding = _shadow_binding_for(request)
+    result = adapter.execute(config, binding=binding)
 
     assert type(result) is DecisionRunPublishedV0
     assert result.local_path.is_file()
+    report = json.loads(result.local_path.read_text(encoding="utf-8"))
+    assert report["metadata"]["provider_finnhub_attempts"] == 1
+    assert report["metadata"]["provider_finnhub_failures"] == 1
+    assert report["metadata"]["provider_polygon_news_failures"] == 0
+    assert report["metadata"]["provider_benzinga_news_failures"] == 0
+    assert report["metadata"]["gate_manifest_sha256"] == (
+        binding.manifest.manifest_sha256
+    )
     assert request_source.identities == [config.to_public_dict()]
     assert "report_dir" not in request_source.identities[0]
 
@@ -567,6 +1024,112 @@ def test_supabase_sealed_request_source_reissues_only_hashed_public_snapshot() -
         "selected_count",
         "verifier_version",
     }
+
+
+def test_approved_gate_and_sealed_snapshot_hash_form_a_unidirectional_binding() -> None:
+    snapshot = {
+        "schema": "sab.decision_board.sealed_request.v0",
+        "run_kind": "ENTRY",
+        "metadata": {
+            "policy_version": "decision-policy.v0",
+            "registry_version": "ticker-directory.v0",
+            "researcher_version": "live-research.v0",
+            "verifier_version": "openai-claim.v0",
+        },
+        "items": [
+            {
+                "item_id": "entry-AAPL.NAS",
+                "instrument": _instrument().to_public_dict(),
+                "item_state": "APPROVED",
+                "identity_state": "APPROVED",
+                "signal_state": "READY_ENTER",
+                "mandate_state": "CURRENT",
+                "price_state": "CURRENT",
+                "exposure_state": "PASS",
+            }
+        ],
+    }
+    sealed_hash = decision_payload_hash(snapshot)
+    raw = json.loads(
+        (ROOT / "config" / "decision-board-shadow-gate.proposed.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    raw["approval"].update(
+        {
+            "state": "APPROVED",
+            "approved_by": "user",
+            "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
+        }
+    )
+    raw["runtime_contract"]["code_revision"] = "git:" + "1" * 40
+    for name in raw["runtime_contract"]["artifact_digests"]:
+        raw["runtime_contract"]["artifact_digests"][name] = "sha256:" + "2" * 64
+    input_ledger = {
+        "schema_version": "decision-board-shadow-input-ledger.v0",
+        "gate_version": raw["gate_version"],
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "run_kind": "ENTRY",
+                "sealed_input_hash": sealed_hash,
+                "item_id": "entry-AAPL.NAS",
+            }
+        ],
+    }
+    expected_ledger = {
+        "schema_version": "decision-board-shadow-expected-action-ledger.v0",
+        "gate_version": raw["gate_version"],
+        "cases": [{"case_id": "case-entry-aapl", "expected_action_set": ["BUY"]}],
+    }
+    raw["evaluation_ledger"] = {
+        "input_ledger_sha256": decision_payload_hash(input_ledger),
+        "expected_action_ledger_sha256": decision_payload_hash(expected_ledger),
+        "case_count": 1,
+    }
+    raw["approval"]["approval_signature_sha256"] = shadow_gate_approval_signature_v0(
+        raw
+    )
+    manifest = validate_shadow_gate_manifest_v0(
+        raw,
+        require_approved=True,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+    ledger = validate_shadow_evaluation_ledgers_v0(
+        manifest,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+
+    class Downloader:
+        def download(self, storage_key: str, *, max_bytes: int) -> bytes:
+            del storage_key, max_bytes
+            return canonical_json_bytes(snapshot)
+
+    request = cast(
+        DecisionRunRequestV0,
+        SupabaseSealedRequestSourceV0(downloader=Downloader()).load_sealed_request(
+            {
+                "run_kind": "ENTRY",
+                "run_id": "entry-gate-bundle",
+                "idempotency_key": "sha256:" + "c" * 64,
+                "created_at": "2026-08-17T12:30:00Z",
+                "sealed_input_hash": sealed_hash,
+                "upload_mode": "DISABLED",
+            }
+        ),
+    )
+    binding = ShadowGateExecutionBindingV0(
+        manifest=manifest,
+        ledger=ledger,
+        expected_item_ids=("entry-AAPL.NAS",),
+    )
+
+    assert "gate_manifest_sha256" not in request.metadata
+    assert decision_payload_hash(snapshot) == sealed_hash
+    assert shadow_gate_binding_matches_request_v0(binding, request)
 
 
 def test_supabase_sealed_request_source_rejects_private_snapshot_fields() -> None:
