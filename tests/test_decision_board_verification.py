@@ -202,11 +202,94 @@ def test_recorded_responses_entailments_bind_exact_public_evidence(case: str) ->
     assert deadlines == second_deadlines
 
 
+def test_recorded_responses_accepts_bounded_reasoning_output_before_message() -> None:
+    recording = _recording()
+    cases = recording["cases"]
+    assert type(cases) is dict
+    supported = cases["SUPPORTED"]
+    assert type(supported) is dict
+    response = supported["response"]
+    assert type(response) is dict
+    output = response["output"]
+    assert type(output) is list
+    output.insert(
+        0,
+        {
+            "id": "rs_synthetic_reasoning",
+            "type": "reasoning",
+            "summary": [],
+        },
+    )
+
+    result, _requests, _deadlines = _run("SUPPORTED", recording=recording)
+
+    assert type(result) is ClaimValidationSucceededV0
+
+
+def test_recorded_responses_accepts_message_phase_metadata() -> None:
+    recording = _recording()
+    cases = recording["cases"]
+    assert type(cases) is dict
+    supported = cases["SUPPORTED"]
+    assert type(supported) is dict
+    response = supported["response"]
+    assert type(response) is dict
+    output = response["output"]
+    assert type(output) is list
+    message = output[0]
+    assert type(message) is dict
+    message["phase"] = "final_answer"
+
+    result, _requests, _deadlines = _run("SUPPORTED", recording=recording)
+
+    assert type(result) is ClaimValidationSucceededV0
+
+
+def test_recorded_responses_accepts_current_documented_optional_fields() -> None:
+    recording = _recording()
+    cases = recording["cases"]
+    assert type(cases) is dict
+    supported = cases["SUPPORTED"]
+    assert type(supported) is dict
+    response = supported["response"]
+    assert type(response) is dict
+    response.update(
+        {
+            "billing": None,
+            "completed_at": 1_723_512_601.5,
+            "frequency_penalty": 0.0,
+            "moderation": None,
+            "presence_penalty": 0.0,
+            "prompt_cache_options": {"mode": "implicit", "ttl": "30m"},
+            "tool_usage": None,
+        }
+    )
+
+    result, _requests, _deadlines = _run("SUPPORTED", recording=recording)
+
+    assert type(result) is ClaimValidationSucceededV0
+
+
 def test_recorded_responses_request_is_public_bounded_and_deadline_aware() -> None:
     _result, requests, deadlines = _run("SUPPORTED")
     assert len(requests) == 1
     wire = requests[0]
     assert set(wire) == {"model", "instructions", "input", "text"}
+    text_format = wire["text"]["format"]  # type: ignore[index]
+    location_schema = text_format["schema"]["properties"][  # type: ignore[index]
+        "supporting_location"
+    ]
+    assert location_schema["properties"]["kind"] == {  # type: ignore[index]
+        "type": "string",
+        "const": "TEXT_OFFSETS",
+    }
+    verifier_version_schema = text_format["schema"]["properties"][  # type: ignore[index]
+        "verifier_version"
+    ]
+    assert verifier_version_schema == {
+        "type": "string",
+        "const": "decision-board-claim-verifier-v0",
+    }
     instructions = wire["instructions"]
     assert type(instructions) is str
     assert "untrusted data" in instructions

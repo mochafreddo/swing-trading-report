@@ -519,16 +519,33 @@ class EvidenceResearcherV0:
         self._monotonic = monotonic
 
     async def research(self, research_input: ResearchInputV0) -> ResearchRunResultV0:
-        if type(research_input) is not ResearchInputV0:
-            return ResearchInputFailedV0(issue=_issue("RESEARCH_INPUT_INVALID"))
-        trusted_input = _copy_research_input(research_input)
-        if trusted_input is None:
-            return ResearchInputFailedV0(issue=_issue("RESEARCH_INPUT_INVALID"))
         try:
             deadline = Deadline.start(
                 self._budget_seconds,
                 monotonic=self._monotonic,
             )
+        except DeadlineInvariantError:
+            return _deadline_invariant_failure()
+        except Exception:
+            return _research_invariant_failure()
+        return await self.research_with_deadline(research_input, deadline=deadline)
+
+    async def research_with_deadline(
+        self,
+        research_input: ResearchInputV0,
+        *,
+        deadline: Deadline,
+    ) -> ResearchRunResultV0:
+        """Run with an invocation-owned deadline shared by downstream claim checks."""
+
+        if type(research_input) is not ResearchInputV0:
+            return ResearchInputFailedV0(issue=_issue("RESEARCH_INPUT_INVALID"))
+        if type(deadline) is not Deadline:
+            return _deadline_invariant_failure()
+        trusted_input = _copy_research_input(research_input)
+        if trusted_input is None:
+            return ResearchInputFailedV0(issue=_issue("RESEARCH_INPUT_INVALID"))
+        try:
             try:
                 self._verifier.preflight(
                     _copy_required_policy(trusted_input.source_policy)
