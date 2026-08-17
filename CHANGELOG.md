@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.37.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.36.0...v1.37.0) (2026-08-17)
+
+
+### Features
+
+* **decision-board:** live shadow adapter를 승인 gate에 결속한다 ([1296b7d](https://github.com/mochafreddo/swing-trading-report/commit/1296b7df2d07d0705b5a0b55ba95c666f071b37e))
+* **decision-board:** live shadow 실행을 승인 gate에 결속한다 ([d83a266](https://github.com/mochafreddo/swing-trading-report/commit/d83a266f362f37c2f52fa06a0656abb60e33934f))
+
+
+### Bug Fixes
+
+* **decision-board:** live shadow 승인 경계를 완결한다 ([b30e916](https://github.com/mochafreddo/swing-trading-report/commit/b30e9161a879d3ae4b28cf3d0cfa7f4b811af815))
+* **decision-board:** Responses 검증 계약을 현재 응답에 맞춘다 ([7a2a460](https://github.com/mochafreddo/swing-trading-report/commit/7a2a4601f9b986035c8b5f88f3f99ede5467863c))
+* **reports:** Decision Board 선택 경합을 막는다 ([bf741e8](https://github.com/mochafreddo/swing-trading-report/commit/bf741e87fe5802845027f9507a9e1c6a144dab98))
+* **reports:** Decision Board 선택 경합을 막는다 ([0e8cc9e](https://github.com/mochafreddo/swing-trading-report/commit/0e8cc9e8a224537d5a4f0445fc6fbb70ec99fc4f))
+
 ## [1.36.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.35.0...v1.36.0) (2026-08-16)
 
 
