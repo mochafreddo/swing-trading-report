@@ -401,6 +401,32 @@ def test_production_adapter_runs_recorded_entry_without_live_provider(
     assert loader.configs == [config.to_public_dict()]
 
 
+def test_production_adapter_rejects_unsealed_gate_manifest_identity(
+    tmp_path: Path,
+) -> None:
+    request, _transport, enricher = _recorded_dependencies()
+    config = DecisionBoardCliConfigV0(
+        run_kind=request.run_kind,
+        run_id=request.run_id,
+        idempotency_key=request.idempotency_key,
+        created_at=request.created_at,
+        sealed_input_hash=request.sealed_input_hash,
+        upload_mode=request.upload_mode,
+        report_dir=tmp_path,
+        gate_manifest_sha256="sha256:" + "9" * 64,
+    )
+    adapter = DecisionBoardProductionAdapterV0(
+        request_loader=_RequestLoader(request),
+        preparer=_Prepared(),
+        enricher=enricher,
+    )
+
+    result = execute_decision_board_cli_v0(config, adapter=adapter)
+
+    assert type(result) is DecisionRunFailedV0
+    assert result.issue_code is DecisionRunIssueCodeV0.PREPARATION_INVALID
+
+
 def test_direct_adapter_preserves_protocol_only_legacy_enricher(tmp_path: Path) -> None:
     request, _transport, _enricher = _recorded_dependencies()
     config = DecisionBoardCliConfigV0(

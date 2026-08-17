@@ -31,22 +31,31 @@ failure 전부 0을 첫 실행 전에 고정합니다.
 
 ```bash
 just decision-board-shadow-gate-validate
-just decision-board-shadow-gate-validate --require-approved
+uv run python -m sab decision-board-shadow-gate-validate \
+  --manifest config/decision-board-shadow-gate.approved.local.json \
+  --require-approved
 ```
 
 첫 명령은 schema, XNYS 거래일, slot identity, version, threshold와 canonical manifest hash를
-검증합니다. 현재 candidate는 `VALID_PROPOSAL`입니다. 두 번째 명령은 사용자가 manifest의
-`approval.state`, `approved_by`, `approved_at`을 명시적으로 승인하기 전까지
-`APPROVAL_REQUIRED`로 실패해야 합니다. 승인 뒤 출력된 `manifest_sha256`을 평가 ledger에
-고정하고 기간 중 파일을 덮어쓰지 않습니다.
+검증합니다. committed candidate는 계속 `VALID_PROPOSAL` template로 유지하며 runtime/ledger
+freeze 값이 `null`이므로 승인 가능한 상태가 아닙니다. 승인 시 이 파일을 gitignore된
+`config/decision-board-shadow-gate.approved.local.json`으로 복사한 뒤 새 미래 window와 freeze
+값을 채웁니다. tracked proposal 자체에 HEAD를 기록하면 commit이 HEAD를 다시 바꾸는
+self-reference가 생기므로 proposal을 승인본으로 덮어쓰지 않습니다. 두 번째 명령은 승인본
+경로를 `--manifest`로 넘기며, 승인 서명뿐 아니라 Git revision, compiler/
+researcher/verifier/instrument-registry artifact digest, input ledger digest, case별 non-empty
+expected-action ledger digest가 모두 고정되기 전까지 실패해야 합니다. 승인 뒤 출력된
+`manifest_sha256`을 기간 중 덮어쓰지 않습니다.
 
-Gitignore된 로컬 ledger에는 승인 hash와 아래 계약을 기록합니다. 계좌별 expected action이나
-private snapshot은 저장소 candidate가 아니라 gitignore된 별도 local artifact에 둡니다.
+계좌별 expected action이나 private snapshot은 저장소 candidate가 아니라 gitignore된 별도
+local artifact에 둡니다. 다만 manifest의 `evaluation_ledger`에는 그 artifact의 canonical
+SHA-256과 case count를 고정합니다. 빈 expected-action set은 승인 입력으로 사용할 수 없습니다.
 
 ```json
 {
   "gate_version": "us-swing-shadow-v1-20260817",
-  "start_session": "2026-08-17",
+  "horizon": "SWING",
+  "start_session": "approved future session",
   "minimum_sessions": 20,
   "lanes": ["ENTRY", "HOLDING"],
   "policy_versions": {
@@ -54,6 +63,8 @@ private snapshot은 저장소 candidate가 아니라 gitignore된 별도 local a
     "researcher": "approved-version",
     "verifier": "approved-version"
   },
+  "runtime_contract": "Git revision + four artifact digests + provider chain + claim model",
+  "evaluation_ledger": "input and expected-action ledger hashes + nonzero case count",
   "expected_slots": ["40 exact slots in the committed proposal"],
   "allowed_diff_reasons": [
     "EXPECTED_POLICY_CHANGE",
@@ -62,6 +73,8 @@ private snapshot은 저장소 candidate가 아니라 gitignore된 별도 local a
     "BUG",
     "UNEXPLAINED"
   ],
+  "allowed_diff_reason_by_rule_id": {},
+  "metric_definitions": "exact numerator, denominator, and zero-denominator policy",
   "approved_thresholds": "committed hard-zero and quality thresholds"
 }
 ```
@@ -100,13 +113,16 @@ scripts/launchd/sab-decision-board-shadow-wrapper.sh \
   --journal-dir logs/decision-board-journal \
   --grace-seconds 300 \
   --stale-seconds 1800 \
+  --gate-manifest "$PWD/config/decision-board-shadow-gate.proposed.json" \
+  --gate-manifest-sha256 sha256:<validated-manifest-hash> \
   --dry-run \
-  -- uv run python -m sab decision-board \
+  -- uv run python -m sab decision-board-shadow-live \
     --run-kind ENTRY \
     --run-id entry-shadow-example \
     --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --created-at 2026-08-13T01:00:00Z \
     --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    --gate-manifest-sha256 sha256:<validated-manifest-hash> \
     --upload-mode disabled
 ```
 
@@ -170,6 +186,8 @@ uv run python -m sab decision-board-journal-status \
 | existing-pipeline impact | 기존 result/exit/notification identity 변경 수 | 0 |
 
 Provider failure-rate, research coverage, freshness는 lane과 provider별로 함께 보고합니다.
+각 rate의 분자/분모와 0 denominator 처리(`NOT_APPLICABLE`)는 manifest의
+`metric_definitions`와 정확히 같아야 합니다.
 이 값은 manifest에 사전 threshold가 있을 때만 자동 pass/fail로 사용합니다. threshold가
 없다면 graduation review의 정량 증거이지 사후에 만든 합격선이 아닙니다.
 

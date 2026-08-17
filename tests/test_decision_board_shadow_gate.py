@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,13 +11,16 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from sab.__main__ import _build_parser, _dispatch_command
 from sab.decision_board.shadow_gate import (
     ShadowGateManifestError,
+    current_shadow_gate_runtime_contract_v0,
     load_shadow_gate_manifest_v0,
     validate_shadow_gate_manifest_v0,
+    validate_shadow_gate_runtime_v0,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 SCHEMA = ROOT / "schemas" / "decision-board-shadow-gate.v0.schema.json"
+APPROVED_LOCAL = ROOT / "config" / "decision-board-shadow-gate.approved.local.json"
 
 
 def _raw_manifest() -> dict[str, object]:
@@ -73,6 +77,16 @@ def _mutate_contract(raw: dict[str, object], mutation: str) -> None:
         quality["provider_failure_rate_max"] = "0.05"
     elif mutation == "quality-too-weak":
         quality["provider_failure_rate_max"] = 0.06
+    elif mutation == "runtime-provider-chain":
+        runtime = raw["runtime_contract"]
+        assert type(runtime) is dict
+        runtime["source_provider_chain"] = ["benzinga-news"]
+    elif mutation == "metric-denominator":
+        metrics = raw["metric_definitions"]
+        assert type(metrics) is dict
+        coverage = metrics["research_coverage_rate"]
+        assert type(coverage) is dict
+        coverage["denominator"] = "published_items"
     else:  # pragma: no cover - parameter table is closed below
         raise AssertionError(f"unknown mutation: {mutation}")
 
@@ -100,6 +114,21 @@ def test_proposed_gate_is_schema_valid_and_covers_twenty_xnys_sessions() -> None
     }
     assert validated.manifest_sha256.startswith("sha256:")
     assert len(validated.manifest_sha256) == 71
+    assert validated.horizon == "SWING"
+    assert validated.source_provider_chain == (
+        "finnhub",
+        "polygon-news",
+        "benzinga-news",
+    )
+    assert validated.claim_model == "gpt-5.6-sol"
+    assert (
+        subprocess.run(
+            ["git", "check-ignore", "--quiet", str(APPROVED_LOCAL)],
+            cwd=ROOT,
+            check=False,
+        ).returncode
+        == 0
+    )
 
 
 @pytest.mark.parametrize(
@@ -157,6 +186,8 @@ def test_gate_validator_rejects_schedule_and_threshold_mutation(
         ("slot-lane", "slot lane"),
         ("quality-shape", "quality thresholds"),
         ("quality-too-weak", "too weak"),
+        ("runtime-provider-chain", "runtime contract"),
+        ("metric-denominator", "metric definitions"),
     ],
 )
 def test_gate_validator_rejects_contract_mutations(
@@ -180,6 +211,84 @@ def test_gate_requires_detached_operator_approval_before_shadow_counting() -> No
 
     with pytest.raises(ShadowGateManifestError, match="approval is required"):
         load_shadow_gate_manifest_v0(MANIFEST, require_approved=True)
+
+
+def test_approved_gate_requires_all_freeze_inputs_before_shadow_counting() -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    approval = raw["approval"]
+    assert type(approval) is dict
+    approval.update(
+        {
+            "state": "APPROVED",
+            "approved_by": "user",
+            "approved_at": "2026-08-17T09:00:00Z",
+        }
+    )
+
+    with pytest.raises(ShadowGateManifestError, match="freeze inputs"):
+        validate_shadow_gate_manifest_v0(raw, require_approved=True)
+
+    runtime = raw["runtime_contract"]
+    ledger = raw["evaluation_ledger"]
+    assert type(runtime) is dict
+    assert type(ledger) is dict
+    runtime["code_revision"] = "git:" + "1" * 40
+    artifact_digests = runtime["artifact_digests"]
+    assert type(artifact_digests) is dict
+    for name in artifact_digests:
+        artifact_digests[name] = "sha256:" + "2" * 64
+    ledger.update(
+        {
+            "input_ledger_sha256": "sha256:" + "3" * 64,
+            "expected_action_ledger_sha256": "sha256:" + "4" * 64,
+            "case_count": 1,
+        }
+    )
+
+    validated = validate_shadow_gate_manifest_v0(raw, require_approved=True)
+    assert validated.approval_state == "APPROVED"
+
+
+def test_approved_gate_runtime_contract_matches_executed_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = copy.deepcopy(_raw_manifest())
+    approval = raw["approval"]
+    ledger = raw["evaluation_ledger"]
+    assert type(approval) is dict
+    assert type(ledger) is dict
+    approval.update(
+        {
+            "state": "APPROVED",
+            "approved_by": "user",
+            "approved_at": "2026-08-17T09:00:00Z",
+        }
+    )
+    raw["runtime_contract"] = current_shadow_gate_runtime_contract_v0(
+        ROOT,
+        claim_model="gpt-5.6-sol",
+    )
+    ledger.update(
+        {
+            "input_ledger_sha256": "sha256:" + "3" * 64,
+            "expected_action_ledger_sha256": "sha256:" + "4" * 64,
+            "case_count": 1,
+        }
+    )
+    manifest = validate_shadow_gate_manifest_v0(raw, require_approved=True)
+    monkeypatch.setattr(shadow_gate, "_require_clean_git_worktree", lambda _root: None)
+
+    validate_shadow_gate_runtime_v0(
+        manifest,
+        repo_root=ROOT,
+        claim_model="gpt-5.6-sol",
+    )
+    with pytest.raises(ShadowGateManifestError, match="claim model"):
+        validate_shadow_gate_runtime_v0(
+            manifest,
+            repo_root=ROOT,
+            claim_model="different-model",
+        )
 
 
 def test_gate_cli_returns_sanitized_proposal_and_approval_required(

@@ -14,6 +14,7 @@ from sab.__main__ import _build_parser, _dispatch_command
 from sab.decision_board.run_journal import RunJournalStoreV0
 from sab.decision_board.run_journal_cli import JournalShadowProcessConfigV0
 from sab.decision_board.runner import RunKindV0
+from sab.decision_board.shadow_gate import load_shadow_gate_manifest_v0
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = REPO_ROOT / "scripts/launchd/sab-decision-board-shadow-wrapper.sh"
@@ -26,6 +27,7 @@ PLISTS = (
 CURRENT_SLOT_TEXT = (
     datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 )
+GATE_MANIFEST = REPO_ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 
 
 def _t7_basename(run_kind: str, run_id: str) -> str:
@@ -175,6 +177,52 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
     assert "PRIVATE-SENTINEL" not in result.stdout + result.stderr
     assert not runner_marker.exists()
     assert not journal_dir.exists()
+
+
+def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
+    tmp_path: Path,
+) -> None:
+    manifest = load_shadow_gate_manifest_v0(GATE_MANIFEST)
+    runner = [
+        sys.executable,
+        "-c",
+        "raise SystemExit(0)",
+        "--gate-manifest-sha256",
+        manifest.manifest_sha256,
+    ]
+    config = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "journal"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=runner,
+        dry_run=True,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256=manifest.manifest_sha256,
+    )
+
+    assert run_journal_cli.execute_journal_shadow_process_v0(config) == 0
+    assert config.dry_run_public_dict()["gate_manifest_sha256"] == (
+        manifest.manifest_sha256
+    )
+
+    mismatched = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "mismatch"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=runner,
+        dry_run=True,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256="sha256:" + "f" * 64,
+    )
+    with pytest.raises(ValueError, match="manifest hash"):
+        run_journal_cli.execute_journal_shadow_process_v0(mismatched)
+    assert not mismatched.journal_dir.exists()
 
 
 def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(

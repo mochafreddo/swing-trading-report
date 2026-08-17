@@ -100,9 +100,17 @@ def test_launchd_package_builds_disabled_unscheduled_entry_and_holding_plists(
         )
         assert "--dry-run" in args
         assert args.index("--dry-run") < args.index("--")
+        assert args[args.index("--gate-manifest") + 1] == str(MANIFEST)
+        assert (
+            args[args.index("--gate-manifest-sha256") + 1] == public["manifest_sha256"]
+        )
         runner = args[args.index("--") + 1 :]
         assert runner[:5] == ["uv", "run", "python", "-m", "sab"]
-        assert "decision-board" in runner
+        assert "decision-board-shadow-live" in runner
+        assert (
+            runner[runner.index("--gate-manifest-sha256") + 1]
+            == public["manifest_sha256"]
+        )
         assert runner[runner.index("--upload-mode") + 1] == "disabled"
 
 

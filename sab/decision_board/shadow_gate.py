@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import stat
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -22,6 +24,7 @@ _PRIVATE_VERSION_SEGMENTS = frozenset(
 _ROOT_FIELDS = {
     "schema_version",
     "gate_version",
+    "horizon",
     "approval",
     "market",
     "calendar",
@@ -31,12 +34,79 @@ _ROOT_FIELDS = {
     "sessions",
     "lanes",
     "policy_versions",
+    "runtime_contract",
+    "evaluation_ledger",
     "schedule_policy",
     "expected_slots",
     "allowed_diff_reasons",
+    "allowed_diff_reason_by_rule_id",
+    "metric_definitions",
     "approved_thresholds",
 }
 _POLICY_FIELDS = {"compiler", "researcher", "verifier", "instrument_registry"}
+_EXPECTED_POLICY_VERSIONS = {
+    "compiler": "decision-policy.v0",
+    "researcher": "evidence-researcher.v0",
+    "verifier": "decision-board-claim-verifier-v0",
+    "instrument_registry": "us-instrument-registry.v0",
+}
+_RUNTIME_FIELDS = {
+    "code_revision",
+    "artifact_digests",
+    "source_provider_chain",
+    "claim_model",
+}
+_ARTIFACT_FIELDS = frozenset(_POLICY_FIELDS)
+_LEDGER_FIELDS = {
+    "input_ledger_sha256",
+    "expected_action_ledger_sha256",
+    "case_count",
+}
+_EXPECTED_PROVIDER_CHAIN = ("finnhub", "polygon-news", "benzinga-news")
+_EXPECTED_METRIC_DEFINITIONS = {
+    "provider_failure_rate": {
+        "numerator": "provider_failed_attempts",
+        "denominator": "provider_attempts",
+        "zero_denominator": "NOT_APPLICABLE",
+    },
+    "research_coverage_rate": {
+        "numerator": "eligible_items_with_verified_evidence",
+        "denominator": "eligible_items",
+        "zero_denominator": "NOT_APPLICABLE",
+    },
+    "fresh_source_rate": {
+        "numerator": "fresh_verified_sources",
+        "denominator": "verified_sources",
+        "zero_denominator": "NOT_APPLICABLE",
+    },
+}
+_HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_CODE_REVISION_PATTERN = re.compile(r"git:[0-9a-f]{40}\Z")
+_ARTIFACT_PATHS = {
+    "compiler": (
+        "sab/decision_board/compiler.py",
+        "sab/decision_board/contracts.py",
+        "sab/decision_board/policy.py",
+        "sab/decision_board/runner.py",
+    ),
+    "researcher": (
+        "sab/decision_board/batch_evidence.py",
+        "sab/research/contracts.py",
+        "sab/research/live_adapters.py",
+        "sab/research/orchestrator.py",
+        "sab/research/source_safety.py",
+    ),
+    "verifier": (
+        "sab/decision_board/claim_responses.py",
+        "sab/decision_board/claims.py",
+        "sab/decision_board/live_adapters.py",
+    ),
+    "instrument_registry": (
+        "sab/decision_board/instruments.py",
+        "sab/decision_board/supabase_request.py",
+    ),
+}
+_MAX_ARTIFACT_BYTES = 2_097_152
 _SCHEDULE_FIELDS = {
     "timezone",
     "entry_expected_time",
@@ -93,6 +163,7 @@ class ShadowGateSlotV0:
 @dataclass(frozen=True, slots=True, init=False)
 class ShadowGateManifestV0:
     gate_version: str
+    horizon: Literal["SWING"]
     approval_state: Literal["PENDING", "APPROVED"]
     market: str
     calendar: str
@@ -105,6 +176,13 @@ class ShadowGateManifestV0:
     holding_expected_time: time
     grace_seconds: int
     stale_seconds: int
+    source_provider_chain: tuple[str, ...]
+    claim_model: str
+    code_revision: str | None
+    artifact_digests: tuple[tuple[str, str | None], ...]
+    input_ledger_sha256: str | None
+    expected_action_ledger_sha256: str | None
+    expected_action_case_count: int
     manifest_sha256: str
 
     def __new__(cls) -> ShadowGateManifestV0:
@@ -168,6 +246,8 @@ def validate_shadow_gate_manifest_v0(
         )
     if raw["market"] != "US" or raw["calendar"] != "XNYS":
         raise ShadowGateManifestError("manifest market calendar is invalid")
+    if raw["horizon"] != "SWING":
+        raise ShadowGateManifestError("manifest horizon is invalid")
     minimum_sessions = raw["minimum_sessions"]
     if type(minimum_sessions) is not int or minimum_sessions != 20:
         raise ShadowGateManifestError("manifest minimum sessions must be 20")
@@ -179,11 +259,18 @@ def validate_shadow_gate_manifest_v0(
     if raw["lanes"] != ["ENTRY", "HOLDING"]:
         raise ShadowGateManifestError("manifest lanes are invalid")
     _validate_policy_versions(raw["policy_versions"])
+    runtime = _validate_runtime_contract(raw["runtime_contract"])
+    ledger = _validate_evaluation_ledger(raw["evaluation_ledger"])
     schedule = _validate_schedule(raw["schedule_policy"])
     slots = _validate_slots(raw["expected_slots"], sessions=sessions, schedule=schedule)
     if raw["allowed_diff_reasons"] != list(_DIFF_REASONS):
         raise ShadowGateManifestError("manifest diff reasons are invalid")
+    _validate_rule_diff_allowlist(raw["allowed_diff_reason_by_rule_id"])
+    if raw["metric_definitions"] != _EXPECTED_METRIC_DEFINITIONS:
+        raise ShadowGateManifestError("manifest metric definitions are invalid")
     _validate_thresholds(raw["approved_thresholds"])
+    if approval_state == "APPROVED" and not _freeze_inputs_complete(runtime, ledger):
+        raise ShadowGateManifestError("manifest approval freeze inputs are incomplete")
     digest = hashlib.sha256(
         json.dumps(
             raw,
@@ -195,6 +282,7 @@ def validate_shadow_gate_manifest_v0(
     value = object.__new__(ShadowGateManifestV0)
     for field, field_value in (
         ("gate_version", gate_version),
+        ("horizon", "SWING"),
         ("approval_state", approval_state),
         ("market", "US"),
         ("calendar", "XNYS"),
@@ -207,10 +295,134 @@ def validate_shadow_gate_manifest_v0(
         ("holding_expected_time", schedule[1]),
         ("grace_seconds", schedule[2]),
         ("stale_seconds", schedule[3]),
+        ("source_provider_chain", runtime[2]),
+        ("claim_model", runtime[3]),
+        ("code_revision", runtime[0]),
+        ("artifact_digests", runtime[1]),
+        ("input_ledger_sha256", ledger[0]),
+        ("expected_action_ledger_sha256", ledger[1]),
+        ("expected_action_case_count", ledger[2]),
         ("manifest_sha256", f"sha256:{digest}"),
     ):
         object.__setattr__(value, field, field_value)
     return value
+
+
+def current_shadow_gate_runtime_contract_v0(
+    repo_root: str | Path,
+    *,
+    claim_model: str,
+) -> dict[str, object]:
+    root = _runtime_root(repo_root)
+    model = _require_version(claim_model, "claim model")
+    return {
+        "code_revision": _git_revision(root),
+        "artifact_digests": _artifact_digests(root),
+        "source_provider_chain": list(_EXPECTED_PROVIDER_CHAIN),
+        "claim_model": model,
+    }
+
+
+def validate_shadow_gate_runtime_v0(
+    manifest: ShadowGateManifestV0,
+    *,
+    repo_root: str | Path,
+    claim_model: str,
+) -> None:
+    if type(manifest) is not ShadowGateManifestV0:
+        raise TypeError("shadow gate runtime requires an exact manifest")
+    root = _runtime_root(repo_root)
+    _require_clean_git_worktree(root)
+    model = _require_version(claim_model, "claim model")
+    if manifest.code_revision != _git_revision(root):
+        raise ShadowGateManifestError("manifest runtime code revision does not match")
+    if dict(manifest.artifact_digests) != _artifact_digests(root):
+        raise ShadowGateManifestError("manifest runtime artifacts do not match")
+    if manifest.source_provider_chain != _EXPECTED_PROVIDER_CHAIN:
+        raise ShadowGateManifestError("manifest runtime provider chain does not match")
+    if manifest.claim_model != model:
+        raise ShadowGateManifestError("manifest runtime claim model does not match")
+
+
+def _runtime_root(value: str | Path) -> Path:
+    try:
+        root = Path(value).resolve(strict=True)
+        identity = root.lstat()
+    except OSError, TypeError:
+        raise ShadowGateManifestError("manifest runtime root is invalid") from None
+    if not stat.S_ISDIR(identity.st_mode) or root.is_symlink():
+        raise ShadowGateManifestError("manifest runtime root is invalid")
+    return root
+
+
+def _git_revision(root: Path) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except OSError, subprocess.SubprocessError:
+        raise ShadowGateManifestError(
+            "manifest runtime revision is unavailable"
+        ) from None
+    revision = completed.stdout.strip()
+    value = f"git:{revision}"
+    if completed.returncode != 0 or _CODE_REVISION_PATTERN.fullmatch(value) is None:
+        raise ShadowGateManifestError("manifest runtime revision is unavailable")
+    return value
+
+
+def _require_clean_git_worktree(root: Path) -> None:
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except OSError, subprocess.SubprocessError:
+        raise ShadowGateManifestError(
+            "manifest runtime worktree is unavailable"
+        ) from None
+    if completed.returncode != 0 or completed.stdout:
+        raise ShadowGateManifestError("manifest runtime worktree is not clean")
+
+
+def _artifact_digests(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for name in sorted(_ARTIFACT_PATHS):
+        digest = hashlib.sha256()
+        for relative in _ARTIFACT_PATHS[name]:
+            path = root / relative
+            try:
+                identity = path.lstat()
+                if (
+                    not stat.S_ISREG(identity.st_mode)
+                    or path.is_symlink()
+                    or identity.st_size > _MAX_ARTIFACT_BYTES
+                ):
+                    raise OSError
+                content = path.read_bytes()
+            except OSError:
+                raise ShadowGateManifestError(
+                    "manifest runtime artifact is unavailable"
+                ) from None
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(hashlib.sha256(content).digest())
+        result[name] = f"sha256:{digest.hexdigest()}"
+    return result
 
 
 def _validate_approval(value: object) -> Literal["PENDING", "APPROVED"]:
@@ -253,6 +465,89 @@ def _validate_policy_versions(value: object) -> None:
         raise ShadowGateManifestError("manifest policy versions are invalid")
     for name in sorted(_POLICY_FIELDS):
         _require_version(value[name], f"{name} policy version")
+    if value != _EXPECTED_POLICY_VERSIONS:
+        raise ShadowGateManifestError("manifest policy versions do not match runtime")
+
+
+def _validate_runtime_contract(
+    value: object,
+) -> tuple[
+    str | None,
+    tuple[tuple[str, str | None], ...],
+    tuple[str, ...],
+    str,
+]:
+    if type(value) is not dict or set(value) != _RUNTIME_FIELDS:
+        raise ShadowGateManifestError("manifest runtime contract is invalid")
+    revision = value["code_revision"]
+    if revision is not None and (
+        type(revision) is not str or _CODE_REVISION_PATTERN.fullmatch(revision) is None
+    ):
+        raise ShadowGateManifestError("manifest runtime contract is invalid")
+    raw_digests = value["artifact_digests"]
+    if type(raw_digests) is not dict or set(raw_digests) != _ARTIFACT_FIELDS:
+        raise ShadowGateManifestError("manifest runtime contract is invalid")
+    digests: list[tuple[str, str | None]] = []
+    for name in sorted(_ARTIFACT_FIELDS):
+        digest = raw_digests[name]
+        if digest is not None and (
+            type(digest) is not str or _HASH_PATTERN.fullmatch(digest) is None
+        ):
+            raise ShadowGateManifestError("manifest runtime contract is invalid")
+        digests.append((name, digest))
+    chain = value["source_provider_chain"]
+    if chain != list(_EXPECTED_PROVIDER_CHAIN):
+        raise ShadowGateManifestError("manifest runtime contract is invalid")
+    model = _require_version(value["claim_model"], "claim model")
+    return revision, tuple(digests), _EXPECTED_PROVIDER_CHAIN, model
+
+
+def _validate_evaluation_ledger(
+    value: object,
+) -> tuple[str | None, str | None, int]:
+    if type(value) is not dict or set(value) != _LEDGER_FIELDS:
+        raise ShadowGateManifestError("manifest evaluation ledger is invalid")
+    hashes: list[str | None] = []
+    for name in ("input_ledger_sha256", "expected_action_ledger_sha256"):
+        digest = value[name]
+        if digest is not None and (
+            type(digest) is not str or _HASH_PATTERN.fullmatch(digest) is None
+        ):
+            raise ShadowGateManifestError("manifest evaluation ledger is invalid")
+        hashes.append(digest)
+    case_count = value["case_count"]
+    if type(case_count) is not int or not 0 <= case_count <= 100_000:
+        raise ShadowGateManifestError("manifest evaluation ledger is invalid")
+    return hashes[0], hashes[1], case_count
+
+
+def _validate_rule_diff_allowlist(value: object) -> None:
+    if type(value) is not dict:
+        raise ShadowGateManifestError("manifest rule diff allowlist is invalid")
+    for rule_id, reasons in value.items():
+        _require_version(rule_id, "rule id")
+        if reasons != ["EXPECTED_POLICY_CHANGE"]:
+            raise ShadowGateManifestError("manifest rule diff allowlist is invalid")
+
+
+def _freeze_inputs_complete(
+    runtime: tuple[
+        str | None,
+        tuple[tuple[str, str | None], ...],
+        tuple[str, ...],
+        str,
+    ],
+    ledger: tuple[str | None, str | None, int],
+) -> bool:
+    revision, digests, _chain, _model = runtime
+    input_hash, expected_hash, case_count = ledger
+    return (
+        revision is not None
+        and all(digest is not None for _name, digest in digests)
+        and input_hash is not None
+        and expected_hash is not None
+        and case_count > 0
+    )
 
 
 def _validate_schedule(value: object) -> tuple[time, time, int, int]:
@@ -405,6 +700,8 @@ __all__ = [
     "ShadowGateManifestError",
     "ShadowGateManifestV0",
     "ShadowGateSlotV0",
+    "current_shadow_gate_runtime_contract_v0",
     "load_shadow_gate_manifest_v0",
     "validate_shadow_gate_manifest_v0",
+    "validate_shadow_gate_runtime_v0",
 ]

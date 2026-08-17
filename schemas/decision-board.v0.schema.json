@@ -33,6 +33,10 @@
       "properties": {
         "eligible_count": { "type": "integer", "minimum": 0 },
         "selected_count": { "type": "integer", "minimum": 0 },
+        "gate_manifest_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
         "compiler_version": { "$ref": "#/$defs/PublicVersionV0" },
         "policy_version": { "$ref": "#/$defs/PublicVersionV0" },
         "registry_version": { "$ref": "#/$defs/PublicVersionV0" },

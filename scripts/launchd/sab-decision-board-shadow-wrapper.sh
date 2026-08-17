@@ -15,16 +15,18 @@ run_id=""
 journal_dir=""
 grace_seconds=""
 stale_seconds=""
+gate_manifest=""
+gate_manifest_sha256=""
 dry_run=false
 runner_args=()
 
 usage() {
-  printf '%s\n' "usage: $0 --run-kind ENTRY|HOLDING --expected-at UTC-RFC3339 --run-id ID --journal-dir DIR --grace-seconds N --stale-seconds N [--dry-run] -- RUNNER [ARGS...]" >&2
+  printf '%s\n' "usage: $0 --run-kind ENTRY|HOLDING --expected-at UTC-RFC3339 --run-id ID --journal-dir DIR --grace-seconds N --stale-seconds N [--gate-manifest PATH --gate-manifest-sha256 HASH] [--dry-run] -- RUNNER [ARGS...]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --run-kind|--expected-at|--run-id|--journal-dir|--grace-seconds|--stale-seconds)
+    --run-kind|--expected-at|--run-id|--journal-dir|--grace-seconds|--stale-seconds|--gate-manifest|--gate-manifest-sha256)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
         usage
         exit 2
@@ -36,6 +38,8 @@ while [[ $# -gt 0 ]]; do
         --journal-dir) journal_dir="$2" ;;
         --grace-seconds) grace_seconds="$2" ;;
         --stale-seconds) stale_seconds="$2" ;;
+        --gate-manifest) gate_manifest="$2" ;;
+        --gate-manifest-sha256) gate_manifest_sha256="$2" ;;
       esac
       shift 2
       ;;
@@ -65,6 +69,15 @@ if [[ "${dry_run}" == true ]]; then
   dry_run_args=(--dry-run)
 fi
 
+gate_manifest_args=()
+if [[ -n "${gate_manifest}" || -n "${gate_manifest_sha256}" ]]; then
+  if [[ -z "${gate_manifest}" || -z "${gate_manifest_sha256}" ]]; then
+    usage
+    exit 2
+  fi
+  gate_manifest_args=(--gate-manifest "${gate_manifest}" --gate-manifest-sha256 "${gate_manifest_sha256}")
+fi
+
 exec uv run python -m sab decision-board-journal-run \
   --run-kind "${run_kind}" \
   --expected-at "${expected_at}" \
@@ -72,5 +85,6 @@ exec uv run python -m sab decision-board-journal-run \
   --journal-dir "${journal_dir}" \
   --grace-seconds "${grace_seconds}" \
   --stale-seconds "${stale_seconds}" \
+  "${gate_manifest_args[@]}" \
   "${dry_run_args[@]}" \
   -- "${runner_args[@]}"

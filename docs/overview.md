@@ -13,7 +13,7 @@
 
 ### 실험
 
-- US SWING Decision Board V0는 production adapter/schedule 미연결 advice-only shadow입니다.
+- US SWING Decision Board V0는 explicit live-shadow adapter가 구현됐지만 schedule은 비활성인 advice-only shadow입니다.
   [reference](decision-board.md)와 [20-session 평가 절차](decision-board-shadow-evaluation.md)를
   통과하기 전 production owner가 아닙니다.
 

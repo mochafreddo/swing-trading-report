@@ -65,5 +65,6 @@ mise.local.lock
 /output/
 /watchlist.txt
 /config.local.yaml
+/config/decision-board-shadow-gate.approved.local.json
 /holdings.yaml
 .gstack/

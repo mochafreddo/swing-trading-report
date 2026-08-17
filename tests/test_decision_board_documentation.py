@@ -18,14 +18,13 @@ def test_decision_board_reference_is_linked_and_states_current_boundary() -> Non
     assert "CONFIG_UNAVAILABLE" in reference
     assert "exit 2" in reference
     assert "DecisionBoardProductionComponentsV0" in reference
-    assert (
-        "production dependency는 의도적으로 선택하거나 연결하지 않았습니다" in reference
-    )
-    assert "환경변수나" in reference and "credential을 읽지 않습니다" in reference
+    assert "sab decision-board-shadow-live" in reference
+    assert "content-addressed Supabase Storage input snapshot" in reference
+    assert "launchd template과 shadow gate manifest는 여전히 비활성" in reference
+    assert "기존 `sab decision-board`" in reference
+    assert "계속 환경변수나" in reference and "credential을 읽지 않으며" in reference
     assert "raw loader, preparer, enricher를" in reference
-    assert (
-        "batch" in reference and "live search/article/Responses transport" in reference
-    )
+    assert "batch owner" in reference and "OpenAI Responses claim verifier" in reference
     assert "사용자가 모든 매수·매도를 직접 실행" in reference
     assert "주문 생성·수정·취소" in reference
     assert "<64-lowercase-hex>" not in reference
@@ -68,15 +67,17 @@ def test_decision_board_docs_do_not_claim_default_production_activation() -> Non
         text = _read(path)
         assert "Decision Board" in text, path
 
-    assert "production research adapter와 schedule은 아직 연결되지 않았습니다" in _read(
-        "README.md"
-    )
-    assert "실제 launchd schedule은 미연결" in _read("docs/deployment.md")
+    readme = _read("README.md")
+    assert "explicit live-shadow adapter" in readme
+    assert "schedule은 비활성" in readme
+    assert "실제 launchd schedule은 비활성" in _read("docs/deployment.md")
+    assert "explicit live-shadow command" in _read("docs/deployment.md")
     operations = _read("docs/operations.md")
-    assert "production composition은 구현되어 있지만" in operations
-    assert (
-        "provider/credential dependency와 schedule이 연결되지 않았으므로" in operations
-    )
+    assert "explicit live-shadow composition은 구현되어 있지만" in operations
+    assert "schedule과 승인 manifest는 비활성" in operations
+    assert "decision-board-shadow-live" in _read("docs/api.md")
+    assert "explicit live-shadow adapter가 구현됐지만" in _read("docs/overview.md")
+    assert "recorded/live 비교와 별도 manifest 승인 뒤" in _read("docs/runbook.md")
 
 
 def test_documented_journal_configuration_matches_compose_defaults() -> None:

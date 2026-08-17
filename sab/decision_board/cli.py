@@ -34,6 +34,7 @@ class DecisionBoardCliConfigV0:
     sealed_input_hash: str
     upload_mode: UploadModeV0
     report_dir: Path
+    gate_manifest_sha256: str | None = None
 
     @classmethod
     def from_strings(
@@ -46,6 +47,7 @@ class DecisionBoardCliConfigV0:
         sealed_input_hash: str,
         upload_mode: str,
         report_dir: str,
+        gate_manifest_sha256: str | None = None,
     ) -> DecisionBoardCliConfigV0:
         kind = RunKindV0(run_kind.upper())
         mode = UploadModeV0(upload_mode.upper())
@@ -62,6 +64,11 @@ class DecisionBoardCliConfigV0:
             raise ValueError("idempotency_key is invalid")
         if _HASH_PATTERN.fullmatch(sealed_input_hash) is None:
             raise ValueError("sealed_input_hash is invalid")
+        if gate_manifest_sha256 is not None and (
+            type(gate_manifest_sha256) is not str
+            or _HASH_PATTERN.fullmatch(gate_manifest_sha256) is None
+        ):
+            raise ValueError("gate_manifest_sha256 is invalid")
         return cls(
             run_kind=kind,
             run_id=run_id,
@@ -70,6 +77,7 @@ class DecisionBoardCliConfigV0:
             sealed_input_hash=sealed_input_hash,
             upload_mode=mode,
             report_dir=Path(report_dir),
+            gate_manifest_sha256=gate_manifest_sha256,
         )
 
     def to_public_dict(self) -> dict[str, str]:
@@ -124,4 +132,29 @@ def execute_decision_board_cli_v0(
     return adapter.execute(config)
 
 
-__all__ = ["DecisionBoardCliConfigV0", "execute_decision_board_cli_v0"]
+def execute_decision_board_shadow_live_cli_v0(
+    config: DecisionBoardCliConfigV0,
+) -> DecisionRunResultV0:
+    """Compose the explicit live boundary or retain a fail-closed result."""
+
+    from .live_runtime import build_decision_board_live_adapter_from_env_v0
+    from .production_adapter import DecisionBoardAdapterUnavailableError
+
+    try:
+        adapter = build_decision_board_live_adapter_from_env_v0()
+    except DecisionBoardAdapterUnavailableError:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        )
+    except Exception:
+        return create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
+        )
+    return adapter.execute(config)
+
+
+__all__ = [
+    "DecisionBoardCliConfigV0",
+    "execute_decision_board_cli_v0",
+    "execute_decision_board_shadow_live_cli_v0",
+]

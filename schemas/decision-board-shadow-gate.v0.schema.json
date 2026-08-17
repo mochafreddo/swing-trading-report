@@ -7,6 +7,7 @@
   "required": [
     "schema_version",
     "gate_version",
+    "horizon",
     "approval",
     "market",
     "calendar",
@@ -16,9 +17,13 @@
     "sessions",
     "lanes",
     "policy_versions",
+    "runtime_contract",
+    "evaluation_ledger",
     "schedule_policy",
     "expected_slots",
     "allowed_diff_reasons",
+    "allowed_diff_reason_by_rule_id",
+    "metric_definitions",
     "approved_thresholds"
   ],
   "properties": {
@@ -28,6 +33,9 @@
     "gate_version": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "horizon": {
+      "const": "SWING"
     },
     "approval": {
       "type": "object",
@@ -116,6 +124,62 @@
         }
       }
     },
+    "runtime_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code_revision",
+        "artifact_digests",
+        "source_provider_chain",
+        "claim_model"
+      ],
+      "properties": {
+        "code_revision": {
+          "type": ["string", "null"],
+          "pattern": "^git:[0-9a-f]{40}$"
+        },
+        "artifact_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "compiler",
+            "researcher",
+            "verifier",
+            "instrument_registry"
+          ],
+          "properties": {
+            "compiler": { "$ref": "#/$defs/nullableSha256" },
+            "researcher": { "$ref": "#/$defs/nullableSha256" },
+            "verifier": { "$ref": "#/$defs/nullableSha256" },
+            "instrument_registry": { "$ref": "#/$defs/nullableSha256" }
+          }
+        },
+        "source_provider_chain": {
+          "const": ["finnhub", "polygon-news", "benzinga-news"]
+        },
+        "claim_model": {
+          "$ref": "#/$defs/version"
+        }
+      }
+    },
+    "evaluation_ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_ledger_sha256",
+        "expected_action_ledger_sha256",
+        "case_count"
+      ],
+      "properties": {
+        "input_ledger_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "expected_action_ledger_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "case_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        }
+      }
+    },
     "schedule_policy": {
       "type": "object",
       "additionalProperties": false,
@@ -193,6 +257,34 @@
         "BUG",
         "UNEXPLAINED"
       ]
+    },
+    "allowed_diff_reason_by_rule_id": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+      },
+      "additionalProperties": {
+        "const": ["EXPECTED_POLICY_CHANGE"]
+      }
+    },
+    "metric_definitions": {
+      "const": {
+        "provider_failure_rate": {
+          "numerator": "provider_failed_attempts",
+          "denominator": "provider_attempts",
+          "zero_denominator": "NOT_APPLICABLE"
+        },
+        "research_coverage_rate": {
+          "numerator": "eligible_items_with_verified_evidence",
+          "denominator": "eligible_items",
+          "zero_denominator": "NOT_APPLICABLE"
+        },
+        "fresh_source_rate": {
+          "numerator": "fresh_verified_sources",
+          "denominator": "verified_sources",
+          "zero_denominator": "NOT_APPLICABLE"
+        }
+      }
     },
     "approved_thresholds": {
       "type": "object",
@@ -275,6 +367,10 @@
     "version": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "nullableSha256": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   }
 }

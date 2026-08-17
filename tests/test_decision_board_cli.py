@@ -90,6 +90,53 @@ def test_decision_board_cli_defaults_to_local_shadow_and_unconfigured_fails_clos
     assert list(tmp_path.iterdir()) == []
 
 
+def test_decision_board_shadow_live_stays_fail_closed_without_runtime_config(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    for name in (
+        "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "FINNHUB_API_KEY",
+        "POLYGON_API_KEY",
+        "BENZINGA_API_TOKEN",
+        "OPENAI_API_KEY",
+        "DECISION_BOARD_OPENAI_MODEL",
+        "OPENAI_AI_BRIEF_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board-shadow-live",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "entry-live-unconfigured",
+            "--idempotency-key",
+            "sha256:" + "5" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "6" * 64,
+            "--gate-manifest-sha256",
+            "sha256:" + "7" * 64,
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert _dispatch_command(ns, parser) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_decision_board_cli_rejects_invalid_trigger_identity_before_executor(
     monkeypatch, capsys, tmp_path
 ) -> None:

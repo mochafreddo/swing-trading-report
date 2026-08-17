@@ -49,15 +49,17 @@ gh run list --limit 10
 ```
 
 Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다.
-production composition은 구현되어 recorded fixture로 검증됐지만 approved request loader와
-production preparation/research adapter dependency는 의도적으로 미설정되어 있습니다. 따라서
-아래 형식의 실행은 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다.
-이 경로는 기존 workflow gating이나 외부 알림에 연결되지 않습니다.
+기본 `decision-board` composition은 환경변수나 credential을 읽지 않으므로 아래 형식의 실행은
+가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 별도
+`decision-board-shadow-live` command에만 content-addressed public snapshot과 production
+research/claim-verifier adapter가 연결돼 있으며, 이 경로도 기존 workflow gating, schedule,
+외부 알림에 연결되지 않습니다.
 
-schema/compiler/runner/UI 테스트가 green이어도 production adapter가 연결됐다는 의미는
-아닙니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다.
-실제 측정은 승인된 adapter 연결 뒤 [shadow evaluation 절차](decision-board-shadow-evaluation.md)의
-frozen manifest와 최소 20 US 거래 session을 사용합니다.
+schema/compiler/runner/UI 테스트나 explicit adapter의 recorded fixture가 green이어도 live 비교나
+schedule 승인을 뜻하지 않습니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질
+표본으로 세지 않습니다. 실제 측정은 recorded/live 비교와 별도 manifest 승인 뒤
+[shadow evaluation 절차](decision-board-shadow-evaluation.md)의 frozen manifest와 최소 20 US
+거래 session을 사용합니다.
 
 ```bash
 uv run python -m sab decision-board \
@@ -192,8 +194,13 @@ CLI consumer를 제거하되 이미 기록된 local journal과 Decision Board re
 ### Shadow 졸업 판정
 
 committed proposal은 먼저 `just decision-board-shadow-gate-validate`로 구조와 20-session
-일정을 확인합니다. `--require-approved`가 `VALID_APPROVED`가 되기 전에는 어떤 slot도 평가
-표본으로 세지 않으며, 출력된 `manifest_sha256`을 local ledger에 결속합니다.
+일정을 확인합니다. 승인본은 tracked proposal을 수정하지 않고 gitignore된
+`config/decision-board-shadow-gate.approved.local.json`에 만들며, `--require-approved`가
+그 파일을 `VALID_APPROVED`로 검증하기 전에는 어떤 slot도 평가
+표본으로 세지 않습니다. 승인 전에는 미래 20-session window, Git revision/artifact digest,
+private input/expected-action ledger digest와 case count, rule별 policy-change allowlist, exact
+metric 분자/분모를 모두 고정합니다. wrapper는 manifest path/hash/slot과 현재 runtime을 먼저
+검증하고, live runner는 같은 hash가 sealed snapshot metadata에 없으면 실행을 닫습니다.
 
 RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot,
 기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고

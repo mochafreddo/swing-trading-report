@@ -101,6 +101,7 @@
 | `SAB_SESSION_DATE`, `SAB_RUNNER_ROLE`, `SAB_SCHEDULED_TICK`, `SAB_ATTEMPT_ID`, `SAB_RUN_URL` | generic scheduled wrapper / scheduler status context | 선택. session/date와 observability metadata override. 정상 launchd 실행은 기본값 사용 |
 | `OPENAI_API_KEY` | `sab ai-brief --model-provider openai` | scheduled AI Brief에서 필요 |
 | `OPENAI_AI_BRIEF_MODEL` | OpenAI primary model | CLI `--model-name`으로도 지정 가능 |
+| `DECISION_BOARD_OPENAI_MODEL` | `sab decision-board-shadow-live` claim verifier | 선택. 없으면 `OPENAI_AI_BRIEF_MODEL` 사용. 명령은 Supabase server key, Finnhub, Polygon, Benzinga 설정도 모두 있어야 fail-open하지 않고 시작 |
 | `OPENAI_AI_BRIEF_FALLBACK_MODEL` | OpenAI fallback model after retryable primary timeout | primary와 달라야 함 |
 | `AI_BRIEF_MODEL_TIMEOUT_SECONDS` | OpenAI primary model timeout | 선택. 양의 finite 숫자만 허용. scheduled 권장값 60 |
 | `AI_BRIEF_MODEL_FALLBACK_TIMEOUT_SECONDS` | OpenAI fallback model timeout | 선택. 양의 finite 숫자만 허용. scheduled 권장값 30 |

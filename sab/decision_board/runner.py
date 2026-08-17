@@ -61,6 +61,7 @@ _PRIVATE_VERSION_SEGMENTS = frozenset(
 _METADATA_FIELDS = frozenset(
     {
         "eligible_count",
+        "gate_manifest_sha256",
         "policy_version",
         "registry_version",
         "researcher_version",
@@ -786,6 +787,9 @@ def _required_metadata(
             expected = eligible_count if key == "eligible_count" else selected_count
             if field != expected:
                 raise ValueError("metadata count does not match the issued request")
+        elif key == "gate_manifest_sha256":
+            if type(field) is not str or _HASH_PATTERN.fullmatch(field) is None:
+                raise ValueError("metadata gate manifest hash is invalid")
         elif (
             type(field) is not str
             or _VERSION_PATTERN.fullmatch(field) is None

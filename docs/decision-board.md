@@ -1,6 +1,6 @@
 # Decision Board V0 Reference
 
-상태: Accepted (production composition 구현, runtime dependency 미연결 shadow)
+상태: Accepted (explicit live-shadow adapter 구현, schedule 비활성)
 
 Decision Board V0는 기존 로직이 만든 US SWING 후보와 확인된 SWING 보유 종목을
 공개 근거로 보강해 `BUY|AVOID|REVIEW` 또는 `HOLD|SELL|REVIEW` 조언을 만드는
@@ -20,12 +20,13 @@ report 경로를 제외한 공개 trigger identity만 전달하고, evidence sou
 request/evidence source capability를 조립 시점에 검증하며 raw loader, preparer, enricher를
 허용하지 않습니다. 기존 직접 `adapter=` 주입은 낮은 수준의 호환 seam으로만 유지됩니다.
 
-다만 Supabase snapshot source, search provider, article fetcher, Responses transport와 uploader의
-production dependency는 의도적으로 선택하거나 연결하지 않았습니다. 조립 함수도 환경변수나
-credential을 읽지 않습니다. 따라서 저장소 기본 상태의
-`sab decision-board`는 조언을 추측하지 않고
-`CONFIG_UNAVAILABLE`, exit 2로 종료합니다. 실제 shadow 측정 기간은 approved adapter가
-별도 검증·연결된 뒤에만 시작할 수 있습니다.
+기존 `sab decision-board`와 dependency-injected composition seam은 계속 환경변수나
+credential을 읽지 않으며 기본 상태에서 `CONFIG_UNAVAILABLE`, exit 2로 닫힙니다. 별도
+`sab decision-board-shadow-live`만 명시적 live composition root를 사용합니다. 이 경로는
+content-addressed Supabase Storage input snapshot, Finnhub/Polygon/Benzinga source chain,
+public-DNS + pinned-address article fetch, OpenAI Responses claim verifier와 optional Supabase
+report uploader를 조립합니다. launchd template과 shadow gate manifest는 여전히 비활성/
+`PENDING`이며, recorded/live 비교와 별도 일정 승인이 끝나기 전에는 측정 기간으로 세지 않습니다.
 
 ## 범위
 
@@ -127,10 +128,11 @@ component bundle은 애플리케이션 코드가 승인된 외부 경계를 명�
 `tests/test_decision_board_production_adapter.py`가 소유하며 live provider나 credential을
 사용하지 않습니다.
 
-현재 evidence source seam은 recorded/offline item 결과만 위한 동기 경계입니다. 최대 5종목의
-공유 45초 deadline, provider concurrency, URL dedupe와 전체 article cap을 소유하는 batch
-research adapter가 추가되기 전에는 live search/article/Responses transport를 이 seam에
-연결하지 않습니다.
+live composition은 기존 `EvidenceResearcherV0`를 batch owner로 재사용합니다. 선택된 최대
+5종목을 한 번에 전달하고 provider concurrency, URL dedupe, 전체 article cap을 보존하며,
+같은 invocation-owned deadline을 claim validation까지 전달한 뒤 mapping-backed synchronous
+item enricher로 기존 runner에 되돌립니다. shared verifier preflight 실패는 방향성 결과를
+만들지 않는 `BLOCKED`로 닫힙니다.
 
 ```bash
 uv run python -m sab decision-board \
@@ -142,6 +144,38 @@ uv run python -m sab decision-board \
   --upload-mode disabled \
   --report-dir reports
 ```
+
+live transport를 명시적으로 선택할 때만 command를 바꿉니다. 승인된 gate의 canonical
+`--gate-manifest-sha256`가 추가로 필요하며,
+`sealed_input_hash`에 해당하는 public snapshot이 먼저 Supabase Storage의
+`decision-board-inputs/v0/<64hex>.json`에 immutable canonical JSON으로 존재해야 합니다.
+snapshot exact field set은 `schema`, `run_kind`, `metadata`, `items`이며 ENTRY/HOLDING item은
+compiler의 public deterministic enum과 `InstrumentRefV0`만 포함합니다. quantity, entry price,
+P/L, notes, tags, account field나 unknown field는 전체 snapshot을 거부합니다.
+
+```bash
+uv run python -m sab decision-board-shadow-live \
+  --run-kind ENTRY \
+  --run-id entry-shadow-example \
+  --idempotency-key sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --created-at 2026-08-13T01:00:00Z \
+  --sealed-input-hash sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  --gate-manifest-sha256 sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+  --upload-mode disabled \
+  --report-dir reports
+```
+
+필수 runtime 설정은 server-side Supabase key, `FINNHUB_API_KEY`, `POLYGON_API_KEY`,
+`BENZINGA_API_TOKEN`, `OPENAI_API_KEY`, 그리고 `DECISION_BOARD_OPENAI_MODEL` 또는
+`OPENAI_AI_BRIEF_MODEL`입니다. 하나라도 없으면 snapshot/provider 호출 전에
+`CONFIG_UNAVAILABLE`로 닫힙니다. 이 명령은 주문·알림 capability를 import하거나 호출하지
+않습니다. sealed snapshot `metadata.gate_manifest_sha256`가 CLI 값과 다르면
+`PREPARATION_INVALID`로 닫히므로 manifest hash도 sealed input identity에 포함됩니다.
+
+현재 vendor news chain은 검증 가능한 공개 기사 후보를 `PRIMARY` coverage로만 제공합니다.
+opposing/action-changing source 의미를 추측하지 않으므로 claim verification이 성공해도
+`COVERAGE_GAP`으로 남아 해당 종목은 `REVIEW`입니다. recorded/live comparison에서 별도
+semantic search adapter가 검증되기 전에는 이 상태를 `CLEAR`나 방향성 근거로 승격하지 않습니다.
 
 | Flag | 값/제약 | 기본값 |
 | --- | --- | --- |
