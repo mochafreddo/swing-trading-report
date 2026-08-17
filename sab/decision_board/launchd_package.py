@@ -64,14 +64,23 @@ def build_decision_board_launchd_dry_run_package_v0(
     output_dir: str | Path,
     report_dir: str | Path | None = None,
     require_approved: bool = False,
+    input_ledger_path: str | Path | None = None,
+    expected_action_ledger_path: str | Path | None = None,
 ) -> ShadowLaunchdPackageResultV0:
+    if (input_ledger_path is None) != (expected_action_ledger_path is None):
+        raise ShadowLaunchdPackageError("package gate ledger paths are incomplete")
     try:
+        manifest_file = Path(manifest_path).resolve(strict=True)
         manifest = load_shadow_gate_manifest_v0(
-            manifest_path,
+            manifest_file,
             require_approved=require_approved,
+            input_ledger_path=input_ledger_path,
+            expected_action_ledger_path=expected_action_ledger_path,
         )
     except ShadowGateManifestError as exc:
         raise ShadowLaunchdPackageError(str(exc)) from None
+    except OSError, TypeError:
+        raise ShadowLaunchdPackageError("package manifest is invalid") from None
     try:
         selected_session = date.fromisoformat(session)
     except TypeError, ValueError:
@@ -129,6 +138,16 @@ def build_decision_board_launchd_dry_run_package_v0(
                 run_id=slot.run_id,
                 grace_seconds=manifest.grace_seconds,
                 stale_seconds=manifest.stale_seconds,
+                manifest_path=manifest_file,
+                manifest_sha256=manifest.manifest_sha256,
+                input_ledger_path=(
+                    None if input_ledger_path is None else Path(input_ledger_path)
+                ),
+                expected_action_ledger_path=(
+                    None
+                    if expected_action_ledger_path is None
+                    else Path(expected_action_ledger_path)
+                ),
             )
             encoded = plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=True)
             target = destination / basename
@@ -168,6 +187,10 @@ def _plist_payload(
     run_id: str,
     grace_seconds: int,
     stale_seconds: int,
+    manifest_path: Path,
+    manifest_sha256: str,
+    input_ledger_path: Path | None,
+    expected_action_ledger_path: Path | None,
 ) -> dict[str, object]:
     runner = [
         "uv",
@@ -175,7 +198,7 @@ def _plist_payload(
         "python",
         "-m",
         "sab",
-        "decision-board",
+        "decision-board-shadow-live",
         "--run-kind",
         run_kind.value,
         "--run-id",
@@ -186,11 +209,28 @@ def _plist_payload(
         expected_at,
         "--sealed-input-hash",
         "sha256:" + "1" * 64,
+        "--gate-manifest-sha256",
+        manifest_sha256,
         "--upload-mode",
         "disabled",
         "--report-dir",
         str(report_dir),
     ]
+    gate_ledger_args: list[str] = []
+    if input_ledger_path is not None and expected_action_ledger_path is not None:
+        gate_ledger_args = [
+            "--input-ledger",
+            str(input_ledger_path),
+            "--expected-action-ledger",
+            str(expected_action_ledger_path),
+        ]
+        runner.extend(
+            [
+                "--gate-manifest",
+                str(manifest_path),
+                *gate_ledger_args,
+            ]
+        )
     return {
         "Label": (
             "com.mochafreddo.sab.decision-board."
@@ -212,6 +252,11 @@ def _plist_payload(
             str(grace_seconds),
             "--stale-seconds",
             str(stale_seconds),
+            "--gate-manifest",
+            str(manifest_path),
+            "--gate-manifest-sha256",
+            manifest_sha256,
+            *gate_ledger_args,
             "--dry-run",
             "--",
             *runner,

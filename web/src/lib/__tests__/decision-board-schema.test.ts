@@ -349,6 +349,32 @@ describe("Decision Board V0 schema", () => {
     );
   });
 
+  it("accepts bounded gate and provider observation metadata", () => {
+    const fixture = loadPublishedFixture();
+    fixture.metadata = {
+      gate_manifest_sha256: `sha256:${"a".repeat(64)}`,
+      provider_finnhub_attempts: 1,
+      provider_finnhub_failures: 1,
+      provider_finnhub_timeouts: 0,
+      provider_polygon_news_attempts: 1,
+      provider_polygon_news_failures: 0,
+      provider_polygon_news_timeouts: 0,
+      provider_benzinga_news_attempts: 1,
+      provider_benzinga_news_failures: 0,
+      provider_benzinga_news_timeouts: 0,
+    };
+
+    expect(decisionBoardEnvelopeV0Schema.safeParse(fixture).success).toBe(true);
+
+    const invalid = structuredClone(fixture) as {
+      metadata: { provider_finnhub_failures: number };
+    };
+    invalid.metadata.provider_finnhub_failures = -1;
+    expect(decisionBoardEnvelopeV0Schema.safeParse(invalid).success).toBe(
+      false,
+    );
+  });
+
   it("rejects malformed hashes", () => {
     const fixture = loadFixture("published-entry.json") as Record<
       string,

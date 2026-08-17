@@ -30,7 +30,15 @@ _PUBLIC_EVIDENCE_PATH_PATTERN = re.compile(
 _PUBLIC_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*\Z")
 _MAX_PUBLIC_EVIDENCE_URL_BYTES = 2048
 _MAX_SUPPORTING_SPAN_CHARS = 4096
-_PUBLIC_METADATA_COUNT_FIELDS = frozenset({"eligible_count", "selected_count"})
+_PUBLIC_METADATA_COUNT_FIELDS = frozenset(
+    {"eligible_count", "selected_count"}
+    | {
+        f"provider_{provider}_{metric}"
+        for provider in ("finnhub", "polygon_news", "benzinga_news")
+        for metric in ("attempts", "failures", "timeouts")
+    }
+)
+_PUBLIC_METADATA_HASH_FIELDS = frozenset({"gate_manifest_sha256"})
 _PUBLIC_METADATA_VERSION_FIELDS = frozenset(
     {
         "compiler_version",
@@ -41,7 +49,9 @@ _PUBLIC_METADATA_VERSION_FIELDS = frozenset(
     }
 )
 _PUBLIC_METADATA_FIELDS = (
-    _PUBLIC_METADATA_COUNT_FIELDS | _PUBLIC_METADATA_VERSION_FIELDS
+    _PUBLIC_METADATA_COUNT_FIELDS
+    | _PUBLIC_METADATA_HASH_FIELDS
+    | _PUBLIC_METADATA_VERSION_FIELDS
 )
 _PUBLIC_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _PRIVATE_VERSION_SEGMENTS = frozenset(
@@ -349,6 +359,8 @@ def _envelope_metadata(value: Any, path: str) -> None:
         raise ContractError(f"{path}.{field}", "is not public report metadata")
     for field in _PUBLIC_METADATA_COUNT_FIELDS & metadata.keys():
         _integer(metadata[field], f"{path}.{field}", minimum=0)
+    for field in _PUBLIC_METADATA_HASH_FIELDS & metadata.keys():
+        _hash(metadata[field], f"{path}.{field}")
     for field in _PUBLIC_METADATA_VERSION_FIELDS & metadata.keys():
         version = _non_empty_string(metadata[field], f"{path}.{field}")
         if _PUBLIC_VERSION_PATTERN.fullmatch(version) is None or (

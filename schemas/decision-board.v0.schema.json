@@ -33,6 +33,19 @@
       "properties": {
         "eligible_count": { "type": "integer", "minimum": 0 },
         "selected_count": { "type": "integer", "minimum": 0 },
+        "provider_finnhub_attempts": { "type": "integer", "minimum": 0 },
+        "provider_finnhub_failures": { "type": "integer", "minimum": 0 },
+        "provider_finnhub_timeouts": { "type": "integer", "minimum": 0 },
+        "provider_polygon_news_attempts": { "type": "integer", "minimum": 0 },
+        "provider_polygon_news_failures": { "type": "integer", "minimum": 0 },
+        "provider_polygon_news_timeouts": { "type": "integer", "minimum": 0 },
+        "provider_benzinga_news_attempts": { "type": "integer", "minimum": 0 },
+        "provider_benzinga_news_failures": { "type": "integer", "minimum": 0 },
+        "provider_benzinga_news_timeouts": { "type": "integer", "minimum": 0 },
+        "gate_manifest_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
         "compiler_version": { "$ref": "#/$defs/PublicVersionV0" },
         "policy_version": { "$ref": "#/$defs/PublicVersionV0" },
         "registry_version": { "$ref": "#/$defs/PublicVersionV0" },

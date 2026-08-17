@@ -41,7 +41,7 @@
 - 원격 노출/클라우드 상시 운영 같은 운영 모델 확장 여부 결정
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
 - 추가 유료/벤더별 news/API adapter 운영화 여부 결정
-- Decision Board production adapter를 승인·연결하고 20-session shadow gate를 시작할지 결정
+- Decision Board recorded/live 비교와 manifest 승인을 끝낸 뒤 20-session shadow gate schedule을 시작할지 결정
 
 ### 폐기 후보
 

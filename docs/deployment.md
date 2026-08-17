@@ -148,7 +148,7 @@ order by tablename;
 
 ### Decision Board report index rollout
 
-적용 순서는 `report_index migration -> Python Decision Board producer/upload adapter -> Web server data consumer`입니다. runner, local scheduler seam, RunJournal과 UI는 구현됐지만 production preparation/research/claim-verifier adapter와 실제 launchd schedule은 미연결입니다. 따라서 이 배포만으로 자동 실행하거나 주문을 만들지 않습니다.
+`report_index` migration, Python Decision Board report producer/upload seam, Web server data consumer는 이미 구현돼 있습니다. 별도 explicit live-shadow command는 content-addressed public input snapshot, production research/claim-verifier adapter를 조립하지만 recorded/live 비교와 approved manifest가 남아 있고 실제 launchd schedule은 비활성입니다. 따라서 이 배포만으로 자동 실행하거나 주문을 만들지 않습니다.
 
 Migration 뒤에는 `report_index`의 RLS/FORCE RLS가 모두 켜져 있고 `anon`/`authenticated` table privilege가 없으며 `service_role`의 필요한 CRUD grant가 있는지 확인합니다. 또한 `run_kind=ENTRY|HOLDING` 각각에서 `decision_created_at DESC, run_id DESC, report_key DESC` latest query를 확인합니다. Web을 migration보다 먼저 배포하면 새 nullable column select가 실패하므로 허용하지 않습니다.
 

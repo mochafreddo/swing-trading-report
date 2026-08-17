@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from sab.report.decision_board import (
     parse_decision_board_storage_key,
 )
 
+from .cli import DecisionBoardCliConfigV0
 from .results import DecisionRunIssueCodeV0
 from .run_journal import (
     ExpectedRunV0,
@@ -23,6 +25,10 @@ from .run_journal import (
     serialize_run_journal_v0,
 )
 from .runner import RunKindV0
+from .shadow_execution import load_shadow_gate_execution_binding_v0
+from .shadow_gate import (
+    load_shadow_gate_manifest_v0,
+)
 
 _REPORT_FILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}\Z")
 _RUNNER_INVALID = {
@@ -76,6 +82,10 @@ class JournalShadowProcessConfigV0:
     stale_seconds: int
     runner_args: tuple[str, ...]
     dry_run: bool
+    gate_manifest: Path | None
+    gate_manifest_sha256: str | None
+    input_ledger: Path | None
+    expected_action_ledger: Path | None
 
     @classmethod
     def from_strings(
@@ -89,6 +99,10 @@ class JournalShadowProcessConfigV0:
         stale_seconds: object,
         runner_args: object,
         dry_run: object,
+        gate_manifest: object = None,
+        gate_manifest_sha256: object = None,
+        input_ledger: object = None,
+        expected_action_ledger: object = None,
     ) -> JournalShadowProcessConfigV0:
         if type(run_kind) is not str:
             raise TypeError("run_kind must be a string")
@@ -111,6 +125,32 @@ class JournalShadowProcessConfigV0:
             raise ValueError("runner arguments are required")
         if type(dry_run) is not bool:
             raise TypeError("dry_run must be a boolean")
+        if (gate_manifest is None) != (gate_manifest_sha256 is None):
+            raise ValueError("gate manifest identity must be complete")
+        manifest_path: Path | None = None
+        manifest_hash: str | None = None
+        if gate_manifest is not None:
+            if type(gate_manifest) is not str or not gate_manifest:
+                raise ValueError("gate manifest path is invalid")
+            if (
+                type(gate_manifest_sha256) is not str
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", gate_manifest_sha256) is None
+            ):
+                raise ValueError("gate manifest hash is invalid")
+            manifest_path = Path(gate_manifest)
+            manifest_hash = gate_manifest_sha256
+        ledger_paths: list[Path | None] = []
+        for value in (input_ledger, expected_action_ledger):
+            if value is None:
+                ledger_paths.append(None)
+            elif type(value) is str and value:
+                ledger_paths.append(Path(value))
+            else:
+                raise ValueError("gate ledger path is invalid")
+        if (ledger_paths[0] is None) != (ledger_paths[1] is None):
+            raise ValueError("gate ledger paths must be complete")
+        if manifest_path is None and ledger_paths[0] is not None:
+            raise ValueError("gate ledger paths require a manifest")
         return cls(
             run_kind=expected.run_kind,
             expected_at=expected.expected_at,
@@ -130,10 +170,14 @@ class JournalShadowProcessConfigV0:
             ),
             runner_args=tuple(args),
             dry_run=dry_run,
+            gate_manifest=manifest_path,
+            gate_manifest_sha256=manifest_hash,
+            input_ledger=ledger_paths[0],
+            expected_action_ledger=ledger_paths[1],
         )
 
     def dry_run_public_dict(self) -> dict[str, object]:
-        return {
+        public: dict[str, object] = {
             "dry_run": True,
             "run_kind": self.run_kind.value,
             "expected_at": self.expected_at.isoformat().replace("+00:00", "Z"),
@@ -142,6 +186,9 @@ class JournalShadowProcessConfigV0:
             "stale_seconds": self.stale_seconds,
             "runner_arg_count": len(self.runner_args),
         }
+        if self.gate_manifest_sha256 is not None:
+            public["gate_manifest_sha256"] = self.gate_manifest_sha256
+        return public
 
 
 def _valid_report_file(value: object) -> bool:
@@ -263,6 +310,7 @@ def _emit_public_result(value: dict[str, object]) -> None:
 def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> int:
     if type(config) is not JournalShadowProcessConfigV0:
         raise TypeError("shadow process config must use the exact type")
+    _validate_gate_binding_v0(config)
     if config.dry_run:
         print(json.dumps(config.dry_run_public_dict(), sort_keys=True))
         return 0
@@ -313,6 +361,96 @@ def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> i
     )
     _emit_public_result(terminal)
     return completed.returncode
+
+
+def _validate_gate_binding_v0(config: JournalShadowProcessConfigV0) -> None:
+    if config.gate_manifest is None:
+        if any(
+            arg == flag or arg.startswith(f"{flag}=")
+            for arg in config.runner_args
+            for flag in (
+                "--gate-manifest",
+                "--gate-manifest-sha256",
+                "--input-ledger",
+                "--expected-action-ledger",
+            )
+        ):
+            raise ValueError("runner gate manifest identity is unbound")
+        return
+    assert config.gate_manifest_sha256 is not None
+    manifest = load_shadow_gate_manifest_v0(
+        config.gate_manifest,
+        require_approved=not config.dry_run,
+        input_ledger_path=config.input_ledger,
+        expected_action_ledger_path=config.expected_action_ledger,
+    )
+    if manifest.manifest_sha256 != config.gate_manifest_sha256:
+        raise ValueError("gate manifest hash does not match")
+    matching_slots = tuple(
+        slot
+        for slot in manifest.slots
+        if slot.run_kind is config.run_kind
+        and slot.expected_at == config.expected_at
+        and slot.run_id == config.run_id
+    )
+    if len(matching_slots) != 1:
+        raise ValueError("gate manifest slot does not match")
+    if _runner_option_value(config.runner_args, "--gate-manifest-sha256") != (
+        manifest.manifest_sha256
+    ):
+        raise ValueError("runner gate manifest hash does not match")
+    if not config.dry_run:
+        model = str(
+            os.getenv("DECISION_BOARD_OPENAI_MODEL")
+            or os.getenv("OPENAI_AI_BRIEF_MODEL")
+            or ""
+        ).strip()
+        if not model:
+            raise ValueError("gate runtime claim model is unavailable")
+        if config.input_ledger is None or config.expected_action_ledger is None:
+            raise ValueError("gate ledgers are required")
+        runner_config = DecisionBoardCliConfigV0.from_strings(
+            run_kind=_runner_option_value(config.runner_args, "--run-kind"),
+            run_id=_runner_option_value(config.runner_args, "--run-id"),
+            idempotency_key=_runner_option_value(
+                config.runner_args, "--idempotency-key"
+            ),
+            created_at=_runner_option_value(config.runner_args, "--created-at"),
+            sealed_input_hash=_runner_option_value(
+                config.runner_args, "--sealed-input-hash"
+            ),
+            upload_mode=_runner_option_value(config.runner_args, "--upload-mode"),
+            report_dir=_runner_option_value(config.runner_args, "--report-dir"),
+            gate_manifest_sha256=manifest.manifest_sha256,
+            gate_manifest=str(config.gate_manifest),
+            input_ledger=str(config.input_ledger),
+            expected_action_ledger=str(config.expected_action_ledger),
+        )
+        if (
+            runner_config.run_kind is not config.run_kind
+            or runner_config.run_id != config.run_id
+            or runner_config.created_at != config.expected_at
+        ):
+            raise ValueError("runner slot identity does not match")
+        load_shadow_gate_execution_binding_v0(
+            runner_config,
+            repo_root=Path.cwd(),
+            claim_model=model,
+        )
+
+
+def _runner_option_value(args: tuple[str, ...], flag: str) -> str:
+    values: list[str] = []
+    for index, arg in enumerate(args):
+        if arg == flag:
+            if index + 1 >= len(args):
+                raise ValueError("runner option is incomplete")
+            values.append(args[index + 1])
+        elif arg.startswith(f"{flag}="):
+            values.append(arg.removeprefix(f"{flag}="))
+    if len(values) != 1 or not values[0]:
+        raise ValueError("runner option identity is invalid")
+    return values[0]
 
 
 __all__ = [

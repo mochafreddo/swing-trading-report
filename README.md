@@ -2,7 +2,7 @@
 
 상태: Accepted (프로젝트 진입점)
 
-KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. `backtest`는 로컬 historical OHLCV 연구 산출물입니다. US SWING Decision Board V0의 schema/compiler/runner/storage/UI는 advice-only shadow로 구현됐지만 production research adapter와 schedule은 아직 연결되지 않았습니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
+KR/US 시장용 on-demand 스윙 트레이딩 신호 스캐너와 로컬 운영 콘솔입니다. Python 패키지 `sab`가 `buy`/`sell`/`entry`/`backtest`/`ai-brief`/`sell-ai-brief` JSON 리포트를 만들고, Next.js 웹 UI가 Supabase에 저장된 리포트와 보유 목록을 보여줍니다. `backtest`는 로컬 historical OHLCV 연구 산출물입니다. US SWING Decision Board V0의 schema/compiler/runner/storage/UI와 explicit live-shadow adapter는 advice-only로 구현됐지만 schedule은 비활성이고 recorded/live 비교 및 manifest 승인이 남아 있습니다. GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. Scheduled scan은 marker-aware fallback 전까지 fail closed이고, scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 실행합니다.
 
 ## 문서 상태
 

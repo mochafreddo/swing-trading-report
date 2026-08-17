@@ -30,6 +30,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--report-dir", default=str(ROOT / "reports"))
     parser.add_argument("--require-approved", action="store_true")
+    parser.add_argument("--input-ledger", default=None)
+    parser.add_argument("--expected-action-ledger", default=None)
     return parser
 
 
@@ -45,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.output_dir,
             report_dir=args.report_dir,
             require_approved=args.require_approved,
+            input_ledger_path=args.input_ledger,
+            expected_action_ledger_path=args.expected_action_ledger,
         )
     except ShadowLaunchdPackageError:
         print(

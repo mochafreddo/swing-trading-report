@@ -256,6 +256,11 @@ def _matches_cli_identity(
         and request.created_at == config.created_at
         and request.sealed_input_hash == config.sealed_input_hash
         and request.upload_mode is config.upload_mode
+        and (
+            config.gate_manifest_sha256 is None
+            or request.metadata.get("gate_manifest_sha256")
+            == config.gate_manifest_sha256
+        )
     )
 
 

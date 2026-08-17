@@ -14,6 +14,7 @@ from sab.__main__ import _build_parser, _dispatch_command
 from sab.decision_board.run_journal import RunJournalStoreV0
 from sab.decision_board.run_journal_cli import JournalShadowProcessConfigV0
 from sab.decision_board.runner import RunKindV0
+from sab.decision_board.shadow_gate import load_shadow_gate_manifest_v0
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = REPO_ROOT / "scripts/launchd/sab-decision-board-shadow-wrapper.sh"
@@ -23,15 +24,16 @@ PLISTS = (
     REPO_ROOT
     / "scripts/launchd/com.mochafreddo.sab.decision-board.holding-shadow.plist.template",
 )
-CURRENT_SLOT_TEXT = (
-    datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-)
+GATE_MANIFEST = REPO_ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 
 
-def _t7_basename(run_kind: str, run_id: str) -> str:
+def _current_slot_text() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _t7_basename(run_kind: str, run_id: str, *, expected_at: str) -> str:
     return (
-        f"{CURRENT_SLOT_TEXT[:10]}.decision-board.{run_kind.lower()}."
-        f"{run_id}.{'a' * 64}.json"
+        f"{expected_at[:10]}.decision-board.{run_kind.lower()}.{run_id}.{'a' * 64}.json"
     )
 
 
@@ -42,13 +44,14 @@ def _run_terminal_script(
     script: str,
 ) -> tuple[subprocess.CompletedProcess[str], RunJournalStoreV0]:
     journal_dir = tmp_path / run_id
+    expected_at = _current_slot_text()
     result = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             run_id,
             "--journal-dir",
@@ -134,13 +137,14 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
 ) -> None:
     runner_marker = tmp_path / "PRIVATE-SENTINEL-runner-called"
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     result = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-001",
             "--journal-dir",
@@ -165,7 +169,7 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
     public = json.loads(result.stdout)
     assert public == {
         "dry_run": True,
-        "expected_at": CURRENT_SLOT_TEXT,
+        "expected_at": expected_at,
         "grace_seconds": 60,
         "run_id": "entry-shadow-001",
         "run_kind": "ENTRY",
@@ -177,17 +181,117 @@ def test_shadow_wrapper_dry_run_has_no_runner_or_journal_side_effect(
     assert not journal_dir.exists()
 
 
+def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
+    tmp_path: Path,
+) -> None:
+    manifest = load_shadow_gate_manifest_v0(GATE_MANIFEST)
+    runner = [
+        sys.executable,
+        "-c",
+        "raise SystemExit(0)",
+        "--gate-manifest-sha256",
+        manifest.manifest_sha256,
+    ]
+    config = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "journal"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=runner,
+        dry_run=True,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256=manifest.manifest_sha256,
+    )
+
+    assert run_journal_cli.execute_journal_shadow_process_v0(config) == 0
+    assert config.dry_run_public_dict()["gate_manifest_sha256"] == (
+        manifest.manifest_sha256
+    )
+
+    mismatched = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "mismatch"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=runner,
+        dry_run=True,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256="sha256:" + "f" * 64,
+    )
+    with pytest.raises(ValueError, match="manifest hash"):
+        run_journal_cli.execute_journal_shadow_process_v0(mismatched)
+    assert not mismatched.journal_dir.exists()
+
+    unbound_equals_form = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(tmp_path / "unbound-equals"),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=[
+            sys.executable,
+            f"--gate-manifest-sha256={manifest.manifest_sha256}",
+        ],
+        dry_run=True,
+    )
+    with pytest.raises(ValueError, match="unbound"):
+        run_journal_cli.execute_journal_shadow_process_v0(unbound_equals_form)
+    assert not unbound_equals_form.journal_dir.exists()
+
+
+def test_non_dry_journal_validates_approved_bundle_before_claiming_started(
+    tmp_path: Path,
+) -> None:
+    manifest = load_shadow_gate_manifest_v0(GATE_MANIFEST)
+    journal_dir = tmp_path / "must-not-start"
+    config = JournalShadowProcessConfigV0.from_strings(
+        run_kind="ENTRY",
+        expected_at="2026-08-17T12:30:00Z",
+        run_id="entry-shadow-20260817",
+        journal_dir=str(journal_dir),
+        grace_seconds="300",
+        stale_seconds="1800",
+        runner_args=[
+            sys.executable,
+            "-m",
+            "sab",
+            "decision-board-shadow-live",
+            "--gate-manifest-sha256",
+            manifest.manifest_sha256,
+            "--input-ledger",
+            str(tmp_path / "input-ledger.json"),
+            "--expected-action-ledger",
+            str(tmp_path / "expected-action-ledger.json"),
+        ],
+        dry_run=False,
+        gate_manifest=str(GATE_MANIFEST),
+        gate_manifest_sha256=manifest.manifest_sha256,
+        input_ledger=str(tmp_path / "input-ledger.json"),
+        expected_action_ledger=str(tmp_path / "expected-action-ledger.json"),
+    )
+
+    with pytest.raises(ValueError, match="approval"):
+        run_journal_cli.execute_journal_shadow_process_v0(config)
+    assert not journal_dir.exists()
+
+
 def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
     tmp_path: Path,
 ) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     failed = subprocess.run(
         [
             str(WRAPPER),
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-failed",
             "--journal-dir",
@@ -222,7 +326,7 @@ def test_shadow_wrapper_records_terminal_result_and_crash_stays_started(
             "--run-kind",
             "HOLDING",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "holding-shadow-crashed",
             "--journal-dir",
@@ -260,10 +364,11 @@ def test_shadow_wrapper_maps_stored_terminal_status(
 ) -> None:
     journal_dir = tmp_path / "journal"
     run_id = f"entry-shadow-{status.lower()}"
+    expected_at = _current_slot_text()
     public = {
         "status": status,
         "exit_code": 0,
-        "report_file": _t7_basename("ENTRY", run_id),
+        "report_file": _t7_basename("ENTRY", run_id, expected_at=expected_at),
         "storage_key": None,
         "degraded": False,
     }
@@ -273,7 +378,7 @@ def test_shadow_wrapper_maps_stored_terminal_status(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             run_id,
             "--journal-dir",
@@ -302,6 +407,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
     tmp_path: Path,
 ) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     raw = {
         "status": "FAILED",
         "exit_code": 2,
@@ -314,7 +420,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-raw",
             "--journal-dir",
@@ -341,6 +447,7 @@ def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
 
 def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> None:
     journal_dir = tmp_path / "journal"
+    expected_at = _current_slot_text()
     public = {
         "status": "PUBLISHED",
         "exit_code": 0,
@@ -354,7 +461,7 @@ def test_shadow_wrapper_rejects_terminal_exit_code_mismatch(tmp_path: Path) -> N
             "--run-kind",
             "ENTRY",
             "--expected-at",
-            CURRENT_SLOT_TEXT,
+            expected_at,
             "--run-id",
             "entry-shadow-exit-conflict",
             "--journal-dir",
@@ -586,7 +693,7 @@ def test_shadow_process_baseexception_propagates_and_started_remains(
 
     config = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at=CURRENT_SLOT_TEXT,
+        expected_at=_current_slot_text(),
         run_id="entry-subprocess-interrupt",
         journal_dir=str(tmp_path),
         grace_seconds="60",

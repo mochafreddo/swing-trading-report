@@ -219,14 +219,21 @@ report path를 볼 수 없고, 외부 evidence source는 공개 `run_kind/item_i
 collaborator가 전체 CLI config나 compiler item을 직접 받는 우회 경로가 없습니다.
 deterministic ENTRY/HOLDING facts는 composition 내부에서 보존됩니다.
 
-Supabase snapshot, search, article fetch, Responses transport는 이 경계 밖의 주입 dependency로
-남고 기본 CLI executor에는 component bundle이 연결되지 않아 `CONFIG_UNAVAILABLE`로 닫힙니다.
-현재 item evidence seam은 offline/recorded 검증만 소유합니다. 기존
-`EvidenceResearcherV0`의 invocation-wide deadline, concurrency, URL dedupe와 article cap을
-보존하는 batch adapter가 구현되기 전에는 live provider를 연결하지 않습니다.
-rollout은 recorded/live provider-verifier 비교를 통과한 dependency bundle을 shadow runner에
-주입한 뒤 시작합니다. 롤백은 이 adapter/consumer 연결만 제거하며 기존 AI Brief source
-policy와 top-five behavior는 유지합니다.
+기본 `decision-board` CLI executor에는 component bundle이 연결되지 않아 계속
+`CONFIG_UNAVAILABLE`로 닫힙니다. explicit `decision-board-shadow-live` composition root만
+Supabase content-addressed public input snapshot, Finnhub/Polygon/Benzinga search,
+public-DNS/pinned-address article fetch, OpenAI Responses claim transport와 optional report
+uploader를 조립합니다. 이 composition은 credentialed adapter를 만들기 전에 exact
+`approved_by=user` approval contract, manifest hash, slot/runtime digest, 실제 private ledger
+hash/count와 sealed input/item membership을 결속합니다. `BatchDecisionEvidenceBuilderV0`가 기존 `EvidenceResearcherV0`의
+invocation-wide deadline, concurrency, URL dedupe와 article cap을 보존한 채 claim validation까지
+같은 deadline을 전달하고, blocking DNS/HTTP/Responses 작업은 deadline에 포함된 killable child
+process에서 실행합니다. child environment는 비우고 provider loader에는 해당 provider
+credential 하나만 전달합니다. 결과는 exact public item identity mapping으로 runner에 제공하고,
+provider별 attempts/failures/timeouts만 public report metadata에 남깁니다.
+snapshot은 hash-derived Storage key로만 읽고 compiler public deterministic fact 외 unknown/private
+field를 거부합니다. rollout은 recorded/live provider-verifier 비교와 manifest 재승인 뒤에만
+시작하며, 롤백은 이 explicit adapter/consumer 연결만 제거합니다.
 
 ### 3.4 ClaimValidationV0 exact-span boundary
 

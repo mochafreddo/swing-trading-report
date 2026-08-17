@@ -225,6 +225,12 @@ def test_report_metadata_is_limited_to_public_version_and_count_fields() -> None
     with pytest.raises(ContractError, match=r"\$\.metadata\.compiler_version"):
         validate_decision_board_report(report)
 
+    report = _load_json(FIXTURE_DIR / "published-entry.json")
+    report["metadata"] = {"gate_manifest_sha256": "sha256:" + "a" * 64}
+
+    _schema_validator().validate(report)
+    assert validate_decision_board_report(report) == report
+
 
 def test_report_instrument_requires_a_public_canonical_ticker() -> None:
     report = _load_json(FIXTURE_DIR / "published-entry.json")

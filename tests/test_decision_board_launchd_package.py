@@ -11,13 +11,71 @@ from pathlib import Path
 
 import pytest
 import sab.decision_board.launchd_package as launchd_package
+from sab.decision_board.contracts import decision_payload_hash
 from sab.decision_board.launchd_package import (
     ShadowLaunchdPackageError,
     build_decision_board_launchd_dry_run_package_v0,
 )
+from sab.decision_board.shadow_gate import (
+    shadow_gate_approval_signature_v0,
+    validate_shadow_gate_manifest_v0,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "decision-board-shadow-gate.proposed.json"
+
+
+def _write_approved_gate_bundle(tmp_path: Path) -> tuple[Path, Path, Path, str]:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw["approval"].update(
+        {
+            "state": "APPROVED",
+            "approved_by": "user",
+            "approved_at": "2026-08-17T09:00:00Z",
+            "approval_signature_sha256": "sha256:" + "0" * 64,
+        }
+    )
+    raw["runtime_contract"]["code_revision"] = "git:" + "1" * 40
+    for name in raw["runtime_contract"]["artifact_digests"]:
+        raw["runtime_contract"]["artifact_digests"][name] = "sha256:" + "2" * 64
+    input_ledger = {
+        "schema_version": "decision-board-shadow-input-ledger.v0",
+        "gate_version": raw["gate_version"],
+        "cases": [
+            {
+                "case_id": "case-entry-aapl",
+                "run_kind": "ENTRY",
+                "sealed_input_hash": "sha256:" + "3" * 64,
+                "item_id": "entry-AAPL.NAS",
+            }
+        ],
+    }
+    expected_ledger = {
+        "schema_version": "decision-board-shadow-expected-action-ledger.v0",
+        "gate_version": raw["gate_version"],
+        "cases": [{"case_id": "case-entry-aapl", "expected_action_set": ["BUY"]}],
+    }
+    raw["evaluation_ledger"] = {
+        "input_ledger_sha256": decision_payload_hash(input_ledger),
+        "expected_action_ledger_sha256": decision_payload_hash(expected_ledger),
+        "case_count": 1,
+    }
+    raw["approval"]["approval_signature_sha256"] = shadow_gate_approval_signature_v0(
+        raw
+    )
+    manifest_path = tmp_path / "approved-gate.json"
+    input_path = tmp_path / "input-ledger.json"
+    expected_path = tmp_path / "expected-action-ledger.json"
+    manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+    input_path.write_text(json.dumps(input_ledger), encoding="utf-8")
+    expected_path.write_text(json.dumps(expected_ledger), encoding="utf-8")
+    manifest = validate_shadow_gate_manifest_v0(
+        raw,
+        require_approved=True,
+        input_ledger=input_ledger,
+        expected_action_ledger=expected_ledger,
+    )
+    return manifest_path, input_path, expected_path, manifest.manifest_sha256
 
 
 def _assert_no_unexpected_cli_stderr(stderr: str) -> None:
@@ -100,10 +158,60 @@ def test_launchd_package_builds_disabled_unscheduled_entry_and_holding_plists(
         )
         assert "--dry-run" in args
         assert args.index("--dry-run") < args.index("--")
+        assert args[args.index("--gate-manifest") + 1] == str(MANIFEST)
+        assert (
+            args[args.index("--gate-manifest-sha256") + 1] == public["manifest_sha256"]
+        )
         runner = args[args.index("--") + 1 :]
         assert runner[:5] == ["uv", "run", "python", "-m", "sab"]
-        assert "decision-board" in runner
+        assert "decision-board-shadow-live" in runner
+        assert (
+            runner[runner.index("--gate-manifest-sha256") + 1]
+            == public["manifest_sha256"]
+        )
         assert runner[runner.index("--upload-mode") + 1] == "disabled"
+
+
+def test_launchd_package_propagates_approved_ledgers_and_rejects_incomplete_pair(
+    tmp_path: Path,
+) -> None:
+    manifest, input_ledger, expected_ledger, manifest_hash = (
+        _write_approved_gate_bundle(tmp_path)
+    )
+    output_dir = tmp_path / "approved-package"
+    result = build_decision_board_launchd_dry_run_package_v0(
+        manifest_path=manifest,
+        session="2026-08-17",
+        repo_root=ROOT,
+        journal_dir=tmp_path / "journal",
+        output_dir=output_dir,
+        require_approved=True,
+        input_ledger_path=input_ledger,
+        expected_action_ledger_path=expected_ledger,
+    )
+
+    assert result.approval_state == "APPROVED"
+    assert result.manifest_sha256 == manifest_hash
+    for path in output_dir.glob("*.plist"):
+        payload = plistlib.loads(path.read_bytes())
+        args = payload["ProgramArguments"]
+        assert args[args.index("--input-ledger") + 1] == str(input_ledger)
+        assert args[args.index("--expected-action-ledger") + 1] == str(expected_ledger)
+        runner = args[args.index("--") + 1 :]
+        assert runner[runner.index("--input-ledger") + 1] == str(input_ledger)
+        assert runner[runner.index("--expected-action-ledger") + 1] == str(
+            expected_ledger
+        )
+
+    with pytest.raises(ShadowLaunchdPackageError, match="incomplete"):
+        build_decision_board_launchd_dry_run_package_v0(
+            manifest_path=MANIFEST,
+            session="2026-08-17",
+            repo_root=ROOT,
+            journal_dir=tmp_path / "incomplete-journal",
+            output_dir=tmp_path / "incomplete-package",
+            input_ledger_path=input_ledger,
+        )
 
 
 def test_generated_launchd_program_arguments_execute_only_wrapper_dry_run(

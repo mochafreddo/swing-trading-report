@@ -1,10 +1,12 @@
 {
   "schema_version": "decision-board-shadow-gate.v0",
   "gate_version": "us-swing-shadow-v1-20260817",
+  "horizon": "SWING",
   "approval": {
     "state": "PENDING",
     "approved_by": null,
-    "approved_at": null
+    "approved_at": null,
+    "approval_signature_sha256": null
   },
   "market": "US",
   "calendar": "XNYS",
@@ -42,6 +44,26 @@
     "researcher": "evidence-researcher.v0",
     "verifier": "decision-board-claim-verifier-v0",
     "instrument_registry": "us-instrument-registry.v0"
+  },
+  "runtime_contract": {
+    "code_revision": null,
+    "artifact_digests": {
+      "compiler": null,
+      "researcher": null,
+      "verifier": null,
+      "instrument_registry": null
+    },
+    "source_provider_chain": [
+      "finnhub",
+      "polygon-news",
+      "benzinga-news"
+    ],
+    "claim_model": "gpt-5.6-sol"
+  },
+  "evaluation_ledger": {
+    "input_ledger_sha256": null,
+    "expected_action_ledger_sha256": null,
+    "case_count": 0
   },
   "schedule_policy": {
     "timezone": "UTC",
@@ -299,6 +321,24 @@
     "BUG",
     "UNEXPLAINED"
   ],
+  "allowed_diff_reason_by_rule_id": {},
+  "metric_definitions": {
+    "provider_failure_rate": {
+      "numerator": "provider_failed_attempts",
+      "denominator": "provider_attempts",
+      "zero_denominator": "NOT_APPLICABLE"
+    },
+    "research_coverage_rate": {
+      "numerator": "eligible_items_with_verified_evidence",
+      "denominator": "eligible_items",
+      "zero_denominator": "NOT_APPLICABLE"
+    },
+    "fresh_source_rate": {
+      "numerator": "fresh_verified_sources",
+      "denominator": "verified_sources",
+      "zero_denominator": "NOT_APPLICABLE"
+    }
+  },
   "approved_thresholds": {
     "hard_failures": {
       "unexplained": 0,

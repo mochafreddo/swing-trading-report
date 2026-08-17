@@ -16,6 +16,7 @@ from .backtest import run_backtest
 from .decision_board.cli import (
     DecisionBoardCliConfigV0,
     execute_decision_board_cli_v0,
+    execute_decision_board_shadow_live_cli_v0,
 )
 from .decision_board.results import (
     DecisionRunIssueCodeV0,
@@ -303,11 +304,32 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     decision_board.add_argument("--report-dir", default="reports")
 
+    decision_board_live = sub.add_parser(
+        "decision-board-shadow-live",
+        help="Run one explicitly configured live-provider Decision Board shadow decision",
+    )
+    decision_board_live.add_argument("--run-kind", required=True)
+    decision_board_live.add_argument("--run-id", required=True)
+    decision_board_live.add_argument("--idempotency-key", required=True)
+    decision_board_live.add_argument("--created-at", required=True)
+    decision_board_live.add_argument("--sealed-input-hash", required=True)
+    decision_board_live.add_argument("--gate-manifest", required=True)
+    decision_board_live.add_argument("--gate-manifest-sha256", required=True)
+    decision_board_live.add_argument("--input-ledger", required=True)
+    decision_board_live.add_argument("--expected-action-ledger", required=True)
+    decision_board_live.add_argument(
+        "--upload-mode",
+        default="disabled",
+    )
+    decision_board_live.add_argument("--report-dir", default="reports")
+
     shadow_gate = sub.add_parser(
         "decision-board-shadow-gate-validate",
         help="Validate one frozen Decision Board shadow gate manifest",
     )
     shadow_gate.add_argument("--manifest", required=True)
+    shadow_gate.add_argument("--input-ledger", default=None)
+    shadow_gate.add_argument("--expected-action-ledger", default=None)
     shadow_gate.add_argument("--require-approved", action="store_true")
 
     journal_status = sub.add_parser(
@@ -344,6 +366,10 @@ def _build_parser() -> argparse.ArgumentParser:
     journal_run.add_argument("--run-id", required=True)
     journal_run.add_argument("--grace-seconds", required=True)
     journal_run.add_argument("--stale-seconds", required=True)
+    journal_run.add_argument("--gate-manifest", default=None)
+    journal_run.add_argument("--gate-manifest-sha256", default=None)
+    journal_run.add_argument("--input-ledger", default=None)
+    journal_run.add_argument("--expected-action-ledger", default=None)
     journal_run.add_argument("--dry-run", action="store_true")
     journal_run.add_argument("runner_args", nargs=argparse.REMAINDER)
 
@@ -735,6 +761,10 @@ def _run_decision_board_command(ns: argparse.Namespace) -> int:
             sealed_input_hash=ns.sealed_input_hash,
             upload_mode=ns.upload_mode,
             report_dir=ns.report_dir,
+            gate_manifest_sha256=getattr(ns, "gate_manifest_sha256", None),
+            gate_manifest=getattr(ns, "gate_manifest", None),
+            input_ledger=getattr(ns, "input_ledger", None),
+            expected_action_ledger=getattr(ns, "expected_action_ledger", None),
         )
     except TypeError, ValueError:
         result = create_decision_run_failed_v0(
@@ -742,7 +772,12 @@ def _run_decision_board_command(ns: argparse.Namespace) -> int:
         )
     else:
         try:
-            result = execute_decision_board_cli_v0(config)
+            execute = (
+                execute_decision_board_shadow_live_cli_v0
+                if ns.cmd == "decision-board-shadow-live"
+                else execute_decision_board_cli_v0
+            )
+            result = execute(config)
         except Exception:
             result = create_decision_run_failed_v0(
                 issue_code=DecisionRunIssueCodeV0.INTERNAL_ERROR
@@ -766,6 +801,8 @@ def _run_decision_board_shadow_gate_validate_command(ns: argparse.Namespace) -> 
         manifest = load_shadow_gate_manifest_v0(
             ns.manifest,
             require_approved=ns.require_approved,
+            input_ledger_path=ns.input_ledger,
+            expected_action_ledger_path=ns.expected_action_ledger,
         )
     except ShadowGateManifestError as exc:
         print(
@@ -872,6 +909,10 @@ def _run_decision_board_journal_run_command(ns: argparse.Namespace) -> int:
             stale_seconds=ns.stale_seconds,
             runner_args=ns.runner_args,
             dry_run=ns.dry_run,
+            gate_manifest=ns.gate_manifest,
+            gate_manifest_sha256=ns.gate_manifest_sha256,
+            input_ledger=ns.input_ledger,
+            expected_action_ledger=ns.expected_action_ledger,
         )
         return execute_journal_shadow_process_v0(config)
     except OSError, RunJournalError, TypeError, ValueError:
@@ -1214,6 +1255,7 @@ def _dispatch_command(
         "sell": _run_sell_command,
         "entry": _run_entry_command,
         "decision-board": _run_decision_board_command,
+        "decision-board-shadow-live": _run_decision_board_command,
         "decision-board-shadow-gate-validate": (
             _run_decision_board_shadow_gate_validate_command
         ),
