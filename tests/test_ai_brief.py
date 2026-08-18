@@ -3862,10 +3862,11 @@ def test_load_ai_brief_sources_benzinga_news_maps_us_tickers_and_normalizes_news
     headers = session.calls[0]["headers"]
     assert isinstance(headers, dict)
     assert headers["Accept"] == "application/json"
-    _assert_timeout_tuple_not_expired(
-        session.calls[0]["timeout"],
-        requested_timeout_seconds=4.5,
-    )
+    timeout = session.calls[0]["timeout"]
+    assert isinstance(timeout, tuple)
+    connect_timeout, read_timeout = timeout
+    assert 0 < connect_timeout <= 4.5
+    assert read_timeout == pytest.approx(connect_timeout, abs=0.01)
     assert session.calls[0]["allow_redirects"] is False
     assert session.trust_env is False
     assert session.closed is True
@@ -4142,6 +4143,36 @@ def test_load_ai_brief_sources_benzinga_news_timeout_is_provider_timeout(
         )
 
     assert session.closed is True
+
+
+def test_load_ai_brief_sources_benzinga_news_allows_slow_first_byte_within_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SlowFirstByteSession(_BenzingaNewsStaticSession):
+        def get(self, url: str, **kwargs: object) -> _BenzingaNewsStaticResponse:
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, tuple)
+            if timeout[1] <= 1.0:
+                raise ai_brief_sources.requests.ReadTimeout("recorded slow first byte")
+            return super().get(url, **kwargs)
+
+    session = SlowFirstByteSession(_BenzingaNewsStaticResponse("[]"))
+    monkeypatch.setenv("BENZINGA_API_TOKEN", "benzinga-secret")
+    monkeypatch.setattr("sab.ai_brief_sources.requests.Session", lambda: session)
+
+    result = load_ai_brief_sources(
+        source_provider="benzinga-news",
+        source_report_path=None,
+        source_api_url=None,
+        source_timeout_seconds=15.0,
+        eligible_tickers={"AAPL.NAS"},
+        now=dt.datetime(2026, 5, 5, 9, 0, tzinfo=dt.UTC),
+    )
+
+    assert result.sources_by_ticker == {}
+    timeout = session.calls[0]["timeout"]
+    assert isinstance(timeout, tuple)
+    assert timeout[1] == 5.0
 
 
 @pytest.mark.parametrize(

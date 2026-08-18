@@ -788,7 +788,56 @@ def test_openai_sync_transport_enforces_one_wall_clock_budget(monkeypatch) -> No
             3.0,
         )
 
-    assert request_timeouts == [(1.0, 1.0)]
+    assert request_timeouts == [(1.0, 3.0)]
+
+
+def test_openai_sync_transport_allows_slow_first_byte_within_wall_clock_budget(
+    monkeypatch,
+) -> None:
+    request_timeouts: list[tuple[float, float]] = []
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def iter_content(self, *, chunk_size: int):
+            assert chunk_size == 64 * 1024
+            yield b"{}"
+
+        def close(self) -> None:
+            return None
+
+    class Session:
+        trust_env = True
+
+        def post(self, *args, **kwargs) -> Response:
+            del args
+            timeout = kwargs["timeout"]
+            request_timeouts.append(timeout)
+            if timeout[1] < 7.5:
+                raise openai_live_adapter_module.requests.ReadTimeout(
+                    "recorded slow first byte"
+                )
+            return Response()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "sab.decision_board.live_adapters.requests.Session",
+        Session,
+    )
+
+    assert (
+        openai_live_adapter_module._post_json(
+            "https://api.openai.com/v1/responses",
+            {"Authorization": "Bearer private"},
+            {"model": "recorded"},
+            15.0,
+        )
+        == {}
+    )
+    assert request_timeouts == [(5.0, 15.0)]
 
 
 def test_batch_evidence_builder_researches_selected_items_once_under_shared_deadline(

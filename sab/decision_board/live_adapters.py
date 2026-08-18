@@ -100,7 +100,7 @@ def _post_json(
     timeout: float,
 ) -> object:
     expires_at = time.monotonic() + timeout
-    phase_timeout = timeout / 3.0
+    connect_timeout = timeout / 3.0
     session = requests.Session()
     session.trust_env = False
     response: requests.Response | None = None
@@ -109,7 +109,7 @@ def _post_json(
             url,
             headers=headers,
             json=cast(Any, payload),
-            timeout=(phase_timeout, phase_timeout),
+            timeout=(connect_timeout, timeout),
             allow_redirects=False,
             stream=True,
         )
