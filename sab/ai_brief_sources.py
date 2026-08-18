@@ -44,6 +44,7 @@ DEFAULT_SOURCE_TIMEOUT_SECONDS = 10.0
 SOURCE_ROW_DNS_TIMEOUT_SECONDS = source_url_safety.SOURCE_ROW_DNS_TIMEOUT_SECONDS
 SOURCE_DNS_RESOLVER_WORKERS = source_url_safety.SOURCE_DNS_RESOLVER_WORKERS
 SOURCE_RESPONSE_READ_TIMEOUT_SECONDS = 1.0
+BENZINGA_RESPONSE_READ_TIMEOUT_SECONDS = 5.0
 FINNHUB_COMPANY_NEWS_URL = "https://api.finnhub.io/api/v1/company-news"
 POLYGON_NEWS_URL = "https://api.polygon.io/v2/reference/news"
 POLYGON_NEWS_LIMIT = 10
@@ -286,6 +287,7 @@ def _get_vendor_source_response(
     headers: Mapping[str, str],
     deadline: float,
     source_subject: str,
+    response_read_timeout_seconds: float = SOURCE_RESPONSE_READ_TIMEOUT_SECONDS,
 ) -> Any:
     try:
         with _pin_source_api_dns(
@@ -297,7 +299,10 @@ def _get_vendor_source_response(
                 validated_source_api_url.url,
                 params=params,
                 headers=headers,
-                timeout=_source_request_timeout(deadline),
+                timeout=_source_request_timeout(
+                    deadline,
+                    read_timeout_seconds=response_read_timeout_seconds,
+                ),
                 stream=True,
                 allow_redirects=False,
             )
@@ -762,6 +767,7 @@ def _load_benzinga_news_source_report(
                 headers=headers,
                 deadline=deadline,
                 source_subject="Benzinga News source",
+                response_read_timeout_seconds=(BENZINGA_RESPONSE_READ_TIMEOUT_SECONDS),
             )
             payload = _parse_benzinga_news_response_payload(
                 response,
@@ -965,9 +971,13 @@ def _remaining_source_timeout(deadline: float) -> float:
     return remaining
 
 
-def _source_request_timeout(deadline: float) -> tuple[float, float]:
+def _source_request_timeout(
+    deadline: float,
+    *,
+    read_timeout_seconds: float = SOURCE_RESPONSE_READ_TIMEOUT_SECONDS,
+) -> tuple[float, float]:
     remaining = _remaining_source_timeout(deadline)
-    return remaining, min(remaining, SOURCE_RESPONSE_READ_TIMEOUT_SECONDS)
+    return remaining, min(remaining, read_timeout_seconds)
 
 
 def _load_local_json_source_report(
