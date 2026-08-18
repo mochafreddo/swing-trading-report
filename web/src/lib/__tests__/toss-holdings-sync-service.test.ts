@@ -91,6 +91,7 @@ function deps(
         usableForAutoMapping: false,
       },
     })),
+    listReviewedTickerMappings: vi.fn(async () => []),
     replaceAllHoldings: vi.fn(async () => ({
       insertedCount: 0,
       updatedCount: 0,
@@ -276,6 +277,62 @@ describe("toss holdings sync service", () => {
     expect(preview.payload.blockedRows).toEqual([
       expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
     ]);
+  });
+
+  it("uses the reviewed registry when the ticker directory has no candidate", async () => {
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listReviewedTickerMappings: vi.fn(async () => [{ ticker: "MSFT.NAS" }]),
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(preview.payload.applyBlocked).toBe(false);
+    expect(preview.payload.targetRows).toEqual([
+      expect.objectContaining({ ticker: "MSFT.NAS" }),
+    ]);
+  });
+
+  it("keeps an exact class-share directory match ahead of the registry fallback", async () => {
+    const listReviewedTickerMappings = vi.fn(async () => [
+      { ticker: "BRK.B.NAS" },
+    ]);
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "BRK/B",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "500",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
+        candidates: [{ ticker: "BRK.B.NYS", name: "Berkshire Hathaway" }],
+        directory: {
+          builtAtMs: Date.now(),
+          sourceReports: 1,
+          usableForAutoMapping: true,
+        },
+      })),
+      listReviewedTickerMappings,
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(preview.payload.applyBlocked).toBe(false);
+    expect(preview.payload.targetRows).toEqual([
+      expect.objectContaining({ ticker: "BRK.B.NYS" }),
+    ]);
+    expect(listReviewedTickerMappings).not.toHaveBeenCalled();
   });
 
   it("scheduled auto apply fails closed when ticker-directory lookup fails", async () => {
