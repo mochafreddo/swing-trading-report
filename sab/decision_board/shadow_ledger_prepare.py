@@ -153,8 +153,8 @@ def prepare_shadow_evaluation_ledgers_v0(
         for basename, payload in encoded:
             target = destination / basename
             with target.open("xb") as stream:
+                written.append(target)
                 stream.write(payload)
-            written.append(target)
             target.chmod(0o600)
     except Exception:
         for path in written:
