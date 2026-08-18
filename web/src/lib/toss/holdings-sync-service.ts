@@ -458,6 +458,7 @@ async function fetchTossTickerDirectoryCandidates(
     if (options.tickerDirectoryLookupFailureMode === "throw") {
       throw error;
     }
+    return [];
   }
 
   const directoryBases = new Set(

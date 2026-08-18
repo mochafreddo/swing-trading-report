@@ -34,6 +34,51 @@ describe("reviewed Toss ticker mapping registry", () => {
     ]);
   });
 
+  it("stays disabled when neither registry setting is configured", () => {
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_B64", "");
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_SHA256", "");
+
+    expect(loadReviewedTossTickerMappingsFromEnv(["MSFT"])).toEqual([]);
+  });
+
+  it.each([
+    ["payload only", APPROVED_MAPPING_B64, ""],
+    ["digest only", "", APPROVED_MAPPING_SHA256],
+  ])("rejects a half-configured registry: %s", (_label, encoded, digest) => {
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_B64", encoded);
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_SHA256", digest);
+
+    expect(() => loadReviewedTossTickerMappingsFromEnv(["MSFT"])).toThrow(
+      "must be configured together",
+    );
+  });
+
+  it.each([
+    ["malformed digest", "sha256:not-a-digest", "must be a sha256 digest"],
+    ["digest mismatch", `sha256:${"0".repeat(64)}`, "digest mismatch"],
+  ])("rejects an invalid hash binding: %s", (_label, digest, message) => {
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_B64", APPROVED_MAPPING_B64);
+    vi.stubEnv("TOSS_SYNC_REVIEWED_MAPPING_SHA256", digest);
+
+    expect(() => loadReviewedTossTickerMappingsFromEnv(["MSFT"])).toThrow(
+      message,
+    );
+  });
+
+  it("rejects self-declared mapping data without approved metadata", () => {
+    configurePayload({
+      schema_version: "toss-sync-reviewed-mapping.v1",
+      review_state: "DRAFT",
+      approved_by: "automation",
+      approved_at: "2026-08-19T00:00:00.000Z",
+      mappings: [],
+    });
+
+    expect(() => loadReviewedTossTickerMappingsFromEnv([])).toThrow(
+      "approval metadata is invalid",
+    );
+  });
+
   it("rejects duplicate symbols instead of allowing a later venue to win", () => {
     configurePayload({
       schema_version: "toss-sync-reviewed-mapping.v1",
@@ -125,5 +170,113 @@ describe("reviewed Toss ticker mapping registry", () => {
     expect(() => loadReviewedTossTickerMappingsFromEnv(["MSFT"])).toThrow(
       "MIC and suffix",
     );
+  });
+
+  it.each([
+    [
+      "symbol and ticker mismatch",
+      {
+        symbol: "MSFT",
+        repo_ticker: "AAPL.NAS",
+        source: "local_buy_reports",
+      },
+      "symbol and ticker do not match",
+    ],
+    [
+      "Polygon row without MIC",
+      {
+        symbol: "MSFT",
+        repo_ticker: "MSFT.NAS",
+        source: "polygon_reference",
+      },
+      "MIC and suffix",
+    ],
+    [
+      "incomplete row",
+      { symbol: "MSFT", source: "local_buy_reports" },
+      "row is incomplete",
+    ],
+  ])("rejects invalid mapping rows: %s", (_label, mapping, message) => {
+    configurePayload({
+      schema_version: "toss-sync-reviewed-mapping.v1",
+      review_state: "APPROVED",
+      approved_by: "user",
+      approved_at: "2026-08-19T00:00:00.000Z",
+      mappings: [mapping],
+    });
+
+    expect(() => loadReviewedTossTickerMappingsFromEnv(["MSFT"])).toThrow(
+      message,
+    );
+  });
+
+  it("accepts reviewed local NYSE and Polygon AMEX mappings", () => {
+    configurePayload({
+      schema_version: "toss-sync-reviewed-mapping.v1",
+      review_state: "APPROVED",
+      approved_by: "user",
+      approved_at: "2026-08-19T00:00:00.000Z",
+      mappings: [
+        {
+          symbol: "VRT",
+          repo_ticker: "VRT.NYS",
+          source: "local_buy_reports",
+        },
+        {
+          symbol: "XYZ",
+          repo_ticker: "XYZ.AMS",
+          source: "polygon_reference",
+          primary_exchange_mic: "XASE",
+        },
+      ],
+    });
+
+    expect(loadReviewedTossTickerMappingsFromEnv(["XYZ", "VRT"])).toEqual([
+      { ticker: "VRT.NYS" },
+      { ticker: "XYZ.AMS" },
+    ]);
+  });
+
+  it.each([
+    ["invalid symbol", "BAD$", "BAD$.NAS"],
+    ["invalid ticker", "MSFT", "MSFT$.NAS"],
+  ])("rejects malformed ticker syntax: %s", (_label, symbol, repoTicker) => {
+    configurePayload({
+      schema_version: "toss-sync-reviewed-mapping.v1",
+      review_state: "APPROVED",
+      approved_by: "user",
+      approved_at: "2026-08-19T00:00:00.000Z",
+      mappings: [
+        {
+          symbol,
+          repo_ticker: repoTicker,
+          source: "local_buy_reports",
+        },
+      ],
+    });
+
+    expect(() => loadReviewedTossTickerMappingsFromEnv([symbol])).toThrow(
+      "symbol and ticker do not match",
+    );
+  });
+
+  it("canonicalizes a valid class-share symbol", () => {
+    configurePayload({
+      schema_version: "toss-sync-reviewed-mapping.v1",
+      review_state: "APPROVED",
+      approved_by: "user",
+      approved_at: "2026-08-19T00:00:00.000Z",
+      mappings: [
+        {
+          symbol: "BRK/B",
+          repo_ticker: "BRK.B.NYS",
+          source: "local_buy_reports",
+        },
+      ],
+    });
+
+    expect(loadReviewedTossTickerMappingsFromEnv(["BRK/B"])).toEqual([
+      { ticker: "BRK.B.NYS" },
+    ]);
   });
 });

@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { parseDecisionBoardJsonBytes } from "@/lib/decision-board-json";
-import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
+import { parseHoldingTickerForMutation } from "@/lib/holding-ticker";
 import type { TossTickerDirectoryCandidate } from "@/lib/toss/holdings-sync";
 
 const SCHEMA_VERSION = "toss-sync-reviewed-mapping.v1";
@@ -51,7 +51,10 @@ class TossTickerMappingRegistryError extends Error {
 }
 
 function normalizeUsBaseSymbol(value: string): string {
-  const normalized = normalizeHoldingTickerForMutation(`${value.trim()}.NAS`);
+  const normalized = parseHoldingTickerForMutation(`${value.trim()}.NAS`);
+  if (normalized === null) {
+    return "";
+  }
   return EXPLICIT_US_SUFFIX_PATTERN.exec(normalized)?.[1] ?? "";
 }
 
@@ -130,7 +133,12 @@ function parseMappings(payload: MappingPayload): Map<string, string> {
       );
     }
     const symbol = normalizeUsBaseSymbol(row.symbol);
-    const ticker = normalizeHoldingTickerForMutation(row.repo_ticker);
+    const ticker = parseHoldingTickerForMutation(row.repo_ticker);
+    if (ticker === null) {
+      throw new TossTickerMappingRegistryError(
+        "Reviewed Toss ticker mapping symbol and ticker do not match.",
+      );
+    }
     const match = EXPLICIT_US_SUFFIX_PATTERN.exec(ticker);
     if (!symbol || !match || match[1] !== symbol) {
       throw new TossTickerMappingRegistryError(
